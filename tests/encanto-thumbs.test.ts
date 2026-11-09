@@ -77,7 +77,9 @@ for (const tier of ["creator", "pro", "scale"] as const) {
   const perRequest = 11 * (0.4 / 1e6) + 0.4 / 1e6 + 40_000 * (0.1 / 1e9 + 0.06 / 1e9) + 2 / 1e6;
   is(`${tier}: the plan's studio figure, each attaching request with the thumbnail's head and read at its dearest`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
-is("its source and date are said", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? ""), true);
+// Rule 23 (#2801, CodeQL "Missing regular expression anchor"): the source was an unanchored pattern, which a longer
+// address holding it would also pass; it is now a whole word of the basis, the page's exact address, and the date as text.
+is("its source and date are said", (line?.basis ?? "").split(/[\s,]+/).includes("vercel.com/docs/vercel-blob/usage-and-pricing") && (line?.basis ?? "").includes("read on 6 November 2026"), true);
 // Rule 23 (#2801 over #2803's eacb4edaa): the signing request is now counted once, by picture-uploads, which prices the
 // thumbnail's upload request with the others; the thumbnail's line names that line's route and the attaching request's.
 is("the signing request is named among the sources of the line that counts it", uploads?.sources.some((each) => each.file === "app/api/store/image/upload/route.ts" && each.names.includes("issueSignedToken")) ?? false, true);

@@ -700,6 +700,14 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   const members = membersKey(group.id);
   const write = (mark: Mark) => JSON.stringify({ e: email, at: mark.at, ...(mark.h !== undefined ? { h: mark.h } : {}), ...(mark.d ? { d: 1 } : {}) });
   /**
+   * This address's mark taken off, so the place it was not given is free for another address and its link works
+   * again (Claude 6 on #2872, ported to the marks; CX-123 rules 24 and 30): Upstash runs each command on its own, so
+   * an HDEL whose call failed or whose answer is of another shape is sent once more alone. True only once Redis said
+   * the HDEL ran (0 or 1); false leaves the mark as it is, this address's own, picked up when its link is opened again.
+   */
+  const dropOnce = () => redisPipeline([["HDEL", members, who]]).then((r) => bit(repliesFor(r, 1)?.[0]) !== null, () => false);
+  const letGo = async (): Promise<boolean> => (await dropOnce()) || (await dropOnce());
+  /**
    * All that follows the gift, each part once: the doors that read gifts
    * opened for this store, a course dated from the day the place was taken,
    * the order counted by its name (lib/orders.ts). Then the mark says it is
@@ -735,7 +743,7 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   if (given) {
     // Given it some other way: no place is used for it, and a mark left by an
     // open that stopped half way is taken off.
-    if (mark) await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
+    if (mark) await letGo();
     return { outcome: "has", email, group };
   }
 
@@ -757,22 +765,25 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
     // so nothing is given and no place is handed out. The mark is this
     // address's alone: taken off, or, if that is lost too, picked up when the
     // link is opened again. No other address's place moves.
-    await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
+    await letGo();
     throw new UnknownReplyError("a place's count");
   }
-  const giveBack = () => redisPipeline([["HDEL", members, who]]);
   if (count > group.people) {
     // More marks than places: this one comes off. When that leaves a place
     // free (two pressed for the last one in the same instant and both came
     // off), it is not said that every place is taken: the open is said as
-    // not done, and the link works again.
-    const after = await redisPipeline([["HDEL", members, who], ["HLEN", members]]).then(
-      (r) => {
-        const two = repliesFor(r, 2);
-        return two ? countOf(two[1]) : null;
-      },
+    // not done, and the link works again. The marks are counted after the
+    // HDEL is known to have run (its answer 0 or 1): when it was not, it is
+    // sent once more alone and counted again (#2872, ported), so a mark it
+    // was never given a place for is not left counted beside the others.
+    const dropped = await redisPipeline([["HDEL", members, who], ["HLEN", members]]).then(
+      (r) => repliesFor(r, 2),
       () => null,
     );
+    let after = dropped && bit(dropped[0]) !== null ? countOf(dropped[1]) : null;
+    if (after === null && (await letGo())) {
+      after = await redisPipeline([["HLEN", members]]).then((r) => countOf(repliesFor(r, 1)?.[0]), () => null);
+    }
     if (after === null) throw new UnknownReplyError("a place given back");
     if (after < group.people) throw new Error("a place was given back in the same instant");
     return { outcome: "full", email, group };
@@ -785,7 +796,9 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   if (!held) {
     const admitted = await admitOrders(store, 1);
     if (!admitted.ok) {
-      await giveBack();
+      // Resting all the same: the mark, when even the second HDEL does not run, is this address's own and is picked up
+      // when its link is opened again.
+      await letGo();
       return { outcome: "resting", email, group };
     }
     hour = admitted.hour;
@@ -793,7 +806,24 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   const placed: Mark = { e: email, at: mark?.at ?? at, ...(hour !== null ? { h: hour } : {}) };
   await redisPipeline([["EXPIRE", members, GROUP_KEPT_SECONDS]]);
 
-  const [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], placed.at, store.sid);
+  // The grant answered in another shape or failed (#2872 review N1, ported): what is on the address is read below,
+  // exactly. Only when it is this purchase's own gift, which this open holds the link for, does it go on as taken;
+  // anything else keeps the mark and says "not done", since a grant whose call failed may still land (rule 24: never
+  // read as a free place).
+  let granted: boolean | null = null;
+  try {
+    [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], placed.at, store.sid);
+  } catch (error) {
+    console.error("a place's grant answered in another shape; read back", error);
+  }
+  if (granted === null) {
+    const one = repliesFor(await redisPipeline([["HGET", importedKey(group.s, email), group.p]]), 1);
+    const landed = one ? givenBy(one[0]) : undefined;
+    // Not landed, not known, or another's: the room this open was admitted with stays held until its day ends, never
+    // given back twice, and the mark stays for the next open of the link, which reads the address again.
+    if (!landed || landed.job !== groupJob(group.id)) throw new UnknownReplyError("a place's gift");
+    granted = true;
+  }
   if (!granted) {
     // This open's order is not counted by this open: the room it was
     // admitted with goes back (another open gives back its own, and an open
@@ -812,7 +842,7 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
       return { outcome: "already", email, group };
     }
     // It reached this address another way in the same instant.
-    await giveBack();
+    await letGo();
     return { outcome: "has", email, group };
   }
   // The hour goes on the mark once this open's gift is the one made, so an

@@ -12,9 +12,14 @@
  * rule 24): disputeLost() throws, so the doors that let in stay open, as when Stripe is slow, and the readings that
  * hand something over wait. This charge's own lost row still decides whatever else the list holds.
  *
+ * The jobs that take things back (licence keys, call meetings, review proof, gifts, pre-orders) read the same rule
+ * from Stripe's closing events (lostDisputesSince) and judge each row with rowGivesBack. A resolution there is a row
+ * that gives the sale back; a block is no row; and a prevented closing whose money cannot be read stops the page as
+ * not read whole, so each job keeps its place and reads it again, never moving past it as "not given back".
+ *
  * Synthetic only: Stripe is a stand-in fetch and Redis is tests/redis-stub.ts. Nothing real is reached.
  */
-import { disputeLost, givenBack, keptUnlessLost, purchaseRefunded } from "@/lib/refunds";
+import { disputeLost, givenBack, keptUnlessLost, lostDisputesSince, purchaseRefunded, rowGivesBack } from "@/lib/refunds";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_dispute_lost_prevented_synthetic";
@@ -24,6 +29,7 @@ const CHARGE = "ch_disputeprev0001";
 const INTENT = "pi_disputeprev0001";
 
 let listed: unknown;
+let events: unknown;
 let calls: string[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -31,6 +37,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const path = url.pathname.replace(/^\/v1/, "");
   calls.push(`${path}?charge=${url.searchParams.get("charge") ?? ""}`);
   if (path === "/disputes") return Response.json(listed);
+  if (path === "/events") return Response.json(events);
   return Response.json({ error: { message: "unexpected synthetic request" } }, { status: 404 });
 }) as typeof fetch;
 
@@ -41,6 +48,31 @@ const session = { mode: "payment", payment_intent: payment, metadata: {} };
 const move = (amount: unknown) => ({ id: `txn_prev${String(amount).replace(/\W/g, "")}`, object: "balance_transaction", amount });
 const dispute = (over: Record<string, unknown> = {}) => ({ id: "du_disputeprev01", object: "dispute", charge: CHARGE, payment_intent: INTENT, amount: 2000, status: "prevented", ...over });
 const whole = (...data: unknown[]) => ({ object: "list", data, has_more: false });
+
+
+/** One closing event of a dispute on this charge, as Stripe lists charge.dispute.closed. */
+const closing = (id: string, over: Record<string, unknown> = {}) => ({
+  id,
+  object: "event",
+  type: "charge.dispute.closed",
+  created: 1_800_000_000,
+  data: { object: { id: `du_${id.slice(4)}`, object: "dispute", charge: CHARGE, payment_intent: INTENT, amount: 2000, status: "prevented", ...over } },
+});
+const page = (...data: unknown[]) => ({ object: "list", data, has_more: false });
+
+type Swept = { rows: Record<string, unknown>[]; complete: boolean };
+async function sweep(reply: unknown): Promise<Swept> {
+  events = reply;
+  const read = await lostDisputesSince(ACCOUNT, 1_799_000_000);
+  return { rows: read.rows, complete: read.complete };
+}
+const gives = (row: Record<string, unknown>): boolean | "throws" => {
+  try {
+    return rowGivesBack(row);
+  } catch {
+    return "throws";
+  }
+};
 
 type Read = { lost: boolean | "unknown"; door: boolean; given: boolean | "unknown"; calls: number };
 
@@ -102,6 +134,34 @@ async function main() {
     is("a resolution on a page not said to be whole: lost, the rest cannot undo it", [got.lost, got.door, got.given], [true, true, true]);
     got = await read({ object: "list", data: [dispute({ balance_transactions: [] })], has_more: true });
     is("a block on a page not said to be whole: unknown, never 'not lost'", got.lost, "unknown");
+
+    part("The jobs: a resolution is a row that gives the sale back (lostDisputesSince, rowGivesBack)");
+    let swept = await sweep(page(closing("evt_prevgone01", { balance_transactions: [move(-2000)] })));
+    is("a resolution's closing: read whole", swept.complete, true);
+    is("and it is one row", swept.rows.length, 1);
+    is("that gives the sale back", swept.rows.map(gives), [true]);
+    is("for this payment", swept.rows.map((row) => row.payment_intent), [INTENT]);
+    swept = await sweep(page(closing("evt_prevlost01", { status: "lost" })));
+    is("control: a lost closing is still one row that gives back", [swept.complete, swept.rows.map(gives)], [true, [true]]);
+
+    part("The jobs: a block is no row");
+    swept = await sweep(page(closing("evt_prevblock1", { balance_transactions: [] })));
+    is("a closing that took nothing: read whole, no row", [swept.complete, swept.rows.length], [true, 0]);
+    swept = await sweep(page(closing("evt_prevblock2", { balance_transactions: [move(-2000), move(2000)] })));
+    is("a closing that put it all back: read whole, no row", [swept.complete, swept.rows.length], [true, 0]);
+
+    part("The jobs: a prevented closing whose money cannot be read stops the page (rule 24)");
+    swept = await sweep(page(closing("evt_prevunk001")));
+    is("no balance_transactions: not read whole", swept.complete, false);
+    is("and no row from that page (the place stays before it)", swept.rows.length, 0);
+    swept = await sweep(page(closing("evt_prevlost02", { status: "lost" }), closing("evt_prevunk002", { balance_transactions: [move("-2000")] })));
+    is("a lost closing beside an unreadable prevented one: the page is not read whole", [swept.complete, swept.rows.length], [false, 0]);
+
+    part("rowGivesBack on a prevented row");
+    const row = (over: Record<string, unknown>) => ({ object: "dispute", id: "evt_prevrow001", status: "prevented", created: 1_800_000_000, payment_intent: INTENT, charge: { object: "charge", id: CHARGE, disputed: true, dispute: { status: "lost" } }, ...over });
+    is("money taken and not put back: gives back", gives(row({ balance_transactions: [move(-2000)] })), true);
+    is("nothing taken: does not give back", gives(row({ balance_transactions: [] })), false);
+    is("money that cannot be read: throws, never 'not given back'", gives(row({ balance_transactions: null })), "throws");
   } finally {
     console.error = original;
   }

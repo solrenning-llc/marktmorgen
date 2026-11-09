@@ -13,6 +13,7 @@
  *   - a try stays within the registry's figures (PLAN_SETTLE_RUN in tests/plan-cost-registry.ts), and the buyer's
  *     email is a store email site (EMAIL_SITES).
  */
+import { readFileSync } from "node:fs";
 import * as plans from "@/lib/plans";
 import { addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
 import { addProduct, claimHandle, ensureStatsId, setLanguage, setStripeAccount, storeForEmail } from "@/lib/store";
@@ -254,6 +255,26 @@ async function main(): Promise<void> {
   // Taken out by hand so the measure below tries one plan only.
   const [lined] = await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:retry", "-inf", "+inf"]]);
   for (const member of lined as string[]) if (member.startsWith(`${ACCOUNT}|${r.session}|`)) await redis.pipeline([["ZREM", "nl:plans:retry", member]]);
+
+  part("The public pages say what the code does (rule 27; Claude 3 LOW 4 on #3367)");
+  const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ").replace(/&rsquo;/g, "'");
+  const terms = flat("app/terms/page.tsx");
+  const refundsPage = flat("app/refunds/page.tsx");
+  const termsPart = terms.slice(terms.indexOf('id="plan-past-end"'), terms.indexOf('id="plan-past-end"') + 1400);
+  const refundsPart = refundsPage.slice(refundsPage.indexOf('id="plan-past-end"'), refundsPage.indexOf('id="plan-past-end"') + 1400);
+  is("the Terms tell the creator: the plan ended, the payment refunded from their own Stripe balance, told after PLAN_OWED_TELL_DAYS", [
+    terms.includes('id="plan-past-end"'),
+    /end the subscription/.test(termsPart),
+    /refund that payment in full/.test(termsPart),
+    /your own Stripe account's balance/.test(termsPart),
+    termsPart.includes(`after ${String(N)} days`),
+  ], [true, true, true, true, true]);
+  is("the Refund Policy tells the buyer: refunded in full, from the creator's account, and emailed", [
+    refundsPage.includes('id="plan-past-end"'),
+    /refund that payment in full/.test(refundsPart),
+    /creator's own Stripe account/.test(refundsPart),
+    /email you/.test(refundsPart),
+  ], [true, true, true, true]);
 
   part("A try stays within the registry's figures");
   const declared = (registry as Record<string, unknown>).PLAN_SETTLE_RUN as Record<string, number>;

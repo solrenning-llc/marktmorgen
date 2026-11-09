@@ -165,12 +165,19 @@ export function CalendarEditor({
               </div>
               {feed.state === "error" && feed.message ? (
                 <p className="notice notice-error mt-3 text-sm">
-                  {`${feed.message} Bookings go on meanwhile${feed.busyTimes ? ", using what was last read" : ""}.`}
+                  {feed.closed
+                    ? `${feed.message} Until it can be read, none of your weekly hours are offered.`
+                    : `${feed.message} Bookings go on meanwhile${feed.busyTimes ? ", using what was last read" : ""}.`}
                 </p>
               ) : null}
               {feed.unsupported ? (
                 <p className="mt-2 text-xs text-ink-soft">
                   {`${feed.unsupported} repeating ${feed.unsupported === 1 ? "event uses a rule" : "events use rules"} we cannot read (such as "the second Tuesday of the month"); only the first time of ${feed.unsupported === 1 ? "it" : "each"} blocks a call.`}
+                </p>
+              ) : null}
+              {feed.unreadable ? (
+                <p className="mt-2 text-xs text-ink-soft">
+                  {`${feed.unreadable} repeating ${feed.unreadable === 1 ? "event uses a rule" : "events use rules"} too large for us to read; from the first time of ${feed.unreadable === 1 ? "it" : "each"} on, no call is offered.`}
                 </p>
               ) : null}
             </li>

@@ -41,6 +41,11 @@
  * charged by the formatters it builds. As a backstop, a reading still going
  * after ICS_MAX_MS is refused the same way.
  *
+ * One event's own rule past the per-rule caps (MAX_RULE_CHARS, MAX_RULE_ITEMS,
+ * an INTERVAL over a million) does not refuse the file: that event blocks from
+ * its first time to the end of the window, since its later times are not
+ * known, it is counted in `unreadable`, and the rest of the file is read.
+ *
  * The busy stretches kept are capped too (maxIntervals, 2,000), and that cut is
  * by time, never by the order of the file: every stretch before a cutoff is
  * kept exactly, and everything from the cutoff to the end of the window is
@@ -58,6 +63,8 @@ export type ParsedCalendar = {
   events: number;
   /** Repeating events whose rule is beyond what is read here. */
   unsupported: number;
+  /** Repeating events whose rule is past the per-rule caps: each blocks from its first time to the end of the window. */
+  unreadable: number;
   /**
    * True when there were more busy stretches (after merging) than are kept:
    * the earliest are kept exactly, and the last stretch then runs from the
@@ -375,20 +382,30 @@ type YearlyRule = { kind: "day"; month: number; day: number } | { kind: "nth"; m
 
 type Zone = { kind: "iana"; tz: string } | { kind: "rules"; rules: ZoneRule[] } | { kind: "utc" };
 
-/** The IANA zone a name means, or null; `build` is told of each formatter built to check one (up to four). */
+/**
+ * The IANA zone a name means, by its canonical name (one name for every
+ * spelling Intl accepts, so lib/call-setup.ts partsIn keeps one formatter for
+ * it), or null; `build` is told of each formatter built to check one (up to four).
+ */
 function ianaFrom(name: string, build: () => void): string | null {
-  const known = (tz: string) => {
+  const known = (tz: string): string | null => {
     build();
-    return isTimeZone(tz);
+    if (!tz || tz.length > 64) return null;
+    try {
+      return new Intl.DateTimeFormat("en-US", { timeZone: tz }).resolvedOptions().timeZone;
+    } catch {
+      return null;
+    }
   };
   const clean = name.replace(/^"|"$/g, "").trim();
-  if (clean && known(clean)) return clean;
+  const named = clean ? known(clean) : null;
+  if (named) return named;
   if (WINDOWS_ZONES[clean]) return WINDOWS_ZONES[clean];
   // "(UTC-05:00) Eastern Time (US & Canada)" and "/mozilla.org/.../America/New_York".
   const segments = clean.split("/").filter(Boolean);
   for (let take = Math.min(3, segments.length); take >= 2; take -= 1) {
-    const guess = segments.slice(-take).join("/");
-    if (known(guess)) return guess;
+    const guess = known(segments.slice(-take).join("/"));
+    if (guess) return guess;
   }
   return null;
 }
@@ -721,6 +738,7 @@ export function parseIcs(
   // many there can be is bounded by the work budget, one unit at least each.
   const busy: Interval[] = [];
   let unsupported = 0;
+  let unreadable = 0;
   let counted = 0;
   const add = (start: number, end: number) => {
     // A time past what Date holds (a length of 400 digits) is not a time: never kept as a null end.
@@ -775,7 +793,24 @@ export function parseIcs(
       continue;
     }
 
-    const rule = readRule(e.rrule);
+    let rule: Record<string, string> | null;
+    try {
+      rule = readRule(e.rrule);
+    } catch (error) {
+      if (!(error instanceof CalendarTooComplex)) throw error;
+      rule = null;
+    }
+    // A whole number, as the standard has it (a fraction used to step into the middle of a day).
+    const interval = rule ? Math.max(1, Math.floor(Number(rule.INTERVAL ?? "1")) || 1) : 0;
+    // A rule past the per-rule caps, or an INTERVAL beyond a million (its second time would leave the dates Date
+    // holds, LOW 4): this event's later times are not known, so it blocks from its first time to the end of the
+    // window, and the rest of the file is read.
+    if (!rule || interval > 1e6) {
+      unreadable += 1;
+      const one = occurrence(start.y, start.mo, start.d);
+      add(one.start, Math.max(one.end, options.to));
+      continue;
+    }
     const excludedInstants = new Set<number>();
     const excludedDates = new Set<number>();
     for (const prop of e.exdates) {
@@ -793,10 +828,6 @@ export function parseIcs(
     };
 
     const freq = rule.FREQ;
-    // A whole number, as the standard has it (a fraction used to step into the middle of a day).
-    const interval = Math.max(1, Math.floor(Number(rule.INTERVAL ?? "1")) || 1);
-    // Beyond a million, its second time would leave the dates Date holds (LOW 4): unreadable.
-    if (interval > 1e6) throw new CalendarTooComplex();
     const count = rule.COUNT ? Math.max(0, Number(rule.COUNT) || 0) : Infinity;
     let untilInstant = Infinity;
     let untilDate = Infinity;
@@ -940,7 +971,7 @@ export function parseIcs(
   }
 
   const kept = keptByTime(mergeIntervals(busy), maxIntervals, options.to);
-  return { busy: kept.busy, events: counted, unsupported, truncated: kept.truncated, zone: calendarZone, work };
+  return { busy: kept.busy, events: counted, unsupported, unreadable, truncated: kept.truncated, zone: calendarZone, work };
 }
 
 /**

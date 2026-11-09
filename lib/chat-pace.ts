@@ -52,6 +52,14 @@ export const GRANT_MS = ROOM_GRANT_MINUTES * MINUTE;
 export const LIVE_LOOKS = GRANT_MS / LIVE_MS;
 export const IDLE_LOOKS = GRANT_MS / IDLE_MS;
 
+/**
+ * The most bytes of messages one look sends: what a look is priced at
+ * (tests/traffic-cost.ts, roomLookCost). A page that is far behind is
+ * brought up to date over the next looks, a little at a time, instead of
+ * being sent a whole page of the room at every look (R20 finding 1).
+ */
+export const LOOK_BYTES = 2_000;
+
 export type Pace = "live" | "idle" | "stopped";
 
 /**

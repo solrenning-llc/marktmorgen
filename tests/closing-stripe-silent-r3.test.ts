@@ -53,6 +53,8 @@ let platform: "up" | "down" | "html502" | "key401" | "slow" = "up";
 const resendDown = false;
 let connected: "up" | "down" | "revoked" = "up";
 const running = new Map<string, Record<string, unknown>>();
+/** Ended plan subscriptions the platform reads by id only (never in a search): a store's own, so our key is confirmed. */
+const ownPlans = new Map<string, Record<string, unknown>>();
 const posted: string[] = [];
 /** What the creators' connected accounts were asked, by path. */
 const asked: string[] = [];
@@ -83,7 +85,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     }
     if (path === "/subscriptions") return json({ object: "list", data: [], has_more: false });
     if (path === "/checkout/sessions" && method === "GET") return json({ object: "list", data: [], has_more: false });
-    const one = [...running.values()].find((row) => path === `/subscriptions/${String(row.id)}`);
+    const one = [...running.values(), ...ownPlans.values()].find((row) => path === `/subscriptions/${String(row.id)}`);
     if (one) return json(one);
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
   }
@@ -218,7 +220,7 @@ async function main(): Promise<void> {
   if (!gs) throw new Error("no store");
   await savePaidPeriod(gs, "sub_gonestore000001", { inv: "in_gonestore000001", amt: 6000, cur: "usd", ps: Math.floor((g.ended - 10 * DAY) / 1000), pe: Math.floor((g.ended + 50 * DAY) / 1000), e: "gone-member@example.com" });
   // The platform finds the store's own plan subscription (ended): our key is the right one.
-  running.set(g.handle, { id: `sub_${g.handle}0001`, object: "subscription", status: "canceled", customer: `cus_${g.handle}0001`, metadata: { store: g.handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } } }] } });
+  ownPlans.set(g.handle, { id: `sub_${g.handle}0001`, object: "subscription", status: "canceled", customer: `cus_${g.handle}0001`, metadata: { store: g.handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } } }] } });
   connected = "revoked";
   const g1 = await quietly(() => closeOne(g.email, g.ended + (C + 1) * DAY, hands));
   const g2 = await quietly(() => closeOne(g.email, g.ended + (C + SILENT) * DAY - 60_000, hands));

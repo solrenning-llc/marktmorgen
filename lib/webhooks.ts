@@ -1322,8 +1322,9 @@ function waitsOn(error: unknown): Waits {
   // or an answer that is not JSON at all (an error page in front of Stripe), which onAccount cannot read.
   if (error instanceof TypeError && error.message === "fetch failed") return "passing";
   if (error instanceof SyntaxError) return "passing";
-  // The same error page, now read with its status (lib/stripe-http-error.ts): a 4xx page is still Stripe's answer.
-  if (error instanceof StripeUnreadableReply) return error.status >= 400 && error.status < 500 && error.status !== 429 && error.status !== 409 ? "refused" : "passing";
+  // The same error page, now read with its status (lib/stripe-http-error.ts): a page in front of Stripe (a proxy, a
+  // CDN, a firewall) is passing whatever its status, as the SyntaxError was; it is never Stripe's own refusal.
+  if (error instanceof StripeUnreadableReply) return "passing";
   return "ours";
 }
 

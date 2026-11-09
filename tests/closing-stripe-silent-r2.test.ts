@@ -57,6 +57,8 @@ let platform: "up" | "down" | "html502" | "key401" | "slow" = "up";
 const resendDown = false;
 let connected: "up" | "down" | "revoked" = "up";
 const running = new Map<string, Record<string, unknown>>();
+/** Ended plan subscriptions the platform reads by id only (never in a search): a store's own, so our key is confirmed. */
+const ownPlans = new Map<string, Record<string, unknown>>();
 const posted: string[] = [];
 /** What the creators' connected accounts were asked, by path. */
 const asked: string[] = [];
@@ -87,7 +89,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     }
     if (path === "/subscriptions") return json({ object: "list", data: [], has_more: false });
     if (path === "/checkout/sessions" && method === "GET") return json({ object: "list", data: [], has_more: false });
-    const one = [...running.values()].find((row) => path === `/subscriptions/${String(row.id)}`);
+    const one = [...running.values(), ...ownPlans.values()].find((row) => path === `/subscriptions/${String(row.id)}`);
     if (one) return json(one);
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
   }
@@ -286,6 +288,9 @@ async function main(): Promise<void> {
   const v = await closingStore("revokedstore");
   await told(v);
   await setStripeAccount(v.email, "acct_1SilentRevoke01");
+  // Rule 23 (third pre-review, ALTO 1): a refusal lapses only when the platform reads the store's own subscription in
+  // the same run (our key is the right one); this store's ended plan is there to read.
+  ownPlans.set(v.handle, { id: `sub_${v.handle}0001`, object: "subscription", status: "canceled", customer: `cus_${v.handle}0001`, metadata: { store: v.handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } } }] } });
   connected = "revoked";
   for (const d of [1, SILENT + 1, 60, 400]) {
     const r = await quietly(() => closeOne(v.email, v.ended + (C + d) * DAY, hands));

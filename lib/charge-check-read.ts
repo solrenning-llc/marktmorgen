@@ -40,6 +40,7 @@
  * Stripe; `platformGet` is the real one. Nothing runs it yet: the cron and
  * the records it decides against come with the next units.
  */
+import { StripeUnreadableReply } from "@/lib/stripe-http-error";
 import { onPlatformAt } from "@/lib/billing";
 
 export const CHARGE_CHECK_VERSION = "2026-10-28.endive";
@@ -326,7 +327,9 @@ export async function readPaidInvoice(options: {
     calls += 1;
     invoice = record(await get(`/invoices/${id}`));
   } catch (error) {
-    const status = (error as { status?: unknown } | null | undefined)?.status;
+    // A page in front of Stripe that is not JSON (lib/stripe-http-error.ts) carries a status that is not Stripe's own:
+    // never a final "not found".
+    const status = error instanceof StripeUnreadableReply ? null : (error as { status?: unknown } | null | undefined)?.status;
     return status === 404 ? { reason: "not_found", final: true, calls } : { reason: "not_answered", final: false, calls };
   }
   if (!invoice) return { reason: "unexpected", final: false, calls };

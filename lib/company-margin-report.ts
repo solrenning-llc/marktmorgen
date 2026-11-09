@@ -217,8 +217,8 @@ export function companyMonthlyMarginPresentation(
     ? "Lojas retidas para recuperação: desconhecido (não zero)."
     : `Lojas retidas para recuperação: ${report.heldStores} no fim do mês; pico mensal ${report.heldStoresPeak}.`;
   const lapsedLine = report.lapsedStores === null
-    ? "Lojas fechadas no prazo sem resposta do Stripe: desconhecido (não zero)."
-    : `Lojas fechadas no prazo sem resposta do Stripe: ${report.lapsedStores}.`;
+    ? "Lojas fechadas no prazo sem resposta do Stripe ou conta desconectada: desconhecido (não zero)."
+    : `Lojas fechadas no prazo sem resposta do Stripe ou conta desconectada: ${report.lapsedStores}.`;
   const overdueLine = report.overdueStores === null
     ? "Lojas retidas além do prazo publicado: desconhecido (não zero)."
     : `Lojas retidas além do prazo publicado: chave do Stripe recusada ${report.overdueStores.key}; resposta ilegível ${report.overdueStores.answer}; aviso que não saiu ${report.overdueStores.notice}; outros ${report.overdueStores.other}.`;

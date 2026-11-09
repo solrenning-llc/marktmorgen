@@ -13,15 +13,19 @@ export class StripeUnreadableReply extends Error {
   }
 }
 
-/** The body of a Stripe answer as JSON; a non-JSON body of a status that is not OK is a StripeUnreadableReply. */
-export async function stripeJson(response: Response): Promise<Record<string, unknown>> {
-  // A stand-in answer that has only json() is read as before.
-  if (typeof response.text !== "function") return (await response.json()) as Record<string, unknown>;
-  const text = await response.text();
+/** A Stripe answer's text as JSON; a non-JSON body of a status that is not OK is a StripeUnreadableReply. */
+export function parseStripeText(text: string, response: Pick<Response, "ok" | "status">): Record<string, unknown> {
   try {
     return JSON.parse(text) as Record<string, unknown>;
   } catch (error) {
     if (!response.ok) throw new StripeUnreadableReply(response.status, error);
     throw error;
   }
+}
+
+/** The body of a Stripe answer as JSON, read through parseStripeText. */
+export async function stripeJson(response: Response): Promise<Record<string, unknown>> {
+  // A stand-in answer that has only json() is read as before.
+  if (typeof response.text !== "function") return (await response.json()) as Record<string, unknown>;
+  return parseStripeText(await response.text(), response);
 }

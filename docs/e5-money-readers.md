@@ -114,7 +114,6 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/api-read.ts` | PAST-SALE | 189: the bookings API labels a paid call with the store's currency; 44/59 settings | no (189) |
 | `lib/course-paid-observation.ts` | PAST-SALE | 71–76: the paid session, line item, payment and charge must match the original receipt currency | yes: compares the paid currency with the frozen original, without conversion or borrowing the current store setting |
 | `lib/gifts.ts` | PAST-SALE | 198: the gift receipt in the session's currency | yes |
-| `lib/group-buy.ts` | PAST-SALE | 243: the group receipt in the session's currency | yes |
 | `lib/payment-recovery.ts` | PAST-SALE | 258: the failed-payment email in the invoice's currency | yes |
 | `lib/preorders.ts` | PAST-SALE | 253: the pre-order receipt in the session's currency | yes |
 | `lib/purchase-email.ts` | PAST-SALE | 230: the purchase email in the session's currency | yes |

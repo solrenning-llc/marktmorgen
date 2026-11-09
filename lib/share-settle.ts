@@ -25,7 +25,8 @@ import { BillingError, onPlatform } from "@/lib/billing";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
-import { storeForEmail, storeForHandle, type Store } from "@/lib/store";
+import { saleHandles, storeForEmail, storeForHandle, type Store } from "@/lib/store";
+import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 import { SHARING_INDEX, owedOn, percentOf, planShareBps, shareBps, toGiveBack } from "@/lib/platform-share";
 
 /**
@@ -41,6 +42,32 @@ export const RECENT_DAYS = 3;
 const APPLIED = "nl:share:applied";
 /** When step 2 last read each account's refunds, by store key. */
 const READ_UNTIL = "nl:share:read-until";
+/** Searches step 3 may make for one store in a run, over every address it has had (rule 24). */
+const MEMBERSHIP_SEARCHES = 20;
+
+/**
+ * The stores that sell through a connected account, as far as the job's own
+ * lists know them; null when those lists could not be read.
+ */
+type AccountStores = (account: string) => Promise<Store[] | null>;
+
+/**
+ * The store a membership invoice on a connected account was sold by. A rename
+ * does not rewrite Stripe metadata, so the invoice names the address the
+ * store had at the checkout: its current one, a previous one, or one it has
+ * let go of, which leads nowhere by name (storeForHandle answers null). Each
+ * store has a connected account of its own (lib/stripe-connect.ts), so on
+ * that account every address the store has had is the store's (saleHandles).
+ * Null, never a guess, when no store, or more than one, holds the address
+ * on that account.
+ */
+async function invoiceStore(handle: string, account: string, stores?: AccountStores): Promise<Store | null> {
+  const sold = (store: Store | null | undefined): store is Store => !!store && store.stripeAccountId === account && saleHandles(store).has(handle);
+  const named = await storeForHandle(handle);
+  if (sold(named)) return named;
+  const owners = ((await stores?.(account)) ?? []).filter(sold);
+  return owners.length === 1 ? owners[0] : null;
+}
 
 export type SettleCounts = { fees: number; gaveBack: number; cents: number; stores: number; memberships: number; failed: number; complete: boolean; unknownDisputes: number; unknownDisputeFees: string[]; unknownAmounts: number; unknownAmountFees: string[]; listUnknown: number };
 
@@ -163,7 +190,7 @@ function goodsOfSession(session: Record<string, unknown>): number | null {
  * What is owed on one fee, read from the payment it was taken on. Null when
  * Stripe could not say, in which case nothing is done with it this run.
  */
-export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_LIVE): Promise<number | null> {
+export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_LIVE, stores?: AccountStores): Promise<number | null> {
   const charge = await onAccount(
     "GET",
     fee.account,
@@ -219,7 +246,7 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     // inside the trial or once its plan has ended.
     const meta = ((invoice.subscription_details as { metadata?: unknown } | null)?.metadata ?? {}) as Record<string, string>;
     const handle = str(meta.store);
-    const store = handle ? await storeForHandle(handle) : null;
+    const store = handle ? await invoiceStore(handle, fee.account, stores) : null;
     const written = metadataInteger(meta.share_bps), created = num(invoice.created);
     const goods = num(invoice.total_excluding_tax === undefined || invoice.total_excluding_tax === null ? invoice.subtotal : invoice.total_excluding_tax);
     if (!store || store.stripeAccountId !== fee.account || written === null || written > 10_000 || created === null || goods === null || currency(invoice.currency) !== fee.currency) throw new UnknownAmount(fee.id);
@@ -256,12 +283,12 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
 }
 
 /** Gives back what was taken above what is owed on one fee. Returns the cents given back. */
-export async function settleFee(fee: Fee, nowSeconds: number, live = COMMISSION_LIVE): Promise<number> {
+export async function settleFee(fee: Fee, nowSeconds: number, live = COMMISSION_LIVE, stores?: AccountStores): Promise<number> {
   const amount = num(fee.amount), refunded = num(fee.refunded);
   if (currency(fee.currency) === null) throw new UnknownAmount(fee.id, "Application fee refund currency is unknown");
   if (amount === null || refunded === null || refunded > amount) throw new UnknownAmount(fee.id, "Application fee refund amount is not a safe integer");
   if (amount - refunded <= 0) return 0;
-  const owed = num(await owedOnFee(fee, nowSeconds, live));
+  const owed = num(await owedOnFee(fee, nowSeconds, live, stores));
   if (owed === null) throw new UnknownAmount(fee.id);
   const back = toGiveBack({ amount, refunded }, owed);
   if (back <= 0) return 0;
@@ -285,7 +312,7 @@ export async function settleFee(fee: Fee, nowSeconds: number, live = COMMISSION_
 }
 
 /** Step 1: every fee taken in the last RECENT_DAYS days. */
-async function settleRecent(nowSeconds: number, deadline: number, counts: SettleCounts, live: boolean): Promise<boolean> {
+async function settleRecent(nowSeconds: number, deadline: number, counts: SettleCounts, live: boolean, stores: AccountStores): Promise<boolean> {
   let after = "";
   const cursors = new Set<string>();
   for (let page = 0; page < 50; page += 1) {
@@ -312,7 +339,7 @@ async function settleRecent(nowSeconds: number, deadline: number, counts: Settle
       if (Date.now() > deadline) return false;
       counts.fees += 1;
       try {
-        const back = await settleFee(fee, nowSeconds, live);
+        const back = await settleFee(fee, nowSeconds, live, stores);
         if (back > 0) {
           counts.gaveBack += 1;
           counts.cents += back;
@@ -373,7 +400,8 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
         const fee = readFee(await onPlatform("GET", `/application_fees/${encodeURIComponent(feeId)}`));
         if (!fee || fee.id !== feeId || fee.account !== account || (event.charge && fee.charge !== event.charge)) throw new UnknownAmount(feeId, "Historical application fee identity was not confirmed");
         counts.fees += 1;
-        const back = await settleFee(fee, nowSeconds, live);
+        // This store's own account: the store is known whatever address the invoice names.
+        const back = await settleFee(fee, nowSeconds, live, async (on) => (on === account ? [store] : []));
         if (back > 0) {
           counts.gaveBack += 1;
           counts.cents += back;
@@ -398,6 +426,15 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
 /**
  * Step 3, for one store: its memberships' percentage, kept to its plan.
  *
+ * Every address the store ever sold under is searched, on its own connected
+ * account (saleHandles: the current one, the previous ones, the released
+ * ones), because a rename does not rewrite the metadata Stripe keeps. Until
+ * 9 November 2026 only the current address was, so a membership sold before
+ * a rename kept the old share, and the applied mark was written anyway: it
+ * was never looked at again (tests/share-settle-handles.test.ts). Each store
+ * has a connected account of its own (lib/stripe-connect.ts), so an address
+ * let go of and taken by another store never selects that store's sales here.
+ *
  * The search asks only for what can still pay (Stripe's search query
  * language: clauses joined by AND, one negated by a leading "-"; status is a
  * subscription search field): an ended membership never comes back, so a
@@ -408,14 +445,18 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
  * went on paying the old share (tests/share-membership-search.test.ts).
  *
  * A member who ends mid-pass now leaves that search, and a page may be cut
- * short by an offset into what it matches now, skipping a live one; so a pass
- * of several pages that changed a percentage is not taken for the last, and
- * the applied mark is written only on a pass of one page or a pass that
- * changed none. At the most, for N memberships that can still pay and a run
- * never out of time: ceil(N / 100) searches a run, and 2 runs when N is at
- * most 2,000 with pages that stay put (one that changes, one that confirms;
- * each member ending mid-pass can add one). Past 2,000 a run reads the same
- * first 20 pages and never writes the mark: never done, never said done.
+ * short by an offset into what it matches now, skipping a live one; so an
+ * address whose pass took several pages and changed a percentage is not taken
+ * as finished, and the applied mark is written only when every address was
+ * read to its end, every change was confirmed, and no address had such a pass.
+ *
+ * Rule 24 bound: at most MEMBERSHIP_SEARCHES (20) searches for a store in a
+ * run, over all its addresses, one at least for each. For A addresses and N
+ * memberships that can still pay, a run never out of time makes at most
+ * min(20, A + ceil(N / 100)) searches, and finishes in 2 runs when that sum
+ * is at most 20 and pages stay put (one that changes, one that confirms; each
+ * member ending mid-pass can add one). Past it, a run reads the same first 20
+ * pages and never writes the mark: never done, never said done.
  */
 async function keepMemberships(store: Store, ref: string, deadline: number, counts: SettleCounts, live: boolean): Promise<boolean> {
   const target = planShareBps(store, live);
@@ -426,58 +467,108 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
   if (applied === target || (applied === null && target === 0)) return true;
   const account = store.stripeAccountId;
   if (!account) return true;
-  let page = "";
-  let completeRead = false, allApplied = true;
-  // Pages read, and percentages changed, on this pass.
-  let read = 0, changed = 0;
-  const cursors = new Set<string>();
+  const handles = [...saleHandles(store)];
+  // Each goes into a search query between quotes: only a confirmed address shape is ever sent.
+  if (!handles.every((handle) => HANDLE_PATTERN.test(handle))) throw new UnknownFeeList("Membership settlement address was not confirmed");
+  let searches = 0, allRead = true, allApplied = true, confirmed = true;
   const statuses = new Set(["active", "trialing", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "paused"]);
-  for (let round = 0; round < 20; round += 1) {
-    if (Date.now() > deadline) return false;
-    const query = encodeURIComponent(`metadata['store']:'${store.handle}' AND -status:'canceled' AND -status:'incomplete_expired'`);
-    const found = await onAccount("GET", account, `/subscriptions/search?limit=100&query=${query}${page ? `&page=${encodeURIComponent(page)}` : ""}`);
-    read += 1;
-    if (found.object !== "search_result" || !Array.isArray(found.data) || found.data.length > 100 || typeof found.has_more !== "boolean"
-      || (found.has_more && (found.data.length === 0 || typeof found.next_page !== "string" || !found.next_page.trim() || cursors.has(found.next_page)))) throw new UnknownFeeList("Membership settlement page was not confirmed");
-    const ids = new Set<string>();
-    const rows = found.data.map((row: unknown) => {
-      if (!row || typeof row !== "object" || Array.isArray(row)) throw new UnknownFeeList("Membership settlement row was not confirmed");
-      const subscription = row as Record<string, unknown>, id = str(subscription.id);
-      if (!/^sub_[A-Za-z0-9]+$/.test(id) || ids.has(id) || !statuses.has(str(subscription.status))) throw new UnknownFeeList("Membership settlement identity or status was not confirmed");
-      ids.add(id);
-      return subscription;
-    });
-    for (const subscription of rows) {
-      const status = str(subscription.status);
-      // Ended already, though the search, which catches up within moments, still gave it: nothing to keep.
-      if (status === "canceled" || status === "incomplete_expired") continue;
-      try {
-        // Stripe's explicit null means that no fee is set; absence is unknown.
-        const written = membershipPercent(subscription);
-        if (written === null) throw new Error("Membership fee percent is unknown");
-        if (written === target / 100) continue;
-        const body = new URLSearchParams({ application_fee_percent: percentOf(target), "metadata[share_bps]": String(target) });
-        const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(str(subscription.id))}`, body);
-        if (!updated || typeof updated !== "object" || Array.isArray(updated) || updated.object !== "subscription"
-          || updated.id !== subscription.id || membershipPercent(updated) !== target / 100) throw new Error("Membership fee update was not confirmed");
-        counts.memberships += 1;
-        changed += 1;
-      } catch (error) {
-        allApplied = false;
-        countSettlementFailure(counts, error);
-        console.error(`keeping a membership share on ${account} failed`, error);
+  for (const handle of handles) {
+    let page = "";
+    let completeRead = false;
+    // Pages read, and percentages changed, on this address's pass.
+    let read = 0, changed = 0;
+    const cursors = new Set<string>();
+    try {
+      while (searches < MEMBERSHIP_SEARCHES) {
+        if (Date.now() > deadline) return false;
+        const query = encodeURIComponent(`metadata['store']:'${handle}' AND -status:'canceled' AND -status:'incomplete_expired'`);
+        searches += 1;
+        const found = await onAccount("GET", account, `/subscriptions/search?limit=100&query=${query}${page ? `&page=${encodeURIComponent(page)}` : ""}`);
+        read += 1;
+        if (found.object !== "search_result" || !Array.isArray(found.data) || found.data.length > 100 || typeof found.has_more !== "boolean"
+          || (found.has_more && (found.data.length === 0 || typeof found.next_page !== "string" || !found.next_page.trim() || cursors.has(found.next_page)))) throw new UnknownFeeList("Membership settlement page was not confirmed");
+        const ids = new Set<string>();
+        const rows = found.data.map((row: unknown) => {
+          if (!row || typeof row !== "object" || Array.isArray(row)) throw new UnknownFeeList("Membership settlement row was not confirmed");
+          const subscription = row as Record<string, unknown>, id = str(subscription.id);
+          if (!/^sub_[A-Za-z0-9]+$/.test(id) || ids.has(id) || !statuses.has(str(subscription.status))) throw new UnknownFeeList("Membership settlement identity or status was not confirmed");
+          ids.add(id);
+          return subscription;
+        });
+        for (const subscription of rows) {
+          const status = str(subscription.status);
+          // Ended already, though the search, which catches up within moments, still gave it: nothing to keep.
+          if (status === "canceled" || status === "incomplete_expired") continue;
+          try {
+            // Stripe's explicit null means that no fee is set; absence is unknown.
+            const written = membershipPercent(subscription);
+            if (written === null) throw new Error("Membership fee percent is unknown");
+            if (written === target / 100) continue;
+            const body = new URLSearchParams({ application_fee_percent: percentOf(target), "metadata[share_bps]": String(target) });
+            const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(str(subscription.id))}`, body);
+            if (!updated || typeof updated !== "object" || Array.isArray(updated) || updated.object !== "subscription"
+              || updated.id !== subscription.id || membershipPercent(updated) !== target / 100) throw new Error("Membership fee update was not confirmed");
+            counts.memberships += 1;
+            changed += 1;
+          } catch (error) {
+            allApplied = false;
+            countSettlementFailure(counts, error);
+            console.error(`keeping a membership share on ${account} failed`, error);
+          }
+        }
+        if (!found.has_more) { completeRead = true; break; }
+        page = found.next_page as string;
+        cursors.add(page);
       }
+    } catch (error) {
+      // One address's unconfirmed search does not stop the others from being kept; it keeps the mark unwritten.
+      countSettlementFailure(counts, error);
+      console.error(`searching the memberships of ${handle} on ${account} failed`, error);
     }
-    if (!found.has_more) { completeRead = true; break; }
-    page = found.next_page as string;
-    cursors.add(page);
+    if (!completeRead) allRead = false;
+    // Several pages, and a percentage changed: a later page may have been cut short by a member who left the search,
+    // so the end reached is not known to have held every one. The next run's pass must change none.
+    if (read > 1 && changed > 0) confirmed = false;
   }
-  if (!completeRead || !allApplied) return false;
-  // Several pages, and a percentage changed: a later page may have been cut short by a member who left the search,
-  // so the end reached is not known to have held every one. The next run's pass must change none.
-  if (read > 1 && changed > 0) return false;
+  if (!allRead || !allApplied || !confirmed) return false;
   confirmedMarkerWrite(await redisPipeline([target > 0 ? ["HSET", APPLIED, ref, String(target)] : ["HDEL", APPLIED, ref]]));
   return true;
+}
+
+/** Every store the job looks at, by key: those that pay a share now, and those whose memberships still carry one. Null when unconfirmed. */
+async function settlementRefs(): Promise<string[] | null> {
+  const indexes = await redisPipeline([["SMEMBERS", SHARING_INDEX], ["HKEYS", APPLIED]]);
+  if (!Array.isArray(indexes) || indexes.length !== 2 || !Array.isArray(indexes[0]) || !Array.isArray(indexes[1])
+    || ![...indexes[0], ...indexes[1]].every(ref => typeof ref === "string" && ref.trim() !== "")) return null;
+  const [members, applied] = indexes as [string[], string[]];
+  return [...new Set([...members, ...applied])];
+}
+
+/**
+ * For step 1, which reads fees across every account: the stores of the job's
+ * lists by connected account, read once a run and only when a membership
+ * invoice names an address that does not lead to its account's store (one
+ * the store let go of). At most one read of the lists and one of each store
+ * they hold, a run. Null when the lists could not be read.
+ */
+function listedStores(): AccountStores {
+  let byAccount: Promise<Map<string, Store[]> | null> | null = null;
+  const read = async (): Promise<Map<string, Store[]> | null> => {
+    const refs = await settlementRefs();
+    if (!refs) return null;
+    const map = new Map<string, Store[]>();
+    for (const ref of refs) {
+      const store = await storeForEmail(ref);
+      if (!store?.stripeAccountId) continue;
+      map.set(store.stripeAccountId, [...(map.get(store.stripeAccountId) ?? []), store]);
+    }
+    return map;
+  };
+  return async (account) => {
+    byAccount ??= read().catch(() => null);
+    const map = await byAccount;
+    return map ? map.get(account) ?? [] : null;
+  };
 }
 
 /**
@@ -487,23 +578,20 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
 export async function settleShares(deadline: number, nowSeconds = Date.now() / 1000, live = COMMISSION_LIVE): Promise<SettleCounts> {
   const counts: SettleCounts = { fees: 0, gaveBack: 0, cents: 0, stores: 0, memberships: 0, failed: 0, complete: true, unknownDisputes: 0, unknownDisputeFees: [], unknownAmounts: 0, unknownAmountFees: [], listUnknown: 0 };
   try {
-    if (!(await settleRecent(nowSeconds, deadline, counts, live))) counts.complete = false;
+    if (!(await settleRecent(nowSeconds, deadline, counts, live, listedStores()))) counts.complete = false;
   } catch (error) {
     countSettlementFailure(counts, error);
     counts.complete = false;
     console.error("reading the recent shares failed", error);
   }
-  const indexes = await redisPipeline([["SMEMBERS", SHARING_INDEX], ["HKEYS", APPLIED]]);
-  if (!Array.isArray(indexes) || indexes.length !== 2 || !Array.isArray(indexes[0]) || !Array.isArray(indexes[1])
-    || ![...indexes[0], ...indexes[1]].every(ref => typeof ref === "string" && ref.trim() !== "")) {
+  const refs = await settlementRefs();
+  if (!refs) {
     const error = new UnknownFeeList("Historical settlement store indexes were not confirmed");
     countSettlementFailure(counts, error);
     counts.complete = false;
     console.error("reading historical settlement stores failed", error);
     return counts;
   }
-  const [members, applied] = indexes as [string[], string[]];
-  const refs = [...new Set([...members, ...applied])];
   for (const ref of refs) {
     if (Date.now() > deadline) {
       counts.complete = false;

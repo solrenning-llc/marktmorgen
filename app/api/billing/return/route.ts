@@ -70,6 +70,9 @@ export async function GET(request: NextRequest) {
       const moved = !now || now.sid !== store.sid || now.statsId !== store.statsId || now.stripeCustomerId !== store.stripeCustomerId ||
         now.subscriptionId !== store.subscriptionId || now.subscriptionActive !== store.subscriptionActive || now.tier !== store.tier || now.cycle !== store.cycle;
       if (!moved) return away(origin, studio("billing=error"));
+      // The same paid checkout written by another tab meanwhile: this is the
+      // plan just paid for, so it is said to be on.
+      if (now?.subscriptionActive && now.subscriptionId === started.subscriptionId && started.active) return away(origin, studio("billing=on"));
       return away(origin, studio(now?.subscriptionActive ? "billing=already" : "billing=unconfirmed"));
     }
     // Started again by hand during a break: there is nothing left for the

@@ -118,7 +118,7 @@ const en = {
   partnerShareLabel: "Your partner share",
   /** `products` is the titles, already joined, or sharedFallback. */
   partnerShare: (percent: number, products: string) =>
-    `${percent}% of what a buyer pays before tax on every sale of ${products} — whoever brought the buyer, and whether or not they came through your link. A refunded sale earns nothing, a partly refunded one earns on what was kept, and your own purchases never earn. A sale paid with PayPal and partly refunded earns nothing, because the amount refunded can't be seen here.`,
+    `${percent}% of what a buyer pays before tax on every sale of ${products} — whoever brought the buyer, and whether or not they came through your link. A refunded sale earns nothing, a partly refunded one earns on what was kept, and your own purchases never earn. A sale paid with PayPal and partly refunded earns nothing, because the amount refunded can't be seen here; a commission already paid on it is kept.`,
   sharedFallback: "the products you share in",
   yourRate: (store: string, percent: number) =>
     `${store} set your share at ${percent}% of what a buyer pays before tax, on every one-time purchase through your link, except any product they took out of the program.`,
@@ -208,7 +208,7 @@ const en = {
   heldAmount: "Held",
   bonusTitle: (sales: number, month: string) => `Bonus: ${sales} ${plural(sales, "sale", "sales")} in ${month}`,
   bonusLine: (date: string) => `${date} · bonus`,
-  termRefunds: "A refunded sale earns nothing, a partly refunded one earns only on what was kept, and your own purchases never earn. A sale paid with PayPal and partly refunded earns nothing, because the amount refunded can't be seen here.",
+  termRefunds: "A refunded sale earns nothing, a partly refunded one earns only on what was kept, and your own purchases never earn. A sale paid with PayPal and partly refunded earns nothing, because the amount refunded can't be seen here; a commission already paid on it is kept.",
   kit: {
     head: "Posts to share, drafted for you",
     intro: "Pick a product and get three short posts written from its page, with your link and a line saying you earn from it already in them. Read each one before you post it, and change anything that is not true for you.",
@@ -296,7 +296,7 @@ const en = {
   partnerInStudio: "It is waiting in your own studio, with the terms, to accept or decline:",
   partnerAnswer: "Nothing happens until you answer it. Declining tells them nothing beyond that you declined.",
   partnerTerms: (percent: number) =>
-    `That is ${percent}% of what each buyer pays before tax, on every sale — not only the ones you send them. A refunded sale earns nothing, and a partly refunded one earns on what was kept. A sale paid with PayPal and partly refunded earns nothing, because the amount refunded can't be seen here.`,
+    `That is ${percent}% of what each buyer pays before tax, on every sale — not only the ones you send them. A refunded sale earns nothing, and a partly refunded one earns on what was kept. A sale paid with PayPal and partly refunded earns nothing, because the amount refunded can't be seen here; a commission already paid on it is kept.`,
   partnerOpen: "Open this link to accept and see your own page, which shows every sale you have earned on and what you have been paid:",
   partnerPays: (store: string) =>
     `${store} pays you directly, from their own account. Marktmorgen never holds this money, so there is no balance to wait on and nothing to claim by a deadline. You will be asked for the PayPal address to be paid at; you need no account with us.`,
@@ -450,7 +450,7 @@ const es: AffiliatesWords = {
   amountOff: (amount) => `${amount} de descuento`,
   partnerShareLabel: "Tu participación como socio",
   partnerShare: (percent, products) =>
-    `${percent}${S}% de lo que paga un comprador antes de impuestos en cada venta de ${products} — sin importar quién trajo al comprador, ni si llegó o no por tu enlace. Una venta reembolsada no genera nada, una reembolsada en parte genera sobre lo que se conservó, y tus propias compras nunca generan nada. Una venta pagada con PayPal y reembolsada en parte no genera nada, porque aquí no se puede ver el importe reembolsado.`,
+    `${percent}${S}% de lo que paga un comprador antes de impuestos en cada venta de ${products} — sin importar quién trajo al comprador, ni si llegó o no por tu enlace. Una venta reembolsada no genera nada, una reembolsada en parte genera sobre lo que se conservó, y tus propias compras nunca generan nada. Una venta pagada con PayPal y reembolsada en parte no genera nada, porque aquí no se puede ver el importe reembolsado; la comisión ya pagada por ella se mantiene.`,
   sharedFallback: "los productos en los que participas",
   yourRate: (store, percent) =>
     `${store} fijó tu parte en el ${percent}${S}% de lo que paga un comprador antes de impuestos, en cada compra única hecha a través de tu enlace, excepto los productos que haya retirado del programa.`,
@@ -519,7 +519,7 @@ const es: AffiliatesWords = {
   bonusTitle: (sales, month) => `Bono: ${sales} ${plural(sales, "venta", "ventas")} en ${month}`,
   bonusLine: (date) => `${date} · bono`,
   termRefunds:
-    "Una venta reembolsada no genera nada, una reembolsada en parte genera solo sobre lo que se conservó, y tus propias compras nunca generan nada. Una venta pagada con PayPal y reembolsada en parte no genera nada, porque aquí no se puede ver el importe reembolsado.",
+    "Una venta reembolsada no genera nada, una reembolsada en parte genera solo sobre lo que se conservó, y tus propias compras nunca generan nada. Una venta pagada con PayPal y reembolsada en parte no genera nada, porque aquí no se puede ver el importe reembolsado; la comisión ya pagada por ella se mantiene.",
   kit: {
     head: "Publicaciones para compartir, redactadas para ti",
     intro: "Elige un producto y recibe tres publicaciones cortas escritas a partir de su página, con tu enlace y una línea que dice que ganas una comisión ya incluidos. Lee cada una antes de publicarla y cambia lo que no sea cierto para ti.",
@@ -596,7 +596,7 @@ const es: AffiliatesWords = {
   partnerInStudio: "Te espera en tu propio estudio, con las condiciones, para que la aceptes o la rechaces:",
   partnerAnswer: "No pasa nada hasta que respondas. Si la rechazas, solo sabrán que la rechazaste.",
   partnerTerms: (percent) =>
-    `Es el ${percent}${S}% de lo que paga cada comprador antes de impuestos, en cada venta — no solo en las que tú les envíes. Una venta reembolsada no genera nada, y una reembolsada en parte genera sobre lo que se conservó. Una venta pagada con PayPal y reembolsada en parte no genera nada, porque aquí no se puede ver el importe reembolsado.`,
+    `Es el ${percent}${S}% de lo que paga cada comprador antes de impuestos, en cada venta — no solo en las que tú les envíes. Una venta reembolsada no genera nada, y una reembolsada en parte genera sobre lo que se conservó. Una venta pagada con PayPal y reembolsada en parte no genera nada, porque aquí no se puede ver el importe reembolsado; la comisión ya pagada por ella se mantiene.`,
   partnerOpen: "Abre este enlace para aceptar y ver tu propia página, que muestra cada venta por la que has ganado y lo que se te ha pagado:",
   partnerPays: (store) =>
     `${store} te paga directamente, desde su propia cuenta. Marktmorgen nunca retiene este dinero, así que no hay saldo que esperar ni nada que reclamar antes de una fecha límite. Se te pedirá la dirección de PayPal en la que quieres cobrar; no necesitas una cuenta con nosotros.`,
@@ -739,7 +739,7 @@ const fr: AffiliatesWords = {
   amountOff: (amount) => `${amount} de réduction`,
   partnerShareLabel: "Votre part de partenaire",
   partnerShare: (percent, products) =>
-    `${percent}${S}% de ce qu'un acheteur paie hors taxes sur chaque vente de ${products} — quelle que soit la personne qui a amené l'acheteur, et qu'il soit passé ou non par votre lien. Une vente remboursée ne rapporte rien, une vente partiellement remboursée rapporte sur ce qui a été conservé, et vos propres achats ne rapportent jamais rien. Une vente payée avec PayPal et partiellement remboursée ne rapporte rien, car le montant remboursé n'est pas visible ici.`,
+    `${percent}${S}% de ce qu'un acheteur paie hors taxes sur chaque vente de ${products} — quelle que soit la personne qui a amené l'acheteur, et qu'il soit passé ou non par votre lien. Une vente remboursée ne rapporte rien, une vente partiellement remboursée rapporte sur ce qui a été conservé, et vos propres achats ne rapportent jamais rien. Une vente payée avec PayPal et partiellement remboursée ne rapporte rien, car le montant remboursé n'est pas visible ici ; une commission déjà payée sur cette vente est conservée.`,
   sharedFallback: "les produits dont vous partagez les ventes",
   yourRate: (store, percent) =>
     `${store} a fixé votre part à ${percent}${S}% de ce qu'un acheteur paie hors taxes, sur chaque achat unique effectué via votre lien, sauf pour les produits retirés du programme.`,
@@ -806,7 +806,7 @@ const fr: AffiliatesWords = {
   bonusTitle: (sales, month) => `Prime${S}: ${sales} ${pluralFr(sales, "vente", "ventes")} en ${month}`,
   bonusLine: (date) => `${date} · prime`,
   termRefunds:
-    "Une vente remboursée ne rapporte rien, une vente partiellement remboursée ne rapporte que sur ce qui a été conservé, et vos propres achats ne rapportent jamais rien. Une vente payée avec PayPal et partiellement remboursée ne rapporte rien, car le montant remboursé n'est pas visible ici.",
+    "Une vente remboursée ne rapporte rien, une vente partiellement remboursée ne rapporte que sur ce qui a été conservé, et vos propres achats ne rapportent jamais rien. Une vente payée avec PayPal et partiellement remboursée ne rapporte rien, car le montant remboursé n'est pas visible ici ; une commission déjà payée sur cette vente est conservée.",
   kit: {
     head: "Des publications à partager, rédigées pour vous",
     intro: "Choisissez un produit et recevez trois courtes publications écrites à partir de sa page, avec votre lien et une ligne indiquant que vous touchez une commission, déjà intégrés. Relisez chacune avant de la publier et modifiez ce qui n'est pas vrai pour vous.",
@@ -886,7 +886,7 @@ const fr: AffiliatesWords = {
   partnerInStudio: `Elle vous attend dans votre propre studio, avec les conditions, pour l'accepter ou la refuser${S}:`,
   partnerAnswer: "Rien ne se passe tant que vous n'avez pas répondu. Si vous refusez, la boutique saura seulement que vous avez refusé.",
   partnerTerms: (percent) =>
-    `Soit ${percent}${S}% de ce que chaque acheteur paie hors taxes, sur chaque vente — pas seulement celles que vous apportez. Une vente remboursée ne rapporte rien, et une vente partiellement remboursée rapporte sur ce qui a été conservé. Une vente payée avec PayPal et partiellement remboursée ne rapporte rien, car le montant remboursé n'est pas visible ici.`,
+    `Soit ${percent}${S}% de ce que chaque acheteur paie hors taxes, sur chaque vente — pas seulement celles que vous apportez. Une vente remboursée ne rapporte rien, et une vente partiellement remboursée rapporte sur ce qui a été conservé. Une vente payée avec PayPal et partiellement remboursée ne rapporte rien, car le montant remboursé n'est pas visible ici ; une commission déjà payée sur cette vente est conservée.`,
   partnerOpen: `Ouvrez ce lien pour accepter et voir votre propre page, qui affiche chaque vente qui vous a rapporté et ce qui vous a été versé${S}:`,
   partnerPays: (store) =>
     `${store} vous paie directement, depuis son propre compte. Marktmorgen ne détient jamais cet argent${S}: il n'y a donc aucun solde à attendre ni rien à réclamer avant une date limite. On vous demandera l'adresse PayPal à laquelle être payé${S}; vous n'avez besoin d'aucun compte chez nous.`,
@@ -1031,7 +1031,7 @@ const de: AffiliatesWords = {
   amountOff: (amount) => `${amount} Rabatt`,
   partnerShareLabel: "Ihre Partnerbeteiligung",
   partnerShare: (percent, products) =>
-    `${percent}${S}% dessen, was ein Käufer vor Steuern zahlt, bei jedem Verkauf von ${products} — egal, wer den Käufer gebracht hat und ob er über Ihren Link kam oder nicht. Ein erstatteter Verkauf bringt nichts ein, ein teilweise erstatteter bringt auf das ein, was behalten wurde, und Ihre eigenen Käufe bringen nie etwas ein. Ein mit PayPal bezahlter und teilweise erstatteter Verkauf bringt nichts ein, weil der erstattete Betrag hier nicht sichtbar ist.`,
+    `${percent}${S}% dessen, was ein Käufer vor Steuern zahlt, bei jedem Verkauf von ${products} — egal, wer den Käufer gebracht hat und ob er über Ihren Link kam oder nicht. Ein erstatteter Verkauf bringt nichts ein, ein teilweise erstatteter bringt auf das ein, was behalten wurde, und Ihre eigenen Käufe bringen nie etwas ein. Ein mit PayPal bezahlter und teilweise erstatteter Verkauf bringt nichts ein, weil der erstattete Betrag hier nicht sichtbar ist; eine dafür bereits gezahlte Provision bleibt bestehen.`,
   sharedFallback: "die Produkte, an denen Sie beteiligt sind",
   yourRate: (store, percent) =>
     `${store} hat Ihren Anteil auf ${percent}${S}% dessen festgelegt, was ein Käufer vor Steuern zahlt, bei jedem Einmalkauf über Ihren Link, außer bei Produkten, die aus dem Programm genommen wurden.`,
@@ -1099,7 +1099,7 @@ const de: AffiliatesWords = {
   bonusTitle: (sales, month) => `Bonus: ${sales} ${plural(sales, "Verkauf", "Verkäufe")} im ${month}`,
   bonusLine: (date) => `${date} · Bonus`,
   termRefunds:
-    "Ein erstatteter Verkauf bringt nichts ein, ein teilweise erstatteter nur auf das, was behalten wurde, und Ihre eigenen Käufe bringen nie etwas ein. Ein mit PayPal bezahlter und teilweise erstatteter Verkauf bringt nichts ein, weil der erstattete Betrag hier nicht sichtbar ist.",
+    "Ein erstatteter Verkauf bringt nichts ein, ein teilweise erstatteter nur auf das, was behalten wurde, und Ihre eigenen Käufe bringen nie etwas ein. Ein mit PayPal bezahlter und teilweise erstatteter Verkauf bringt nichts ein, weil der erstattete Betrag hier nicht sichtbar ist; eine dafür bereits gezahlte Provision bleibt bestehen.",
   kit: {
     head: "Beiträge zum Teilen, für Sie entworfen",
     intro: "Wählen Sie ein Produkt und erhalten Sie drei kurze Beiträge, geschrieben aus seiner Seite, mit Ihrem Link und einer Zeile, dass Sie daran verdienen, schon darin. Lesen Sie jeden vor dem Posten und ändern Sie, was für Sie nicht stimmt.",
@@ -1181,7 +1181,7 @@ const de: AffiliatesWords = {
   partnerInStudio: "Das Angebot wartet in Ihrem eigenen Studio, mit den Bedingungen, darauf, dass Sie es annehmen oder ablehnen:",
   partnerAnswer: "Es passiert nichts, bis Sie antworten. Wenn Sie ablehnen, erfährt der Shop nur, dass Sie abgelehnt haben.",
   partnerTerms: (percent) =>
-    `Das sind ${percent}${S}% dessen, was jeder Käufer vor Steuern zahlt, bei jedem Verkauf — nicht nur bei denen, die Sie vermitteln. Ein erstatteter Verkauf bringt nichts ein, und ein teilweise erstatteter bringt auf das ein, was behalten wurde. Ein mit PayPal bezahlter und teilweise erstatteter Verkauf bringt nichts ein, weil der erstattete Betrag hier nicht sichtbar ist.`,
+    `Das sind ${percent}${S}% dessen, was jeder Käufer vor Steuern zahlt, bei jedem Verkauf — nicht nur bei denen, die Sie vermitteln. Ein erstatteter Verkauf bringt nichts ein, und ein teilweise erstatteter bringt auf das ein, was behalten wurde. Ein mit PayPal bezahlter und teilweise erstatteter Verkauf bringt nichts ein, weil der erstattete Betrag hier nicht sichtbar ist; eine dafür bereits gezahlte Provision bleibt bestehen.`,
   partnerOpen:
     "Öffnen Sie diesen Link, um anzunehmen und Ihre eigene Seite zu sehen, die jeden Verkauf zeigt, an dem Sie verdient haben, und was Ihnen ausgezahlt wurde:",
   partnerPays: (store) =>
@@ -1327,7 +1327,7 @@ const it: AffiliatesWords = {
   amountOff: (amount) => `${amount} di sconto`,
   partnerShareLabel: "La tua quota da partner",
   partnerShare: (percent, products) =>
-    `${percent}${S}% di quanto un acquirente paga al netto delle tasse su ogni vendita di ${products} — chiunque abbia portato l'acquirente, e che sia arrivato o no tramite il tuo link. Una vendita rimborsata non fa guadagnare nulla, una rimborsata in parte fa guadagnare su quanto è stato trattenuto, e i tuoi acquisti non fanno mai guadagnare. Una vendita pagata con PayPal e rimborsata in parte non fa guadagnare nulla, perché qui l'importo rimborsato non è visibile.`,
+    `${percent}${S}% di quanto un acquirente paga al netto delle tasse su ogni vendita di ${products} — chiunque abbia portato l'acquirente, e che sia arrivato o no tramite il tuo link. Una vendita rimborsata non fa guadagnare nulla, una rimborsata in parte fa guadagnare su quanto è stato trattenuto, e i tuoi acquisti non fanno mai guadagnare. Una vendita pagata con PayPal e rimborsata in parte non fa guadagnare nulla, perché qui l'importo rimborsato non è visibile; una commissione già pagata su di essa resta.`,
   sharedFallback: "i prodotti a cui partecipi",
   yourRate: (store, percent) =>
     `${store} ha fissato la tua quota al ${percent}${S}% di quanto un acquirente paga al netto delle tasse, su ogni acquisto singolo fatto tramite il tuo link, tranne i prodotti che ha escluso dal programma.`,
@@ -1396,7 +1396,7 @@ const it: AffiliatesWords = {
   bonusTitle: (sales, month) => `Premio: ${sales} ${plural(sales, "vendita", "vendite")} a ${month}`,
   bonusLine: (date) => `${date} · premio`,
   termRefunds:
-    "Una vendita rimborsata non fa guadagnare nulla, una rimborsata in parte fa guadagnare solo su quanto è stato trattenuto, e i tuoi acquisti non fanno mai guadagnare. Una vendita pagata con PayPal e rimborsata in parte non fa guadagnare nulla, perché qui l'importo rimborsato non è visibile.",
+    "Una vendita rimborsata non fa guadagnare nulla, una rimborsata in parte fa guadagnare solo su quanto è stato trattenuto, e i tuoi acquisti non fanno mai guadagnare. Una vendita pagata con PayPal e rimborsata in parte non fa guadagnare nulla, perché qui l'importo rimborsato non è visibile; una commissione già pagata su di essa resta.",
   kit: {
     head: "Post da condividere, scritti per te",
     intro: "Scegli un prodotto e ricevi tre brevi post scritti a partire dalla sua pagina, con il tuo link e una riga che dice che guadagni una commissione già inclusi. Leggi ognuno prima di pubblicarlo e cambia ciò che per te non è vero.",
@@ -1476,7 +1476,7 @@ const it: AffiliatesWords = {
   partnerInStudio: "Ti aspetta nel tuo studio, con le condizioni, per accettarla o rifiutarla:",
   partnerAnswer: "Non succede nulla finché non rispondi. Se rifiuti, sapranno solo che hai rifiutato.",
   partnerTerms: (percent) =>
-    `È il ${percent}${S}% di quanto ogni acquirente paga al netto delle tasse, su ogni vendita — non solo quelle che porti tu. Una vendita rimborsata non fa guadagnare nulla, e una rimborsata in parte fa guadagnare su quanto è stato trattenuto. Una vendita pagata con PayPal e rimborsata in parte non fa guadagnare nulla, perché qui l'importo rimborsato non è visibile.`,
+    `È il ${percent}${S}% di quanto ogni acquirente paga al netto delle tasse, su ogni vendita — non solo quelle che porti tu. Una vendita rimborsata non fa guadagnare nulla, e una rimborsata in parte fa guadagnare su quanto è stato trattenuto. Una vendita pagata con PayPal e rimborsata in parte non fa guadagnare nulla, perché qui l'importo rimborsato non è visibile; una commissione già pagata su di essa resta.`,
   partnerOpen: "Apri questo link per accettare e vedere la tua pagina, che mostra ogni vendita su cui hai guadagnato e quanto ti è stato pagato:",
   partnerPays: (store) =>
     `${store} ti paga direttamente, dal proprio conto. Marktmorgen non detiene mai questo denaro, quindi non c'è nessun saldo da aspettare e niente da richiedere entro una scadenza. Ti verrà chiesto l'indirizzo PayPal su cui essere pagato; non ti serve un account da noi.`,
@@ -1619,7 +1619,7 @@ const nl: AffiliatesWords = {
   amountOff: (amount) => `${amount} korting`,
   partnerShareLabel: "Je partneraandeel",
   partnerShare: (percent, products) =>
-    `${percent}${S}% van wat een koper vóór belasting betaalt, bij elke verkoop van ${products} — wie de koper ook heeft gebracht, en of die nu via je link kwam of niet. Een terugbetaalde verkoop levert niets op, een gedeeltelijk terugbetaalde levert op over wat is behouden, en je eigen aankopen leveren nooit iets op. Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, levert niets op, omdat het terugbetaalde bedrag hier niet te zien is.`,
+    `${percent}${S}% van wat een koper vóór belasting betaalt, bij elke verkoop van ${products} — wie de koper ook heeft gebracht, en of die nu via je link kwam of niet. Een terugbetaalde verkoop levert niets op, een gedeeltelijk terugbetaalde levert op over wat is behouden, en je eigen aankopen leveren nooit iets op. Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, levert niets op, omdat het terugbetaalde bedrag hier niet te zien is; een commissie die er al voor is betaald, blijft staan.`,
   sharedFallback: "de producten waarin je deelt",
   yourRate: (store, percent) =>
     `${store} heeft je aandeel vastgesteld op ${percent}${S}% van wat een koper vóór belasting betaalt, bij elke eenmalige aankoop via je link, behalve producten die uit het programma zijn gehaald.`,
@@ -1687,7 +1687,7 @@ const nl: AffiliatesWords = {
   bonusTitle: (sales, month) => `Premie: ${sales} ${plural(sales, "verkoop", "verkopen")} in ${month}`,
   bonusLine: (date) => `${date} · premie`,
   termRefunds:
-    "Een terugbetaalde verkoop levert niets op, een gedeeltelijk terugbetaalde alleen over wat is behouden, en je eigen aankopen leveren nooit iets op. Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, levert niets op, omdat het terugbetaalde bedrag hier niet te zien is.",
+    "Een terugbetaalde verkoop levert niets op, een gedeeltelijk terugbetaalde alleen over wat is behouden, en je eigen aankopen leveren nooit iets op. Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, levert niets op, omdat het terugbetaalde bedrag hier niet te zien is; een commissie die er al voor is betaald, blijft staan.",
   kit: {
     head: "Berichten om te delen, voor je geschreven",
     intro: "Kies een product en krijg drie korte berichten, geschreven vanuit de pagina ervan, met je link en een regel dat je eraan verdient er al in. Lees ze voordat je ze plaatst en pas aan wat voor jou niet klopt.",
@@ -1768,7 +1768,7 @@ const nl: AffiliatesWords = {
   partnerInStudio: "Het aanbod wacht in je eigen studio, met de voorwaarden, om te accepteren of af te wijzen:",
   partnerAnswer: "Er gebeurt niets tot je antwoordt. Als je afwijst, horen ze alleen dat je hebt afgewezen.",
   partnerTerms: (percent) =>
-    `Dat is ${percent}${S}% van wat elke koper vóór belasting betaalt, bij elke verkoop — niet alleen de verkopen die jij aanbrengt. Een terugbetaalde verkoop levert niets op, en een gedeeltelijk terugbetaalde levert op over wat is behouden. Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, levert niets op, omdat het terugbetaalde bedrag hier niet te zien is.`,
+    `Dat is ${percent}${S}% van wat elke koper vóór belasting betaalt, bij elke verkoop — niet alleen de verkopen die jij aanbrengt. Een terugbetaalde verkoop levert niets op, en een gedeeltelijk terugbetaalde levert op over wat is behouden. Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, levert niets op, omdat het terugbetaalde bedrag hier niet te zien is; een commissie die er al voor is betaald, blijft staan.`,
   partnerOpen: "Open deze link om te accepteren en je eigen pagina te zien, met elke verkoop waaraan je hebt verdiend en wat je is uitbetaald:",
   partnerPays: (store) =>
     `${store} betaalt je rechtstreeks, vanaf de eigen rekening. Marktmorgen houdt dit geld nooit vast, dus er is geen saldo om op te wachten en niets om vóór een deadline op te eisen. Je wordt gevraagd naar het PayPal-adres waarop je betaald wilt worden; je hebt geen account bij ons nodig.`,
@@ -1917,7 +1917,7 @@ const pt: AffiliatesWords = {
   amountOff: (amount) => `${amount} de desconto`,
   partnerShareLabel: "A sua participação como parceiro",
   partnerShare: (percent, products) =>
-    `${percent}${S}% do que um comprador paga antes de impostos em cada venda de ${products} — seja quem for que trouxe o comprador, e quer tenha vindo ou não pela sua ligação. Uma venda reembolsada não gera nada, uma parcialmente reembolsada gera sobre o que foi mantido, e as suas próprias compras nunca geram nada. Uma venda paga com PayPal e parcialmente reembolsada não gera nada, porque o valor reembolsado não pode ser visto aqui.`,
+    `${percent}${S}% do que um comprador paga antes de impostos em cada venda de ${products} — seja quem for que trouxe o comprador, e quer tenha vindo ou não pela sua ligação. Uma venda reembolsada não gera nada, uma parcialmente reembolsada gera sobre o que foi mantido, e as suas próprias compras nunca geram nada. Uma venda paga com PayPal e parcialmente reembolsada não gera nada, porque o valor reembolsado não pode ser visto aqui; uma comissão já paga sobre ela é mantida.`,
   sharedFallback: "os produtos em que participa",
   yourRate: (store, percent) =>
     `${store} fixou a sua parte em ${percent}${S}% do que um comprador paga antes de impostos, em cada compra única feita através da sua ligação, exceto os produtos que retirou do programa.`,
@@ -1986,7 +1986,7 @@ const pt: AffiliatesWords = {
   bonusTitle: (sales, month) => `Bónus: ${sales} ${plural(sales, "venda", "vendas")} em ${month}`,
   bonusLine: (date) => `${date} · bónus`,
   termRefunds:
-    "Uma venda reembolsada não gera nada, uma parcialmente reembolsada gera apenas sobre o que foi mantido, e as suas próprias compras nunca geram nada. Uma venda paga com PayPal e parcialmente reembolsada não gera nada, porque o valor reembolsado não pode ser visto aqui.",
+    "Uma venda reembolsada não gera nada, uma parcialmente reembolsada gera apenas sobre o que foi mantido, e as suas próprias compras nunca geram nada. Uma venda paga com PayPal e parcialmente reembolsada não gera nada, porque o valor reembolsado não pode ser visto aqui; uma comissão já paga sobre ela é mantida.",
   kit: {
     head: "Publicações para partilhar, redigidas para si",
     intro: "Escolha um produto e receba três publicações curtas escritas a partir da página dele, já com a sua ligação e uma linha a dizer que recebe uma comissão. Leia cada uma antes de a publicar e altere o que não for verdade para si.",
@@ -2066,7 +2066,7 @@ const pt: AffiliatesWords = {
   partnerInStudio: "A proposta está à sua espera no seu próprio estúdio, com as condições, para aceitar ou recusar:",
   partnerAnswer: "Nada acontece até responder. Se recusar, só ficam a saber que recusou.",
   partnerTerms: (percent) =>
-    `Ou seja, ${percent}${S}% do que cada comprador paga antes de impostos, em cada venda — não apenas nas que lhes trouxer. Uma venda reembolsada não gera nada, e uma parcialmente reembolsada gera sobre o que foi mantido. Uma venda paga com PayPal e parcialmente reembolsada não gera nada, porque o valor reembolsado não pode ser visto aqui.`,
+    `Ou seja, ${percent}${S}% do que cada comprador paga antes de impostos, em cada venda — não apenas nas que lhes trouxer. Uma venda reembolsada não gera nada, e uma parcialmente reembolsada gera sobre o que foi mantido. Uma venda paga com PayPal e parcialmente reembolsada não gera nada, porque o valor reembolsado não pode ser visto aqui; uma comissão já paga sobre ela é mantida.`,
   partnerOpen: "Abra esta ligação para aceitar e ver a sua própria página, que mostra cada venda com que ganhou e o que lhe foi pago:",
   partnerPays: (store) =>
     `${store} paga-lhe diretamente, a partir da própria conta. A Marktmorgen nunca detém este dinheiro, por isso não há saldo de que esteja à espera nem nada a reclamar até um prazo. Ser-lhe-á pedido o endereço PayPal onde quer receber; não precisa de conta connosco.`,

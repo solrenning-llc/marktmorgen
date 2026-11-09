@@ -735,6 +735,19 @@ export class MemoryRedis {
           this.run(["HSET", people, field, next]);
           return 1;
         }
+        // lib/affiliate-codes.ts GIVE_CODE: whether the code is held, its room and the write in one step. A code held
+        // is moved and takes no room ({2, 0}); a code not held takes its room (TAKE_DATA, slot "aff:codes") and is
+        // written only when that answers {1, total}.
+        if (key.startsWith("-- marktmorgen:affiliate-code-give:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, room, codes, limit, month, bytes, promo, affiliate] = args;
+          if (this.run(["HEXISTS", codes, promo]) === 1) {
+            this.run(["HSET", codes, promo, affiliate]);
+            return [2, 0];
+          }
+          const taken = this.storeData([room, limit, "0", month, "a", "aff:codes", bytes]);
+          if (Array.isArray(taken) && taken[0] === 1) this.run(["HSET", codes, promo, affiliate]);
+          return taken;
+        }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
         if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];

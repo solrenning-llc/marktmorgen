@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
-import { listAsCsv } from "@/lib/free";
+import { ListNotWholeError, listAsCsv } from "@/lib/free";
 
 /**
  * The creator's list, as a file they can take anywhere.
@@ -22,9 +22,18 @@ export async function GET(request: NextRequest) {
   const onlyAgreed = request.nextUrl.searchParams.get("who") === "agreed";
 
   try {
-    const csv = await listAsCsv(store, onlyAgreed);
+    // Contacts kept but unreadable (rule 24): the readable ones are handed over, and the file's name says it is not the
+    // whole list ("-partial", as the sales file says it), never a file given as the list without a word.
+    const read = await listAsCsv(store, onlyAgreed).then(
+      (csv) => ({ csv, partial: false }),
+      (error: unknown) => {
+        if (error instanceof ListNotWholeError) return { csv: error.csv, partial: true };
+        throw error;
+      },
+    );
+    const csv = read.csv;
     const day = new Date().toISOString().slice(0, 10);
-    const name = `${store.handle}-${onlyAgreed ? "agreed" : "everyone"}-${day}.csv`;
+    const name = `${store.handle}-${onlyAgreed ? "agreed" : "everyone"}-${day}${read.partial ? "-partial" : ""}.csv`;
     // The byte-order mark makes Excel read the file as UTF-8, so a name with
     // an accent arrives with its accent. Every email tool ignores it.
     return new Response(`\uFEFF${csv}`, {

@@ -51,7 +51,7 @@ function textOf(query: { [key: string]: string | string[] | undefined }, key: st
 type Loaded =
   | { store: Store; state: "resting"; buyer: boolean }
   | { store: Store; state: "gone" }
-  | { store: Store; state: "move"; product: CallListing }
+  | { store: Store; state: "move"; product: CallListing; known: boolean }
   | { store: Store; state: "open"; product: CallListing; pkg: Awaited<ReturnType<typeof packageFor>>; soon: boolean | null };
 
 /**
@@ -70,14 +70,18 @@ const load = cache(async (raw: string, productId: string, pkgToken: string, movi
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) return null;
   let pkg: Awaited<ReturnType<typeof packageFor>> | undefined;
+  let known = false;
   if (await isResting(store)) {
     if (pkgToken) pkg = await packageFor(store, productId, pkgToken);
     const proved = pkgToken ? pkg !== null : moving ? await bookedHere(store, moving) : false;
     if (!proved || (await isResting(store, undefined, "buyer"))) return { store, state: "resting", buyer: proved };
+    if (moving) known = true;
   }
   const product = await readListing(store, productId);
   if (!product || !isCallProduct(product)) return { store, state: "gone" };
-  if (moving) return { store, state: "move", product };
+  // A move is read from Stripe only for a booking in this store's diary (review of #3478; one HEXISTS): anything else
+  // is not found, with nothing asked.
+  if (moving) return { store, state: "move", product, known: known || (await bookedHere(store, moving)) };
   if (pkg === undefined) pkg = pkgToken ? await packageFor(store, product.id, pkgToken) : null;
   // A draft call is left off the store (lib/catalog.ts): its title, price and
   // times are for the store's owner and team, signed in, and for a package
@@ -121,7 +125,7 @@ export default async function BookPage({ params, searchParams }: Params) {
   const { product } = loaded;
 
   const status = typeof query.status === "string" ? query.status : "";
-  if (loaded.state === "move") return <MovePage store={store} product={product} session={textOf(query, "move")} status={status} />;
+  if (loaded.state === "move") return <MovePage store={store} product={product} session={textOf(query, "move")} status={status} known={loaded.known} />;
 
   // Sent here from the calendar on one of the creator's listed sites (app/embed), after a refusal or back from Stripe:
   // the site and the way back stay with the booking, read against the creator's list again, so a second try is still the
@@ -424,13 +428,16 @@ async function MovePage({
   product,
   session,
   status,
+  known,
 }: {
   store: Store;
   product: CallListing;
   session: string;
   status: string;
+  /** Whether the session is a booking in this store's diary: only then is it read from Stripe. */
+  known: boolean;
 }) {
-  const order = await readOrder(store, session);
+  const order = known ? await readOrder(store, session) : ({ state: "invalid" } as const);
   const setup = product.call;
   const booking = order.state === "paid" && order.call && order.product.id === product.id ? order.call : null;
   const { money, lang } = speech(store);

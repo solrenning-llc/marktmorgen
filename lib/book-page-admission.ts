@@ -20,8 +20,9 @@ import { BOOKING_SESSION, bookTimesUnits, bookingDiaryKey } from "@/lib/book-pag
  * takes them from the whole window. False when they do not fit: then nothing
  * is read.
  */
-export async function payBookTimes(store: Store, who: "public" | "buyer", now = Date.now()): Promise<boolean> {
-  const units = bookTimesUnits(idsOfKind(store, "call").length);
+export async function payBookTimes(store: Store, who: "public" | "buyer", now = Date.now(), extra = 0): Promise<boolean> {
+  // `extra`: requests of the same work that no page counted (BOOK_POST_EXTRA_UNITS for a booking's POST).
+  const units = bookTimesUnits(idsOfKind(store, "call").length) + Math.max(0, Math.floor(extra));
   return who === "buyer" ? takePublicRequest(store, "buyer", now, units) : holdPublicRequests(store, units, now);
 }
 

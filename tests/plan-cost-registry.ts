@@ -418,6 +418,14 @@ export function bookTimesRead(listings: number): number {
   });
 }
 /**
+ * What booking a time costs besides its times and its checkout (app/api/store/book; review of #3478): the request
+ * itself, which no page counted (a later page's wait and work, a store's record and the call's listing read, its
+ * limits and counts), and two calls to the creator's Stripe account before the time is held (a discount code read, the
+ * browser's earlier hold let go), each waited on EXPORT_PAGE_SECONDS. The checkout opened for the hold is the order's
+ * own work (ORDER_COMPUTE, admitted as CALL_ORDER_UNITS orders). Taken as BOOK_POST_EXTRA_UNITS with the times.
+ */
+export const BOOK_POST_READ = readShapeCost({ seconds: 1.3, cpu: 0.2, commands: 30, dbBytes: 2 * LISTING_READ_BYTES + 65_536, outBytes: 2_048, stripePages: 2 });
+/**
  * What one next product after a purchase costs besides the model (lib/next-offer.ts),
  * at the most: its commands and its counting, the listings it reads (a product's
  * heavy record among them), and up to five calls to the creator's Stripe account
@@ -1237,7 +1245,10 @@ export const COST_LINES: CostLine[] = [
       // The calendar embedded on a creator's listed site pays for its times as the booking page does (pre-review, 9 November 2026).
       { file: "app/embed/[handle]/[product]/page.tsx", names: ["(await payBookTimes(store, \"public\")) ? await slotsForProduct("] },
       { file: "lib/book-page-admission.ts", names: ["bookTimesUnits(idsOfKind(store, \"call\").length)", "takePublicRequest(store, \"buyer\", now, units)", "holdPublicRequests(store, units, now)", "[\"HEXISTS\", bookingDiaryKey(store.callsId), session]"] },
-      { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_IN_BASE", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits", "bookingDiaryKey"] },
+      { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_IN_BASE", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits", "bookingDiaryKey", "BOOK_POST_EXTRA_UNITS"] },
+      // Booking a time and moving a booking pay for the times they read, before Stripe is asked (review of #3478).
+      { file: "app/api/store/book/route.ts", names: ["if (!(await payBookTimes(store, owned ? \"buyer\" : \"public\", Date.now(), BOOK_POST_EXTRA_UNITS))) return back(\"slow\");"] },
+      { file: "app/api/store/book/move/route.ts", names: ["if (!(await bookedHere(store, session))) return back(\"unknown\");", "if (!(await payBookTimes(store, \"buyer\"))) return back(\"slow\");"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS"] },

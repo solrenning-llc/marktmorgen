@@ -1289,6 +1289,7 @@
     "components/assistant-reminder-box.tsx",
     "components/attribution-table.tsx",
     "components/audio-embed.tsx",
+    "components/automation-draft.tsx",
     "components/beside-stores.tsx",
     "components/block-picker.tsx",
     "components/block-rewrite.tsx",

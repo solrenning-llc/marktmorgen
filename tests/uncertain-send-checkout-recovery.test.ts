@@ -18,10 +18,18 @@
  *   - Resend answers 422 (a certain refusal): tried again on the next pass
  *     and sent then (control: unchanged behavior);
  *   - Amazon took it but its answer was a 500: Amazon asked once, one email
- *     taken from the figure and one stop link written, never Resend.
+ *     taken from the figure and one stop link written, never Resend;
+ *   - Resend refuses for certain on every pass (a 422 for one address, or
+ *     the ceiling spent): tried at most three times, so at most three emails
+ *     taken from the figure, and the stop link of an email that never went
+ *     is taken back (Claude 2's MEDIUM 3 on #3377);
+ *   - an error while the reminder is written: nothing was sent, so its marks
+ *     and its stop link go and the next pass sends it (Claude 2's LOW on
+ *     #3377, the sibling of the call reminders' fix).
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { remindAbandoned } from "@/lib/checkout-recovery";
+import { givingWords } from "@/lib/buyer-words/giving";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -140,6 +148,36 @@ async function main(): Promise<void> {
   refuse = false;
   is("the next pass sends it, once", [await remindAbandoned(await load(), left("cs_test_rex00000000001", "rex@example.com")), await remindAbandoned(await load(), left("cs_test_rex00000000001", "rex@example.com")), resendOf("rex@example.com")], ["sent", "skip", 2]);
 
+  part("A certain refusal on every pass: tried three times at most, its unsent stop links taken back");
+  resendSays = (to) => (to === "sal@example.com" ? () => answerOf(422) : null);
+  used = await allowanceUsed(await load(), "email");
+  let linksBefore = links();
+  const sixPasses: string[] = [];
+  for (let i = 0; i < 6; i += 1) sixPasses.push(await remindAbandoned(await load(), left("cs_test_sal00000000001", "sal@example.com")));
+  is("refused three times, then left", sixPasses, ["failed", "failed", "failed", "skip", "skip", "skip"]);
+  is("Resend asked three times, not once a pass", resendOf("sal@example.com"), 3);
+  is("three emails taken from the store's figure, not one a pass", (await allowanceUsed(await load(), "email")) - used, 3);
+  is("no stop link kept for an email that never went", links() - linksBefore, 0);
+  is("another checkout of the same address and product is not held back a week", [await (async () => { resendSays = () => null; return remindAbandoned(await load(), left("cs_test_sal00000000002", "sal@example.com")); })(), resendOf("sal@example.com")], ["sent", 4]);
+
+  part("An error while the reminder is written: nothing sent, so the next pass sends it");
+  const words = givingWords("en");
+  const price = words.recoverPrice;
+  words.recoverPrice = () => {
+    throw new Error("synthetic: the reminder could not be written");
+  };
+  linksBefore = links();
+  let broken: string;
+  try {
+    broken = await remindAbandoned(await load(), left("cs_test_wyn00000000001", "wyn@example.com"));
+  } catch (error) {
+    broken = `threw: ${(error as Error).message}`;
+  } finally {
+    words.recoverPrice = price;
+  }
+  is("not sent, and said as a failure", [broken, resendOf("wyn@example.com"), links() - linksBefore], ["failed", 0, 0]);
+  is("the next pass sends it, once", [await remindAbandoned(await load(), left("cs_test_wyn00000000001", "wyn@example.com")), await remindAbandoned(await load(), left("cs_test_wyn00000000001", "wyn@example.com")), resendOf("wyn@example.com"), links() - linksBefore], ["sent", "skip", 1, 1]);
+
   part("Amazon took it, its answer lost: one email from the figure, not one a pass");
   process.env.AWS_SES_REGION = REGION;
   process.env.AWS_SES_CONFIGURATION_SET = "marktmorgen";
@@ -149,7 +187,7 @@ async function main(): Promise<void> {
   resendSays = () => null;
   amazonLoses.add("ivy@example.com");
   used = await allowanceUsed(await load(), "email");
-  const linksBefore = links();
+  linksBefore = links();
   is("not counted as sent; the later passes leave it", await passes("cs_test_ivy00000000001", "ivy@example.com"), ["failed", "skip", "skip", "skip"]);
   is("Amazon was asked once and Resend never", [amazonAsked.filter((to) => to === "ivy@example.com").length, resendOf("ivy@example.com")], [1, 0]);
   is("one email taken from the store's figure, not one a pass", (await allowanceUsed(await load(), "email")) - used, 1);

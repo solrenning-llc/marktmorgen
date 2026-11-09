@@ -1,0 +1,18 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/member-discount.ts",
+    "../../../lib/member-free-days.ts",
+    "../../../tests/member-discount.test.ts",
+    "../../../tests/member-free-days.test.ts",
+    "../../../proofs/s/2912-focal/rows.proof.ts",
+    "../../../proofs/s/2912-focal/status.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

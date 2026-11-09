@@ -1,0 +1,11 @@
+{
+  "file": "tests/pricing-usage-proposal.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "e9f9aae052648d12d8646be9b42a83e98fb891f6",
+  "stdout": "✔ the document is what the numbers render today (run node scripts/pricing-usage-proposal.mjs) (1491.20631ms)\n✔ it is a proposal: the price list in force is still #553's, and nothing is on sale (0.712084ms)\n✔ the figures before #553 are today's except the three #553 raised, and its prices are the first legacy list (0.339622ms)\n✔ every recommended plan keeps 60% at full included use on both intervals, with the spend floor's room, and fails the most-tax gate (20.010872ms)\n✔ every pack keeps 60% on its own payment, used in full, with the add-on's room, and fails the most-tax gate (13.855816ms)\n✔ one customer, alone, at full use of the plan and of one of every pack, keeps 60% (45.971342ms)\n✔ every competitor figure has its page and the day it was read (1.049844ms)\nℹ tests 7\nℹ suites 0\nℹ pass 7\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1580.173925\nS_VOLUME {\"runs\":0,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

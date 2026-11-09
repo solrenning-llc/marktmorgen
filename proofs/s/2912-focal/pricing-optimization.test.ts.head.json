@@ -1,0 +1,11 @@
+{
+  "file": "tests/pricing-optimization.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "e9f9aae052648d12d8646be9b42a83e98fb891f6",
+  "stdout": "✔ it changes nothing in force: today's prices, and nothing on sale (1.497429ms)\n✔ the program's input is what the repository's margin code gives today (run node scripts/pricing-optimization.mjs) (4563.67337ms)\n✔ every solution keeps 60% at full use on both intervals, fails the most-tax gate, respects the plan order, and equals the exhaustive search (1171.93507ms)\n✔ the recommendation keeps every #553 figure and 60% on both intervals (9.415607ms)\n✔ every competitor figure has its page and its day, and the regression reports its size (2.931042ms)\n✔ the document is what the numbers render today (11762.27006ms)\n✔ the exhaustive C oracle keeps the solver raw share floor and the same five-cent linear budgets (1090.232124ms)\nℹ tests 7\nℹ suites 0\nℹ pass 7\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 18624.701183\nS_VOLUME {\"runs\":0,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

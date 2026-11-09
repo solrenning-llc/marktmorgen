@@ -55,8 +55,7 @@ import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } f
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { importedFrom, importedRead } from "@/lib/imported-purchases";
-import { takeBuyerRead } from "@/lib/buyer-actions";
-import { dripStartUnits } from "@/lib/drip-start-rules";
+import { dripRunUnits, dripStartUnits } from "@/lib/drip-start-rules";
 
 /** The secret a course checkout leaves in the buyer's browser. */
 export const BUYER_COOKIE = "nl_buyer";
@@ -326,8 +325,11 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
   return (await courseLedger(store, email)).paid;
 }
 
-/** The same answer, with the memberships that ended kept apart. */
-async function courseLedger(store: Store, email: string): Promise<Ledger> {
+/**
+ * The same answer, with the memberships that ended kept apart. `strict`: a Stripe read that does not answer throws
+ * instead of leaving the courses written down on their own (the drip job, which waits for the next run).
+ */
+async function courseLedger(store: Store, email: string, strict = false): Promise<Ledger> {
   const result = new Map<string, number>();
   if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set() };
   // A store that brought buyers over from another platform reads theirs in
@@ -345,6 +347,8 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
       const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded], ...(asked.again?.size ? { a: [...asked.again] } : {}) });
       await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
     } catch (error) {
+      // Unknown, not none, where the caller can wait (CX-123 rule 24): a purchase refunded in full stays shut.
+      if (strict) throw error;
       console.error("reading course purchases failed", error);
       asked = { paid: new Map(), ended: new Set(), refunded: new Set() };
     }
@@ -971,6 +975,8 @@ export async function sendDripEmails(
   if (!isRedisConfigured()) return counts;
   const [raw] = await redisPipeline([["SMEMBERS", DRIP_SET]]);
   const members = Array.isArray(raw) ? (raw as string[]) : [];
+  // What each store's start reads took in this run, in units of its own figure (dripRunUnits).
+  const spent = new Map<string, number>();
   for (const member of members) {
     const [courseId, handle, productId] = member.split("|");
     const store = await load(handle);
@@ -1012,11 +1018,14 @@ export async function sendDripEmails(
         }
         if (!read) {
           read = true;
-          // Counted with the store's public requests before it is made (lib/drip-start-rules.ts): refused, nothing
-          // is read and nothing is sent this run.
-          const counted = await takeBuyerRead(store, dripStartUnits(idsOfKind(store, "course").length)).catch(() => false);
+          // Taken from the job's own figure for this store and run (lib/drip-start-rules.ts), never from its public
+          // requests: past it, nothing is read and nothing is sent this run, and the next run reads this student.
+          const units = dripStartUnits(idsOfKind(store, "course").length);
+          const used = spent.get(store.handle) ?? 0;
+          const counted = used + units <= dripRunUnits(store, nowSeconds);
+          if (counted) spent.set(store.handle, used + units);
           stands = counted
-            ? await courseLedger(store, student.email).then(
+            ? await courseLedger(store, student.email, true).then(
                 (ledger) => ledger.paid.get(product.id),
                 (error: unknown) => (console.error("reading a student's course start for its drip emails failed", error), null),
               )

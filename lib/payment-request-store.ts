@@ -5,7 +5,7 @@
  *   nl:payreq:r:<id>               the request, as JSON, for KEEP_DAYS from the day it was made
  *   nl:payreq:s:<sid>              the store's requests: id -> when made
  *   nl:payreq:o:<sid>              the store's open requests: id -> when its link stops taking payment
- *   nl:payreq:p:<sid>:<person>     one person's requests in the store (lib/person-key.ts), for the cap and for deleting them
+ *   nl:payreq:p:<sid>:<person>     one person's requests in the store (lib/person-key.ts), for the cap, for deleting them and for their copy
  *   nl:payreq:due                  reminders waiting: "<sid>|<id>" -> when due, read by the daily job
  *   nl:payreq:stores               stores with open requests, read by the five-minute job (lib/checkout-sweep.ts)
  *   nl:payreq:lock:<id>            a checkout being opened for it, a minute
@@ -51,6 +51,8 @@ import {
   requestLimitsFor,
   statusOf,
 } from "@/lib/payment-request-rules";
+// Under its own name, so it never collides with the reply helpers other work imports by name above.
+import * as copyReply from "@/lib/redis-reply";
 
 const DAY = 86_400_000;
 const recordKey = (id: string) => `nl:payreq:r:${id}`;
@@ -284,6 +286,69 @@ export async function requestsOfPerson(store: Pick<Store, "sid">, email: string)
     console.error("reading a person's payment requests failed", error);
     return null;
   }
+}
+
+/**
+ * The most members a person's set is read with for their copy: MAX_PER_PERSON
+ * kept, and as many again whose records ran out and are not yet taken off
+ * (createRequest takes those off before it counts). A set past it is not one
+ * the code makes, so the copy fails rather than read part of it.
+ */
+const COPY_MEMBERS_MAX = MAX_PER_PERSON * 2;
+
+/**
+ * Every request the store keeps for one person, newest first, for the copy
+ * of their data (619 [SZ3], lib/person-copy.ts; R19 MEDIUM 2, 9 November
+ * 2026): from their own set, the index the erasure deletes by
+ * (forgetRequestsPerson), never from the store's list, of which a copy would
+ * read only the newest (the plan's kept figure, 20 once the plan ended) while
+ * a request is kept KEEP_DAYS. Read whole and exactly (rule 24), three
+ * commands at the most whatever the store keeps: the set's size first, so a
+ * set past COPY_MEMBERS_MAX is refused before one member or record is read
+ * (what a copy reads is bounded before it is read: 48 ids and 48 records);
+ * then its members, each a request id, once; then their records in one MGET.
+ * A record that ran out is left out. One that does not read as this store's
+ * request to this person, or any reply of another shape, throws, so the copy
+ * fails (lib/person-copy.ts, copyPerson) rather than being handed over with a
+ * request silently missing.
+ */
+export async function requestsOfPersonWhole(store: Pick<Store, "sid">, email: string): Promise<PaymentRequest[]> {
+  if (!isRedisConfigured() || !store.sid) throw new Error("a person's payment requests cannot be read here");
+  const person = personSet(store.sid, email);
+  const sized = copyReply.repliesFor(await redisPipeline([["SCARD", person]]), 1);
+  const size = sized ? copyReply.countOf(sized[0]) : null;
+  if (size === null) throw new copyReply.UnknownReplyError("the count of a person's payment requests");
+  if (size > COPY_MEMBERS_MAX) throw new Error(`a person's payment requests are more than the ${COPY_MEMBERS_MAX} their copy reads`);
+  if (size === 0) return [];
+  const listed = copyReply.repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
+  const ids = listed ? copyReply.stringList(listed[0]) : null;
+  if (!ids || ids.length > COPY_MEMBERS_MAX || new Set(ids).size !== ids.length || !ids.every((id) => ID_PATTERN.test(id))) {
+    throw new copyReply.UnknownReplyError("a person's payment requests");
+  }
+  if (!ids.length) return [];
+  const read = copyReply.repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
+  const values = read ? copyReply.listSlots(read[0]) : null;
+  if (!values || values.length !== ids.length) throw new copyReply.UnknownReplyError("a person's payment requests' records");
+  const whose = personKey(store.sid, email);
+  const out: PaymentRequest[] = [];
+  ids.forEach((id, i) => {
+    const raw = values[i];
+    if (raw === null) return;
+    let request: PaymentRequest | null = null;
+    if (typeof raw === "string") {
+      try {
+        request = parseRequest(JSON.parse(raw));
+      } catch {
+        request = null;
+      }
+    }
+    // Their own set names only their requests: one of another store, another id or another person is not read as theirs.
+    if (!request || request.id !== id || request.sid !== store.sid || personKey(store.sid, request.email) !== whose) {
+      throw new copyReply.UnknownReplyError("a person's payment request");
+    }
+    out.push(request);
+  });
+  return out.sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1));
 }
 
 /** How many of the store's requests are open now. */

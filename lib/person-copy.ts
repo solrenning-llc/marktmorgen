@@ -32,7 +32,7 @@ import { leadsKey, parseContact } from "@/lib/contacts";
 import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
-import { listRequests } from "@/lib/payment-request-store";
+import { requestsOfPersonWhole } from "@/lib/payment-request-store";
 import { listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
@@ -215,11 +215,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
-  "lib/payment-request-store.ts": async (s) => {
-    const list = await listRequests(s.store);
-    if (list === null) throw new Error("the payment requests could not be read");
-    return list.filter((r) => same(r.email, s.email));
-  },
+  // From the person's own set, whole (R19 MEDIUM 2): never the store's newest requests, which leave older ones of theirs out.
+  "lib/payment-request-store.ts": (s) => requestsOfPersonWhole(s.store, s.email),
   "lib/agreement-store.ts": async (s) => {
     const list = await listAgreements(s.store);
     if (list === null) throw new Error("the agreements could not be read");

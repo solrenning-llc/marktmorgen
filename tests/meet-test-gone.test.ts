@@ -28,13 +28,18 @@ process.env.ZOOM_WEBHOOK_SECRET_TOKEN = "z-token";
 process.env.ZOOM_LIVE = "1";
 delete process.env.ZOOM_API_BASE;
 
-const USER = "zoomTestGoneUser01";
+/** The Zoom account the stand-in answers for (/v2/users/me): A, or B once the store connects another account. */
+const USER_A = "zoomTestGoneUser01";
+const USER_B = "zoomTestGoneUserB2";
+let USER = USER_A;
 let tokenNumber = 0;
 let meetingNumber = 812_000_000_00;
 /** The meetings made, moved and deleted on the stand-in Zoom, by id. */
 const made: string[] = [];
 const moved: string[] = [];
 const deleted: string[] = [];
+/** The agenda each make sent Zoom: the words the creator reads in their own Zoom account. */
+const agendas: string[] = [];
 /** Run once, just before the stand-in Zoom answers the next make or move: a deletion landing mid-flow. */
 let onCreate: (() => Promise<unknown>) | null = null;
 let onMove: (() => Promise<unknown>) | null = null;
@@ -53,6 +58,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.pathname === "/v2/users/me/meetings" && method === "POST") {
     const id = String((meetingNumber += 1));
     made.push(id);
+    agendas.push(String((JSON.parse(String(init?.body ?? "{}")) as { agenda?: unknown }).agenda ?? ""));
     if (onCreate) {
       const run = onCreate;
       onCreate = null;
@@ -78,15 +84,23 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 40);
-const userIndex = `nl:meet:user:zoom:${hash(`meet-user:zoom:${USER}`)}`;
-const goneMark = `nl:meet:gone:zoom:${hash(`meet-gone:zoom:${USER}`)}`;
+const indexOf = (account: string) => `nl:meet:user:zoom:${hash(`meet-user:zoom:${account}`)}`;
+const goneOf = (account: string) => `nl:meet:gone:zoom:${hash(`meet-gone:zoom:${account}`)}`;
+const userIndex = indexOf(USER_A);
+const goneMark = goneOf(USER_A);
 const connKey = (statsId: string) => `nl:meet:conn:${statsId}:zoom`;
 
 type Command = (string | number)[];
 /** Replies replaced, for the next pipeline a predicate matches: the slot of the command matched gets `reply`. */
 let weird: { match: (c: Command) => boolean; reply: unknown } | null = null;
+/** The next pipeline holding a command this matches fails as a dropped connection would, with nothing run. */
+let failing: ((c: Command) => boolean) | null = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: Command[]) => {
+  if (failing && commands.some(failing)) {
+    failing = null;
+    throw new Error("the connection to Redis dropped");
+  }
   const out = (await pipeline(commands)) as unknown[];
   if (weird && commands.some(weird.match)) {
     const { match, reply } = weird;
@@ -123,7 +137,10 @@ async function main(): Promise<void> {
     if (!answer.ok) throw new Error(`set-up: not connected (${answer.error})`);
   };
   const reset = async () => {
-    redis.run(["DEL", connKey(statsId), test, userIndex, goneMark]);
+    redis.run(["DEL", connKey(statsId), test, userIndex, goneMark, indexOf(USER_B), goneOf(USER_B)]);
+    USER = USER_A;
+    failing = null;
+    agendas.length = 0;
     made.length = 0;
     moved.length = 0;
     deleted.length = 0;
@@ -214,6 +231,47 @@ async function main(): Promise<void> {
     weird = { match: (c) => ["EVAL", "SET"].includes(String(c[0]).toUpperCase()) && c.includes(test), reply };
     is(`${shape}: not said to be made`, await outcome(() => makeTest(store, "zoom")), "unavailable");
   }
+
+  part("Another account connected while the test meeting is made, its old account's clean-up failing: nothing kept");
+  // Pre-review M3: the store's connection changes from account A to account B mid-make, and the pipeline that takes
+  // the store out of A's index and forgets A's test meeting fails. Before, that failure was swallowed, the keep read
+  // "still A's" from A's index, said "made" and kept A's meeting under B's connection, to be moved or deleted later
+  // with B's token.
+  await reset();
+  onCreate = async () => {
+    USER = USER_B;
+    failing = (c) => String(c[0]).toUpperCase() === "SREM" && c[1] === indexOf(USER_A);
+    await connect();
+  };
+  const switched = await outcome(() => makeTest(store, "zoom"));
+  is("the connection is B's now (set-up)", JSON.parse(redis.run(["GET", connKey(statsId)]) as string).account.id, USER_B);
+  is("not said to be made: the account it was made on is no longer connected", switched, "not connected");
+  is("no test meeting of account A kept under B's connection", record(), null);
+  is("the store is no longer listed under account A", redis.run(["SISMEMBER", indexOf(USER_A), statsId]), 0);
+  is("the store is listed under account B", redis.run(["SISMEMBER", indexOf(USER_B), statsId]), 1);
+
+  part("Another account connected over a kept test meeting, the clean-up failing: A's meeting is not left under B");
+  await reset();
+  is("made on A (set-up)", await outcome(() => makeTest(store, "zoom")), "made");
+  USER = USER_B;
+  failing = (c) => String(c[0]).toUpperCase() === "SREM" && c[1] === indexOf(USER_A);
+  await connect();
+  is("the connection is B's now (set-up)", JSON.parse(redis.run(["GET", connKey(statsId)]) as string).account.id, USER_B);
+  is("A's test meeting is forgotten with A's connection", record(), null);
+  is("the store is no longer listed under account A", redis.run(["SISMEMBER", indexOf(USER_A), statsId]), 0);
+  const madeOnA = made.length;
+  is("B's make answers made", await outcome(() => makeTest(store, "zoom")), "made");
+  is("B makes its own test meeting at Zoom, not A's given back", made.length, madeOnA + 1);
+  is("the one kept is the one made on B", JSON.parse(record() as string).id, made[made.length - 1]);
+
+  part("The meeting's own words never promise a page that may not list it");
+  // Pre-review L: a meeting made but not kept here (the connection gone meanwhile, a keep reply that is not the
+  // script's) stays on the creator's account with no record, so the studio's page does not list it.
+  await reset();
+  weird = { match: (c) => String(c[0]).toUpperCase() === "EVAL" && c.includes(test), reply: "OK" };
+  is("a keep reply not the script's is not 'made' (set-up)", await outcome(() => makeTest(store, "zoom")), "unavailable");
+  is("the meeting was made at Zoom (set-up)", made.length, 1);
+  is("its agenda says where to delete it when the page does not list it", agendas[0].includes("If that page doesn't list it, delete it in Zoom."), true);
 
   Date.now = realNow;
   done();

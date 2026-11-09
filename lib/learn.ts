@@ -172,12 +172,23 @@ const ledgerKey = (store: Store, email: string) => `nl:learn:enr:${storeKey(stor
 const paidCacheKey = (store: Store, email: string) => `nl:learn:paid:${storeKey(store)}:${emailKey(email)}`;
 const blockedKey = (courseId: string) => `nl:course:${courseId}:blocked`;
 
-/** Written when a purchase is confirmed on the thanks page. */
-export async function recordEnrollment(store: Store, email: string, productId: string, startSeconds: number): Promise<void> {
+/**
+ * Where a course written down came from, kept beside its start as one letter ("1760000000:p"). While Stripe cannot be
+ * read, a one-off course from a source of its own (a PayPal sale, a gift, a pre-order or a group place, each taken
+ * back by its own path through dropEnrollment) stays open; one from a Stripe checkout, or written before origins were
+ * kept (no letter), waits on Stripe, which alone says whether it was refunded.
+ */
+export type EnrollmentOrigin = "stripe" | "paypal" | "gift" | "preorder" | "group";
+const ORIGIN_LETTER: Record<EnrollmentOrigin, string> = { stripe: "s", paypal: "p", gift: "g", preorder: "r", group: "l" };
+const ORIGIN_OF = new Map(Object.entries(ORIGIN_LETTER).map(([origin, letter]) => [letter, origin as EnrollmentOrigin]));
+
+/** Written when a purchase is confirmed: on the thanks page, or by the path that hands over a sale of another origin. */
+export async function recordEnrollment(store: Store, email: string, productId: string, startSeconds: number, origin: EnrollmentOrigin): Promise<void> {
   if (!isRedisConfigured()) return;
-  // Counted in the store's room at what it really adds: nothing for a course already there (lib/order-data.ts).
+  // Counted in the store's room at what it really adds: nothing for a course already there (lib/order-data.ts). The
+  // first origin written stays, as the start does (HSETNX).
   await orderWrite(store, [
-    ["HSETNX", ledgerKey(store, email), productId, String(Math.floor(startSeconds))],
+    ["HSETNX", ledgerKey(store, email), productId, `${Math.floor(startSeconds)}:${ORIGIN_LETTER[origin]}`],
     ["DEL", paidCacheKey(store, email)],
   ]);
 }
@@ -310,10 +321,22 @@ async function paidAtStripe(store: Store, email: string, reading: Reading): Prom
   return { paid: found, ended, refunded };
 }
 
-/** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
-function wholeSeconds(value: unknown): number | null {
-  if (typeof value === "number") return countOf(value);
-  return typeof value === "string" && /^\d{1,15}$/.test(value) ? Number(value) : null;
+/** When a course in a kept answer began: whole seconds from zero up; otherwise null. */
+function wholeSeconds(value: number): number | null {
+  return countOf(value);
+}
+
+/**
+ * A course written down, in the exact shape recordEnrollment writes (CX-123 rule 24): its start in whole seconds,
+ * then, since origins are kept, a colon and one known letter. No letter is an entry written before (origin null);
+ * anything else is null, so the caller throws: unknown, never "not written down".
+ */
+function writtenDown(value: unknown): { began: number; origin: EnrollmentOrigin | null } | null {
+  if (typeof value !== "string") return null;
+  const parts = /^(\d{1,15})(?::([a-z]))?$/.exec(value);
+  if (!parts) return null;
+  const origin = parts[2] === undefined ? null : ORIGIN_OF.get(parts[2]);
+  return origin === undefined ? null : { began: Number(parts[1]), origin };
 }
 
 const textList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -406,10 +429,13 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
   } else if (ledger && typeof ledger === "object") {
     pairs.push(...Object.entries(ledger as Record<string, unknown>));
   }
+  // Written down from a source of its own, not a Stripe checkout: it stands while Stripe cannot be read.
+  const ownSource = new Set<string>();
   for (const [field, value] of pairs) {
-    const began = wholeSeconds(value);
-    if (typeof field !== "string" || began === null) throw new UnknownReplyError("the courses written down for an address");
-    recorded.set(field, began);
+    const entry = writtenDown(value);
+    if (typeof field !== "string" || entry === null) throw new UnknownReplyError("the courses written down for an address");
+    recorded.set(field, entry.began);
+    if (entry.origin !== null && entry.origin !== "stripe") ownSource.add(field);
   }
 
   // Brought over from another platform: the course itself, or a course in a
@@ -436,12 +462,14 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
 
   // Stripe could not be read whole: what it alone decides is unknown, never "bought nothing" (a paying member shut
   // out in silence) nor "not refunded" (a refunded course open again). A purchase it did show stands, and so does a
-  // course brought over from another platform; every other course is neither open nor shut, and is said as such.
+  // one-off course brought over from another platform or written down from a source of its own (a PayPal sale, a
+  // gift, a pre-order, a group place: each taken off the ledger by its own refund path); every other course is
+  // neither open nor shut, and is said as such.
   const unknown = new Set<string>();
   if (!whole) {
     for (const product of courses) {
       if (!product.course || fromStripe.has(product.id)) continue;
-      if (!product.recurring && given.has(product.id)) continue;
+      if (!product.recurring && (given.has(product.id) || ownSource.has(product.id))) continue;
       result.delete(product.id);
       unknown.add(product.id);
     }

@@ -105,7 +105,7 @@ async function main() {
     const before = room();
     await upsertContact(store.listId!, email, { agreed: false, explicit: false, source: "buyer", sid: store.sid, productId, title, at: new Date().toISOString() }, orderRoom(store));
     await rememberBuyers(store.sid, [email]);
-    await recordEnrollment(store, email, productId, Math.floor(Date.now() / 1000));
+    await recordEnrollment(store, email, productId, Math.floor(Date.now() / 1000), "stripe");
     return room() - before;
   };
   const newBuyer = await buy("first.buyer@example.com", "prod_course_one", "The Weeknight Course");

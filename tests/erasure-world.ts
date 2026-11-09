@@ -156,7 +156,7 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await addResponse(statsId, w.formId, { id: hex(16), at: now, page: "/@erase-shop/form/intake", answers: { fmail1: email, fgoal1: "Learn fast" }, outcome: "", joined: false }, ROOM);
 
   // The course (lib/learn.ts, lib/course-finish.ts, lib/quiz.ts, lib/assignment.ts, lib/certificate.ts, lib/lesson-comments.ts).
-  await recordEnrollment(store, email, w.courseProduct, now - 3_600);
+  await recordEnrollment(store, email, w.courseProduct, now - 3_600, "stripe");
   await touchStudent(w.courseId, email, now - 3_600, ROOM);
   await markLesson(w.courseId, email, w.lessons[0], true, ROOM);
   await mintPass(store, email, "all");

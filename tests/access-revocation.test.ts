@@ -114,10 +114,10 @@ async function main(): Promise<void> {
 
   part("A course bought once");
   sessions["ana@example.com"] = [paid("cs_test_ana000000001", once)];
-  await recordEnrollment(store, "ana@example.com", once, NOW - 86_400);
+  await recordEnrollment(store, "ana@example.com", once, NOW - 86_400, "stripe");
   is("opens", await open("ana@example.com"), [once]);
   sessions["ben@example.com"] = [paid("cs_test_ben000000001", once, { payment_intent: { id: "pi_ben01", latest_charge: charge(4900, 4900) } })];
-  await recordEnrollment(store, "ben@example.com", once, NOW - 86_400);
+  await recordEnrollment(store, "ben@example.com", once, NOW - 86_400, "stripe");
   is("refunded in full: shut, though the thanks page wrote it down", await open("ben@example.com"), []);
   sessions["cy@example.com"] = [paid("cs_test_cy0000000001", once, { payment_intent: { id: "pi_cy01", latest_charge: charge(4900, 2000) } })];
   is("refunded in part: still open", await open("cy@example.com"), [once]);

@@ -135,10 +135,10 @@ async function main(): Promise<void> {
   sessions["mia@example.com"] = [membership("cs_test_mia000000001", member.id)];
   is("a member: the membership course is open", await stateOf("mia@example.com", member), "open");
   sessions["leo@example.com"] = [oneOff("cs_test_leo000000001", one.id)];
-  await recordEnrollment(store, "leo@example.com", one.id, START);
+  await recordEnrollment(store, "leo@example.com", one.id, START, "stripe");
   is("a one-off buyer: open", await stateOf("leo@example.com", one), "open");
   sessions["ref@example.com"] = [oneOff("cs_test_ref000000001", one.id, true)];
-  await recordEnrollment(store, "ref@example.com", one.id, START);
+  await recordEnrollment(store, "ref@example.com", one.id, START, "stripe");
   is("a one-off refunded in full: shut, though written down on the thanks page", await stateOf("ref@example.com", one), "closed");
   is("a stranger: shut", await stateOf("nobody@example.com", one), "closed");
 
@@ -181,7 +181,7 @@ async function main(): Promise<void> {
   is("a membership on the second page: open", await stateOf("max@example.com", member), "open");
   is("both pages were read", sessionReads >= 2, true);
   sessions["rex@example.com"] = [filler(4), filler(5), oneOff("cs_test_rex000000001", one.id, true)];
-  await recordEnrollment(store, "rex@example.com", one.id, START);
+  await recordEnrollment(store, "rex@example.com", one.id, START, "stripe");
   is("a refund on the second page shuts a course written down", await stateOf("rex@example.com", one), "closed");
   pageSize = 100;
 
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
   sessions["amy@example.com"] = [null as unknown as Record<string, unknown>, membership("cs_test_amy000000001", member.id)];
   is("a member beside a row that does not read: open", await stateOf("amy@example.com", member), "open");
   sessions["ted@example.com"] = [{ id: "cs_test_ted000000001", metadata: "garbled" }, filler(6)];
-  await recordEnrollment(store, "ted@example.com", one.id, START);
+  await recordEnrollment(store, "ted@example.com", one.id, START, "stripe");
   is("a course written down, its refund maybe on the unreadable row: unknown, not open", await stateOf("ted@example.com", one), "unknown");
 
   part("A kept answer in another shape is asked again, never read as 'nothing refunded'");

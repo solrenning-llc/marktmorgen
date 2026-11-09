@@ -53,7 +53,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, scanPage } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { idsIn } from "@/lib/data-recount";
@@ -585,15 +585,24 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
   return { deleted: doomed.size, pruned };
 }
 
-async function readBatch(): Promise<Map<string, Batched>> {
-  const [flat] = await redisPipeline([["HGETALL", BATCH_KEY]]);
-  const list = Array.isArray(flat) ? (flat as string[]) : flat && typeof flat === "object" ? Object.entries(flat as Record<string, string>).flat() : [];
-  const out = new Map<string, Batched>();
+/**
+ * The walk's batch, read exactly (CX-123 rule 24; Claude 5's second money review of #3279): one reply for the one
+ * HGETALL, a list of strings with an even count, or UnknownReplyError. HGETALL answers an empty list for a batch with
+ * nothing in it, so only that is "no store"; a reply of any other shape was taken as an empty batch, and the count of
+ * stores left was written as 0 from it. An entry that does not read is kept and counted in `unreadable`, so the count
+ * of stores left is never lowered past it.
+ */
+async function readBatch(): Promise<{ entries: Map<string, Batched>; unreadable: number }> {
+  const list = stringList(repliesFor(await redisPipeline([["HGETALL", BATCH_KEY]]), 1)?.[0]);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError("the closing walk's batch");
+  const entries = new Map<string, Batched>();
+  let unreadable = 0;
   for (let i = 0; i + 1 < list.length; i += 2) {
-    const value = json(String(list[i + 1])) as Batched | null;
-    if (value && Array.isArray(value.marks)) out.set(String(list[i]), value);
+    const value = json(list[i + 1]) as Batched | null;
+    if (value && Array.isArray(value.marks)) entries.set(list[i], value);
+    else unreadable += 1;
   }
-  return out;
+  return { entries, unreadable };
 }
 
 /**
@@ -633,7 +642,14 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
       if (set !== 0 && set !== 1) confirmed = false;
       continue;
     }
-    await redisPipeline([["HDEL", BATCH_KEY, ref]]);
+    // Out of the batch only on Redis's own answer (Claude 5 on #3279, rule 30): one still in it, not set aside,
+    // would have its ids counted by the next walk. Not known to be out, the run stops here and finishes it again.
+    const gone = repliesFor(await redisPipeline([["HDEL", BATCH_KEY, ref]]), 1)?.[0];
+    if (gone !== 0 && gone !== 1) {
+      console.error("taking a finished store out of the walk's batch was not confirmed; it is finished again on the next run", gone);
+      confirmed = false;
+      continue;
+    }
     report.finished += 1;
   }
   return confirmed ? left : null;
@@ -657,16 +673,17 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   if (phase === "idle" || phase === "") {
     // Walked stores left unfinished (finishStores) are finished again on every run until they are, never walked again.
     if (unfinishedRaw !== "" && unfinishedRaw !== "0") {
-      const left = await finishStores([...(await readBatch())].filter(([, entry]) => entry.unfinished), finish, now, deadline, report);
+      const { entries, unreadable } = await readBatch();
+      const left = await finishStores([...entries].filter(([, entry]) => entry.unfinished), finish, now, deadline, report);
       if (left === null) return report;
-      await redisPipeline([["HSET", WALK_KEY, "unfinished", left]]);
-      report.unfinished = left;
+      await redisPipeline([["HSET", WALK_KEY, "unfinished", left + unreadable]]);
+      report.unfinished = left + unreadable;
     }
     const started = Number(startedRaw) || 0;
     if (now - started < WALK_GAP_MS) return { ...report, done: true };
     const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "-inf", now, "LIMIT", 0, BATCH_MAX]]);
     const refs = Array.isArray(due) ? (due as unknown[]).map(String) : [];
-    if (!refs.length) return { ...report, done: true };
+    // None due still reads the batch below: a store prepared by a run that stopped before its walk started is walked.
     for (const ref of refs) {
       if (Date.now() > deadline) break;
       let store: Store | null;
@@ -695,14 +712,14 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
     // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again.
-    if (![...(await readBatch()).values()].some((entry) => !entry.unfinished)) return { ...report, done: !unsure };
+    if (![...(await readBatch()).entries.values()].some((entry) => !entry.unfinished)) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);
     phase = "walk";
     cursor = "0";
     report.started = true;
   }
 
-  const batch = await readBatch();
+  const { entries: batch, unreadable } = await readBatch();
   const owners = ownersOf([...batch.values()]);
   while (phase === "walk" && Date.now() < deadline && report.pages < WALK_PAGES_PER_RUN) {
     // A page that does not read is unknown, not a page with no keys nor the end of the database (rule 30): the run
@@ -723,9 +740,9 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     // Each store on its own (finishStores): one whose mark cannot be written never keeps the walk in this phase.
     const left = await finishStores(batch, finish, now, deadline, report);
     if (left === null) return report;
-    await redisPipeline([["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "finished", now, "unfinished", left]]);
-    report.unfinished = left;
-    report.done = !unsure && !left;
+    await redisPipeline([["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "finished", now, "unfinished", left + unreadable]]);
+    report.unfinished = left + unreadable;
+    report.done = !unsure && !(left + unreadable);
   }
   return report;
 }

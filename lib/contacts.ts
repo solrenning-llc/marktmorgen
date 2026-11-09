@@ -916,6 +916,8 @@ export async function listCounts(listId: string | null): Promise<ListCounts> {
 export async function forEachContact(
   listId: string,
   each: (email: string, contact: Contact) => void,
+  /** Adds the bytes every page moved (its addresses and records, as text), so a caller that paid for a size can settle at the measured one. */
+  moved?: { bytes: number },
 ): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = leadsKey(listId);
@@ -929,6 +931,7 @@ export async function forEachContact(
     const nextCursor = typeof next === "string" && /^\d+$/.test(next) ? next : countOf(next) !== null ? String(next) : null;
     if (!reply || nextCursor === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
     cursor = nextCursor;
+    if (moved) for (const piece of flat) moved.bytes += Buffer.byteLength(piece, "utf8");
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const contact = parseContact(flat[i + 1]);
       if (contact) each(flat[i], contact);
@@ -963,6 +966,8 @@ export async function audience(
   keep?: (email: string) => boolean,
   /** Only people who carry this label (99 [E2-TAG-BROADCAST]), compared as a sequence compares one: case and spaces at the ends aside. Read from the same record, so no extra read. */
   label?: string,
+  /** Adds the bytes the read moved (forEachContact), for lib/audience-read.ts to settle what it held. */
+  moved?: { bytes: number },
 ): Promise<string[]> {
   const out: string[] = [];
   const wanted = label?.trim().toLocaleLowerCase() ?? "";
@@ -974,7 +979,7 @@ export async function audience(
     if (wanted && !contact.tags.some((t) => t.trim().toLocaleLowerCase() === wanted)) return;
     if (keep && !keep(email)) return;
     out.push(email);
-  });
+  }, moved);
   return out;
 }
 

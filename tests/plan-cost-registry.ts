@@ -1201,6 +1201,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
+      // The composer's count and a broadcast written down read the whole list: its size is read first (HLEN) and the studio requests for the most it can weigh are held before any page is read, then settled at what it moved, a megabyte a request after the request's own fifty kilobytes (9 November 2026, C5 audit MEDIUM 2).
+      { file: "lib/audience-read.ts", names: ["CONTACT_READ_BYTES", "audienceHeldUnits", "audienceUnits", "listSize", "countedAudience", "new IncludedBytes().take(bytes, STUDIO_UNIT_SENT_BYTES)", "taken.give(held - owed)", "taken.force(owed - held)"] },
+      { file: "app/api/store/mail/route.ts", names: ["holdStudio(studio, units)", "countedAudience(hold, store.listId", "counting.count, hold)"] },
+      { file: "lib/broadcasts.ts", names: ["countedAudience(hold, store.listId", "AudienceNotCounted"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
       { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
       // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).

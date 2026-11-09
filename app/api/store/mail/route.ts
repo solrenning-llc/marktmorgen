@@ -11,10 +11,12 @@ import {
   storeForHandle,
 } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
+import { MAX_IMPORT, WHO, type Who, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
 import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
+import { AudienceNotCounted, countedAudience } from "@/lib/audience-read";
+import { holdStudio } from "@/lib/studio-route";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
@@ -125,6 +127,9 @@ export async function POST(request: NextRequest) {
   try {
     let store = await storeForEmail(ref);
     if (!store) return fail("none");
+    // Reading the whole list is paid by its size before it is read, and settled at what it moved (lib/audience-read.ts).
+    const studio = store;
+    const hold = (units: number) => holdStudio(studio, units);
 
     if (action === "settings") {
       const fromName = text(body.fromName, 200).replace(/\s+/g, " ").trim().slice(0, MAX_MAIL_NAME);
@@ -163,7 +168,9 @@ export async function POST(request: NextRequest) {
       // The store's sales are read only when an email narrows by them, or
       // when the composer opens the choices that do (lib/segments.ts).
       if (!isNarrowed(narrow) && body.channels !== true) {
-        return Response.json({ ok: true, count: (await audience(store.listId, productId, notProductId, whoOf(store, who), undefined, label)).length });
+        const reached = await countedAudience(hold, store.listId, productId, notProductId, whoOf(store, who), undefined, label).catch((error) => (error instanceof AudienceNotCounted ? error : Promise.reject(error)));
+        if (reached instanceof AudienceNotCounted) return notCounted(reached.message);
+        return Response.json({ ok: true, count: reached.length });
       }
       // Counted before it is read: the ten-minute copy by its size, or Stripe, PayPal and the imported buyers again.
       const counting = countLedger(store);
@@ -177,9 +184,11 @@ export async function POST(request: NextRequest) {
       // One moment for the kinds counted and the kind kept, so a buyer at a boundary is the same kind in both.
       const now = Date.now();
       const keep = isNarrowed(narrow) ? keeps(narrow, ledger, now) : undefined;
+      const reached = await countedAudience(hold, store.listId, productId, notProductId, whoOf(store, who), keep, label).catch((error) => (error instanceof AudienceNotCounted ? error : Promise.reject(error)));
+      if (reached instanceof AudienceNotCounted) return notCounted(reached.message);
       return Response.json({
         ok: true,
-        count: (await audience(store.listId, productId, notProductId, whoOf(store, who), keep, label)).length,
+        count: reached.length,
         channels: ledgerChannels(ledger),
         // How many of the store's buyers are of each kind (270 [GR1], unit 3c), from the same ledger: no extra read.
         kinds: Object.fromEntries(rfmSummary(ledger.buyers.values(), now).map((k) => [k.id, k.buyers])),
@@ -257,7 +266,7 @@ export async function POST(request: NextRequest) {
         // A second subject line to try against the first; what it may be is
         // decided where the email is written down (lib/mail-test.ts).
         test: body.test && typeof body.test === "object" ? body.test : undefined,
-      }, counting.count).catch((error) => {
+      }, counting.count, hold).catch((error) => {
         if (error instanceof LedgerNotCounted) return error;
         throw error;
       });

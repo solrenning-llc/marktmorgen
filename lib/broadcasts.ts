@@ -34,6 +34,7 @@ import { broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links"
 import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest, parseTest, partAt, splitFor } from "@/lib/mail-test";
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
+import { AudienceNotCounted, type StudioHold, countedAudience } from "@/lib/audience-read";
 import { BUYER_LEDGER_UNITS, LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadBytes, ledgerReadingUnits, ledgerUnits, readNarrow, readsBuyers } from "@/lib/segments";
 import { sameNarrow } from "@/lib/segments-rules";
 
@@ -390,6 +391,8 @@ export async function createBroadcast(
   store: Store,
   input: { subject: unknown; body: unknown; productId: unknown; notProductId: unknown; sendAt: unknown; who?: unknown; test?: unknown; narrow?: unknown; label?: unknown },
   count?: (units: number) => Promise<boolean>,
+  /** Takes the studio requests the read of the list costs, by its size, before it is read (lib/audience-read.ts); the studio's route always gives it. */
+  hold?: StudioHold,
 ): Promise<CreateResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
   if (!store.mail || !store.listId) return { ok: false, reason: "setup" };
@@ -422,7 +425,16 @@ export async function createBroadcast(
   const startsNow = sendAt <= now;
   // Checked now for a send that starts now; a scheduled one is checked again when it starts.
   const keep = await keepFor(store, narrow, count);
-  const reach = (await audience(store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), keep, label ?? undefined)).length;
+  let reach: number;
+  try {
+    reach = (hold
+      ? await countedAudience(hold, store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), keep, label ?? undefined)
+      : await audience(store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), keep, label ?? undefined)).length;
+  } catch (error) {
+    // The list's size is paid for before it is read: when it is not there, nothing was read and nothing is written.
+    if (error instanceof AudienceNotCounted) return { ok: false, reason: "studio_used", message: error.message };
+    throw error;
+  }
   if (reach === 0) return { ok: false, reason: "empty" };
   // A second subject line, when one was asked for. Refused here, with the
   // reason, whenever it could not be a real test: the creator finds out while

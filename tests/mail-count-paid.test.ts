@@ -83,7 +83,10 @@ async function main(): Promise<void> {
   const made1 = await createBroadcast(shop, input, undefined, spy);
   is("it is written down", made1.ok, true);
   is("the requests were asked for once, before the first page was read", [asked.length, scansWhenHeld], [1, 0]);
-  is("what stays taken is what the list moved, a megabyte a request (3.7 MB: 4)", (await used()) - before, 4);
+  // What the list weighs as it is read: every address and record, a megabyte a request after the request's own fifty kilobytes.
+  const weight = 5_000 * (Buffer.byteLength("reader4999@example.com") + Buffer.byteLength(record(titles, 4_999)));
+  const owed = Math.ceil(weight / 1_000_000);
+  is("what stays taken is what the list moved, a megabyte a request, not what was held", [(await used()) - before, asked[0] > owed], [owed, true]);
 
   part("Too few requests left: refused with the sentence, nothing read, nothing written");
   const figure = allowanceFor(shop, "studio");
@@ -119,16 +122,30 @@ async function main(): Promise<void> {
 
   part("Records far heavier than the most expected: counted past what was held");
   // 100 people with 20 titles of 4,000 characters: about 8 MB, where 100 records were held at the most expected.
-  await fill(listId, 100, Array.from({ length: 20 }, (_, i) => `${i}`.padEnd(4_000, "t")));
+  const heavyTitles = Array.from({ length: 20 }, (_, i) => `${i}`.padEnd(4_000, "t"));
+  await fill(listId, 100, heavyTitles);
   await setUsed(before);
   const heavy = await createBroadcast(shop, input, undefined, hold(shop));
-  is("written", heavy.ok, true);
-  is("what stays taken is what it really moved (8 MB: 9), not what was held", (await used()) - before >= 8, true);
+  const heavyOwed = Math.ceil((100 * (Buffer.byteLength("reader99@example.com") + Buffer.byteLength(record(heavyTitles, 99)))) / 1_000_000);
+  is("written, and what stays taken is what it really moved, not what was held", [heavy.ok, (await used()) - before], [true, heavyOwed]);
+
+  part("Ten such records: the most expected fits the request's own fifty kilobytes, so nothing is held first, and what they moved is counted after");
+  await fill(listId, 10, heavyTitles);
+  await setUsed(before);
+  const asks: number[] = [];
+  const ten = await createBroadcast(shop, input, undefined, (units) => {
+    asks.push(units);
+    return holdStudio(shop, units);
+  });
+  const tenOwed = Math.ceil((10 * (Buffer.byteLength("reader9@example.com") + Buffer.byteLength(record(heavyTitles, 9)))) / 1_000_000);
+  is("written; the figure was asked for only once the pages were read, at what they moved", [ten.ok, asks, (await used()) - before], [true, [tenOwed], tenOwed]);
 
   part("The studio's route reads the audience only through the counted read");
   const route = readFileSync("app/api/store/mail/route.ts", "utf8").replace(/\s+/g, " ");
   is("no bare read of the whole list in the route", /[^a-zA-Z]audience\(store\.listId/.test(route), false);
-  is("the broadcast is given the studio's hold", route.includes("holdStudio(store, units)"), true);
+  is("the studio's requests are taken through holdStudio", route.includes("holdStudio(studio, units)"), true);
+  is("the broadcast is given that hold", route.includes("}, counting.count, hold)"), true);
+  is("the count reads through the counted read, narrowed or not", (route.match(/countedAudience\(hold, store\.listId/g) ?? []).length, 2);
   done();
 }
 

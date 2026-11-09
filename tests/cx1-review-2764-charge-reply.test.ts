@@ -4,6 +4,7 @@ import { switchTier } from "@/lib/tier-switch";
 import { switchYearly } from "@/lib/yearly-switch";
 import { EU_WITHDRAWAL_CONSENT_VERSION, consentMetaValue } from "@/lib/digital-consent";
 import { store as redis } from "./redis-stub";
+import { runAfterTasks } from "./next-server-after-world";
 import { paidPeriod } from "./billing-period-fixture";
 import { is, done } from "./check";
 
@@ -67,6 +68,9 @@ async function main() {
   await setStoreTiers(owner, [product, b.product.id]);
   let store = (await storeForEmail(owner))!;
   const sent = await requestManageLink({ store, email: "member@example.test", ip: "203.0.113.15", origin: "https://example.test" });
+  // The membership search, the link and its email run after the answer since 07/11/2026 (lib/after-answer.ts, the
+  // membership-link timing fix): run before the email is looked at.
+  await runAfterTasks();
   const token = /token=([0-9a-f]{64})/.exec(emails.at(-1)?.text ?? "")?.[1];
   if (sent !== "sent" || !token) throw new Error(`Missing synthetic member token: ${sent}; ${emails.length} emails; paths=${calls.map(c => c.path).join(",")}`);
   for (const flow of ["tier", "yearly"]) {

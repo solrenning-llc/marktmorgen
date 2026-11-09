@@ -15,6 +15,7 @@ import { MAX_LIBRARY_STORES, rememberBuyers, storesBoughtFrom } from "@/lib/buye
 import { requestManageLink } from "@/lib/membership-manage";
 import { BUYER_HELP } from "@/lib/buyer-help";
 import { store as redis } from "./redis-stub";
+import { runAfterTasks } from "./next-server-after-world";
 import { done, is, part } from "./check";
 
 async function main(): Promise<void> {
@@ -59,6 +60,9 @@ async function main(): Promise<void> {
   await setStripeAccount(owner, "acct_1TestHarbor0001", true);
   const store = (await storeForEmail(owner))!;
   const outcome = await requestManageLink({ store, email: "buyer@example.test", ip: "203.0.113.1", origin: "https://marktmorgen.com" });
+  // The membership search, the link and its email run after the answer since 07/11/2026 (lib/after-answer.ts, the
+  // membership-link timing fix): run before the email is looked at.
+  await runAfterTasks();
   is("(the real membership-link email went, through synthetic HTTP)", [outcome, Boolean(captured)], ["sent", true]);
   is("it carries no reply-to of the store's", (captured?.reply_to ?? "").includes(owner), false);
   is("so no answer promises a reply to any email reaches them", BUYER_HELP.some((entry) => entry.a.some((text) => /any email/i.test(text))), false);

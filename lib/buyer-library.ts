@@ -42,9 +42,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
-import { withinLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { afterAnswer } from "@/lib/after-answer";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
+import { repliesFor as linkSetReplies } from "@/lib/redis-reply";
 
 export const LIBRARY_LINK_SECONDS = 24 * 60 * 60;
 export const LIBRARY_TOKEN = /^[0-9a-f]{64}$/;
@@ -100,15 +102,32 @@ export type LibraryRequest = "sent" | "email" | "limited" | "error";
 
 /**
  * Emails a link that opens the library. "sent" whether or not the address
- * bought anything; nothing is sent to one that did not.
+ * bought anything, and at once, right after the limits: which stores it
+ * bought from is read, and its link made and emailed, only after the answer
+ * is sent (lib/after-answer.ts), so neither the answer's words nor its time
+ * tell them apart, and an email that could not go out is said only in the
+ * server's log. Nothing is sent to an address that bought nothing.
  */
 export async function requestLibraryLink(input: { email: string; ip: string; origin: string }): Promise<LibraryRequest> {
   const raw = input.email.trim();
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
   const email = normaliseEmail(raw);
-  if (!(await withinLimit("library-ip", input.ip, 10, 3_600))) return "limited";
-  if (!(await withinLimit("library-address", sha(email), 5, 3_600))) return "limited";
+  // A paid email follows: a count that is not known sends nothing, for every address alike, before anything about the
+  // address is asked, so saying so tells nobody who bought; it is said as our error, never as too many requests.
+  const byConnection = await essentialLimitState("library-ip", input.ip, 10, 3_600);
+  if (byConnection === "unknown") return "error";
+  if (byConnection === "exceeded") return "limited";
+  const byAddress = await essentialLimitState("library-address", sha(email), 5, 3_600);
+  if (byAddress === "unknown") return "error";
+  if (byAddress === "exceeded") return "limited";
+  // From here the answer is "sent" whatever happens, and at once: the stores, the link and its email are all after it.
+  afterAnswer("sending a library link", () => sendLibraryLink(email, input.origin));
+  return "sent";
+}
+
+/** The link itself, for an address that bought from a store still open; nothing for one that did not. */
+async function sendLibraryLink(email: string, origin: string): Promise<void> {
   // Only stores that are still open: one that has closed is gone, and is never shown.
   const stores: string[] = [];
   let charged: Awaited<ReturnType<typeof storeForId>> = null;
@@ -118,27 +137,43 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
     stores.push(sid);
     charged ??= store;
   }
-  if (!stores.length) return "sent";
-  if (!charged) return "error";
+  if (!stores.length || !charged) return;
   const token = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]);
-  const link = `${input.origin}/library?token=${token}`;
-  // One of the access emails of the store the address bought from first in the list (lib/store-allowance-rules.ts).
-  const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },
-    from: NIMBUS_FROM,
-    to: email,
-    subject: "Your purchases on Marktmorgen",
-    text: [
-      `Here is everything you bought from creators on Marktmorgen, from ${stores.length} ${stores.length === 1 ? "store" : "stores"}:`,
-      "",
-      link,
-      "",
-      "The link works for 24 hours. After that, ask for a new one at marktmorgen.com/library.",
-      "",
-      "If you did not ask for this, you can ignore it: nobody can open your library without this email.",
-    ].join("\n"),
-  });
-  return sent ? "sent" : "error";
+  let sent = false;
+  try {
+    // A paid email only with a link Redis said it stored (rule 24): any other answer sends nothing, and the link,
+    // in case it did land, is removed below like any unsent one. The answer was already "sent" for every address.
+    const saved = linkSetReplies(await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]), 1);
+    if (saved?.[0] !== "OK") {
+      console.error("a library link was not stored, so no email was sent");
+      return;
+    }
+    const link = `${origin}/library?token=${token}`;
+    // One of the access emails of the store the address bought from first in the list (lib/store-allowance-rules.ts).
+    sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },
+      from: NIMBUS_FROM,
+      to: email,
+      subject: "Your purchases on Marktmorgen",
+      text: [
+        `Here is everything you bought from creators on Marktmorgen, from ${stores.length} ${stores.length === 1 ? "store" : "stores"}:`,
+        "",
+        link,
+        "",
+        "The link works for 24 hours. After that, ask for a new one at marktmorgen.com/library.",
+        "",
+        "If you did not ask for this, you can ignore it: nobody can open your library without this email.",
+      ].join("\n"),
+    });
+  } finally {
+    // A link whose email did not go out opens nothing: it is removed at once,
+    // not left for the day. When the send's outcome was unknown, an email that
+    // did arrive then holds a link that no longer opens, and asking again sends
+    // a new one. Removal is best effort: the day's expiry still ends it.
+    if (!sent) {
+      await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("removing an unsent library link failed", error));
+    }
+  }
+  if (!sent) console.error("a library link was not sent");
 }
 
 /** The address a live library link was sent to, or null. */

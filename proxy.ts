@@ -204,8 +204,19 @@ const CROSS_SITE_POSTS = new Set(["/api/mail/unsubscribe"]);
  * of ours, does — is refused too, so a route's own ceiling always has a
  * number to check.
  */
+/** A private podcast's feed (app/api/store/podcast/feed/[token]). */
+const PODCAST_FEED_PATH = /^\/api\/store\/podcast\/feed\/[^/]+$/;
+
 function guardApi(request: NextRequest): NextResponse {
   const method = request.method.toUpperCase();
+  // A feed's address with a query is sent on, for good, to the feed's own (audit of private podcasts, L1): the CDN
+  // keeps a feed under its exact address, and a query added to it would miss that copy every time and spend the
+  // feed's few daily readings (lib/podcast-access.ts, feedReadAllowed) before the subscriber's own app asks.
+  if ((method === "GET" || method === "HEAD") && request.nextUrl.search && PODCAST_FEED_PATH.test(request.nextUrl.pathname)) {
+    const url = request.nextUrl.clone();
+    url.search = "";
+    return NextResponse.redirect(url, 308);
+  }
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return NextResponse.next();
   if (fromAnotherSite(request) && !CROSS_SITE_POSTS.has(request.nextUrl.pathname)) {
     return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });

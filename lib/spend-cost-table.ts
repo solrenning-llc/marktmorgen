@@ -89,6 +89,15 @@ export const UPSTASH_MICRO_USD_PER_GB_MONTH = 250_000;
 export const R2_STORAGE_MICRO_USD_PER_GB_MONTH = 15_000;
 export const R2_CLASS_A_MICRO_USD_PER_MILLION = 4_500_000;
 export const R2_CLASS_B_MICRO_USD_PER_MILLION = 360_000;
+/**
+ * The R2 reads (Class B, one per GET, a Range request included) one signed address for a delivered file is priced at
+ * (an episode, a download): a podcast app or a browser fetches a file in one GET, or in a few ranges while it plays
+ * or resumes. R2 bills every GET and egress nothing (docs/backup-cost-2026-11-04.md, read 4 November 2026), and does
+ * not let a signed address be counted or stopped while it works: what bounds it is how long it works
+ * (EPISODE_URL_SECONDS, DOWNLOAD_URL_SECONDS: minutes) and the store's requests that hand each one out. A review
+ * figure, not a count kept by code.
+ */
+export const R2_READS_PER_SIGNED_URL = 16;
 
 /** Upload doors (lib/upload-budget.ts): each request is a function call held
  * at 2 GB for up to 10 seconds with one CPU-second and twenty database

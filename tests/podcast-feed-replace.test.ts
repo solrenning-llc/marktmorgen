@@ -18,6 +18,10 @@ import { readListing } from "@/lib/catalog";
 import { newPodcastId, savePodcast } from "@/lib/podcast";
 import * as access from "@/lib/podcast-access";
 import { feedToken, readFeedToken } from "@/lib/podcast-access";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { POST as newFeedRoute } from "@/app/api/store/podcast/new-feed/route";
+import { POST as listenerRoute } from "@/app/api/store/podcast/listener/route";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
@@ -45,7 +49,7 @@ async function main(): Promise<void> {
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
   process.env.STRIPE_SECRET_KEY = "sk_test_podcast_replace_only";
-  process.env.RESEND_API_KEY = "re_test_podcast_replace_only";
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   await claimHandle(OWNER, "podfeedreplace", "Pod Feed Replace", "");
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
@@ -109,6 +113,46 @@ async function main(): Promise<void> {
   redis.pipeline = original as typeof redis.pipeline;
   is("the old token is not handed out", handed === before, false);
   is("and its grant is not written back", await readFeedToken(before), null);
+
+  part("The buyer's own page: \"Get a new feed address\", confirmed (app/api/store/podcast/new-feed)");
+  const ORIGIN = "https://marktmorgen.com";
+  const ask = (fields: Record<string, string>) => {
+    const form = new URLSearchParams(fields);
+    return newFeedRoute(new NextRequest(`${ORIGIN}/api/store/podcast/new-feed`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN, host: "marktmorgen.com", "x-forwarded-for": "203.0.113.7" }, body: form.toString() }));
+  };
+  const shown = (await feedToken(store, id, OWNER))!;
+  emails.length = 0;
+  const asked = await ask({ handle: "podfeedreplace", product: id, token: shown });
+  const where = asked.headers.get("Location") ?? "";
+  is("back to the podcast's page, saying it was replaced", where, `${ORIGIN}/@podfeedreplace/podcast/${id}?status=renewed`);
+  const renewed = (await feedToken(store, id, OWNER))!;
+  is("the address shown stops working", await readFeedToken(shown), null);
+  is("the new address is not on the page it goes back to", where.includes(renewed), false);
+  is("it is emailed to the address that holds the podcast", emails.length === 1 && emails[0].text.includes(`?t=${renewed}`), true);
+  const foreign = await ask({ handle: "podfeedreplace", product: "0000000000", token: renewed });
+  is("a token for another product changes nothing", [foreign.status, (await readFeedToken(renewed))?.e], [303, OWNER]);
+  const madeUp = await ask({ handle: "podfeedreplace", product: id, token: "f".repeat(48) });
+  is("a token that opens no feed changes nothing", [madeUp.headers.get("Location"), (await readFeedToken(renewed))?.e], [`${ORIGIN}/@podfeedreplace/podcast/${id}?status=renewed`, OWNER]);
+  for (let i = 0; i < 3; i++) await ask({ handle: "podfeedreplace", product: id, token: renewed });
+  const tooMany = await ask({ handle: "podfeedreplace", product: id, token: renewed });
+  is("three an hour for one feed, then \"Too many\"", tooMany.headers.get("Location"), `${ORIGIN}/@podfeedreplace/podcast/${id}?status=limited`);
+
+  part("The creator, for one listener, from the studio (app/api/store/podcast/listener)");
+  const session = await openSession(OWNER);
+  const studio = (body: unknown) =>
+    listenerRoute(new NextRequest(`${ORIGIN}/api/store/podcast/listener`, { method: "POST", headers: { "content-type": "application/json", origin: ORIGIN, host: "marktmorgen.com", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
+  const listenerOld = (await feedToken(store, id, OWNER))!;
+  emails.length = 0;
+  const done1 = (await (await studio({ id, email: OWNER })).json()) as { ok: boolean; result?: string };
+  is("replaced and emailed", done1, { ok: true, result: "sent" });
+  is("the listener's old address stops working", await readFeedToken(listenerOld), null);
+  is("the new address goes only to the listener", emails.length === 1 && emails[0].to.toString().includes(OWNER), true);
+  const noFeed = (await (await studio({ id, email: "never.listened@example.com" })).json()) as { ok: boolean; result?: string };
+  is("an address with no feed: nothing changes, and the studio is told", noFeed, { ok: true, result: "none" });
+  const badEmail = await studio({ id, email: "not an email" });
+  is("a typed address that is not one is refused", badEmail.status, 400);
+  const signedOut = await listenerRoute(new NextRequest(`${ORIGIN}/api/store/podcast/listener`, { method: "POST", headers: { "content-type": "application/json", origin: ORIGIN, host: "marktmorgen.com" }, body: JSON.stringify({ id, email: OWNER }) }));
+  is("never without the studio's sign-in", signedOut.status, 401);
   done();
 }
 

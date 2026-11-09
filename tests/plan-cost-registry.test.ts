@@ -48,6 +48,8 @@ import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_P
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { PODCAST_PLAY_READ } from "./plan-cost-registry";
+import { PLAY_COMMANDS, PLAY_REQUEST_UNITS } from "@/lib/podcast-rules";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES } from "./plan-cost-registry";
 import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
@@ -239,6 +241,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.
   assert.ok(PICTURE_REQUEST_UNITS * laterPageCost() >= PICTURE_READ, `${PICTURE_REQUEST_UNITS} x ${laterPageCost()} < ${PICTURE_READ}`);
+  // An episode is PLAY_REQUEST_UNITS public requests, taken before it reads or asks Stripe: more than its wait, its commands and
+  // the R2 reads its signed address can bring (audit of private podcasts, 9 November 2026, M1 and M2).
+  assert.ok(PLAY_REQUEST_UNITS * laterPageCost() >= PODCAST_PLAY_READ, `${PLAY_REQUEST_UNITS} x ${laterPageCost()} < ${PODCAST_PLAY_READ}`);
+  assert.ok(PODCAST_PLAY_READ > request("wait", PLAY_COMMANDS), "the R2 reads of the episode's address are in it");
+  console.log(`an episode: $${PODCAST_PLAY_READ.toFixed(6)} at most, counted as ${PLAY_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // A collection's products (lib/page-read-rules.ts, 4 November 2026): at every size the requests taken cost more than what they read.
   for (let products = 1; products <= MAX_COLLECTION_PRODUCTS; products += 1) assert.ok(collectionUnits(products) * laterPageCost() >= collectionRead(products), `collection of ${products}`);
   // The items its bundles hold (Codex G2 on #2583): every product and every one its checkout boxes offer may be a bundle of MAX_BUNDLE_ITEMS.

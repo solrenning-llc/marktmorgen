@@ -19,9 +19,12 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { GET as play } from "@/app/api/store/podcast/play/[token]/[episode]/route";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setPodcastEpisodes, setProductPodcast, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setPastBuyers, setPodcastEpisodes, setProductPodcast, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { newPodcastId, savePodcast } from "@/lib/podcast";
 import { feedToken, readFeedToken } from "@/lib/podcast-access";
+import { grantImported } from "@/lib/imported-purchases";
+import { PLAY_COMMANDS, PLAY_REQUEST_UNITS } from "@/lib/podcast-rules";
+import { REQUEST_COMMANDS } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
@@ -81,7 +84,10 @@ async function main(): Promise<void> {
 
   part("The creator's own feed: charged, and handed an address that works for minutes");
   events.length = 0;
+  commands = 0;
   const own = await ask(ownToken);
+  is("its commands within PLAY_COMMANDS and its units' counting", commands <= PLAY_COMMANDS + PLAY_REQUEST_UNITS * REQUEST_COMMANDS, true);
+  console.log(`        the creator's own episode: ${commands} Redis commands`);
   is("sent on to the file (302)", own.status, 302);
   is("the store's public request was taken", events.includes("charge"), true);
   const location = new URL(own.headers.get("Location") ?? "https://none.invalid/");
@@ -92,13 +98,30 @@ async function main(): Promise<void> {
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   is("the cost registry prices an episode's R2 Class B reads", /PODCAST_PLAY_READ[\s\S]*R2_CLASS_B/.test(registry), true);
 
+  part("A buyer who holds it (brought over from another platform), the access asked afresh: the heaviest answer");
+  const HOLDER = "brought.over@example.com";
+  await setPastBuyers(OWNER);
+  const importing = (await storeForEmail(OWNER))!;
+  await grantImported(importing.statsId!, "a".repeat(24), [{ email: HOLDER, productId: id, items: null }], Math.floor(Date.now() / 1000), importing.sid);
+  const holderToken = (await feedToken(importing, id, HOLDER))!;
+  events.length = 0;
+  commands = 0;
+  const held = await ask(holderToken);
+  is("sent on to the file (302)", held.status, 302);
+  is("charged before anything else is asked", events[0], "charge");
+  is("its commands within PLAY_COMMANDS and its units' counting", commands <= PLAY_COMMANDS + PLAY_REQUEST_UNITS * REQUEST_COMMANDS, true);
+  console.log(`        a buyer's episode, access asked afresh: ${commands} Redis commands, ${events.filter((e) => e === "stripe").length} Stripe call(s)`);
+
   part("A dead token: the first request is charged before Stripe is asked, and the confirmed no ends the token");
   events.length = 0;
+  commands = 0;
   const first = await ask(deadToken);
+  const firstCommands = commands;
   is("refused (403)", first.status, 403);
   is("charged", events.includes("charge"), true);
   is("charged before Stripe is asked", events.indexOf("charge") >= 0 && events.indexOf("charge") < events.indexOf("stripe"), true);
   const stripeOnFirst = events.filter((e) => e === "stripe").length;
+  is("its commands within PLAY_COMMANDS and its units' counting", firstCommands <= PLAY_COMMANDS + PLAY_REQUEST_UNITS * REQUEST_COMMANDS, true);
   is("its grant is gone", await readFeedToken(deadToken), null);
 
   part("The same token asked 599 more times over the hour");
@@ -113,7 +136,7 @@ async function main(): Promise<void> {
   is("each answered 404", notFound, 599);
   is("Stripe is never asked again", events.filter((e) => e === "stripe").length, 0);
   is("one read each, no more", commands <= 599, true);
-  console.log(`        first request: ${stripeOnFirst} Stripe call(s); the 599 after it: ${commands} Redis commands`);
+  console.log(`        first request: ${firstCommands} Redis commands, ${stripeOnFirst} Stripe call(s); the 599 after it: ${commands} Redis commands`);
 
   part("The buyer's own address opens again when a feed is handed to them with access");
   const again = await feedToken(store, id, BUYER);

@@ -21,6 +21,21 @@ export const FEED_TOKEN = /^[0-9a-f]{48}$/;
 export const MAX_EPISODES = 300;
 export const MAX_EPISODE_TITLE = 150;
 export const MAX_EPISODE_NOTES = 4_000;
+/**
+ * How long the signed address an episode is sent on to works, in seconds. A podcast app asks the feed's own address
+ * for the episode (app/api/store/podcast/play) each time it starts fetching it, and is handed a new one there, after
+ * the access is asked again: so an address that got out stops working within minutes, and the R2 reads it can bring
+ * (tests/plan-cost-registry.ts, PODCAST_PLAY_READ) are those of minutes, not of hours.
+ */
+export const EPISODE_URL_SECONDS = 5 * 60;
+/**
+ * The store's public requests on the buyers' side one episode fetched takes, before anything about it is read or
+ * Stripe is asked whether the address still holds the podcast (tests/plan-cost-registry.test.ts holds them above
+ * PODCAST_PLAY_READ, the most one costs).
+ */
+export const PLAY_REQUEST_UNITS = 2;
+/** Database commands one episode fetched spends at the most, its units' own counting apart (tests/podcast-play-charged.test.ts measures it). */
+export const PLAY_COMMANDS = 24;
 /** What an episode may be: the audio every podcast app plays. */
 export const EPISODE_TYPES = ["audio/mpeg", "audio/mp4"] as const;
 export const EPISODE_ACCEPT = ".mp3,.m4a";

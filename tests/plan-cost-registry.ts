@@ -110,6 +110,8 @@ import {
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { R2_CLASS_B_MICRO_USD_PER_MILLION, R2_READS_PER_SIGNED_URL } from "@/lib/spend-cost-table";
+import { PLAY_COMMANDS } from "@/lib/podcast-rules";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -375,6 +377,15 @@ export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + 
  * waited on at 2 GB.
  */
 export const NEXT_OFFER_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMANDS, (NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES) * 16_384 + MAX_PRODUCT_BYTES + 4_096);
+/**
+ * One episode fetched by a podcast app (app/api/store/podcast/play; audit of private podcasts, 9 November 2026, M1 and
+ * M2), at the most: the wait shape, as Stripe is asked whether the address still holds the podcast (the same check as
+ * a community's door, whose wait the next offer's calls are priced at); PLAY_COMMANDS; and the R2 reads its signed
+ * address can bring while it works (EPISODE_URL_SECONDS, minutes): R2_READS_PER_SIGNED_URL Class B operations at
+ * R2_CLASS_B_MICRO_USD_PER_MILLION, egress free (docs/backup-cost-2026-11-04.md). Taken as PLAY_REQUEST_UNITS public
+ * requests before the product is read or Stripe asked, a refusal too, held above it in tests/plan-cost-registry.test.ts.
+ */
+export const PODCAST_PLAY_READ = request("wait", PLAY_COMMANDS) + R2_READS_PER_SIGNED_URL * micro(R2_CLASS_B_MICRO_USD_PER_MILLION) / 1_000_000;
 /**
  * What one Store assistant checkout reminder costs besides the model and its
  * email (lib/assistant-reminder.ts), at the most: its commands and its
@@ -900,7 +911,7 @@ export const COST_LINES: CostLine[] = [
     feature: "Downloads (sold and free)",
     monthlyUsd: () => (FREE_PAUSE_ABOVE_BYTES / GB) * FILE_DELIVERY_PER_GB,
     sources: [{ file: "lib/delivery.ts", names: ["FREE_PAUSE_ABOVE_BYTES", "DELIVERY_ALLOWANCE_BYTES"] }],
-    basis: "Files are sent from a store that charges nothing to send them; the download's request is OPEN item public-requests.",
+    basis: "Files are sent from a store that charges nothing to send them (R2: egress free, docs/backup-cost-2026-11-04.md); the download's request is OPEN item public-requests. Every GET of a signed address is an R2 Class B read, which no count in code can see: an episode's address works EPISODE_URL_SECONDS and its R2_READS_PER_SIGNED_URL reads are priced in the episode's own requests (PODCAST_PLAY_READ, line public-requests). A download's address (DOWNLOAD_URL_SECONDS) and a lesson video's (VIDEO_URL_SECONDS, hours) are not yet held this way: their reads are not priced (audit of private podcasts, M2).",
   },
   {
     id: "video",
@@ -1134,6 +1145,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
+      // An episode takes PLAY_REQUEST_UNITS before the product is read or Stripe asked, a refusal too, and so does a new feed address
+      // asked by its buyer (audit of private podcasts, 9 November 2026; PODCAST_PLAY_READ in tests/plan-cost-registry.test.ts).
+      { file: "app/api/store/podcast/play/[token]/[episode]/route.ts", names: ["takeBuyerRead(store, PLAY_REQUEST_UNITS)", "EPISODE_URL_SECONDS", "endGrant(token)"] },
+      { file: "app/api/store/podcast/new-feed/route.ts", names: ["takeBuyerRead(store, PLAY_REQUEST_UNITS)"] },
+      { file: "lib/podcast-rules.ts", names: ["PLAY_REQUEST_UNITS", "PLAY_COMMANDS", "EPISODE_URL_SECONDS"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
       // A signed proposal or agreement takes one more before the workflows that start on signing are checked (635 [GL3], 2 November 2026).
@@ -1712,7 +1728,8 @@ export const SCOPES: Record<string, ScopeClass> = {
   "waitlist-address": BURST("public-requests"), "numbers-link": BURST("public-requests"), preview: BURST("public-requests"),
   "affhub-address": METERED_EMAIL, "affhub-ip": METERED_EMAIL, "library-address": METERED_EMAIL, "library-ip": METERED_EMAIL,
   "erase-address": METERED_EMAIL, "erase-ip": METERED_EMAIL,
-  "podcast-link-address": METERED_EMAIL, "contact-ip": METERED_EMAIL, "contact-store": METERED_EMAIL, "remind-ask": METERED_EMAIL,
+  "podcast-link-address": METERED_EMAIL, "podcast-listener-feed": METERED_EMAIL,
+  "podcast-new-ip": BURST("public-requests"), "podcast-new-feed": BURST("public-requests"), "contact-ip": METERED_EMAIL, "contact-store": METERED_EMAIL, "remind-ask": METERED_EMAIL,
   "remind-store": METERED_EMAIL, "assist-remind-store": METERED_EMAIL, "resend-sale": METERED_EMAIL, "resend-store": METERED_EMAIL, "creator-inbound": METERED_EMAIL,
   "inbox-reply": METERED_EMAIL, "inbox-tell": METERED_EMAIL,
   // The Store assistant (an add-on, ADD_ON_LINES): its asks are burst limits under its month's pool, the rest public requests.

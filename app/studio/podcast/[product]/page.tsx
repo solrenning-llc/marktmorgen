@@ -10,6 +10,8 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { readListing } from "@/lib/catalog";
 import { readPodcast } from "@/lib/podcast";
 import { PodcastEditor } from "@/components/podcast-editor";
+import { PodcastListenerFeed } from "@/components/podcast-listener-feed";
+import { can } from "@/lib/team-roles";
 
 export const metadata: Metadata = {
   title: "Your podcast — Marktmorgen",
@@ -70,6 +72,7 @@ export default async function StudioPodcastPage({
             </span>
           </div>
           <PodcastEditor productId={product.id} folder={folder} initial={podcast} />
+          {can(view.role, "orders") ? <PodcastListenerFeed productId={product.id} /> : null}
         </main>
       </StudioStorePin>
     </div>

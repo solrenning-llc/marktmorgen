@@ -42,6 +42,7 @@ import { withinLimit } from "@/lib/request-guard";
 import { FEED_TOKEN } from "@/lib/podcast-rules";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { Listing, Store } from "@/lib/store";
+import { holdsProductsOrThrow } from "@/lib/community-access";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const addressKey = (email: string) => sha(`nimbus-podcast:${normaliseEmail(email)}`).slice(0, 32);
@@ -72,7 +73,7 @@ export async function feedToken(store: Store, productId: string, email: string):
   if (set !== "OK") return null;
   // Only "OK" wrote the grant: on any other reply no link is given to a feed that may not open.
   const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)]]);
-  return made === "OK" ? token : null;
+  return made === "OK" && (await stillIndexed(token, grant)) ? token : null;
 }
 
 /**
@@ -86,7 +87,7 @@ async function withGrant(store: Store, token: string, grant: FeedGrant): Promise
   if (held === undefined) return null;
   if (held !== null) return sameGrant(held, grant) ? token : null;
   const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant), "NX"]]);
-  if (made === "OK") return token;
+  if (made === "OK") return (await stillIndexed(token, grant)) ? token : null;
   if (made !== null) return null;
   // null: another call wrote it first; hand it out only if it is this address's grant.
   const again = await grantOf(token);
@@ -259,4 +260,106 @@ export async function feedsOf(store: Store, productIds: string[], email: string)
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
   const tokens = await indexedTokens(store.statsId, productIds, email);
   return productIds.filter((_, i) => typeof tokens[i] === "string" && FEED_TOKEN.test(tokens[i] as string));
+}
+
+/**
+ * Whether the index still leads to a grant just written (audit of private podcasts, M3): a feed replaced or ended
+ * (revokeFeed) between the read of the index and the write of its grant must not come back to life, nor leave a grant
+ * holding the address that no index leads to, which an erasure would never find. When the index holds another token,
+ * none, or cannot be read, the grant just written is deleted again and no link is given.
+ */
+async function stillIndexed(token: string, grant: FeedGrant): Promise<boolean> {
+  if ((await indexedToken(grant.s, grant.p, grant.e)) === token) return true;
+  await redisPipeline([["DEL", tokenKey(token)]]);
+  return false;
+}
+
+/**
+ * Whether this address may listen now, for a door that takes something away on a no (the episode route deletes the
+ * grant of a token whose address no longer holds the podcast): Stripe that cannot be asked throws instead of saying
+ * no (lib/community-access.ts, holdsProductsOrThrow). The same cached answer as mayListen.
+ */
+export async function mayListenOrThrow(store: Store, productId: string, email: string): Promise<boolean> {
+  if (!store.statsId) return false;
+  if (normaliseEmail(email) === normaliseEmail(store.email)) return true;
+  return holdsProductsOrThrow(store, [productId], email, okKey(store.statsId, productId, email), "1");
+}
+
+/**
+ * Ends one token whose address no longer holds the podcast, on a confirmed no (audit of private podcasts, M1): its
+ * grant is deleted, so every later request on it is one read that answers "Not found", and nothing more is asked of
+ * Stripe for it. Its index stays: the next time a feed is handed to the address with access (the page after paying,
+ * the list of purchases, "Email me my feed"), the same address is written back and the buyer's app works again
+ * (withGrant). A failed delete leaves the grant, and the next request asks again.
+ */
+export async function endGrant(token: string): Promise<void> {
+  if (!FEED_TOKEN.test(token) || !isRedisConfigured()) return;
+  await redisPipeline([["DEL", tokenKey(token)]]);
+}
+
+/**
+ * Ends the feed an address has of a product, index and grant (audit of private podcasts, M3): its address stops
+ * working at once, and the next feed handed to the address is a new one. True when there was one, false when there
+ * was none. Read exactly first (CX-123 rule 24): an unknown read or delete throws UnknownReplyError.
+ */
+export async function revokeFeed(store: Store, productId: string, email: string): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured()) return false;
+  const sid = store.statsId;
+  const held = await indexedToken(sid, productId, email);
+  if (held === undefined) throw new UnknownReplyError("a podcast feed's index");
+  if (held === null) return false;
+  const reply = repliesFor(await redisPipeline([["DEL", byKey(sid, productId, email), okKey(sid, productId, email), tokenKey(held)]]), 1);
+  if ((reply ? countOf(reply[0]) : null) === null) throw new UnknownReplyError("the end of a podcast feed");
+  return true;
+}
+
+/**
+ * "Get a new feed address", asked by the buyer from their feed's page or by the creator for one listener from the
+ * studio (audit of private podcasts, M3: a feed that got out played for anyone, on the store's requests, until a
+ * refund). The address's old feed stops working at once; while the address still holds the podcast, a new one is
+ * emailed to it, never shown to whoever asked, so a person who only has the old address cannot take the new one.
+ *
+ *   sent    the old feed ended, and the new one was emailed
+ *   ended   the old feed ended; the address no longer holds the podcast, so nothing was sent
+ *   none    the address had no feed of this podcast; nothing changed
+ *   unsent  the old feed ended, and the email with the new one could not be sent ("Email me my feed" sends it)
+ *   error   nothing was changed: the access or the feed could not be read
+ *
+ * The access is asked before anything is changed. The caller takes the store's request and its limits first.
+ */
+export type ReplaceResult = "sent" | "ended" | "none" | "unsent" | "error";
+export async function replaceFeed(input: { store: Store; product: Listing; email: string; base: string; from: string }): Promise<ReplaceResult> {
+  const { store, product } = input;
+  const email = normaliseEmail(input.email);
+  let holds: boolean;
+  let had: boolean;
+  try {
+    holds = await mayListenOrThrow(store, product.id, email);
+    had = await revokeFeed(store, product.id, email);
+  } catch {
+    return "error";
+  }
+  if (!had) return "none";
+  if (!holds) return "ended";
+  const token = await feedToken(store, product.id, email);
+  if (!token) return "unsent";
+  // In the store's language (lib/buyer-words/courses.ts), as "Email me my feed" sends it, with what changed first.
+  const w = coursesWords(store.language);
+  const sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
+    from: input.from,
+    to: email,
+    subject: w.podcastSubject(product.title).slice(0, 200),
+    text: [
+      w.podcastReplaced,
+      "",
+      w.podcastLead(product.title, store.name),
+      "",
+      `${input.base}/podcast/${product.id}?t=${token}`,
+      "",
+      w.podcastBody,
+      "",
+      w.sentBy(store.name),
+    ].join("\n"),
+  });
+  return sent ? "sent" : "unsent";
 }

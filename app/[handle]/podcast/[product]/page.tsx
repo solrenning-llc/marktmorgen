@@ -62,6 +62,9 @@ export default async function PodcastPage({ params, searchParams }: Params) {
   if (product.hidden && !mine && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const feed = mine ? `${SITE_URL}/api/store/podcast/feed/${mine}.xml` : null;
   const notice = w.podcastNotices[status];
+  // "Get a new feed address" asks once more before it ends the feed shown here (WCAG 3.3.6).
+  const confirming = !!mine && query.confirm === "new";
+  const pageOf = `/@${store.handle}/podcast/${product.id}`;
 
   return (
     <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -84,11 +87,27 @@ export default async function PodcastPage({ params, searchParams }: Params) {
                 <input className="st-field mt-2 font-mono text-sm" readOnly value={feed} />
               </label>
               <p className="st-muted mt-4 text-sm">{w.feedNote}</p>
+              <section id="new-feed" aria-labelledby="new-feed-title" className="mt-8">
+                <h2 id="new-feed-title" className="text-lg font-semibold">{w.newFeedTitle}</h2>
+                <p className="st-muted mt-2 text-sm">{w.newFeedWhy}</p>
+                {confirming ? (
+                  <form action="/api/store/podcast/new-feed" method="post" className="mt-4 space-y-3">
+                    <input type="hidden" name="handle" value={store.handle} />
+                    <input type="hidden" name="product" value={product.id} />
+                    <input type="hidden" name="token" value={mine ?? ""} />
+                    <p className="font-semibold" style={{ color: "var(--st-text)" }}>{w.newFeedConfirm}</p>
+                    <button type="submit" className="btn st-btn btn-block">{w.newFeedYes}</button>
+                    <Link href={`${pageOf}?t=${mine}`} className="st-footer-link block min-h-11 py-3 text-center text-sm font-semibold">{w.newFeedKeep}</Link>
+                  </form>
+                ) : (
+                  <Link href={`${pageOf}?t=${mine}&confirm=new#new-feed`} className="btn st-btn btn-block mt-4">{w.newFeedButton}</Link>
+                )}
+              </section>
             </>
           ) : (
             <>
               {notice ? (
-                <div className="mt-5" role={status === "sent" ? "status" : "alert"}>
+                <div className="mt-5" role={status === "sent" || status === "renewed" ? "status" : "alert"}>
                   <p className="font-semibold" style={{ color: "var(--st-text)" }}>{notice.title}</p>
                   <p className="st-muted mt-1">{notice.body}</p>
                 </div>

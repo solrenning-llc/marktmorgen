@@ -197,20 +197,22 @@ async function main(): Promise<void> {
   sends = 0;
   const createdD = NOW - (PENDING_SWEEP_SECONDS - 120);
   await breakCodes();
-  await notePendingLinks(store, [order("cs_D", "d@example.com", { [VIA_PENDING_META]: pend }, createdD)], NOW, undefined, undefined, send);
+  // Regra 23: the click comes before the checkout opened (as in the proof); the RED commit had it after, which no window credits.
+  await notePendingLinks(store, [order("cs_D", "d@example.com", { [VIA_PENDING_META]: `ana.${createdD - 60}~ana.${createdD - 60}~-~0;prod01=30` }, createdD)], NOW, undefined, undefined, send);
   await mendCodes();
   is("read once and still unknown: told in the same pass", [sends, await mark("cs_D")], [1, "told"]);
   is("the margin keeps the notice's tries inside the day", PENDING_TELL_MARGIN >= 300, true);
-  const listed = order("cs_D2", "d2@example.com", { [VIA_PENDING_META]: pend }, NOW - 600);
+  // Regra 23: a checkout id as Stripe writes them (the RED commit's "cs_D2" was shorter than any).
+  const listed = order("cs_D2listed", "d2@example.com", { [VIA_PENDING_META]: pend }, NOW - 600);
   await breakCodes();
   await notePendingLinks(store, [listed], NOW, undefined, undefined, send);
   await mendCodes();
-  const [score] = await redis.pipeline([["ZSCORE", "nl:aff:pend:due", `${store.sid}|cs_D2`]]);
+  const [score] = await redis.pipeline([["ZSCORE", "nl:aff:pend:due", `${store.sid}|cs_D2listed`]]);
   is("a pending order is kept on the sweep's own list", score !== null && score !== undefined, true);
-  sessions.set("cs_D2", listed);
+  sessions.set("cs_D2listed", listed);
   await notePendingDue(NOW + 900, undefined, send);
-  is("which reads it by itself when the day's listing no longer brings it, and credits it", [(await sale("cs_D2"))?.aff, String(await mark("cs_D2")).startsWith("credited:")], [ANA, true]);
-  const [gone] = await redis.pipeline([["ZSCORE", "nl:aff:pend:due", `${store.sid}|cs_D2`]]);
+  is("which reads it by itself when the day's listing no longer brings it, and credits it", [(await sale("cs_D2listed"))?.aff, String(await mark("cs_D2listed")).startsWith("credited:")], [ANA, true]);
+  const [gone] = await redis.pipeline([["ZSCORE", "nl:aff:pend:due", `${store.sid}|cs_D2listed`]]);
   is("and takes it off once decided", gone, null);
 
   part("E (MÉDIO): PayPal, the mark not written at the hand-over");
@@ -257,7 +259,8 @@ async function main(): Promise<void> {
 
   part("I (LEVE): the sweep hands its reads on");
   const sweep = readFileSync(join(process.cwd(), "lib/checkout-sweep.ts"), "utf8");
-  is("notePendingLinks gets the codes and the partners the sweep read", /notePendingLinks\(store, pendingRows[^)]*owners[^)]*partners/.test(sweep), true);
+  // Regra 23: case-insensitive since the RED commit, the sweep's names being readOwners and readPartners.
+  is("notePendingLinks gets the codes and the partners the sweep read", /notePendingLinks\(store, pendingRows[^)]*owners[^)]*partners/i.test(sweep), true);
   is("and the sweep reads its own list of pending orders", /notePendingDue\(/.test(sweep), true);
 
   part("J (LEVE): Stripe is never asked past the pass's deadline");

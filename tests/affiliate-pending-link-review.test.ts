@@ -56,6 +56,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.stripe.com" && url.pathname === "/v1/payment_intents" && (init?.method ?? "GET") === "GET") {
     return json({ object: "list", data: offers.filter((pi) => pi.customer === url.searchParams.get("customer")), has_more: false });
   }
+  // A membership's first invoice, with the payment it was paid by (second pre-review, ALTO A; regra 23: added).
+  if (url.hostname === "api.stripe.com" && url.pathname.startsWith("/v1/invoices/")) {
+    const id = url.pathname.split("/").pop();
+    return json({ id, object: "invoice", status: "paid", payments: { data: [{ status: "paid", payment: { payment_intent: `pi_first_${id}` } }] } });
+  }
   if (url.hostname === "api.stripe.com" && url.pathname.startsWith("/v1/subscriptions/") && init?.method === "POST") {
     const body = String(init.body ?? "");
     subscriptionPosts.push({ url: url.pathname, body });

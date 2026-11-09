@@ -186,6 +186,12 @@ export type Affiliate = {
    * Null: the program's own shares.
    */
   rate: number | null;
+  /**
+   * When that share last changed (epoch ms, withRate), so a sale confirmed later knows whether the share it was made
+   * at is still the one held (owner's decision 6). Absent on a record whose share has not changed since 9 November
+   * 2026: a share set then is of an unknown date.
+   */
+  rateAt?: number;
   /** The PayPal address they asked to be paid at; empty: the address they joined with. */
   paypal: string;
   /**
@@ -362,6 +368,7 @@ function parseAffiliate(raw: unknown): Affiliate | null {
         return Number.isInteger(percent) && percent >= 1 && percent <= MAX_COMMISSION ? { id: by.id, percent } : null;
       })(),
       warned: Number.isInteger(value.warned) && Number(value.warned) > 0 ? Number(value.warned) : 0,
+      ...(Number.isSafeInteger(value.rateAt) && Number(value.rateAt) > 0 ? { rateAt: Number(value.rateAt) } : {}),
     };
   } catch {
     return null;
@@ -385,10 +392,15 @@ export function payAddress(affiliate: Pick<Affiliate, "email" | "paypal">): stri
  * partners, ShareCapError and nothing written. Unknown reply: UnknownReplyError; the lock not held: LockBusyError;
  * nothing written either way.
  */
+/** An affiliate's record with its own share set to `rate`, and the moment it changed when it did (rateAt). */
+function withRate(affiliate: Affiliate, rate: number | null): Affiliate {
+  return affiliate.rate === rate ? { ...affiliate, rate } : { ...affiliate, rate, rateAt: Date.now() };
+}
+
 export async function setAffiliateRate(store: Store, id: string, rate: number | null, charge: Charge = PAID): Promise<Affiliate | null> {
   if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
   const lowers = (a: Affiliate) => rate !== null && a.rate !== null && rate <= a.rate;
-  const plain = await changeAffiliate(store, id, (affiliate) => (lowers(affiliate) ? { ...affiliate, rate } : null));
+  const plain = await changeAffiliate(store, id, (affiliate) => (lowers(affiliate) ? withRate(affiliate, rate) : null));
   if (!plain) return null;
   if (plain.next) return plain.next;
   if (plain.before.rate === rate) return plain.before;
@@ -397,14 +409,14 @@ export async function setAffiliateRate(store: Store, id: string, rate: number | 
     const lost = () => new LockBusyError("the partner lock was lost before an affiliate's share was written");
     // The terms cannot change while the lock is held (every save of them takes it), so "pays no more" stays true.
     if (!(await holdLock(held))) throw lost();
-    const lowered = await changeAffiliate(store, id, (affiliate) => (paysNoMore(now.affiliates, affiliate.rate, rate) ? { ...affiliate, rate } : null));
+    const lowered = await changeAffiliate(store, id, (affiliate) => (paysNoMore(now.affiliates, affiliate.rate, rate) ? withRate(affiliate, rate) : null));
     if (!lowered) return null;
     if (lowered.next) return lowered.next;
     if (lowered.before.rate === rate) return lowered.before;
     const problem = await commissionProblem(now, { rate: { id, rate } }, charge);
     if (problem) throw new ShareCapError(problem);
     if (!(await holdLock(held))) throw lost();
-    return (await changeAffiliate(store, id, (affiliate) => ({ ...affiliate, rate })))?.next ?? null;
+    return (await changeAffiliate(store, id, (affiliate) => withRate(affiliate, rate)))?.next ?? null;
   });
 }
 
@@ -2069,7 +2081,7 @@ async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charg
     const was = read.affiliate.rate;
     if (!ask.when(read.affiliate) || was === ask.rate) continue;
     // Down from a share of their own to a lower one: lower on every product whatever the terms (commissionRate).
-    if (was !== null && ask.rate !== null && ask.rate <= was) plain.push({ id: ask.id, raw: read.raw, change: (now) => (ask.when(now) ? { ...now, rate: ask.rate } : null) });
+    if (was !== null && ask.rate !== null && ask.rate <= was) plain.push({ id: ask.id, raw: read.raw, change: (now) => (ask.when(now) ? withRate(now, ask.rate) : null) });
     else judged.push(ask);
   }
   const writing = plain.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 8), 0) + judged.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES);
@@ -2083,7 +2095,7 @@ async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charg
       const ran = await withPaidStore(store, charge, async (now, lock) => {
         const terms = now.affiliates;
         const changes: BatchWrite[] = [];
-        const write = (ask: RateAsk, raw: string) => changes.push({ id: ask.id, raw, change: (x) => (ask.when(x) ? { ...x, rate: ask.rate } : null) });
+        const write = (ask: RateAsk, raw: string) => changes.push({ id: ask.id, raw, change: (x) => (ask.when(x) ? withRate(x, ask.rate) : null) });
         // Paying no more anywhere, under the terms as they are now (they cannot change while the lock is held).
         const lower = judged.filter((ask) => paysNoMore(terms, records.get(ask.id)?.affiliate.rate ?? null, ask.rate));
         const raise = judged.filter((ask) => !lower.includes(ask));
@@ -2096,7 +2108,7 @@ async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charg
             const at = new Map(people.map((one, i) => [one.id, i]));
             for (const ask of lower) {
               const i = at.get(ask.id);
-              if (i !== undefined) people[i] = { ...people[i], rate: ask.rate };
+              if (i !== undefined) people[i] = withRate(people[i], ask.rate);
             }
             for (const ask of raise) {
               const read = everyone.get(ask.id);
@@ -2108,7 +2120,7 @@ async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charg
               if (!ask.when(read.affiliate) || read.affiliate.rate === ask.rate) continue;
               // Against the program as it stands with those changed before it in this batch.
               const next = people.slice();
-              next[i] = { ...people[i], rate: ask.rate };
+              next[i] = withRate(people[i], ask.rate);
               if (commissionCapProblem({ terms, people, nextTerms: terms, nextPeople: next })) {
                 outcome.set(ask.id, "cap");
                 continue;
@@ -2474,9 +2486,20 @@ function saleShare(pending: Pending, productId: string, own: number | null): num
   return kept === "x" ? 0 : own ?? kept;
 }
 
-type PendingOutcome = { kind: "credit"; affiliate: Affiliate; pending: Pending } | { kind: "none" } | { kind: "unknown" };
+type PendingOutcome = { kind: "credit"; affiliate: Affiliate; pending: Pending } | { kind: "share"; affiliate: Affiliate } | { kind: "none" } | { kind: "unknown" };
 
-/** A pending link read again, against the sale's own time: credited, nobody, or still not known. Never throws. */
+/**
+ * Whether the affiliate's own share may have changed since the sale at `atSeconds` (withRate): changed after it, or
+ * set at a date not kept. The share the sale was made at is then not known, and nothing is credited on its own.
+ */
+function ownShareChangedSince(affiliate: Affiliate, atSeconds: number): boolean {
+  return affiliate.rateAt !== undefined ? affiliate.rateAt > atSeconds * 1000 : affiliate.rate !== null;
+}
+
+/**
+ * A pending link read again, against the sale's own time: credited, nobody, still not known, or ("share") read but
+ * sold at an own share of the affiliate's that has changed since. Never throws.
+ */
 async function decidePending(store: Store, raw: unknown, atSeconds: number): Promise<PendingOutcome> {
   const pending = readPending(raw);
   if (!pending) return { kind: "unknown" };
@@ -2485,6 +2508,7 @@ async function decidePending(store: Store, raw: unknown, atSeconds: number): Pro
     if (!affiliate || pending.own === affiliate.id) return { kind: "none" };
     // Their own browser could not be told apart at checkout: never credited automatically, the creator decides.
     if (pending.own === "?") return { kind: "unknown" };
+    if (ownShareChangedSince(affiliate, atSeconds)) return { kind: "share", affiliate };
     return { kind: "credit", affiliate, pending };
   } catch (error) {
     console.error("a pending affiliate link still does not read", store.handle, error instanceof Error ? error.message : "");
@@ -2495,6 +2519,7 @@ async function decidePending(store: Store, raw: unknown, atSeconds: number): Pro
 /**
  * A pending link's mark (PENDING_MARK_SECONDS), one an order:
  *   seen:<t>          first seen paid at t, read at least once, not decided yet;
+ *   offers:<aff>:<t>  credited to <aff>, its offers after paying not all read yet (they follow it meanwhile);
  *   lead:<aff>:<t>    credited to <aff>, its booking's lead not written yet (tried again, then told);
  *   credited:<aff>    credited to <aff>: its offers after paying follow it (notePendingOffer);
  *   none              nobody's;
@@ -2504,8 +2529,18 @@ async function decidePending(store: Store, raw: unknown, atSeconds: number): Pro
  *   untold            refused REFUSED_TRIES times, said in the sweep's log.
  * From the moment a notice is due, nothing about the sale is credited automatically, whatever a later read says.
  */
-type TellWhy = "unread" | "membership" | "lead";
-type PendingMark = `seen:${number}` | `lead:${string}:${number}` | `credited:${string}` | "none" | `tell:${TellWhy}` | "told" | "uncertain" | "untold";
+type TellWhy = "unread" | "membership" | "unsure" | "lead" | "share";
+type PendingMark =
+  | `seen:${number}`
+  | `offers:${string}:${number}`
+  | `lead:${string}:${number}`
+  | `credited:${string}`
+  | "none"
+  | `tell:${TellWhy}`
+  | "told"
+  | "uncertain"
+  | "untold";
+const TELL_WHYS: readonly TellWhy[] = ["unread", "membership", "unsure", "lead", "share"];
 
 /** A pending link's mark, read exactly: null when nothing was decided, UnknownReplyError for an answer of another shape. */
 async function readPendingMark(statsId: string, ref: string): Promise<string | null> {
@@ -2518,6 +2553,12 @@ async function readPendingMark(statsId: string, ref: string): Promise<string | n
 async function writePendingMark(statsId: string, ref: string, mark: PendingMark): Promise<void> {
   const reply = repliesFor(await redisPipeline([["SET", pendingKey(statsId, ref), mark, "EX", PENDING_MARK_SECONDS]]), 1)?.[0];
   if (reply !== "OK") throw new UnknownReplyError("a pending affiliate link's mark");
+}
+
+/** The affiliate a mark says the order was credited to, its offers following it: "" for none. */
+function creditedTo(mark: string | null): string {
+  const found = mark?.match(/^(?:credited:([0-9a-f]{12})|(?:offers|lead):([0-9a-f]{12}):\d+)$/);
+  return found ? found[1] ?? found[2] ?? "" : "";
 }
 
 /** Sends one email and says how it went, as lib/email.ts sendEmailOutcome does: handed in by the tests. */
@@ -2535,27 +2576,35 @@ export function pendingNotice(
   const pending = readPending(raw);
   const code = pending ? (store.affiliates.rule === "first" ? pending.via.first.code : pending.via.last.code) : "unknown";
   const studio = `${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`;
-  const first =
-    why === "membership"
-      ? `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. The link could not be read when the buyer paid, or could not be put on the subscription afterwards, so its payments are not credited to them.`
-      : why === "lead"
-        ? `A call booked on ${store.name} came through the link of the affiliate with the code ${code}. The sale was credited to them, but its lead could not be written down, so the lead is not counted.`
-        : `An order on ${store.name} came through an affiliate's link that could not be read when the buyer paid, and it still could not be read when it was checked again later. The code on the link was ${code}.`;
+  const first = {
+    unread: `An order on ${store.name} came through an affiliate's link that could not be read when the buyer paid, and it still could not be read when it was checked again later. The code on the link was ${code}.`,
+    share: `An order on ${store.name} came through the link of the affiliate with the code ${code}. The link was read afterwards, but the share it was sold at is not known now (the program's share for it was not kept, or the affiliate's own share changed since the sale), so it was not credited automatically.`,
+    membership: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. The link could not be read when the buyer paid, or could not be put on the subscription afterwards, so its payments are not credited to them.`,
+    unsure: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. We could not confirm whether the affiliate was put on its subscription: Stripe did not answer.`,
+    lead: `A call booked on ${store.name} came through the link of the affiliate with the code ${code}. The sale was credited to them, but its lead could not be written down, so the lead is not counted.`,
+  }[why];
+  const what = {
+    unread: "It was not credited to any affiliate, so no commission is counted for it, nor for an offer the buyer took after paying. The buyer was charged as usual and has their purchase.",
+    share: "No commission is counted for it, nor for an offer the buyer took after paying. The buyer was charged as usual and has their purchase.",
+    membership: "No commission is counted for its payments. The buyer was charged as usual and has their membership.",
+    unsure: "Before paying anything for it, look in your affiliates' book: if its payments appear there under the affiliate, they are counted already.",
+    lead: "No lead payment is counted for it.",
+  }[why];
   return {
     to: store.email,
-    subject: `An affiliate link on an order on ${store.name} was not credited`,
+    subject: why === "unsure" ? `An affiliate link on a membership on ${store.name} could not be confirmed` : `An affiliate link on an order on ${store.name} was not credited`,
     text: [
       first,
       `The order: ${ref}`,
       "",
-      why === "lead"
-        ? "No lead payment is counted for it."
-        : "It was not credited to any affiliate, so no commission is counted for it, nor for an offer the buyer took after paying. The buyer was charged as usual and has their purchase.",
-      "If you decide it is theirs, pay them outside Marktmorgen: a payout written down in your studio is taken off what they earn next, so it would not settle this sale.",
+      what,
+      why === "unsure"
+        ? "If it is not there and you decide it is theirs, pay them outside Marktmorgen: a payout written down in your studio is taken off what they earn next."
+        : "If you decide it is theirs, pay them outside Marktmorgen: a payout written down in your studio is taken off what they earn next, so it would not settle this sale.",
       `Your affiliates: ${studio}`,
     ].join("\n"),
-    title: "An affiliate link was not credited",
-    body: `An order came through the code ${code}, which could not be credited. Pay the affiliate outside Marktmorgen if it is theirs.`,
+    title: why === "unsure" ? "An affiliate link could not be confirmed" : "An affiliate link was not credited",
+    body: why === "unsure" ? `A membership came through the code ${code}; check your affiliates' book before paying anything for it.` : `An order came through the code ${code}, which could not be credited. Pay the affiliate outside Marktmorgen if it is theirs.`,
   };
 }
 
@@ -2569,7 +2618,7 @@ export function pendingNotice(
  */
 async function tellPending(store: Store, ref: string, raw: unknown, why: TellWhy, send: PendingSend): Promise<Told> {
   const statsId = store.statsId as string;
-  if (why === "unread") {
+  if (why === "unread" || why === "share") {
     const credited = repliesFor(await redisPipeline([["HEXISTS", salesKey(statsId), ref]]), 1)?.[0];
     if (credited === 1) {
       await writePendingMark(statsId, ref, "none");
@@ -2631,44 +2680,119 @@ function creditedMeta(meta: Record<string, string>, affiliate: Affiliate, pendin
   return { meta: out, earns };
 }
 
+/** How long a Stripe request may take inside the pass's deadline; UnknownReplyError when none is left (rule 24: the order waits). */
+function pendingWait(deadline: number | undefined): number {
+  const wait = stripeWait(deadline);
+  if (wait === null) throw new UnknownReplyError("the pass's time, spent before Stripe could be asked");
+  return wait;
+}
+
 /**
  * Credits an offer taken after paying (lib/upsell.ts, which calls noteCharge) on an order whose link was pending, to
- * `aff` or, not given, to whom that order's mark says it was credited: at the share the offer's product earns now, as
- * lib/upsell.ts credits an offer on an order whose link read. Nothing while the order is still pending, or nobody's.
+ * `aff` or, not given, to whom that order's mark says it was credited (creditedTo): at the share the offer's product
+ * earns in the program now, as lib/upsell.ts credits an offer on an order whose link read, whether the program is on
+ * now or not (the order was sold while it was). Nothing while the order is still pending, or nobody's, or for an
+ * affiliate since declined or removed.
  */
 async function notePendingOffer(store: Store, pi: Record<string, unknown>, parent: string, aff?: string): Promise<void> {
   if (!store.statsId || typeof pi.id !== "string" || pi.status !== "succeeded") return;
-  const mark = aff ? `credited:${aff}` : await readPendingMark(store.statsId, parent);
-  const to = mark?.startsWith("credited:") ? mark.slice("credited:".length) : "";
+  const to = aff ?? creditedTo(await readPendingMark(store.statsId, parent));
   if (!AFFILIATE_ID_PATTERN.test(to)) return;
+  const affiliate = await readAffiliate(store, to);
+  if (affiliate?.status !== "approved") return;
   const meta = (pi.metadata ?? {}) as Record<string, string>;
-  const rate = await funnelRate(store, to, meta.product ?? "");
+  const rate = commissionRate(store.affiliates, meta.product ?? "", affiliate.rate);
   if (rate <= 0) return;
   await noteCharge(store, { ...pi, metadata: { ...meta, via: to, via_rate: String(rate) } });
 }
 
-/** The offers after paying already paid on an order confirmed now, read from the buyer's payments on the creator's account (one page). */
-async function creditOffersOf(store: Store, row: SessionLike & { id: string }, aff: string): Promise<void> {
+/** Pages of a buyer's payments read for an order's offers after paying, at the most (as lib/upsell.ts OFFER_PAGES_IN_JOB). */
+export const PENDING_OFFER_PAGES = 5;
+
+/**
+ * The offers after paying already paid on an order confirmed now, read from the buyer's payments on the creator's
+ * account, page by page up to PENDING_OFFER_PAGES; a page that does not read, or more than that, throws, and the
+ * order's offers are read again at the next pass (its mark says offers:<aff>, which offers noted meanwhile follow).
+ */
+async function creditOffersOf(store: Store, row: SessionLike & { id: string }, aff: string, deadline?: number): Promise<void> {
   if (typeof row.customer !== "string" || !row.customer || !store.stripeAccountId) return;
-  const query = new URLSearchParams({ customer: row.customer, limit: "100" });
-  const page = readStripePage(await onAccount("GET", store.stripeAccountId, `/payment_intents?${query}`, undefined, STRIPE_LIST_VERSION));
-  for (const pi of page.rows) {
-    const meta = pi.metadata as Record<string, unknown> | null | undefined;
-    if (meta?.kind === "upsell" && meta.parent === row.id) await notePendingOffer(store, pi, row.id, aff);
+  let after = "";
+  for (let page = 0; page < PENDING_OFFER_PAGES; page += 1) {
+    const query = new URLSearchParams({ customer: row.customer, limit: "100" });
+    if (after) query.set("starting_after", after);
+    const read = readStripePage(await onAccount("GET", store.stripeAccountId, `/payment_intents?${query}`, undefined, STRIPE_LIST_VERSION, undefined, pendingWait(deadline)));
+    for (const pi of read.rows) {
+      const meta = pi.metadata as Record<string, unknown> | null | undefined;
+      if (meta?.kind === "upsell" && meta.parent === row.id) await notePendingOffer(store, pi, row.id, aff);
+    }
+    if (!read.hasMore) {
+      if (read.unreadable) throw new UnknownReplyError("a buyer's payment");
+      return;
+    }
+    if (!read.lastId) throw new UnknownReplyError("a page of a buyer's payments");
+    after = read.lastId;
   }
+  throw new UnknownReplyError("more of a buyer's payments than are read");
+}
+
+/** A Stripe subscription's own affiliate (metadata via), read exactly: "" for none, UnknownReplyError when it does not answer. */
+async function subscriptionVia(store: Store, subscription: string, deadline?: number): Promise<{ via: string; rate: string }> {
+  const read = await onAccount("GET", store.stripeAccountId as string, `/subscriptions/${subscription}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, pendingWait(deadline));
+  const meta = read.metadata as Record<string, unknown> | null | undefined;
+  if (read.id !== subscription || !meta || typeof meta !== "object") throw new UnknownReplyError("a membership's subscription");
+  return { via: typeof meta.via === "string" ? meta.via : "", rate: typeof meta.via_rate === "string" ? meta.via_rate : "" };
+}
+
+/**
+ * Credits a membership's first payment, already made before the affiliate was on its subscription, as a renewal of
+ * it, with the payment its invoice was paid by (read from the invoice, pinned as recurringReferrals reads them), so a
+ * refund or a dispute takes it back (settleLine). An invoice that does not answer, or names no payment, throws: not
+ * credited, read again at the next pass.
+ */
+async function creditFirstPayment(store: Store, row: SessionLike & { id: string }, aff: string, rate: number, deadline?: number): Promise<void> {
+  const meta = row.metadata ?? {};
+  const total = typeof row.amount_total === "number" ? row.amount_total : 0;
+  if (total <= 0) return;
+  const invoice = typeof row.invoice === "string" ? row.invoice : "";
+  if (!/^in_[A-Za-z0-9]{3,250}$/.test(invoice)) throw new UnknownReplyError("a membership's first invoice");
+  const read = (await onAccount("GET", store.stripeAccountId as string, `/invoices/${invoice}?expand[]=payments`, undefined, AFF_SUB_STRIPE_VERSION, undefined, pendingWait(deadline))) as {
+    id?: unknown;
+    payments?: { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | null;
+  };
+  const pi = read.id === invoice ? (read.payments?.data ?? []).filter((p) => p.status === undefined || p.status === "paid").map((p) => p.payment?.payment_intent).find((x): x is string => typeof x === "string" && /^pi_/.test(x)) : undefined;
+  if (!pi) throw new UnknownReplyError("a membership's first payment");
+  const tax = typeof row.total_details?.amount_tax === "number" ? row.total_details.amount_tax : 0;
+  const buyer = typeof row.customer_details?.email === "string" ? row.customer_details.email : "";
+  await writeReferral(store, {
+    ref: invoice,
+    pi,
+    aff,
+    at: typeof row.created === "number" ? row.created : Math.floor(Date.now() / 1000),
+    product: meta.product ?? "",
+    title: (meta.title ?? "").slice(0, 200),
+    base: Math.max(0, total - tax),
+    total,
+    currency: readCurrencyCode(row.currency),
+    rate,
+    self: await isSelf(store, aff, buyer),
+    promotion: affiliatePromotionFrom(meta) ?? undefined,
+    how: "recurring",
+  });
 }
 
 /**
  * Puts a membership's affiliate on its subscription, as a checkout whose link read does (lib/store-checkout.ts), so
- * its renewals earn (recurringReferrals); and credits its first payment, already made, as a renewal of it, since that
- * invoice was made without them. Idempotent at Stripe; a reply that is not the subscription with the affiliate on it
- * throws, and the order is read again at the next pass, then told about.
+ * its renewals earn (recurringReferrals), and credits its first payment (creditFirstPayment). The change is one
+ * idempotent request; an answer that is lost, or refused (the same key with another share answers 400), is checked
+ * by reading the subscription back: the affiliate on it is a change made. Not known, it throws and is read again.
+ * False when there is nothing to put (no renewals in the program at the sale, or a share of 0); null when the share
+ * at the sale is not known.
  */
-async function creditMembership(store: Store, row: SessionLike & { id: string }, affiliate: Affiliate, pending: Pending): Promise<boolean> {
+async function creditMembership(store: Store, row: SessionLike & { id: string }, affiliate: Affiliate, pending: Pending, deadline?: number): Promise<boolean | null> {
   const meta = row.metadata ?? {};
   const months = pending.months ?? store.affiliates.recurring;
   const rate = saleShare(pending, meta.product ?? "", affiliate.rate);
-  if (rate === null) throw new UnknownReplyError("a membership's share at the sale");
+  if (rate === null) return null;
   if (months <= 0 || rate <= 0) return false;
   const subscription = typeof row.subscription === "string" ? row.subscription : "";
   if (!/^sub_[A-Za-z0-9]{3,250}$/.test(subscription) || !store.stripeAccountId) throw new UnknownReplyError("a membership's subscription");
@@ -2679,29 +2803,16 @@ async function creditMembership(store: Store, row: SessionLike & { id: string },
     "metadata[via_months]": String(months),
     "metadata[via_at]": String(at),
   });
-  const answer = await onAccount("POST", store.stripeAccountId, `/subscriptions/${subscription}`, body, undefined, `nimbus-aff-pending-sub:${row.id}`);
-  const kept = answer.metadata as Record<string, unknown> | null | undefined;
-  if (answer.id !== subscription || kept?.via !== affiliate.id || kept?.via_rate !== String(rate)) throw new UnknownReplyError("a membership's subscription changed");
-  const total = typeof row.amount_total === "number" ? row.amount_total : 0;
-  const tax = typeof row.total_details?.amount_tax === "number" ? row.total_details.amount_tax : 0;
-  const buyer = typeof row.customer_details?.email === "string" ? row.customer_details.email : "";
-  if (total > 0) {
-    await writeReferral(store, {
-      ref: typeof row.invoice === "string" && row.invoice ? row.invoice : row.id,
-      pi: "",
-      aff: affiliate.id,
-      at,
-      product: meta.product ?? "",
-      title: (meta.title ?? "").slice(0, 200),
-      base: Math.max(0, total - tax),
-      total,
-      currency: readCurrencyCode(row.currency),
-      rate,
-      self: await isSelf(store, affiliate.id, buyer),
-      promotion: affiliatePromotionFrom(meta) ?? undefined,
-      how: "recurring",
-    });
+  let put = false;
+  try {
+    const answer = await onAccount("POST", store.stripeAccountId, `/subscriptions/${subscription}`, body, undefined, `nimbus-aff-pending-sub:${row.id}`, pendingWait(deadline));
+    const kept = answer.metadata as Record<string, unknown> | null | undefined;
+    put = answer.id === subscription && kept?.via === affiliate.id && kept?.via_rate === String(rate);
+  } catch (error) {
+    console.error("putting an affiliate on a membership's subscription did not answer; read back", row.id, error instanceof Error ? error.message : "");
   }
+  if (!put && (await subscriptionVia(store, subscription, deadline)).via !== affiliate.id) throw new UnknownReplyError("a membership's subscription changed");
+  await creditFirstPayment(store, row, affiliate.id, rate, deadline);
   return true;
 }
 
@@ -2732,14 +2843,30 @@ const countTold = (counts: PendingCounts, told: Told) => {
 };
 
 /**
+ * Every store's pending Stripe orders not decided yet, one list for the company, by when each was last read (seconds):
+ * members "<store id>|<checkout>". The sweep reads it by itself (notePendingDue), so an order the day's listing no
+ * longer brings (past its day, a store whose pass was cut, more checkouts than the pages read) is still decided or
+ * told about. Each member leaves it once its order is decided; a member whose mark has expired leaves it too.
+ */
+const PENDING_DUE_KEY = "nl:aff:pend:due";
+/** Orders of the list read in one run of the five-minute job, at the most. */
+export const PENDING_DUE_BATCH = 20;
+/** An order the listing read within this long is left to it, not read again from the list in the same run. */
+const PENDING_DUE_IDLE = 600;
+
+const isFinal = (mark: string) => /^(credited:[0-9a-f]{12}|none|told|uncertain|untold)$/.test(mark);
+
+/**
  * Decides the pending links of a page of settled checkouts (lib/checkout-sweep.ts, every five minutes, whether the
  * program is on now or not: the sale was made while it was). An order is read at its first sight, and again at each
- * pass until PENDING_LINK_SECONDS after it (never past CONFIRM_WITHIN_SECONDS less PENDING_TELL_MARGIN after the
- * checkout opened), against the sale's own time. Answered: credited to the affiliate at the shares of the sale,
- * through noteSession, once (HSETNX and a mark), with its offers after paying, a membership's subscription and a
- * booking's lead; or, nobody, left to a code, a bond or a contact as any sale is. Past the deadline it is not read any
- * more: the creator is told (tellPending), and a refused notice is tried again at the next passes, REFUSED_TRIES at
- * most. The marks of a page are read in one MGET; an order is counted in `failed` when anything about it did not read.
+ * pass until PENDING_LINK_SECONDS after it (never past PENDING_SWEEP_SECONDS less PENDING_TELL_MARGIN after the
+ * checkout opened: at that point one still unknown is told at once), against the sale's own time. Answered: credited
+ * to the affiliate at the shares of the sale, through noteSession, once (HSETNX and a mark), with its offers after
+ * paying, a membership's subscription and a booking's lead; read but sold at a share not known now, told at once;
+ * or, nobody, left to a code, a bond or a contact as any sale is. Past the deadline it is not read any more: the
+ * creator is told (tellPending), and a refused notice is tried again at the next passes, REFUSED_TRIES at most. The
+ * marks of a page are read in one MGET; an order is counted in `failed` when anything about it did not read. Every
+ * order not decided stays on the company's list (PENDING_DUE_KEY); Stripe is asked nothing past `deadline` (ms).
  */
 export async function notePendingLinks(
   store: Store,
@@ -2748,6 +2875,7 @@ export async function notePendingLinks(
   owners?: Map<string, string>,
   partners?: Affiliate[],
   send: PendingSend = sendEmailOutcome,
+  deadline?: number,
 ): Promise<PendingCounts> {
   const counts: PendingCounts = { credited: 0, none: 0, waiting: 0, told: 0, refused: 0, uncertain: 0, untold: 0, failed: [] };
   if (!store.statsId || !isRedisConfigured()) return counts;
@@ -2766,85 +2894,202 @@ export async function notePendingLinks(
   }
   for (const [i, row] of marked.entries()) {
     const mark = marks[i];
-    const meta = row.metadata ?? {};
-    const raw = meta[VIA_PENDING_META];
-    const once = row.mode === undefined || row.mode === "payment";
-    try {
-      if (mark !== null && typeof mark !== "string") {
-        counts.failed.push(row.id);
-        continue;
-      }
-      if (mark?.startsWith("tell:")) {
-        // A notice still due: tried again, never read again.
-        const why = mark.slice(5);
-        countTold(counts, await tellPending(store, row.id, raw, why === "membership" || why === "lead" ? why : "unread", send));
-        continue;
-      }
-      const lead = mark?.match(/^lead:([0-9a-f]{12}):(\d+)$/) ?? null;
-      const seenAt = mark === null ? now : lead ? Number(lead[2]) : mark.startsWith("seen:") ? Number(mark.slice(5)) : NaN;
-      // Decided already, or a mark of another shape (counted as failed, never taken for undecided).
-      if (!Number.isFinite(seenAt)) {
-        if (!/^(credited:[0-9a-f]{12}|none|told|uncertain|untold)$/.test(mark ?? "")) counts.failed.push(row.id);
-        continue;
-      }
-      if (mark === null) await writePendingMark(statsId, row.id, `seen:${now}`);
-      const at = typeof row.created === "number" ? row.created : now;
-      const deadline = Math.min(seenAt + PENDING_LINK_SECONDS, at + PENDING_SWEEP_SECONDS - PENDING_TELL_MARGIN);
-      // Past the deadline, after at least one read: told, never read again.
-      if (mark !== null && now >= deadline) {
-        countTold(counts, await tellPending(store, row.id, raw, lead ? "lead" : once ? "unread" : "membership", send));
-        continue;
-      }
-      if (lead) {
-        if (await pendingLead(store, row, lead[1])) {
-          await writePendingMark(statsId, row.id, `credited:${lead[1]}`);
-          counts.credited += 1;
-        } else counts.waiting += 1;
-        continue;
-      }
-      const outcome = await decidePending(store, raw, at);
-      if (outcome.kind === "unknown") {
-        counts.waiting += 1;
-        continue;
-      }
-      const rest = Object.fromEntries(Object.entries(meta).filter(([key]) => key !== VIA_PENDING_META));
-      if (outcome.kind === "credit" && once) {
-        // Credited as a link that read would have, at the shares of the sale; one that earns nothing leaves the sale
-        // to a code, a bond or a contact.
-        const credit = creditedMeta(rest, outcome.affiliate, outcome.pending);
-        if (!credit) {
-          // A share at the sale not kept: not credited automatically, read again and then told (rule 24).
-          counts.waiting += 1;
-          continue;
-        }
-        await noteSession(store, { ...row, metadata: credit.earns ? credit.meta : rest }, owners, partners);
-        if (credit.earns) await creditOffersOf(store, row, outcome.affiliate.id);
-        if (!(await pendingLead(store, row, outcome.affiliate.id))) {
-          await writePendingMark(statsId, row.id, `lead:${outcome.affiliate.id}:${seenAt}`);
-          counts.waiting += 1;
-          continue;
-        }
-        await writePendingMark(statsId, row.id, credit.earns ? `credited:${outcome.affiliate.id}` : "none");
-        if (credit.earns) counts.credited += 1;
-        else counts.none += 1;
-      } else if (outcome.kind === "credit") {
-        // A membership or a payment plan: the affiliate goes on its subscription, its first payment credited now.
-        const put = await creditMembership(store, row, outcome.affiliate, outcome.pending);
-        await writePendingMark(statsId, row.id, put ? `credited:${outcome.affiliate.id}` : "none");
-        if (put) counts.credited += 1;
-        else counts.none += 1;
-      } else {
-        // Nobody's link: the sale is any other sale.
-        if (once) await noteSession(store, { ...row, metadata: rest }, owners, partners);
-        await writePendingMark(statsId, row.id, "none");
-        counts.none += 1;
-      }
-    } catch (error) {
+    const final = await notePendingOne(store, row, mark, now, counts, owners, partners, send, deadline).catch((error: unknown) => {
       counts.failed.push(row.id);
       console.error("a pending affiliate link was left for the next run", row.id, error instanceof Error ? error.message : "");
+      return false;
+    });
+    // On the company's list while not decided, last read now; off it once decided. Best effort: the listing still
+    // brings it for its day, and a member left behind leaves once its mark has expired.
+    if (store.sid) {
+      const member = `${store.sid}|${row.id}`;
+      await redisPipeline([final ? ["ZREM", PENDING_DUE_KEY, member] : ["ZADD", PENDING_DUE_KEY, now, member], ["EXPIRE", PENDING_DUE_KEY, PENDING_MARK_SECONDS]]).catch((error) =>
+        console.error("keeping a pending affiliate link on the sweep's list failed", row.id, error instanceof Error ? error.message : ""),
+      );
     }
   }
   return counts;
+}
+
+/** One pending order of notePendingLinks; true once it is decided for good (its mark final). */
+async function notePendingOne(
+  store: Store,
+  row: SessionLike & { id: string },
+  mark: unknown,
+  now: number,
+  counts: PendingCounts,
+  owners: Map<string, string> | undefined,
+  partners: Affiliate[] | undefined,
+  send: PendingSend,
+  deadline: number | undefined,
+): Promise<boolean> {
+  const statsId = store.statsId as string;
+  const meta = row.metadata ?? {};
+  const raw = meta[VIA_PENDING_META];
+  const once = row.mode === undefined || row.mode === "payment";
+  const finalNow = async () => isFinal((await readPendingMark(statsId, row.id)) ?? "");
+  if (mark !== null && typeof mark !== "string") {
+    counts.failed.push(row.id);
+    return false;
+  }
+  if (typeof mark === "string" && isFinal(mark)) return true;
+  if (mark?.startsWith("tell:")) {
+    // A notice still due: tried again, never read again.
+    const why = mark.slice(5) as TellWhy;
+    countTold(counts, await tellPending(store, row.id, raw, TELL_WHYS.includes(why) ? why : "unread", send));
+    return finalNow();
+  }
+  const step = mark?.match(/^(offers|lead):([0-9a-f]{12}):(\d+)$/) ?? null;
+  const seenAt = mark === null ? now : step ? Number(step[3]) : mark.startsWith("seen:") ? Number(mark.slice(5)) : NaN;
+  if (!Number.isFinite(seenAt)) {
+    counts.failed.push(row.id);
+    return false;
+  }
+  if (mark === null) await writePendingMark(statsId, row.id, `seen:${now}`);
+  const at = typeof row.created === "number" ? row.created : now;
+  const lastCall = at + PENDING_SWEEP_SECONDS - PENDING_TELL_MARGIN;
+  const due = Math.min(seenAt + PENDING_LINK_SECONDS, lastCall);
+  if (step) {
+    // Credited already: its offers or its lead are what is left.
+    const aff = step[2];
+    const doneNow = step[1] === "offers" ? await creditOffersOf(store, row, aff, deadline).then(() => pendingLead(store, row, aff)) : await pendingLead(store, row, aff);
+    if (doneNow) {
+      await writePendingMark(statsId, row.id, `credited:${aff}`);
+      counts.credited += 1;
+      return true;
+    }
+    if (step[1] === "offers") await writePendingMark(statsId, row.id, `lead:${aff}:${seenAt}`);
+    if (now >= due) {
+      countTold(counts, await tellPending(store, row.id, raw, "lead", send));
+      return finalNow();
+    }
+    counts.waiting += 1;
+    return false;
+  }
+  // Past the deadline, after at least one read: told, never read again; a membership's subscription read back first.
+  if (mark !== null && now >= due) {
+    if (!once) return tellMembership(store, row, raw, counts, send, deadline);
+    countTold(counts, await tellPending(store, row.id, raw, "unread", send));
+    return finalNow();
+  }
+  const outcome = await decidePending(store, raw, at);
+  if (outcome.kind === "unknown") {
+    // Read once now and still unknown, with the checkout about to leave the sweep's day: told now.
+    if (now >= lastCall) {
+      countTold(counts, await tellPending(store, row.id, raw, once ? "unread" : "membership", send));
+      return finalNow();
+    }
+    counts.waiting += 1;
+    return false;
+  }
+  if (outcome.kind === "share") {
+    // Read, but sold at a share not known now: it will not become known, so the creator is told at once.
+    countTold(counts, await tellPending(store, row.id, raw, "share", send));
+    return finalNow();
+  }
+  const rest = Object.fromEntries(Object.entries(meta).filter(([key]) => key !== VIA_PENDING_META));
+  if (outcome.kind === "none") {
+    // Nobody's link: the sale is any other sale.
+    if (once) await noteSession(store, { ...row, metadata: rest }, owners, partners);
+    await writePendingMark(statsId, row.id, "none");
+    counts.none += 1;
+    return true;
+  }
+  const aff = outcome.affiliate.id;
+  if (!once) {
+    // A membership or a payment plan: the affiliate goes on its subscription, its first payment credited now.
+    const put = await creditMembership(store, row, outcome.affiliate, outcome.pending, deadline);
+    if (put === null) {
+      countTold(counts, await tellPending(store, row.id, raw, "share", send));
+      return finalNow();
+    }
+    await writePendingMark(statsId, row.id, put ? `credited:${aff}` : "none");
+    if (put) counts.credited += 1;
+    else counts.none += 1;
+    return true;
+  }
+  // Credited as a link that read would have, at the shares of the sale; one that earns nothing leaves the sale to a
+  // code, a bond or a contact.
+  const credit = creditedMeta(rest, outcome.affiliate, outcome.pending);
+  if (!credit) {
+    countTold(counts, await tellPending(store, row.id, raw, "share", send));
+    return finalNow();
+  }
+  await noteSession(store, { ...row, metadata: credit.earns ? credit.meta : rest }, owners, partners);
+  if (!credit.earns) {
+    await writePendingMark(statsId, row.id, "none");
+    counts.none += 1;
+    return true;
+  }
+  // The offers follow it from here (creditedTo), before the ones already paid are read: none is missed in between.
+  await writePendingMark(statsId, row.id, `offers:${aff}:${seenAt}`);
+  await creditOffersOf(store, row, aff, deadline);
+  if (!(await pendingLead(store, row, aff))) {
+    await writePendingMark(statsId, row.id, `lead:${aff}:${seenAt}`);
+    counts.waiting += 1;
+    return false;
+  }
+  await writePendingMark(statsId, row.id, `credited:${aff}`);
+  counts.credited += 1;
+  return true;
+}
+
+/**
+ * A membership past its deadline: its subscription read back first. The affiliate on it: the change was made (an
+ * answer lost), so it is credited, its first payment with it. Nobody on it: told it is not credited. Not answered:
+ * told only that it could not be confirmed, never that it is not credited (rule 24).
+ */
+async function tellMembership(store: Store, row: SessionLike & { id: string }, raw: unknown, counts: PendingCounts, send: PendingSend, deadline: number | undefined): Promise<boolean> {
+  const statsId = store.statsId as string;
+  const subscription = typeof row.subscription === "string" ? row.subscription : "";
+  let on: { via: string; rate: string } | null = null;
+  if (/^sub_[A-Za-z0-9]{3,250}$/.test(subscription) && store.stripeAccountId) {
+    on = await subscriptionVia(store, subscription, deadline).catch(() => null);
+  } else {
+    on = { via: "", rate: "" };
+  }
+  if (on && AFFILIATE_ID_PATTERN.test(on.via) && /^\d{1,3}(\.\d+)?$/.test(on.rate)) {
+    await creditFirstPayment(store, row, on.via, Number(on.rate), deadline);
+    await writePendingMark(statsId, row.id, `credited:${on.via}`);
+    counts.credited += 1;
+    return true;
+  }
+  countTold(counts, await tellPending(store, row.id, raw, on ? "membership" : "unsure", send));
+  return isFinal((await readPendingMark(statsId, row.id)) ?? "");
+}
+
+/**
+ * The sweep's own pass over the company's list of pending Stripe orders (PENDING_DUE_KEY): at most PENDING_DUE_BATCH
+ * not read by a store's listing for PENDING_DUE_IDLE, each read again from Stripe (its checkout, by GET) and decided
+ * as notePendingLinks does. One whose store is gone, or whose mark has expired, leaves the list; one that does not
+ * read stays for the next run. Stripe is asked nothing past `deadline` (ms). Returns how many did not read.
+ */
+export async function notePendingDue(now = Math.floor(Date.now() / 1000), deadline?: number, send: PendingSend = sendEmailOutcome): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const read = repliesFor(await redisPipeline([["ZRANGEBYSCORE", PENDING_DUE_KEY, "-inf", now - PENDING_DUE_IDLE, "LIMIT", 0, PENDING_DUE_BATCH]]), 1);
+  const members = read ? stringList(read[0]) : null;
+  if (!members) throw new UnknownReplyError("the pending affiliate links' list");
+  let failed = 0;
+  for (const member of members) {
+    const [sid, session] = member.split("|");
+    try {
+      const store = sid ? await storeForId(sid) : null;
+      const mark = store?.statsId && /^cs_[A-Za-z0-9_]{3,250}$/.test(session ?? "") ? await readPendingMark(store.statsId, session) : null;
+      if (!store || !store.stripeAccountId || mark === null || isFinal(mark)) {
+        await redisPipeline([["ZREM", PENDING_DUE_KEY, member]]);
+        continue;
+      }
+      const row = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${session}`, undefined, undefined, undefined, pendingWait(deadline));
+      if (row.id !== session) throw new UnknownReplyError("a pending order's checkout");
+      const counts = await notePendingLinks(store, [row as SessionLike], now, undefined, undefined, send, deadline);
+      if (counts.failed.length) failed += 1;
+    } catch (error) {
+      failed += 1;
+      await redisPipeline([["ZADD", PENDING_DUE_KEY, now, member]]).catch(() => undefined);
+      console.error("a pending affiliate link on the sweep's list was left for the next run", member, error instanceof Error ? error.message : "");
+    }
+  }
+  return failed;
 }
 
 /** The PayPal orders whose affiliate link waits to be decided, by when they are next due (seconds). */
@@ -2866,42 +3111,39 @@ async function paypalDone(statsId: string, order: string): Promise<void> {
 
 /**
  * A PayPal order's pending link (owner's decision 6), as notePendingLinks decides a Stripe one, whether the program
- * is on now or not: read at its hand-over against the time it was paid, and again until PENDING_LINK_SECONDS after
- * it, credited once at the share of the sale, or nobody's; still unknown, kept on the store's list for the sweep's
- * next pass (notePayPalPendings); past it, the creator is told with the same retries.
+ * is on now or not: put on the store's list first, so whatever fails after leaves it there for the sweep's next pass
+ * (notePayPalPendings); read at its hand-over against the time it was paid, and again until PENDING_LINK_SECONDS after
+ * it, credited once at the share of the sale, or nobody's; read but sold at a share not known now, or past the
+ * deadline, the creator is told with the same retries. Off the list once decided.
  */
 async function settlePayPalPending(store: Store, paid: Paid, title: string, now: number, send: PendingSend): Promise<void> {
   const statsId = store.statsId as string;
   const raw = paid.meta?.[VIA_PENDING_META];
   const ref = `paypal:${paid.order}`;
+  await paypalDue(statsId, paid.order, now);
   const mark = await readPendingMark(statsId, ref);
-  if (mark !== null && mark !== "tell:unread" && mark !== "seen:0") return paypalDone(statsId, paid.order);
-  // Read at its hand-over first (seen:0 marks that it was), then told past the deadline.
-  if (mark === "tell:unread" || (mark === "seen:0" && now - paid.at >= PENDING_LINK_SECONDS)) {
-    // On the list before the notice is tried, so an order is never left with a notice due and nothing to try it again.
-    await paypalDue(statsId, paid.order, now);
-    const told = await tellPending(store, ref, raw, "unread", send);
+  if (mark !== null && isFinal(mark)) return paypalDone(statsId, paid.order);
+  const tell = async (why: TellWhy) => {
+    const told = await tellPending(store, ref, raw, why, send);
     if (told !== "refused") await paypalDone(statsId, paid.order);
-    return;
-  }
+  };
+  if (mark?.startsWith("tell:")) return tell(mark === "tell:share" ? "share" : "unread");
+  // Read at its hand-over first (seen:0 marks that it was), then told past the deadline.
+  if (mark === "seen:0" && now - paid.at >= PENDING_LINK_SECONDS) return tell("unread");
   const outcome = await decidePending(store, raw, paid.at);
   if (outcome.kind === "unknown") {
     if (mark === null) await writePendingMark(statsId, ref, "seen:0");
-    return paypalDue(statsId, paid.order, now);
+    return;
   }
+  if (outcome.kind === "share") return tell("share");
   const share = outcome.kind === "credit" ? saleShare(outcome.pending, paid.product, outcome.affiliate.rate) : 0;
-  if (share === null) {
-    // The share at the sale was not kept: not credited automatically, told past the deadline (rule 24).
-    if (mark === null) await writePendingMark(statsId, ref, "seen:0");
-    return paypalDue(statsId, paid.order, now);
-  }
-  const rate = share;
-  if (outcome.kind === "credit" && rate > 0) {
+  if (share === null) return tell("share");
+  if (outcome.kind === "credit" && share > 0) {
     const sale = { ref, pi: paypalPaymentId(paid.capture), at: paid.at, product: paid.product, title: title.slice(0, 200), base: paid.cents, total: paid.cents, currency: readCurrencyCode(paid.currency) };
-    await writeReferral(store, { ...sale, aff: outcome.affiliate.id, rate, self: await isSelf(store, outcome.affiliate.id, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
+    await writeReferral(store, { ...sale, aff: outcome.affiliate.id, rate: share, self: await isSelf(store, outcome.affiliate.id, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
     await rememberBuyer(store, paid.email, outcome.affiliate.id, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
-  await writePendingMark(statsId, ref, outcome.kind === "credit" && rate > 0 ? `credited:${outcome.affiliate.id}` : "none");
+  await writePendingMark(statsId, ref, outcome.kind === "credit" && share > 0 ? `credited:${outcome.affiliate.id}` : "none");
   await paypalDone(statsId, paid.order);
 }
 
@@ -3600,7 +3842,10 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       invoicesChecked = false;
     }
   }
-  const everything = [...referrals, ...partnerLines, ...recurringLines];
+  // A payment already written down as a sale (a membership's first payment credited when its pending link was
+  // confirmed, lib/affiliates.ts creditFirstPayment) is never read again from its invoice: one line, never two.
+  const written = new Set(referrals.map((r) => r.ref));
+  const everything = [...referrals, ...partnerLines, ...recurringLines.filter((r) => !written.has(r.ref))];
   const leads = pairs(leadsReply)
     .map(([, raw]) => parseLead(raw))
     .filter((l): l is NonNullable<typeof l> => l !== null);

@@ -89,6 +89,23 @@ async function main(): Promise<void> {
   is("a unit held by a checkout still open: Sold out", held, { ok: false, reason: "soldout" });
   is("and Stripe is not asked", [gets.length, opened], [0, 1]);
 
+  part("Stripe cannot be read about the lapsed holds: an unknown count is never Sold out (Claude 6's LOW on #1732)");
+  // stockLeft throws when a lapsed hold's checkout cannot be read; the click is told to press again, as for a count
+  // that does not settle, never "Sold out" on that guess.
+  await fillWithLapsed("recount4", MAX_LAPSED);
+  const stripe = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
+  try {
+    const unknown = await withStockHold(creator, limited("recount4", MAX_LAPSED), async () => {
+      opened += 1;
+      return { id: "cs_test_recountopen0004" };
+    });
+    is("Stripe down while the lapsed holds are asked about: press again, never Sold out", unknown, { ok: false, reason: "busy" });
+    is("and nothing is opened", opened, 1);
+  } finally {
+    globalThis.fetch = stripe;
+  }
+
   done();
 }
 

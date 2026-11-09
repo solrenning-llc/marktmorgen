@@ -126,6 +126,22 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
+        if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, listKey, id, kept] = args;
+          this.live(listKey);
+          if (!this.data.has(listKey)) return null;
+          for (const raw of this.list(listKey).slice(0, Number(kept))) {
+            if (!raw.includes(`"id":"${id}"`)) continue;
+            try {
+              const value = JSON.parse(raw) as unknown;
+              if (!value || typeof value !== "object" || Array.isArray(value) || (value as { id?: unknown }).id === id) return raw;
+            } catch {
+              return raw;
+            }
+          }
+          return null;
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;

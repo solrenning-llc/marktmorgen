@@ -1,0 +1,39 @@
+{
+  "retrievedOn": "2026-11-09 UTC",
+  "sources": [
+    {
+      "repository": "stripe/stripe-node",
+      "ref": "v22.6.0",
+      "path": "src/resources/Disputes.ts",
+      "blob": "624f304d80b96abef2f810d03401ea0a71a025a6",
+      "length": 34217,
+      "excerpt": "  }\n\n  export type Status =\n    | 'lost'\n    | 'needs_response'\n    | 'prevented'\n    | 'under_review'\n    | 'warning_closed'\n    | 'warning_needs_response'\n    | 'warning_under_review'\n    | 'won'\n    | OtherString;\n\n  export namespace Evidence {"
+    },
+    {
+      "repository": "stripe/stripe-node",
+      "ref": "v12.18.0",
+      "path": "types/Disputes.d.ts",
+      "blob": "dae7864594a1eed0848cc0e85a3f1fe696f10c12",
+      "length": 10441,
+      "excerpt": "      }\n\n      type Status =\n        | 'charge_refunded'\n        | 'lost'\n        | 'needs_response'\n        | 'under_review'\n        | 'warning_closed'\n        | 'warning_needs_response'\n        | 'warning_under_review'\n        | 'won';\n    }\n  }"
+    },
+    {
+      "repository": "stripe/stripe-node",
+      "ref": "v13.0.0",
+      "path": "CHANGELOG.md",
+      "blob": "07f2453def979fdaf85f28ea82204682815224ae",
+      "length": 209444,
+      "excerpt": "* ⚠️Remove support for value `charge_refunded` from enum `Dispute.status`\n  * This value was not fully operational."
+    }
+  ],
+  "currentOfficialAPI": {
+    "url": "https://docs.stripe.com/api/disputes/object",
+    "statusPreventedMeaning": "A dispute that was prevented from becoming a formal chargeback.",
+    "scope": "Confirms documented status/closure description; does not independently prove that all prevention modes refund money."
+  },
+  "supportContext": {
+    "url": "https://support.stripe.com/questions/onboarding-to-dispute-prevention?locale=en-GB",
+    "scope": "Automatic refund conditions during dispute prevention, context only; not a complete per-status funds contract."
+  },
+  "limitations": "Generated type membership is independently checked. Treating prevented as lost follows the existing RETURNED policy of plan-refund-rules; refund settlement for every prevention mode is not independently proven here. Legacy charge_refunded was removed as not fully operational; no live response is claimed."
+}

@@ -1,0 +1,23 @@
+
+FILE z-3321-controls.proof.ts
+Z_CONDITIONAL_COMPOSITION {"refunds":1,"disputes":1,"kept":-10000,"commission":0,"liveCooccurrenceProven":false}
+✔ prevented reaches actual readers, retained revenue and affiliate settlement (6.525422ms)
+✔ prevented refund replay keeps one key and a confirmed fully refunded fee performs no reads (4.891324ms)
+✔ unconfirmed refund receipt retries the same difference with the same key (3.540214ms)
+✔ prevented GET bindings retain the exact account, charge and pinned version (0.698144ms)
+✔ partial, foreign, duplicate and unknown dispute evidence cannot refund (3.010434ms)
+✔ unknown charge amount or currency never becomes a refund entitlement (1.239621ms)
+✔ won keeps the fee while legacy and case-variant statuses fail closed (1.798215ms)
+✔ conditional refund plus prevented composition is observed without claiming live co-occurrence (2.195744ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 38.313289
+Z_VOLUME {"runs":0,"mocks":38,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3321-MwC629

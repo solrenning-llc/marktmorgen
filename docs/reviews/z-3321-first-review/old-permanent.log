@@ -1,0 +1,120 @@
+
+FILE prevented-dispute-siblings.test.ts
+✖ the one list of disputes that take the money now holds prevented, as it holds lost (1.8222ms)
+✖ the store's numbers take a prevented dispute's money off, as a lost one's (6.661251ms)
+✖ the affiliate book earns nothing on a sale whose dispute was prevented, as on a lost one (1.318479ms)
+✖ a prevented dispute gives the platform share back once, as a lost one does (5.730085ms)
+✔ a won dispute keeps the share; a status the pinned version cannot send, or one unknown, still gives nothing back (4.668794ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 1
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26.904664
+
+✖ failing tests:
+
+test at [stdin]:45217:30
+✖ the one list of disputes that take the money now holds prevented, as it holds lost (1.8222ms)
+  AssertionError [ERR_ASSERTION]: prevented
+
+  false !== true
+
+      at TestContext.<anonymous> ([stdin]:45218:103)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:45222:30
+✖ the store's numbers take a prevented dispute's money off, as a lost one's (6.661251ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  ... Skipped lines
+
+    [
+      [
+        'pi_lost',
+        4000
+      ],
+  ...
+      [
+  -     'pi_prevented',
+  -     3000
+  -   ],
+  -   [
+        'pi_underreview',
+        600
+      ]
+    ]
+
+      at TestContext.<anonymous> ([stdin]:45225:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:45232:30
+✖ the affiliate book earns nothing on a sale whose dispute was prevented, as on a lost one (1.318479ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  ... Skipped lines
+
+    [
+      [
+        'pi_lost',
+        4000
+      ],
+  ...
+      [
+  -     'pi_prevented',
+  -     3000
+  -   ],
+  -   [
+        'pi_underreview',
+        600
+      ]
+    ]
+
+      at TestContext.<anonymous> ([stdin]:45235:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:45242:30
+✖ a prevented dispute gives the platform share back once, as a lost one does (5.730085ms)
+  UnknownDisputeStatus [Error]: Dispute status is unknown
+      at owedOnFee ([stdin]:45119:40)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:45246:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    feeId: 'fee_PreventedProof01'
+  }
+Z_VOLUME {"runs":0,"mocks":17,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3321-NBygSw

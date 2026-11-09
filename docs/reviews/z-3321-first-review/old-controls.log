@@ -1,0 +1,84 @@
+
+FILE z-3321-controls.proof.ts
+Z_CONDITIONAL_COMPOSITION {"refunds":1,"disputes":0,"kept":0,"commission":0,"liveCooccurrenceProven":false}
+✖ prevented reaches actual readers, retained revenue and affiliate settlement (8.547897ms)
+✖ prevented refund replay keeps one key and a confirmed fully refunded fee performs no reads (3.199056ms)
+✖ unconfirmed refund receipt retries the same difference with the same key (1.493323ms)
+✖ prevented GET bindings retain the exact account, charge and pinned version (2.800526ms)
+✔ partial, foreign, duplicate and unknown dispute evidence cannot refund (4.697157ms)
+✔ unknown charge amount or currency never becomes a refund entitlement (1.280282ms)
+✔ won keeps the fee while legacy and case-variant statuses fail closed (4.879682ms)
+✔ conditional refund plus prevented composition is observed without claiming live co-occurrence (3.374071ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 4
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 38.793092
+
+✖ failing tests:
+
+test at [stdin]:45322:30
+✖ prevented reaches actual readers, retained revenue and affiliate settlement (8.547897ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  10000 !== 0
+
+      at TestContext.<anonymous> ([stdin]:45329:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 10000,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:45334:30
+✖ prevented refund replay keeps one key and a confirmed fully refunded fee performs no reads (3.199056ms)
+  UnknownDisputeStatus [Error]: Dispute status is unknown
+      at owedOnFee ([stdin]:45237:40)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async settleFee ([stdin]:45281:20)
+      at async TestContext.<anonymous> ([stdin]:45336:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    feeId: 'fee_Z3321Proof01'
+  }
+
+test at [stdin]:45345:30
+✖ unconfirmed refund receipt retries the same difference with the same key (1.493323ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /receipt was not confirmed/. Input:
+
+  'Error: Dispute status is unknown'
+
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:45347:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [UnknownDisputeStatus],
+    expected: /receipt was not confirmed/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:45352:30
+✖ prevented GET bindings retain the exact account, charge and pinned version (2.800526ms)
+  UnknownDisputeStatus [Error]: Dispute status is unknown
+      at owedOnFee ([stdin]:45237:40)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:45354:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    feeId: 'fee_Z3321Proof01'
+  }
+Z_VOLUME {"runs":0,"mocks":30,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3321-YqBIyh

@@ -1,0 +1,58 @@
+[
+  {
+    "label": "old-controls",
+    "files": [
+      "z-3321-controls.proof.ts"
+    ],
+    "status": 1,
+    "seconds": 0.788,
+    "bytes": 3644
+  },
+  {
+    "label": "old-permanent",
+    "files": [
+      "prevented-dispute-siblings.test.ts"
+    ],
+    "status": 1,
+    "seconds": 1.053,
+    "bytes": 3787
+  },
+  {
+    "label": "head",
+    "files": [
+      "z-3321-controls.proof.ts",
+      "prevented-dispute-siblings.test.ts",
+      "retained-revenue.test.ts",
+      "share-lost-dispute.test.ts"
+    ],
+    "status": 1,
+    "seconds": 1.873,
+    "bytes": 5400
+  },
+  {
+    "label": "old-controls-corrected",
+    "status": 1,
+    "seconds": 0.771,
+    "bytes": 3644
+  },
+  {
+    "label": "head-controls-corrected",
+    "status": 0,
+    "seconds": 0.629,
+    "bytes": 1102
+  },
+  {
+    "label": "types",
+    "status": 0,
+    "seconds": 7.16,
+    "bytes": 103,
+    "heapMiB": 1024
+  },
+  {
+    "label": "lint",
+    "status": 0,
+    "seconds": 2.25,
+    "bytes": 0,
+    "heapMiB": 512
+  }
+]

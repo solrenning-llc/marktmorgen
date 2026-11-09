@@ -1,0 +1,5 @@
+{
+  "initialSHA256": "659d7f418d3d2d5154c0feb52682c90dd7a4618ab5dd23c7abed55c8fbafa94d",
+  "reason": "Own harness indexed a zero-net channel omitted by keptIn. Preserve the zero-net oracle using its channel sum. Also replace invalid Referral Credit link with existing click. No product change, ceiling breach or oracle relaxation. Initial logs retained; rerun only own complete eight-case root on OLD and HEAD.",
+  "finalSHA256": "3f3ea91fec6c5533b6edfaf81386a223ba872086eb81dd4b875f31b0cb5af4a6"
+}

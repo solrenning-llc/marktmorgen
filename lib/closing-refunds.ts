@@ -141,33 +141,73 @@ export type Settled = {
   left: number;
 };
 
-/** The payment intent an invoice was paid by, whichever way this account's API version names it. */
-async function intentOf(account: string, invoice: string, count: () => void): Promise<string> {
+/** The most pages of an invoice's payments read for one member's refund (a hundred a page; each page past the first is a call taken from the closing's budget). */
+export const INVOICE_PAYMENT_PAGES = 5;
+
+/**
+ * The invoice's payments could not all be read within the closing's calls: no call was left for the next page, or the
+ * list ran past INVOICE_PAYMENT_PAGES. Handled as a member the closing's limit did not reach (told on the closing
+ * day, counted for the creator before it), never as "no payment".
+ */
+export class PaymentsPastLimit extends Error {
+  constructor(what: string) {
+    super(`an invoice's payments were not read to the end within the closing's limit: ${what}`);
+    this.name = "PaymentsPastLimit";
+  }
+}
+
+/**
+ * A row of an invoice's payments, read in its exact shape: any status in text; a paid one with a payment object whose
+ * type is text and agrees with what it names (a payment_intent names a PaymentIntent by id; any other type names
+ * none), so a garbled row is never taken for a payment of another kind.
+ */
+function paymentRowReads(row: Record<string, unknown>): boolean {
+  const status = ownField(row, "status");
+  if (typeof status !== "string") return false;
+  if (status !== "paid") return true;
+  const payment = ownField(row, "payment");
+  if (!plainObject(payment)) return false;
+  const type = ownField(payment, "type");
+  if (typeof type !== "string" || !type) return false;
+  const pi = ownField(payment, "payment_intent");
+  if (type === "payment_intent") return INTENT_ID.test(idOf(pi));
+  return pi === undefined || pi === null;
+}
+
+/**
+ * The payment intent an invoice was paid by, whichever way this account's API version names it. `more` takes the
+ * call for each page of its payments past the first from the closing's budget, before it is read.
+ */
+async function intentOf(account: string, invoice: string, count: () => void, more: () => Promise<boolean>): Promise<string> {
   count();
   const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
   const direct = typeof read.payment_intent === "string" ? read.payment_intent : (read.payment_intent as { id?: unknown } | null)?.id;
   if (typeof direct === "string" && INTENT_ID.test(direct)) return direct;
-  count();
-  // Read in its exact shape (lib/stripe-list.ts; CX-123 rules 24 and 30): a page in another shape, a row that does not
-  // read, or a list not read to its end throws, and the member stays to be read again. "No payment" ("") only from a
-  // whole, readable list: none paid, or paid otherwise than by a PaymentIntent. Never a refund owed dropped on a guess.
-  const page = readStripePage(await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`), (row) => {
-    const status = ownField(row, "status");
-    if (typeof status !== "string") return false;
-    if (status !== "paid") return true;
-    const payment = ownField(row, "payment");
-    if (!plainObject(payment)) return false;
-    const pi = ownField(payment, "payment_intent");
-    // Absent (or null) only on a payment of another kind; present, it must name a PaymentIntent.
-    return pi === undefined || pi === null || INTENT_ID.test(idOf(pi));
-  });
-  if (page.unreadable) throw new StripeListUnreadable("an invoice's payments, a row not readable");
-  for (const row of page.rows) {
-    if (ownField(row, "status") !== "paid") continue;
-    const id = idOf(ownField(ownField(row, "payment") as Record<string, unknown>, "payment_intent"));
-    if (INTENT_ID.test(id)) return id;
+  // Read in its exact shape (lib/stripe-list.ts; CX-123 rules 24 and 30), page by page from the last row of the one
+  // before: a paid payment on a readable row is the answer on any page, beside rows that do not read; "no payment"
+  // ("") only from the whole list, every row readable, none paid by a PaymentIntent. A page in another shape, a row
+  // that does not read or a list that cannot be followed throws, and the member stays to be read again; a list longer
+  // than the closing's calls reach is PaymentsPastLimit. Never a refund owed dropped on a guess.
+  let unreadable = 0;
+  let after: string | null = null;
+  for (let pages = 0; ; pages += 1) {
+    if (pages >= INVOICE_PAYMENT_PAGES) throw new PaymentsPastLimit(`more than ${INVOICE_PAYMENT_PAGES} pages`);
+    if (pages > 0 && !(await more())) throw new PaymentsPastLimit("no call left for the next page");
+    count();
+    const query = new URLSearchParams({ invoice, limit: "100" });
+    if (after) query.set("starting_after", after);
+    const page = readStripePage(await onAccount("GET", account, `/invoice_payments?${query}`), paymentRowReads);
+    for (const row of page.rows) {
+      if (ownField(row, "status") !== "paid") continue;
+      const id = idOf(ownField(ownField(row, "payment") as Record<string, unknown>, "payment_intent"));
+      if (INTENT_ID.test(id)) return id;
+    }
+    unreadable += page.unreadable;
+    if (!page.hasMore) break;
+    if (!page.lastId) throw new StripeListUnreadable("an invoice's payments, the last row of a page not readable");
+    after = page.lastId;
   }
-  if (page.hasMore) throw new StripeListUnreadable("an invoice's payments, not read to the end");
+  if (unreadable) throw new StripeListUnreadable("an invoice's payments, a row not readable");
   return "";
 }
 
@@ -268,7 +308,8 @@ export async function giveBackUnused(
         out.short.push({ sub: row.sub, amount: give, cur: row.paid.cur, email: row.paid.e });
       };
       // Its payment, the refunds already made on it and the refund itself, and two more when Stripe did not name its
-      // payment when it was held. Before the closing day they come from the budget; only the closing day uses the
+      // payment when it was held (and one more for each further page of the invoice's payments, taken as it is read).
+      // Before the closing day they come from the budget; only the closing day uses the
       // calls set aside when it was held (rcalls), so pressing the button again can never drain them. Every call not
       // made is given back to where it was taken from.
       const need = row.paid.pi ? 3 : 5;
@@ -320,7 +361,9 @@ export async function giveBackUnused(
         continue;
       }
       try {
-        const intent = row.paid.pi ?? (await intentOf(account, row.paid.inv, count));
+        // Each page of the invoice's payments past the first: one more call from the budget, as the rest are taken.
+        const more = async () => (options.final ? (await take("calls", 1)) || (await take("rcalls", 1)) : await take("calls", 1));
+        const intent = row.paid.pi ?? (await intentOf(account, row.paid.inv, count, more));
         if (!intent) {
           await settle("none");
           out.none += 1;
@@ -419,6 +462,16 @@ export async function giveBackUnused(
           out.done.push({ sub: row.sub, amount: give, cur: row.paid.cur });
         }
       } catch (error) {
+        if (error instanceof PaymentsPastLimit) {
+          // As a member the closing's calls did not reach: on the closing day final, and told honestly that it was not
+          // made automatically, with what is left to give; before it, counted for the creator and tried again.
+          if (options.final) {
+            const amount = stillToGive(row.unused, row.paid.back ?? 0);
+            await settle("over", amount);
+            out.unmade.push({ sub: row.sub, amount, cur: row.paid.cur, email: row.paid.e });
+          } else out.over += 1;
+          continue;
+        }
         console.error("giving a member's unused time back failed; tried again", error);
         out.failed += 1;
       } finally {

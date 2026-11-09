@@ -7,7 +7,7 @@
  *     day a charge (before: on every run, every five minutes, for any refund);
  *   - a refund held for later keeps the anchor written: run after run for sixty-two days, it never lapses, and the
  *     review is marked once the refund succeeded (before: a pass that ended where it began wrote nothing);
- *   - a refund on its way on a charge that does not read refunded in full holds nothing: it can never end anything.
+ *   - a refund on its way on a charge not read refunded in full still holds the anchor (2nd pre-review).
  */
 import { markRefundedReviews } from "@/lib/review-proof";
 import { readReview, saveReview } from "@/lib/reviews";
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
     is("once the refund succeeded in full, the review is marked", await slow.refunded(), true);
   }
 
-  part("A refund on its way that can end nothing");
+  part("A refund on its way on a charge not read refunded in full");
   {
     await restart(NOW - 3_600);
     refunds = [
@@ -121,7 +121,9 @@ async function main(): Promise<void> {
       refund("re_RevAlertPart01", "pi_RevAlertOtherSale2", "pending", charge("ch_RevAlertPart01", false, 500), 500, NOW - 1_800),
     ];
     await run();
-    is("a pending part of a charge not refunded in full never holds the anchor", (await anchor()) >= NOW - 60, true);
+    // Rule 23 (2nd pre-review of ba094637f9): nothing says Stripe counts a refund on its way in amount_refunded, so
+    // one on a charge not read refunded in full may still give it all back: it holds the anchor too (it used to not).
+    is("a pending refund on a charge not read refunded in full still holds the anchor", (await anchor()) <= NOW - 1_800, true);
   }
   done();
 }

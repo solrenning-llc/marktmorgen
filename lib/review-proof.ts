@@ -453,14 +453,14 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   const stuck: Row[] = [];
   /**
    * Whether a row may mark its reviews now: a lost dispute, or a refund that succeeded on a charge refunded in full. A
-   * refund still on its way on a charge that reads refunded in full (Stripe counts it there) marks nothing and, in the
-   * pass, holds the anchor at its time (the owner's decision 18); one on a charge that does not, which can never give
-   * the whole charge back, holds nothing. One that failed or was canceled, or a part, marks nothing.
+   * refund still on its way marks nothing and, in the pass, holds the anchor at its time (the owner's decision 18),
+   * whatever its charge reads now: nothing says Stripe already counts it in amount_refunded (main's #3188 reads it the
+   * other way), so it may still give the whole charge back once it goes through (2nd pre-review of ba094637f9). One
+   * that failed or was canceled, or a part, marks nothing.
    */
   const givesBackNow = (refund: Row, inPass: boolean): boolean => {
     if (refund.object === "dispute") return rowGivesBack(refund);
     if (REFUND_ON_ITS_WAY.has(refund.status as string)) {
-      if (!refundedInFull(refund.charge)) return false;
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (created <= now - REFUND_STUCK_SECONDS) stuck.push(refund);
       // The newest page a resuming run reads first never moves the pass: one of the pass's window is held when the pass
@@ -472,7 +472,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   };
   /**
    * A refund on its way more than seven days, said in the log only for a purchase with a review, at most once a day a
-   * charge (one SET NX EX a row, then one HGET of the payment's index on the first of the day): an alert for whoever
+   * charge (one HGET of the payment's index a row, then one SET NX EX of the day's mark for a reviewed one): an alert for whoever
    * reads the logs, never a revocation (the owner's decision 18; pre-review of 589eb24c1b).
    */
   const sayStuck = async () => {
@@ -481,9 +481,12 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const charge = plainObject(refund.charge) ? ownField(refund.charge, "id") : undefined;
       if (typeof charge !== "string" || !CHARGE_PATTERN.test(charge) || charges.has(charge)) continue;
       charges.add(charge);
-      const [first] = await redisPipeline([["SET", saidKey(statsId, charge), "1", "NX", "EX", 86_400]]);
+      // Whether the purchase has a review first, then the day's mark: a read that fails leaves no mark, so the line is
+      // not lost for the day (2nd pre-review of ba094637f9).
       const pi = idOf(refund.payment_intent);
-      if (first !== "OK" || !INTENT_ID.test(pi) || !(await paymentReviewed(statsId, pi))) continue;
+      if (!INTENT_ID.test(pi) || !(await paymentReviewed(statsId, pi))) continue;
+      const [first] = await redisPipeline([["SET", saidKey(statsId, charge), "1", "NX", "EX", 86_400]]);
+      if (first !== "OK") continue;
       // The review counts until the refund succeeded.
       console.error("a refund for a reviewed purchase has been pending for more than seven days; its review counts until it succeeds", { store: store.handle, account, refund: refund.id, charge, status: refund.status, created: refund.created });
     }

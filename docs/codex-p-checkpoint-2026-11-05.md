@@ -3148,3 +3148,16 @@ b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
 8679ebd3d3f9dddfd5786d3fe98fdcfe7390e346	refs/pull/3360/head
 6ee69ba31a08e99a2264f0cabdbfcc0ea1053d57	refs/pull/3380/head
 ```
+
+
+## 2026-11-09 13:32 Fortaleza — channel transport failure persists; read-only reconciliation
+
+FIRST canonicalf0726adecd3e90347edd343af2a45c374c7927eb/blobb4f8c08e62fe05d32da7b906f61f118080f4c148/FULL545825 read in full through metadata→blob, latest12:40 section reconciled. Fresh authorized ROOTmessages.md metadata766f079ca4d40106ababc1a30f765863dfc9a25f obtained only for SHA; required FULL fetch_blob returned explicit Transport closed. This version is UNREAD. No retry loop, partial/shared write fallback, new channel RES/PONTO or receipt. Last fully verified PONTO remains0529/ea628b97fd8633e5a21bdba61f221284c13c7555/blobcfae92502174d8ed4d1a4fda92597010de24dcce/FULL7908578. No quota/reset/403 inference. Transient transport failure; project ongoing and existing continuity preserved.
+
+One native ref batch completed exit0 and was compared by exact SHA to the preceding12:40 full snapshot:94 own branches and29 followed PR refs. ALL29 followed PR heads and93 own non-checkpoint branch heads unchanged, no missing/added own ref reported. Only main advanced tofe39815c248d4caf6182f4ecfbac6d499f218b51 and the own checkpoint branch wasf0726adecd3e90347edd343af2a45c374c7927eb before this append. Thus every exact unchanged identity is the12:40 table/snapshot above; no source fetch or normdiff, CI/merge inference, foreign branch/product mutation. Original four PRs remain historically confirmed MERGED as documented; no recreation.
+
+Fresh3380 API OPEN/unmerged/head6ee69ba31a08e99a2264f0cabdbfcc0ea1053d57/base8679ebd3d3f9dddfd5786d3fe98fdcfe7390e346/updated2026-11-09T12:45:41Z. Returned FULL7-item discussion unchanged, including M nominal focal5826017803. M closure remains M's scope/result, not P execution or first opinion. No P formal3380 review id, no borrow or duplicate third review. Pending private evidence603d8dce ACK still requires exact FULL verification; local originals unavailable in the current workspace per12:40 limitation. No claim of archive recovery, corrective source/probe/test/runtime or validation replay.
+
+Only read-only reconciliation and this exact-prefix own-checkpoint append. No product/refauthor/reservations/CI/review/queue/merge/provider/account/payment/price/limit/commission/flag/gate/terms/key/contact/PII/automation/agent change. Unknown costs remain unknown. Serial Medium, zero agents, no background watcher.
+
+Next fresh CP+authorized channel metadata→FULL UTF8 blob before dependent work. After recovery reconcile latest PONTO and directed originals, verify evidence603d8dce/archive before any formal opinion, then successful causal focal RES/readback before current-head source/execution. The pending first opinion and remote PONTO are not delivered. End after exact own CP readback.

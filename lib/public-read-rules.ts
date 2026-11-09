@@ -33,8 +33,13 @@ const whole = (n: number) => (Number.isFinite(n) && n > 0 ? Math.ceil(n) : 0);
 export const AFFILIATE_PAGE_UNITS = 4;
 /** Each page of the creator's Stripe account read for the book, its body up to a megabyte worked through: one request each. */
 export const AFFILIATE_STRIPE_PAGES_PER_UNIT = 1;
-/** Fields of the program's records (affiliates, clicks, sales, payouts, shares, paid clicks, leads), read in one go, per request. */
-export const AFFILIATE_FIELDS_PER_UNIT = 150;
+/**
+ * Fields of the program's records (affiliates, clicks, sales, payouts, shares, paid clicks, leads), read in one go, per
+ * request. 125 since the book asks about each PayPal payment's partial refund too (BOOK_KEPT_REFUND_BYTES 384, two
+ * names an entry in each question; audit R13, MEDIUM 2): at 150 a program of 868 to about 1,500 fields cost more than
+ * its requests; at 125 none does, from no field to 60,000 (scanned one by one) and past it (tests/plan-cost-registry.test.ts).
+ */
+export const AFFILIATE_FIELDS_PER_UNIT = 125;
 /** Records read one command each (PayPal refunds, moved bookings), per request. */
 export const AFFILIATE_ROWS_PER_UNIT = 16;
 /** Listings read (products with their own rate, a partner's products, products named by invoices), per request. */

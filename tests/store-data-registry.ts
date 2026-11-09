@@ -430,7 +430,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:imports:cf:lock:@lib/clickfunnels-funnel.ts": short("One move at a time", "studio", 1, 128),
 
   // community
-  "nl:cm:@lib/community-access.ts": { what: "A buyer's ticket answered, the welcome sent", parts: [per("request", 1, 512, "Stripe's answer cached for minutes.", REQ("page")), item(MARK, "The welcome's mark, once per member.", "membership")] },
+  // Since #3395 the search (lib/community-found.ts) no longer keeps its own answer per course (`:sg:`): it reads what the
+  // member holds once, through holdingsOf here (`:h:`), so its search request's part moved to this file with it. The
+  // `:sg:` keys main wrote expire in OPEN_SECONDS (five minutes) and are still deleted with the person here
+  // (forgetAccessPerson), under this same family.
+  "nl:cm:@lib/community-access.ts": { what: "A buyer's ticket answered (also for the community search), the welcome sent", parts: [per("request", 1, 512, "Stripe's answer cached for minutes.", REQ("page")), per("request", 1, 512, "What a member holds, read once for a community search, cached for minutes.", REQ("search")), item(MARK, "The welcome's mark, once per member.", "membership")] },
   "nl:cm:link:@lib/community-access.ts": short("An emailed link into the community, an hour", "access", 1, LINK_BYTES, MAIL("community link")),
   "nl:rl:cm:addr:@lib/community-access.ts": short("Links asked per address, an hour", "request", 1, KEY, REQ("community link")),
   "nl:rl:cm:ip:@lib/community-access.ts": short("Links asked per connection, an hour", "request", 1, KEY, REQ("community link")),
@@ -447,7 +451,6 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cimg:@lib/community-files.ts": { what: "Community pictures, their owners and counts", line: "community-pictures" },
   "nl:cimg:doors@lib/community-files.ts": company("Picture doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's."),
   "nl:cimg:n:@lib/community-files.ts": { what: "A community's pictures counted", parts: [capped(KEY, "One count a store.")] },
-  "nl:cm:@lib/community-found.ts": short("A member's ticket for a course in the search, answered", "request", 1, 512, REQ("search")),
   "nl:cm:mail:@lib/community-mail.ts": { what: "An announcement's emails, and who they go to", parts: [per("monthly", 30, 512, "Each reader's place in a send, thirty days.", MAIL("announcement"))] },
   "nl:cm:mailq@lib/community-mail.ts": company("Announcements under way", "One set, members gone when sent."),
   "nl:cm:unsub:@lib/community-mail.ts": { what: "A member's stop link, made once and kept", parts: [item(KEY, "One a member.", "membership")] },

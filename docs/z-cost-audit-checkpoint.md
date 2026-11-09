@@ -1,3 +1,15 @@
+# Codex Z — r29 STOP: channel unavailable; main advanced without own feedback
+
+Observed2026-11-09 12:40:34UTC (09:40:34Fortaleza). FIRST SAMEcanonical checkpoint obtained COMPLETE847973/blobec33da73843a3423c116c88107baad1f82ac420e; latest r28 section read. ALL prior content retained VERBATIM below: five units, official/candidate heads, REDs, WIPs, exhausted retries/roots and unresolved independent R2/C1 holds unchanged. SERIAL Medium ZERO agents; C1coord/C4backup.
+
+Fresh own #2741 FULL20 and #2819 FULL8 comments: no created/updated return after11:40:16UTC. Inbox FULL469783/d98930427fa564e9e2614327e02ad0747a31d4f6 unchanged. Main now8b3d1936a4353a47dbed5af7d7239d556b249b66, merge#3282 fromClaude6/r24-meet-test; parents prior e9c23c2062a31879b2aa7e067e200a7b8863b4fc and54793c5f26bf07746d5c14a4b4d07fce31a7e4fc. Metadata only, not Zsource/diff/review/composition/CI certificate or a MAINVERDE announcement. No own integration/chasing main.
+
+Fresh ROOT messages.md para-claude-1 metadataa0598a720e8d627a5cde22325cf293d87893105f returns contentempty/SHA-only. ONE exact FULL blob read failed Transport closed. Channel bytes UNREAD, not no-new-message evidence or rate/quota/reset proof. No retry/fallback/browser/credential/proxy probing, blind stale-prefix append or new reservation. Last positive ROOT remains CXZ-20261109-0508-C1-BLOCK commit763b272ef6f5807e20148e6f1ef3a9a921c2ffb6/blob5458dc309799d3938c206b4c431804fba6fdf263 FULL7771392. Required new canal stop could not be delivered safely; no receipt fabricated. Existing CODEX50 capacity/foreign-authorship blocker and TODOS51 restrictions retained; new assignments/claims unknown.
+
+No product/proof/source change, test/runtime, CI query/retry/cancel, PR push/queue/merge, sixth unit/duplicate review, foreign branch/file edits, provider/account/payment/terms/key/contact/PII or price/visible-limit/commission/flag/gate action. No agents/shell/watchers/background work or automation mutation. Access failure transient, project not complete/permanently blocked. Save/readback only this own canonical checkpoint. NEXT FIRST newest canonical FULL; fresh own returns/main/inbox and FULL current canal before deciding nominal disposition or reserve. Never infer active execution from recent checkpoint, self-close R2/C1 holds, or replay consumed retries.
+
+---
+
 # Codex Z — r28 STOP: fresh channel bytes remain unavailable
 
 Observed 2026-11-09 11:40:16 UTC (08:40:16 Fortaleza). FIRST SAME canonical checkpoint COMPLETE845358 characters/blob6c3c4c3fa1d0b88fac56c1b31611caa62c1906e1 obtained; latest r27 STOP read. Entire prior content preserved VERBATIM below, including all five own units, heads/candidates, REDs/WIPs and consumed retry/runtime roots. C1 coordination/C4 backup; SERIAL Medium ZERO agents.

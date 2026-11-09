@@ -1099,8 +1099,9 @@ export function payPalSale(paid: Paid): Sale {
     payment_intent: paypalPaymentId(paid.capture),
     metadata: meta,
     // What the order's own record says of it, for the Path (lib/path-facts.ts, soldOf; 12 [D9]): taken through
-    // PayPal's live API or not, by which PayPal account, and whether PayPal refunded part of it or reversed it.
-    paypal: { live: paid.live === true, merchant: typeof paid.merchant === "string" ? paid.merchant : null, taken_off: typeof paid.takenOff === "string" ? paid.takenOff : null },
+    // PayPal's live API or not, by which PayPal account, whether PayPal refunded part of it or reversed it, and whether
+    // the refund watch could not read PayPal's word on it at its last look (Claude 5's N1b on #3443).
+    paypal: { live: paid.live === true, merchant: typeof paid.merchant === "string" ? paid.merchant : null, taken_off: typeof paid.takenOff === "string" ? paid.takenOff : null, blind: paid.blind !== undefined },
   };
   return {
     created: paid.at * 1000,

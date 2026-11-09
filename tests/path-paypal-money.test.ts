@@ -80,7 +80,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 /** Replies bent on their way back, for the replies-off-their-shape checks; null leaves every reply as Redis gave it. */
 let bend: ((commands: (string | number)[][], replies: unknown[]) => unknown) | null = null;
 const realPipeline = redis.pipeline.bind(redis);
+/** Commands not run at all, their reply off its shape: a write Redis may not have made. */
+let lost: ((commands: (string | number)[][]) => boolean) | null = null;
 redis.pipeline = (async (commands: (string | number)[][]) => {
+  if (lost?.(commands)) return ["x"];
   const replies = await realPipeline(commands);
   return bend ? bend(commands, replies) : replies;
 }) as typeof redis.pipeline;
@@ -104,6 +107,7 @@ async function setup(): Promise<{ store: Store; statsId: string }> {
   captureRefused.clear();
   sessions = [];
   bend = null;
+  lost = null;
   await claimHandle(OWNER, "paypalpath", "PayPal Path", "");
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
@@ -258,14 +262,14 @@ async function main(): Promise<void> {
     await look(1);
     is("completed again: counted", await money(store), [2, 4400]);
 
-    // The write that would count it again answers off its shape: the sale stays out, looked at again in an hour.
+    // The write that would count it again is lost, its reply off its shape: the sale stays out, looked at again in an hour.
     ({ store, statsId } = await setup());
     captureRefused.set("CAPTURE1", 403);
     await look(1);
     captureRefused.clear();
-    bend = bendFirst("nl:ppsell:paid:", "SET", () => ["x"]);
+    lost = (commands) => commands[0]?.[0] === "SET" && String(commands[0]?.[1]).startsWith("nl:ppsell:paid:");
     await look(1);
-    bend = null;
+    lost = null;
     const score = Number(redis.run(["ZSCORE", `nl:ppsell:watch:${statsId}`, order(1)]));
     is("the clearing write unknown: still not counted, asked again within the hour", [await money(store), score > now && score <= now + 3700], [[1, 1500], true]);
   }

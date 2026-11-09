@@ -26,9 +26,11 @@
  * PayPal's live API, never a test purchase (PayPal's sandbox has no
  * store-level test mode here), and judged by the refunds PayPal confirmed,
  * matched by the capture (12 [D9]). One counts only while its refunds can be
- * seen: the refund watch runs for the PayPal account that took it. One PayPal
- * refunded in part or reversed is taken off whole, the amount kept not being
- * read (the money reviews on #3443).
+ * seen: the refund watch runs for the PayPal account that took it, and read
+ * PayPal's word on it at its last look (a seller who took the permission back
+ * inside PayPal gets a 403 there, and the sale leaves the count until PayPal
+ * answers again). One PayPal refunded in part or reversed is taken off whole,
+ * the amount kept not being read (the money reviews on #3443).
  */
 import { KIND } from "@/lib/catalog";
 import {saleHandles,type Store} from "@/lib/store";
@@ -67,14 +69,16 @@ type Sold = { cents: number; currency: string; intent: string; live: boolean | n
  * A sale read, as the path counts it. A Stripe sale carries its own livemode. A
  * PayPal order is real only when its own record says it was taken through
  * PayPal's live API, by the PayPal account whose refunds are watched now
- * (`watched`, paypalRefundWatch; null when none is), and PayPal never said it
- * was refunded in part or reversed; otherwise it is neither real nor a test
- * purchase (null). Pure, for the tests.
+ * (`watched`, paypalRefundWatch; null when none is), the watch read PayPal's
+ * word on it at its last look (Claude 5's N1b: not refused, 403 or 401, nor
+ * left unanswered), and PayPal never said it was refunded in part or
+ * reversed; otherwise it is neither real nor a test purchase (null). Pure, for
+ * the tests.
  */
 export function soldOf(sale: { cents: number; currency: string; paymentIntent: string; row: Record<string, unknown> }, watched: string | null): Sold {
   if (sale.row.object === "paypal.order") {
     const own = sale.row.paypal && typeof sale.row.paypal === "object" ? (sale.row.paypal as Record<string, unknown>) : {};
-    const counted = own.live === true && own.taken_off === null && typeof own.merchant === "string" && watched !== null && own.merchant === watched;
+    const counted = own.live === true && own.taken_off === null && own.blind === false && typeof own.merchant === "string" && watched !== null && own.merchant === watched;
     return { cents: sale.cents, currency: sale.currency, intent: sale.paymentIntent, live: counted ? true : null };
   }
   return { cents: sale.cents, currency: sale.currency, intent: sale.paymentIntent, live: typeof sale.row.livemode === "boolean" ? sale.row.livemode : null };

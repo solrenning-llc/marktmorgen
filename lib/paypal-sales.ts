@@ -464,6 +464,13 @@ export type Paid = {
    * Path takes such a sale off whole.
    */
   takenOff?: TakenOff;
+  /**
+   * When the refund watch last failed to read PayPal's word on this capture, in seconds (Claude 5's N1b on #3443):
+   * PayPal refused it (403 or 401: the seller took the permission back inside PayPal), did not answer, or answered
+   * without a status. Present in any form, the Path does not count the sale; it is taken off once the watch writes
+   * PayPal's answer down again.
+   */
+  blind?: number;
 };
 /** Capture statuses that leave less than the whole sale kept without a refund in full (payments_payment_v2, capture). */
 export type TakenOff = "PARTIALLY_REFUNDED" | "REVERSED";
@@ -764,6 +771,24 @@ export function nextLook(paidAt: number, now: number): number | null {
 }
 
 /**
+ * Marks a paid order as not seen by the refund watch at its last look (Claude 5's N1b on #3443), so the Path stops
+ * counting it: once, keeping the first time, for the record's time left (SET XX: a record already gone is not
+ * written again). The write is read exactly; one that cannot be confirmed is logged, never thrown, and the order is
+ * looked at again in an hour like every look that failed.
+ */
+async function markBlind(paid: Paid, now: number): Promise<void> {
+  if (paid.blind !== undefined) return;
+  const left = paid.at + PAID_KEPT_SECONDS - now;
+  if (left <= 0) return;
+  try {
+    const wrote = repliesFor(await redisPipeline([["SET", paidKey(paid.order), JSON.stringify({ ...paid, blind: now }), "XX", "EX", left]]), 1);
+    if (!wrote || (wrote[0] !== "OK" && wrote[0] !== null)) console.error("a PayPal sale the refund watch could not read could not be marked", paid.order);
+  } catch (error) {
+    console.error("a PayPal sale the refund watch could not read could not be marked", paid.order, error);
+  }
+}
+
+/**
  * What the sweep asks of PayPal for one store, a few orders at a time:
  *
  *   - a payment PayPal held as pending and has since completed is written
@@ -845,26 +870,39 @@ export async function watchPayPal(
     try {
       const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: store.paypalSeller.merchant });
       // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
-      // "not refunded", and moved back so it cannot hold the place of the orders behind it.
+      // "not refunded", and moved back so it cannot hold the place of the orders behind it. Until PayPal answers, the
+      // Path does not count the sale (Claude 5's N1b on #3443).
       if (typeof capture.status !== "string" || !capture.status) {
+        await markBlind(paid, now);
         await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
         continue;
       }
       status = capture.status;
     } catch (error) {
+      // PayPal refused the capture (403 or 401: the seller took Marktmorgen's permission back inside PayPal, while the
+      // store still shows it connected), did not answer, or answered off its shape: whether it was refunded is not
+      // known, so the Path stops counting the sale until the watch reads it again (Claude 5's N1b on #3443).
       console.error("reading a PayPal capture failed", error);
+      await markBlind(paid, now);
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
       continue;
     }
     // Refunded in part, or reversed: written on the paid record once, for its time left, so the Path takes the sale off
-    // whole (Claude 6's M2 and L3 on #3443); it stays watched for a refund in full. The write is read exactly: "OK", or
-    // null when the record is already gone (XX); anything else is unknown and the order is looked at again in an hour.
-    if (TAKEN_OFF.has(status) && paid.takenOff !== status) {
+    // whole (Claude 6's M2 and L3 on #3443); it stays watched for a refund in full. A sale the watch could not read at
+    // its last look is seen again, its mark taken off in the same write (Claude 5's N1b), except when PayPal says it
+    // was refunded in full: then it leaves the count either way, and the mark is kept. The write is read exactly: "OK",
+    // or null when the record is already gone (XX); anything else is unknown and the order is looked at again in an
+    // hour, the sale still not counted while it was not seen.
+    const takeOff = TAKEN_OFF.has(status) && paid.takenOff !== status;
+    const seenAgain = status !== "REFUNDED" && paid.blind !== undefined;
+    if (takeOff || seenAgain) {
       const left = paid.at + PAID_KEPT_SECONDS - now;
       if (left > 0) {
-        const wrote = repliesFor(await redisPipeline([["SET", paidKey(order), JSON.stringify({ ...paid, takenOff: status }), "XX", "EX", left]]), 1);
+        const { blind: _blind, ...seen } = paid;
+        const record: Paid = { ...(seenAgain ? seen : paid), ...(takeOff ? { takenOff: status as TakenOff } : {}) };
+        const wrote = repliesFor(await redisPipeline([["SET", paidKey(order), JSON.stringify(record), "XX", "EX", left]]), 1);
         if (!wrote || (wrote[0] !== "OK" && wrote[0] !== null)) {
-          console.error("a PayPal sale refunded in part or reversed could not be marked; looked at again in an hour", order);
+          console.error("PayPal's word on a sale could not be written on its record; looked at again in an hour", order);
           await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
           continue;
         }
@@ -889,6 +927,8 @@ export async function watchPayPal(
     );
     if (!marked || !marked.every((reply) => reply === 0 || reply === 1)) {
       console.error("a PayPal refund could not be marked; looked at again in an hour", order);
+      // Refunded in full but not yet written down: the Path does not count the sale meanwhile (Claude 5's N1b).
+      await markBlind(paid, now);
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;
     }

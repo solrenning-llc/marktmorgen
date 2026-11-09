@@ -158,8 +158,12 @@ policy says so (`/privacy#path`).
    deployment that reads it later; a sandbox order, or one paid before that field
    existed, is neither a real sale nor a test purchase. A PayPal sale counts only
    while its refunds can be seen: the platform is a PayPal partner and the store
-   is still connected to the PayPal account that took it; otherwise it is left
-   out. A sale PayPal reports as refunded in part or reversed is taken off whole,
+   is still connected to the PayPal account that took it, and the refund watch
+   read PayPal's word on it at its last look; otherwise it is left out. A seller
+   who takes Marktmorgen's permission back inside PayPal still shows as
+   connected, but the watch gets a 403 (or 401) there: that sale, like one PayPal
+   did not answer about, leaves the count until the watch reads it again, and
+   Stripe sales stay counted (Claude 5's N1b on #3443). A sale PayPal reports as refunded in part or reversed is taken off whole,
    since the amount kept is not read. Refunds that cannot all be read, or a reply
    off its shape, leave the money unknown. A PayPal refund of a sale the Path did
    not count is never taken off another sale. A reading takes PATH_READ_UNITS

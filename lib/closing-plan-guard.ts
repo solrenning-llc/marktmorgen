@@ -43,7 +43,7 @@ import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
 import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
@@ -367,6 +367,21 @@ export async function expirePlanCheckouts(store: Store, customerIds: string[]): 
   return expired;
 }
 
+/**
+ * A plan's place in line (HGET of UNDO_KEY), from a pipeline that sent it
+ * alone, read only in its exact shape (CX-123 rules 24 and 30): null when it
+ * is not in line; its text when it is (readUndo then reads it, and text that
+ * does not parse is kept for a person to see). Anything else (a missing or an
+ * extra reply, a number, a list, an object) throws UnknownReplyError: never
+ * "not in line", which the closing job would count as settled.
+ */
+function undoReply(replies: unknown): string | null {
+  const read = repliesFor(replies, 1);
+  const raw = read ? read[0] : undefined;
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a plan's place in the closing line");
+  return raw;
+}
+
 function readUndo(raw: unknown): Undo | null {
   if (typeof raw !== "string") return null;
   try {
@@ -457,11 +472,12 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
  * made again, and it goes back in line if that cannot be done now.
  */
 export async function settleOne(id: string, recheck = false, onStopped?: () => void): Promise<boolean> {
-  const [raw] = await redisPipeline([["HGET", UNDO_KEY, id]]);
+  // A reply not in its exact shape throws (undoReply): the plan stays in line, never taken as nothing to settle.
+  const raw = undoReply(await redisPipeline([["HGET", UNDO_KEY, id]]));
   const entry = readUndo(raw);
   if (!entry) {
-    if (raw !== null && raw !== undefined) console.error(`closing-plan-guard: an unreadable entry for ${id} is kept for a person to see`);
-    return raw === null || raw === undefined;
+    if (raw !== null) console.error(`closing-plan-guard: an unreadable entry for ${id} is kept for a person to see`);
+    return raw === null;
   }
   if (entry.done && !recheck) return true;
   const keep = async (why: string, error?: unknown) => {
@@ -572,11 +588,18 @@ async function tell(id: string, entry: Undo, returned: number, disputed: number,
   });
 }
 
-/** The closing job: every subscription still in line, tried again until `deadline` (ms). */
+/**
+ * The closing job: every subscription still in line, tried again until
+ * `deadline` (ms). A line that cannot be read in its exact shape (HKEYS)
+ * throws UnknownReplyError, never an empty line; the job says it failed. A
+ * plan in it whose place cannot be read (HGET, here or in settleOne) is left
+ * in line, counted as left and said, and the rest of the line is walked.
+ */
 export async function retryPlanUndos(deadline: number): Promise<{ settled: number; left: number }> {
   if (!isRedisConfigured()) return { settled: 0, left: 0 };
-  const [fields] = await redisPipeline([["HKEYS", UNDO_KEY]]);
-  const ids = Array.isArray(fields) ? (fields as unknown[]).map(String) : [];
+  const line = repliesFor(await redisPipeline([["HKEYS", UNDO_KEY]]), 1);
+  const ids = line ? stringList(line[0]) : null;
+  if (!ids) throw new UnknownReplyError("the closing line of plans");
   let settled = 0;
   let left = 0;
   for (const id of ids) {
@@ -584,16 +607,21 @@ export async function retryPlanUndos(deadline: number): Promise<{ settled: numbe
       left += 1;
       continue;
     }
-    const [raw] = await redisPipeline([["HGET", UNDO_KEY, id]]);
-    const entry = readUndo(raw);
-    // Settled long enough ago that no refund can still come back and no retry still come: taken out.
-    if (entry?.done && Date.now() - entry.done > DONE_KEEP_DAYS * 86_400_000) {
-      await redisPipeline([["HDEL", UNDO_KEY, id]]);
-      continue;
+    try {
+      const entry = readUndo(undoReply(await redisPipeline([["HGET", UNDO_KEY, id]])));
+      // Settled long enough ago that no refund can still come back and no retry still come: taken out.
+      if (entry?.done && Date.now() - entry.done > DONE_KEEP_DAYS * 86_400_000) {
+        await redisPipeline([["HDEL", UNDO_KEY, id]]);
+        continue;
+      }
+      if (await settleOne(id, Boolean(entry?.done))) {
+        if (!entry?.done) settled += 1;
+      } else left += 1;
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      console.error(`closing-plan-guard: ${id} could not be read in line; kept, and tried again on the next run`, error);
+      left += 1;
     }
-    if (await settleOne(id, Boolean(entry?.done))) {
-      if (!entry?.done) settled += 1;
-    } else left += 1;
   }
   return { settled, left };
 }

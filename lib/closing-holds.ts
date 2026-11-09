@@ -47,7 +47,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
@@ -95,13 +95,68 @@ const listOf = (reply: unknown): unknown[] => {
   return (reply as { data: unknown[] }).data;
 };
 
-const parseCursor = (raw: unknown): Cursor => {
+/**
+ * A walk's cursor, from a pipeline that sent its HGET alone, read only in its
+ * exact shape (CX-123 rules 24 and 30): none kept (null) is the first page; a
+ * cursor as eachSold writes it ({ h, p }, h a whole number from zero) is where
+ * it stopped. Anything else (a missing or an extra reply, a number, a list,
+ * text that is not such a cursor) throws UnknownReplyError: never the first
+ * page, which would walk again over members already reached and spend the
+ * closing's calls on them; the walk is said as not done and tried again.
+ */
+const cursorOf = (replies: unknown): Cursor => {
+  const read = repliesFor(replies, 1);
+  if (!read) throw new UnknownReplyError("a closing walk's cursor");
+  const raw = read[0];
+  if (raw === null) return { h: 0, p: "" };
+  let value: unknown = null;
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as Cursor) : null;
-    return value && Number.isInteger(value.h) && value.h >= 0 && typeof value.p === "string" ? value : { h: 0, p: "" };
+    value = typeof raw === "string" ? JSON.parse(raw) : null;
   } catch {
-    return { h: 0, p: "" };
+    value = null;
   }
+  const h = value && typeof value === "object" && !Array.isArray(value) ? (value as { h?: unknown }).h : undefined;
+  const page = value && typeof value === "object" && !Array.isArray(value) ? (value as { p?: unknown }).p : undefined;
+  if (!Number.isSafeInteger(h) || (h as number) < 0 || typeof page !== "string") throw new UnknownReplyError("a closing walk's cursor");
+  return { h: h as number, p: page };
+};
+
+/**
+ * A hash's fields and values (HGETALL), from a pipeline that sent it alone,
+ * only in its exact shape: a list of strings in pairs. Anything else (a
+ * missing or an extra reply, a list with a member that is not text, a field
+ * with no value, an object) throws UnknownReplyError, never an empty hash.
+ */
+const pairsOf = (replies: unknown, what: string): string[] => {
+  const read = repliesFor(replies, 1);
+  const flat = read ? stringList(read[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
+  return flat;
+};
+
+/** A hash's fields (HKEYS), from a pipeline that sent it alone: a list of strings, or UnknownReplyError, never no field. */
+const keysOf = (replies: unknown, what: string): string[] => {
+  const read = repliesFor(replies, 1);
+  const keys = read ? stringList(read[0]) : null;
+  if (!keys) throw new UnknownReplyError(what);
+  return keys;
+};
+
+/**
+ * The drafts a held member's hold kept (HGET of "d:<sub>"), from a pipeline
+ * that sent it alone: none (null), or the invoice ids as holdOne writes them
+ * (one or more, comma separated). Anything else throws UnknownReplyError:
+ * never "none kept", which would let the member go with its drafts never put
+ * back.
+ */
+const keptDraftsOf = (replies: unknown): string[] => {
+  const read = repliesFor(replies, 1);
+  if (!read) throw new UnknownReplyError("a held member's kept drafts");
+  const raw = read[0];
+  if (raw === null) return [];
+  const drafts = typeof raw === "string" ? raw.split(",") : [];
+  if (!drafts.length || !drafts.every((d) => INVOICE_ID.test(d))) throw new UnknownReplyError("a held member's kept drafts");
+  return drafts;
 };
 
 /** Runs `each` over `items`, MEMBERS_AT_ONCE at a time, stopping once `until` has passed. */
@@ -127,8 +182,8 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
   const account = store.stripeAccountId;
   if (!account) return true;
   const handles = [...saleHandles(store)];
-  const [raw] = await redisPipeline([["HGET", workKey(folder), field]]);
-  let cursor = parseCursor(raw);
+  // A cursor that cannot be read throws (cursorOf): the walk is not done, and no page is asked of Stripe on it.
+  let cursor = cursorOf(await redisPipeline([["HGET", workKey(folder), field]]));
   for (let pages = 0; pages < HOLD_PAGES_PER_RUN; pages += 1) {
     if (cursor.h >= handles.length) {
       await redisPipeline([["HDEL", workKey(folder), field]]);
@@ -296,11 +351,15 @@ export async function memberAddresses(folder: string): Promise<string[]> {
   return (await membersOf(folder)).emails;
 }
 
-/** Every member of this ending: the addresses, and the members with none (by subscription). */
+/**
+ * Every member of this ending: the addresses, and the members with none (by
+ * subscription). Throws UnknownReplyError when the ending's work hash cannot
+ * be read in its exact shape (pairsOf): never no member, so nobody goes
+ * untold that the store closes and nobody is counted as paused on it.
+ */
 export async function membersOf(folder: string): Promise<{ emails: string[]; missing: string[]; unpaused: string[] }> {
   if (!isRedisConfigured()) return { emails: [], missing: [], unpaused: [] };
-  const [raw] = await redisPipeline([["HGETALL", workKey(folder)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const flat = pairsOf(await redisPipeline([["HGETALL", workKey(folder)]]), "a closing's members");
   const fields = new Map<string, string>();
   for (let i = 0; i + 1 < flat.length; i += 2) fields.set(flat[i], flat[i + 1]);
   const out = { emails: [] as string[], missing: [] as string[], unpaused: [] as string[] };
@@ -342,11 +401,15 @@ export async function inClosingDay(ref: string): Promise<boolean> {
   return finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]])) !== null;
 }
 
-/** How the hold stands: the members it could not reach yet, and those past the budget. */
+/**
+ * How the hold stands: the members it could not reach yet, and those past the
+ * budget. Throws UnknownReplyError when the fields cannot be read in their
+ * exact shape (keysOf): never { failed: 0, over: 0 }, which would tell the
+ * creator every member is paused.
+ */
 export async function holdCounts(folder: string): Promise<{ failed: number; over: number }> {
   if (!isRedisConfigured()) return { failed: 0, over: 0 };
-  const [fields] = await redisPipeline([["HKEYS", workKey(folder)]]);
-  const keys = Array.isArray(fields) ? (fields as unknown[]).map(String) : [];
+  const keys = keysOf(await redisPipeline([["HKEYS", workKey(folder)]]), "a closing hold's members");
   return { failed: keys.filter((k) => k.startsWith("f:")).length, over: keys.filter((k) => k.startsWith("o:")).length };
 }
 
@@ -400,8 +463,8 @@ export async function retryHolds(store: Store, endedAt: number, until: number): 
   const folder = await storeFolder(storeRef(store));
   const account = store.stripeAccountId;
   if (!account) return holdCounts(folder);
-  const [fields] = await redisPipeline([["HKEYS", workKey(folder)]]);
-  const ids = (Array.isArray(fields) ? (fields as unknown[]).map(String) : []).filter((k) => k.startsWith("f:")).map((k) => k.slice(2)).filter((id) => SUB_ID.test(id));
+  // Fields that cannot be read throw (keysOf): never no member to try again, and no Stripe call is made on them.
+  const ids = keysOf(await redisPipeline([["HKEYS", workKey(folder)]]), "a closing hold's members").filter((k) => k.startsWith("f:")).map((k) => k.slice(2)).filter((id) => SUB_ID.test(id));
   await inTurn(ids, until, async (id) => {
     try {
       if (!(await takeCalls(folder, 1))) {
@@ -437,13 +500,16 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
     const all = await inTurn(todo, until, async (sub) => {
       const id = sub.id as string;
       try {
+        // The drafts its hold kept are read before it is let go (keptDraftsOf): a list that cannot be read throws, so the
+        // member stays held and is tried again tomorrow, never let go with its drafts left behind for good (once let go,
+        // it is no longer held, and no later run would look for them).
+        const kept = keptDraftsOf(await redisPipeline([["HGET", workKey(folder), `d:${id}`]]));
         await onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, releaseBody(sub, nowSeconds), undefined, `closing-release:${id}:${sub.metadata?.store_hold}`);
         // The drafts its hold kept as drafts go on as they were (their calls were taken with the hold); voided invoices do not come back.
-        const [kept] = await redisPipeline([["HGET", workKey(folder), `d:${id}`]]);
-        for (const draft of typeof kept === "string" ? kept.split(",").filter((d) => INVOICE_ID.test(d)) : []) {
+        for (const draft of kept) {
           await onAccount("POST", account, `/invoices/${encodeURIComponent(draft)}`, new URLSearchParams({ auto_advance: "true", "metadata[closing_draft]": "" }), undefined, `closing-draft-back:${draft}:${sub.metadata?.store_hold}`);
         }
-        if (typeof kept === "string") await redisPipeline([["HDEL", workKey(folder), `d:${id}`]]);
+        if (kept.length) await redisPipeline([["HDEL", workKey(folder), `d:${id}`]]);
         out.released += 1;
       } catch (error) {
         failed += 1;
@@ -458,12 +524,16 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
   return out;
 }
 
-/** The members' last payments a store has written down, by subscription. */
+/**
+ * The members' last payments a store has written down, by subscription.
+ * Throws UnknownReplyError when the hash cannot be read in its exact shape
+ * (pairsOf): never no payment, so nobody's paid time is taken as nothing to
+ * give back.
+ */
 export async function paidPeriods(store: Store): Promise<Map<string, PaidPeriod>> {
   const out = new Map<string, PaidPeriod>();
   if (!isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const flat = pairsOf(await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]), "a closing's written-down payments");
   for (let i = 0; i + 1 < flat.length; i += 2) {
     try {
       const row = JSON.parse(flat[i + 1]) as PaidPeriod;
@@ -488,6 +558,16 @@ export async function forgetHeld(store: Store, folder: string): Promise<void> {
 
 export type Released = { key: string; state: "released" | "held" | "closing" | "gone" };
 
+/** A score as Redis writes it: a number's text, with an exponent where Redis uses one ("1.5e+12"), as finalScoreOf reads it. */
+const SCORE_TEXT = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i;
+
+/** A held store's score, when its plan ended (ms), as Redis writes it: a positive finite number's text, or UnknownReplyError. */
+function heldScore(text: string): number {
+  const value = SCORE_TEXT.test(text) ? Number(text) : Number.NaN;
+  if (!Number.isFinite(value) || value <= 0) throw new UnknownReplyError("a held store's place in the line");
+  return value;
+}
+
 /**
  * The daily walk of the stores whose members are held: a store whose plan
  * runs again (or ended again, on another day) has every member let go, its
@@ -499,15 +579,17 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
   const out: Released[] = [];
   const flat: string[] = [];
   for (let from = 0; from < 100_000; from += 500) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", HELD_INDEX, "-inf", "+inf", "WITHSCORES", "LIMIT", from, 500]]);
-    const page = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+    // A page that cannot be read in its exact shape throws (pairsOf, heldScore below): never an empty line, and never
+    // a store whose plan's end cannot be read taken as one that runs again (its members let go, what it wrote down deleted).
+    const page = pairsOf(await redisPipeline([["ZRANGEBYSCORE", HELD_INDEX, "-inf", "+inf", "WITHSCORES", "LIMIT", from, 500]]), "the line of stores whose members are held");
+    for (let i = 1; i < page.length; i += 2) heldScore(page[i]);
     flat.push(...page);
     if (page.length < 1000) break;
   }
   for (let i = 0; i + 1 < flat.length; i += 2) {
     if (Date.now() > deadline) break;
     const key = flat[i];
-    const endedAt = Number(flat[i + 1]);
+    const endedAt = heldScore(flat[i + 1]);
     const store = await storeForEmail(key).catch(() => null);
     if (!store) {
       await redisPipeline([["ZREM", HELD_INDEX, key]]);
@@ -545,8 +627,8 @@ export async function heldPaymentsOf(store: Store, email: string): Promise<(Paid
   if (!isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
   const folder = await storeFolder(storeRef(store));
-  const [raw] = await redisPipeline([["HGETALL", paidKey(folder)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
+  // Payments that cannot be read throw (pairsOf): the copy says this part could not be read, never that none is kept.
+  const flat = pairsOf(await redisPipeline([["HGETALL", paidKey(folder)]]), "a closing's written-down payments");
   const out: (PaidPeriod & { subscription: string })[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     try {

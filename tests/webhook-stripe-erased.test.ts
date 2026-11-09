@@ -6,13 +6,15 @@
  * written at or after the payment sends the event with no address and no name; a person deleted before they paid
  * again is named as before; a print that is there but not in its exact shape (CX-123 rule 24) sends no address
  * either, the event itself still sent; and a read with no answer sends nothing yet: the event is read again next
- * run and named from what that read says (review of #3491). Only a store whose endpoints hear the event pays the
- * read. The PayPal sibling is lib/paypal-delivery.ts (#3449). Synthetic Stripe
+ * run and named from what that read says (review of #3491). The print is read only for an event about to be kept
+ * for a live endpoint: never one no endpoint hears, one already sent and read again, or one the month's deliveries
+ * cannot take. A checkout is paid when its session completes, not when it was opened. The PayPal sibling is lib/paypal-delivery.ts (#3449). Synthetic Stripe
  * answers only; the endpoint's name resolves to a private address, so nothing leaves this machine.
  */
 import { addEndpoint, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
 import { claimHandle, ensureListId, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { forceAllowance } from "@/lib/store-allowance";
 import { paidPeriod } from "./billing-period-fixture";
 import { WEBHOOK_ERASED_READ_COMMANDS } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
@@ -159,8 +161,11 @@ async function main() {
 
   part("The other Stripe events that name a buyer (rule 30)");
   await setup(["sale.completed", "membership.started", "membership.canceled"]);
-  await erase("sale-gone@example.com", PAID + 50);
-  await erase("sub-gone@example.com", PAID + 50);
+  // A checkout is paid when the session completes (its event's time): these are deleted after that.
+  await erase("sale-gone@example.com", PAID + 200);
+  await erase("sub-gone@example.com", PAID + 200);
+  // Opened the checkout, deleted, then paid: a later payment, so named (review of #3491, L3).
+  await erase("opened-gone@example.com", PAID + 50);
   await erase("offer-gone@example.com", PAID + 50);
   await erase("member-gone@example.com", PAID + 50);
   const session = (id: string, email: string, mode = "payment", extra: Record<string, unknown> = {}) => ({
@@ -174,6 +179,7 @@ async function main() {
   timeline = [
     evt("evt_SaleGone", "checkout.session.completed", PAID + 60, session("cs_Gone01", "sale-gone@example.com")),
     evt("evt_SaleKept", "checkout.session.completed", PAID + 70, session("cs_Kept01", "sale-kept@example.com")),
+    evt("evt_SaleOpened", "checkout.session.completed", PAID + 120, session("cs_Opened01", "opened-gone@example.com")),
     evt("evt_SubGone", "checkout.session.completed", PAID + 80, session("cs_SubGone01", "sub-gone@example.com", "subscription", { subscription: "sub_Gone01" })),
     evt("evt_OfferGone", "payment_intent.succeeded", PAID + 90, offer("pi_OfferGone", "offer-gone@example.com")),
     evt("evt_OfferKept", "payment_intent.succeeded", PAID + 95, offer("pi_OfferKept", "offer-kept@example.com")),
@@ -183,6 +189,7 @@ async function main() {
   await watchStripe(Date.now() + 10_000);
   is("a sale whose person was deleted after paying: no address and no name", await buyerOf("sale.completed", "checkout_session", "cs_Gone01"), { email: null, name: null });
   is("a sale nobody deleted: named as before", await buyerOf("sale.completed", "checkout_session", "cs_Kept01"), { email: "sale-kept@example.com", name: "Name of sale-kept@example.com" });
+  is("opened before the deletion, paid after it: named", await buyerOf("sale.completed", "checkout_session", "cs_Opened01"), { email: "opened-gone@example.com", name: "Name of opened-gone@example.com" });
   is("a membership's sale and its start: no address and no name", [await buyerOf("sale.completed", "checkout_session", "cs_SubGone01"), await buyerOf("membership.started", "checkout_session", "cs_SubGone01")], [{ email: null, name: null }, { email: null, name: null }]);
   is("an offer's sale whose person was deleted: no address", await buyerOf("sale.completed", "payment_intent", "pi_OfferGone"), { email: null, name: null });
   is("an offer's sale nobody deleted: named as before", await buyerOf("sale.completed", "payment_intent", "pi_OfferKept"), { email: "offer-kept@example.com", name: null });
@@ -202,6 +209,32 @@ async function main() {
   redis.pipeline = counting;
   is("one HGET of this address's print, nothing written", reads, [["HGET", suppressedKey(listId), suppressionPrint(listId, "one@example.com")]]);
   is("as many as the webhook unit counts (tests/plan-cost-registry.ts)", reads.length, WEBHOOK_ERASED_READ_COMMANDS);
+
+  part("No read for an event already sent and read again (review of #3491)");
+  reads.length = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const c of commands) if (String(c[1] ?? "").startsWith("nl:erased:")) reads.push(c);
+    return counting(commands);
+  }) as typeof redis.pipeline;
+  // The anchor lost (or a run that ended before moving it): the same event is listed again.
+  await redis.pipeline([["DEL", `nl:hooks:anchor:${(await storeForEmail(OWNER))!.statsId}`]]);
+  await watchStripe(Date.now() + 10_000);
+  redis.pipeline = counting;
+  is("read again: no read of the print, and still one message", [reads.length, (await recentMessages((await storeForEmail(OWNER))!, "refund.issued", 50)).length], [0, 1]);
+
+  part("No read when the month's deliveries are used (review of #3491)");
+  await setup(["refund.issued"]);
+  if (!(await forceAllowance((await storeForEmail(OWNER))!, "webhook", 10_000_000))) throw new Error("setup: the month could not be used");
+  reads.length = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const c of commands) if (String(c[1] ?? "").startsWith("nl:erased:")) reads.push(c);
+    return counting(commands);
+  }) as typeof redis.pipeline;
+  // Refunded now, in the month just used (emitEvent counts an event in the month of its own time).
+  timeline = [evt("evt_RfUsed", "charge.refunded", Math.floor(Date.now() / 1000), refund("ch_used", "used@example.com"))];
+  await watchStripe(Date.now() + 10_000);
+  redis.pipeline = counting;
+  is("the month used: no read, and nothing sent", [reads.length, await buyerOf("refund.issued", "charge", "ch_used")], [0, "not sent"]);
 
   part("No read when no endpoint hears the event (rule 26, review of #3491)");
   await setup(["refund.issued"]);

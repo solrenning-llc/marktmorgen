@@ -81,6 +81,7 @@ import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
 import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
 import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, previewContactRows, readTags } from "@/lib/contacts";
 import { csvLine, readConsent } from "@/lib/csv";
+import { suppressedAmong } from "@/lib/suppression";
 import { grantImported, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
@@ -594,6 +595,22 @@ async function firstSeen(job: ImportJob, keys: { key: string; line: number }[]):
   });
 }
 
+/**
+ * Which of these addresses were deleted from the store (lib/suppression.ts), read whole (CX-123 rule 24): a reply in
+ * any other shape throws UnknownReplyError, so nobody is ever taken as not deleted. A store without a list has
+ * deleted nobody: a deletion gives it one.
+ */
+async function deletedAmong(listId: string | null | undefined, emails: string[]): Promise<Set<string>> {
+  try {
+    return await suppressedAmong(listId, emails);
+  } catch {
+    throw new UnknownReplyError("who was deleted from the store");
+  }
+}
+
+/** Why a deleted address is left out. Said by its row only: the address is not written back next to it. */
+const DELETED = "Deleted from your store before, so left alone";
+
 const isEmail = (email: string) => email.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(email);
 
 /** What a row of contacts holds once it is read, and what it says about consent. */
@@ -914,12 +931,19 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
     skipped.push({ line: v.line, column: "email", problem: `The same buyer and product as row ${seen[i]}`, value: v.email });
     return false;
   });
-  const given = await grantImported(statsId, job.id, fresh.map((v) => ({ email: v.email, productId: v.productId, items: v.bundle })), undefined, store.sid, store);
+  // Nobody deleted from the store is given anything again or emailed ("no import puts them back"); unknown throws.
+  const deleted = await deletedAmong(store.listId, fresh.map((v) => v.email));
+  const kept = fresh.filter((v) => {
+    if (!deleted.has(v.email)) return true;
+    skipped.push({ line: v.line, column: "email", problem: DELETED, value: "" });
+    return false;
+  });
+  const given = await grantImported(statsId, job.id, kept.map((v) => ({ email: v.email, productId: v.productId, items: v.bundle })), undefined, store.sid, store);
   const toMail: string[] = [];
   given.forEach((isNew, i) => {
     if (isNew) {
       job.counts.added += 1;
-      toMail.push(fresh[i].email);
+      toMail.push(kept[i].email);
     } else job.counts.already += 1;
   });
   if (job.options.email && toMail.length) {
@@ -1038,7 +1062,12 @@ export async function previewImport(store: Store, kind: ImportKind, input: Start
   told(skipped, "skipped");
   const fresh = repeated(valid, (v) => `p:${v.email}|${v.productId}`, "email", (v) => v.email, "The same buyer and product as row");
   const titles = new Map(listings.map((p) => [p.id, p.title]));
+  const deleted = await deletedAmong(store.listId, fresh.map((v) => v.email));
   for (const v of fresh) {
+    if (deleted.has(v.email)) {
+      out.push([v.line, "skipped", "email", DELETED, "", "", 0]);
+      continue;
+    }
     out.push([v.line, "added", "product", `Given ${titles.get(v.productId) ?? "the product"}, unless they already have it`, v.email, `p:${v.email}|${v.productId}`, 0]);
   }
   return { ok: true, rows: out.sort((a, b) => a[0] - b[0]), room: null };
@@ -1132,7 +1161,14 @@ async function membersStep(job: ImportJob, store: Store, rows: string[][], now =
     skipped.push({ line: v.line, column: "email", problem: `The same member and membership as row ${seen[i]}`, value: v.email });
     return false;
   });
-  const fields = await inviteMembers(store, job.id, fresh, now);
+  // Nobody deleted from the store is invited or emailed ("no import puts them back"); unknown throws.
+  const deleted = await deletedAmong(store.listId, fresh.map((v) => v.email));
+  const kept = fresh.filter((v) => {
+    if (!deleted.has(v.email)) return true;
+    skipped.push({ line: v.line, column: "email", problem: DELETED, value: "" });
+    return false;
+  });
+  const fields = await inviteMembers(store, job.id, kept, now);
   const toMail: string[] = [];
   fields.forEach((field) => {
     if (field) {
@@ -1240,6 +1276,20 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       replyTo: store.email,
       tags,
     });
+  }
+  // Nobody deleted from the store since they were queued is written to. Read whole (CX-123 rule 24): any other reply
+  // puts the same addresses back, gives the portion back and throws, the step left as it was. A store read without a
+  // list is read again, since a deletion gives it one.
+  if (messages.length) {
+    let deleted: Set<string>;
+    try {
+      deleted = await deletedAmong(store.listId ?? (await storeForId(job.sid))?.listId, messages.map((m) => m.to));
+    } catch (error) {
+      await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+      await unsent(portion);
+      throw error;
+    }
+    for (let i = messages.length - 1; i >= 0; i -= 1) if (deleted.has(messages[i].to)) messages.splice(i, 1);
   }
   if (messages.length === 0) {
     await unsent(portion);
@@ -1513,6 +1563,9 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if (!store?.statsId || !isPaidUp(store) || (await pausedFor(sid))) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      // Never to somebody deleted from the store. Read whole (CX-123 rule 24): unknown throws, and the reminder is put
+      // back in line (the catch below).
+      if ((await deletedAmong(store.listId, [invite.e])).size) continue;
       if (await keptAlready(store, invite.e, invite.p)) {
         await noteKept(store, invite.e, invite.p, now);
         counts.kept += 1;

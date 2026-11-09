@@ -28,6 +28,7 @@ import { deliverableItems } from "@/lib/bundle-rules";
 import { MAX_CONTACT_NAME, changeLabels, importContactRows, leadsKey, parseContact, readTags } from "@/lib/contacts";
 import { enroll } from "@/lib/flows";
 import { grantImported, importedFor, takeGiven } from "@/lib/imported-purchases";
+import { suppressedAmong } from "@/lib/suppression";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { releaseDay, reserveDay } from "@/lib/mail";
 import { pausedFor } from "@/lib/mail-health";
@@ -49,6 +50,7 @@ export type WriteError =
   | "email"
   | "consent"
   | "unsubscribed"
+  | "deleted"
   | "list_full"
   | "not_on_list"
   | "labels"
@@ -206,6 +208,11 @@ export async function giveAccess(
   if (store.period?.funded === true && !store.statsId) return fail("unavailable");
   const statsId = store.statsId ?? (await ensureStatsId(storeRef(store)))?.statsId;
   if (!statsId || !store.sid) return fail("nothing_to_give");
+  // Nobody deleted from the store is given anything again or emailed ("no import or API call puts them back"). Read
+  // whole (CX-123 rule 24): an unknown reply refuses, never taking them as not deleted.
+  const deleted = await suppressedAmong(store.listId, [email]).catch(() => null);
+  if (!deleted) return fail("unavailable");
+  if (deleted.size) return fail("deleted");
   const already = (await importedFor({ ...store, statsId, pastBuyers: true }, email)).some((p) => p.productId === product.id);
   if (already) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return fail("unavailable");
@@ -264,6 +271,7 @@ export const WRITE_ERRORS: Record<WriteError, [number, string]> = {
   email: [400, "Send email: an address."],
   consent: [400, "Send agreed: true, your word that this person agreed to hear from you. Nobody is added without it."],
   unsubscribed: [409, "This person unsubscribed from your list, so they are not added back."],
+  deleted: [409, "This person was deleted from your store, so nothing is given to them and they are not emailed."],
   list_full: [409, "Your list is full."],
   not_on_list: [404, "Nobody with this address is on your list."],
   labels: [400, "Send labels as a list of words: add, remove, or both."],

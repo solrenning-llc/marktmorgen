@@ -1600,10 +1600,7 @@ export function CourseStart({ productId, startsAt }: { productId: string; starts
 /**
  * When access to the course ends (24 [E7]). Fair to whoever already joined: the date applies only to people who join
  * from the moment it is set until the date itself, it can move later or come off, never earlier (lib/course.ts).
- *
- * Not drawn in the studio yet: the product's own page (app/[handle]/p/[product]/page.tsx, reserved by another lane)
- * must say the date before anyone pays there first, through ProductFacts' `accessEndLine`. Until then a creator
- * cannot set a date a buyer could pay without seeing.
+ * The course's page and its sales page (ProductFacts' `accessEndLine`) say the date before anyone pays.
  */
 export function CourseAccessEnd({ productId, endsAt, passed }: { productId: string; endsAt: number | null; passed: boolean }) {
   const router = useRouter();

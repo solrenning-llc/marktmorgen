@@ -79,6 +79,7 @@ import { featuredCards } from "@/lib/featured-cards";
 import { ProductAbout } from "@/components/product-about-view";
 import { readCourse } from "@/lib/course";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
+import { accessEndFact } from "@/lib/course-access-end";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -319,9 +320,17 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // How many times it was bought, when the creator chose to say so (lib/sold-count.ts).
     readSoldCounts(store).catch(() => null),
     // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
-    product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
+    // And when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays. A record
+    // that cannot be read here shows no line, as it shows no video total; the course's own page and the learner's
+    // gate read it exactly (lib/learn.ts courseAccess).
+    product.course
+      ? readCourse(product.course.id)
+          .then(async (course) => (course ? { facts: await readCourseFacts(course), accessEndLine: accessEndFact(course, store.language) } : null))
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
-  const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
+  const videoLine = courseFacts?.facts.videoSeconds != null ? videoTotalLine(courseFacts.facts.videoSeconds, store.language) : null;
+  const accessEndLine = courseFacts?.accessEndLine ?? null;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -587,7 +596,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
             </div>
             {summary ? <RatingLine summary={summary} href="#reviews" className="mt-2" lang={store.language} /> : null}
             {soldLine}
-            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} videoLine={videoLine} />
+            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} videoLine={videoLine} accessEndLine={accessEndLine} />
             {product.summary ? <p className="st-muted mt-4 text-lg leading-relaxed">{product.summary}</p> : null}
             {blocks.length > 0 ? <ProductAbout blocks={blocks} language={store.language} /> : null}
             {bundleList}
@@ -655,7 +664,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
       </div>
       {soldLine}
-      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} />
+      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} accessEndLine={accessEndLine} />
       {bundleList}
       <div className="mt-4">{buyTerms}</div>
     </section>

@@ -1,0 +1,259 @@
+/**
+ * A PayPal order is watched before PayPal is asked to take the payment, so a buyer charged always ends up handed what
+ * they paid for (Claude 6's second money review of #3385, MEDIUM, probe A; rules 24 and 30).
+ *
+ * openOrder wrote only the order's record, and captureOrder put the order in pending only on its uncertain branches,
+ * never on the COMPLETED one. When the step that writes the payment down did not reach Redis after PayPal had taken the
+ * payment, nothing was written: the order was in no list, the sweep had nothing to resume, and only the buyer opening
+ * the return page again recovered it. Now the order goes into pending first, the write read exactly; a write that is
+ * not confirmed means PayPal is not asked to take anything.
+ *
+ * Synthetic only: a stand-in for PayPal's API and Resend, the in-memory Redis, the real return route and the real
+ * sweep.
+ */
+import { TEST_CONSENT } from "./digital-consent-fixture";
+import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
+import { handOverKey, openOrder, readPaid } from "@/lib/paypal-sales";
+import { sweepPayPal } from "@/lib/paypal-delivery";
+import { importedFor } from "@/lib/imported-purchases";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+import { NextRequest } from "next/server";
+import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
+
+const PARTNER_CLIENT = "AZpartnerClientId0123456789";
+const SELLER = "7KNGBPH2U58GQ";
+const orders = new Map<string, Record<string, unknown>>();
+const captures = new Map<string, number>();
+const receipts = new Map<string, number>();
+let made = 0;
+const orderId = (n: number) => `5O190127TN36472${String(n).padStart(2, "0")}`;
+
+function completed(order: string, value: string, email: string): Record<string, unknown> {
+  return {
+    id: order,
+    status: "COMPLETED",
+    payer: { email_address: email, payer_id: "QYR5Z8XDVJNXQ" },
+    purchase_units: [{ reference_id: "x", payee: { merchant_id: SELLER }, payments: { captures: [{ id: `3C679366HH9088${order.slice(-2)}`, status: "COMPLETED", amount: { currency_code: "USD", value } }] } }],
+  };
+}
+
+/** How PayPal answers the next capture: it takes the payment, it declines it, or the answer never comes back (nothing taken). */
+let captureWith: "take" | "decline" | "lost" = "take";
+let buyerFor = "a@example.com";
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
+  const method = init?.method ?? "GET";
+  if (url.hostname === "api.resend.com") {
+    const body = String(init?.body ?? "");
+    for (const [buyer, count] of receipts) if (body.includes(buyer)) receipts.set(buyer, count + 1);
+    return json({ id: "e" });
+  }
+  if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
+  if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AApartner", token_type: "Bearer", expires_in: 32400 });
+  if (url.pathname === "/v2/checkout/orders" && method === "POST") {
+    made += 1;
+    const id = orderId(made);
+    orders.set(id, { id, status: "PAYER_ACTION_REQUIRED" });
+    return json({ id, status: "PAYER_ACTION_REQUIRED", links: [{ href: `https://www.paypal.com/checkoutnow?token=${id}`, rel: "payer-action", method: "GET" }] });
+  }
+  const capture = /^\/v2\/checkout\/orders\/([A-Z0-9]+)\/capture$/.exec(url.pathname)?.[1];
+  if (capture && method === "POST") {
+    captures.set(capture, (captures.get(capture) ?? 0) + 1);
+    if (captureWith === "decline") return json({ name: "UNPROCESSABLE_ENTITY", details: [{ issue: "INSTRUMENT_DECLINED" }] }, 422);
+    if (captureWith === "lost") throw new Error("Synthetic: the capture's answer never came back");
+    const body = completed(capture, "49.00", buyerFor);
+    orders.set(capture, body);
+    return json(body, 201);
+  }
+  const read = /^\/v2\/checkout\/orders\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
+  if (read && method === "GET") return orders.has(read) ? json(orders.get(read)) : json({ name: "RESOURCE_NOT_FOUND" }, 404);
+  const cap = /^\/v2\/payments\/captures\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
+  if (cap && method === "GET") return json({ id: cap, status: "COMPLETED" });
+  return json({ name: "RESOURCE_NOT_FOUND" }, 404);
+}) as typeof fetch;
+
+const realNow = Date.now.bind(Date);
+let ahead = 0;
+Date.now = () => realNow() + ahead;
+type Commands = (string | number)[][];
+type Pipeline = (commands: Commands) => Promise<unknown[]>;
+const timeout = () => new Error("Synthetic: Redis timed out");
+
+/**
+ * How Redis fails while the return runs ("none": it does not):
+ *  - "settle": the step that writes the payment down never reaches Redis (probe A);
+ *  - "watch-unsent": putting the order in pending never reaches Redis;
+ *  - "watch-lost": it is applied, but its answer is lost on the way back;
+ *  - "watch-text" / "watch-wrapped": it is applied and answers in a shape not known (rule 24).
+ */
+type Fault = "none" | "settle" | "watch-unsent" | "watch-lost" | "watch-text" | "watch-wrapped";
+const pendingWrite = (commands: Commands) => commands.some((command) => command[0] === "ZADD" && String(command[1]).startsWith("nl:ppsell:pending:"));
+const settleWrite = (commands: Commands) => commands.some((command) => command[0] === "EVAL" && String(command[1]).includes("marktmorgen:paypal-settle"));
+
+async function returnFor(store: Store, order: string, fault: Fault): Promise<{ status: number; location: string }> {
+  const pipeline: Pipeline = redis.pipeline.bind(redis);
+  let struck = false;
+  redis.pipeline = (async (commands: Commands) => {
+    if (struck || fault === "none") return pipeline(commands);
+    if (fault === "settle" && settleWrite(commands)) {
+      struck = true;
+      throw timeout();
+    }
+    if (fault.startsWith("watch-") && pendingWrite(commands)) {
+      struck = true;
+      if (fault === "watch-unsent") throw timeout();
+      const replies = await pipeline(commands);
+      if (fault === "watch-lost") throw timeout();
+      return fault === "watch-text" ? replies.map((reply) => String(reply)) : [{ result: replies[0] }];
+    }
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  try {
+    const response = await paypalReturn(
+      new NextRequest(`https://marktmorgen.com/api/store/paypal/return?store=${store.handle}&token=${order}`, { headers: { host: "marktmorgen.com", "x-forwarded-for": `198.51.100.${made}` } }),
+    );
+    return { status: response.status, location: response.headers.get("location") ?? "" };
+  } catch {
+    // The return fails outright while Redis does: nothing is shown as paid; what matters is what is left written.
+    return { status: 500, location: "" };
+  } finally {
+    redis.pipeline = pipeline;
+  }
+}
+
+async function main(): Promise<void> {
+  redis.clear();
+  console.error = () => {};
+  process.env.RESEND_API_KEY = "re_test_paypal_sales";
+  delete process.env.PAYPAL_ENV;
+  process.env.PAYPAL_PARTNER_CLIENT_ID = PARTNER_CLIENT;
+  process.env.PAYPAL_PARTNER_SECRET = "EPpartnerSecret0123456789";
+  process.env.PAYPAL_PARTNER_MERCHANT_ID = "PARTNERMERCH01";
+  process.env.PAYPAL_BN_CODE = "NimbusLabs_SP";
+
+  await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");
+  await ensureStatsId("owner@example.com");
+  await setSubscription("owner@example.com", { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: true, period: paidPeriod() });
+  const added = await addProduct("owner@example.com", "Sourdough Guide", "", "49", null);
+  if (!added.ok) throw new Error("no product");
+  await setProductLink("owner@example.com", added.product.id, "https://example.com/guide");
+  await setPayPalSeller("owner@example.com", SELLER);
+  const store = (await storeForEmail("owner@example.com"))!;
+  const id = added.product.id;
+  const statsId = store.statsId!;
+  const fresh = async () => (await storeForEmail("owner@example.com"))!;
+  const owned = async (buyer: string) => (await importedFor(await fresh(), buyer)).length;
+  const members = async (key: string) => (await redis.pipeline([["ZRANGEBYSCORE", key, "-inf", "+inf"]]))[0] as string[];
+  const pending = async (order: string) => (await members(`nl:ppsell:pending:${statsId}`)).includes(order);
+  const sales = async (order: string) => (await members(`nl:ppsell:sales:${statsId}`)).filter((member) => member === order).length;
+  const sweep = async () => {
+    ahead += 3_600_000;
+    return (await sweepPayPal(await fresh(), Date.now() + 10_000)).cleared;
+  };
+  const open = async (buyer: string): Promise<string> => {
+    const product = (await readListing(store, id))!;
+    const opened = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+    if (!opened.ok) throw new Error(`no order: ${opened.reason}`);
+    buyerFor = buyer;
+    receipts.set(buyer, 0);
+    return opened.order;
+  };
+  /** Where an order stands: paid, handed over, its receipts, counted in the store's sales, in pending, owed a hand-over, captured. */
+  const state = async (order: string, buyer: string) => ({
+    paid: Boolean(await readPaid(order)),
+    owned: await owned(buyer),
+    receipts: receipts.get(buyer) ?? 0,
+    sales: await sales(order),
+    pending: await pending(order),
+    owed: (await members(handOverKey(statsId))).includes(order),
+    captured: captures.get(order) ?? 0,
+  });
+
+  part("Healthy control: taken once, written down, handed over once, off pending");
+  captureWith = "take";
+  const healthy = await open("healthy@example.com");
+  const back = await returnFor(store, healthy, "none");
+  is("the buyer is sent to the thanks page", [back.status, back.location.includes("/thanks?paypal=")], [303, true]);
+  is("paid, handed over, one receipt, counted once, off pending, not owed, captured once", await state(healthy, "healthy@example.com"), {
+    paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
+  });
+  is("a sweep after it hands nothing over again", await sweep(), 0);
+  is("and nothing moved", await state(healthy, "healthy@example.com"), { paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1 });
+
+  part("Probe A: PayPal takes the payment, then writing it down never reaches Redis");
+  captureWith = "take";
+  const lost = await open("probe-a@example.com");
+  await returnFor(store, lost, "settle");
+  is("PayPal took it once, nothing is written down yet", [captures.get(lost), Boolean(await readPaid(lost))], [1, false]);
+  is("but the order stands in pending, for the sweep to resume", await pending(lost), true);
+  let cleared = 0;
+  for (let i = 0; i < 3; i += 1) cleared += await sweep();
+  is("three sweeps later: paid, handed over, one receipt, counted once, off pending, not owed, never captured again", await state(lost, "probe-a@example.com"), {
+    paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
+  });
+  is("handed over by the sweep, once", cleared, 1);
+  const reload = await returnFor(store, lost, "none");
+  is("the buyer opening the return again is sent to the thanks page", [reload.status, reload.location.includes("/thanks?paypal=")], [303, true]);
+  is("and nothing is taken, handed over, receipted or counted twice", await state(lost, "probe-a@example.com"), {
+    paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
+  });
+
+  for (const [fault, label] of [
+    ["watch-unsent", "putting the order in pending never reaches Redis"],
+    ["watch-lost", "putting the order in pending is applied, but its answer is lost"],
+    ["watch-text", "putting the order in pending answers in text, not a count"],
+    ["watch-wrapped", "putting the order in pending answers in a wrapped shape"],
+  ] as [Fault, string][]) {
+    part(`Rule 24: ${label}`);
+    captureWith = "take";
+    const buyer = `${fault}@example.com`;
+    const order = await open(buyer);
+    const shown = await returnFor(store, order, fault);
+    is("PayPal is not asked to take anything", captures.get(order) ?? 0, 0);
+    is("and the buyer is never shown the thanks page as paid", shown.location.includes("/thanks?paypal="), false);
+    is("nothing written down, handed over or receipted", await state(order, buyer), {
+      paid: false, owned: 0, receipts: 0, sales: 0, pending: fault !== "watch-unsent", owed: false, captured: 0,
+    });
+    is("a sweep never takes the payment itself", [await sweep(), captures.get(order) ?? 0], [0, 0]);
+    const again = await returnFor(store, order, "none");
+    is("the buyer opening the return again with Redis well: taken once and sent to the thanks page", [captures.get(order), again.location.includes("/thanks?paypal=")], [1, true]);
+    is("paid, handed over, one receipt, counted once, off pending, not owed", await state(order, buyer), {
+      paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
+    });
+  }
+
+  part("Control: PayPal declines the capture (nothing charged)");
+  captureWith = "decline";
+  const declined = await open("declined@example.com");
+  const no = await returnFor(store, declined, "none");
+  is("the buyer is told PayPal did not take it", no.location.includes("status=paypal-declined"), true);
+  is("nothing paid, and the order is not left in pending", await state(declined, "declined@example.com"), {
+    paid: false, owned: 0, receipts: 0, sales: 0, pending: false, owed: false, captured: 1,
+  });
+
+  part("Control: the capture's answer never comes back and PayPal's order shows no capture");
+  captureWith = "lost";
+  const unsure = await open("unsure@example.com");
+  orders.set(unsure, { id: unsure, status: "APPROVED" });
+  await returnFor(store, unsure, "none");
+  is("kept in pending, nothing paid", await state(unsure, "unsure@example.com"), {
+    paid: false, owned: 0, receipts: 0, sales: 0, pending: true, owed: false, captured: 1,
+  });
+  is("a sweep keeps asking and takes nothing itself", [await sweep(), await pending(unsure), captures.get(unsure)], [0, true, 1]);
+  orders.set(unsure, { id: unsure, status: "VOIDED" });
+  await sweep();
+  is("once PayPal says it was voided, let go, nothing paid", await state(unsure, "unsure@example.com"), {
+    paid: false, owned: 0, receipts: 0, sales: 0, pending: false, owed: false, captured: 1,
+  });
+
+  done();
+}
+
+main().catch((error) => {
+  console.log(String(error?.stack ?? error));
+  process.exit(1);
+});

@@ -489,18 +489,25 @@ async function keepConnection(
  * KEYS[1] the store's connection, KEYS[2] the stores the account the test meeting was made on connected (its index),
  * KEYS[3] that account's deletion mark (forgetUser), KEYS[4] the test meeting's record (testKey); ARGV[1] the store,
  * ARGV[2] the record to keep, ARGV[3] the cutoff: the time, in milliseconds, at or after which a deletion of that
- * account stops this make or move, ARGV[4] the record as it was read ("" for none there). 1 the record is kept; 2 the
- * connection is gone, or no longer listed under that account, or that account was deleted at or after the cutoff (or
- * its mark does not read as a time), and nothing is written; 3 the record is no longer the one read (one made
- * meanwhile, or deleted or moved meanwhile), and nothing is written; -1 a call of any other shape, refused before
- * anything is read or written. Every deletion of a connection (disconnectFor, forgetUser) deletes it, its test meeting
- * and its place in the index in one pipeline, and a connection kept for another account leaves the old account's
- * index before its test meeting is deleted: whichever side of those commands this runs on, nothing it writes is left
- * after them. Mirrored for tests in lib/redis-memory.ts.
+ * account stops this make or move, ARGV[4] the record as it was read ("" for none there), ARGV[5] the account the
+ * test meeting was made on. 1 the record is kept; 2 the connection is gone, or its own record names another account
+ * (or does not read as a connection with an account), or the store is no longer listed under that account, or that
+ * account was deleted at or after the cutoff (or its mark does not read as a time), and nothing is written; 3 the
+ * record is no longer the one read (one made meanwhile, or deleted or moved meanwhile), and nothing is written; -1 a
+ * call of any other shape, refused before anything is read or written. The account is read from the connection
+ * itself, not only from the index: a store whose connection went to another account is never taken as still the old
+ * one's because a place in the old index outlived it. Every deletion of a connection (disconnectFor, forgetUser)
+ * deletes it, its test meeting and its place in the index in one pipeline, and a connection kept for another account
+ * leaves the old account's index and forgets its test meeting in the same step (KEEP_UNLESS_GONE): whichever side of
+ * those this runs on, nothing it writes is left after them. Mirrored for tests in lib/redis-memory.ts.
  */
-const KEEP_TEST_UNLESS_GONE = `-- marktmorgen:meet-test-keep:v1
-if #KEYS ~= 4 or #ARGV ~= 4 or ARGV[1] == "" or ARGV[2] == "" or #ARGV[3] > 16 or not string.match(ARGV[3], "^[1-9]%d*$") then return -1 end
-if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("SISMEMBER", KEYS[2], ARGV[1]) ~= 1 then return 2 end
+const KEEP_TEST_UNLESS_GONE = `-- marktmorgen:meet-test-keep:v2
+if #KEYS ~= 4 or #ARGV ~= 5 or ARGV[1] == "" or ARGV[2] == "" or #ARGV[3] > 16 or not string.match(ARGV[3], "^[1-9]%d*$") or ARGV[5] == "" then return -1 end
+local conn = redis.call("GET", KEYS[1])
+if not conn then return 2 end
+local read, c = pcall(cjson.decode, conn)
+if not read or type(c) ~= "table" or type(c.account) ~= "table" or c.account.id ~= ARGV[5] then return 2 end
+if redis.call("SISMEMBER", KEYS[2], ARGV[1]) ~= 1 then return 2 end
 local gone = redis.call("GET", KEYS[3])
 if gone and (#gone > 16 or not string.match(gone, "^%d+$") or tonumber(gone) >= tonumber(ARGV[3])) then return 2 end
 local had = redis.call("GET", KEYS[4])
@@ -521,7 +528,8 @@ export type TestKept = "kept" | "gone" | "changed" | "expired" | "unknown";
 
 /**
  * Keeps a test meeting's record (lib/meet-test.ts makeTest, moveTest) in one step with the checks that the store's
- * connection is still the one it was made on (`account`, listed in that account's index) and that no deletion of that
+ * connection is still the one it was made on (`account`, named in the connection's own record and listed in that
+ * account's index) and that no deletion of that
  * account was confirmed since the make or the move began (`startedAt`, less GONE_MARGIN_MS, as finishConsent reads
  * forgetUser's mark), and only over the record as it was read (`had`, null for none there).
  */
@@ -533,7 +541,7 @@ export async function keepTest(
   if (!flowFresh(input.startedAt)) return "expired";
   const keys = [connKey(statsId, provider), userKey(provider, input.account), goneKey(provider, input.account), testKey(statsId, provider)];
   const replies = repliesFor(
-    await redisPipeline([["EVAL", KEEP_TEST_UNLESS_GONE, keys.length, ...keys, statsId, input.value, input.startedAt - GONE_MARGIN_MS, input.had ?? ""]]),
+    await redisPipeline([["EVAL", KEEP_TEST_UNLESS_GONE, keys.length, ...keys, statsId, input.value, input.startedAt - GONE_MARGIN_MS, input.had ?? "", input.account]]),
     1,
   );
   const answer = replies ? countOf(replies[0]) : null;

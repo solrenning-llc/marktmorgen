@@ -1162,7 +1162,7 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         if (key.startsWith("-- marktmorgen:meet-keep:v2\n")) return this.meetKeep(args);
-        if (key.startsWith("-- marktmorgen:meet-test-keep:v1\n")) return this.meetTestKeep(args);
+        if (key.startsWith("-- marktmorgen:meet-test-keep:v2\n")) return this.meetTestKeep(args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];
         this.live(target);
@@ -2088,17 +2088,27 @@ export class MemoryRedis {
 
   /**
    * lib/meet-connect.ts KEEP_TEST_UNLESS_GONE, step for step: a test meeting's record kept only while the store's
-   * connection is there and listed under the account, no deletion of that account is at or after the cutoff, and the
+   * connection is there, names the account in its own record and is listed under it, no deletion of that account is at or after the cutoff, and the
    * record is the one read; -1, as the script answers, for a call of any other shape. A list, a mark or a record of
    * another type throws Redis's own error, read in the script's order (tests/meet-redis-scripts.test.ts holds it to
    * Redis). The list is read without SISMEMBER here, which in this stand-in would make a missing key an empty set.
    */
   private meetTestKeep(args: string[]): unknown {
     const { keys, argv } = this.evalParts(args);
-    if (keys.length !== 4 || argv.length !== 4 || argv[0] === "" || argv[1] === "" || !/^[1-9][0-9]{0,15}$/.test(argv[2])) return -1;
+    if (keys.length !== 4 || argv.length !== 5 || argv[0] === "" || argv[1] === "" || !/^[1-9][0-9]{0,15}$/.test(argv[2]) || argv[4] === "") return -1;
     const [conn, index, goneMark, test] = keys;
-    const [statsId, record, cutoff, had] = argv;
-    if (this.run(["EXISTS", conn]) !== 1) return 2;
+    const [statsId, record, cutoff, had, account] = argv;
+    const connection = this.run(["GET", conn]);
+    if (typeof connection !== "string") return 2;
+    let named: unknown;
+    try {
+      const value: unknown = JSON.parse(connection);
+      const held = value && typeof value === "object" ? (value as { account?: unknown }).account : undefined;
+      named = held && typeof held === "object" ? (held as { id?: unknown }).id : undefined;
+    } catch {
+      return 2;
+    }
+    if (named !== account) return 2;
     this.live(index);
     const listed = this.data.get(index);
     if (listed !== undefined && !(listed instanceof Set)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");

@@ -4,7 +4,8 @@
  * connection, indexed first, only while the renewal lock is the writer's and no deletion of that account was
  * confirmed since its consent flow began (forgetUser's mark) and, when it replaces another account's, takes the store
  * out of that account's index and forgets the test meeting made on it in the same step; KEEP_TEST_UNLESS_GONE keeps a test meeting
- * (lib/meet-test.ts) only while the store's connection is there and listed under the account it was made on, no
+ * (lib/meet-test.ts) only while the store's connection is there, names in its own record the account it was made on
+ * and is listed under it, no
  * deletion of that account was confirmed since the make or the move began, and the record is still the one read.
  *
  * It refuses a call of the wrong shape (key or argument count, a cutoff that is not a time, an empty token,
@@ -39,7 +40,7 @@ test("lib/meet-connect.ts defines the script", () => {
 });
 
 test("lib/meet-connect.ts defines the test meeting's script", () => {
-  assert.match(T, /^-- marktmorgen:meet-test-keep:v1\n/);
+  assert.match(T, /^-- marktmorgen:meet-test-keep:v2\n/);
 });
 
 type Arg = string | number;
@@ -127,7 +128,9 @@ const CASES: Case[] = [
 // The test meeting's script: the store's connection ("conn"), the stores listed under the account it was made on
 // ("idx"), that account's deletion mark ("gone") and the test meeting's record ("test").
 const TKEYS = ["conn", "idx", "gone", "test"];
-const CONNECTED: Arg[][] = [["SET", "conn", "C"], ["SADD", "idx", "s1"]];
+/** The store's connection as lib/meet-connect.ts keeps it, for account A (only its account matters to the script). */
+const CONN_A = JSON.stringify({ provider: "zoom", account: { id: "A", email: "a@example.com", name: "A" }, access: "x", refresh: "y" });
+const CONNECTED: Arg[][] = [["SET", "conn", CONN_A], ["SADD", "idx", "s1"]];
 const tk = (name: string, setup: Arg[][], run: Arg[], reply: number | "error", record: unknown = null, after: Arg[][] = [["GET", "test"]]): Case => ({
   name: `test meeting: ${name}`,
   setup: [...CONNECTED, ...setup],
@@ -136,7 +139,7 @@ const tk = (name: string, setup: Arg[][], run: Arg[], reply: number | "error", r
   after,
   state: [record],
 });
-const tcall = (had: Arg = "", cutoff: Arg = 1001, store: Arg = "s1", value: Arg = "V"): Arg[] => [4, ...TKEYS, store, value, cutoff, had];
+const tcall = (had: Arg = "", cutoff: Arg = 1001, store: Arg = "s1", value: Arg = "V", account: Arg = "A"): Arg[] => [4, ...TKEYS, store, value, cutoff, had, account];
 
 CASES.push(
   tk("keeps a new one while the store is connected and listed, with no deletion since", [], tcall(), 1, "V"),
@@ -164,12 +167,23 @@ CASES.push(
   tk("a cutoff longer than sixteen digits is refused", [], tcall("", "12345678901234567"), -1),
   tk("an empty store is refused", [], tcall("", 1001, ""), -1),
   tk("an empty record is refused", [], tcall("", 1001, "s1", ""), -1),
-  tk("a key too few is refused", [], [3, ...TKEYS.slice(0, 3), "s1", "V", 1001, ""], -1),
-  tk("a key too many is refused", [], [5, ...TKEYS, "more", "s1", "V", 1001, ""], -1),
+  tk("a key too few is refused", [], [3, ...TKEYS.slice(0, 3), "s1", "V", 1001, "", "A"], -1),
+  tk("a key too many is refused", [], [5, ...TKEYS, "more", "s1", "V", 1001, "", "A"], -1),
   tk("an argument too many is refused", [], [...tcall(), "extra"], -1),
   tk("an argument too few is refused", [], tcall().slice(0, -1), -1),
-  tk("a key count with a leading zero is Redis's own error", [], ["04", ...TKEYS, "s1", "V", 1001, ""], "error"),
-  tk("a negative key count is Redis's own error", [], [-1, ...TKEYS, "s1", "V", 1001, ""], "error"),
+  tk("a key count with a leading zero is Redis's own error", [], ["04", ...TKEYS, "s1", "V", 1001, "", "A"], "error"),
+  tk("a negative key count is Redis's own error", [], [-1, ...TKEYS, "s1", "V", 1001, "", "A"], "error"),
+  tk("an empty account is refused", [], tcall("", 1001, "s1", "V", ""), -1),
+  // The account is read from the connection's own record, not only from the index (pre-review M3): a place in the
+  // old account's index that outlived a switch never passes a make on the old account under the new connection.
+  tk("keeps nothing once the connection is another account's, even with the store still in the old index", [["SET", "conn", CONN_A.replace('"id":"A"', '"id":"B"')]], tcall(), 2),
+  tk("keeps nothing when the connection does not read as a record", [["SET", "conn", "not json"]], tcall(), 2),
+  tk("keeps nothing when the connection names no account", [["SET", "conn", '{"provider":"zoom"}']], tcall(), 2),
+  tk("keeps nothing when the connection's account is not a record", [["SET", "conn", '{"account":"A"}']], tcall(), 2),
+  tk("keeps nothing when the connection's account is null", [["SET", "conn", '{"account":null}']], tcall(), 2),
+  tk("keeps nothing when the connection's account id is a number", [["SET", "conn", '{"account":{"id":7}}']], tcall("", 1001, "s1", "V", "7"), 2),
+  tk("keeps nothing when the connection is a list", [["SET", "conn", '[{"account":{"id":"A"}}]']], tcall(), 2),
+  tk("a connection of another type is Redis's error, with nothing written", [["DEL", "conn"], ["SADD", "conn", "x"]], tcall(), "error"),
   tk("more keys than arguments is Redis's own error", [], [9, ...TKEYS, "s1"], "error"),
 );
 

@@ -130,7 +130,9 @@ export async function makeTest(store: Store, provider: MeetProvider, now = Date.
   const spec = {
     eventId: eventId(`test|${statsId}|${randomBytes(6).toString("hex")}`),
     title: TEST_MEETING_TITLE,
-    description: "Made from your Marktmorgen studio to check that the connection works. Nobody is invited. You can delete it from the Video calls page in your studio.",
+    // A meeting made here may end up with no record (the connection gone meanwhile, a keep reply not the script's), so
+    // the studio's page would not list it: the words say where to delete it then, never only that page.
+    description: `Made from your Marktmorgen studio to check that the connection works. Nobody is invited. You can delete it from the Video calls page in your studio. If that page doesn't list it, delete it in ${ACCOUNT_NAMES[provider]}.`,
     start,
     end,
     tz: "UTC",

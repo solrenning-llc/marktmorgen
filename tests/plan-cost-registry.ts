@@ -100,6 +100,7 @@ import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
+import { HELD_REFUND_MAX_KEPT, HELD_REFUND_READS } from "@/lib/held-refunds";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
@@ -708,6 +709,51 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  * Why the retry is the five-minute job's, not a plan's: NOT_A_COST.HAND_OVER_BATCH.
  */
 export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4 } as const;
+/**
+ * The refunds Stripe has not finished, kept for a later look by the three five-minute jobs that take a paid thing back
+ * on a full refund (lib/held-refunds.ts; lib/call-meetings.ts, lib/licence-keys.ts, lib/review-proof.ts; rule 30), in
+ * Redis commands and Stripe reads a job and store a run, each held to what the real jobs send at their worst by
+ * tests/held-refunds-cost.test.ts:
+ * - rangeReads: the kept set read once a run (ZRANGEBYSCORE, at most HELD_REFUND_READS due), kept refunds or not;
+ * - perMemberRead: each member read back takes one command on the kept set: looked at again later (ZADD XX), let go
+ *   (ZREM), or, once handled, released (ZREM);
+ * - perRowReadBack: each one read back that now gives everything back takes the read set's SADD and EXPIRE when the
+ *   job handles it (its closing write is the one a refund of the window takes, once a refund, inside the job's lookups);
+ * - perPageKeep: each page of refunds with one Stripe has not finished keeps it (ZCARD, ZADD NX, EXPIRE);
+ * - pages: each job's REFUND_PAGES; runsPerMonth: the five-minute schedule (/api/cron/mail) over 31 days.
+ * Why it is the five-minute job's, not a plan's: NOT_A_COST.HELD_REFUND_READS.
+ */
+export const HELD_REFUND_RUN = {
+  rangeReads: 1,
+  perMemberRead: 1,
+  perRowReadBack: 2,
+  perPageKeep: 3,
+  pages: { "lib/call-meetings.ts": 2, "lib/licence-keys.ts": 3, "lib/review-proof.ts": 3 } as Record<string, number>,
+  runsPerMonth: 31 * 24 * 12,
+  commandsPerJobRun(file: string): number {
+    const pages = HELD_REFUND_RUN.pages[file];
+    if (!Number.isSafeInteger(pages)) return Number.NaN;
+    return HELD_REFUND_RUN.rangeReads + HELD_REFUND_READS * (HELD_REFUND_RUN.perMemberRead + HELD_REFUND_RUN.perRowReadBack) + HELD_REFUND_RUN.perPageKeep * pages;
+  },
+  stripeReadsPerJobRun: HELD_REFUND_READS,
+};
+/**
+ * The bytes those commands move through the database at the most a job and store a run: every command at 128 bytes
+ * (its name, the key, the JSON around it), and every member it carries at HELD_MEMBER_WIRE_BYTES (the longest member a
+ * kept refund can be, "<refund id>|<seconds>" at 4 + 255 + 1 + 10 bytes, with its score and quotes): the range's
+ * reply, one a member read back, one refund id a SADD, and HELD_REFUND_MAX_KEPT a keep's ZADD NX.
+ */
+const HELD_MEMBER_WIRE_BYTES = 270 + 32;
+const heldRunBytes = (file: string) =>
+  HELD_REFUND_RUN.commandsPerJobRun(file) * 128 + (3 * HELD_REFUND_READS + HELD_REFUND_RUN.pages[file] * HELD_REFUND_MAX_KEPT) * HELD_MEMBER_WIRE_BYTES;
+const HELD_JOBS = Object.keys(HELD_REFUND_RUN.pages);
+/** The kept refunds' worst month for one store, all three jobs: commands, bytes, reads by id and dollars. */
+export const HELD_REFUND_MONTH = (() => {
+  const commands = HELD_JOBS.reduce((sum, file) => sum + HELD_REFUND_RUN.commandsPerJobRun(file), 0) * HELD_REFUND_RUN.runsPerMonth;
+  const bytes = HELD_JOBS.reduce((sum, file) => sum + heldRunBytes(file), 0) * HELD_REFUND_RUN.runsPerMonth;
+  const stripeReads = HELD_JOBS.length * HELD_REFUND_RUN.stripeReadsPerJobRun * HELD_REFUND_RUN.runsPerMonth;
+  return { commands, bytes, stripeReads, usd: commands * COMMAND + bytes * DB_BYTE };
+})();
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**
  * A narrowed email's reading of the store's buyers made by the scheduled job
@@ -1636,6 +1682,7 @@ export const NOT_A_COST: Record<string, string> = {
   DEMO_REFUSALS_PER_ADDRESS_PER_DAY: "Refused demo requests one address or network may count in a day, each counted for the whole site only inside it, so one address cannot spend the day's DEMO_REFUSALS_PER_DAY: a pace that only refuses, inside the day's counted refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_REFUSALS_PER_SESSION: "Refused actions one live demo session may count in its own record, whoever shares its address, past which its next actions are answered after one read and write nothing: priced with each day's openings in the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_REFUSAL_WORST_COMMANDS: "The commands one refused demo request sends at the most, priced with the refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
+  HELD_REFUND_READS: `Refunds Stripe has not finished, kept for a later look by the three five-minute jobs that take a paid thing back on a full refund (lib/held-refunds.ts; lib/call-meetings.ts, lib/licence-keys.ts, lib/review-proof.ts; rule 30): each job reads its kept set once a run and reads back by id (GET /v1/refunds/{id}, its charge expanded) at most HELD_REFUND_READS due ones a store a run, each first looked at HELD_REFUND_FIRST_LOOK_SECONDS after it was kept and then every HELD_REFUND_RECHECK_SECONDS while unfinished, let go at the latest HELD_REFUND_MAX_SECONDS after it was made, at most HELD_REFUND_MAX_KEPT kept a job and store (the set's bytes are the data room's: nl:meet:rf:, nl:keys:, nl:rev:refunds:held: in tests/store-data-registry.ts, 16 KB each). A scheduled job, bounded by its schedule and counted at its worst, never as zero (HELD_REFUND_RUN, held to the real jobs by tests/held-refunds-cost.test.ts): ${HELD_JOBS.map((file) => `${file} ${HELD_REFUND_RUN.commandsPerJobRun(file)}`).join(", ")} commands a run, so at most ${HELD_REFUND_MONTH.commands.toLocaleString("en-US")} commands and ${(HELD_REFUND_MONTH.bytes / 1e9).toFixed(2)} GB moved a store in a month of ${HELD_REFUND_RUN.runsPerMonth.toLocaleString("en-US")} runs, $${HELD_REFUND_MONTH.usd.toFixed(4)} at the registry's Upstash prices (COMMAND, DB_BYTE), a company fixed cost of the five-minute schedule like LOST_DISPUTE_PAGES; and ${HELD_REFUND_MONTH.stripeReads.toLocaleString("en-US")} GET /v1/refunds/{id} a store a month, which Stripe bills nothing for but which count in its request rate limit with the jobs' other calls.`,
   LOST_DISPUTE_PAGES: "Pages of Stripe's closing events (GET /events, up to 100 each) read per store per run by each of the five five-minute jobs that take things back after a lost dispute (lib/refunds.ts, lostDisputesSince; lib/licence-keys.ts, lib/call-meetings.ts, lib/review-proof.ts, and the checkout sweep's gifts and pre-orders, lib/gifts.ts and lib/preorders.ts, asked only of a store that ever sold one), so at most 5 x LOST_DISPUTE_PAGES calls a store every five minutes, inside each run's deadline and with no other call per dispute: a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call. Each lost dispute read becomes one row, handled once (its event id kept as read), with the store commands a refund row of the same job takes (SISMEMBER, SADD and EXPIRE of the read set, or for gifts and pre-orders the SISMEMBER and SADD of the read set, the GET of the payment's gift or pre-order and the read of that gift or pre-order and of what it gave (GET or HGET), each reply read in its exact shape so a row left unknown is read again next run, at most once a row a run, and the closing write: the key revoked, the meeting ended, the review marked, the gift or pre-order taken back as for a full refund; for a call refunded in full, the calendar feed's changed mark too: SET, INCRBY and EXPIRE, lib/call-records.ts, markBookingsChanged, at most REFUND_LOOKUPS a store a run), at most 100 x LOST_DISPUTE_PAGES rows a job a run, inside the same schedule and deadline as the refund rows. When there are more than a run may read, the job keeps its place in one key (GET at the start, then, once every row read is handled, one SMISMEMBER of the read set and SET or DEL: 3 commands a run, lib/refunds.ts, lostCursorKey and confirmLostRead; a run that could not handle every row writes nothing) and the next run reads on from there.",
   GIVEN_UP_LINES_PER_DAY: "A cap on the lines passed-over Stripe events leave for each endpoint of a store a day, at most MAX_ENDPOINTS endpoints a store a day, past which one summary line an endpoint counts the rest (lib/webhooks.ts, markGivenUp): no endpoint is called and no delivery taken; what the lines keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:evt:), and the job that writes them is the five-minute schedule's (a company fixed cost).",
   SKIPPED_LINES_PER_DAY: "A cap on the lines a store's log gets in a UTC day for messages not kept (too large to keep, or made with the month's webhook deliveries used), each reason on its own, past which one summary line an endpoint counts the rest (lib/webhooks.ts, skippedLines): no endpoint is called and no delivery taken; what the lines and the day's counts keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:wait:).",

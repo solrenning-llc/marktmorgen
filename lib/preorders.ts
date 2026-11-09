@@ -234,17 +234,22 @@ export async function waitingCount(store: Store, productId: string): Promise<num
  * still waiting are queued for the five-minute job to hand over
  * (runPreorderReleases). A count that cannot be read queues the job all the
  * same, never "nobody waits": the job reads the pre-orders again and keeps
- * itself in line until it can (sweep APP3). The job's SADD answered in
- * another shape throws, so the caller says it was not done.
+ * itself in line until it can (sweep APP3). It still throws that unknown read
+ * afterwards (main's preorder-release-exact: a release is not left on a
+ * guess), so the caller says it was not done while the job is already in line.
+ * The job's SADD answered in another shape throws, so the caller says it was
+ * not done.
  */
 export async function queueRelease(store: Store, productId: string): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
   let waiting: number;
+  let unknown: UnknownReplyError | null = null;
   try {
     waiting = await waitingCount(store, productId);
   } catch (error) {
     if (!(error instanceof UnknownReplyError)) throw error;
     console.error("could not read a product's pre-orders going on sale; its hand-over job is queued to read them again", error);
+    unknown = error;
     waiting = Number.POSITIVE_INFINITY;
   }
   const queue = waiting > 0;
@@ -253,6 +258,7 @@ export async function queueRelease(store: Store, productId: string): Promise<voi
     ...(queue ? [["SADD", JOBS, `${store.statsId}|${productId}|${store.handle}`]] : []),
   ]);
   if (queue && !oneWrite(repliesFor(replies, 2)?.[1])) throw new UnknownReplyError("a pre-order hand-over job");
+  if (unknown) throw unknown;
 }
 
 // ------------------------------------------------------------------ one pre-order

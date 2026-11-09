@@ -20,6 +20,7 @@ import { makeKey } from "@/lib/api-keys";
 import { POST as postAccess } from "@/app/api/v1/access/route";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setLanguage, setPastBuyers, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { LANGUAGES, LANGUAGE_CODES } from "@/lib/store-language";
+import { MOVED_PURCHASE_WORDS } from "@/lib/buyer-words/moved-purchases";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -144,6 +145,15 @@ async function main(): Promise<void> {
       is("French spaces its : ? ! ; from the word before", /[^ \s][:?!;](\s|$)/.test(prose), false);
     }
   }
+
+  part("The moved email's words: the same keys in every language, a course's line too");
+  const keys = Object.keys(MOVED_PURCHASE_WORDS.en);
+  for (const code of LANGUAGE_CODES) {
+    const words = MOVED_PURCHASE_WORDS[code];
+    const line = words.courseLine("\u00abtitle\u00bb", "https://marktmorgen.com/@x/course/1");
+    is(`${LANGUAGES[code].english}: every key English has, and a course line naming the course and its link`, [Object.keys(words), line.includes("\u00abtitle\u00bb"), line.includes("https://marktmorgen.com/@x/course/1")], [keys, true, true]);
+  }
+  is("French spaces the course line's colon", MOVED_PURCHASE_WORDS.fr.courseLine("T", "u"), "- T\u00a0: u");
 
   part("Every plain letter built in these files carries its language");
   for (const file of ["lib/imports.ts", "lib/api-write.ts"]) {

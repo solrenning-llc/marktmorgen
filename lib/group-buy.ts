@@ -8,6 +8,7 @@
  *   nl:grp:<id>:t:<hash>     string  one open of an address's link at a time, for 30 seconds at most
  *   nl:grp:<id>:mail         string  emails this link sent today, so it cannot be used to fill inboxes
  *   nl:grp:<id>:stuck        string  its refund stuck on its way was said in the log today (a day at most)
+ *   nl:grp:<id>:held         string  its charge was read with a part on its way: asked again after an hour
  *   nl:grp:take:<token>      string  the link in a place's email: which purchase, which address
  *   nl:grp:pi:<payment>      string  the purchase a payment paid for, so a refund finds it
  *   nl:grp:<store>:any       string  present once the store has sold one
@@ -154,6 +155,16 @@ const now = () => Math.floor(Date.now() / 1000);
  * read in the next run. A scheduled job bounded by its schedule, like REFUND_PAGES; Stripe bills no API call.
  */
 export const CHARGE_REFUND_LOOKUPS = 10;
+/**
+ * How long a group purchase whose charge was read with a part still on its way waits before that charge is asked
+ * again (heldKey; second money review of #3410, Claude 3): its parts hold the anchor meanwhile, and the run's lookups go
+ * to the other charges, so ten charges waiting on a part never starve an older one refunded in full. A charge is asked
+ * once a run at most, whatever its parts (chargeSettled in revokeRefundedGroups). Up to CHARGE_REFUND_LOOKUPS x 12
+ * charges waiting at once are each asked again within the hour; the places of one whose last part went through go at
+ * most this long later.
+ */
+const CHARGE_HELD_RECHECK_SECONDS = 3_600;
+const heldKey = (id: string) => `nl:grp:${id}:held`;
 /**
  * A refund still on its way this long is said in the log, and still takes nothing back (the owner's decision 18, 9
  * November 2026: a refund pending for many days raises an alert, never a revocation). Stripe finishes almost every
@@ -987,6 +998,8 @@ export async function revokeRefundedGroups(
   let lookups = CHARGE_REFUND_LOOKUPS;
   /** Refunds read in this run still on their way after REFUND_STUCK_SECONDS, each said in the log once a run. */
   const stuck = new Set<string>();
+  /** Each charge's parts as read in this run: held (a part on its way, seen on a row or in the charge's refunds) or through. */
+  const chargeSettled = new Map<string, "held" | "through">();
 
   /**
    * One refund row, or one dispute closed as lost (as lostDisputesSince builds it), read whole: true when it was
@@ -1034,29 +1047,51 @@ export async function revokeRefundedGroups(
     // No group purchase paid by it: nothing to take back, so nothing held, said or asked of Stripe. One that gives its
     // payment back is marked read, as before; one still on its way is read again with the list, at no cost.
     if (groupId === null) return onItsWay ? true : markRead();
+    const chargeId = plainObject(refund.charge) ? ownField(refund.charge, "id") : undefined;
+    const chargeKey = typeof chargeId === "string" && CHARGE_PATTERN.test(chargeId) ? chargeId : "";
     if (onItsWay) {
+      // Its charge has a part on its way: a succeeded part of it read later in this run holds without asking Stripe.
+      if (chargeKey) chargeSettled.set(chargeKey, "held");
       if (typeof refund.created === "number" && refund.created <= now() - REFUND_STUCK_SECONDS && !stuck.has(id)) {
         stuck.add(id);
         // An alert for whoever reads the logs, never a revocation (the owner's decision 18): nothing goes until it
         // succeeded. At most once a payment a day: the mark is written first, and only a mark already there is quiet.
         const mark = typeof groupId === "string" && GROUP_ID.test(groupId) ? repliesFor(await redisPipeline([["SET", stuckKey(groupId), "1", "NX", "EX", STUCK_SAID_SECONDS]]), 1)?.[0] : undefined;
         if (mark !== null) {
-          console.error("a refund for a group purchase has been pending for more than seven days; its places are kept while it is on its way, and for good if it is only a part", { store: sid, account, refund: id, status: refund.status, created: refund.created });
+          console.error("a refund for a group purchase has been pending for more than seven days; its places are kept while it is on its way", { store: sid, account, refund: id, status: refund.status, created: refund.created });
         }
       }
       return "hold";
     }
     // A succeeded part of the charge: through only once the charge's succeeded refunds add up to it. Read after the
     // handled mark and the group purchase, so a refund already handled, or of another sale, asks Stripe nothing more.
+    // Each charge is asked once a run at most, and one found waiting on a part is asked again only after
+    // CHARGE_HELD_RECHECK_SECONDS (its mark, or a reply on the mark that does not read, holds without a lookup).
     if (!through) {
-      if (lookups <= 0) return "hold";
-      lookups -= 1;
-      try {
-        if ((await chargeRefundsSettled(account, refund)) === "held") return "hold";
-      } catch (error) {
-        if (!(error instanceof StripeListUnreadable) && !(error instanceof StripeError)) throw error;
-        console.error("reading the refunds of a refunded charge for group purchases failed; held for the next pass", error);
-        return "hold";
+      const known = chargeKey ? chargeSettled.get(chargeKey) : undefined;
+      if (known === "held") return "hold";
+      if (known !== "through") {
+        // A purchase id in another shape has no mark: its charge is asked as before, never held for good.
+        const marked = typeof groupId === "string" && GROUP_ID.test(groupId) ? groupId : "";
+        const waiting = marked ? repliesFor(await redisPipeline([["GET", heldKey(marked)]]), 1) : [null];
+        if (!waiting || waiting[0] !== null) return "hold";
+        if (lookups <= 0) return "hold";
+        lookups -= 1;
+        let settled: "held" | "through";
+        try {
+          settled = await chargeRefundsSettled(account, refund);
+        } catch (error) {
+          if (!(error instanceof StripeListUnreadable) && !(error instanceof StripeError)) throw error;
+          console.error("reading the refunds of a refunded charge for group purchases failed; held for the next pass", error);
+          if (chargeKey) chargeSettled.set(chargeKey, "held");
+          return "hold";
+        }
+        if (chargeKey) chargeSettled.set(chargeKey, settled);
+        if (settled === "held") {
+          // A mark whose write is left unknown only means the charge is asked again on the next run.
+          if (marked) await redisPipeline([["SET", heldKey(marked), "1", "EX", CHARGE_HELD_RECHECK_SECONDS]]);
+          return "hold";
+        }
       }
     }
     if (typeof groupId === "string") {

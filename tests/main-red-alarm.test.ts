@@ -451,7 +451,7 @@ async function endToEnd() {
       gh.reads.filter((p) => /^actions\/runs\/\d+\/jobs/.test(p)).length, 10);
     is("only the workflow without a result on the current head is read on earlier heads, page by page",
       gh.reads.filter((p) => p.startsWith("actions/workflows/")),
-      ["actions/workflows/product-checks.yml/runs?branch=main&status=completed&per_page=100&page=1", "actions/workflows/product-checks.yml/runs?branch=main&status=completed&per_page=100&page=2"]);
+      ["actions/workflows/product-checks.yml/runs?branch=main&per_page=100&page=1", "actions/workflows/product-checks.yml/runs?branch=main&per_page=100&page=2"]);
   }
   {
     const b = run(PC, stopped, { id: 7_001 });
@@ -622,14 +622,14 @@ async function endToEnd() {
       is(`(d) ${what}: never green, the earlier red still opens the issue as before`, [outcome, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
     }
     {
-      {
       // TODOS-56: the head's push run stopped by its time limit is newer than the queue's green: it still opens.
       const gh = github({ head: HEAD, headRuns: canceledHead, older: earlierRed, ...proven });
       const d = await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet });
       is("a head run stopped by its time limit, the merge queue green on the head: it still opens, with the stopped run",
         [d.action, d.red.map((r) => r.id)], ["open", [8_950]]);
     }
-    const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: stoppedHead, issues: [botIssue], queueReply: "garbage" });
+    {
+      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: stoppedHead, issues: [botIssue], queueReply: "garbage" });
       let outcome = "";
       try { outcome = (await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet })).action; } catch { outcome = "threw"; }
       is("(d) head all canceled and an unreadable merge-queue reply: nothing closes, nothing opens", [outcome, gh.writes], ["none", []]);

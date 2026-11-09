@@ -40,7 +40,8 @@
  * - none: anything else (a run still going with no red behind it, a workflow without a run, an
  *   unexpected conclusion).
  *
- * Never counted, either way: skipped, neutral and stale runs, canceled runs with no failed job,
+ * Never counted, either way: skipped, neutral and stale runs, canceled runs with no failed job and
+ * either no stopped job or a newer run of their workflow and event that superseded them (redInside),
  * runs of another branch, of another file, or of any other event (pull_request, workflow_dispatch...);
  * merge_group runs only as above, from their own listing, and only a success on the current head. The jobs of a canceled run are read for every one on the current head and,
  * on earlier heads, newest first, for at most JOB_READS runs per workflow per alarm run; beyond
@@ -357,13 +358,17 @@ export async function alarm({ api, trigger, log = console.log }) {
   }
   // Earlier main heads, only for the workflows with no result on the current head, newest first,
   // until the first completed counted run on an earlier head (the latest one) is found. A canceled
-  // one is evidence only when a job inside it failed; at most JOB_READS of them are read.
+  // one is evidence only when a job inside it failed, or was stopped with nothing newer begun before it
+  // ended (redInside); at most JOB_READS of them are read. Read in every status, not only completed:
+  // the run that superseded a canceled one may itself still be going, being canceled by a later push,
+  // and would otherwise be missing, so the canceled run would read as a time-out (Claude 6 on #3422).
+  // Runs still going are only ever candidates that supersede, never evidence (the loop below skips them).
   for (const file of earlierNeeded(decide({ runs, trigger, head, redJobs, stoppedJobs, queueRuns }).states)) {
     const workflow = file.slice(file.lastIndexOf("/") + 1);
     let jobReads = 0;
     let settled = false;
     for (let page = 1; !settled; page += 1) {
-      const listing = await api("GET", `actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100&page=${page}`);
+      const listing = await api("GET", `actions/workflows/${workflow}/runs?branch=main&per_page=100&page=${page}`);
       if (!Number.isSafeInteger(listing?.total_count) || !Array.isArray(listing?.workflow_runs)) throw new Error("unreadable earlier run listing");
       const found = listing.workflow_runs.map(checked);
       runs.push(...found);

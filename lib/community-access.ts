@@ -67,19 +67,21 @@ import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { readStripePage } from "@/lib/stripe-list";
 import {
+  REFUND_CHECK_WAITS,
   TICKET_CUSTOMERS,
   TICKET_CUSTOMERS_SIDE_BY_SIDE,
   TICKET_PAYMENT_PAGES,
   TICKET_PAYMENT_PAGE_BYTES,
   TICKET_PAYMENT_PAGE_ROWS,
   TICKET_REFUND_CHECKS,
+  TICKET_REFUND_READ_BYTES,
   TICKET_SESSION_PAGES,
   TICKET_SESSION_PAGE_BYTES,
   TICKET_SESSION_PAGE_ROWS,
 } from "@/lib/community-read-rules";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
-import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
+import { RefundReadCapped, type RefundReadLimits, keptUnlessLost, purchaseRefunded, refundReader, refundedInFull } from "@/lib/refunds";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { type Learner, TOKEN_PATTERN, emailKey, learnerFrom, storeKey } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
@@ -201,6 +203,23 @@ const isIntentRow = (row: Row) => hasId(row) && hasMeta(row) && oneOf(row.status
 const refunded = refundedInFull;
 
 /**
+ * What one refund question asked here may read, enforced by lib/refunds.ts (refundReader): the calls and bytes it is
+ * priced at (tests/plan-cost-registry.ts, ACCESS_CHECK_READ). Past them it throws RefundReadCapped, read here as an
+ * answer not known for good, never as "kept" (Claude 2's review of #3395: a payment plan's question read about 22).
+ */
+const REFUND_READ: RefundReadLimits = { calls: REFUND_CHECK_WAITS, maxBytes: TICKET_REFUND_READ_BYTES };
+
+/** A refund question asked inside REFUND_READ: given back, kept, or "capped" when it would read past it. */
+async function withinRefundRead(ask: () => Promise<boolean>): Promise<boolean | "capped"> {
+  try {
+    return await ask();
+  } catch (error) {
+    if (error instanceof RefundReadCapped) return "capped";
+    throw error;
+  }
+}
+
+/**
  * Whether this address paid for one of `ids` on the creator's Stripe account
  * and still holds it: not refunded, and for a membership, still running.
  */
@@ -249,10 +268,12 @@ async function paidHoldings(store: Store, email: string, ids: ReadonlySet<string
         const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
         if (!handles.has(meta.store ?? "")) continue;
         if (!isSettled(session)) continue;
-        if (refunded(session.payment_intent)) continue;
         // Only a checkout that carried the offers after paying can have a one-click addition on its customer
-        // (lib/upsell.ts takes no offer without `upsell_key`, and charges the checkout's own customer).
+        // (lib/upsell.ts takes no offer without `upsell_key`, and charges the checkout's own customer). Added before the
+        // checkout's own refund is read: an addition is its own payment, kept when the checkout is refunded, and read
+        // on its own below (Claude 2's review of #3395: it read as "not held").
         if (carriedOffers(session) && typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer)) customers.add(session.customer);
+        if (refunded(session.payment_intent)) continue;
         // A product in a bundle opens the door as if bought on its own; one already found held is not asked again.
         const bought = deliveredIds(meta).filter((id) => ids.has(id) && !held.has(id));
         if (!bought.length) continue;
@@ -261,7 +282,13 @@ async function paidHoldings(store: Store, email: string, ids: ReadonlySet<string
           reading.whole = false;
           continue;
         }
-        if (await purchaseRefunded(account, session)) continue;
+        const gone = await withinRefundRead(() => purchaseRefunded(account, session, REFUND_READ));
+        // Past what the question may read, whether it was given back is not known: never held, never "no".
+        if (gone === "capped") {
+          reading.whole = false;
+          continue;
+        }
+        if (gone) continue;
         // A membership opens the door while it is being paid for; a payment
         // plan is a one-off paid in parts, and counts like one.
         if (session.mode === "subscription" && meta.kind !== "plan") {
@@ -304,7 +331,12 @@ async function paidHoldings(store: Store, email: string, ids: ReadonlySet<string
       reading.whole = false;
       continue;
     }
-    if (await keptUnlessLost(account, intent)) continue;
+    const lost = await withinRefundRead(() => keptUnlessLost(account, intent, refundReader(account, REFUND_READ)));
+    if (lost === "capped") {
+      reading.whole = false;
+      continue;
+    }
+    if (lost) continue;
     for (const id of bought) held.add(id);
     if (enough()) return { held, whole: true };
   }
@@ -413,9 +445,18 @@ export type Holdings = {
    * never "try again in a minute".
    */
   lasting: boolean;
+  /**
+   * When `lasting`, why: "volume", the purchases are more, or heavier, than one reading takes in (the address may hold
+   * a ticket past them, so "Send me the link" still sends it); "refused", the store's Stripe account refuses the read
+   * (account_invalid, 400, 403, 404: nothing about this address is known, so no link is made for it).
+   */
+  why?: LastingWhy;
   /** What went wrong, when not whole: what a strict door throws. */
   unread?: unknown;
 };
+
+/** Why a reading will stay not known however often it is asked (Holdings `why`). */
+export type LastingWhy = "volume" | "refused";
 
 /** The answer for a door kept for `ids`: yes when one is held; no only when the reading was whole. */
 export function heldAnswer(holdings: Holdings, ids: readonly string[]): Ticket {
@@ -432,7 +473,12 @@ export function unknownForGood(holdings: Holdings | null | undefined): boolean {
   return Boolean(holdings && !holdings.whole && holdings.lasting);
 }
 
-const notRead = (error: unknown): Holdings => ({ held: new Set(), whole: false, lasting: askingAgainWontTell(error), unread: error });
+/** A reading that failed on `error`: not known, for good when asking again will not tell, with why (Holdings `why`). */
+function notRead(error: unknown): Holdings {
+  const lasting = askingAgainWontTell(error);
+  if (!lasting) return { held: new Set(), whole: false, lasting, unread: error };
+  return { held: new Set(), whole: false, lasting, why: error instanceof UnreadPurchasesError ? "volume" : "refused", unread: error };
+}
 
 /**
  * Which of `ids` this address holds now — paid and not refunded, a membership still running, given for free or
@@ -459,7 +505,7 @@ async function readHoldings(store: Store, email: string, ids: readonly string[],
       for (const id of paid.held) held.add(id);
       if (!paid.whole) {
         const unread = new UnreadPurchasesError("more than is read", true);
-        return { held, whole: false, lasting: true, unread };
+        return { held, whole: false, lasting: true, why: "volume", unread };
       }
     }
     return { held, whole: true, lasting: false };
@@ -479,13 +525,16 @@ const holdingsKey = (id: string, email: string) => `nl:cm:${id}:h:${emailKey(ema
 function keptHoldings(raw: unknown, version: number, asked: readonly string[]): Holdings | null {
   if (typeof raw !== "string") return null;
   try {
-    const value = JSON.parse(raw) as { v?: unknown; ids?: unknown; held?: unknown; lasting?: unknown };
+    const value = JSON.parse(raw) as { v?: unknown; ids?: unknown; held?: unknown; lasting?: unknown; why?: unknown };
     if (value.v !== version || !Array.isArray(value.ids) || !Array.isArray(value.held)) return null;
     if (value.lasting !== undefined && value.lasting !== true) return null;
+    // A lasting reading kept without why it lasts is read again: what "Send me the link" does turns on it.
+    const why = value.why === "volume" || value.why === "refused" ? value.why : null;
+    if (value.lasting === true && !why) return null;
     const ids = new Set(value.ids.filter((id): id is string => typeof id === "string"));
     if (!asked.every((id) => ids.has(id))) return null;
     const held = new Set(value.held.filter((id): id is string => typeof id === "string" && ids.has(id)));
-    if (value.lasting === true) return { held, whole: false, lasting: true, unread: new UnreadPurchasesError("more than is read (kept a minute)", true) };
+    if (value.lasting === true && why) return { held, whole: false, lasting: true, why, unread: new UnreadPurchasesError("more than is read (kept a minute)", true) };
     return { held, whole: true, lasting: false };
   } catch {
     return null;
@@ -530,7 +579,7 @@ export async function holdingsOf(
   // than are read) is kept a minute, as a "no" is, so a member past it does not cost every page a reading of Stripe.
   if (!read.whole && !read.lasting) return read;
   const every = read.whole && asked.every((pid) => read.held.has(pid));
-  const record = { v: config.v, ids: asked, held: [...read.held], ...(read.whole ? {} : { lasting: true }) };
+  const record = { v: config.v, ids: asked, held: [...read.held], ...(read.whole ? {} : { lasting: true, why: read.why }) };
   // Keeping it is a saving only: a failed write leaves the reading just made to decide.
   await redisPipeline([["SET", holdingsKey(id, email), JSON.stringify(record), "EX", every ? OPEN_SECONDS : SHUT_SECONDS]]).catch(
     (error) => console.error("keeping what a community member holds failed", error),
@@ -796,7 +845,8 @@ async function within(key: string, limit: number): Promise<boolean | null> {
   return count === null ? null : count <= limit;
 }
 
-export type LinkRequest = "sent" | "email" | "limited" | "error";
+/** "unchecked": the store's Stripe account refuses to be read, so nobody's access can be checked; nothing was sent. */
+export type LinkRequest = "sent" | "email" | "limited" | "error" | "unchecked";
 
 /**
  * Emails a way in, when the address holds a ticket. "sent" either way: only
@@ -829,10 +879,14 @@ export async function requestCommunityLink(input: {
   const holdings = await holdingsOf(store, config, raw);
   const ticket = heldAnswer(holdings, config.access);
   // Not confirmed for now: "try again", never a quiet "sent" with nothing sent to somebody who paid. Not confirmed
-  // for good (more purchases than are read): the link is sent, as to somebody who may hold one, and the gate it opens
-  // says to write to the creator; never an "error" that trying again will not change (the pre-review's P3). Either
-  // way the form tells nobody whether the address bought anything.
+  // for good because of the purchases' volume: the link is sent, as to somebody who may hold one, and the gate it
+  // opens says to write to the creator; never an "error" that trying again will not change (the pre-review's P3).
+  // Not confirmed because the store's Stripe account refuses the read: nothing about this address is known, so no
+  // link is made and no email sent to somebody who may never have dealt with the store; the answer says to write to
+  // the creator, and is the same for every address (Claude 6's F2 on #3395). Either way the form tells nobody whether
+  // the address bought anything.
   if (ticket === "unknown" && !holdings.lasting) return "error";
+  if (ticket === "unknown" && holdings.why !== "volume") return "unchecked";
   if (ticket === false) return "sent";
 
   const token = randomBytes(32).toString("hex");

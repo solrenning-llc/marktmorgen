@@ -213,6 +213,8 @@ async function main(): Promise<void> {
   intents.cus_cprKeptAdd01 = [{ id: "pi_cpradd700", object: "payment_intent", status: "succeeded", metadata: { kind: "upsell", store: "paidreview", product: ticket }, latest_charge: charge("ch_cpradd000700") }];
   is("the kept addition opens the door", await state("kept-add@example.com"), true);
   intents.cus_cprKeptAdd01 = [{ ...intents.cus_cprKeptAdd01[0], latest_charge: refundedCharge }];
+  // The "yes" just read is kept five minutes (OPEN_SECONDS), as for every holder: forgotten, as a refund's webhook would.
+  await access.forgetTicket(await fresh(), "kept-add@example.com");
   is("control: refunded too, it does not", await state("kept-add@example.com"), false);
   done();
 }

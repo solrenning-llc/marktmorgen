@@ -76,16 +76,24 @@ export const TICKET_PAYMENT_PAGE_ROWS = 10;
 export const TICKET_PAYMENT_PAGE_BYTES = 60_000;
 /**
  * Purchases whose refund or lost dispute is asked of Stripe for one answer (lib/refunds.ts purchaseRefunded,
- * keptUnlessLost). Those answers are read by lib/refunds.ts, shared with every other door, with no ceiling of bytes:
- * the 64 KB each is priced at in tests/plan-cost-registry.ts is a premise, not enforced, and its true most is not
- * known.
+ * keptUnlessLost), each inside REFUND_CHECK_WAITS calls of at most TICKET_REFUND_READ_BYTES (lib/refunds.ts
+ * refundReader); one more purchase that would need asking leaves the answer not known, never "no".
  */
 export const TICKET_REFUND_CHECKS = 2;
 /**
- * The calls one such question waits on, one after another, at the most: the dispute, a payment plan's invoice, its
- * payments, its first payments side by side, and their disputes side by side.
+ * The calls one such question makes, at the most, and so the most it waits on one after another: for a payment plan
+ * its first invoice, the invoice's payments, its first payments and their disputes. Enforced (lib/refunds.ts
+ * refundReader): a question that would make one more call is not known, never "not refunded" and never "refunded", and
+ * asking again tells no more. A plan paid in one payment takes three, four when its charge is disputed. It was the
+ * price only, while a plan's question could read about twenty-two (Claude 2's review of #3395).
  */
 export const REFUND_CHECK_WAITS = 5;
+/**
+ * The most bytes one answer to such a question is read to (an invoice, its payments, a payment with its charge, a list
+ * of disputes): past it the question is not known, as past REFUND_CHECK_WAITS. A premise, not a measurement: an
+ * invoice with its lines or ten disputes with their evidence fields stay well under it.
+ */
+export const TICKET_REFUND_READ_BYTES = 64_000;
 /** Every Stripe call one answer waits on, one after another, at the most: the pages of both ways of the address, the customers' pages read a group at a time, the refund questions. */
 export const TICKET_STRIPE_WAITS =
   2 * TICKET_SESSION_PAGES + Math.ceil(TICKET_CUSTOMERS / TICKET_CUSTOMERS_SIDE_BY_SIDE) * TICKET_PAYMENT_PAGES + TICKET_REFUND_CHECKS * REFUND_CHECK_WAITS;

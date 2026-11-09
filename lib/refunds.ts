@@ -58,7 +58,7 @@
  * delivered as a link to somewhere else — once the buyer has the address,
  * only the creator can close it there.
  */
-import { onAccount } from "@/lib/stripe-account";
+import { StripeBodyTooLarge, onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
 
 type ChargeLike = {
@@ -168,6 +168,44 @@ function closingKnown(event: unknown): boolean {
   return status !== "lost" || CHARGE_ID.test(idOf(charge));
 }
 
+/** One GET of the creator's Stripe account, as a refund question reads it. */
+export type RefundRead = (path: string) => Promise<Record<string, unknown>>;
+
+/** The most one refund question may read (lib/community-access.ts): calls, and bytes of each answer. */
+export type RefundReadLimits = { calls: number; maxBytes: number };
+
+/**
+ * A refund question read past its ceiling (RefundReadLimits): more calls than it may make, or an answer heavier than
+ * it may read. Its answer is not known, never "not refunded" and never "refunded": the callers that read a refund
+ * leniently (keptUnlessLost, purchaseRefunded) let this one through instead of taking it as "kept".
+ */
+export class RefundReadCapped extends Error {
+  constructor(what: string) {
+    super(`a refund question read past its ceiling: ${what}`);
+    this.name = "RefundReadCapped";
+  }
+}
+
+const plainRead = (account: string): RefundRead => (path) => onAccount("GET", account, path);
+
+/**
+ * The reads of one refund question, inside `limits`: at most `limits.calls` calls, every answer read up to
+ * `limits.maxBytes` (lib/stripe-account.ts); one past either throws RefundReadCapped before it is made, or as it streams
+ * in. Without `limits`, every read as before.
+ */
+export function refundReader(account: string, limits?: RefundReadLimits): RefundRead {
+  if (!limits) return plainRead(account);
+  let left = limits.calls;
+  return async (path) => {
+    if (left <= 0) throw new RefundReadCapped("more calls than it may make");
+    left -= 1;
+    return onAccount("GET", account, path, undefined, undefined, undefined, undefined, limits.maxBytes).catch((error: unknown) => {
+      if (error instanceof StripeBodyTooLarge) throw new RefundReadCapped("an answer heavier than it may read");
+      throw error;
+    });
+  };
+}
+
 /**
  * Whether the bank took this payment back from the creator for good: a
  * dispute on its charge that Stripe has closed as lost, whatever its amount
@@ -177,15 +215,15 @@ function closingKnown(event: unknown): boolean {
  * for a charge marked disputed (rare) is Stripe asked for that charge's
  * disputes: a door reading an undisputed payment makes no extra request.
  * A charge not expanded, or not marked, counts as not lost, as with refunds.
- * Throws when Stripe cannot be asked.
+ * Throws when Stripe cannot be asked; with a `read` of refundReader(), RefundReadCapped past its ceiling.
  */
-export async function disputeLost(account: string, payment: unknown): Promise<boolean> {
+export async function disputeLost(account: string, payment: unknown, read: RefundRead = plainRead(account)): Promise<boolean> {
   const charge = chargeOf(payment);
   if (!charge || charge.disputed !== true) return false;
   if (lostOnCharge(charge)) return true;
   const id = typeof charge.id === "string" ? charge.id : "";
   if (!CHARGE_ID.test(id)) return false;
-  const listed = await onAccount("GET", account, `/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`);
+  const listed = await read(`/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`);
   const rows = Array.isArray(listed.data) ? (listed.data as { status?: unknown }[]) : [];
   return rows.some((row) => !!row && row.status === "lost");
 }
@@ -198,19 +236,21 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
  * closing on a failed read would lock paying buyers out whenever Stripe is
  * slow.
  */
-export async function keptUnlessLost(account: string, payment: unknown): Promise<boolean> {
+export async function keptUnlessLost(account: string, payment: unknown, read?: RefundRead): Promise<boolean> {
   try {
-    return await disputeLost(account, payment);
+    return await disputeLost(account, payment, read);
   } catch (error) {
+    // Past its ceiling the answer is not known: never taken as "not lost".
+    if (error instanceof RefundReadCapped) throw error;
     console.error("reading a payment's dispute failed", error);
     return false;
   }
 }
 
 /** Refunded in full, or lost to a dispute: given back either way. Throws when Stripe cannot be asked. */
-export async function givenBack(account: string | null | undefined, payment: unknown): Promise<boolean> {
+export async function givenBack(account: string | null | undefined, payment: unknown, read?: RefundRead): Promise<boolean> {
   if (refundedInFull(payment)) return true;
-  return account ? disputeLost(account, payment) : false;
+  return account ? disputeLost(account, payment, read) : false;
 }
 
 /**
@@ -404,7 +444,7 @@ const idOf = (value: unknown): string =>
  * that counts is its first invoice's. Read from Stripe; any answer it does
  * not give counts as not refunded, as everywhere else.
  */
-async function planRefundedInFull(account: string, session: SessionLike): Promise<boolean> {
+async function planRefundedInFull(account: string, session: SessionLike, get: RefundRead): Promise<boolean> {
   const meta = (session.metadata ?? {}) as Record<string, unknown>;
   if (session.mode !== "subscription" || meta.kind !== "plan") return false;
   const invoice =
@@ -413,12 +453,12 @@ async function planRefundedInFull(account: string, session: SessionLike): Promis
   try {
     // Whichever way this account's API version names it: on the invoice
     // itself (older versions), or as the invoice's payments (newer ones).
-    const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
+    const read = await get(`/invoices/${encodeURIComponent(invoice)}`);
     const intents: string[] = [];
     const direct = idOf(read.payment_intent);
     if (INTENT_ID.test(direct)) intents.push(direct);
     else {
-      const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
+      const listed = await get(`/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
       for (const row of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
         if (row.status !== "paid") continue;
         const payment = row.payment && typeof row.payment === "object" ? (row.payment as Record<string, unknown>) : null;
@@ -429,11 +469,13 @@ async function planRefundedInFull(account: string, session: SessionLike): Promis
     if (!intents.length) return false;
     const checked = await Promise.all(
       intents.map(async (intent) =>
-        givenBack(account, await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`)),
+        givenBack(account, await get(`/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`), get),
       ),
     );
     return checked.every(Boolean);
   } catch (error) {
+    // Past its ceiling the answer is not known: never taken as "not refunded".
+    if (error instanceof RefundReadCapped) throw error;
     console.error("reading a payment plan's first payment failed", error);
     return false;
   }
@@ -445,10 +487,12 @@ async function planRefundedInFull(account: string, session: SessionLike): Promis
  * The one rule for every door. A plan's later instalments, refunded or lost,
  * close nothing here, as before.
  */
-export async function purchaseRefunded(account: string | null | undefined, session: SessionLike): Promise<boolean> {
+export async function purchaseRefunded(account: string | null | undefined, session: SessionLike, limits?: RefundReadLimits): Promise<boolean> {
   if (refundedInFull(session.payment_intent)) return true;
   if (!account) return false;
+  // One ceiling for the whole question, when given (lib/community-access.ts): past it RefundReadCapped is thrown.
+  const read = refundReader(account, limits);
   // As for a plan's first payment below: what Stripe did not answer closes nothing.
-  if (await keptUnlessLost(account, session.payment_intent)) return true;
-  return planRefundedInFull(account, session);
+  if (await keptUnlessLost(account, session.payment_intent, read)) return true;
+  return planRefundedInFull(account, session, read);
 }

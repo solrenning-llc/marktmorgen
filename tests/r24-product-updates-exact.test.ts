@@ -6,6 +6,7 @@
  *   2.1 a queue of updates that does not read is unknown, never "no updates";
  *   2.2 a product's latest update that does not read is unknown, never "none in two months";
  *   2.3 the send's lock holds a value of its own run and is let go only while it still holds it.
+ *   2.4 one send whose give-back is unknown does not hold up the other sends of the same run.
  *
  * Synthetic Redis (tests/redis-stub.ts) and synthetic Stripe and Resend answers only.
  */
@@ -258,5 +259,55 @@ test("2.3 control: a run lets go of its own lock when it is done", async () => {
   try {
     await advanceUpdate(r.job.id, storeForHandle, Date.now() + 20000);
     assert.equal(redis.run(["GET", `nl:upd:job:${r.job.id}:lock`]), null);
+  } finally { r.restore(); }
+});
+
+// ---- 2.4: one send that throws does not hold up the others in the same run
+
+/** A second send of the same update under its own id, waiting in the queue beside the first. */
+function copyJob(r: World): string {
+  const id = r.job.id === "f".repeat(24) ? "e".repeat(24) : "f".repeat(24);
+  const job = JSON.parse(String(redis.run(["GET", `nl:upd:job:${r.job.id}`])));
+  redis.run(["SET", `nl:upd:job:${id}`, JSON.stringify({ ...job, id })]);
+  for (const to of redis.run(["LRANGE", `nl:upd:job:${r.job.id}:to`, 0, -1]) as string[]) redis.run(["RPUSH", `nl:upd:job:${id}:to`, to]);
+  redis.run(["SADD", "nl:updq", id]);
+  return id;
+}
+
+test("2.4 a send whose give-back is unknown still throws, and the other send in the queue is moved on", async () => {
+  const r = await setup();
+  const copy = copyJob(r);
+  const sent = globalThis.fetch;
+  let refusedOnce = false;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (!refusedOnce && new URL(String(input)).pathname === "/emails/batch") {
+      refusedOnce = true;
+      return Response.json({ message: "synthetic refusal" }, { status: 422 });
+    }
+    return sent(input, init);
+  }) as typeof fetch;
+  let unknownOnce = false;
+  redis.pipeline = (async (cs: Command[]) => {
+    if (!unknownOnce && cs.length === 2 && cs.every((c) => c[0] === "DECRBY")) {
+      unknownOnce = true;
+      return [{}, {}];
+    }
+    return r.original(cs);
+  }) as typeof redis.pipeline;
+  try {
+    await assert.rejects(advanceUpdates(storeForHandle, Date.now() + 20000), UnknownReplyError, "the step is still logged as failed");
+    assert.ok(refusedOnce && unknownOnce, "the first send was refused and its give-back did not read");
+    const statuses = [(await readUpdateJob(r.job.id))?.status, (await readUpdateJob(copy))?.status].sort();
+    assert.deepEqual(statuses, ["sending", "sent"], "the other send went out in the same run; the unknown one waits");
+    assert.equal(r.batches.flat().length, 1);
+  } finally { r.restore(); }
+});
+
+test("2.4 control: two healthy sends in the queue are both moved on", async () => {
+  const r = await setup();
+  const copy = copyJob(r);
+  try {
+    assert.equal(await advanceUpdates(storeForHandle, Date.now() + 20000), 2);
+    assert.deepEqual([(await readUpdateJob(r.job.id))?.status, (await readUpdateJob(copy))?.status], ["sent", "sent"]);
   } finally { r.restore(); }
 });

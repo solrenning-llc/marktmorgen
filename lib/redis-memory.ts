@@ -689,6 +689,8 @@ export class MemoryRedis {
           if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
           if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
           this.data.set(target, args[3]);
+          // The script's SET has no KEEPTTL: as in real Redis, the key keeps no expiry.
+          this.until.delete(target);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {

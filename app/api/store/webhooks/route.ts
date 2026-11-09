@@ -3,7 +3,7 @@ import { noticeCreator } from "@/lib/account-notice";
 import { ensureStatsId, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
-import { MAX_ENDPOINT_URL, addEndpoint, removeEndpoint, resendDelivery, rotateSecret, sendTest, setEndpointEvents, webhooksView } from "@/lib/webhooks";
+import { MAX_ENDPOINT_URL, WEBHOOK_SETTINGS_UNSURE_WORDS, WebhookSettingsUnsureError, addEndpoint, removeEndpoint, resendDelivery, rotateSecret, sendTest, setEndpointEvents, webhooksView } from "@/lib/webhooks";
 
 /**
  * The creator's webhook endpoints: add one (its signing secret comes back in
@@ -88,6 +88,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
     console.error("changing webhooks failed", error);
+    // A change that may have been saved is never said unchanged (the editor's server_error words say so).
+    if (error instanceof WebhookSettingsUnsureError) return Response.json({ ok: false, error: "unsure", message: WEBHOOK_SETTINGS_UNSURE_WORDS }, { status: 503 });
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

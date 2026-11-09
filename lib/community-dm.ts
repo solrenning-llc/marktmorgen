@@ -202,27 +202,40 @@ export async function send(
   if (!words) return { ok: false, reason: "empty" };
   const pair = pairOf(from, to);
 
-  const [declined, already, size] = await redisPipeline([
-    ["SISMEMBER", shutKey(id, to), from],
-    ["EXISTS", chatKey(id, pair)],
-    ["ZCARD", inboxKey(id, to)],
-  ]);
+  // Each reply in its exact shape (CX-123 rule 24): SISMEMBER and EXISTS 0 or 1,
+  // ZCARD a whole count. A hole, null, text or a short pipeline is not "not
+  // declined", "under the cap" or "already talking": nothing is written and
+  // the route answers 503.
+  const checks = repliesFor(
+    await redisPipeline([
+      ["SISMEMBER", shutKey(id, to), from],
+      ["EXISTS", chatKey(id, pair)],
+      ["ZCARD", inboxKey(id, to)],
+    ]),
+    3,
+  );
+  const declined = replyCount(checks?.[0]);
+  const already = replyCount(checks?.[1]);
+  const size = replyCount(checks?.[2]);
+  if (declined === null || declined > 1 || already === null || already > 1 || size === null) {
+    throw new UnknownReplyError("a private message's declined, conversation or count check");
+  }
   // Declined once is declined for good, and the sender is told nothing that
   // would let them work out they were declined rather than ignored.
-  if (Number(declined) === 1) return { ok: false, reason: "declined" };
-  if (Number(size) >= MAX_CONVERSATIONS && !Number(already)) return { ok: false, reason: "full" };
+  if (declined === 1) return { ok: false, reason: "declined" };
+  if (size >= MAX_CONVERSATIONS && !already) return { ok: false, reason: "full" };
 
   const message: Message = { a: from, text: words, at: now() };
   // A request when this is the first thing said and the community asks for
   // one. The creator writing to a member never is; a member writing to the
   // creator never is either.
-  const asking = setting.ask && !Number(already) && from !== CREATOR && to !== CREATOR;
+  const asking = setting.ask && !already && from !== CREATOR && to !== CREATOR;
 
   // Its room first (DataRoomError when it does not fit). A conversation at
   // MAX_MESSAGES lets its oldest go, and that one's room comes back.
   const [length, oldest] = await redisPipeline([["LLEN", chatKey(id, pair)], ["LINDEX", chatKey(id, pair), 0]]);
   const dropped = Number(length) >= MAX_MESSAGES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
-  await needData(room, [{ slot: PAIR_SLOT(pair), bytes: dataBytes([JSON.stringify(message)], 1) + (Number(already) ? 0 : PAIR_BYTES) - dropped }]);
+  await needData(room, [{ slot: PAIR_SLOT(pair), bytes: dataBytes([JSON.stringify(message)], 1) + (already ? 0 : PAIR_BYTES) - dropped }]);
 
   await redisPipeline([
     ["RPUSH", chatKey(id, pair), JSON.stringify(message)],
@@ -400,14 +413,21 @@ export type MessageHit = { pair: string; other: string; message: Message };
  */
 export async function searchMessages(id: string, who: string, used: string[]): Promise<MessageHit[]> {
   if (!used.length) return [];
-  const [raw] = await redisPipeline([["ZREVRANGE", inboxKey(id, who), 0, SEARCH_CONVERSATIONS - 1]]);
-  const pairs = (Array.isArray(raw) ? raw.map(String) : []).filter((pair) => otherIn(pair, who) !== "");
+  // Each list in its exact shape (CX-123 rule 24): a lost or off-shape reply is
+  // not "no match", so the search page says it could not search the messages.
+  // Only an exact empty list has nothing to find.
+  const what = "a member's conversations for a search";
+  const inbox = stringList(repliesFor(await redisPipeline([["ZREVRANGE", inboxKey(id, who), 0, SEARCH_CONVERSATIONS - 1]]), 1)?.[0]);
+  if (!inbox) throw new UnknownReplyError(what);
+  const pairs = inbox.filter((pair) => otherIn(pair, who) !== "");
   const hits: MessageHit[] = [];
   for (let at = 0; at < pairs.length; at += SEARCH_BATCH) {
     const batch = pairs.slice(at, at + SEARCH_BATCH);
-    const rows = await redisPipeline(batch.map((pair) => ["LRANGE", chatKey(id, pair), -SEARCH_MESSAGES, -1]));
+    const rows = repliesFor(await redisPipeline(batch.map((pair) => ["LRANGE", chatKey(id, pair), -SEARCH_MESSAGES, -1])), batch.length);
+    if (!rows) throw new UnknownReplyError(what);
     batch.forEach((pair, i) => {
-      const list = Array.isArray(rows[i]) ? (rows[i] as unknown[]) : [];
+      const list = stringList(rows[i]);
+      if (!list) throw new UnknownReplyError(what);
       for (const entry of list) {
         const message = parseMessage(entry);
         if (message && holdsAll(message.text, used)) hits.push({ pair, other: otherIn(pair, who), message });
@@ -460,18 +480,33 @@ export async function forgetDmPerson(id: string, who: string): Promise<number> {
  * reads: no read mark is set.
  */
 export async function conversationsOf(id: string, who: string): Promise<{ request: boolean; messages: { mine: boolean; fromCreator: boolean; text: string; at: number }[] }[]> {
-  const [mine, asked] = await redisPipeline([["ZRANGEBYSCORE", inboxKey(id, who), "-inf", "+inf"], ["ZRANGEBYSCORE", askedKey(id, who), "-inf", "+inf"]]);
-  const requests = new Set((Array.isArray(asked) ? asked : []).map(String));
-  const pairs = [...new Set([...(Array.isArray(mine) ? mine : []), ...requests].map(String))].filter((p) => p.split(".").includes(who));
+  // Every list and line in its exact shape (CX-123 rule 24): a lost or
+  // off-shape reply, or a line that cannot be read as a message, is not "no
+  // conversations" or "no messages". It throws, so lib/person-copy.ts fails the
+  // whole copy rather than hand over one with a part silently missing. Only
+  // exact empty lists mean none.
+  const what = "a member's private conversations for their data copy";
+  const heads = repliesFor(await redisPipeline([["ZRANGEBYSCORE", inboxKey(id, who), "-inf", "+inf"], ["ZRANGEBYSCORE", askedKey(id, who), "-inf", "+inf"]]), 2);
+  const mine = stringList(heads?.[0]);
+  const asked = stringList(heads?.[1]);
+  if (!mine || !asked) throw new UnknownReplyError(what);
+  const requests = new Set(asked);
+  const pairs = [...new Set([...mine, ...asked])].filter((p) => p.split(".").includes(who));
   if (!pairs.length) return [];
-  const lists = await redisPipeline(pairs.map((pair) => ["LRANGE", chatKey(id, pair), 0, -1]));
-  return pairs.map((pair, i) => ({
-    request: requests.has(pair),
-    messages: (Array.isArray(lists[i]) ? (lists[i] as unknown[]) : [])
-      .map(parseMessage)
-      .filter((m): m is Message => m !== null)
-      .map((m) => ({ mine: m.a === who, fromCreator: m.a === CREATOR, text: m.text, at: m.at })),
-  }));
+  const lists = repliesFor(await redisPipeline(pairs.map((pair) => ["LRANGE", chatKey(id, pair), 0, -1])), pairs.length);
+  if (!lists) throw new UnknownReplyError(what);
+  return pairs.map((pair, i) => {
+    const lines = stringList(lists[i]);
+    if (!lines) throw new UnknownReplyError(what);
+    return {
+      request: requests.has(pair),
+      messages: lines.map((line) => {
+        const m = parseMessage(line);
+        if (!m) throw new UnknownReplyError(what);
+        return { mine: m.a === who, fromCreator: m.a === CREATOR, text: m.text, at: m.at };
+      }),
+    };
+  });
 }
 
 /** How many conversations and requests one member is in: what deleting them goes through (lib/community-erasure.ts). */

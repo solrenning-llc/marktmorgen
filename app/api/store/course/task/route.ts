@@ -130,7 +130,10 @@ export async function POST(request: NextRequest) {
     // The file it replaced is no longer anybody's work.
     if (done.replaced) {
       await deleteFile(done.replaced.path).catch((error: unknown) => console.error("could not delete a replaced assignment file", error));
-      await releaseBytes(room, done.replaced.bytes).catch(() => {});
+    }
+    // Its bytes come back only when this hand-in took it out of the files' hash (lib/assignment.ts, freedBytes).
+    if (done.freedBytes) {
+      await releaseBytes(room, done.freedBytes).catch(() => {});
     }
     // A creator who reads each one hears there is work to read.
     if (task.review) {

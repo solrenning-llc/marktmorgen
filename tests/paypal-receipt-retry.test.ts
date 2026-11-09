@@ -88,6 +88,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const realNow = Date.now.bind(Date);
 let ahead = 0;
 Date.now = () => realNow() + ahead;
+/**
+ * Moves the clock to a minute after the next UTC midnight. The synthetic Resend account (tests/resend-fallback-fixture.ts)
+ * keeps one ledger a UTC day, while the real ledger is kept in Redis; so a part whose tries must meet the same ledger
+ * runs inside one day, whatever the time the suite starts (as tests/paypal-receipt-once.test.ts does).
+ */
+const startOfNextDay = () => {
+  const now = Date.now();
+  ahead += Math.ceil(now / 86_400_000) * 86_400_000 + 60_000 - now;
+};
 const handOverKey = (statsId: string) => `nl:ppsell:handover:${statsId}`;
 
 async function main(): Promise<void> {
@@ -147,6 +156,7 @@ async function main(): Promise<void> {
   is("never sent twice", toBuyer(second).length, 1);
 
   part("The sender's answer is unknown (the request throws): kept, and the same email is never sent again");
+  startOfNextDay();
   mail = "throws";
   const third = await pay(3);
   is("no receipt accepted", toBuyer(third).length, 0);

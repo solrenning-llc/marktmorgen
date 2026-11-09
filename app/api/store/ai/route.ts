@@ -34,9 +34,13 @@ import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
-import { heldRefusal } from "@/lib/child-safety";
+import { heldRefusal, heldRefusalAmong } from "@/lib/child-safety";
+import { isFileHeld } from "@/lib/held-files";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
+
+/** The kinds of writing help that read a product named by `product` (quiz and feedback name it by `id`). */
+const HELD_KINDS = new Set(["page", "review", "block", "headline", "fill", "alt", "translate", "posts", "reply"]);
 
 /**
  * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research", … }`.
@@ -46,9 +50,6 @@ const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call"
  * Who may ask is who may write that thing: products and courses need the
  * products permission, an email the one to write drafts (lib/team-roles.ts).
  */
-/** The kinds of writing help that read a product named by `product` (quiz and feedback name it by `id`). */
-const HELD_KINDS = new Set(["page", "review", "block", "headline", "fill", "alt", "translate", "posts", "reply"]);
-
 export async function POST(request: NextRequest) {
   // A review or a translation sends the page being edited, which may be long, and
   // twice as long with a second version being tested (lib/sales-page.ts, MAX_PAGE_BYTES).
@@ -197,6 +198,11 @@ export async function POST(request: NextRequest) {
     const product = sitePage ? { title: sitePage.title } : await readListing(store, text(body.product, 40));
     if (!product) return fail("unknown", 404);
     const path = text(body.path, 200);
+    // A picture kept for a child-safety report goes to no AI provider, whichever product or page names it
+    // (lib/held-files.ts), and nothing says whose it is; a mark that cannot be read is not a yes.
+    const pictureHeld = path ? await isFileHeld(path).catch(() => null) : false;
+    if (pictureHeld === null) return fail("unavailable", 503);
+    if (pictureHeld) return fail("on_hold", 409);
     const folder = await imageFolder(guarded.ref);
     if (!path || !ownsImagePath(path, folder)) return fail("invalid");
     const found = await get(path, { access: "private" }).catch(() => null);
@@ -349,6 +355,10 @@ export async function POST(request: NextRequest) {
     // guided setup checks them; nothing is saved here.
     const type = funnelType(text(body.type, 40));
     if (!type) return fail("type");
+    // A chosen product held for a child-safety report goes to no AI provider (lib/child-safety.ts).
+    const chosen = body.products && typeof body.products === "object" && !Array.isArray(body.products) ? Object.values(body.products as Record<string, unknown>).map((id) => text(id, 40)).filter(Boolean) : [];
+    const onHold = await heldRefusalAmong(store, chosen);
+    if (onHold) return onHold;
     const read = await readFunnelFacts(store, type, body.products && typeof body.products === "object" && !Array.isArray(body.products) ? (body.products as Record<string, unknown>) : {});
     if (!read.ok) return Response.json({ ok: false, error: read.error, slot: read.slot }, { status: 400 });
     const ask = readFunnelAsk(body);

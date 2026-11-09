@@ -13,7 +13,14 @@
  * Synthetic store, placeholder names and paths, in-memory Redis, no blob
  * token: a call that reached the blob SDK fails at once, without the network.
  */
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductFile, setProductImage, setSubscription, storeForEmail } from "@/lib/store";
+import { readFileSync } from "node:fs";
+import { NextRequest } from "next/server";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductFile, setProductImage, setProductPage, setSubscription, storeForEmail } from "@/lib/store";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { parsePage } from "@/lib/sales-page";
+import { writePage } from "@/lib/sales-page-store";
+import { POST as aiRoute } from "@/app/api/store/ai/route";
+import { ROOM } from "./data-room";
 import { holdReported } from "@/lib/child-safety";
 import { HELD_FILE_SECONDS, holdFiles, isFileHeld } from "@/lib/held-files";
 import { del } from "@/lib/blob";
@@ -52,11 +59,20 @@ async function main(): Promise<void> {
   await setProductFile(owner, free.product.id, file(freePath));
   await setProductImage(owner, held.product.id, { path: `images/${FOLDER}/${HELD_PICTURE}`, width: 10, height: 10, alt: "", bytes: 1, small: null } as never);
 
+  const PAGE_PICTURE = "cccccccccccccccccccccccccccccccc.webp";
+  await setProductPage(owner, held.product.id, true);
+  const statsId = (await storeForEmail(owner))!.statsId!;
+  await writePage(statsId, held.product.id, { ...parsePage({}), blocks: [{ id: "blk001", kind: "pictures", heading: "", items: [{ path: `images/${FOLDER}/${PAGE_PICTURE}`, width: 10, height: 10, alt: "", caption: "" }] }] } as never, ROOM);
+
   part("The hold marks every file the product hands over");
   is("held", await holdReported({ kind: "child_safety", url: `https://marktmorgen.com/@filesshop/p/${held.product.id}` }, (await storeForEmail(owner))!), "held");
   is("its file and its picture are marked; another product's file is not", [await isFileHeld(heldPath), await isFileHeld(`images/${FOLDER}/${HELD_PICTURE}`), await isFileHeld(freePath)], [true, true, false]);
+  is("so are the pictures on its sales page", await isFileHeld(`images/${FOLDER}/${PAGE_PICTURE}`), true);
+  const lists = redis.keys().filter((key) => key.startsWith("nl:csa:files:"));
+  const list = lists.length === 1 ? (JSON.parse(String(redis.run(["GET", lists[0]]))) as { paths: string[]; more: number }) : null;
+  is("where its files are is kept for the owner to find them", [lists.length, list?.paths.includes(heldPath), list?.more], [1, true, 0]);
   const marks = redis.keys().filter((key) => key.startsWith("nl:csa:file:"));
-  is("the marks name no path or store", marks.every((key) => /^nl:csa:file:[0-9a-f]{64}$/.test(key)) && marks.length === 2, true);
+  is("the marks name no path or store", marks.every((key) => /^nl:csa:file:[0-9a-f]{64}$/.test(key)) && marks.length === 3, true);
   const ttl = Number(redis.run(["TTL", marks[0] ?? ""]));
   is("and they end by themselves after 400 days", ttl > 399 * 86_400 && ttl <= HELD_FILE_SECONDS, true);
 
@@ -85,6 +101,13 @@ async function main(): Promise<void> {
   is("the public picture is not found, and not cached", [pic.status, pic.headers.get("cache-control")], [404, "no-store"]);
   const other = await imageRoute(picture(FREE_PICTURE), { params: Promise.resolve({ folder: FOLDER, file: FREE_PICTURE }) });
   is("another picture is still asked for (no token here, so it fails to fetch)", other.status, 502);
+
+  const session = await openSession(owner);
+  const describe = await aiRoute(new NextRequest("https://marktmorgen.com/api/store/ai", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}`, origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ kind: "alt", product: free.product.id, path: `images/${FOLDER}/${HELD_PICTURE}` }) }));
+  is("its picture goes to no AI provider, even named under another product", [describe.status, ((await describe.json()) as { error?: string }).error], [409, "on_hold"]);
+  const words = readFileSync("lib/child-safety.ts", "utf8") + readFileSync("docs/incident-response.md", "utf8");
+  is("the owner is told what the site cannot take back: cached pictures for up to a year, issued addresses for up to 4 hours", [words.includes("for up to a year"), words.includes("Purge CDN cache"), words.includes("up to 4 hours")], [true, true, true]);
+  is("the privacy policy says reported material is kept, unserved", readFileSync("app/privacy/page.tsx", "utf8").includes('id="child-safety-kept"'), true);
 
   part("A mark that cannot be read keeps the file and hands nothing out");
   const real = redis.pipeline.bind(redis);

@@ -19,6 +19,7 @@
  *
  *   nl:csa:held:<store>:<YYYY-MM-DD>   set      products held automatically that day, 2 days
  *   nl:csa:keep:<store>:<product>      "1"      preservation hold, 400 days (unit 2)
+ *   nl:csa:files:<store>:<product>     JSON     where its held files are, 400 days (unit 3b)
  *
  * Unit 2: the hold also marks the product for KEEP_SECONDS, before it is
  * taken off, and while the mark is there no studio route removes, edits,
@@ -56,6 +57,21 @@ export const TAKE_IT_DOWN_HOURS = 48;
 const COUNT_SECONDS = 2 * 86_400;
 /** How long a reported product is kept from removal, editing and publishing: a year from the report and a margin. */
 export const KEEP_SECONDS = 400 * 86_400;
+
+/** How many paths the held list keeps: every file stays marked, the list is for finding them again. */
+export const HELD_LIST_PATHS = 400;
+const listKey = (store: Pick<Store, "statsId" | "handle">, productId: string) => `nl:csa:files:${storeTag(store)}:${productId}`;
+
+/**
+ * Where the held product's files are, kept beside the marks for as long: the marks are hashes, and once a store
+ * closes or a person is erased this list is how the owner finds what to hand over (18 U.S.C. § 2258A(h)). It is
+ * read by the owner only, from the store's data in the hosting console, never served by the site.
+ */
+async function listHeldFiles(store: Pick<Store, "statsId" | "handle">, productId: string, paths: string[]): Promise<boolean> {
+  const list = JSON.stringify({ paths: paths.slice(0, HELD_LIST_PATHS), more: Math.max(0, paths.length - HELD_LIST_PATHS) });
+  const replies = repliesFor(await redisPipeline([["SET", listKey(store, productId), list, "EX", KEEP_SECONDS]]), 1);
+  return replies?.[0] === "OK";
+}
 
 export type HoldOutcome = "held" | "files_unconfirmed" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
 
@@ -184,8 +200,8 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
     const kept = repliesFor(await redisPipeline([["SET", keepKey(store, product.id), "1", "EX", KEEP_SECONDS]]), 1);
     if (kept?.[0] !== "OK") return "unknown";
     // Its files are kept and closed to everyone before it is taken off (unit 3b, lib/held-files.ts).
-    const files = await productFilePaths(product)
-      .then(holdFiles)
+    const files = await productFilePaths(product, store.statsId || undefined)
+      .then(async (paths) => (await holdFiles(paths)) && (await listHeldFiles(store, product.id, paths)))
       .catch(() => false);
     const done = await setProductHidden(storeRef(store), product.id, true);
     if (!done.ok) return done.reason === "unknown" ? "unknown" : "failed";
@@ -197,7 +213,7 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
-  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist or buyers' reviews, from the studio, and it goes into no bundle. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. Its files are kept from deletion, whoever asks, and handed to nobody, buyers included: only a download address issued in the last few hours works until it expires.",
+  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist or buyers' reviews, from the studio, and it goes into no bundle. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. Its files are kept from deletion, whoever asks, and handed to nobody, buyers included. Two things the site cannot take back: a download address issued before the report works until it expires (up to 4 hours), and a picture of it fetched before may still be served from the CDN's and browsers' caches for up to a year; purge the CDN cache in the hosting dashboard now, as docs/incident-response.md section 8 says.",
   files_unconfirmed: "The product it points at was taken off the store at once (unpublished), but keeping its files from deletion and download could not be confirmed. Suspend the store now, as docs/incident-response.md section 8 says.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",

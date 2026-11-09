@@ -1273,18 +1273,22 @@ const num = (value: unknown) => (typeof value === "number" && Number.isFinite(va
  * store's deletion print (lib/suppression.ts), which every deletion writes first, the team's or the person's own
  * (lib/person-erasure.ts), and which only their own yes given again lifts (lib/contacts.ts). Then the event still goes
  * out, with no address and no name. One HGET, read in its exact shape (CX-123 rule 24): nothing, or a time in seconds;
- * any other reply, or none, counts as deleted, so an address is never sent on a read that is not known. A payment whose
- * time does not read counts any print. A store with no list has deleted nobody (suppressedCommand). The PayPal sibling
- * is lib/paypal-delivery.ts.
+ * a print that is there in any other shape counts as deleted, since a print exists only once a deletion wrote it. A read
+ * with no answer (the pipeline failed, or no reply for the command) throws UnknownReplyError before the event is sent
+ * or marked, so the watcher reads the event again next run (review of #3491): an address is never sent, and a person
+ * never deleted is never sent without one, on a read that is not known. A payment whose time does not read counts any
+ * print. A store with no list has deleted nobody (suppressedCommand). Called only when an endpoint hears the event, so
+ * every read is inside a try (WEBHOOK_ERASED_READ_COMMANDS). The PayPal sibling is lib/paypal-delivery.ts.
  */
 async function erasedSincePaid(store: Store, email: string | null, paidAt: unknown): Promise<boolean> {
   const listId = store.listId;
   if (!email || !listId) return false;
-  const replies = await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, email)]]).then((r) => repliesFor(r, 1), () => null);
+  const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, email)]]), 1);
   const mark = replies ? replies[0] : undefined;
+  if (mark === undefined) throw new UnknownReplyError("a person's deletion print");
   if (mark === null) return false;
   if (typeof mark !== "string" || !/^[0-9]{1,12}$/.test(mark)) {
-    console.error("a person's deletion mark could not be read; the Stripe event goes out with no address and no name", store.handle);
+    console.error("a person's deletion print is there but not in its shape; the Stripe event goes out with no address and no name", store.handle);
     return true;
   }
   return !(typeof paidAt === "number" && Number.isSafeInteger(paidAt) && paidAt > 0) || Number(mark) >= paidAt;
@@ -1433,7 +1437,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     if (!session) return true;
     const details = (object.customer_details ?? {}) as { email?: unknown; name?: unknown };
     const named = { email: str(details.email) ?? str(object.customer_email), name: str(details.name) };
-    const buyer = (await erasedSincePaid(store, named.email, object.created)) ? { email: null, name: null } : named;
+    // The print is read only when an endpoint hears what names the buyer (rule 26): otherwise nothing is sent.
+    const buyer = (heard.has("sale.completed") || heard.has("membership.started")) && (await erasedSincePaid(store, named.email, object.created)) ? { email: null, name: null } : named;
     const membership = object.mode === "subscription" && meta.kind !== "plan";
     const kind = meta.kind === "call" ? "call" : meta.kind === "plan" ? "payment_plan" : membership ? "membership" : "one_time";
     const totals = (object.total_details ?? {}) as { amount_discount?: unknown };
@@ -1500,7 +1505,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       amount_cents: num(object.amount),
       discount_cents: 0,
       currency: str(object.currency) ?? "usd",
-      buyer: { email: (await erasedSincePaid(store, str(object.receipt_email), object.created)) ? null : str(object.receipt_email), name: null },
+      buyer: { email: heard.has("sale.completed") && (await erasedSincePaid(store, str(object.receipt_email), object.created)) ? null : str(object.receipt_email), name: null },
       paid_at: iso(event.created),
     }, created);
     return true;

@@ -581,8 +581,10 @@ export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LO
  * lib/webhooks.ts erasedSincePaid (R38): before a Stripe-read event names its buyer (refund.issued, sale.completed,
  * membership.started, an offer's sale.completed, membership.canceled), one HGET of that address's print in the store's
  * deletion hash (lib/suppression.ts), so a person deleted at or after the payment is sent with no address. One a
- * Stripe event that names a buyer, and every such event the store's endpoints hear is sent at least once (a try, this
- * unit), so it is counted in every try (held in tests/webhook-stripe-erased.test.ts).
+ * Stripe event that names a buyer, made only when the store's endpoints hear that event (review of #3491), and every
+ * such event is sent at least once (a try, this unit), so it is counted in every try (held in
+ * tests/webhook-stripe-erased.test.ts). A read with no answer sends nothing and is read again next run, as the
+ * watcher's other lookups are, within its wait bound (STRIPE_WAIT_RUNS in lib/webhooks.ts).
  */
 export const WEBHOOK_ERASED_READ_COMMANDS = 1;
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */

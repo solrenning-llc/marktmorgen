@@ -178,6 +178,37 @@ async function main(): Promise<void> {
     is("on again", await heardOff(store), false);
   }
 
+  part("Carrying a stop before an address is let go: a refused SADD never takes the stop away (the pipeline is not atomic)");
+  {
+    const owner = "rye@example.com";
+    let store = await paidStore(owner, "rye", "Rye Room");
+    await setStripeAccount(owner, "acct_1TestStopBySid03", true);
+    await redis.pipeline([["SADD", "nl:weekly:off", "rye"], ["SADD", "nl:heard:off", "rye"]]);
+    is("the store is renamed", (await renameHandle(owner, "rye-two")).ok, true);
+    store = await fresh(owner);
+    // Redis refuses a write that may grow memory (SADD) and still runs one that does not (SREM): in one batch, only
+    // the SREM is done. Pre-review of claude5/email-stop-by-sid-2: the stop under the address went, none under the id.
+    const pipelineNow = redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "SADD" && String(c[2]).startsWith("sid:"))) {
+        const removes = commands.filter((c) => c[0] === "SREM");
+        if (removes.length) await pipelineNow(removes);
+        throw new Error("Redis error: OOM command not allowed when used memory > 'maxmemory'");
+      }
+      return pipelineNow(commands);
+    }) as typeof redis.pipeline;
+    const refused = await releaseRoute(await studio(owner, store, "/api/store/release", { handle: "rye" }));
+    redis.pipeline = pipelineNow;
+    is("the carry refused: the address is not let go", [refused.status === 200, (await fresh(owner)).previousHandles.includes("rye")], [false, true]);
+    store = await fresh(owner);
+    is("the carry refused: still stopped", await weeklyOff(store), true);
+    is("the carry refused: buyers are still not asked", await heardOff(store), true);
+    is("then let go", (await releaseRoute(await studio(owner, store, "/api/store/release", { handle: "rye" }))).status, 200);
+    store = await fresh(owner);
+    is("let go: still stopped", await weeklyOff(store), true);
+    is("let go: buyers are still not asked", await heardOff(store), true);
+  }
+
   part("Nothing left the process but the emails");
   is("no other request", elsewhere, []);
 }

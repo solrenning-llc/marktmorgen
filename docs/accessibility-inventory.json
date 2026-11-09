@@ -1589,6 +1589,7 @@
     "components/store-tracking.tsx",
     "components/structured-data.tsx",
     "components/studio-app.tsx",
+    "components/studio-bell.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
     "components/studio-screens.tsx",

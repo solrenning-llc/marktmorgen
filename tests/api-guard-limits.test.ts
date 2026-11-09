@@ -126,7 +126,9 @@ async function main(): Promise<void> {
     is("and an AI assistant's prepared change, refused with the same message", /propose_product_description/.test(paused), true);
     is("a paused key is no longer said to hear 403 on every request", page.includes("Every request with it is answered 403"), false);
     is("past its minute a paused key is said to hear 429 like any key", /past that, it hears 429 <code className="font-mono">rate_limited<\/code> like any key/i.test(page), true);
-    is("a minute's count that cannot be read is listed as 503 unavailable", page.includes('503  {"error": "unavailable", "message": "The store could not answer just now. Try again in a moment."}'), true);
+    // Rule 23: on the RED commit this read the flattened page, where the code block's two spaces are one, so it could
+    // never pass; it reads the file as written, as tests/api-key-second-step.test.ts does for 403 key_paused.
+    is("a minute's count that cannot be read is listed as 503 unavailable", readFileSync("app/developers/page.tsx", "utf8").includes('503  {"error": "unavailable", "message": "The store could not answer just now. Try again in a moment."}'), true);
 
     part("A key past its minute costs only its lookup and the counter, paused or live");
     const fourth = await storeOf("guard-limits-cost@example.com", "guard-limits-cost", "GuardLimitsCost");

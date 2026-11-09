@@ -131,7 +131,8 @@ export default function DevelopersPage() {
         </p>
         <p>
           {`Each key may make ${API_RATE} requests a minute. Past that, the answer is 429 with `}
-          <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
+          <code className="whitespace-nowrap font-mono">Retry-After: 60</code>. If the minute&apos;s count cannot be read, the
+          answer is 503 <code className="font-mono">unavailable</code> and nothing else is done; try again in a moment.
         </p>
         <p>
           {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}, and a page of sales as ${API_SALES_UNITS}, and more when it names products that are read for their titles. Every read except Store counts as more than one when it reads more than one request's worth: a page of products, of your list or of your members, a course's students, your numbers, your discount codes, your affiliates, your bookings and the recent events (/api/v1/events, the examples a tool such as Zapier shows while you set up a step: from ${n(EVENTS_LEAST)} to ${n(EVENTS_MOST_COUNT)} each, by the size of the deliveries it reads, measured before they are read; a webhook message takes at most ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, each text in it at most ${MESSAGE_TEXT_MAX} characters, so ${n(EVENTS_MOST_COUNT)} is the most for messages made since November 4, 2026, and one kept from before counts at its size), as said with each below; what it will take is taken before it reads. A read whose size is known only once it is read (a page of your list or your members, your numbers from their copy) sets aside the most it may take first, and gives back at once what it did not need. Past the figure, or when a read needs more than are left, the answer is 429 `}
@@ -154,13 +155,16 @@ export default function DevelopersPage() {
 403  {"error": "key_paused", "message": "This key is paused: the store's team now logs in with a second step, and the key was made without one. …"}
 409  {"error": "paused_unpaid", "message": "Nothing was read: your plan's renewal payment did not go through, …"}
 409  {"error": "paused_unpaid", "message": "Nothing was changed: your plan's renewal payment did not go through, …"}
-502  {"error": "unavailable", "message": "… could not be read just now. Try again in a moment."}`}</Code>
+502  {"error": "unavailable", "message": "… could not be read just now. Try again in a moment."}
+503  {"error": "unavailable", "message": "The store could not answer just now. Try again in a moment."}`}</Code>
         <p>A missing, mistyped and revoked key all get the same 401.</p>
         <p>
           A key made by a team member who logged in without a second step is paused when the store&apos;s owner starts
-          asking the team for one. Every request with it is answered 403 <code className="font-mono">key_paused</code>{" "}
-          until whoever made it logs in with a passkey or an authenticator app&apos;s code and turns it back on under API
-          keys in the studio. A key made by someone who then leaves the team is paused too, and can only be revoked;
+          asking the team for one. Its requests still count toward the key&apos;s minute: up to {API_RATE} a minute, each is
+          answered 403 <code className="font-mono">key_paused</code>, and
+          past that, it hears 429 <code className="font-mono">rate_limited</code> like any key. It stays paused
+          until whoever made it logs in with a passkey or an authenticator app&apos;s code and turns it back on
+          under API keys in the studio. A key made by someone who then leaves the team is paused too, and can only be revoked;
           one made by someone whose role no longer allows it waits for the store&apos;s owner to turn it back on.
           A paused key is never deleted. The webhook endpoints a key added are sent nothing while it is paused, start
           again when it is turned back on, and stop for good when it is revoked.
@@ -170,7 +174,7 @@ export default function DevelopersPage() {
           <code className="font-mono">paused_unpaid</code>
           {" (or "}
           <code className="font-mono">paused_disputed</code>
-          {" while a payment for the plan is disputed, and for the period that payment covered if the dispute is decided for the store, while the plan runs), before the request counts toward the month. Adding a lead, adding labels, giving a product and adding a webhook endpoint get the same 409, also before they count; its message starts \"Nothing was changed\". Removing labels, taking back access and removing a webhook endpoint are not paused: they still work and count as API requests as usual."}
+          {" while a payment for the plan is disputed, and for the period that payment covered if the dispute is decided for the store, while the plan runs), before the request counts toward the month. Adding a lead, adding labels, giving a product, making or switching off a discount code and adding a webhook endpoint get the same 409, also before they count; its message starts \"Nothing was changed\". An assistant asking to prepare a change (propose_product_description, under MCP below) is refused with the same message. Removing labels, taking back access and removing a webhook endpoint are not paused: they still work and count as API requests as usual."}
         </p>
       </LegalSection>
 

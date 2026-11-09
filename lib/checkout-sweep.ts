@@ -56,7 +56,7 @@ import { enroll, readFlows } from "@/lib/flows";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
-import { AFFILIATE_ID_PATTERN, affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
+import { AFFILIATE_ID_PATTERN, VIA_PENDING_META, affiliatesOn, listPartners, notePendingLinks, noteSession } from "@/lib/affiliates";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
@@ -482,6 +482,17 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
             console.error("an affiliate's sale was left for the next run", id, describe(error));
           }
         }
+      }
+      // An order whose affiliate could not be read at checkout carries the click as pending (owner's decision 6):
+      // read again at each pass, credited once it answers, the creator told past PENDING_LINK_SECONDS. Never ends
+      // the store's pass: an order that does not read is counted as failed and waits for the next run.
+      if (sold.some((row) => typeof row.metadata?.[VIA_PENDING_META] === "string")) {
+        const pending = await notePendingLinks(store, sold as Parameters<typeof notePendingLinks>[1], now, owners ?? undefined, partners ?? undefined).catch((error: unknown) => {
+          console.error("reading the pending affiliate links failed; they wait for the next run", store.handle, describe(error));
+          return null;
+        });
+        if (pending === null) for (const row of sold) if (typeof row.metadata?.[VIA_PENDING_META] === "string") failOrder(row.id as string);
+        for (const id of pending?.failed ?? []) failOrder(id);
       }
     }
     // The store's first sale ever, noted once, with the yearly plan offered

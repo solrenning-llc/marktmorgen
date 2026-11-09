@@ -101,6 +101,7 @@ import {
   creditsContacts,
   RECURRING_ALWAYS,
   readViaCookie,
+  type Via,
 } from "@/lib/affiliate-setting";
 import { type Card, productIds, readCardsFor } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
@@ -2298,6 +2299,294 @@ export async function attributedAffiliate(
   return affiliate;
 }
 
+// ---- A link the checkout could not read: charged now, credited later -----
+
+/**
+ * The metadata key an order carries when the affiliate behind its click could not be read at checkout (owner's
+ * decision 6, 9 November 2026: the sale is charged and the affiliate is linked afterwards). Its value is
+ * "<last>~<first>~<own>": the two clicks as the visit's cookie held them, and the affiliate this browser was signed in
+ * as ("-" for nobody, "?" when that did not read either). It carries no share, so nothing is credited on it until a
+ * later read answers (notePendingLinks; creditPayPalSale for a PayPal order).
+ */
+export const VIA_PENDING_META = "via_pending";
+
+/**
+ * How long a pending link is read again before the creator is told. The five-minute sweep (lib/checkout-sweep.ts)
+ * reads it at each pass: two hours is 24 passes, enough to outlast a passing fault of the database, and it ends well
+ * inside the day for which the sweep reads a store's checkouts at all (CONFIRM_WITHIN_SECONDS, lib/purchase-email.ts),
+ * so the creator always hears while the order is still read. Once told, nothing is credited automatically any more:
+ * a creator who pays the affiliate by hand is never paid over by a late read.
+ */
+export const PENDING_LINK_SECONDS = 2 * 60 * 60;
+
+/** The most commands one pending order's read takes in a sweep's run: a code and a record, twice on first click. */
+export const PENDING_LINK_COMMANDS = 4;
+
+/** How long the mark of a decided link stays: past the sweep's day of reading, so an order is never decided twice. */
+const PENDING_MARK_SECONDS = 2 * 86_400;
+const pendingKey = (statsId: string, ref: string) => `nl:aff:pend:${statsId}:${ref}`;
+
+/** What the checkout's read of the visit's affiliate came to: known (somebody or nobody), or not known and kept. */
+export type Attribution =
+  | { known: true; via: { aff: string; rate: number; own: number | null } | null }
+  | { known: false; pending: string };
+
+/** The approved affiliate behind a code, read exactly (rule 24): null for nobody approved, UnknownReplyError otherwise. */
+async function approvedByCodeExact(store: Store, code: string): Promise<Affiliate | null> {
+  if (!AFFILIATE_CODE_PATTERN.test(code)) return null;
+  const statsId = store.statsId as string;
+  const id = repliesFor(await redisPipeline([["HGET", codesKey(statsId), code]]), 1)?.[0];
+  if (id === null) return null;
+  if (typeof id !== "string" || !AFFILIATE_ID_PATTERN.test(id)) throw new UnknownReplyError("which affiliate a code belongs to");
+  const raw = repliesFor(await redisPipeline([["HGET", peopleKey(statsId), id]]), 1)?.[0];
+  if (raw === null) return null;
+  const affiliate = typeof raw === "string" ? parseAffiliate(raw) : null;
+  // A record that does not read is not "nobody": the sale may well be theirs.
+  if (!affiliate || affiliate.id !== id) throw new UnknownReplyError("an affiliate's record");
+  return affiliate.status === "approved" ? affiliate : null;
+}
+
+/** The affiliate a browser is signed in as on this store, read exactly: "-" for nobody, their id, UnknownReplyError otherwise. */
+async function ownIdExact(store: Store, session: string | undefined): Promise<string> {
+  if (!session || !AFFILIATE_TOKEN_PATTERN.test(session)) return "-";
+  const raw = repliesFor(await redisPipeline([["GET", sessionKey(session)]]), 1)?.[0];
+  if (raw === null) return "-";
+  if (typeof raw !== "string") throw new UnknownReplyError("an affiliate's session");
+  let value: { s?: unknown; a?: unknown };
+  try {
+    value = JSON.parse(raw) as { s?: unknown; a?: unknown };
+  } catch {
+    throw new UnknownReplyError("an affiliate's session");
+  }
+  if (value.s !== store.statsId) return "-";
+  if (typeof value.a !== "string" || !AFFILIATE_ID_PATTERN.test(value.a)) throw new UnknownReplyError("an affiliate's session");
+  return value.a;
+}
+
+/** Who the clicks credit at `atSeconds`, under the store's rule and window, as attributedAffiliate decides; read exactly. */
+async function creditedByClicks(store: Store, via: Via, atSeconds: number): Promise<Affiliate | null> {
+  const inWindow = (click: Via["last"]) => click.at <= atSeconds + 60 && atSeconds - click.at <= store.affiliates.days * 86_400;
+  const click = store.affiliates.rule === "first" ? via.first : via.last;
+  if (!inWindow(click)) return null;
+  const affiliate = await approvedByCodeExact(store, click.code);
+  if (affiliate || store.affiliates.rule !== "first" || via.last.code === click.code || !inWindow(via.last)) return affiliate;
+  return approvedByCodeExact(store, via.last.code);
+}
+
+/**
+ * Who a checkout is credited to, as attributionFor, except that a read that does not answer is never "nobody" (owner's
+ * decision 6): it answers { known: false } with the visit's clicks, which the checkout carries on the order
+ * (pendingChannel) so the sale is charged as usual and credited once a later read answers. Never throws: a checkout
+ * route opens the payment page whatever it answers.
+ */
+export async function attributionOrPending(
+  store: Store,
+  productId: string,
+  cookies: { via: string | undefined; session: string | undefined },
+): Promise<Attribution> {
+  const via = affiliatesOn(store) ? readViaCookie(cookies.via) : null;
+  if (!via) return { known: true, via: null };
+  try {
+    const affiliate = await creditedByClicks(store, via, Math.floor(Date.now() / 1000));
+    if (!affiliate) return { known: true, via: null };
+    if ((await ownIdExact(store, cookies.session)) === affiliate.id) return { known: true, via: null };
+    return { known: true, via: { aff: affiliate.id, rate: commissionRate(store.affiliates, productId, affiliate.rate), own: affiliate.rate } };
+  } catch (error) {
+    console.error("an affiliate's link could not be read at checkout; the sale goes on with it pending", store.handle, error instanceof Error ? error.message : "");
+    const own = await ownIdExact(store, cookies.session).catch(() => "?");
+    return { known: false, pending: `${via.last.code}.${via.last.at}~${via.first.code}.${via.first.at}~${own}` };
+  }
+}
+
+/** The metadata a checkout adds for a link it could not read: the pending clicks, and nothing when it knows. */
+export function pendingChannel(attribution: Attribution): Record<string, string> {
+  return attribution.known ? {} : { [VIA_PENDING_META]: attribution.pending };
+}
+
+/** A pending mark as the checkout wrote it, or null for one that does not read. */
+function readPending(raw: unknown): { via: Via; own: string } | null {
+  if (typeof raw !== "string") return null;
+  const parts = raw.split("~");
+  if (parts.length !== 3) return null;
+  const via = readViaCookie(`${parts[0]}~${parts[1]}`);
+  const own = parts[2];
+  return via && (own === "-" || own === "?" || AFFILIATE_ID_PATTERN.test(own)) ? { via, own } : null;
+}
+
+type PendingOutcome = { kind: "credit"; affiliate: Affiliate } | { kind: "none" } | { kind: "unknown" };
+
+/** A pending link read again, against the sale's own time: credited, nobody, or still not known. Never throws. */
+async function decidePending(store: Store, raw: unknown, atSeconds: number): Promise<PendingOutcome> {
+  const pending = readPending(raw);
+  if (!pending) return { kind: "unknown" };
+  try {
+    const affiliate = await creditedByClicks(store, pending.via, atSeconds);
+    if (!affiliate || pending.own === affiliate.id) return { kind: "none" };
+    // Their own browser could not be told apart at checkout: never credited automatically, the creator decides.
+    if (pending.own === "?") return { kind: "unknown" };
+    return { kind: "credit", affiliate };
+  } catch (error) {
+    console.error("a pending affiliate link still does not read", store.handle, error instanceof Error ? error.message : "");
+    return { kind: "unknown" };
+  }
+}
+
+/** Whether a pending link of this sale was decided already: exact, UnknownReplyError for any other answer. */
+async function pendingDecided(statsId: string, ref: string): Promise<boolean> {
+  const mark = repliesFor(await redisPipeline([["GET", pendingKey(statsId, ref)]]), 1)?.[0];
+  if (mark === null) return false;
+  if (typeof mark !== "string") throw new UnknownReplyError("a pending affiliate link's mark");
+  return true;
+}
+
+/** Marks a pending link decided, so no later run decides it again. */
+async function decidePendingMark(statsId: string, ref: string, how: "credited" | "none"): Promise<void> {
+  const reply = repliesFor(await redisPipeline([["SET", pendingKey(statsId, ref), how, "EX", PENDING_MARK_SECONDS]]), 1)?.[0];
+  if (reply !== "OK") throw new UnknownReplyError("a pending affiliate link's mark");
+}
+
+/** What the creator is told about a sale whose affiliate link was never confirmed (tellPending): by email and on the phone. Pure. */
+export function pendingNotice(
+  store: Pick<Store, "name" | "email" | "sid" | "affiliates">,
+  ref: string,
+  raw: unknown,
+  why: "unread" | "membership",
+): { to: string; subject: string; text: string; title: string; body: string } {
+  const pending = readPending(raw);
+  const code = pending ? (store.affiliates.rule === "first" ? pending.via.first.code : pending.via.last.code) : "unknown";
+  const studio = `${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`;
+  const first =
+    why === "membership"
+      ? `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}, which could not be read when the buyer paid. Its renewals cannot be credited to them after it started.`
+      : `An order on ${store.name} came through an affiliate's link that could not be read when the buyer paid, and it still could not be read when it was checked again later. The code on the link was ${code}.`;
+  return {
+    to: store.email,
+    subject: `An affiliate link on an order on ${store.name} was not credited`,
+    text: [
+      first,
+      `The order: ${ref}`,
+      "",
+      "It was not credited to any affiliate, so no commission is counted for it. The buyer was charged as usual and has their purchase.",
+      `If the sale is theirs, you can pay them yourself and write the payment down in your studio: ${studio}`,
+    ].join("\n"),
+    title: "An affiliate link was not credited",
+    body: `An order came through the code ${code}, which could not be read. Pay the affiliate yourself if it is theirs.`,
+  };
+}
+
+/**
+ * Tells the creator, once, about a sale whose affiliate link was never confirmed: by email from the store's own
+ * figure (line store-email) and on the phone where they asked for affiliate notices. Never about a sale already
+ * credited. The mark is taken first and kept, so it is said once and nothing is credited automatically after it.
+ * Returns whether the mark was taken here.
+ */
+async function tellPending(store: Store, ref: string, raw: unknown, why: "unread" | "membership"): Promise<boolean> {
+  const statsId = store.statsId as string;
+  const credited = repliesFor(await redisPipeline([["HEXISTS", salesKey(statsId), ref]]), 1)?.[0];
+  if (credited === 1) {
+    await decidePendingMark(statsId, ref, "credited");
+    return false;
+  }
+  if (credited !== 0) throw new UnknownReplyError("whether a sale was credited");
+  const claim = repliesFor(await redisPipeline([["SET", pendingKey(statsId, ref), "told", "NX", "EX", PENDING_MARK_SECONDS]]), 1)?.[0];
+  if (claim === null) return false;
+  if (claim !== "OK") throw new UnknownReplyError("a pending affiliate link's mark");
+  const notice = pendingNotice(store, ref, raw, why);
+  await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+    from: `"Marktmorgen" <${senderAddress()}>`,
+    to: notice.to,
+    subject: notice.subject,
+    text: notice.text,
+    idempotencyKey: `nimbus-aff-pending:${statsId}:${ref}`,
+  }).catch((error) => console.error("telling a creator about an unconfirmed affiliate link failed", error));
+  await alertCreator(
+    store,
+    "affiliate",
+    { title: notice.title, body: notice.body, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
+    { seed: `pending:${ref}` },
+  ).catch((error) => console.error("an unconfirmed-affiliate notification failed", error));
+  return true;
+}
+
+/** The order's metadata as if its link had read at checkout: the affiliate, and each product's share as it is now. */
+function creditedMeta(store: Store, meta: Record<string, string>, affiliate: Affiliate): { meta: Record<string, string>; earns: boolean } {
+  const front = commissionRate(store.affiliates, meta.product ?? "", affiliate.rate);
+  const out: Record<string, string> = { ...meta, via: affiliate.id, via_rate: String(front) };
+  let earns = front > 0;
+  for (const { key, id } of bumpsFromMeta(meta)) {
+    const rate = commissionRate(store.affiliates, id, affiliate.rate);
+    out[`${key}_rate`] = String(rate);
+    earns ||= rate > 0;
+  }
+  return { meta: out, earns };
+}
+
+export type PendingCounts = { credited: number; none: number; waiting: number; told: number; failed: string[] };
+
+/**
+ * Decides the pending links of a page of settled checkouts (lib/checkout-sweep.ts, every five minutes): each read
+ * again against the sale's own time. Answered: credited to the affiliate from then on, through noteSession at the
+ * shares the program holds now, once (HSETNX and a mark), or, nobody, left to a code, a bond or a contact as any
+ * sale is. Not answered: read again at the next pass, and past PENDING_LINK_SECONDS the creator is told (tellPending).
+ * The marks of a page are read in one MGET; an order is counted in `failed` when anything about it did not read.
+ */
+export async function notePendingLinks(
+  store: Store,
+  rows: SessionLike[],
+  now = Math.floor(Date.now() / 1000),
+  owners?: Map<string, string>,
+  partners?: Affiliate[],
+): Promise<PendingCounts> {
+  const counts: PendingCounts = { credited: 0, none: 0, waiting: 0, told: 0, failed: [] };
+  if (!store.statsId || !isRedisConfigured()) return counts;
+  const statsId = store.statsId;
+  const handles = saleHandles(store);
+  const marked = rows.filter(
+    (row): row is SessionLike & { id: string } =>
+      typeof row.id === "string" && isSettled(row) && handles.has(row.metadata?.store ?? "") && typeof row.metadata?.[VIA_PENDING_META] === "string",
+  );
+  if (!marked.length) return counts;
+  const reply = repliesFor(await redisPipeline([["MGET", ...marked.map((row) => pendingKey(statsId, row.id))]]), 1);
+  const marks = reply ? repliesFor(reply[0], marked.length) : null;
+  if (!marks) {
+    counts.failed.push(...marked.map((row) => row.id));
+    return counts;
+  }
+  for (const [i, row] of marked.entries()) {
+    if (marks[i] !== null) {
+      if (typeof marks[i] !== "string") counts.failed.push(row.id);
+      continue;
+    }
+    const meta = row.metadata ?? {};
+    const rest = Object.fromEntries(Object.entries(meta).filter(([key]) => key !== VIA_PENDING_META));
+    const at = typeof row.created === "number" ? row.created : now;
+    const once = row.mode === undefined || row.mode === "payment";
+    try {
+      const outcome = await decidePending(store, meta[VIA_PENDING_META], at);
+      const credit = outcome.kind === "credit" ? creditedMeta(store, rest, outcome.affiliate) : null;
+      if (credit?.earns && once) {
+        await noteSession(store, { ...row, metadata: credit.meta }, owners, partners);
+        await decidePendingMark(statsId, row.id, "credited");
+        counts.credited += 1;
+      } else if (outcome.kind === "none" || (credit && (once || !credit.earns)) || (!once && store.affiliates.recurring <= 0)) {
+        // Nobody's link, a link that earns nothing, or a membership on a program that credits none: the sale is any
+        // other sale, open to a code, a bond or a contact.
+        if (once) await noteSession(store, { ...row, metadata: rest }, owners, partners);
+        await decidePendingMark(statsId, row.id, "none");
+        counts.none += 1;
+      } else if (credit || now - at >= PENDING_LINK_SECONDS) {
+        if (await tellPending(store, row.id, meta[VIA_PENDING_META], credit ? "membership" : "unread")) counts.told += 1;
+      } else {
+        counts.waiting += 1;
+      }
+    } catch (error) {
+      counts.failed.push(row.id);
+      console.error("a pending affiliate link was left for the next run", row.id, error instanceof Error ? error.message : "");
+    }
+  }
+  return counts;
+}
+
 /** The share an offer after paying earns the affiliate the order came through. */
 export async function funnelRate(store: Store, affId: string, productId: string): Promise<number> {
   if (!affiliatesOn(store)) return 0;
@@ -2383,6 +2672,26 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string):
     await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
   await notePartners(store, { ...sale, buyer: paid.email });
+  // A link the checkout could not read (owner's decision 6), after the partners so nothing here keeps their shares
+  // from being written: read again at the hand-over, the one moment a PayPal sale is credited, against the time it
+  // was paid. Answered: credited at the share the program holds now, once. Still not answered: the creator is told
+  // now, since no later pass reads this order again for its affiliate.
+  const pendingRaw = paid.meta?.[VIA_PENDING_META];
+  if (!paid.via && affiliatesOn(store) && typeof pendingRaw === "string" && !(await pendingDecided(store.statsId, sale.ref))) {
+    const outcome = await decidePending(store, pendingRaw, paid.at);
+    if (outcome.kind === "credit") {
+      const rate = commissionRate(store.affiliates, paid.product, outcome.affiliate.rate);
+      if (rate > 0) {
+        await writeReferral(store, { ...sale, aff: outcome.affiliate.id, rate, self: await isSelf(store, outcome.affiliate.id, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
+        await rememberBuyer(store, paid.email, outcome.affiliate.id, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
+      }
+      await decidePendingMark(store.statsId, sale.ref, rate > 0 ? "credited" : "none");
+    } else if (outcome.kind === "none") {
+      await decidePendingMark(store.statsId, sale.ref, "none");
+    } else {
+      await tellPending(store, sale.ref, pendingRaw, "unread");
+    }
+  }
 }
 
 async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean> {
@@ -2480,6 +2789,7 @@ export async function noteSession(
   // affiliate's own page both say out loud.
   let how: Credit = "click";
   if (!AFFILIATE_ID_PATTERN.test(aff)) {
+    if (meta[VIA_PENDING_META] !== undefined) return; // a pending click: notePendingLinks decides
     // Then the code the buyer typed, which is the only trace a sale made on a
     // podcast or from a stage leaves at all (lib/affiliate-codes.ts). Read only
     // for a sale that carries a code: a sale with none never waits on that read.

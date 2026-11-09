@@ -10,7 +10,7 @@ import { countHit } from "@/lib/visit";
 import { openOrder, paypalReady } from "@/lib/paypal-sales";
 import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest } from "@/lib/visit-channel";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 
 /**
@@ -55,13 +55,18 @@ export async function POST(request: NextRequest) {
   }
   // What the visit carried, as a Stripe checkout carries it: the channel this
   // sale is credited to (lib/visit-channel.ts) and the affiliate who sent the
-  // buyer, if one did (lib/affiliates.ts). A lookup that fails never stops the sale.
+  // buyer, if one did (lib/affiliates.ts). A lookup that does not answer never
+  // stops the sale: the click rides on the order as pending, first so the
+  // order's twenty kept keys never leave it out (cleanMeta), and is decided at
+  // the hand-over (owner's decision 6, creditPayPalSale).
   const host = new URL(origin).hostname;
-  const via = await attributionFor(store, product.id, {
+  const credit = await attributionOrPending(store, product.id, {
     via: request.cookies.get(viaCookieName(store.handle))?.value,
     session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-  }).catch(() => null);
+  });
+  const via = credit.known ? credit.via : null;
   const meta = {
+    ...pendingChannel(credit),
     ...channelOfRequest(request, store.handle, host, Date.now() / 1000, store.attributionDays),
     ...(() => {
       const page = cameFrom(request.headers.get("referer"), host);

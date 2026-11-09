@@ -22,9 +22,10 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NO_AFFILIATES, parseAffiliateSetting, viaCookieValue } from "@/lib/affiliate-setting";
+import { NO_AFFILIATES, RECURRING_OPTIONS, parseAffiliateSetting, viaCookieValue } from "@/lib/affiliate-setting";
 import {
   PENDING_LINK_SECONDS,
+  pendingNotice,
   VIA_PENDING_META,
   attributionFor,
   attributionOrPending,
@@ -46,17 +47,9 @@ const NOW = Math.floor(Date.now() / 1000);
 const ANA = "aaaaaaaaaaaa";
 const BEN = "bbbbbbbbbbbb";
 
-const mails: { to: string; subject: string; text: string }[] = [];
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (url.hostname === "api.resend.com") {
-    const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
-    mails.push({ to: Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""), subject: String(body.subject ?? ""), text: String(body.text ?? "") });
-    return answer({ id: `email_${mails.length}` });
-  }
-  return answer({ object: "list", data: [], has_more: false });
-}) as typeof fetch;
+// No real provider is reached: the email service is unavailable in this world (no reviewed fallback), so what the
+// creator is told is held by its words (pendingNotice) and by the mark taken once before it is sent.
+globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", data: [], has_more: false }))) as typeof fetch;
 
 // Every reply passes through here, so a test can answer one command in a shape Redis never would.
 const real = redis.pipeline.bind(redis);
@@ -84,7 +77,7 @@ const order = (id: string, email: string, meta: Record<string, string> = {}, cre
   currency: "usd",
   total_details: { amount_tax: 0 },
   payment_intent: `pi_${id}`,
-  metadata: { store: "oven", product: "prod01", title: "Sourdough course", ...meta },
+  metadata: { store: "oven", product: "prod01", title: "Sourdough course", ...meta } as Record<string, string>,
   customer_details: { email },
   discounts,
 });
@@ -113,6 +106,7 @@ async function main(): Promise<void> {
     return out;
   };
   const cookie = viaCookieValue(undefined, "ana", NOW - 3_600);
+  const mark = async (ref: string) => (await real([["GET", `nl:aff:pend:${statsId}:${ref}`]]))[0];
   const weirdCodes = (command: (string | number)[]) => (command[0] === "HGET" && command[1] === codes ? { not: "a reply" } : undefined);
 
   part("A read of an unknown shape at checkout: the sale goes on, the click is kept as pending");
@@ -147,7 +141,8 @@ async function main(): Promise<void> {
   let counts = await notePendingLinks(store, [sale], NOW);
   is("the sweep reads again and still cannot tell: it waits", counts.waiting, 1);
   is("no commission is written", (await sales()).has("cs_pend1"), false);
-  is("and the creator is not told yet, inside the window", mails.length, 0);
+  // Regra 23: was mails.length 0; no email can leave this world, so the mark is what shows nobody was told.
+  is("and the creator is not told yet, inside the window", [counts.told, await mark("cs_pend1")], [0, null]);
   odd = null;
   await giveCode(store, "promo_1PendBenCode0001", BEN);
   store = (await storeForEmail(OWNER))!;
@@ -163,7 +158,8 @@ async function main(): Promise<void> {
   await noteSession(store, sale);
   await notePendingLinks(store, [sale], NOW + 900);
   is("the sweep seeing it again writes nothing more: one line for one sale", [...(await sales()).keys()].filter((ref) => ref === "cs_pend1").length, 1);
-  is("and the creator is never told about a link that was confirmed", mails.length, 0);
+  // Regra 23: was mails.length 0; the mark says the link was decided as credited, never told.
+  is("and the creator is never told about a link that was confirmed", await mark("cs_pend1"), "credited");
 
   part("A pending read that answers nobody");
   await redis.pipeline([["HSET", people, BEN, person(BEN, "ben@example.com", "ben", { status: "removed" })]]);
@@ -179,14 +175,29 @@ async function main(): Promise<void> {
   odd = weirdCodes;
   counts = await notePendingLinks(store, [late], NOW);
   is("still unknown past PENDING_LINK_SECONDS: told", counts.told, 1);
-  is("one email, to the creator", mails.map((m) => m.to), [OWNER]);
-  is("naming the order and the affiliate code it came through", /cs_pend4/.test(mails[0]?.text ?? "") && /\bana\b/.test(mails[0]?.text ?? ""), true);
-  is("and saying no commission was paid on it", /not credited|no commission/i.test(mails[0]?.text ?? ""), true);
+  // Regra 23: the three checks below read the email's words from pendingNotice, the one place tellPending takes them
+  // from, and the mark it takes before sending; they were read off a stubbed Resend, which this world never reaches.
+  is("the mark says told", await mark("cs_pend4"), "told");
+  const notice = pendingNotice(store, "cs_pend4", late.metadata[VIA_PENDING_META], "unread");
+  is("the email goes to the creator", notice.to, OWNER);
+  is("naming the order and the affiliate code it came through", /cs_pend4/.test(notice.text) && /\bana\b/.test(notice.text), true);
+  is("and saying no commission was counted on it", /not credited/.test(notice.subject) && /no commission/i.test(notice.text), true);
   odd = null;
   counts = await notePendingLinks(store, [late], NOW + 300);
   is("once told, a later read that answers credits nothing automatically", (await sales()).has("cs_pend4"), false);
-  is("and the creator is not told twice", mails.length, 1);
+  // Regra 23: was mails.length 1; told again would count here.
+  is("and the creator is not told twice", [counts.told, await mark("cs_pend4")], [0, "told"]);
   is("the deadline leaves several of the sweep's five-minute passes, and ends well inside its day of re-reading", PENDING_LINK_SECONDS >= 30 * 60 && PENDING_LINK_SECONDS <= 12 * 3_600, true);
+
+  part("A membership whose link could not be read");
+  const member = (id: string) => ({ ...order(id, "sub@example.com", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-` }), mode: "subscription" });
+  counts = await notePendingLinks(store, [member("cs_sub1")], NOW);
+  is("a program that credits no renewals: nothing to credit, nobody told", [counts.none, counts.told, await mark("cs_sub1")], [1, 0, "none"]);
+  await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...store.affiliates, recurring: RECURRING_OPTIONS.find((n) => n > 0) }));
+  store = (await storeForEmail(OWNER))!;
+  counts = await notePendingLinks(store, [member("cs_sub2")], NOW);
+  is("one that does: its renewals cannot be credited afterwards, so the creator is told at once", [counts.told, await mark("cs_sub2")], [1, "told"]);
+  is("and nothing is written as a sale", (await sales()).has("cs_sub2"), false);
 
   part("PayPal: the same mark, decided at the hand-over");
   const paid = (order: string, meta: Record<string, string>) => ({
@@ -199,7 +210,8 @@ async function main(): Promise<void> {
   await creditPayPalSale(store, paid("PPORDER2", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-` }), "Sourdough course");
   odd = null;
   is("one still unknown at its hand-over is not credited", (await sales()).has("paypal:PPORDER2"), false);
-  is("and its creator is told", mails.length, 2);
+  // Regra 23: was mails.length 2; the mark tellPending takes before sending.
+  is("and its creator is told", await mark("paypal:PPORDER2"), "told");
 
   part("Every checkout route keeps the sale and the pending click");
   for (const file of ["app/api/store/checkout/route.ts", "app/api/store/cart/route.ts", "app/api/store/book/route.ts", "app/api/store/paypal/checkout/route.ts"]) {

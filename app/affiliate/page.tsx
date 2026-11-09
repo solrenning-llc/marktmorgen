@@ -63,7 +63,7 @@ async function cutFor(store: Store, affiliate: Affiliate): Promise<Row["cut"]> {
 export default async function AffiliateHubPage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
-  const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
+  const status = typeof query.status === "string" && Object.hasOwn(STATUS, query.status) ? STATUS[query.status] : undefined;
   const email = token ? await hubOwner(token) : null;
 
   const rows: Row[] = [];

@@ -42,7 +42,8 @@ const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
 export default async function LibraryPage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
-  const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
+  // Only the notices the page has: a word such as "constructor" is not one of them.
+  const status = typeof query.status === "string" && Object.hasOwn(STATUS, query.status) ? STATUS[query.status] : undefined;
   // A link whose address could not be read is said so, never "expired" (CX-123 rule 24; Claude 5 on #2910).
   const owner = token ? await libraryOwner(token).then((email) => ({ email }), () => null) : { email: null };
   const email = owner?.email ?? null;

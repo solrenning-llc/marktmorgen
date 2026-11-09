@@ -79,6 +79,7 @@ import { readAllTimeSales } from "@/lib/stats";
 import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { NewTab } from "@/components/new-tab";
+import { ownEntry } from "@/lib/own-entry";
 
 /** What a try at "Support my work" may come back with (app/api/store/tip). */
 const TIP_PROBLEMS = new Set(["amount", "limited", "closed", "error"]);
@@ -160,7 +161,7 @@ export default async function StorePage({ params, searchParams }: Params) {
   // The links on the page now: a scheduled one only inside its window (lib/store-link.ts).
   const links = showingLinks(store.links);
   const bw = blockWords(store.language);
-  const notice = w.notices[typeof query.status === "string" ? query.status : ""] ?? null;
+  const notice = ownEntry(w.notices, query.status) ?? null;
   // "Bought 120 times", when the creator shows it and it is worth saying (lib/sold-count.ts).
   const soldLine = (count: number | undefined) => (count && count >= SHOWN_FROM ? w.bought(num(count)) : null);
 

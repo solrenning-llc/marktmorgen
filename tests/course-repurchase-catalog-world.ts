@@ -10,3 +10,6 @@ export async function readListing(_store: Store, id: string | null | undefined):
 export async function readKind(_store: Store, kind: string): Promise<Listing[]> {
   return kind === "course" ? catalog.listings.filter((l) => l.course) : [];
 }
+export function idsOfKind(_store: Store, kind: string): string[] {
+  return kind === "course" ? catalog.listings.filter((l) => l.course).map((l) => l.id) : [];
+}

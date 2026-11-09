@@ -1,5 +1,6 @@
 {
   "@/lib/catalog": "course-repurchase-catalog-world.ts",
   "@/lib/stripe-account": "course-repurchase-stripe-world.ts",
-  "@/lib/email": "course-drip-mail-world.ts"
+  "@/lib/email": "course-drip-mail-world.ts",
+  "@/lib/buyer-actions": "course-drip-count-world.ts"
 }

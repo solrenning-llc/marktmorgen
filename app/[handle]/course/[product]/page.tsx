@@ -98,7 +98,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
     : [new Set<string>(), new Set<string>(), null];
   if (open && !access.learner.owner) {
     const { email } = access.learner;
-    after(() => touchStudent(course.id, email, access.start, store));
+    // The day the page opens it from: the row takes it, so the drip emails go on the same day (lib/learn.ts).
+    after(() => touchStudent(course.id, email, access.start, store, course));
     // Once the whole month's visits are used, a course rests too (lib/traffic-rules.ts).
     if (await isResting(store, undefined, "buyer")) redirect(`/@${store.handle}/resting`);
     // A student's day in a course is a visit to the store (lib/day-visit.ts).

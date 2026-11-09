@@ -10,6 +10,8 @@ import type { Listing, Store } from "@/lib/store";
 import { catalog } from "./course-repurchase-catalog-world";
 import { stripe } from "./course-repurchase-stripe-world";
 import { mail } from "./course-drip-mail-world";
+import { counted } from "./course-drip-count-world";
+import { DRIP_START_UNITS, dripStartUnits } from "@/lib/drip-start-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -66,6 +68,8 @@ redis.pipeline = async (commands) => {
 async function fresh(sessions: Record<string, unknown>[]) {
   redis.clear();
   odd = null;
+  counted.asked = [];
+  counted.left = Number.MAX_SAFE_INTEGER;
   catalog.listings = [product];
   stripe.sessions = sessions;
   await registerDrip(store, product, course);
@@ -116,6 +120,21 @@ async function main() {
   odd = { match: (c) => c[0] === "SET" && String(c[1]).includes(":dripmail:"), reply: "QUEUED" };
   is("the mark's claim unknown: nothing is sent", await run(first + 30 * DAY), []);
   is("the next run sends it, never skipped", await run(first + 31 * DAY), [subject("Month 1")]);
+
+  part("The read counted with the store's public requests before it is made");
+  await fresh([session("cs_test_once", first, false)]);
+  await recordEnrollment(store, buyer, product.id, first);
+  await openedOn(first);
+  counted.left = 0;
+  stripe.asked = [];
+  is("the store's requests used: nothing is sent", await run(first + 30 * DAY), []);
+  is("and nothing is read at Stripe", stripe.asked.length, 0);
+  is("it asked for the read's requests, for a store of one course", counted.asked, [DRIP_START_UNITS + 1]);
+  counted.left = Number.MAX_SAFE_INTEGER;
+  counted.asked = [];
+  is("with requests again, the next run sends it", await run(first + 31 * DAY), [subject("Month 1")]);
+  is("one read for the student", counted.asked, [dripStartUnits(1)]);
+  is("a run with nothing to announce reads nothing", (counted.asked = [], await run(first + 45 * DAY), counted.asked), []);
 
   part("One purchase, written down on its thanks page (unchanged)");
   await fresh([session("cs_test_once", first, false)]);

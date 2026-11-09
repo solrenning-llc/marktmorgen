@@ -1,0 +1,260 @@
+
+FILE stripe-connect-account-exact.test.ts
+
+readAccount: every unknown shape throws
+  ok    no configuration (the include ignored): throws
+  ok    configuration not an object: throws
+  ok    no merchant: throws
+  ok    merchant null: throws
+  ok    no capabilities: throws
+  ok    no card_payments: throws
+  ok    card_payments an array: throws
+  ok    status missing: throws
+  ok    status a number: throws
+  ok    status empty: throws
+  ok    status null: throws
+  ok    no requirements, card payments active: throws
+  ok    requirements a string: throws
+  ok    requirements an array: throws
+  ok    requirements without summary: throws
+  ok    summary a string: throws
+  ok    summary an array: throws
+  ok    minimum_deadline a string: throws
+  ok    minimum_deadline an array: throws
+  ok    minimum_deadline without status: throws
+  ok    minimum_deadline status a number: throws
+  ok    card status a single space: throws
+  ok    card status a value Stripe does not document: throws
+  ok    card status in other letter case: throws
+  ok    deadline status a value Stripe does not document: throws
+  ok    deadline status empty: throws
+  ok    only an id: throws
+  ok    empty object: throws
+  ok    JSON null: throws
+  ok    JSON array: throws
+  ok    JSON number: throws
+  ok    not JSON: throws
+
+readAccount: confirmed shapes read as before
+  ok    active, eventually due: read
+  ok    active, currently due: read
+  ok    active, past due: read
+  ok    restricted, past due: read
+  ok    pending, nothing due (empty summary): read
+  ok    active, minimum_deadline null (nothing due): read
+  ok    active, summary null (confirmed none): read
+  ok    active, requirements null (confirmed none): read
+  ok    inactive, nothing due: read
+  ok    unsupported, nothing due: read
+
+checkup: an unknown shape is said as not checked, never as fine
+  ok    no configuration (the include ignored): payments line
+  ok    no requirements, card payments active: payments line
+  ok    control, past due: warned
+  ok    control, nothing due: ok
+  ok    synthetic store
+
+return: an unknown shape writes nothing and says the check failed
+  ok    seeded selling
+  ok    return no configuration (the include ignored): told the check failed
+  ok    return no configuration (the include ignored): the selling record is unchanged
+  ok    return no configuration (the include ignored): Stripe asked once
+  ok    seeded selling
+  ok    return no merchant: told the check failed
+  ok    return no merchant: the selling record is unchanged
+  ok    return no merchant: Stripe asked once
+  ok    seeded selling
+  ok    return no requirements, card payments active: told the check failed
+  ok    return no requirements, card payments active: the selling record is unchanged
+  ok    return no requirements, card payments active: Stripe asked once
+  ok    seeded selling
+  ok    return only an id: told the check failed
+  ok    return only an id: the selling record is unchanged
+  ok    return only an id: Stripe asked once
+
+return: confirmed shapes are written and said as before
+  ok    seeded
+  ok    return active: said
+  ok    return active: written
+  ok    seeded
+  ok    return pending: said
+  ok    return pending: written
+
+check: an unknown shape writes nothing and says the check failed
+  ok    seeded selling
+  ok    check no configuration (the include ignored): told the check failed
+  ok    check no configuration (the include ignored): the selling record is unchanged
+  ok    check no configuration (the include ignored): Stripe asked once
+  ok    seeded selling
+  ok    check no merchant: told the check failed
+  ok    check no merchant: the selling record is unchanged
+  ok    check no merchant: Stripe asked once
+  ok    seeded selling
+  ok    check no requirements, card payments active: told the check failed
+  ok    check no requirements, card payments active: the selling record is unchanged
+  ok    check no requirements, card payments active: Stripe asked once
+  ok    seeded selling
+  ok    check only an id: told the check failed
+  ok    check only an id: the selling record is unchanged
+  ok    check only an id: Stripe asked once
+
+check: confirmed shapes are written and said as before
+  ok    seeded
+  ok    check active: said
+  ok    check active: written
+  ok    seeded
+  ok    check pending: said
+  ok    check pending: written
+
+91 checks, all passing.
+Z_VOLUME {"runs":272,"mocks":58,"over":false}
+stripe return failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async GET ([stdin]:49320:19)
+    at async main ([stdin]:49639:24)
+stripe return failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async GET ([stdin]:49320:19)
+    at async main ([stdin]:49639:24)
+stripe return failed Error: Stripe answered an account's requirements in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at deadlineStatus ([stdin]:48587:41)
+    at readAccount ([stdin]:48601:20)
+    at async GET ([stdin]:49320:19)
+    at async main ([stdin]:49639:24)
+stripe return failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async GET ([stdin]:49320:19)
+    at async main ([stdin]:49639:24)
+stripe check failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async POST ([stdin]:49340:19)
+    at async main ([stdin]:49639:24)
+stripe check failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async POST ([stdin]:49340:19)
+    at async main ([stdin]:49639:24)
+stripe check failed Error: Stripe answered an account's requirements in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at deadlineStatus ([stdin]:48587:41)
+    at readAccount ([stdin]:48601:20)
+    at async POST ([stdin]:49340:19)
+    at async main ([stdin]:49639:24)
+stripe check failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async POST ([stdin]:49340:19)
+    at async main ([stdin]:49639:24)
+
+Z_STATUS 0 null
+
+FILE z-3311-status-unknown.proof.ts
+  ok    synthetic owner
+STATUS_ROUTE {"name":"check","status":" ","said":"error","still":true,"commands":10,"jsonBytes":732,"requests":1}
+  ok    check unknown status is error " "
+  ok    check unknown status preserves selling " "
+STATUS_ROUTE {"name":"check","status":"future_unknown","said":"error","still":true,"commands":6,"jsonBytes":551,"requests":1}
+  ok    check unknown status is error "future_unknown"
+  ok    check unknown status preserves selling "future_unknown"
+STATUS_ROUTE {"name":"return","status":" ","said":"error","still":true,"commands":6,"jsonBytes":551,"requests":1}
+  ok    return unknown status is error " "
+  ok    return unknown status preserves selling " "
+STATUS_ROUTE {"name":"return","status":"future_unknown","said":"error","still":true,"commands":6,"jsonBytes":551,"requests":1}
+  ok    return unknown status is error "future_unknown"
+  ok    return unknown status preserves selling "future_unknown"
+STATUS_CHECKUP {"deadline":" ","state":"not-checked"}
+  ok    unknown deadline is not checked " "
+STATUS_CHECKUP {"deadline":"future_unknown","state":"not-checked"}
+  ok    unknown deadline is not checked "future_unknown"
+  ok    known past due remains a problem
+  ok    known state remains ok
+PROVIDER_CALLS [{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0}]
+
+13 checks, all passing.
+Z_VOLUME {"runs":84,"mocks":8,"over":false}
+stripe check failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async POST ([stdin]:49320:19)
+    at async main ([stdin]:49569:24)
+stripe check failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async POST ([stdin]:49320:19)
+    at async main ([stdin]:49569:24)
+stripe return failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async GET ([stdin]:49340:19)
+    at async main ([stdin]:49569:24)
+stripe return failed Error: Stripe answered an account's card payments in an unknown shape
+    at unknownShape ([stdin]:48574:9)
+    at cardPaymentsStatus ([stdin]:48581:65)
+    at readAccount ([stdin]:48600:18)
+    at async GET ([stdin]:49340:19)
+    at async main ([stdin]:49569:24)
+
+Z_STATUS 0 null
+
+FILE z-3311-shapes.proof.ts
+  ok    only the requested read
+  ok    unknown shape 0
+  ok    only the requested read
+  ok    unknown shape 1
+  ok    only the requested read
+  ok    unknown shape 2
+  ok    only the requested read
+  ok    unknown shape 3
+  ok    only the requested read
+  ok    unknown shape 4
+  ok    only the requested read
+  ok    unknown shape 5
+  ok    only the requested read
+  ok    unknown shape 6
+  ok    only the requested read
+  ok    unknown shape 7
+  ok    only the requested read
+  ok    unknown shape 8
+  ok    only the requested read
+  ok    unknown shape 9
+  ok    only the requested read
+  ok    unknown shape 10
+  ok    only the requested read
+  ok    unknown shape 11
+  ok    only the requested read
+  ok    unknown shape 12
+  ok    only the requested read
+  ok    unknown shape 13
+  ok    only the requested read
+  ok    known state active
+  ok    only the requested read
+  ok    known state pending
+  ok    only the requested read
+  ok    known state restricted
+  ok    only the requested read
+  ok    non-200 remains unknown
+  ok    only the requested read
+  ok    transport remains unknown
+  ok    only the requested read
+  ok    actual checkup boundary retains unknown
+  ok    one mock request per read
+
+41 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":20,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3311focal-dWpeyH

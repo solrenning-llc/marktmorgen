@@ -1,0 +1,444 @@
+
+FILE checkup-disputes.test.ts
+
+Read only, on the creator's account
+  ok    a GET on the creator's own account, from the last 180 days
+  ok    two waiting: a problem, with the next due date
+  ok    in Stripe's own words for an unanswered one
+  ok    where to answer, and the studio's page to look first
+  ok    one waiting is said as one
+  ok    an appeal waiting for an answer is one too
+  ok    one past its due date: said, and never given as the next date
+  ok    all past: no next date at all
+
+None waiting
+  ok    some with the bank, an appeal among them: fine, counted
+  ok    none at all: fine
+  ok    a status Stripe adds that this does not know: not checked, never fine
+
+Unknown is never fine
+  ok    Stripe failing: not checked
+  ok    Stripe not answering: not checked, on time
+  ok    an odd answer: not checked
+  ok    could not be read at all: not checked
+  ok    a row that is not a dispute: not checked
+  ok    a dispute with no id: not checked
+  ok    the same dispute twice (a stuck cursor): not checked
+  ok    the first page read, the second out of time: what was read is kept, said as at least
+  ok    the second page failing, none waiting: not checked
+
+At most three pages
+  ok    three pages read, then it stops
+  ok    more than it reads, none waiting: not checked, never fine
+  ok    more than it reads, some waiting: at least
+  ok    the next page starts after the last one read
+
+No Stripe account
+  ok    left out: the payments line already says nothing can be sold
+  ok    each reader waits at most CHECK_WAIT_MS
+
+26 checks, all passing.
+Z_VOLUME {"runs":19,"mocks":16,"over":false}
+
+Z_STATUS 0 null
+
+FILE stripe-account-written.test.ts
+  ok    synthetic store
+
+return: healthy answers are written and said
+  ok    seeded
+  ok    return active: said
+  ok    return active: written
+  ok    return active: Stripe asked once
+  ok    seeded
+  ok    return inactive: said
+  ok    return inactive: written
+  ok    return inactive: Stripe asked once
+
+return: a record not written is never said ready or pending
+  ok    seeded
+  ok    return gone (null) active: told the check failed
+  ok    return gone (null) active: record unchanged
+  ok    seeded
+  ok    return gone (null) inactive: told the check failed
+  ok    return gone (null) inactive: record unchanged
+  ok    seeded
+  ok    return number active: told the check failed
+  ok    return number active: record unchanged
+  ok    seeded
+  ok    return number inactive: told the check failed
+  ok    return number inactive: record unchanged
+  ok    seeded
+  ok    return not JSON active: told the check failed
+  ok    return not JSON active: record unchanged
+  ok    seeded
+  ok    return not JSON inactive: told the check failed
+  ok    return not JSON inactive: record unchanged
+  ok    seeded
+  ok    return array active: told the check failed
+  ok    return array active: record unchanged
+  ok    seeded
+  ok    return array inactive: told the check failed
+  ok    return array inactive: record unchanged
+  ok    seeded
+  ok    return object active: told the check failed
+  ok    return object active: record unchanged
+  ok    seeded
+  ok    return object inactive: told the check failed
+  ok    return object inactive: record unchanged
+
+check: healthy answers are written and said
+  ok    seeded
+  ok    check active: said
+  ok    check active: written
+  ok    check active: Stripe asked once
+  ok    seeded
+  ok    check inactive: said
+  ok    check inactive: written
+  ok    check inactive: Stripe asked once
+
+check: a record not written is never said ready or pending
+  ok    seeded
+  ok    check gone (null) active: told the check failed
+  ok    check gone (null) active: record unchanged
+  ok    seeded
+  ok    check gone (null) inactive: told the check failed
+  ok    check gone (null) inactive: record unchanged
+  ok    seeded
+  ok    check number active: told the check failed
+  ok    check number active: record unchanged
+  ok    seeded
+  ok    check number inactive: told the check failed
+  ok    check number inactive: record unchanged
+  ok    seeded
+  ok    check not JSON active: told the check failed
+  ok    check not JSON active: record unchanged
+  ok    seeded
+  ok    check not JSON inactive: told the check failed
+  ok    check not JSON inactive: record unchanged
+  ok    seeded
+  ok    check array active: told the check failed
+  ok    check array active: record unchanged
+  ok    seeded
+  ok    check array inactive: told the check failed
+  ok    check array inactive: record unchanged
+  ok    seeded
+  ok    check object active: told the check failed
+  ok    check object active: record unchanged
+  ok    seeded
+  ok    check object inactive: told the check failed
+  ok    check object inactive: record unchanged
+
+77 checks, all passing.
+Z_VOLUME {"runs":568,"mocks":24,"over":false}
+
+Z_STATUS 0 null
+
+FILE connect-configuration.test.ts
+
+Only the countries Stripe confirmed for a US platform are offered (Stripe support, 28 October 2026)
+  ok    42 countries are offered
+  ok    Malaysia is not offered: direct charges are not available there for a US platform
+  ok    Brazil is not offered: direct charges there are a public beta
+  ok    India is not offered: Stripe India accounts are by invitation only
+  ok    every offered country appears once
+
+Every offered country keeps the creator's full Stripe dashboard and Stripe responsibilities
+  ok    us: exactly one intercepted request
+  ok    us: return the account Stripe confirmed
+  ok    us: full dashboard and Stripe fee/loss collection
+  ok    us: pinned creation API and synthetic credential
+  ok    us: account creation is on the platform, without impersonating a connected account
+  ok    gb: exactly one intercepted request
+  ok    gb: return the account Stripe confirmed
+  ok    gb: full dashboard and Stripe fee/loss collection
+  ok    gb: pinned creation API and synthetic credential
+  ok    gb: account creation is on the platform, without impersonating a connected account
+  ok    ca: exactly one intercepted request
+  ok    ca: return the account Stripe confirmed
+  ok    ca: full dashboard and Stripe fee/loss collection
+  ok    ca: pinned creation API and synthetic credential
+  ok    ca: account creation is on the platform, without impersonating a connected account
+  ok    au: exactly one intercepted request
+  ok    au: return the account Stripe confirmed
+  ok    au: full dashboard and Stripe fee/loss collection
+  ok    au: pinned creation API and synthetic credential
+  ok    au: account creation is on the platform, without impersonating a connected account
+  ok    ie: exactly one intercepted request
+  ok    ie: return the account Stripe confirmed
+  ok    ie: full dashboard and Stripe fee/loss collection
+  ok    ie: pinned creation API and synthetic credential
+  ok    ie: account creation is on the platform, without impersonating a connected account
+  ok    nz: exactly one intercepted request
+  ok    nz: return the account Stripe confirmed
+  ok    nz: full dashboard and Stripe fee/loss collection
+  ok    nz: pinned creation API and synthetic credential
+  ok    nz: account creation is on the platform, without impersonating a connected account
+  ok    at: exactly one intercepted request
+  ok    at: return the account Stripe confirmed
+  ok    at: full dashboard and Stripe fee/loss collection
+  ok    at: pinned creation API and synthetic credential
+  ok    at: account creation is on the platform, without impersonating a connected account
+  ok    be: exactly one intercepted request
+  ok    be: return the account Stripe confirmed
+  ok    be: full dashboard and Stripe fee/loss collection
+  ok    be: pinned creation API and synthetic credential
+  ok    be: account creation is on the platform, without impersonating a connected account
+  ok    bg: exactly one intercepted request
+  ok    bg: return the account Stripe confirmed
+  ok    bg: full dashboard and Stripe fee/loss collection
+  ok    bg: pinned creation API and synthetic credential
+  ok    bg: account creation is on the platform, without impersonating a connected account
+  ok    hr: exactly one intercepted request
+  ok    hr: return the account Stripe confirmed
+  ok    hr: full dashboard and Stripe fee/loss collection
+  ok    hr: pinned creation API and synthetic credential
+  ok    hr: account creation is on the platform, without impersonating a connected account
+  ok    cy: exactly one intercepted request
+  ok    cy: return the account Stripe confirmed
+  ok    cy: full dashboard and Stripe fee/loss collection
+  ok    cy: pinned creation API and synthetic credential
+  ok    cy: account creation is on the platform, without impersonating a connected account
+  ok    cz: exactly one intercepted request
+  ok    cz: return the account Stripe confirmed
+  ok    cz: full dashboard and Stripe fee/loss collection
+  ok    cz: pinned creation API and synthetic credential
+  ok    cz: account creation is on the platform, without impersonating a connected account
+  ok    dk: exactly one intercepted request
+  ok    dk: return the account Stripe confirmed
+  ok    dk: full dashboard and Stripe fee/loss collection
+  ok    dk: pinned creation API and synthetic credential
+  ok    dk: account creation is on the platform, without impersonating a connected account
+  ok    ee: exactly one intercepted request
+  ok    ee: return the account Stripe confirmed
+  ok    ee: full dashboard and Stripe fee/loss collection
+  ok    ee: pinned creation API and synthetic credential
+  ok    ee: account creation is on the platform, without impersonating a connected account
+  ok    fi: exactly one intercepted request
+  ok    fi: return the account Stripe confirmed
+  ok    fi: full dashboard and Stripe fee/loss collection
+  ok    fi: pinned creation API and synthetic credential
+  ok    fi: account creation is on the platform, without impersonating a connected account
+  ok    fr: exactly one intercepted request
+  ok    fr: return the account Stripe confirmed
+  ok    fr: full dashboard and Stripe fee/loss collection
+  ok    fr: pinned creation API and synthetic credential
+  ok    fr: account creation is on the platform, without impersonating a connected account
+  ok    de: exactly one intercepted request
+  ok    de: return the account Stripe confirmed
+  ok    de: full dashboard and Stripe fee/loss collection
+  ok    de: pinned creation API and synthetic credential
+  ok    de: account creation is on the platform, without impersonating a connected account
+  ok    gi: exactly one intercepted request
+  ok    gi: return the account Stripe confirmed
+  ok    gi: full dashboard and Stripe fee/loss collection
+  ok    gi: pinned creation API and synthetic credential
+  ok    gi: account creation is on the platform, without impersonating a connected account
+  ok    gr: exactly one intercepted request
+  ok    gr: return the account Stripe confirmed
+  ok    gr: full dashboard and Stripe fee/loss collection
+  ok    gr: pinned creation API and synthetic credential
+  ok    gr: account creation is on the platform, without impersonating a connected account
+  ok    hk: exactly one intercepted request
+  ok    hk: return the account Stripe confirmed
+  ok    hk: full dashboard and Stripe fee/loss collection
+  ok    hk: pinned creation API and synthetic credential
+  ok    hk: account creation is on the platform, without impersonating a connected account
+  ok    hu: exactly one intercepted request
+  ok    hu: return the account Stripe confirmed
+  ok    hu: full dashboard and Stripe fee/loss collection
+  ok    hu: pinned creation API and synthetic credential
+  ok    hu: account creation is on the platform, without impersonating a connected account
+  ok    it: exactly one intercepted request
+  ok    it: return the account Stripe confirmed
+  ok    it: full dashboard and Stripe fee/loss collection
+  ok    it: pinned creation API and synthetic credential
+  ok    it: account creation is on the platform, without impersonating a connected account
+  ok    jp: exactly one intercepted request
+  ok    jp: return the account Stripe confirmed
+  ok    jp: full dashboard and Stripe fee/loss collection
+  ok    jp: pinned creation API and synthetic credential
+  ok    jp: account creation is on the platform, without impersonating a connected account
+  ok    lv: exactly one intercepted request
+  ok    lv: return the account Stripe confirmed
+  ok    lv: full dashboard and Stripe fee/loss collection
+  ok    lv: pinned creation API and synthetic credential
+  ok    lv: account creation is on the platform, without impersonating a connected account
+  ok    li: exactly one intercepted request
+  ok    li: return the account Stripe confirmed
+  ok    li: full dashboard and Stripe fee/loss collection
+  ok    li: pinned creation API and synthetic credential
+  ok    li: account creation is on the platform, without impersonating a connected account
+  ok    lt: exactly one intercepted request
+  ok    lt: return the account Stripe confirmed
+  ok    lt: full dashboard and Stripe fee/loss collection
+  ok    lt: pinned creation API and synthetic credential
+  ok    lt: account creation is on the platform, without impersonating a connected account
+  ok    lu: exactly one intercepted request
+  ok    lu: return the account Stripe confirmed
+  ok    lu: full dashboard and Stripe fee/loss collection
+  ok    lu: pinned creation API and synthetic credential
+  ok    lu: account creation is on the platform, without impersonating a connected account
+  ok    mt: exactly one intercepted request
+  ok    mt: return the account Stripe confirmed
+  ok    mt: full dashboard and Stripe fee/loss collection
+  ok    mt: pinned creation API and synthetic credential
+  ok    mt: account creation is on the platform, without impersonating a connected account
+  ok    mx: exactly one intercepted request
+  ok    mx: return the account Stripe confirmed
+  ok    mx: full dashboard and Stripe fee/loss collection
+  ok    mx: pinned creation API and synthetic credential
+  ok    mx: account creation is on the platform, without impersonating a connected account
+  ok    nl: exactly one intercepted request
+  ok    nl: return the account Stripe confirmed
+  ok    nl: full dashboard and Stripe fee/loss collection
+  ok    nl: pinned creation API and synthetic credential
+  ok    nl: account creation is on the platform, without impersonating a connected account
+  ok    no: exactly one intercepted request
+  ok    no: return the account Stripe confirmed
+  ok    no: full dashboard and Stripe fee/loss collection
+  ok    no: pinned creation API and synthetic credential
+  ok    no: account creation is on the platform, without impersonating a connected account
+  ok    pl: exactly one intercepted request
+  ok    pl: return the account Stripe confirmed
+  ok    pl: full dashboard and Stripe fee/loss collection
+  ok    pl: pinned creation API and synthetic credential
+  ok    pl: account creation is on the platform, without impersonating a connected account
+  ok    pt: exactly one intercepted request
+  ok    pt: return the account Stripe confirmed
+  ok    pt: full dashboard and Stripe fee/loss collection
+  ok    pt: pinned creation API and synthetic credential
+  ok    pt: account creation is on the platform, without impersonating a connected account
+  ok    ro: exactly one intercepted request
+  ok    ro: return the account Stripe confirmed
+  ok    ro: full dashboard and Stripe fee/loss collection
+  ok    ro: pinned creation API and synthetic credential
+  ok    ro: account creation is on the platform, without impersonating a connected account
+  ok    sg: exactly one intercepted request
+  ok    sg: return the account Stripe confirmed
+  ok    sg: full dashboard and Stripe fee/loss collection
+  ok    sg: pinned creation API and synthetic credential
+  ok    sg: account creation is on the platform, without impersonating a connected account
+  ok    sk: exactly one intercepted request
+  ok    sk: return the account Stripe confirmed
+  ok    sk: full dashboard and Stripe fee/loss collection
+  ok    sk: pinned creation API and synthetic credential
+  ok    sk: account creation is on the platform, without impersonating a connected account
+  ok    si: exactly one intercepted request
+  ok    si: return the account Stripe confirmed
+  ok    si: full dashboard and Stripe fee/loss collection
+  ok    si: pinned creation API and synthetic credential
+  ok    si: account creation is on the platform, without impersonating a connected account
+  ok    es: exactly one intercepted request
+  ok    es: return the account Stripe confirmed
+  ok    es: full dashboard and Stripe fee/loss collection
+  ok    es: pinned creation API and synthetic credential
+  ok    es: account creation is on the platform, without impersonating a connected account
+  ok    se: exactly one intercepted request
+  ok    se: return the account Stripe confirmed
+  ok    se: full dashboard and Stripe fee/loss collection
+  ok    se: pinned creation API and synthetic credential
+  ok    se: account creation is on the platform, without impersonating a connected account
+  ok    ch: exactly one intercepted request
+  ok    ch: return the account Stripe confirmed
+  ok    ch: full dashboard and Stripe fee/loss collection
+  ok    ch: pinned creation API and synthetic credential
+  ok    ch: account creation is on the platform, without impersonating a connected account
+  ok    th: exactly one intercepted request
+  ok    th: return the account Stripe confirmed
+  ok    th: full dashboard and Stripe fee/loss collection
+  ok    th: pinned creation API and synthetic credential
+  ok    th: account creation is on the platform, without impersonating a connected account
+  ok    ae: exactly one intercepted request
+  ok    ae: return the account Stripe confirmed
+  ok    ae: full dashboard and Stripe fee/loss collection
+  ok    ae: pinned creation API and synthetic credential
+  ok    ae: account creation is on the platform, without impersonating a connected account
+
+Unapproved countries never reach even the synthetic provider
+  ok    br: no account request
+  ok    : no account request
+  ok    unknown: no account request
+
+218 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":42,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (54.736965ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (81.87812ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (32.167339ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (1.908109ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.135735ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.139481ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.450329ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (64.577604ms)
+✔ every store figure taken in the code is a kind a line prices (43.657737ms)
+✔ every email sent names a meter, and each file only the meters it may use (67.931204ms)
+✔ the units a figure is taken in cost at least what they stand for (8.692998ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.905325ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.227454ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.331831ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.116746ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.089905ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.359021ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.14532ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.685023ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.108033ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.027499ms)
+✔ Path push fits its reserved studio requests (0.079721ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.061112ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.155905ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.15223ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (33.530926ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 415.435709
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (197.075856ms)
+✔ each family is bounded one way at least, and what it says can be checked (41.740124ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (3.49247ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.052829ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.39809ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (6.120876ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.197027ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 269.539946
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3311focal-wXKAT3

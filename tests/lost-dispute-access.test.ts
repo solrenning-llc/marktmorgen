@@ -13,8 +13,11 @@
  *     offerRefunded), the list of purchases (lib/buyer-orders.ts) and the
  *     license key (lib/licence-keys.ts revokeRefunded, from the closing events);
  *   - a dispute still open (needs_response, under_review, the warning_
- *     stages) or won closes nothing; one prevented (or the legacy
- *     charge_refunded) gave the money back and closes as lost does;
+ *     stages, the appeal stages) or won closes nothing; one prevented and
+ *     resolved (refunded) before a chargeback gave the money back and closes
+ *     as lost does; one prevented by a network block left the money with the
+ *     creator and closes nothing; the legacy charge_refunded is left to the
+ *     refund doors, which read the money the charge itself gave back;
  *   - one lost dispute closes only what its own payment paid for: another
  *     purchase of the same product, a purchase made again, and another key
  *     keep standing;
@@ -48,7 +51,7 @@ const intents: Record<string, Record<string, unknown>[]> = {};
 const paymentIntents: Record<string, Record<string, unknown>> = {};
 const invoices: Record<string, Record<string, unknown>> = {};
 /** A charge's disputes, by charge id. */
-const disputes: Record<string, { status: string }[]> = {};
+const disputes: Record<string, Record<string, unknown>[]> = {};
 /** The closing events of disputes, newest first. */
 let closings: Record<string, unknown>[] = [];
 let disputeReads = 0;
@@ -82,9 +85,21 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 
 /** A charge as Stripe sends it: disputed or not; the dispute itself is never on it. */
 const charge = (id: string, amount = 4900, disputed = false) => ({ object: "charge", id, amount, amount_refunded: 0, refunded: false, disputed });
+/**
+ * A dispute as Stripe lists it, from a state written "status" or
+ * "prevented:resolution" / "prevented:block": the card case type
+ * (payment_method_details.card.case_type) with the money that case moves on
+ * the creator's account (balance_transactions), which is what decides.
+ */
+const disputeOf = (state: string) => {
+  const [status, caseType] = state.split(":");
+  if (!caseType) return { status };
+  const withdrawn = caseType === "resolution" ? [{ object: "balance_transaction", amount: -4900, currency: "usd", reporting_category: "dispute" }] : [];
+  return { status, payment_method_details: { type: "card", card: { brand: "visa", case_type: caseType } }, balance_transactions: withdrawn };
+};
 /** A charge with a dispute in this state (or none). */
 const chargeIn = (id: string, status: string | null) => {
-  if (status) disputes[id] = [{ status }];
+  if (status) disputes[id] = [disputeOf(status)];
   return charge(id, 4900, status !== null);
 };
 const paid = (id: string, product: string, status: string | null, over: Record<string, unknown> = {}) => ({
@@ -102,11 +117,18 @@ const paid = (id: string, product: string, status: string | null, over: Record<s
   ...over,
 });
 
-// Changed (rule 23, siblings of #3318): "prevented" left this list. Stripe closes a dispute as prevented when the money went
-// back to the buyer before a chargeback (lib/dispute-statuses.ts DISPUTE_RETURNED, as lib/plan-refund-rules.ts RETURNED reads
-// it), so keeping it open left the buyer with the money and the access. RETURNED_STATES below holds it closed.
-const OPEN_STATES = ["needs_response", "under_review", "warning_needs_response", "warning_under_review", "warning_closed", "won"];
-const RETURNED_STATES = ["prevented", "charge_refunded"];
+// Changed (rule 23, siblings of #3318): a prevented dispute is read by the money it moved (lib/dispute-statuses.ts
+// disputeMoney, its balance_transactions). Resolved ("prevented:resolution", refunded through the dispute before a
+// chargeback) gave the money back, so keeping it open left the buyer with the money and the access: RETURNED_STATES
+// holds it closed.
+// Changed again (rule 23, Claude 2's money review of #3323, comment 6732285842): the first version closed every
+// "prevented" and "charge_refunded". A network block ("prevented:block", nothing withdrawn) left the money with the creator, and
+// charge_refunded was a won dispute on a refunded charge, whose money the refund doors read at its own amount: both are
+// back here with the open ones, and so are the appeal stages (appeal_needs_response, appeal_under_review).
+const OPEN_STATES = ["needs_response", "under_review", "warning_needs_response", "warning_under_review", "warning_closed", "won", "prevented:block", "charge_refunded", "appeal_needs_response", "appeal_under_review"];
+const RETURNED_STATES = ["prevented:resolution"];
+/** A distinct id part for a state: all its letters (the first eight are shared, as "warningn" and "prevente" are). */
+const tag = (state: string) => state.replace(/[^a-z]/g, "");
 
 async function main(): Promise<void> {
   redis.clear();
@@ -116,11 +138,13 @@ async function main(): Promise<void> {
   is("lost, written on the charge: closed", refundedInFull({ object: "charge", amount: 4900, amount_refunded: 0, disputed: true, dispute: { status: "lost" } }), true);
   is("won, written on the charge: open", refundedInFull({ object: "charge", amount: 4900, amount_refunded: 0, disputed: true, dispute: { status: "won" } }), false);
   is("lost, read from Stripe: closed", await purchaseRefunded(ACCOUNT, paid("cs_test_unit00000lost", "x", "lost")), true);
+  // Changed (rule 23, review 6732285842): the id is built from all of the state's letters, not its first eight, so
+  // "prevented:block" and "prevented:resolution" each get their own charge.
   for (const status of OPEN_STATES) {
-    is(`${status}: open`, await purchaseRefunded(ACCOUNT, paid(`cs_test_unit0${status.replace(/_/g, "").slice(0, 8)}`, "x", status)), false);
+    is(`${status}: open`, await purchaseRefunded(ACCOUNT, paid(`cs_test_unit0${tag(status)}`, "x", status)), false);
   }
   for (const status of RETURNED_STATES) {
-    is(`${status}: closed, as lost`, await purchaseRefunded(ACCOUNT, paid(`cs_test_unit0${status.replace(/_/g, "").slice(0, 8)}`, "x", status)), true);
+    is(`${status}: closed, as lost`, await purchaseRefunded(ACCOUNT, paid(`cs_test_unit0${tag(status)}`, "x", status)), true);
   }
   disputeReads = 0;
   is("never disputed: open", await purchaseRefunded(ACCOUNT, paid("cs_test_unit000000none", "x", null)), false);

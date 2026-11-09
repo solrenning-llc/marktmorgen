@@ -29,7 +29,11 @@ type Entry = string | string[] | Map<string, string> | Set<string> | { score: nu
  */
 function evalShape(args: string[]): { keys: string[]; argv: string[] } {
   const raw = args[0] ?? "";
-  if (!/^-?[0-9]+$/.test(raw)) throw new Error("ERR value is not an integer or out of range");
+  // As Redis reads a whole number: the plain way only, so "02", "-0" and "+2" are refused (Claude 2 on #3322), and
+  // within 64 bits.
+  if (!/^(0|-?[1-9][0-9]*)$/.test(raw) || BigInt(raw) > BigInt("9223372036854775807") || BigInt(raw) < BigInt("-9223372036854775808")) {
+    throw new Error("ERR value is not an integer or out of range");
+  }
   const count = Number(raw);
   if (count < 0) throw new Error("ERR Number of keys can't be negative");
   if (count > args.length - 1) throw new Error("ERR Number of keys can't be greater than number of args");
@@ -1187,6 +1191,12 @@ export class MemoryRedis {
           const [connection, cutoff, statsId] = argv;
           const gone = this.run(["GET", goneMark]);
           if (typeof gone === "string" && (!/^[0-9]{1,16}$/.test(gone) || Number(gone) >= Number(cutoff))) return 0;
+          // Both sets checked before anything is written, as the script does: this stand-in's SADD would replace a key
+          // of another kind, where Redis refuses it.
+          for (const set of [stores, user]) {
+            const kind = this.run(["TYPE", set]);
+            if (kind !== "set" && kind !== "none") throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          }
           this.run(["SET", conn, connection]);
           this.run(["DEL", read]);
           this.run(["SADD", stores, statsId]);

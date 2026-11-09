@@ -286,12 +286,19 @@ return 1`;
  * the time, in milliseconds, at or after which a deletion of that user stops this flow (finishMeta), ARGV[3] the
  * store. 1 the connection is kept, its record dropped and the store added to both sets; 0 a deletion at or after the
  * cutoff (or a mark that does not read as a time) and nothing is written; -1 a call of any other shape, refused
- * before anything is read or written. Mirrored for tests in lib/redis-memory.ts.
+ * before anything is read or written. Both sets are checked to be sets (or absent) before the connection is written:
+ * Redis does not undo a script that stops half-way, so a SADD failing on a key of another kind after the SET would
+ * keep the connection, sealed token and all, outside the person's index (Claude 2 on #3322); such a key is Redis's
+ * own WRONGTYPE error with nothing written. Mirrored for tests in lib/redis-memory.ts.
  */
 const FINISH_UNLESS_GONE = `-- marktmorgen:meta-finish:v1
 if #KEYS ~= 5 or #ARGV ~= 3 or #ARGV[2] > 16 or not string.match(ARGV[2], "^[1-9]%d*$") or ARGV[3] == "" then return -1 end
 local gone = redis.call("GET", KEYS[5])
 if gone and (#gone > 16 or not string.match(gone, "^%d+$") or tonumber(gone) >= tonumber(ARGV[2])) then return 0 end
+for i = 3, 4 do
+  local kind = redis.call("TYPE", KEYS[i])["ok"]
+  if kind ~= "set" and kind ~= "none" then return redis.error_reply("WRONGTYPE Operation against a key holding the wrong kind of value") end
+end
 redis.call("SET", KEYS[1], ARGV[1])
 redis.call("DEL", KEYS[2])
 redis.call("SADD", KEYS[3], ARGV[3])

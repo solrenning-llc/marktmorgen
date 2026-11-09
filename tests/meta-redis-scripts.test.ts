@@ -48,12 +48,14 @@ const FIN_SETUP: Arg[][] = [["SET", "read", "r"]];
 const FIN_STATE: Arg[][] = [["GET", "conn"], ["EXISTS", "read"], ["SISMEMBER", "stores", "s1"], ["SISMEMBER", "user", "s1"]];
 const FIN_KEYS = ["conn", "read", "stores", "user", "gone"];
 const kept = [null, 1, 0, 0];
-const finCase = (name: string, gone: string | null, run: Arg[], reply: number | "error", state: unknown[] = kept): Case => ({
+// The same, with each set read by its kind (TYPE), for a key that holds another kind of value.
+const FIN_TYPED: Arg[][] = [["GET", "conn"], ["EXISTS", "read"], ["TYPE", "stores"], ["TYPE", "user"]];
+const finCase = (name: string, gone: string | null, run: Arg[], reply: number | "error", state: unknown[] = kept, more: Arg[][] = [], after: Arg[][] = FIN_STATE): Case => ({
   name,
-  setup: gone === null ? FIN_SETUP : [...FIN_SETUP, ["SET", "gone", gone]],
+  setup: [...(gone === null ? FIN_SETUP : [...FIN_SETUP, ["SET", "gone", gone]]), ...more],
   run: ["EVAL", F, ...run],
   reply,
-  after: FIN_STATE,
+  after,
   state,
 });
 
@@ -72,6 +74,11 @@ const CASES: Case[] = [
   ifCase("an argument too few is refused", [2, "c", "r", "S", "new"], -1),
   ifCase("a single key is refused", [1, "c", "S", "new", 60], -1),
   ifCase("more keys than arguments is Redis's own error", [9, "c", "r", "S"], "error"),
+  // Redis reads the key count as a whole number written the plain way (Claude 2 on #3322, Redis 7.0.15): a leading
+  // zero, "-0" or a sign is its own error before the script runs, so the stand-in refuses them too.
+  ifCase("a key count with a leading zero is Redis's own error", ["02", "c", "r", "S", "new", 60], "error"),
+  ifCase("a key count of -0 is Redis's own error", ["-0", "c", "r", "S", "new", 60], "error"),
+  ifCase("a key count with a plus sign is Redis's own error", ["+2", "c", "r", "S", "new", 60], "error"),
   finCase("keeps the connection when no deletion was confirmed", null, [5, ...FIN_KEYS, "J", 1001, "s1"], 1, ["J", 0, 1, 1]),
   finCase("keeps it when the deletion is older than the flow", "1000", [5, ...FIN_KEYS, "J", 1001, "s1"], 1, ["J", 0, 1, 1]),
   finCase("keeps nothing when the deletion is at the flow's start", "1001", [5, ...FIN_KEYS, "J", 1001, "s1"], 0),
@@ -85,6 +92,13 @@ const CASES: Case[] = [
   finCase("a key too few is refused", null, [4, ...FIN_KEYS.slice(0, 4), "J", 1001, "s1"], -1),
   finCase("an argument too many is refused", null, [5, ...FIN_KEYS, "J", 1001, "s1", "extra"], -1),
   finCase("an argument too few is refused", null, [5, ...FIN_KEYS, "J", 1001], -1),
+  finCase("a key count with a leading zero is Redis's own error", null, ["05", ...FIN_KEYS, "J", 1001, "s1"], "error"),
+  finCase("keeps it when both sets already hold another store", null, [5, ...FIN_KEYS, "J", 1001, "s1"], 1, ["J", 0, 1, 1], [["SADD", "stores", "s0"], ["SADD", "user", "s0"]]),
+  // A set key holding another kind of value (Claude 2 on #3322): Redis does not undo a script that stops half-way, so
+  // the connection must not be written before a SADD that would fail; nothing is written, and the error is Redis's.
+  // Read with TYPE, since SISMEMBER on such a key is an error itself.
+  finCase("keeps nothing when the person's index holds another kind of value", null, [5, ...FIN_KEYS, "J", 1001, "s1"], "error", [null, 1, "none", "string"], [["SET", "user", "x"]], FIN_TYPED),
+  finCase("keeps nothing when the connected stores hold another kind of value", null, [5, ...FIN_KEYS, "J", 1001, "s1"], "error", [null, 1, "string", "none"], [["SET", "stores", "x"]], FIN_TYPED),
 ];
 
 function onStandIn(c: Case): { reply: unknown; state: unknown[] } {

@@ -5,7 +5,7 @@ import { readAiAnswer } from "@/lib/ai-response";
 import { Icon } from "@/components/icons";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { AiDraftReview } from "@/components/ai-draft-review";
-import { freshChecks, reviewDone, sensitiveTopics, type SensitiveTopic } from "@/lib/ai-draft-review";
+import { draftStrings, freshChecks, reviewDone, sensitiveTopics, unsourcedNumbers, type SensitiveTopic } from "@/lib/ai-draft-review";
 
 /**
  * Whether the writing help (lib/ai.ts) is there for this person on this page,
@@ -94,6 +94,8 @@ export function AiAssist<T>({
   const [checks, setChecks] = useState<boolean[]>(freshChecks);
   // What the draft is about that needs a reader who knows it (756 [STN3], unit 2), read from its own words.
   const [topics, setTopics] = useState<SensitiveTopic[]>([]);
+  // Numbers in the draft that the creator did not give (756 [STN3], unit 3).
+  const [estimates, setEstimates] = useState<string[]>([]);
   const [left, setLeft] = useState(startLeft);
   const [allowanceKnown, setAllowanceKnown] = useState(startKnown);
   const [readOnce, setReadOnce] = useState(startKnown);
@@ -111,11 +113,13 @@ export function AiAssist<T>({
     onBusyChange?.(true);
     setError(null);
     setFilled(false);
+    // What the creator gave this job, kept to tell the draft's own numbers from theirs.
+    const sent = payload();
     try {
       const response = await fetch("/api/store/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload(), notes }),
+        body: JSON.stringify({ ...sent, notes }),
       });
       const data = readAiAnswer(response.ok, await response.json().catch(() => null));
       if (data.ok) {
@@ -127,6 +131,7 @@ export function AiAssist<T>({
         // Every new draft is checked afresh, whatever was ticked for the one before.
         setChecks(freshChecks());
         setTopics(sensitiveTopics(JSON.stringify(data.value)));
+        setEstimates(unsourcedNumbers(draftStrings(data.value), `${notes}\n${JSON.stringify(sent)}`));
         onReviewChange?.(false);
         setFilled(true);
         return;
@@ -183,6 +188,7 @@ export function AiAssist<T>({
           <AiDraftReview
             checks={checks}
             topics={topics}
+            estimates={estimates}
             onToggle={(index, ticked) => {
               const next = checks.map((was, at) => (at === index ? ticked : was));
               setChecks(next);

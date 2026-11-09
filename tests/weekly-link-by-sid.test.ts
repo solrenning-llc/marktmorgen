@@ -1,0 +1,226 @@
+/**
+ * The numbers emails' stop link and the team's list follow the store, not its
+ * address (siblings of finding 5 of Claude 5's handles audit, 9 November 2026).
+ *
+ * 1. The stop link at the foot of the weekly, monthly, busy-day, quiet-sales
+ *    and alert emails was signed for the store's ADDRESS. Once a store let an
+ *    address go and, after the 30-day quarantine, another store took it, the
+ *    old store's link stopped (or started again) the new store's emails. A link
+ *    is now signed for the store's id; a link signed for an address, from an
+ *    email sent before, is honored only for a store known to have held that
+ *    address before links stopped being signed that way, never for one that
+ *    may have taken it after another store let it go.
+ * 2. Who on the team gets the weekly email (nl:weekly:to:<address>) was lost
+ *    when the store was renamed: the members stopped getting it. It is now kept
+ *    by the store's id, a list written before under an address the store still
+ *    owns is still read, and one under an address it lets go of goes to the id
+ *    first, so the next store at that address never inherits it.
+ *
+ * Synthetic data only; no request leaves the process.
+ */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { claimHandle, ensureStatsId, renameHandle, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import * as report from "@/lib/stats-report";
+import { BUSY_FLOOR, maybeBusyAlert, setWeeklyOff, weeklyMemberToken, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { GET as weeklyPage, POST as weeklyRoute } from "@/app/api/store/weekly/route";
+import { POST as releaseRoute } from "@/app/api/store/release/route";
+import { paidPeriod } from "./billing-period-fixture";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+process.env.STRIPE_SECRET_KEY = "sk_test_weekly_link_by_sid_only";
+process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
+process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
+
+const HOST = "marktmorgen.com";
+const ORIGIN = `https://${HOST}`;
+
+/** Emails handed to the sender; nothing else may leave the process. */
+const sent: { to: string; text: string }[] = [];
+const elsewhere: string[] = [];
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  if (url.hostname === "api.resend.com") {
+    const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; text?: string };
+    sent.push({ to: Array.isArray(body.to) ? body.to[0] : String(body.to), text: String(body.text ?? "") });
+    return new Response(JSON.stringify({ id: `email_${sent.length}` }), { status: 200 });
+  }
+  elsewhere.push(`${url.hostname}${url.pathname}`);
+  return new Response(JSON.stringify({ error: "not in this test" }), { status: 400 });
+}) as typeof fetch;
+
+async function paidStore(owner: string, handle: string, name: string): Promise<Store> {
+  await claimHandle(owner, handle, name, "");
+  await ensureStatsId(owner);
+  await setSubscription(owner, { customerId: `cus_${handle.replace(/\W/g, "")}0001`, subscriptionId: `sub_${handle.replace(/\W/g, "")}0001`, active: true, period: paidPeriod() });
+  return (await storeForEmail(owner))!;
+}
+
+const fresh = async (owner: string) => (await storeForEmail(owner))!;
+
+/** Rewrites fields of a store's own record, as a store made earlier (or before ids) would have them. */
+async function edit(owner: string, fields: Record<string, unknown>): Promise<Store> {
+  const [, keys] = redis.run(["SCAN", "0", "MATCH", "nl:store:owner:*", "COUNT", "1000"]) as [string, string[]];
+  for (const key of keys) {
+    const raw = redis.run(["GET", key]);
+    if (typeof raw !== "string") continue;
+    const record = JSON.parse(raw) as Record<string, unknown>;
+    if (record.email !== owner) continue;
+    redis.run(["SET", key, JSON.stringify({ ...record, ...fields })]);
+  }
+  return fresh(owner);
+}
+
+/** The stop link at the foot of today's busy-day email of the store, as the creator received it. */
+async function busyDayLink(store: Store): Promise<string> {
+  redis.run(["DEL", `nl:busy:${new Date().toISOString().slice(0, 10)}:${store.handle}`]);
+  const before = sent.length;
+  await maybeBusyAlert(store, BUSY_FLOOR);
+  const mail = sent.slice(before).find((m) => m.to === store.email);
+  return mail?.text.match(/https:\/\/marktmorgen\.com\/api\/store\/weekly\?\S+/)?.[0] ?? "";
+}
+
+/** The link pressed: "Stop these emails" (off) or "Start it again" (on). */
+async function press(link: string, what: "off" | "on" = "off"): Promise<{ status: number; page: string }> {
+  if (!link) return { status: 0, page: "no link" };
+  const response = await weeklyRoute(
+    new NextRequest(link, { method: "POST", headers: { host: HOST, origin: ORIGIN, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ do: what }).toString() }),
+  );
+  return { status: response.status, page: await response.text() };
+}
+
+const addressLink = (handle: string) => `${ORIGIN}/api/store/weekly?h=${encodeURIComponent(handle)}&t=${encodeURIComponent(weeklyToken(handle))}`;
+const addressMemberLink = (handle: string, email: string) =>
+  `${ORIGIN}/api/store/weekly?h=${encodeURIComponent(handle)}&e=${encodeURIComponent(email)}&t=${encodeURIComponent(weeklyMemberToken(handle, email))}`;
+
+/** A studio request of the signed-in owner, for their store. */
+async function studio(owner: string, store: Store, path: string, body: Record<string, unknown>): Promise<NextRequest> {
+  const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
+  return new NextRequest(`${ORIGIN}${path}?store=${store.sid}`, {
+    method: "POST",
+    headers: { host: HOST, origin: ORIGIN, cookie, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Lets an address of the store go, then lets the quarantine pass, so another store may take it. */
+async function letGo(owner: string, store: Store, handle: string): Promise<number> {
+  const response = await releaseRoute(await studio(owner, store, "/api/store/release", { handle }));
+  redis.run(["DEL", `nl:store:handle:${handle}`]);
+  return response.status;
+}
+
+/** The team list, through whatever the module offers for a store (before the fix: the address only). */
+const teamOf = async (store: Store): Promise<unknown> => (report.weeklyTeam as (s: unknown) => Promise<string[]>)(store).catch((error: Error) => `threw: ${error.message}`);
+const setTeam = (store: Store, emails: string[]) => (report.setWeeklyTeam as (s: unknown, e: string[]) => Promise<void>)(store, emails);
+
+async function main(): Promise<void> {
+  part("The audit's proof: an old store's stop link never changes the emails of the store that took its address");
+  {
+    const owner = "dock@example.com";
+    let dock = await paidStore(owner, "dock", "Dock Prints");
+    const link = await busyDayLink(dock);
+    is("the busy-day email carries a stop link", link !== "", true);
+    is("the link names the store by its id, not its address", /[?&]s=[0-9a-f]{32}(&|$)/.test(link) && !/[?&]h=dock(&|$)/.test(link), true);
+    is("the store is renamed", (await renameHandle(owner, "dock-two")).ok, true);
+    dock = await fresh(owner);
+    is("the old address is let go", await letGo(owner, dock, "dock"), 200);
+    const next = await paidStore("next-dock@example.com", "dock", "Another Dock");
+    let pressed = await press(link, "off");
+    is("the old email's link still reaches its own store", pressed.status, 200);
+    is("its own store is stopped", await weeklyOff(await fresh(owner)), true);
+    is("the store now at the address is not stopped", await weeklyOff(next), false);
+    await setWeeklyOff(next, true);
+    pressed = await press(link, "on");
+    is("'Start it again' from the old email: its own store again", await weeklyOff(await fresh(owner)), false);
+    is("the store now at the address stays stopped (no email without its consent)", await weeklyOff(next), true);
+    pressed = await press(addressLink("dock"), "on");
+    is("a link signed for the address, from before: nothing is changed", [pressed.status, /Nothing was changed/.test(pressed.page)], [404, true]);
+    is("and the store now at the address stays stopped", await weeklyOff(next), true);
+    const shown = await weeklyPage(new NextRequest(link, { headers: { host: HOST } }));
+    is("the link's page opens with its button, without a press", [shown.status, /Stop these emails/.test(await shown.text())], [200, true]);
+  }
+
+  part("A link signed for the address, sent before: honored for a store that held the address before");
+  {
+    const owner = "pier@example.com";
+    await paidStore(owner, "pier", "Pier Goods");
+    let pier = await edit(owner, { createdAt: "2026-10-01T12:00:00.000Z" });
+    let pressed = await press(addressLink("pier"), "off");
+    is("pressed: stopped", [pressed.status, await weeklyOff(pier)], [200, true]);
+    pressed = await press(addressLink("pier"), "on");
+    is("'Start it again': on again", [pressed.status, await weeklyOff(pier)], [200, false]);
+    is("a store made today takes an address", (await paidStore("quay@example.com", "quay", "Quay")).handle, "quay");
+    pressed = await press(addressLink("quay"), "off");
+    is("a link signed for an address a store took after such links ended: nothing is changed", pressed.status, 404);
+    is("and that store is not stopped", await weeklyOff(await fresh("quay@example.com")), false);
+    is("the store is renamed today", (await renameHandle(owner, "pier-two")).ok, true);
+    pier = await fresh(owner);
+    pressed = await press(addressLink("pier-two"), "off");
+    is("a link signed for the address it took today: nothing is changed (it never had one)", pressed.status, 404);
+    const link = await busyDayLink(pier);
+    pressed = await press(link, "off");
+    is("the newer email's link stops it", [pressed.status, await weeklyOff(pier)], [200, true]);
+  }
+
+  part("A store without an id yet keeps its address links (it has no other)");
+  {
+    const owner = "cove@example.com";
+    await paidStore(owner, "cove", "Cove");
+    const cove = await edit(owner, { sid: "" });
+    const link = await busyDayLink(cove);
+    is("its email's link names its address", /[?&]h=cove(&|$)/.test(link), true);
+    const pressed = await press(link, "off");
+    is("pressed: stopped", [pressed.status, await weeklyOff(cove)], [200, true]);
+  }
+
+  part("Who on the team gets the weekly email: kept through a rename, never inherited by the next store at the address");
+  {
+    const owner = "reef@example.com";
+    let reef = await paidStore(owner, "reef", "Reef Studio");
+    // What the code before this change wrote: the list under the address.
+    redis.run(["SADD", "nl:weekly:to:reef", "ana@example.com"]);
+    is("read under its address", await teamOf(reef), ["ana@example.com"]);
+    is("the store is renamed", (await renameHandle(owner, "reef-two")).ok, true);
+    reef = await fresh(owner);
+    is("renamed: the members still get it", await teamOf(reef), ["ana@example.com"]);
+    is("the old address is let go", await letGo(owner, reef, "reef"), 200);
+    reef = await fresh(owner);
+    is("let go: the members still get it", await teamOf(reef), ["ana@example.com"]);
+    is("let go: nothing is left under the address", redis.run(["EXISTS", "nl:weekly:to:reef"]), 0);
+    const next = await paidStore("next-reef@example.com", "reef", "Another Reef");
+    is("the store now at the address has nobody on its list", await teamOf(next), []);
+    await setTeam(next, ["ana@example.com"]);
+    const pressed = await press(addressMemberLink("reef", "ana@example.com"));
+    is("a member's link signed for the address, from before: nothing is changed", pressed.status, 404);
+    is("the store now at the address keeps its member", await teamOf(next), ["ana@example.com"]);
+    is("the owner changes the list: kept by the store's id", (await setTeam(reef, ["ben@example.com"]).then(() => "ok", (e: Error) => e.message)), "ok");
+    is("changed", await teamOf(reef), ["ben@example.com"]);
+    is("renamed again", (await renameHandle(owner, "reef-three")).ok, true);
+    reef = await fresh(owner);
+    is("renamed again: still the same list", await teamOf(reef), ["ben@example.com"]);
+    const memberLink = (report as Record<string, unknown>).weeklyMemberStopUrl as ((s: Store, e: string) => string) | undefined;
+    const own = typeof memberLink === "function" ? memberLink(reef, "ben@example.com") : "";
+    is("a member's own link names the store by its id", /[?&]s=[0-9a-f]{32}&/.test(own), true);
+    const left = await press(own);
+    is("the member's own link stops their copy after a rename", [left.status, await teamOf(reef)], [200, []]);
+  }
+
+  part("Every numbers email builds its stop link the one way");
+  {
+    const files = ["app/api/cron/weekly/route.ts", "app/api/cron/monthly/route.ts", "lib/quiet-sales.ts", "lib/store-alerts.ts", "lib/stats-report.ts"];
+    const byAddress = files.filter((file) => /api\/store\/weekly\?h=\$\{encodeURIComponent\(store\.handle\)\}/.test(readFileSync(join(process.cwd(), file), "utf8")));
+    is("no file signs a stop link for the address itself", byAddress, []);
+  }
+
+  part("Nothing left the process but the emails");
+  is("no other request", elsewhere, []);
+}
+
+main().then(done, (error) => {
+  console.error(error);
+  process.exit(1);
+});

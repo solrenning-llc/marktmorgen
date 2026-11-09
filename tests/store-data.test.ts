@@ -7,7 +7,7 @@
  * real code against the in-memory Redis (tests/redis-stub.ts);
  * scripts/test_store_data_redis.py runs the same script on a real Redis.
  */
-import { DataRoomError, dataKey, dataUsed, giveData, keepFor, needData, noteData, takeData } from "@/lib/store-data";
+import { DataRoomError, RECOUNT_AGAIN_FIELD, RECOUNT_STATE_KEY, dataKey, dataUsed, giveData, keepFor, needData, noteData, takeData } from "@/lib/store-data";
 import { orderWriteCharged } from "@/lib/order-data";
 import { DATA_FULL_BUYER_WORDS, DATA_ROOM_BYTES, NON_PAYING_DATA_ROOM_BYTES, ORDER_DATA_BYTES, contentRoomFor, dataBytes, dataFullWords, dataRoomFor, itemsHandedOver, orderDataBytes, orderReserveFor, utf8Length } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
@@ -93,6 +93,12 @@ async function main() {
   }
   is("and is an ordinary failure, to try again, not a full store", [thrown instanceof Error, thrown instanceof DataRoomError], [true, false]);
   is("a change that is not a number is refused before anything", (await takeData({ ...paid, sid: "data-test-2" }, [{ slot: "p:x", bytes: Number.NaN }], now)).ok, false);
+  // giveData and noteData answered nothing and swallowed this before (audit of tolerant reads, 09/11/2026).
+  const asksBefore = Number(redis.run(["HGET", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD]) ?? 0);
+  is("a give-back the room cannot take says so, and only shrinking asks for no count again", [await giveData(paid, [{ slot: "p:x", bytes: 1 }], now), await giveData(paid, [{ slot: "p:one", bytes: 0, set: true }], now), Number(redis.run(["HGET", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD]) ?? 0) - asksBefore], [false, false, 0]);
+  await noteData(paid, [{ slot: "p:x", bytes: 1 }], now);
+  is("a record written and not counted asks for every store to be counted again", Number(redis.run(["HGET", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD]) ?? 0) - asksBefore, 1);
+  is("and one counted asks nothing", [await giveData({ ...paid, sid: "data-test-3" }, [{ slot: "p:x", bytes: 0, set: true }], now), (await noteData({ ...paid, sid: "data-test-3" }, [{ slot: "p:x", bytes: 1 }], now), Number(redis.run(["HGET", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD]) ?? 0) - asksBefore)], [true, 1]);
 
   part("Counts that never grow a hash past its most");
   const counts = "nl:test:capped";

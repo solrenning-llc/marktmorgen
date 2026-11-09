@@ -21,7 +21,8 @@ import { isPathBoardSharedKey } from "@/lib/path-board";
  * nothing, so the room ends at least as full as what was measured, and never
  * emptier than it was.
  *
- *   nl:recount:state   hash: phase (ids, scan, apply, done), cursor, version, started, finished
+ *   nl:recount:state   hash: phase (ids, scan, apply, done), cursor, version, started, finished,
+ *                      again (counts of a store that could not be confirmed since, lib/store-data.ts)
  *   nl:recount:ids     hash: an id a store's keys are named by -> the store; "*" when two share it
  *   nl:recount:sum     hash: a store -> what was measured of its keys
  *
@@ -31,7 +32,11 @@ import { isPathBoardSharedKey } from "@/lib/path-board";
  * so a run that dies part way leaves nothing half-added and the next run
  * reads that page again. Idempotent: a store's slot is set, never added to,
  * so applying the same measure twice comes to the same room, and once done
- * the job does nothing until RECOUNT_VERSION changes.
+ * the job does nothing until RECOUNT_VERSION changes, or until a count of a
+ * store's data could not be confirmed (noteData, giveData): that asks for
+ * every store to be counted again ("again" above), and the next run once
+ * this one is done starts over, so a record written and not counted is in
+ * its room after it.
  *
  * What it leaves out, said so: a key whose name and value carry no id of a
  * store (a mark under a payment's id, an address's library across stores) is
@@ -42,7 +47,7 @@ import { isPathBoardSharedKey } from "@/lib/path-board";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countedInRoom } from "@/lib/data-families";
 import { ORDER_BOARD_ENTRY_BYTES, ORDER_ENTRY_BYTES, ORDER_KEY_BYTES } from "@/lib/order-data";
-import { dataKey, noteData } from "@/lib/store-data";
+import { RECOUNT_AGAIN_FIELD, RECOUNT_STATE_KEY, dataKey, noteData } from "@/lib/store-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 import { readAllListings } from "@/lib/catalog";
 import { readFlows } from "@/lib/flows";
@@ -57,7 +62,8 @@ export const RECOUNT_PAGE_KEYS = 500;
 /** The slot of a store's room the count is kept in. */
 export const LEGACY_SLOT = "legacy";
 
-export const STATE_KEY = "nl:recount:state";
+/** Kept with lib/store-data.ts, which asks for a count again under it. */
+export const STATE_KEY = RECOUNT_STATE_KEY;
 export const IDS_KEY = "nl:recount:ids";
 export const SUM_KEY = "nl:recount:sum";
 
@@ -97,12 +103,15 @@ export function idsIn(...texts: string[]): string[] {
   return [...out];
 }
 
-type State = { phase: string; cursor: string; version: string };
+/** `again`: the asks to count again (none when the field is absent), or null when it holds anything but a whole number. */
+type State = { phase: string; cursor: string; version: string; again: number | null };
 
 async function readState(): Promise<State> {
-  const [raw] = await redisPipeline([["HMGET", STATE_KEY, "phase", "cursor", "version"]]);
-  const [phase, cursor, version] = Array.isArray(raw) ? raw.map((v) => (typeof v === "string" ? v : "")) : ["", "", ""];
-  return { phase, cursor: cursor || "0", version };
+  const [raw] = await redisPipeline([["HMGET", STATE_KEY, "phase", "cursor", "version", RECOUNT_AGAIN_FIELD]]);
+  const [phase, cursor, version] = Array.isArray(raw) ? raw.slice(0, 3).map((v) => (typeof v === "string" ? v : "")) : ["", "", ""];
+  const asked: unknown = Array.isArray(raw) ? raw[3] : undefined;
+  const again = asked === null || asked === undefined ? 0 : typeof asked === "string" && /^(0|[1-9][0-9]*)$/.test(asked) && Number.isSafeInteger(Number(asked)) ? Number(asked) : null;
+  return { phase, cursor: cursor || "0", version, again };
 }
 
 export type RecountReport = { phase: string; stores: number; pages: number; measured: number; applied: number; done: boolean };
@@ -239,9 +248,14 @@ export async function recountStep(deadline: number, now = Date.now()): Promise<R
   const report: RecountReport = { phase: "", stores: 0, pages: 0, measured: 0, applied: 0, done: false };
   if (!isRedisConfigured()) return report;
   let state = await readState();
-  if (state.version !== RECOUNT_VERSION) {
-    await redisPipeline([["DEL", IDS_KEY, SUM_KEY], ["HSET", STATE_KEY, "phase", "ids", "cursor", "0", "version", RECOUNT_VERSION, "started", now], ["HDEL", STATE_KEY, "finished"]]);
-    state = { phase: "ids", cursor: "0", version: RECOUNT_VERSION };
+  // Asked again (lib/store-data.ts): once the count is done, never in the middle of one, which might have read the store's keys before.
+  const asked = state.phase === "done" && state.again !== 0;
+  if (state.version !== RECOUNT_VERSION || asked) {
+    // What was read is taken off, not the field set to none: an ask written meanwhile stays for the run after.
+    // One that cannot be read is set back to none, as no ask could have been added to it (HINCRBY refuses it).
+    const spent: (string | number)[][] = state.again === null ? [["HSET", STATE_KEY, RECOUNT_AGAIN_FIELD, 0]] : state.again > 0 ? [["HINCRBY", STATE_KEY, RECOUNT_AGAIN_FIELD, -state.again]] : [];
+    await redisPipeline([["DEL", IDS_KEY, SUM_KEY], ["HSET", STATE_KEY, "phase", "ids", "cursor", "0", "version", RECOUNT_VERSION, "started", now], ["HDEL", STATE_KEY, "finished"], ...spent]);
+    state = { phase: "ids", cursor: "0", version: RECOUNT_VERSION, again: 0 };
   }
   report.phase = state.phase;
   if (state.phase === "done") return { ...report, done: true };

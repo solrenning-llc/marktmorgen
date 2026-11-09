@@ -10,7 +10,7 @@ import { PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY } from "@/lib/path-board";
  */
 import { COUNTED_FAMILIES, ELSEWHERE_FAMILIES, countedInRoom } from "@/lib/data-families";
 import { IDS_KEY, LEGACY_SLOT, RECOUNT_PAGE, STATE_KEY, SUM_KEY, idsIn, measureKey, recountStep } from "@/lib/data-recount";
-import { dataKey, dataUsed, noteData } from "@/lib/store-data";
+import { DataCountUnconfirmed, RECOUNT_AGAIN_FIELD, dataKey, dataUsed, giveData, noteData } from "@/lib/store-data";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { FAMILIES } from "./store-data-registry";
 import { store as redis } from "./redis-stub";
@@ -81,6 +81,63 @@ async function main() {
   const [moved] = await (await import("@/lib/redis")).redisPipeline([["EVAL", RECOUNT_PAGE, 2, STATE_KEY, SUM_KEY, "17", "0", OWNER, 100]]);
   is("the page from where it is adds once and moves on", [moved, redis.run(["HGET", SUM_KEY, OWNER]), redis.run(["HGET", STATE_KEY, "phase"])], [1, "100", "apply"]);
   is("a run out of time does nothing and loses nothing", (await recountStep(Date.now() - 1)).applied, 0);
+
+  part("A count that could not be made is made again (giveData and noteData never swallow it)");
+  const finished = await recountStep(Date.now() + 30_000);
+  is("the count is done before what follows", finished.done, true);
+  // A record written as a job writes it, counted after: the count's own call fails once, on the network.
+  const late = `nl:blog:body:${statsId}:p2`;
+  redis.run(["SET", late, "z".repeat(3_000)]);
+  const unnoted = (await dataUsed(store))!.used;
+  const real = redis.pipeline;
+  let lost = 0;
+  const failCounts = () => {
+    redis.pipeline = async (commands) => {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:v1"))) {
+        lost += 1;
+        throw new Error("fetch failed");
+      }
+      return real(commands);
+    };
+  };
+  failCounts();
+  let noted: unknown = null;
+  try {
+    await noteData(store, [{ slot: "bl:p2", bytes: 3_000, set: true }]);
+  } catch (error) {
+    noted = error;
+  }
+  redis.pipeline = real;
+  is("the count failed, and the record it follows is not in the room yet", [lost, (await dataUsed(store))!.used], [1, unnoted]);
+  is("the caller is not stopped: the count is asked to be made again", [noted, Number(redis.run(["HGET", STATE_KEY, RECOUNT_AGAIN_FIELD])) > 0], [null, true]);
+  const recounted = await recountStep(Date.now() + 30_000);
+  const kept = (await Promise.all([blog, leads, link, late].map((key) => measureKey(key)))).reduce<number>((sum, n) => sum + (n ?? 0), 0);
+  is("the next run counts every store again, so the room holds what the store keeps", [recounted.done, recounted.applied, (await dataUsed(store))!.used >= kept], [true, 1, true]);
+  is("and the ask is spent: the run after reads and does nothing", [Number(redis.run(["HGET", STATE_KEY, RECOUNT_AGAIN_FIELD])), (await recountStep(Date.now() + 30_000)).pages], [0, 0]);
+
+  // A give-back that sets a slot may grow it (lib/crm.ts sets it to what the record now weighs): asked again too.
+  failCounts();
+  const given = await giveData(store, [{ slot: "bl:p2", bytes: 9_000, set: true }]);
+  const shrunk = await giveData(store, [{ slot: "bl:p2", bytes: 100 }]);
+  redis.pipeline = real;
+  is("a give-back not made says so, and never throws", [given, shrunk], [false, false]);
+  is("one that may have grown a slot asks for the count again; one that only shrinks leaves the room fuller, never emptier", Number(redis.run(["HGET", STATE_KEY, RECOUNT_AGAIN_FIELD])), 1);
+  await recountStep(Date.now() + 30_000);
+
+  redis.pipeline = async () => {
+    throw new Error("fetch failed");
+  };
+  let unasked: unknown = null;
+  try {
+    await noteData(store, [{ slot: "bl:p3", bytes: 1_000 }]);
+  } catch (error) {
+    unasked = error;
+  }
+  redis.pipeline = real;
+  is("when not even the ask can be written, the caller is told and does not go on as if it were counted", [unasked instanceof DataCountUnconfirmed, unasked instanceof Error], [true, true]);
+  redis.run(["HSET", STATE_KEY, RECOUNT_AGAIN_FIELD, "x"]);
+  const unreadable = await recountStep(Date.now() + 30_000);
+  is("an ask that cannot be read is a count made again, and set back to none", [unreadable.done, unreadable.applied, redis.run(["HGET", STATE_KEY, RECOUNT_AGAIN_FIELD])], [true, 1, "0"]);
   done();
 }
 

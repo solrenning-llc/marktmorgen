@@ -253,25 +253,79 @@ export async function keepFor(store: DataStore, bytes: number, seconds: number, 
 }
 
 /**
- * Gives back what a deletion freed, or puts right what a write that was
- * taken and then failed took. Never refuses and never throws.
+ * Where a count that could not be confirmed asks for every store to be
+ * counted again: the one-time count's own state (lib/data-recount.ts, which
+ * reads it from here), its field RECOUNT_AGAIN_FIELD raised by one for each
+ * such count. The hourly run of that count (app/api/cron/recount) starts it
+ * again once it is done and the field is above zero, and takes off what it
+ * read, so an ask made while it runs is kept for the run after. The count
+ * sets each store's "legacy" slot to what it measured beyond what the room
+ * holds, never less than nothing: a record written and not counted is in
+ * the room again after it, and nothing is counted twice.
  */
-export async function giveData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
+export const RECOUNT_STATE_KEY = "nl:recount:state";
+export const RECOUNT_AGAIN_FIELD = "again";
+
+/**
+ * Thrown by noteData when what is already written could not be counted and
+ * the ask to count again could not be written either: the caller does not go
+ * on as if it were counted (the store's room would hold less than it keeps).
+ */
+export class DataCountUnconfirmed extends Error {
+  constructor() {
+    super("the store's data room could not be counted");
+    this.name = "DataCountUnconfirmed";
+  }
+}
+
+/** Asks for every store to be counted again; true only when the ask was written, read back as the whole number it is. */
+async function askRecount(): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  try {
+    const [raised] = await redisPipeline([["HINCRBY", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD, 1]]);
+    return typeof raised === "number" && Number.isSafeInteger(raised) && raised >= 1;
+  } catch (error) {
+    console.error("could not ask for the stores' data to be counted again", error);
+    return false;
+  }
+}
+
+/**
+ * Gives back what a deletion freed, or puts right what a write that was
+ * taken and then failed took. Never refuses and never throws: answers true
+ * when the room took it, false when it could not be confirmed. Not given
+ * back, the room stays fuller than it is, the side this file errs toward;
+ * a slot set to what its record now weighs may have been growing it
+ * (lib/crm.ts), so that one asks for the count to be made again as well.
+ */
+export async function giveData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<boolean> {
   // What expires by itself is never given back early: it comes off with its month.
   const shrinking = changes.flatMap((change) => ("until" in change ? [] : [change.set ? change : { ...change, bytes: -Math.abs(change.bytes) }]));
-  await run(store, shrinking, true, now / 1000).catch(() => undefined);
+  const taken = await run(store, shrinking, true, now / 1000);
+  if (taken.ok) return true;
+  const mayGrow = shrinking.some((change) => "slot" in change && change.set && change.bytes > 0);
+  const asked = mayGrow ? await askRecount() : false;
+  console.error("a store's data could not be given back; its room stays fuller than it is", { store: dataKey(store), reason: taken.reason, recountAsked: asked });
+  return false;
 }
 
 /**
  * Counts what is already written, as it is, whatever it comes to: a record
- * moved, or kept before the room was counted. Never refuses and never throws.
+ * moved, or kept before the room was counted. Never refuses. When the count
+ * cannot be confirmed, every store is asked to be counted again
+ * (RECOUNT_AGAIN_FIELD), so the record is in the room after the next run;
+ * when not even that ask can be written, throws DataCountUnconfirmed.
  */
 export async function noteData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
-  await run(store, changes, true, now / 1000).catch(() => undefined);
+  const taken = await run(store, changes, true, now / 1000);
+  if (taken.ok) return;
+  const asked = await askRecount();
+  console.error("a store's data could not be counted", { store: dataKey(store), reason: taken.reason, recountAsked: asked });
+  if (!asked) throw new DataCountUnconfirmed();
 }
 
-/** One slot shrunk by `bytes`. Never refuses and never throws. */
-export function giveDataBytes(store: DataStore, slot: string, bytes: number, now = Date.now()): Promise<void> {
+/** One slot shrunk by `bytes`. Never refuses and never throws: true when the room took it. */
+export function giveDataBytes(store: DataStore, slot: string, bytes: number, now = Date.now()): Promise<boolean> {
   return giveData(store, [{ slot, bytes }], now);
 }
 

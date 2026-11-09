@@ -928,7 +928,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:*@lib/data-recount.ts": company("The pattern the one-time count reads the database by", "Not a key: a pattern."),
   "nl:recount:@lib/data-recount.ts": company("The one-time count's own records: where it is, the stores' ids, what each measured", "The company's job, three keys, deleted when it is done."),
   "nl:recount:ids@lib/data-recount.ts": company("The ids each store's keys are named by, while the count runs", "The company's job, deleted when it is done, thirty days at the most."),
-  "nl:recount:state@lib/data-recount.ts": company("Where the one-time count is", "One key, the company's job."),
+  // Named in lib/store-data.ts since a count that could not be confirmed asks there for the count again (field "again",
+  // one HINCRBY a failed count; lib/data-recount.ts reads the name from it). Same key, same bound: one hash, the company's.
+  "nl:recount:state@lib/store-data.ts": company("Where the one-time count is, and the asks to make it again", "One key, the company's job: a few fields and one whole number."),
   "nl:recount:sum@lib/data-recount.ts": company("What the count measured of each store, until it is set in its room", "The company's job, deleted when it is done."),
   "nl:join:t:@lib/store-join.ts": short("A link to join the list, sent by email", "access", 7, LINK_BYTES, MAIL("join")),
   "nl:store:photo:@lib/store-photo.ts": { what: "The store's photo", parts: [capped(2 * (MAX_PHOTO_BYTES * 4) / 3 + KB, "One photo, and the one it replaces while it is written.", src("lib/photo-limits.ts", "MAX_PHOTO_BYTES"))] },

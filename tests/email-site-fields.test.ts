@@ -65,7 +65,8 @@ function main(): void {
 
   part("What EmailInput draws");
   const html = renderToStaticMarkup(createElement(EmailInput, { id: "invite-email", value: "dana@gmial.com", onChange: () => {}, className: "field", required: true, autoComplete: "off" }));
-  is("an email input showing the parent's value", /<input id="invite-email" type="email" required="" maxLength="254" autoComplete="off" class="field" value="dana@gmial.com"\/>/.test(html), true);
+  // Changed by claude5/email-pattern-everywhere (follows #3328): the input now carries the server's address rule and its English hint.
+  is("an email input showing the parent's value, with the server's address rule (tests/email-pattern-everywhere.test.ts)", /<input id="invite-email" type="email" required="" maxLength="254" pattern="\[\^\\s@\]\+@\[\^\\s@\]\+\\\.\[\^\\s@\]\+" title="Type the whole address, like name@example.com" autoComplete="off" class="field" value="dana@gmial.com"\/>/.test(html), true);
   is("no description before the field is left, even with a likely slip", html.includes("aria-describedby"), false);
   is("its line, an empty polite region until then", html.includes('<div id="invite-email-suggestion" aria-live="polite" data-email-suggestion="true"></div>'), true);
   const described = renderToStaticMarkup(createElement(EmailInput, { id: "two-step-backup", value: "", onChange: () => {}, className: "field", describedBy: "two-step-backup-hint" }));

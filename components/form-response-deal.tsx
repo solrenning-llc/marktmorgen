@@ -7,6 +7,7 @@ import { crmAnswer } from "@/lib/crm-response";
 import { fieldPrefix, readMoney, type Currency } from "@/lib/money";
 import { MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, readFollowUp, type Stage } from "@/lib/crm-rules";
 import type { FormDef, FormResponse } from "@/lib/forms";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 export function FormResponseDeal({ form, response, responseRef, stages, sid, currency, assignees, existingDeals, existingDealsAvailable = false, onRecorded, onClose }: { existingDealsAvailable?: boolean; onRecorded?: (deal: FormDealMatch) => void; responseRef: string; existingDeals: FormDealMatch[]; currency: string; assignees: string[]; form: FormDef; response: FormResponse; stages: Stage[]; sid: string; onClose: () => void }) {
   const [draft, setDraft] = useState(() => ({ ...formDealDraft(form, response), stage: stages.find(stage => stage.kind === "open")?.id ?? "", nextAction: "Review form response", value: "", dueDate: "", assignee: "" }));
@@ -51,7 +52,7 @@ export function FormResponseDeal({ form, response, responseRef, stages, sid, cur
       <legend className="sr-only">Opportunity details</legend>
       <p className="text-sm text-ink-soft">Review the submitted information before saving. Set an estimate and a dated next action when useful. This does not send email or subscribe anyone to marketing.</p>
       <label className="block"><span className="field-label">Opportunity name</span><input className="field mt-2" maxLength={MAX_DEAL_TITLE} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>
-      <label className="block"><span className="field-label">Contact email (optional)</span><input className="field mt-2" type="email" autoComplete="off" maxLength={254} value={draft.email} onChange={event => setDraft({ ...draft, email: event.target.value })} /></label>
+      <label className="block"><span className="field-label">Contact email (optional)</span><input className="field mt-2" type="email" pattern={EMAIL_ADDRESS_RULE} title={wholeAddress()} autoComplete="off" maxLength={254} value={draft.email} onChange={event => setDraft({ ...draft, email: event.target.value })} /></label>
       {matches.length ? <div className="notice notice-warn" role="status">
         <p className="font-semibold">{matches.length} existing {matches.length === 1 ? "opportunity uses" : "opportunities use"} this email.</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">{matches.slice(0, 5).map(deal => <li key={deal.id}>{deal.title} · {stages.find(stage => stage.id === deal.stage)?.name ?? "Stage unavailable"}</li>)}</ul>

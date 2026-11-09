@@ -5,6 +5,7 @@ import { UrlField } from "@/components/url-field";
 import { type LinkCheck, checkWith } from "@/lib/url-check";
 import { reportAnswer } from "@/lib/report-response";
 import { MAX_REPORT_CONTACT, MAX_REPORT_NAME, MAX_REPORT_TEXT, MAX_REPORT_URL, REPORT_PROBLEMS, type ReportKind } from "@/lib/takedown-rules";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 // The page's address, checked when its field is left by the reading the notice is held to (lib/takedown-rules.ts), and required.
 const URL_SHAPE = checkWith((raw) => (/^https?:\/\/\S+$/i.test(raw) ? raw : null), REPORT_PROBLEMS.url, MAX_REPORT_URL);
@@ -109,7 +110,7 @@ export function ReportForm({ url: given }: { url: string }) {
         </div>
         <div>
           <label htmlFor="report-email" className="field-label">Your email</label>
-          <input id="report-email" type="email" required maxLength={MAX_REPORT_CONTACT} autoComplete="email" value={fields.email} onChange={set("email")} className={field} />
+          <input id="report-email" type="email" pattern={EMAIL_ADDRESS_RULE} title={wholeAddress()} required maxLength={MAX_REPORT_CONTACT} autoComplete="email" value={fields.email} onChange={set("email")} className={field} />
         </div>
       </div>
       <div>

@@ -72,6 +72,8 @@ for (const file of [...walk("app"), ...walk("components")]) {
 // 588 [KB9] added an EmailField for the confirmation's address on a buyer's withdrawal (app/[handle]/orders/withdraw/page.tsx).
 is("the email fields the audit counted: 16 inputs (two with a type chosen in code), 23 EmailFields (the twenty-second: a buyer's withdrawal, 588 [KB9]; the twenty-third: a creator's withdrawal from their plan, 588 [KB9] unit 3) and 7 EmailInputs (the seventh: a member's address for a discount, 616 [WP15](8))", [inputs, components, controlled], [16, 23, 7]);
 is("every one says whose address it is (autocomplete)", missing, []);
-is("someone else's address is not offered the creator's own", ["components/form-response-deal.tsx", "components/deals-board.tsx", "components/workflow-tools.tsx"].every((f) => /type="email" autoComplete="off"/.test(readFileSync(f, "utf8"))), true);
-is("nor is the address a store moves to (\"Move to\")", /type="email"\s+name="email"\s+autoComplete="off"/.test(readFileSync("app/studio/page.tsx", "utf8")), true);
+// Changed by claude5/email-pattern-everywhere (follows #3328): each of these inputs now carries the server's
+// address rule and its hint right after its type (tests/email-pattern-everywhere.test.ts); autoComplete="off" is unchanged.
+is("someone else's address is not offered the creator's own (with the server's address rule beside its type)", ["components/form-response-deal.tsx", "components/deals-board.tsx", "components/workflow-tools.tsx"].every((f) => /type="email" pattern=\{EMAIL_ADDRESS_RULE\} title=\{wholeAddress\(\)\} autoComplete="off"/.test(readFileSync(f, "utf8"))), true);
+is("nor is the address a store moves to (\"Move to\", with the server's address rule beside its type)", /type="email"\s+pattern=\{EMAIL_ADDRESS_RULE\}\s+title=\{wholeAddress\(\)\}\s+name="email"\s+autoComplete="off"/.test(readFileSync("app/studio/page.tsx", "utf8")), true);
 done();

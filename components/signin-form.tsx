@@ -6,6 +6,7 @@ import { Icon } from "@/components/icons";
 import { EmailSuggestion } from "@/components/email-suggestion";
 import { EmailCodeForm } from "@/components/email-code-form";
 import { holdForSuggestion, suggestEmail } from "@/lib/email-typo";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 type State =
   | { kind: "idle" }
@@ -166,6 +167,8 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
           id="signin-email"
           name="email"
           type="email"
+          pattern={EMAIL_ADDRESS_RULE}
+          title={wholeAddress()}
           autoComplete="email"
           required
           value={email}

@@ -238,6 +238,7 @@ import { readLinks } from "@/lib/short-links";
 import { storeBase } from "@/lib/purchase-email";
 import { feeWords } from "@/lib/fee-words";
 import { NewTab } from "@/components/new-tab";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 /** "October 19": a day of a window, for the studio. */
 const windowDay = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric" });
@@ -3427,6 +3428,8 @@ export default async function StudioPage({
                   Move to
                   <input
                     type="email"
+                    pattern={EMAIL_ADDRESS_RULE}
+                    title={wholeAddress()}
                     name="email"
                     autoComplete="off"
                     required

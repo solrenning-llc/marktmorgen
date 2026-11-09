@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { EmailSuggestion } from "@/components/email-suggestion";
 import { holdForSuggestion, suggestEmail } from "@/lib/email-typo";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 /**
  * The controlled email field with the "Did you mean …?" line under it
@@ -83,6 +84,8 @@ export function EmailInput({
         type="email"
         required={required}
         maxLength={maxLength}
+        pattern={EMAIL_ADDRESS_RULE}
+        title={wholeAddress(language)}
         autoComplete={autoComplete}
         placeholder={placeholder}
         value={value}

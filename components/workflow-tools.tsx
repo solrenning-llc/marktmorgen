@@ -14,6 +14,7 @@ import type { RunEvent, RunRecord } from "@/lib/flow-runs";
 import { MAX_RETRIES_BY_YOU, MAX_RUN_EVENTS } from "@/lib/flow-limits";
 import { runEffects } from "@/lib/run-effects";
 import { stopRules } from "@/lib/flow-stop-rules";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 type Answer = Record<string, unknown> & { ok?: boolean; error?: string };
 type Request = (payload: Record<string, unknown>) => Promise<Answer>;
@@ -173,7 +174,7 @@ export function WorkflowPreview({
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="block min-w-0 grow basis-56">
             <span className="text-sm text-ink-soft">Or start from someone on your list</span>
-            <input className="field mt-1" type="email" autoComplete="off" value={lookup} placeholder="name@example.com" onChange={(e) => setLookup(e.target.value)} />
+            <input className="field mt-1" type="email" pattern={EMAIL_ADDRESS_RULE} title={wholeAddress()} autoComplete="off" value={lookup} placeholder="name@example.com" onChange={(e) => setLookup(e.target.value)} />
           </label>
           <button type="button" className="btn btn-secondary btn-sm" disabled={looking || !lookup.trim()} aria-busy={looking} onClick={load}>
             {looking ? "Reading…" : "Use this person"}

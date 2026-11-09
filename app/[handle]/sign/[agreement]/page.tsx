@@ -16,6 +16,7 @@ import { statusOf as requestStatus } from "@/lib/payment-request-rules";
 import { requestLink } from "@/lib/payment-requests";
 import { PrintButton } from "@/components/print-button";
 import { StoreResting } from "@/components/store-resting";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 type Params = {
   params: Promise<{ handle: string; agreement: string }>;
@@ -133,7 +134,7 @@ export default async function AgreementPage({ params, searchParams }: Params) {
               <label className="mt-5 block text-sm font-semibold" htmlFor="sign-name">{w.nameLabel}</label>
               <input id="sign-name" name="name" required minLength={2} maxLength={MAX_SIGNED_NAME} autoComplete="name" className="st-field mt-1" />
               <label className="mt-4 block text-sm font-semibold" htmlFor="sign-email">{w.emailLabel}</label>
-              <input id="sign-email" name="email" type="email" required maxLength={254} autoComplete="email" className="st-field mt-1" />
+              <input id="sign-email" name="email" type="email" pattern={EMAIL_ADDRESS_RULE} title={wholeAddress(store.language)} required maxLength={254} autoComplete="email" className="st-field mt-1" />
               <label className="mt-4 flex items-start gap-3 text-sm">
                 <input type="checkbox" name="agree" value="yes" required className="mt-1" />
                 <span>{w.consent}</span>

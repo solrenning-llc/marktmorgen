@@ -4,6 +4,7 @@ import { MorningLogo } from "@/components/morning-header";
 import type { Metadata } from "next";
 import { LOCK_DAYS } from "@/lib/recovery-address";
 import { LOCKED_LIST } from "@/lib/locked-words";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 export const metadata: Metadata = {
   title: "Cannot open your email — Marktmorgen",
@@ -52,7 +53,7 @@ export default async function LostEmailPage({ searchParams }: { searchParams: Pr
               <form method="post" action="/api/auth/lost" className="mt-3 space-y-3">
                 <label className="block" htmlFor="lost-email">
                   <span className="field-label">The address you log in with</span>
-                  <input id="lost-email" name="email" type="email" required maxLength={254} autoComplete="email" className="field mt-2" />
+                  <input id="lost-email" name="email" type="email" pattern={EMAIL_ADDRESS_RULE} title={wholeAddress()} required maxLength={254} autoComplete="email" className="field mt-2" />
                 </label>
                 <PendingSubmit label="Email my recovery address" pending="Sending…" className="btn btn-primary" />
               </form>

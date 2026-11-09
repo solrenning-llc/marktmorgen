@@ -18,6 +18,7 @@ import {
   socialUrl,
   typedOf,
 } from "@/lib/store-socials";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 type Row = { key: number; network: SocialNetwork; typed: string };
 
@@ -225,6 +226,8 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
                     id={`${id}-value`}
                     disabled={saving}
                     type={row.network === "email" ? "email" : "text"}
+                    pattern={row.network === "email" ? EMAIL_ADDRESS_RULE : undefined}
+                    title={row.network === "email" ? wholeAddress() : undefined}
                     inputMode={profileKeyboard(row.network, row.key).inputMode}
                     autoComplete={profileKeyboard(row.network, row.key).autoComplete}
                     spellCheck={false}

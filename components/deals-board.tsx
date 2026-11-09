@@ -40,6 +40,7 @@ import {
   starterStages,
   copyPipeline,
 } from "@/lib/crm-rules";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 const MESSAGES: Record<string, string> = {
   title: "Give the deal a name.",
@@ -602,7 +603,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
               {savedNow("title")}
               <label className="block">
                 <span className="field-label">Their email (optional)</span>
-                <input id={dealFieldId("email")} aria-describedby={describedBy("email")} aria-invalid={bad(dealFieldId("email")) || undefined} readOnly={locked} aria-disabled={locked || undefined} className="field mt-2" type="email" autoComplete="off" value={draft.email} onChange={(e) => put({ email: e.target.value })} />
+                <input id={dealFieldId("email")} aria-describedby={describedBy("email")} aria-invalid={bad(dealFieldId("email")) || undefined} readOnly={locked} aria-disabled={locked || undefined} className="field mt-2" type="email" pattern={EMAIL_ADDRESS_RULE} title={wholeAddress()} autoComplete="off" value={draft.email} onChange={(e) => put({ email: e.target.value })} />
               </label>
               {errorBeside(dealFieldId("email"), "sm:col-span-2")}
               {savedNow("email")}

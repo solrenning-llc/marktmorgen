@@ -15,6 +15,7 @@ import { FormBranching } from "@/components/form-branching";
 import { formWords } from "@/lib/buyer-words/form";
 import { FormKeep } from "@/components/form-keep";
 import { NewTab } from "@/components/new-tab";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 /**
  * The blocks of a product's page, drawn (lib/sales-page.ts says what each is).
@@ -940,6 +941,8 @@ function FormQuestion({ field, form, ctx }: { field: FormField; form: FormDef; c
           id={id}
           name={name}
           type={field.type === "email" ? "email" : "text"}
+          pattern={field.type === "email" ? EMAIL_ADDRESS_RULE : undefined}
+          title={field.type === "email" ? wholeAddress(ctx.lang) : undefined}
           autoComplete={field.type === "email" ? "email" : "off"}
           maxLength={field.type === "email" ? 254 : MAX_SHORT_ANSWER}
           required={field.required}

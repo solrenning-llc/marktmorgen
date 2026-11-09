@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "@/components/toast";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 /**
  * Looks up one buyer by their address (lib/buyer-profile.ts). The address is
@@ -47,6 +48,8 @@ export function PersonFind({ initial = "" }: { initial?: string }) {
         <span className="field-label">A buyer&apos;s email address</span>
         <input
           type="email"
+          pattern={EMAIL_ADDRESS_RULE}
+          title={wholeAddress()}
           required
           autoComplete="off"
           spellCheck={false}

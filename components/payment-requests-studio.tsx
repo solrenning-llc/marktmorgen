@@ -32,6 +32,7 @@ import {
   readDraft,
   statusOf,
 } from "@/lib/payment-request-rules";
+import { EMAIL_ADDRESS_RULE, wholeAddress } from "@/lib/email-address-rule";
 
 type LineDraft = { text: string; quantity: string; amount: string };
 export type RequestRow = PaymentRequest & { link: string };
@@ -230,7 +231,7 @@ export function PaymentRequestsStudio({
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <label className="block">
               <span className="text-sm font-semibold text-ink">Their email</span>
-              <input id="pr-email" className="field mt-1" type="email" autoComplete="off" required maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input id="pr-email" className="field mt-1" type="email" pattern={EMAIL_ADDRESS_RULE} title={wholeAddress()} autoComplete="off" required maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} />
             </label>
             <label className="block">
               <span className="text-sm font-semibold text-ink">Their name (optional)</span>

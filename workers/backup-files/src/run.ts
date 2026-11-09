@@ -21,9 +21,11 @@
  *   5. only then the copies, in 5 MiB parts that resume across runs.
  *
  * Deletions (5.1 item 2):
- *   - never from absence: an object missing from a listing is kept; it is an
- *     orphan, removed only after 90 days missing from every passing complete
- *     listing;
+ *   - never from absence: an object missing from a listing is kept; without
+ *     a deletion record it is an orphan, removed only after 90 days missing
+ *     from every passing complete listing, alarmed the day it is first seen
+ *     and again when that end comes (not every day in between); with its
+ *     record it is expected, no orphan and no alarm, and goes by the record;
  *   - from explicit records, 30 days after the record, unless a guard holds
  *     them; a held record is applied on its 90th day anyway, with an alarm
  *     every day that gives that date;
@@ -42,7 +44,8 @@
  * counted before it is made, inside BACKUP_FILES_RUN_SUBREQUESTS (the paid
  * plan's 10,000 less room) and BACKUP_FILES_RUN_MS (its 15 minutes less room);
  * the run stops at a step or part boundary and the next run goes on.
- * Heartbeat (item 5): only when the day's cycle finished with no alarm at all.
+ * Heartbeat (item 5): only when the day's cycle finished with no alarm at all;
+ * a record waiting its 30 days, or an orphan between its two alarms, is not one.
  *
  * Rule 24: every reply is read exactly. A route page goes through the
  * contract's parsers; an origin read must be 206 with the exact Content-Range
@@ -425,20 +428,28 @@ async function applyDeletions(ctx: Ctx, state: StoreState, source: BackupFilesSo
   if (versionsHeld && !rule.forcedOnly) raise(ctx, "versions_held", { ...where, count: versionsHeld, on: isoMs(versionsOn) });
   if (rule.forcedOnly) return;
 
+  // A file missing with its deletion record is expected, never an orphan: its record's 30 days (or the
+  // record's own 90-day end while held, alarmed above) decide when it goes, not the orphan clock.
+  const recorded = new Set(src.pending.map((r) => r.key));
   let orphans = 0;
   let orphanBytes = 0;
   let orphanOn = Infinity;
+  let notable = false;
   for (const object of [...src.objects.values()]) {
-    if (object.missingSince === null) continue;
-    if (rule.orphans && !rule.held && ctx.day - object.missingSince >= BACKUP_FILES_ORPHAN_DAYS) {
+    if (object.missingSince === null || recorded.has(object.key)) continue;
+    const end = object.missingSince + BACKUP_FILES_ORPHAN_DAYS;
+    if (rule.orphans && !rule.held && ctx.day >= end) {
       await eraseKey(ctx, state, source, object.key);
       continue;
     }
     orphans += 1;
     orphanBytes += object.size;
-    orphanOn = Math.min(orphanOn, object.missingSince + BACKUP_FILES_ORPHAN_DAYS);
+    orphanOn = Math.min(orphanOn, end);
+    // Alarmed the day it is first seen and again when its end comes (the day before, and every day it is
+    // still kept past it), not on each day in between.
+    if (object.missingSince === ctx.day || ctx.day >= end - 1) notable = true;
   }
-  if (orphans) raise(ctx, "orphans", { ...where, count: orphans, bytes: orphanBytes, on: isoDay(orphanOn) });
+  if (orphans && notable) raise(ctx, "orphans", { ...where, count: orphans, bytes: orphanBytes, on: isoDay(orphanOn) });
 }
 
 /** 1. Forced deletions on their 90th day, before anything else and whatever else fails today. */

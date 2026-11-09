@@ -121,7 +121,9 @@ async function main(): Promise<void> {
   {
     const g = await gift();
     is("the mark free: given", [await g.give(), await has(g.to)], ["given", true]);
-    is("and let go after", (await pipeline([["GET", g.key]]))[0], null);
+    // Kept until it runs out (#2872 review M1): a run that comes in before the caller keeps its "sent" mark reads it
+    // taken and the gift given, and says "already" instead of telling and confirming a second time.
+    is("and kept after, this run's own, until it runs out", [typeof (await pipeline([["GET", g.key]]))[0], await g.give()], ["string", "already"]);
   }
   {
     const g = await gift();

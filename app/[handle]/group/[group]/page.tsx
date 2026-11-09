@@ -6,7 +6,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { readListing } from "@/lib/catalog";
 import { GROUP_ID, PLACE_TOKEN, placesWords } from "@/lib/group-rules";
-import { type Taken, groupTitle, placesTaken, readGroup, takePlace } from "@/lib/group-buy";
+import { type Taken, groupTitle, placeNotice, placesTaken, readGroup, takePlace } from "@/lib/group-buy";
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { recordEnrollment } from "@/lib/learn";
 import { storeBase } from "@/lib/purchase-email";
@@ -96,24 +96,27 @@ export default async function GroupPage({ params, searchParams }: Params) {
 
   // The link from a place's email: the place is taken now, once.
   let taken: Taken | null = null;
-  // A run that threw (a reply it could not read) or found a place it cannot confirm is said as not confirmed, never as
-  // an expired link nor as a place taken.
-  let unconfirmed = false;
+  // Opening the link threw: said as not finished, to be opened again (the
+  // place may be the person's already), never as an expired link.
+  let failed = false;
   if (PLACE_TOKEN.test(token)) {
-    const tried = await takePlace({
+    const opened = await takePlace({
       store,
       token,
       recordStart: async (email, productId, start) => {
         const course = productId === product.id ? product : await readListing(store, productId);
         if (course?.course) await recordEnrollment(store, email, productId, start);
       },
-    }).catch((error) => {
-      console.error("taking a place failed", error);
-      return null;
-    });
-    taken = tried;
-    unconfirmed = !tried || tried.outcome === "pending";
-    if (taken && (taken.outcome === "taken" || taken.outcome === "already" || taken.outcome === "has")) {
+    }).then(
+      (value) => ({ value }),
+      (error: unknown) => {
+        console.error("taking a place failed", error);
+        return { value: null };
+      },
+    );
+    taken = opened.value;
+    failed = !taken;
+    if (taken && taken.outcome !== "gone" && taken.outcome !== "full" && taken.outcome !== "resting") {
       const link = (await ordersLinkFor(store, taken.email, base).catch(() => null)) ?? `${base}/orders`;
       const email = taken.email;
       return shell(
@@ -134,23 +137,18 @@ export default async function GroupPage({ params, searchParams }: Params) {
     }
   }
 
-  // Read exactly (sweep app5, finding 1): a count that could not be read is said as not checked, and no place is
-  // offered, never "all places still open".
-  const count = await placesTaken(group.id).catch((error: unknown) => {
-    console.error("reading a purchase for several's places failed", error);
-    return null;
-  });
-  const left = count === null ? 0 : Math.max(0, group.people - count);
-  const notice =
-    taken?.outcome === "full"
-      ? g.groupNotices.full
-      : taken?.outcome === "resting"
-        ? g.groupNotices.resting
-      : unconfirmed
-        ? g.groupNotices.unconfirmed
-      : taken?.outcome === "gone" || (token && !taken)
-        ? g.groupNotices.expired
-        : status !== "expired" ? g.groupNotices[status] ?? null : null;
+  // A count that could not be read is not said at all, never as every place open (CX-123 rule 24); the form
+  // stays, and asking for a place counts again before any link is sent.
+  const count = await placesTaken(group.id).then(
+    (n): number | null => n,
+    (error: unknown) => {
+      console.error("counting a purchase's places failed", error);
+      return null;
+    },
+  );
+  const left = count === null ? 1 : Math.max(0, group.people - count);
+  const noticeName = placeNotice({ token, tokenValid: PLACE_TOKEN.test(token), taken, threw: failed, status });
+  const notice = noticeName ? g.groupNotices[noticeName as keyof typeof g.groupNotices] ?? null : null;
 
   return shell(
     <>
@@ -163,7 +161,7 @@ export default async function GroupPage({ params, searchParams }: Params) {
       <p className="st-price text-sm">{g.paidForYou}</p>
       <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{title}</h1>
       <p className="st-muted mt-4 text-lg">
-        {g.boughtForPeople(store.name, group.people, count === null ? g.placesUnchecked : placesWords(group.people, count, store.language))}
+        {g.boughtForPeople(store.name, group.people, count === null ? "" : placesWords(group.people, count, store.language)).trim()}
       </p>
       {left > 0 ? (
         <form action="/api/store/group" method="post" className="mt-8 space-y-3">

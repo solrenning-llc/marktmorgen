@@ -31,6 +31,7 @@ import { reserveQuizSubmission } from "@/lib/quiz-usage";
 import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rules";
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
@@ -588,11 +589,34 @@ export async function markPassed(courseId: string, who: string, lessonId: string
   if (Number(added) === 1) await noteData(room, [{ slot: TRIES_SLOT(courseId), bytes: dataBytes([lessonId], 1) }]);
 }
 
-/** The lessons whose quizzes this student has passed, and the assignments they have done. */
+/** The student's passes read in their exact shape (CX-123 rule 24), or null when the reply is unknown. */
+async function passedExactly(courseId: string, who: string): Promise<Set<string> | null> {
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", passedKey(courseId, who)]]), 1);
+  const members = replies ? stringList(replies[0]) : null;
+  return members ? new Set(members) : null;
+}
+
+/**
+ * The lessons whose quizzes this student has passed, and the assignments they have done, read exactly: a reply in
+ * an unknown shape throws UnknownReplyError. This is what a copy of a person's data reads (lib/person-copy.ts), so
+ * a pass that could not be read makes the copy fail as not done, never a complete copy with the pass left out
+ * (Codex D2 on #2875).
+ */
 export async function passedQuizzes(courseId: string, who: string): Promise<Set<string>> {
   if (!isRedisConfigured()) return new Set();
-  const [raw] = await redisPipeline([["SMEMBERS", passedKey(courseId, who)]]);
-  return new Set(Array.isArray(raw) ? (raw as string[]) : []);
+  const passed = await passedExactly(courseId, who);
+  if (!passed) throw new UnknownReplyError("a student's passed quizzes");
+  return passed;
+}
+
+/**
+ * The same passes for a gate that decides what a student may open. A reply in an unknown shape reads as nothing
+ * passed: later lessons stay shut until it reads, never opened on a reply that was not read. Never use this for
+ * anything that reports what was passed, such as a data copy; that reads passedQuizzes.
+ */
+export async function passedForGate(courseId: string, who: string): Promise<Set<string>> {
+  if (!isRedisConfigured()) return new Set();
+  return (await passedExactly(courseId, who)) ?? new Set();
 }
 
 /** Several students at once, for the studio's list. */
@@ -605,14 +629,20 @@ export async function passedFor(courseId: string, who: string[]): Promise<Set<st
 /**
  * Gives a student their tries back on every quiz of a course. What they
  * already passed stays passed: this is for someone stuck, not a penalty.
+ * Their passes, or the tries and results it would delete, answered in an
+ * unknown shape throw UnknownReplyError before anything is deleted (sweep
+ * A5 finding 6): an unknown read is never "nothing passed".
  */
 export async function resetTries(course: Course, who: string, room: DataStore): Promise<void> {
-  const passed = await passedQuizzes(course.id, who);
+  const passed = isRedisConfigured() ? await passedExactly(course.id, who) : new Set<string>();
+  if (!passed) throw new UnknownReplyError("a student's passed quizzes");
   const lessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz && !passed.has(lesson.id));
   if (lessons.length === 0) return;
   // What the tries weighed comes back to the store's data room.
-  const held = await redisPipeline(lessons.flatMap(({ lesson }) => [["GET", resultKey(course.id, lesson.id, who)], ["GET", triesKey(course.id, lesson.id, who)]]));
-  const freed = held.reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
+  const held = repliesFor(await redisPipeline(lessons.flatMap(({ lesson }) => [["GET", resultKey(course.id, lesson.id, who)], ["GET", triesKey(course.id, lesson.id, who)]])), lessons.length * 2);
+  // Each GET answers a string or null; anything else is not evidence of what would be deleted (Codex D2 on #2875).
+  if (!held || held.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a student's quiz tries");
+  const freed = held.reduce((sum: number, raw) => sum + kept(raw), 0);
   if (freed) await giveData(room, [{ slot: TRIES_SLOT(course.id), bytes: freed }]);
   await redisPipeline(
     lessons.flatMap(({ lesson }) => [
@@ -622,10 +652,19 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
   );
 }
 
-/** Deletes one student's tries, results and passes in these courses' quizzes (lib/person-erasure.ts). `who` is lib/learn.ts emailKey. */
+/**
+ * Deletes one student's tries, results and passes in these courses' quizzes (lib/person-erasure.ts). `who` is
+ * lib/learn.ts emailKey. Only the exact one-slot DEL count, from zero up to the distinct keys sent, says how many
+ * were deleted; any other reply throws UnknownReplyError, so the erasure reports this part as not done for a retry
+ * instead of a finished part that may have deleted nothing (CX-123 rule 24).
+ */
 export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string): Promise<number> {
   if (!courses.length || !isRedisConfigured()) return 0;
-  const keys = courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])]);
-  const [gone] = await redisPipeline([["DEL", ...keys]]);
-  return Number(gone) || 0;
+  const keys = [
+    ...new Set(courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])])),
+  ];
+  const replies = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
+  const gone = replies ? countOf(replies[0]) : null;
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a student's quiz tries, results and passes");
+  return gone;
 }

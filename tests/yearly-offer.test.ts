@@ -14,7 +14,8 @@
  *     the next pass asks again.
  */
 import { claimHandle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { firstSaleAt, isSale, noteFirstSale, yearlyOfferEmail } from "@/lib/yearly-offer";
+import { firstSaleAt, isSale, noteFirstSale, offerYearly, yearlyOfferEmail } from "@/lib/yearly-offer";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_yearly_offer_only";
@@ -65,6 +66,25 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
+
+
+/** The reply to the first pipeline that writes a key starting with `prefix`, without the write landing (CX-123 rule 24, L9). */
+async function withOddWrite<T>(prefix: string, reply: unknown, run: () => Promise<T>): Promise<T> {
+  const real = redis.pipeline.bind(redis);
+  let used = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!used && commands[0]?.[0] === "SET" && String(commands[0]?.[1] ?? "").startsWith(prefix)) {
+      used = true;
+      return reply;
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  try {
+    return await run();
+  } finally {
+    redis.pipeline = real;
+  }
+}
 
 async function seller(email: string, handle: string, sub: string | null) {
   await claimHandle(email, handle, "A store", "");
@@ -157,6 +177,16 @@ async function main() {
     stripeDown = false;
     const up = await noteFirstSale(store, [sale(NOW, { metadata: { store: store.handle } })], true);
     is("the next pass notes it and writes", [up, emails.length], [true, 2]);
+  }
+
+  part("The once-per-subscription offer, read exactly (CX-123 rule 24, L9)");
+  {
+    subs.sub_oddanswer01 = subscription("sub_oddanswer01", "month");
+    const store = await seller("odd-answer@example.com", "oddanswer", "sub_oddanswer01");
+    const before = emails.length;
+    is("a mark answered oddly that did not land sends nothing", await withOddWrite("nl:yearly-offer:", [undefined], () => offerYearly(store, true)), false);
+    is("no email on it", emails.length - before, 0);
+    is("the next whole answer sends it, once", [await offerYearly(store, true), await offerYearly(store, true), emails.length - before], [true, false, 1]);
   }
 
   done();

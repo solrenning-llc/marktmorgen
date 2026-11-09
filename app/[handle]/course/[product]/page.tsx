@@ -19,10 +19,12 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, touchStudent } from "@/lib/learn";
-import { heldBack, passedQuizzes, requiredQuizLessons } from "@/lib/quiz";
+import { heldBack, passedForGate, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
+import { ForgetLessonPositions } from "@/components/forget-lesson-positions";
+import { devicePlaceKey } from "@/lib/lesson-position";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
@@ -31,6 +33,8 @@ import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
+import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -73,6 +77,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
   const jar = await cookies();
   const access = await courseAccess(store, product, jar);
+  // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
+  const forgetKey = access.state !== "open" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
   const open = access.state === "open";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's
@@ -86,7 +92,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const [done, passed, certificate] = studying
     ? await Promise.all([
         doneLessons(course.id, access.learner.email),
-        passedQuizzes(course.id, who),
+        passedForGate(course.id, who),
         course.certificate ? certificateOf(course.id, who) : Promise.resolve(null),
       ])
     : [new Set<string>(), new Set<string>(), null];
@@ -106,6 +112,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
 
+  // What the code knows of the course, never what anyone typed (292 [SQ3], lib/course-facts.ts).
+  const facts = await readCourseFacts(course);
   const all = lessonsInOrder(course);
   const total = lessonCount(course);
   const doneCount = all.filter(({ lesson }) => done.has(lesson.id)).length;
@@ -132,6 +140,9 @@ export default async function CoursePage({ params, searchParams }: Params) {
       style={lookStyle(store.look) as React.CSSProperties}
     >
       <main id="content" className="relative mx-auto max-w-2xl px-4 py-12 sm:py-16">
+        {/* Access not open for a signed-in student (a refund, a lost dispute, an ended membership, taken off):
+            where they stopped in this course's videos is removed from their device (650 [WG10]). */}
+        {forgetKey ? <ForgetLessonPositions courseId={course.id} learner={forgetKey} /> : null}
         <div className="flex items-center justify-center gap-3">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -149,7 +160,13 @@ export default async function CoursePage({ params, searchParams }: Params) {
           <h1 className="font-display mt-1 text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{product.title}</h1>
           {product.summary ? <p className="st-muted mt-3 leading-relaxed">{product.summary}</p> : null}
           <p className="st-muted mt-3 text-sm font-semibold">
-            {[w.outline(total, course.modules.length), course.certificate ? w.withCertificate : null].filter(Boolean).join(" · ")}
+            {[
+              w.outline(total, course.modules.length),
+              facts.videoSeconds !== null ? videoTotalLine(facts.videoSeconds, store.language) : null,
+              course.certificate ? w.withCertificate : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
 
           {notice ? (
@@ -270,6 +287,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
                   <input type="hidden" name="from" value="course" />
                   <DigitalConsentBox id={`dc-course-${product.id}`} lang={store.language} refused={query.consent === "needed"} className="mb-5" />
                   <button type="submit" className="btn st-btn btn-lg btn-block">{w.buyCourse(access.state === "ended", price)}</button>
+                  <WhoAnswers store={store} className="st-muted mt-3 text-center text-sm" />
                 </form>
               ) : paypalReady(store, product) ? (
                 <Link href={`/@${store.handle}/p/${productSegment(product)}#buy`} className="btn st-btn btn-lg btn-block">{w.buyWithPayPal(price)}</Link>

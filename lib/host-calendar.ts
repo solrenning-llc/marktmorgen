@@ -40,7 +40,7 @@ import type { Busy } from "@/lib/call-setup";
 import { readFeed, providerOf } from "@/lib/calendar-sync";
 import { checkUrl, problemWords as fetchProblemWords, SafeFetchError } from "@/lib/safe-fetch";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
-import { NotConnected, accessFor, disconnect, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
+import { NotConnected, accessFor, disconnectFor, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
 import { type GoogleCalendar, MAX_READ_CALENDARS, ProviderError, googleCalendars, googleFreeBusy, grantedParts, hostSyncOn } from "@/lib/meet-providers";
 import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 import { hostId } from "@/lib/host-claims";
@@ -476,14 +476,22 @@ export async function removeHostIcs(store: Pick<Store, "statsId">, email: string
   await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
 }
 
-/** Disconnects a host's own Google Calendar: access given back to Google, everything kept here forgotten. */
-export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email: string): Promise<void> {
-  if (!store.statsId) return;
+/**
+ * Disconnects a host's own Google Calendar: access given back to Google, everything kept here forgotten.
+ * True only when Google confirmed the give-back in this request. False when it did not, and when the
+ * connection was already gone: a try that stopped below after forgetting it (its error answered as
+ * "try again") leaves the retry nothing to ask Google, so the page says how to remove the access there
+ * rather than that it was given back (G review 5815599962). The cleanup below still throws, so that
+ * retry also finishes it.
+ */
+export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email: string): Promise<boolean> {
+  if (!store.statsId) return true;
   const host = hostId(email);
-  await disconnect(store.statsId, "google", host);
+  const { providerAccessRemoved } = await disconnectFor(store.statsId, "google", host);
   const config = await readConfig(host);
   if (config) await writeConfig(host, { ...config, read: [], write: "", source: config.source === "google" ? "none" : config.source });
   await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
+  return providerAccessRemoved;
 }
 
 /** Where a host's team bookings are written, when they connected Google Calendar for it: the calendar id ("" is primary). */

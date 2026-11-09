@@ -1,6 +1,6 @@
 /**
  * A partner's share is "X% of what a buyer pays before tax on every sale of <their products>"
- * (lib/buyer-words/affiliates.ts, partnerShare). On an order with more than one line (a product ticked at
+ * (lib/buyer-words/affiliates.ts, partnerShare). On an order with more than one line (a product added at
  * checkout, or a cart), each partner's base is the part of the order paid for the lines of the products they
  * share in, each line weighed by what it was charged (`<bump>_cents`, the rest of the subtotal for the order's
  * own product), with what the code took off and the shipping shared the same way and the tax left out.

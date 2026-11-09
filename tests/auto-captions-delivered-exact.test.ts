@@ -21,13 +21,20 @@
  *     of due videos in an unknown shape is unknown, never an empty queue;
  *   - the five-minute job runs the video sweep, the captions sweep and the
  *     watch reading each on its own: one failing never skips another, the
- *     answer says which failed, and the lock is let go.
+ *     answer says which failed, and the lock is let go;
+ *   - an unknown look past GIVE_UP_HOURS only extends the life of the record
+ *     there now: one settled and deleted during the look stays gone (and is
+ *     never asked to refund again), one changed during it (a refund owed, a
+ *     language listed) keeps the change, and the EXPIRE reply is read exactly
+ *     (rule 24): anything but 1 or 0 is unknown and nothing else is written;
+ *   - a look that keeps failing moves behind the videos due before it, so it
+ *     never holds the head of the queue.
  *
  * Synthetic data only; the healthy and confirmed-empty answers work as before.
  */
 import { GET as streamJob } from "@/app/api/cron/stream/route";
 import { GIVE_UP_HOURS } from "@/lib/auto-captions-rules";
-import { sweepAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
+import { autoRefundsOwed, sweepAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { streamPath } from "@/lib/stream-rules";
 import { store as redis } from "./redis-stub";
@@ -47,6 +54,8 @@ const WEEK_SECONDS = 7 * 86_400;
 
 /** What the video service answers about a video: its status and body, or a thrown fetch. */
 let video: { status: number; body: unknown } | "throws" = { status: 200, body: { guid: VIDEO, status: 4, captions: [] } };
+/** What happens elsewhere (the service's hook) while the video service is being asked. */
+let during: () => void = () => {};
 const refundsAsked: URLSearchParams[] = [];
 const errors: string[] = [];
 const realError = console.error;
@@ -59,6 +68,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "video.bunnycdn.com") {
+    during();
     if (video === "throws") throw new Error("the service could not be reached");
     return video.body === undefined ? new Response("", { status: video.status }) : json(video.body, video.status);
   }
@@ -103,6 +113,7 @@ function reset(): void {
   throwsOn = () => false;
   replyFor = () => null;
   seen = [];
+  during = () => {};
   video = { status: 200, body: { guid: VIDEO, status: 4, captions: [] } };
 }
 
@@ -217,7 +228,7 @@ async function main(): Promise<void> {
   }
   throwsOn = () => false;
   is("one video failing: the next is still looked at and settled, and the failure counted", swept, { looked: 2, done: 1, failed: 1 });
-  is("the one that failed is still due for the next run", [queuedAt(VIDEO), redis.run(["GET", `nl:stream:auto:${OTHER}`])], [T - 2_000, null]);
+  is("the one that failed is still due for the next run, moved behind the videos due before it", [queuedAt(VIDEO), redis.run(["GET", `nl:stream:auto:${OTHER}`])], [T, null]);
   is("and said so", errors.some((line) => line.includes(VIDEO)), true);
 
   part("A list of due videos in an unknown shape is unknown, never an empty queue");
@@ -279,6 +290,90 @@ async function main(): Promise<void> {
   redis.run(["ZADD", QUEUE, T - 2_000, VIDEO]);
   throwsOn = (c) => c[0] === "GET" && c[1] === KEY;
   is("one captions look failing: the job runs every part and does not say it all went well", await run(), { status: 500, ok: false, failed: ["captions"], videos: true, captions: true, watch: true, letGo: true });
+
+  part("An unknown look past the give-up never writes back the copy it read before asking");
+  const OWED_KEY = `nl:stream:autoowed:${FOLDER}`;
+  const REFUND_KEY = `nl-captions:${VIDEO}:${T}:refund`;
+  const branches = [
+    ["looked at again", late],
+    ["kept for a person", longAfter],
+  ] as const;
+  const answers = [
+    ["a 500", { status: 500, body: { message: "down" } }],
+    ["a 200 that does not say what was delivered", { status: 200, body: { guid: VIDEO, status: 4 } }],
+  ] as const;
+  for (const [branch, at] of branches) {
+    for (const [name, answer] of answers) {
+      reset();
+      seed();
+      video = answer;
+      // The hook settles the request meanwhile: it refunds what never came and deletes the record.
+      during = () => {
+        redis.run(["DEL", KEY]);
+        redis.run(["ZREM", QUEUE, VIDEO]);
+      };
+      is(`${branch}, ${name}, the request settled during the look: it stays gone and is not queued again`, [await look(at), record(), queuedAt()], ["waiting", null, null]);
+      during = () => {};
+      video = { status: 200, body: { guid: VIDEO, status: 4, captions: [{ srclang: "en" }] } };
+      is(`${branch}, ${name}: a known answer afterward asks for no refund again`, [await look(at + HOUR), refundsAsked.length], ["none", 0]);
+
+      reset();
+      seed();
+      video = answer;
+      // The hook's refund was not confirmed meanwhile: it wrote what is owed and listed it for the store.
+      during = () => {
+        const now = JSON.parse(String(redis.run(["GET", KEY]))) as Pending;
+        redis.run(["SET", KEY, JSON.stringify({ ...now, owed: { cents: 6000, key: REFUND_KEY, since: at, looks: 0 } }), "EX", 400 * 86_400]);
+        redis.run(["SADD", OWED_KEY, VIDEO]);
+      };
+      await look(at);
+      is(`${branch}, ${name}, a refund owed written during the look: it is kept and still shown to the studio`, [(record() as { owed?: { cents: number } } | null)?.owed?.cents, await autoRefundsOwed(FOLDER)], [6000, [{ id: VIDEO, cents: 6000, stuck: false }]]);
+
+      reset();
+      seed();
+      video = answer;
+      // A language listed meanwhile stays listed.
+      during = () => {
+        const now = JSON.parse(String(redis.run(["GET", KEY]))) as Pending;
+        redis.run(["SET", KEY, JSON.stringify({ ...now, got: ["en"] }), "EX", WEEK_SECONDS]);
+      };
+      await look(at);
+      is(`${branch}, ${name}, a language listed during the look: it stays listed, and the record still lives past the usual one`, [record()?.got, ttl() > WEEK_SECONDS], [["en"], true]);
+    }
+  }
+
+  part("The EXPIRE reply that keeps the record is read exactly");
+  for (const [branch, at] of branches) {
+    for (const [name, reply] of [["no reply", []], ["OK", ["OK"]], ["null", [null]], ["-1", [-1]], ["2", [2]], ["the string 1", ["1"]], ["two replies", [1, 1]]] as const) {
+      reset();
+      seed();
+      video = { status: 500, body: { message: "down" } };
+      const before = queuedAt();
+      replyFor = (commands) => (commands.length === 1 && commands[0][0] === "EXPIRE" && commands[0][1] === KEY ? (reply as unknown as unknown[]) : null);
+      is(`${branch}, EXPIRE answered ${name}: unknown, the record untouched, the queue untouched`, [await look(at), record()?.got, ttl() <= WEEK_SECONDS, queuedAt() === before], ["threw UnknownReplyError", [], true, true]);
+    }
+  }
+
+  part("A look that keeps failing never holds the head of the queue");
+  reset();
+  const failing = Array.from({ length: 30 }, (_, i) => `${String(i).padStart(8, "0")}-3f40-4a5b-8c6d-7e8f9a0b1c2d`);
+  failing.forEach((id, i) => {
+    seed(id, streamPath(FOLDER, `lesson${String(100 + i).padStart(6, "0")}`, id));
+    redis.run(["ZADD", QUEUE, T - 60_000 + i, id]);
+  });
+  seed(OTHER, OTHER_PATH);
+  redis.run(["ZADD", QUEUE, T - 500, OTHER]);
+  video = { status: 200, body: { guid: OTHER, status: 4, captions: [{ srclang: "en" }, { srclang: "es" }] } };
+  throwsOn = (c) => c[0] === "GET" && typeof c[1] === "string" && failing.some((id) => c[1] === `nl:stream:auto:${id}`);
+  const first = await sweepAutoCaptions(Date.now() + 8_000, T);
+  is("thirty looks failing in one run: each is counted and kept in the queue, due for the next run", [first, failing.every((id) => queuedAt(id) !== null && (queuedAt(id) ?? Infinity) <= T)], [{ looked: 30, done: 0, failed: 30 }, true]);
+  const second = await sweepAutoCaptions(Date.now() + 8_000, T + 5 * 60_000);
+  is("the next run looks at the video that was due before them first, and settles it", [second.done, redis.run(["GET", `nl:stream:auto:${OTHER}`]), queuedAt(OTHER)], [1, null, null]);
+  reset();
+  seed();
+  redis.run(["ZADD", QUEUE, T - 2_000, VIDEO]);
+  throwsOn = (c) => (c[0] === "GET" && c[1] === KEY) || c[0] === "ZADD";
+  is("Redis failing on the move too: the look is counted, and it keeps its place", [await sweepAutoCaptions(Date.now() + 8_000, T), queuedAt(VIDEO)], [{ looked: 1, done: 0, failed: 1 }, T - 2_000]);
 
   console.error = realError;
   done();

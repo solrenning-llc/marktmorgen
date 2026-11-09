@@ -458,7 +458,7 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
     return (await settle(id, pending, pending.got, now)) ? "done" : "waiting";
   }
   const there = answer.status === 200 ? deliveredIn(answer.data) : null;
-  if (!there) return unknownLook(id, pending, answer.status, now);
+  if (!there) return unknownLook(id, pending, raw as string, answer.status, now);
   const got = pending.langs.filter((lang) => there.includes(lang));
   const fresh = got.filter((lang) => !pending.got.includes(lang));
   if (fresh.length) await noteCaptionLanguages(id, fresh);
@@ -473,6 +473,17 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
 }
 
 /**
+ * Marks a request kept for a person only while its record is still the one read before asking the service, keeping
+ * its time to live (the EXPIRE just before it): 1 marked, 0 changed or gone meanwhile, and nothing written over it.
+ */
+const MARK_KEPT = [
+  "-- marktmorgen:auto-captions-kept:v1",
+  'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end',
+  'redis.call("SET", KEYS[1], ARGV[2], "KEEPTTL")',
+  "return 1",
+].join("\n");
+
+/**
  * The service's answer did not say what it delivered: not a 200, or a 200 in a
  * shape that is not its own. Nothing is listed or refunded on it, and the
  * languages already listed stay listed. Before GIVE_UP_HOURS the video is
@@ -482,33 +493,45 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
  * further apart, and settled by the first answer that says what was
  * delivered. After DELIVERY_LOOKS_MS it is kept for a person, said so, and no
  * longer queued; never refunded on an unknown answer, never dropped.
+ *
+ * Only the life of the record there now is extended (EXPIRE), never the copy
+ * read before asking the service written back: the hook may have settled and
+ * deleted it, or written a refund owed or a language listed, meanwhile. The
+ * reply is read exactly (rule 24): 1 is kept, 0 is gone (settled elsewhere:
+ * nothing is queued again), anything else is unknown and nothing else is
+ * written. The one write into the record, the kept mark, lands only while it
+ * is still the one read (MARK_KEPT), its reply read the same way.
  */
-async function unknownLook(id: string, pending: Pending, status: number, now: number): Promise<"waiting"> {
+async function unknownLook(id: string, pending: Pending, raw: string, status: number, now: number): Promise<"waiting"> {
   const past = now - pending.at - GIVE_UP_HOURS * 3_600_000;
   if (status === 200) console.error("the video service answered about a video in a shape that does not say which captions it delivered; nothing is refunded on it", id);
   if (past <= 0) {
     await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
     return "waiting";
   }
-  const key = pendingKey(id);
+  const kept = repliesFor(await redisPipeline([["EXPIRE", pendingKey(id), REFUND_KEEP_SECONDS]]), 1)?.[0];
+  if (kept === 0) return "waiting";
+  if (kept !== 1) throw new UnknownReplyError("keeping an AI captions request whose delivery is unknown");
   if (past > DELIVERY_LOOKS_MS) {
     console.error("which AI captions were delivered is still unknown after every automatic look; nothing refunded, the request kept for a person", id, status);
-    // Marked kept the first time, listed for its store and counted once for the owner's report; a later look (the
-    // service's announcement) keeps it as it is.
+    // Marked kept the first time, only over the record read before asking the service (MARK_KEPT): one settled, owed
+    // or listed meanwhile is never written over, and stays as it is now, with its place in the queue. Then it is listed
+    // for its store and counted once for the owner's report; a later look (the service's announcement) keeps it as it is.
     const first = pending.kept === undefined;
-    await redisPipeline([
-      ["SET", key, JSON.stringify(first ? { ...pending, kept: now } : pending), "EX", REFUND_KEEP_SECONDS],
-      ["ZREM", QUEUE, id],
-      ...keepListed(pending),
-      ...(first ? countKept("delivery", now) : []),
-    ]);
+    if (first) {
+      const marked = repliesFor(await redisPipeline([["EVAL", MARK_KEPT, 1, pendingKey(id), raw, JSON.stringify({ ...(JSON.parse(raw) as object), kept: now })]]), 1)?.[0];
+      if (marked === 0) return "waiting";
+      if (marked !== 1) {
+        // The mark may have landed: counted, so a case kept for a person is never left out of the owner's report.
+        await redisPipeline(countKept("delivery", now));
+        throw new UnknownReplyError("marking an AI captions request kept for a person");
+      }
+    }
+    await redisPipeline([["ZREM", QUEUE, id], ...keepListed(pending), ...(first ? countKept("delivery", now) : [])]);
     return "waiting";
   }
   console.error("which AI captions were delivered is unknown past the give-up; nothing refunded, the request kept and looked at again", id, status);
-  await redisPipeline([
-    ["SET", key, JSON.stringify(pending), "EX", REFUND_KEEP_SECONDS],
-    ["ZADD", QUEUE, now + Math.min(REFUND_LOOK_MAX_MS, Math.max(LOOK_AGAIN_MS, past / 4)), id],
-  ]);
+  await redisPipeline([["ZADD", QUEUE, now + Math.min(REFUND_LOOK_MAX_MS, Math.max(LOOK_AGAIN_MS, past / 4)), id]]);
   return "waiting";
 }
 
@@ -682,7 +705,8 @@ async function cardRefundSettled(id: string, pending: Pending, owed: Owed): Prom
 
 /**
  * The five-minute job's part: every video whose captions are due a look, until `deadline`. Each look is on its own:
- * one that fails is counted and said, keeps its place in the queue for the next run, and the rest are looked at. A
+ * one that fails is counted and said, stays due for the next run, moved behind the videos due before it (only if
+ * still queued: XX), so a look that keeps failing never holds the head of the queue, and the rest are looked at. A
  * list of due videos that does not read is unknown (UnknownReplyError), never an empty queue.
  */
 export async function sweepAutoCaptions(deadline: number, now = Date.now()): Promise<{ looked: number; done: number; failed: number }> {
@@ -699,6 +723,11 @@ export async function sweepAutoCaptions(deadline: number, now = Date.now()): Pro
     } catch (error) {
       counts.failed += 1;
       console.error("a look at a video's AI captions failed; it stays due for the next run", id, error);
+      try {
+        await redisPipeline([["ZADD", QUEUE, "XX", now, id]]);
+      } catch (moveError) {
+        console.error("a failed look at a video's AI captions keeps its place in the queue", id, moveError);
+      }
     }
   }
   return counts;

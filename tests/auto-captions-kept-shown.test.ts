@@ -19,7 +19,13 @@
  *   - an answer that later says what was delivered settles it as before, and
  *     it is listed no more;
  *   - the store's list of money not settled, read in an unknown shape, is
- *     unknown, never "nothing owed".
+ *     unknown, never "nothing owed";
+ *   - the kept mark lands only over the record read before asking the video
+ *     service (with #3345's EXPIRE, which only extends it): one changed or
+ *     gone meanwhile keeps what was written there, and the mark's reply is
+ *     read exactly (rule 24): anything but 1 or 0 is unknown, nothing else is
+ *     written, and the case is counted so the owner's report never leaves it
+ *     out.
  *
  * Synthetic data only.
  */
@@ -274,6 +280,54 @@ async function main(): Promise<void> {
   is("the course page reads the lesson videos once, held ones included", /autoCaptionStates\(videoPaths\)/.test(page) && /held=\{held\}/.test(page), true);
   is("the course page lists unconfirmed charges apart from refunds owed", [page.includes("data-captions-unconfirmed"), page.includes("data-captions-refunds")], [true, true]);
   is("an unreadable list is said, never shown as nothing owed", /autoCaptionsMoney\(folder\)\.catch\(\(\) => null\)/.test(page) && page.includes("data-captions-money-unread"), true);
+  part("The kept mark lands only over the record read before asking the service");
+  const MARK = "-- marktmorgen:auto-captions-kept:v1\n";
+  const isMark = (commands: (string | number)[][]) => commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith(MARK) && commands[0][3] === KEY;
+  const tried = async (): Promise<unknown> => {
+    try {
+      return await syncAutoCaptions(VIDEO, LATE);
+    } catch (error) {
+      return error instanceof UnknownReplyError ? "threw UnknownReplyError" : String(error);
+    }
+  };
+  reset();
+  await keep();
+  is("control: marked over the record read, the rest of it as it was, living as long as a refund owed would", [record()?.got, record()?.langs, Number(redis.run(["TTL", KEY])) > WEEK_SECONDS], [[], ["en", "es"], true]);
+  reset();
+  seed();
+  // A language listed by the service's hook between the EXPIRE and the mark.
+  replyFor = (commands) => {
+    if (isMark(commands)) redis.run(["SET", KEY, JSON.stringify({ ...record(), got: ["en"] }), "EX", WEEK_SECONDS]);
+    return null;
+  };
+  is(
+    "a record changed meanwhile: what was written stays, not marked, not listed, not counted, and it keeps its place in the queue",
+    [await tried(), record()?.got, record()?.kept, redis.run(["SISMEMBER", OWED, VIDEO]), queued(), await keptMonth()],
+    ["waiting", ["en"], undefined, 0, String(T + 3 * 60_000), { delivery: 0, order: 0, refund: 0 }],
+  );
+  reset();
+  seed();
+  // Settled and deleted by the hook between the EXPIRE and the mark.
+  replyFor = (commands) => {
+    if (isMark(commands)) {
+      redis.run(["DEL", KEY]);
+      redis.run(["ZREM", QUEUE, VIDEO]);
+    }
+    return null;
+  };
+  is("a record gone meanwhile: it stays gone, unqueued, not listed and not counted", [await tried(), record(), queued(), redis.run(["SISMEMBER", OWED, VIDEO]), await keptMonth()], ["waiting", null, null, 0, { delivery: 0, order: 0, refund: 0 }]);
+  for (const [name, reply] of [["no reply", []], ["OK", ["OK"]], ["null", [null]], ["2", [2]], ["the string 1", ["1"]], ["two replies", [1, 1]]] as const) {
+    reset();
+    seed();
+    replyFor = (commands) => (isMark(commands) ? (reply as unknown as unknown[]) : null);
+    is(
+      `the mark answered ${name}: unknown, nothing else written, and counted so the owner's report never leaves it out`,
+      [await tried(), record()?.kept, redis.run(["SISMEMBER", OWED, VIDEO]), queued(), await keptMonth()],
+      ["threw UnknownReplyError", undefined, 0, String(T + 3 * 60_000), { delivery: 1, order: 0, refund: 0 }],
+    );
+  }
+  replyFor = () => null;
+
   is("errors say so", errors.some((l) => l.includes("person") && l.includes(VIDEO)), true);
 
   console.error = realError;

@@ -317,6 +317,14 @@ export class MemoryRedis {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
         }
+        // lib/auto-captions.ts MARK_KEPT: a request marked kept only while its record is still the one read, keeping its time to live.
+        if (key.startsWith("-- marktmorgen:auto-captions-kept:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, record, expected, next] = args;
+          if (this.run(["GET", record]) !== expected) return 0;
+          // Match SET KEEPTTL: no expiry extension or removal.
+          this.data.set(record, next);
+          return 1;
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;

@@ -13,13 +13,16 @@
  * One at a time for each account, and forgotten with the connection it was
  * made on (lib/meet-connect.ts, testKey): the meeting itself stays on the
  * creator's account until they delete it, here or there, like every meeting
- * we make.
+ * we make. Its record is written only through keepTest (lib/meet-connect.ts),
+ * so a deletion confirmed while one is being made or moved (Zoom's notice that
+ * the app was removed, Disconnect, Delete) is never undone by the write that
+ * follows it.
  */
 import { randomBytes } from "node:crypto";
 import type { Store } from "@/lib/store";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { MeetProvider } from "@/lib/call-setup";
-import { accessFor, testKey, NotConnected } from "@/lib/meet-connect";
+import { ACCOUNT_NAMES, accessFor, keepTest, testKey, NotConnected } from "@/lib/meet-connect";
 import { eventId, googleCreate, googleDelete, googleMove, zoomCreate, zoomDelete, zoomMove } from "@/lib/meet-providers";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
@@ -71,15 +74,40 @@ function unread(what: string): TestMeetingUnavailable {
  * answers "try again in a moment".
  */
 export async function readTests(statsId: string | null, providers: MeetProvider[]): Promise<Partial<Record<MeetProvider, TestMeeting>>> {
+  const kept = await readKept(statsId, providers);
+  const found: Partial<Record<MeetProvider, TestMeeting>> = {};
+  for (const p of providers) {
+    const one = kept[p];
+    if (one) found[p] = one.test;
+  }
+  return found;
+}
+
+/** As readTests, with each record's text as it was read, for keepTest to write over only that one. */
+async function readKept(statsId: string | null, providers: MeetProvider[]): Promise<Partial<Record<MeetProvider, { test: TestMeeting; raw: string }>>> {
   if (!statsId || !providers.length || !isRedisConfigured()) return {};
   const replies = repliesFor(await redisPipeline(providers.map((p) => ["GET", testKey(statsId, p)])), providers.length);
   if (!replies) throw unread("the test meetings with a reply missing or extra");
-  const found: Partial<Record<MeetProvider, TestMeeting>> = {};
+  const found: Partial<Record<MeetProvider, { test: TestMeeting; raw: string }>> = {};
   providers.forEach((p, i) => {
     const test = parse(replies[i]);
-    if (test) found[p] = test;
+    if (test) found[p] = { test, raw: replies[i] as string };
   });
   return found;
+}
+
+/**
+ * Keeps the record made or moved, only while the connection it was made on is still there and no deletion of its
+ * account was confirmed since `began`, and only over the record as it was read (lib/meet-connect.ts keepTest). A
+ * connection deleted meanwhile throws NotConnected (the route says "not connected"); a reply not one of the script's
+ * is unknown (CX-123 rule 24) and throws TestMeetingUnavailable, never taken as kept. Otherwise says whether it was
+ * kept, or the record changed meanwhile (or the make or move ran too long), with nothing written.
+ */
+async function keep(statsId: string, provider: MeetProvider, account: string, began: number, test: TestMeeting, had: string | null): Promise<boolean> {
+  const kept = await keepTest(statsId, provider, { account, startedAt: began, value: JSON.stringify(test), had });
+  if (kept === "unknown") throw unread("keeping the test meeting with a reply that is not one of the script's");
+  if (kept === "gone") throw new NotConnected(`${ACCOUNT_NAMES[provider]} is not connected`);
+  return kept === "kept";
 }
 
 /**
@@ -88,6 +116,8 @@ export async function readTests(statsId: string | null, providers: MeetProvider[
  * the route to say in words.
  */
 export async function makeTest(store: Store, provider: MeetProvider, now = Date.now()): Promise<TestMeeting> {
+  // When this make began, for keepTest: a deletion of the account confirmed after it keeps nothing it makes.
+  const began = Date.now();
   const statsId = store.statsId;
   if (!statsId) throw new NotConnected("Connect an account first.");
   const had = (await readTests(statsId, [provider]))[provider];
@@ -109,7 +139,14 @@ export async function makeTest(store: Store, provider: MeetProvider, now = Date.
   };
   const meeting = provider === "zoom" ? await zoomCreate(access.token, spec) : await googleCreate(access.token, spec);
   const test: TestMeeting = { id: meeting.id, link: meeting.link, start, end, madeAt: now };
-  await redisPipeline([["SET", testKey(statsId, provider), JSON.stringify(test)]]);
+  // Kept only while the connection is still there and nothing was made meanwhile. Before, a plain SET wrote it after
+  // a deletion confirmed during the call above (Zoom's notice, Disconnect), or over a test meeting made meanwhile.
+  if (!(await keep(statsId, provider, access.account, began, test, null))) {
+    // Another one was made meanwhile (or this ran too long): the one made here is not left behind on the account.
+    if (provider === "zoom") await zoomDelete(access.token, meeting.id).catch(() => {});
+    else await googleDelete(access.token, meeting.id).catch(() => {});
+    throw new TestMeetingUnavailable();
+  }
   return test;
 }
 
@@ -122,10 +159,12 @@ export const TEST_MOVE_MINUTES = 60;
  * time (lib/meet-links.ts). Null when there is no test meeting to move.
  */
 export async function moveTest(store: Store, provider: MeetProvider): Promise<TestMeeting | null> {
+  const began = Date.now();
   const statsId = store.statsId;
   if (!statsId) return null;
-  const had = (await readTests(statsId, [provider]))[provider];
-  if (!had) return null;
+  const read = (await readKept(statsId, [provider]))[provider];
+  if (!read) return null;
+  const had = read.test;
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) throw new TestMeetingUnavailable();
   const access = await accessFor(statsId, provider);
   const shift = TEST_MOVE_MINUTES * 60_000;
@@ -133,7 +172,9 @@ export async function moveTest(store: Store, provider: MeetProvider): Promise<Te
   if (provider === "zoom") await zoomMove(access.token, had.id, when);
   else await googleMove(access.token, had.id, when);
   const moved: TestMeeting = { ...had, start: when.start, end: when.end };
-  await redisPipeline([["SET", testKey(statsId, provider), JSON.stringify(moved)]]);
+  // Written back only over the record read, while the connection is still there: a test meeting deleted meanwhile
+  // (Delete, Disconnect, Zoom's notice) is not shown again.
+  if (!(await keep(statsId, provider, access.account, began, moved, read.raw))) throw new TestMeetingUnavailable();
   return moved;
 }
 

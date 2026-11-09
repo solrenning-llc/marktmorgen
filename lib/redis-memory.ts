@@ -1162,6 +1162,7 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
+        if (key.startsWith("-- marktmorgen:meet-test-keep:v1\n")) return this.meetTestKeep(args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];
         this.live(target);
@@ -2050,13 +2051,7 @@ export class MemoryRedis {
    * (tests/meet-redis-scripts.test.ts holds it to Redis).
    */
   private meetKeep(args: string[]): unknown {
-    const raw = args[0] ?? "";
-    if (!/^(0|-?[1-9][0-9]*)$/.test(raw)) throw new Error("ERR value is not an integer or out of range");
-    const count = Number(raw);
-    if (count < 0) throw new Error("ERR Number of keys can't be negative");
-    if (count > args.length - 1) throw new Error("ERR Number of keys can't be greater than number of args");
-    const keys = args.slice(1, 1 + count);
-    const argv = args.slice(1 + count);
+    const { keys, argv } = this.evalParts(args);
     if (keys.length !== 4 || argv.length !== 4 || argv[0] === "" || argv[1] === "" || !/^[1-9][0-9]{0,15}$/.test(argv[2]) || argv[3] === "") return -1;
     const [lock, conn, index, goneMark] = keys;
     const [token, connection, cutoff, statsId] = argv;
@@ -2068,6 +2063,41 @@ export class MemoryRedis {
     if (held !== undefined && !(held instanceof Set)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
     this.run(["SADD", index, statsId]);
     this.run(["SET", conn, connection]);
+    return 1;
+  }
+
+  /** An EVAL's keys and arguments, past its key count, with the errors Redis itself gives for a count it refuses. */
+  private evalParts(args: string[]): { keys: string[]; argv: string[] } {
+    const raw = args[0] ?? "";
+    if (!/^(0|-?[1-9][0-9]*)$/.test(raw)) throw new Error("ERR value is not an integer or out of range");
+    const count = Number(raw);
+    if (count < 0) throw new Error("ERR Number of keys can't be negative");
+    if (count > args.length - 1) throw new Error("ERR Number of keys can't be greater than number of args");
+    return { keys: args.slice(1, 1 + count), argv: args.slice(1 + count) };
+  }
+
+  /**
+   * lib/meet-connect.ts KEEP_TEST_UNLESS_GONE, step for step: a test meeting's record kept only while the store's
+   * connection is there and listed under the account, no deletion of that account is at or after the cutoff, and the
+   * record is the one read; -1, as the script answers, for a call of any other shape. A list, a mark or a record of
+   * another type throws Redis's own error, read in the script's order (tests/meet-redis-scripts.test.ts holds it to
+   * Redis). The list is read without SISMEMBER here, which in this stand-in would make a missing key an empty set.
+   */
+  private meetTestKeep(args: string[]): unknown {
+    const { keys, argv } = this.evalParts(args);
+    if (keys.length !== 4 || argv.length !== 4 || argv[0] === "" || argv[1] === "" || !/^[1-9][0-9]{0,15}$/.test(argv[2])) return -1;
+    const [conn, index, goneMark, test] = keys;
+    const [statsId, record, cutoff, had] = argv;
+    if (this.run(["EXISTS", conn]) !== 1) return 2;
+    this.live(index);
+    const listed = this.data.get(index);
+    if (listed !== undefined && !(listed instanceof Set)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+    if (!listed?.has(statsId)) return 2;
+    const gone = this.run(["GET", goneMark]);
+    if (typeof gone === "string" && (!/^[0-9]{1,16}$/.test(gone) || Number(gone) >= Number(cutoff))) return 2;
+    const now = this.run(["GET", test]);
+    if (had === "" ? now !== null : now !== had) return 3;
+    this.run(["SET", test, record]);
     return 1;
   }
 

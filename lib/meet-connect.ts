@@ -120,7 +120,10 @@ type Connection = {
 const slot = (host: string) => (host ? `:h:${host}` : "");
 const space = (statsId: string, host: string) => (host ? "hosts" : statsId);
 const connKey = (statsId: string, provider: MeetProvider, host = "") => `nl:meet:conn:${space(statsId, host)}:${provider}${slot(host)}`;
-/** The test meeting a creator made to check a connection (lib/meet-test.ts): forgotten with the connection it was made on. */
+/**
+ * The test meeting a creator made to check a connection (lib/meet-test.ts): forgotten with the connection it was made
+ * on, and written only by keepTest, so a deletion confirmed while one is being made or moved is never undone.
+ */
 export const testKey = (statsId: string, provider: MeetProvider) => `nl:meet:test:${statsId}:${provider}`;
 const refreshLockKey = (statsId: string, provider: MeetProvider, host = "") => `nl:meet:refresh:${space(statsId, host)}:${provider}${slot(host)}`;
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 40);
@@ -460,6 +463,64 @@ async function keepConnection(
     ]).catch(() => {});
   }
   return { ok: true, view: viewOf(connection), replaced: Boolean(before) };
+}
+
+/**
+ * KEYS[1] the store's connection, KEYS[2] the stores the account the test meeting was made on connected (its index),
+ * KEYS[3] that account's deletion mark (forgetUser), KEYS[4] the test meeting's record (testKey); ARGV[1] the store,
+ * ARGV[2] the record to keep, ARGV[3] the cutoff: the time, in milliseconds, at or after which a deletion of that
+ * account stops this make or move, ARGV[4] the record as it was read ("" for none there). 1 the record is kept; 2 the
+ * connection is gone, or no longer listed under that account, or that account was deleted at or after the cutoff (or
+ * its mark does not read as a time), and nothing is written; 3 the record is no longer the one read (one made
+ * meanwhile, or deleted or moved meanwhile), and nothing is written; -1 a call of any other shape, refused before
+ * anything is read or written. Every deletion of a connection (disconnectFor, forgetUser) deletes it, its test meeting
+ * and its place in the index in one pipeline, and a connection kept for another account leaves the old account's
+ * index before its test meeting is deleted: whichever side of those commands this runs on, nothing it writes is left
+ * after them. Mirrored for tests in lib/redis-memory.ts.
+ */
+const KEEP_TEST_UNLESS_GONE = `-- marktmorgen:meet-test-keep:v1
+if #KEYS ~= 4 or #ARGV ~= 4 or ARGV[1] == "" or ARGV[2] == "" or #ARGV[3] > 16 or not string.match(ARGV[3], "^[1-9]%d*$") then return -1 end
+if redis.call("EXISTS", KEYS[1]) ~= 1 or redis.call("SISMEMBER", KEYS[2], ARGV[1]) ~= 1 then return 2 end
+local gone = redis.call("GET", KEYS[3])
+if gone and (#gone > 16 or not string.match(gone, "^%d+$") or tonumber(gone) >= tonumber(ARGV[3])) then return 2 end
+local had = redis.call("GET", KEYS[4])
+if ARGV[4] == "" then
+  if had then return 3 end
+elseif had ~= ARGV[4] then return 3 end
+redis.call("SET", KEYS[4], ARGV[2])
+return 1`;
+
+/**
+ * What keepTest did: "kept"; "gone", the connection was deleted (or another account's connection took its place, or
+ * the account was deleted) since the make or the move began, and nothing was written; "changed", the record is no
+ * longer the one read, and nothing was written; "expired", the make or the move began longer ago than any can last
+ * (FLOW_MS), and nothing was written; "unknown", a reply that is not one of the script's (CX-123 rule 24), never
+ * taken as kept.
+ */
+export type TestKept = "kept" | "gone" | "changed" | "expired" | "unknown";
+
+/**
+ * Keeps a test meeting's record (lib/meet-test.ts makeTest, moveTest) in one step with the checks that the store's
+ * connection is still the one it was made on (`account`, listed in that account's index) and that no deletion of that
+ * account was confirmed since the make or the move began (`startedAt`, less GONE_MARGIN_MS, as finishConsent reads
+ * forgetUser's mark), and only over the record as it was read (`had`, null for none there).
+ */
+export async function keepTest(
+  statsId: string,
+  provider: MeetProvider,
+  input: { account: string; startedAt: number; value: string; had: string | null },
+): Promise<TestKept> {
+  if (!flowFresh(input.startedAt)) return "expired";
+  const keys = [connKey(statsId, provider), userKey(provider, input.account), goneKey(provider, input.account), testKey(statsId, provider)];
+  const replies = repliesFor(
+    await redisPipeline([["EVAL", KEEP_TEST_UNLESS_GONE, keys.length, ...keys, statsId, input.value, input.startedAt - GONE_MARGIN_MS, input.had ?? ""]]),
+    1,
+  );
+  const answer = replies ? countOf(replies[0]) : null;
+  if (answer === 1) return "kept";
+  if (answer === 2) return "gone";
+  if (answer === 3) return "changed";
+  return "unknown";
 }
 
 /**

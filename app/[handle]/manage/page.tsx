@@ -3,9 +3,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { pageAddress } from "@/lib/essential-exit";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { MANAGE_LINK_SECONDS, type Membership, canManage, membershipsFor } from "@/lib/membership-manage";
+import { MANAGE_LINK_SECONDS, type Membership, admitManage, canManage, membershipsFor } from "@/lib/membership-manage";
+import { takePublicRequest } from "@/lib/traffic";
 import { formatMoney } from "@/lib/money";
 import { speech } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
@@ -47,10 +49,17 @@ export default async function ManagePage({ params, searchParams }: Params) {
   if (!store) notFound();
 
   const query = await searchParams;
-  const token = typeof query.token === "string" ? query.token : "";
-  const status = typeof query.status === "string" ? query.status : "";
-  // Reading the memberships spends nothing: opening this page is never an
-  // action, so a mail scanner following the link changes and uses up nothing.
+  const asked = typeof query.token === "string" ? query.token : "";
+  // Opening this page changes nothing, but it is one of the store's buyer requests (MÉDIO 4 of the audit of
+  // 9 November 2026). With the emailed link it is the way out, essential (lib/essential-exit.ts): the link is read
+  // first, and the store's month counts it but never refuses it; past the way out's own figures it says so ("daily")
+  // and keeps the form. Without one it is the form alone, counted in the window (past it if it must) and drawn all the
+  // same, since asking for the link is how a member gets out; what a buyer has never rests (tests/traffic.test.ts).
+  const admitted = asked ? await admitManage(store, asked, await pageAddress()) : null;
+  if (!asked) await takePublicRequest(store, "buyer").catch(() => false);
+  const refused = admitted && !admitted.ok && admitted.reason !== "expired" ? admitted.reason : null;
+  const token = refused ? "" : asked;
+  const status = refused ?? (typeof query.status === "string" ? query.status : "");
   const memberships: Membership[] | null = token ? await membershipsFor(store, token) : null;
   const live = memberships !== null;
   // The plans each membership can switch to (lib/tier-switch.ts).

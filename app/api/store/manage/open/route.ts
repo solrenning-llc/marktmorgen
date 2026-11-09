@@ -1,8 +1,7 @@
-import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { MANAGE_TOKEN_PATTERN, openPortal } from "@/lib/membership-manage";
+import { MANAGE_TOKEN_PATTERN, admitManage, openPortal } from "@/lib/membership-manage";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
@@ -49,8 +48,11 @@ export async function POST(request: NextRequest) {
     });
 
   if (!MANAGE_TOKEN_PATTERN.test(token)) return back("expired");
-  // Each press opens a billing page on the creator's Stripe account.
-  if (!(await withinStore("manage-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer"))) return back("limited");
+  // Each press opens a billing page on the creator's Stripe account. The way out is essential: the link is read
+  // before anything of the store's is spent, and the store's month counts it but never refuses it
+  // (lib/membership-manage.ts admitManage, lib/essential-exit.ts).
+  const admitted = await admitManage(store, token, clientAddress(request));
+  if (!admitted.ok) return back(admitted.reason);
 
   const result = await openPortal(store, token, linkOrigin(request, store));
   if (!result.ok) return back(result.reason);

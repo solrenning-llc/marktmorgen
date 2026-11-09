@@ -25,6 +25,7 @@
  * (lib/payment-recovery.ts), so nothing depends on the redirect arriving.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { noteForErasure } from "@/lib/erasure-index";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
@@ -57,13 +58,18 @@ export const openKey = (account: string, sub: string) => `nl:card:open:${account
 
 export type CardGrant = { a: string; c: string; s: string };
 
-/** A new link for one membership, to put in an email. */
-export async function cardLink(account: string, customer: string, subscription: string): Promise<string> {
+/**
+ * A new link for one membership, to put in an email. `to`: the store and the address it is emailed to, so deleting
+ * that person deletes the link with them (lib/erasure-index.ts; LEVE 5 of the audit of 9 November 2026): it names
+ * their membership and opens its card page for CARD_LINK_SECONDS.
+ */
+export async function cardLink(account: string, customer: string, subscription: string, to?: { statsId: string | null | undefined; email: string }): Promise<string> {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   const grant: CardGrant = { a: account, c: customer, s: subscription };
-  await redisPipeline([["SET", await linkKey(token), JSON.stringify(grant), "EX", CARD_LINK_SECONDS]]);
+  const key = await linkKey(token);
+  await redisPipeline([["SET", key, JSON.stringify(grant), "EX", CARD_LINK_SECONDS], ...(to ? noteForErasure(to.statsId, to.email, key) : [])]);
   return token;
 }
 

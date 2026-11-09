@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { activeIntro } from "@/lib/intro-price";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { isResting } from "@/lib/traffic";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
@@ -52,6 +53,10 @@ export default async function RenewPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // One of the store's buyer requests (MÉDIO 4 of the audit of 9 November 2026): the come-back page reads the product
+  // and its offer. It is not the way out, which the member's own page keeps open past the store's month
+  // (lib/essential-exit.ts); this one rests with the month, as a buyer's page does.
+  if (await isResting(store, undefined, "buyer")) redirect(`/@${store.handle}/resting`);
   const listed = (await readListing(store, productId)) ?? null;
   // A come-back email's link (lib/winback-send.ts): the offer it carries, for
   // the address it was sent to, while it lasts.

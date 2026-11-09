@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { pageAddress } from "@/lib/essential-exit";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { membershipsFor } from "@/lib/membership-manage";
+import { admitManage, membershipsFor } from "@/lib/membership-manage";
 import { answerFor, offers } from "@/lib/leave-rules";
 import { choicesFor, liveTiers } from "@/lib/tier-switch";
 import { speech } from "@/lib/buyer-words";
@@ -44,7 +45,11 @@ export default async function LeavePage({ params, searchParams }: Params) {
   const asked = read("why");
   const why = offers(store.leaving, asked) ? asked : "";
 
-  const memberships = token ? await membershipsFor(store, token) : null;
+  // Part of the way out, essential (lib/essential-exit.ts): the link read first, then one of the store's buyer
+  // requests, or past its month the way out's own figures; refused there, the member's page says so ("daily").
+  const admitted = token ? await admitManage(store, token, await pageAddress()) : null;
+  if (admitted && !admitted.ok && admitted.reason !== "expired") redirect(`/@${store.handle}/manage?status=${admitted.reason}`);
+  const memberships = admitted?.ok ? await membershipsFor(store, token) : null;
   const one = memberships?.find((m) => m.id === sub) ?? null;
   const say = speech(store);
   const m = membershipWords(store.language);

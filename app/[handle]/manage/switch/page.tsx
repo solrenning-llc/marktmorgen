@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { pageAddress } from "@/lib/essential-exit";
 import { lookStyle } from "@/lib/store-look";
 import { formatMoney } from "@/lib/money";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { previewSwitch } from "@/lib/tier-switch";
+import { admitManage } from "@/lib/membership-manage";
+import { takePublicRequest } from "@/lib/traffic";
 import { YEARLY_TARGET, previewYearly } from "@/lib/yearly-switch";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
 
@@ -45,6 +48,14 @@ export default async function SwitchPage({ params, searchParams }: Params) {
   // `from=offer`: the link in the email that offers it (lib/yearly-ask.ts), which works for 14 days.
   // Sent back here by the button when the EU box was not checked (app/api/store/manage/switch): it says what is missing.
   const consentNeeded = read("consent") === "needed";
+  // One of the store's buyer requests (MÉDIO 4 of the audit of 9 November 2026), before Stripe is asked for the price:
+  // what a buyer has never rests (tests/traffic.test.ts). With the member's own link it is counted as the way out
+  // (lib/membership-manage.ts admitManage); with the yearly offer's link, one of the window's requests. Refused, the
+  // member's page says so ("daily"), never that the link expired.
+  const admitted = await admitManage(store, token, await pageAddress());
+  const room = admitted.ok || admitted.reason !== "expired" ? null : await takePublicRequest(store, "buyer").catch(() => null);
+  const counted = admitted.ok ? "ok" : admitted.reason !== "expired" ? admitted.reason : room === null ? "error" : room ? "ok" : "daily";
+  if (counted !== "ok") redirect(`/@${store.handle}/manage?status=${counted}`);
   if (to === YEARLY_TARGET) return <YearlyPage store={store} token={token} sub={sub} fromOffer={read("from") === "offer"} consentNeeded={consentNeeded} />;
   const result = await previewSwitch(store, token, sub, to);
   const back = `/@${store.handle}/manage${token ? `?token=${encodeURIComponent(token)}` : ""}`;

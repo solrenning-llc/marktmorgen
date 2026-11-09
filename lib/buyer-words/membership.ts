@@ -35,6 +35,11 @@ const en = {
       title: "Too many requests for now",
       body: "To keep this form from being used to flood somebody's inbox, it takes a limited number of requests an hour. Try again in an hour.",
     },
+    // The way out past a store's month (lib/essential-exit.ts): per connection and member a day, per store a month.
+    daily: {
+      title: "Too many of these for now",
+      body: "Nothing was changed. So that one person or one store cannot use up the rest, this takes a limited number at a time. Try again tomorrow. If it still says this, reply to your order confirmation email: it reaches the store, which can cancel your membership for you.",
+    },
     unavailable: {
       title: "This store cannot open memberships right now",
       body: "Its payments are not connected to Stripe right now, so there is no membership to open from this page. Reply to your order confirmation email and it reaches the store.",
@@ -396,6 +401,11 @@ const es: MembershipWords = {
       title: "Demasiadas solicitudes por ahora",
       body: "Para que nadie use este formulario para llenar de mensajes la bandeja de entrada de otra persona, acepta un número limitado de solicitudes por hora. Vuelve a intentarlo dentro de una hora.",
     },
+    // The way out past a store's month (lib/essential-exit.ts): per connection and member a day, per store a month.
+    daily: {
+      title: "Demasiadas solicitudes de este tipo",
+      body: "No se cambió nada. Para que una persona o una tienda no agote el resto, esto acepta un número limitado cada vez. Vuelve a intentarlo mañana. Si sigue diciendo esto, responde al email de confirmación de tu pedido: le llega a la tienda, que puede cancelar tu membresía por ti.",
+    },
     unavailable: {
       title: "Esta tienda no puede abrir membresías en este momento",
       body: "Sus pagos no están conectados a Stripe en este momento, así que no hay ninguna membresía que abrir desde esta página. Responde al email de confirmación de tu pedido y le llegará a la tienda.",
@@ -741,6 +751,11 @@ const fr: MembershipWords = {
     limited: {
       title: "Trop de demandes pour le moment",
       body: "Pour éviter que ce formulaire serve à inonder la boîte de réception de quelqu'un, il accepte un nombre limité de demandes par heure. Réessayez dans une heure.",
+    },
+    // The way out past a store's month (lib/essential-exit.ts): per connection and member a day, per store a month.
+    daily: {
+      title: "Trop de demandes de ce type",
+      body: `Rien n'a été modifié. Pour qu'une personne ou une boutique n'épuise pas le reste, ceci accepte un nombre limité à la fois. Réessayez demain. Si ce message revient, répondez à l'e-mail de confirmation de votre commande${S}: il parvient à la boutique, qui peut résilier votre abonnement pour vous.`,
     },
     unavailable: {
       title: "Cette boutique ne peut pas ouvrir d'abonnements pour le moment",
@@ -1097,6 +1112,11 @@ const de: MembershipWords = {
     limited: {
       title: "Vorerst zu viele Anfragen",
       body: "Damit dieses Formular nicht dazu benutzt wird, jemandes Posteingang zu überfluten, nimmt es nur eine begrenzte Zahl von Anfragen pro Stunde an. Versuchen Sie es in einer Stunde erneut.",
+    },
+    // The way out past a store's month (lib/essential-exit.ts): per connection and member a day, per store a month.
+    daily: {
+      title: "Zu viele Anfragen dieser Art",
+      body: "Es wurde nichts geändert. Damit eine Person oder ein Shop nicht den Rest aufbraucht, nimmt dies nur eine begrenzte Zahl auf einmal an. Versuchen Sie es morgen erneut. Wenn das dann noch hier steht, antworten Sie auf die E-Mail mit Ihrer Bestellbestätigung: Sie erreicht den Shop, der Ihre Mitgliedschaft für Sie kündigen kann.",
     },
     unavailable: {
       title: "Dieser Shop kann gerade keine Mitgliedschaften öffnen",
@@ -1465,6 +1485,11 @@ const it: MembershipWords = {
       title: "Troppe richieste per ora",
       body: "Per evitare che questo modulo venga usato per intasare la casella di posta di qualcuno, accetta un numero limitato di richieste all'ora. Riprova tra un'ora.",
     },
+    // The way out past a store's month (lib/essential-exit.ts): per connection and member a day, per store a month.
+    daily: {
+      title: "Troppe richieste di questo tipo",
+      body: "Non è stato modificato nulla. Perché una persona o un negozio non esaurisca il resto, questo accetta un numero limitato alla volta. Riprova domani. Se compare di nuovo questo messaggio, rispondi all'email di conferma del tuo ordine: arriva al negozio, che può annullare la tua iscrizione per te.",
+    },
     unavailable: {
       title: "Questo negozio non può aprire abbonamenti in questo momento",
       body: "I suoi pagamenti non sono collegati a Stripe in questo momento, quindi da questa pagina non c'è nessun abbonamento da aprire. Rispondi all'email di conferma del tuo ordine e arriverà al negozio.",
@@ -1817,6 +1842,11 @@ const nl: MembershipWords = {
       title: "Even te veel aanvragen",
       body: "Om te voorkomen dat dit formulier wordt gebruikt om iemands inbox te overspoelen, neemt het maar een beperkt aantal aanvragen per uur aan. Probeer het over een uur opnieuw.",
     },
+    // The way out past a store's month (lib/essential-exit.ts): per connection and member a day, per store a month.
+    daily: {
+      title: "Te veel aanvragen van dit soort",
+      body: "Er is niets gewijzigd. Zodat één persoon of één winkel de rest niet opmaakt, neemt dit maar een beperkt aantal tegelijk aan. Probeer het morgen opnieuw. Staat dit er dan nog, beantwoord dan de bevestigingsmail van je bestelling: die komt bij de winkel aan, die je lidmaatschap voor je kan opzeggen.",
+    },
     unavailable: {
       title: "Deze winkel kan nu geen lidmaatschappen openen",
       body: "De betalingen zijn nu niet aan Stripe gekoppeld, dus er is via deze pagina geen lidmaatschap te openen. Beantwoord de bevestigingsmail van je bestelling, dan komt je bericht bij de winkel aan.",
@@ -2165,6 +2195,11 @@ const pt: MembershipWords = {
     limited: {
       title: "Demasiados pedidos por agora",
       body: "Para evitar que este formulário seja usado para inundar a caixa de entrada de alguém, aceita um número limitado de pedidos por hora. Tente novamente dentro de uma hora.",
+    },
+    // The way out past a store's month (lib/essential-exit.ts): per connection and member a day, per store a month.
+    daily: {
+      title: "Demasiados pedidos deste tipo",
+      body: "Nada foi alterado. Para que uma pessoa ou uma loja não esgote o resto, isto aceita um número limitado de cada vez. Tente novamente amanhã. Se continuar a aparecer, responda ao email de confirmação da sua encomenda: a mensagem chega à loja, que pode cancelar a sua subscrição por si.",
     },
     unavailable: {
       title: "Esta loja não pode abrir subscrições neste momento",

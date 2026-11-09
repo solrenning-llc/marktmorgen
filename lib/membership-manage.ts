@@ -24,6 +24,8 @@
 import { saleHandles } from "@/lib/store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { admitExit, exitConnection, pastFigure } from "@/lib/essential-exit";
+import { forceAllowance, takeAllowance } from "@/lib/store-allowance";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
@@ -172,7 +174,7 @@ function senderAddress(): string {
   return (match ? match[1] : NIMBUS_FROM).trim();
 }
 
-export type ManageRequest = "sent" | "email" | "limited" | "unavailable" | "error";
+export type ManageRequest = "sent" | "email" | "limited" | "daily" | "unavailable" | "error";
 
 export type Grant = {
   /** The connected account the membership is on. */
@@ -207,6 +209,15 @@ export async function requestManageLink(input: {
   const customer = await findMember(store, email);
   if (!customer) return "sent";
 
+  // The way out is essential (lib/essential-exit.ts): one of the store's access emails while it has them, and past
+  // them the member's day and the store's month of these links, counted on the same figure; never refused by it.
+  const taken = await takeAllowance(store, "transactional", 1);
+  if (!taken.ok) {
+    const past = await pastFigure(store, `${store.stripeAccountId}|${customer}`, "link");
+    if (past !== "ok") return past === "daily" ? "daily" : "error";
+    if (!(await forceAllowance(store, "transactional", 1))) return "error";
+  }
+
   const token = randomToken();
   const grant: Grant = { a: store.stripeAccountId as string, c: customer, h: store.handle };
   await redisPipeline([
@@ -216,7 +227,8 @@ export async function requestManageLink(input: {
   const name = store.name;
   const link = `${origin}/@${store.handle}/manage?token=${token}`;
   const m = membershipWords(store.language);
-  const sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
+  // Counted above, so sent on the company's meter: a second count would refuse it at the figure.
+  const sent = await sendEmail({ meter: { by: "company" },
     from: `"${m.fromName(displayName(name))}" <${senderAddress()}>`,
     to: email,
     subject: m.membershipWith(name),
@@ -245,6 +257,31 @@ function parseGrant(raw: unknown): Grant | null {
   } catch {
     return null;
   }
+}
+
+/** Whether a press or page on the way out may go on: "expired" for a link that is not good here. */
+export type ManageAdmission = { ok: true; grant: Grant } | { ok: false; reason: "expired" | "daily" | "error" };
+
+/**
+ * A press of Cancel, Open, Pause or Resume, or a member's page drawn with its
+ * link (lib/essential-exit.ts): counted per connection, then the link read,
+ * before anything of the store's is spent, so an invented link spends none of
+ * it; then one of the store's buyer requests, or past its month the member's
+ * and the store's own figures. Never refused by the store's month.
+ */
+export async function admitManage(store: Store, token: string, address: string): Promise<ManageAdmission> {
+  if (!MANAGE_TOKEN_PATTERN.test(token)) return { ok: false, reason: "expired" };
+  const door = await exitConnection(store, address);
+  if (door !== "ok") return { ok: false, reason: door === "daily" ? "daily" : "error" };
+  let grant: Grant | null;
+  try {
+    grant = await grantOf(store, token);
+  } catch {
+    return { ok: false, reason: "error" };
+  }
+  if (!grant) return { ok: false, reason: "expired" };
+  const admitted = await admitExit(store, `${grant.a}|${grant.c}`);
+  return admitted === "ok" ? { ok: true, grant } : { ok: false, reason: admitted === "daily" ? "daily" : "error" };
 }
 
 /** Whether an emailed link is still good, without spending it. For the page. */

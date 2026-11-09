@@ -1,9 +1,8 @@
-import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { countLeave } from "@/lib/leave-flow";
-import { MANAGE_TOKEN_PATTERN } from "@/lib/membership-manage";
+import { MANAGE_TOKEN_PATTERN, admitManage } from "@/lib/membership-manage";
 import { pauseMembership, resumeMembership } from "@/lib/membership-pause";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
@@ -55,7 +54,10 @@ export async function POST(request: NextRequest) {
     });
 
   if (!MANAGE_TOKEN_PATTERN.test(token)) return back("expired");
-  if (!(await withinStore("manage-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store, "buyer"))) return back("limited");
+  // The way out is essential: the link is read before anything of the store's is spent, and the store's month
+  // counts it but never refuses it (lib/membership-manage.ts admitManage, lib/essential-exit.ts).
+  const admitted = await admitManage(store, token, clientAddress(request));
+  if (!admitted.ok) return back(admitted.reason);
 
   if (action === "resume") {
     const result = await resumeMembership(store, token, subscription);

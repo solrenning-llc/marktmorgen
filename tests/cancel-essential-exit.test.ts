@@ -158,9 +158,15 @@ async function main(): Promise<void> {
     const text = read(page);
     is(`${page}: admitted as a way out before the memberships are read`, text.includes("admitManage(") && text.indexOf("admitManage(") < text.indexOf("membershipsFor("), true);
   }
-  for (const [page, reading] of [["app/[handle]/manage/card/page.tsx", "cardGrant("], ["app/[handle]/manage/switch/page.tsx", "previewSwitch("], ["app/[handle]/renew/[product]/page.tsx", "readListing("]] as const) {
+  // What a buyer has never rests (tests/traffic.test.ts), so the member's card and switch pages are counted as the way
+  // out is, before Stripe is read; the come-back page, outside it, rests with the store's month.
+  for (const [page, counter, reading] of [
+    ["app/[handle]/manage/card/page.tsx", "admitMemberPage(", "cardView(store, grant)"],
+    ["app/[handle]/manage/switch/page.tsx", "admitManage(", "previewSwitch(store"],
+    ["app/[handle]/renew/[product]/page.tsx", 'isResting(store, undefined, "buyer")', "readListing("],
+  ] as const) {
     const text = read(page);
-    is(`${page}: counted as a buyer's request before it reads`, text.includes('isResting(store, undefined, "buyer")') && text.indexOf('isResting(store, undefined, "buyer")') < text.indexOf(reading), true);
+    is(`${page}: counted as a buyer's request before it reads`, text.includes(counter) && text.indexOf(counter) < text.indexOf(reading), true);
   }
 
   part("The cost of the way out is priced, and its counters classified");

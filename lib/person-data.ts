@@ -155,6 +155,10 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/store-join.ts", how: "erased", via: "lib/erasure-index.ts", what: "Their sign-up confirmation links" },
   { file: "lib/buyer-orders.ts", how: "expires", days: 1, what: "A link to their purchases already emailed works for 24 hours" },
   { file: "lib/membership-manage.ts", how: "expires", days: 1, what: "A link to manage their membership already emailed works for an hour" },
+  // LEVE 5 of the audit of 9 November 2026: the card link and the payment emails' marks were not said here.
+  { file: "lib/card-update.ts", how: "erased", via: "lib/erasure-index.ts", what: "A link to change the card on their membership, emailed when a payment failed or a card was about to stop working, which names that membership" },
+  { file: "lib/card-update.ts", how: "expires", days: 21, what: "How many times a card link was pressed, and for two days the Stripe page last opened from it; neither names an address" },
+  { file: "lib/payment-recovery.ts", how: "kept", what: "The marks that an email about a failed payment or a card went out for a membership: Stripe's ids for the invoice, the membership and the card, with when, and no address, for up to 400 days", why: "They keep the same payment email from going out twice; they hold no address or name, and go by themselves" },
   { file: "lib/request-guard.ts", how: "expires", days: 32, what: "Counts that limit how often one address may ask for things, kept as one-way hashes for at most 32 days" },
   { file: "lib/buyer-library.ts", how: "erased", what: "The note that they bought from your store, used for their library across stores" },
   { file: "lib/buyer-library.ts", how: "expires", days: 1, what: "A link to their library across stores works for 24 hours" },

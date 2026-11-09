@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { cardGrant, cardView } from "@/lib/card-update";
+import { admitMemberPage, pageAddress } from "@/lib/essential-exit";
 import { speech } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
 
@@ -38,6 +39,11 @@ export default async function CardPage({ params, searchParams }: Params) {
   const token = typeof query.t === "string" ? query.t : "";
   const status = typeof query.status === "string" ? query.status : "";
   const grant = token ? await cardGrant(store, token) : null;
+  // One of the store's buyer requests (MÉDIO 4 of the audit of 9 November 2026), before Stripe is read for it: what a
+  // buyer has never rests (tests/traffic.test.ts), so past the store's month it is the way out's own figures for the
+  // member the link names (lib/essential-exit.ts), and past those the member's page says so ("daily").
+  const admitted = grant ? await admitMemberPage(store, await pageAddress(), `${grant.a}|${grant.c}`) : null;
+  if (admitted && admitted !== "ok") redirect(`/@${store.handle}/manage?status=${admitted === "daily" ? "daily" : "error"}`);
   const view = grant ? await cardView(store, grant) : null;
   const say = speech(store);
   const m = membershipWords(store.language);

@@ -47,6 +47,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { EXIT_LINKS_PER_STORE_MONTH, EXIT_PRESSES_PER_STORE_MONTH } from "@/lib/essential-exit-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
@@ -795,6 +796,14 @@ export const TEAM_COMMANDS_PER_VIEW = 2;
 
 /** Windows of a counter that a 31-day month can touch. */
 export const DAY_WINDOWS = 32;
+/** Calls to the creator's Stripe account one press on the way out makes at its worst: the list, the reason, the set-up and the session, the last two again once (lib/membership-manage.ts openCancel). */
+export const EXIT_STRIPE_CALLS = 6;
+/** One press or page on the way out past the store's window (line member-exit): its call, its Stripe calls waited on, its commands and up to twenty listings read. */
+export const EXIT_PRESS_USD = request("light", 40, 20 * PUBLIC_LISTING_BYTES + 8_000) + EXIT_STRIPE_CALLS * (STRIPE_TIMEOUT_MS / 1000) * MEMORY_SECOND;
+/** One link to manage a membership past the store's access emails: the email, its token, its counts. */
+export const EXIT_LINK_USD = PER_EMAIL + 12 * COMMAND + 400 * DB_BYTE;
+/** The commands a card link's note for deletion adds (lib/erasure-index.ts noteForErasure). */
+export const CARD_NOTE_COMMANDS = 3;
 
 /** CX-61: two bounded provider reads, independent of released-name history.
  * Vercel's official regional table read 2026-11-04 has a highest memory rate
@@ -970,6 +979,25 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
     ],
     basis: "The plan's access emails, each at the most an email costs and its count; taken from the store's window before sending, refused past it.",
+  },
+  {
+    id: "member-exit",
+    feature: "A member's way out past the store's own figures: Cancel, Stripe's billing page, Pause or Resume, the member's pages that list them, and the emailed link to them, counted but never refused by the store's month (ALTO 2 of the audit of 9 November 2026); and the card link noted for deletion with the person (LEVE 5)",
+    monthlyUsd: (tier) => EXIT_PRESSES_PER_STORE_MONTH * EXIT_PRESS_USD + EXIT_LINKS_PER_STORE_MONTH * EXIT_LINK_USD + STORE_ALLOWANCES[tier].email * CARD_NOTE_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/essential-exit-rules.ts", names: ["EXIT_PRESSES_PER_STORE_MONTH", "EXIT_LINKS_PER_STORE_MONTH", "EXIT_PER_MEMBER_DAY", "EXIT_PER_CONNECTION_DAY"] },
+      { file: "lib/essential-exit.ts", names: ["essentialLimitState(\"exit-ip\"", "essentialLimitState(\"exit-member\"", "essentialLimitState(\"exit-store\"", "takePublicRequest(store, \"buyer\", now)"] },
+      { file: "lib/membership-manage.ts", names: ["export async function admitManage", "pastFigure(store, `${store.stripeAccountId}|${customer}`, \"link\")", "forceAllowance(store, \"transactional\", 1)", "takeAllowance(store, \"transactional\", 1)"] },
+      { file: "app/api/store/manage/cancel/route.ts", names: ["admitManage(store, token, clientAddress(request))"] },
+      { file: "app/api/store/manage/open/route.ts", names: ["admitManage(store, token, clientAddress(request))"] },
+      { file: "app/api/store/manage/pause/route.ts", names: ["admitManage(store, token, clientAddress(request))"] },
+      { file: "app/[handle]/manage/page.tsx", names: ["admitManage(store, asked,", "takePublicRequest(store, \"buyer\").catch(() => false)"] },
+      { file: "app/[handle]/manage/leave/page.tsx", names: ["admitManage(store, token,"] },
+      { file: "app/[handle]/manage/card/page.tsx", names: ["admitMemberPage(store,"] },
+      { file: "app/[handle]/manage/switch/page.tsx", names: ["admitManage(store, token,", "takePublicRequest(store, \"buyer\").catch(() => null)"] },
+      { file: "lib/card-update.ts", names: ["noteForErasure(to.statsId, to.email, key)"] },
+    ],
+    basis: "Past the store's window, a press or a member's page is taken from EXIT_PRESSES_PER_STORE_MONTH of the store's month, each at the most one costs (EXIT_PRESS_USD): Cancel's billing page with its offer, made again once when refused, EXIT_STRIPE_CALLS calls to the creator's Stripe account each waited on for STRIPE_TIMEOUT_MS at 2 GB, and the member's page with up to twenty memberships' listings read; past its access emails a link is taken from EXIT_LINKS_PER_STORE_MONTH, each an email at the most one costs and its counts (EXIT_LINK_USD). One member takes at most EXIT_PER_MEMBER_DAY of each a day and one connection EXIT_PER_CONNECTION_DAY presses, so neither uses up the store's. Inside the window and the figure they are the public-requests and transactional-email lines, as before. Finding the member behind a typed address is unchanged and not counted here. Each card email notes its link for deletion with three commands more (CARD_NOTE_COMMANDS), at the store's email figure; the note's bytes are the data room's erase index (tests/store-data-registry.ts). Counts that cannot be made refuse, never let through.",
   },
   {
     id: "store-email",
@@ -1535,6 +1563,8 @@ export function nonPayingWorst(): number {
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
     + ["calendar-feed", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
+    // Its members' way out past its figures (lib/essential-exit.ts), at Store's.
+    + creator("member-exit")
     // Its students' work and its community's pictures, kept for the trial and then to its closing day (lib/plan-closing.ts).
     + ((TRIAL_TASK_ROOM_BYTES + TRIAL_COMMUNITY_PICTURES * PICTURE_BYTES) / GB) * STORAGE_PER_GB * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30)
     // Its data room, and what it keeps outside it at Store's figures, which are more than a trial's, for the trial and to its closing day
@@ -1691,6 +1721,10 @@ export const SCOPES: Record<string, ScopeClass> = {
   "podcast-feed": line("visits"), "<dynamic:allowance[0]>": line("visits"),
   "<dynamic:scope>": guard("withinStore and withinService pass their scope on to withinLimit (lib/metered-limits.ts)."),
   "<dynamic:scope: string>": guard("The definitions of withinLimit, withinMonth, withinStore and withinService themselves (lib/request-guard.ts, lib/metered-limits.ts)."),
+  // A member's way out (lib/essential-exit.ts): the store's month past its figure is priced; the rest only bound it.
+  "exit-store": line("member-exit"),
+  "exit-member": BURST("member-exit"),
+  "exit-ip": guard("A member's way out, per connection a day, before the emailed link is read: two commands, a company cost as the other per-connection guards; past it nothing of the store's is spent."),
   api: line("rest-api"), "studio-essential": line("studio"), "studio-paused": line("studio"), "bundle-picker": line("studio"),
   // Sign-in and account security.
   join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "passkey-remove-locked": ACCOUNT, "move-ask": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
@@ -1706,7 +1740,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   // Public requests: counted in the store's window as well (lib/metered-limits.ts, withinStore).
   "ads-event": PUBLIC, "aff-join": PUBLIC, "aff-open": PUBLIC, "book-move": PUBLIC, "cart-read": PUBLIC, "come-back": PUBLIC, "course-start": PUBLIC,
   "discord-join": PUBLIC, download: PUBLIC, "orders-bundle": PUBLIC, "orders-older": PUBLIC, "form-ip": PUBLIC, heard: PUBLIC, "join-ip": PUBLIC, "manage-card": PUBLIC, "manage-card-back": PUBLIC,
-  "manage-leave": PUBLIC, "manage-open": PUBLIC, "move-open": PUBLIC, "podcast-link-ip": PUBLIC, review: PUBLIC, "review-view": PUBLIC,
+  "manage-leave": PUBLIC, "move-open": PUBLIC, "podcast-link-ip": PUBLIC, review: PUBLIC, "review-view": PUBLIC,
   "store-search": PUBLIC, "thanks-view": PUBLIC, "tier-switch": PUBLIC, tip: PUBLIC, "pay-request": PUBLIC, "pay-request-view": PUBLIC, "agreement-sign": PUBLIC, "agreement-view": PUBLIC, "waitlist-ip": PUBLIC, "welcome-open": PUBLIC,
   "course-start-order": BURST("public-requests"), "review-order": BURST("public-requests"), "join-address": BURST("public-requests"),
   "waitlist-address": BURST("public-requests"), "numbers-link": BURST("public-requests"), preview: BURST("public-requests"),
@@ -1754,6 +1788,9 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "app/api/cron/mail-check/route.ts": COMPANY, "app/api/cron/monthly/route.ts": COMPANY, "app/api/cron/stripe-check/route.ts": COMPANY,
   "app/api/cron/usage/route.ts": COMPANY, "app/api/cron/weekly/route.ts": COMPANY, "lib/account-notice.ts": COMPANY, "lib/auth.ts": COMPANY,
   "lib/billing-reminders.ts": COMPANY, "lib/passkeys.ts": COMPANY, "lib/plan-closing.ts": COMPANY, "lib/closing-buyers.ts": COMPANY, "lib/closing-plan-guard.ts": COMPANY, "lib/plan-refund-flow.ts": COMPANY, "lib/plan-pause.ts": COMPANY,
+  // The link to manage a membership (lib/membership-manage.ts): taken from the store's access emails before it is sent,
+  // past them a member's way out (lib/essential-exit.ts, line member-exit), so it goes on the company's meter, uncounted twice.
+  "lib/membership-manage.ts": COMPANY,
   "lib/recovery-address.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/takedown.ts": COMPANY,
   "lib/trial-nudges.ts": COMPANY, "lib/two-step.ts": COMPANY, "lib/verify-mail.ts": COMPANY, "lib/yearly-offer.ts": COMPANY,
   "lib/inbound-mail.ts": ["store", "company"],
@@ -1768,7 +1805,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
   "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE,
   "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
-  "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-manage.ts": STORE, "lib/membership-pause.ts": STORE,
+  "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-pause.ts": STORE,
   "lib/payment-recovery.ts": STORE, "lib/podcast-access.ts": STORE, "lib/quiet-sales.ts": STORE, "lib/store-contact.ts": STORE,
   "lib/store-join.ts": STORE, "lib/team.ts": STORE, "lib/api-key-pause.ts": STORE, "lib/tier-switch.ts": STORE, "lib/waitlist.ts": STORE,
   "lib/welcome-offer-send.ts": STORE, "lib/winback-send.ts": STORE, "lib/yearly-ask.ts": STORE, "lib/yearly-switch.ts": STORE,

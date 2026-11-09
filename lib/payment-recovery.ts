@@ -445,7 +445,7 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     const value = claimValue();
     if ((await claimMark(key, CARD_SENT_SECONDS, value)) !== "ours") continue;
     try {
-      const token = await cardLink(account, customer, subId);
+      const token = await cardLink(account, customer, subId, { statsId: store.statsId, email });
       const mail = cardNoticeEmail({
         storeName: store.name,
         title: titles.get(sub.metadata?.product ?? "") || null,

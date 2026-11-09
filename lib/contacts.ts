@@ -249,12 +249,21 @@ export async function upsertContact(
     const now = new Date().toISOString();
     const wasMailable = before ? mailable(before) : false;
     // Somebody deleted from this store is kept, by a fingerprint, from being
-    // written to again: only their own yes, given now, lifts it. A purchase
-    // without the box still records the purchase, as anyone's does.
+    // written to again: only their own yes, given after the deletion, lifts it.
+    // A purchase without the box, made after it, still records the purchase, as
+    // anyone's does.
     const deleted = wasSuppressed(erased);
     // Deleted between an earlier read and its write: what was read before the deletion is never written after it.
     if (deletedAtFirst === null) deletedAtFirst = deleted;
     else if (deleted && !deletedAtFirst) return none;
+    // When they were deleted: the mark holds the second (lib/suppression.ts, suppressCommand), read exactly only for
+    // an address that has one. Gone between the two reads: read again.
+    const mark = deleted ? await textOrNil(["HGET", suppressedKey(listId), suppressionPrint(listId, email)], "when an address was deleted") : null;
+    if (deleted && mark === null) continue;
+    // What this call writes happened when `at` says (the order, the tick), or now. Something from before the
+    // deletion, or from the same second, is never written after it: a thank-you page of an older order reloaded, a
+    // download link opened again. A mark in another shape is not known to be older, so nothing is written either.
+    if (deleted && !afterDeletion(mark, input.at || now)) return none;
     const ownYes = input.agreed && input.explicit;
     const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
     // A yes only undoes an unsubscribe when it was given after it: a thank-you
@@ -300,7 +309,7 @@ export async function upsertContact(
     if (agreed && !before?.agreed) rest.push(["INCR", agreedKey(listId)]);
     if (resubscribe) rest.push(["DECR", unsubKey(listId)]);
     if (input.sid) rest.push(...joinedCommands(input.sid, email));
-    const written = await writeContactIf(listId, email, raw, deleted, next, deleted && ownYes, rest, room);
+    const written = await writeContactIf(listId, email, raw, mark, next, deleted && ownYes, rest, room);
     if (written) return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
     // Changed meanwhile: what it took of the room goes back, and it is read again.
     await settleContacts(room, [{ before, next }], [false]);
@@ -312,10 +321,22 @@ export async function upsertContact(
 const CONTACT_WRITE_TRIES = 3;
 
 /**
- * A contact's row written only while it and the address's deleted mark are as read, in one step: KEYS[1] the
- * list, KEYS[2] the store's deleted marks (lib/suppression.ts); ARGV[1] the address, ARGV[2] the SHA-1 of its row
- * as read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark, ARGV[5] "1" when it existed when
- * read and "0" when not, ARGV[6] "1" to lift it with the write (their own yes). Answers 1 written, 0 changed.
+ * Whether something that happened at `at` (an ISO time) is after the deletion whose mark holds `mark`, the second
+ * it was written: only from the next whole second on, since the deletion may have been made at any moment of its
+ * own. Anything not read exactly (a mark that is not a count of seconds, a time that does not parse) is not after.
+ */
+function afterDeletion(mark: string | null, at: string): boolean {
+  if (mark === null || !/^(0|[1-9][0-9]{0,15})$/.test(mark)) return false;
+  const when = Date.parse(at);
+  return Number.isFinite(when) && when >= (Number(mark) + 1) * 1000;
+}
+
+/**
+ * A contact's row written only while it and the address's deleted mark hold what was read, in one step: KEYS[1]
+ * the list, KEYS[2] the store's deleted marks (lib/suppression.ts); ARGV[1] the address, ARGV[2] the SHA-1 of its
+ * row as read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark, ARGV[5] the SHA-1 of the mark's
+ * value as read ("" for none), ARGV[6] "1" to lift it with the write (their own yes, given after the deletion).
+ * Answers 1 written, 0 changed.
  */
 const CONTACT_WRITE_IF = [
   // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
@@ -324,7 +345,10 @@ const CONTACT_WRITE_IF = [
   'local seen = ""',
   "if cur then seen = redis.sha1hex(cur) end",
   "if seen ~= ARGV[2] then return 0 end",
-  'if tostring(redis.call("HEXISTS", KEYS[2], ARGV[4])) ~= ARGV[5] then return 0 end',
+  'local held = redis.call("HGET", KEYS[2], ARGV[4])',
+  'local markSeen = ""',
+  "if held then markSeen = redis.sha1hex(held) end",
+  "if markSeen ~= ARGV[5] then return 0 end",
   'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
   'if ARGV[6] == "1" then redis.call("HDEL", KEYS[2], ARGV[4]) end',
   "return 1",
@@ -332,7 +356,7 @@ const CONTACT_WRITE_IF = [
 
 /**
  * Writes one contact's row, the lifting of its deleted mark when `lift`, and `rest` (counters, the stores the
- * address joined), only while the row is still `raw` and the mark still `erased` (consent audit of 9 November
+ * address joined), only while the row is still `raw` and the mark still `mark` (consent audit of 9 November
  * 2026: a read and then a plain HSET wrote an unsubscribe, a complaint or a deletion made in between over).
  * An order's are written by lib/order-data.ts and charged there at what they add, all in one script
  * (ORDER_WRITE_IF_SAME); anybody else's row in CONTACT_WRITE_IF, then `rest`. True when written, false when the
@@ -344,7 +368,8 @@ async function writeContactIf(
   listId: string,
   email: string,
   raw: string | null,
-  erased: boolean,
+  /** The address's deleted mark as read, null for none. */
+  mark: string | null,
   next: Contact,
   lift: boolean,
   rest: (string | number)[][],
@@ -355,18 +380,19 @@ async function writeContactIf(
   const print = suppressionPrint(listId, email);
   const value = JSON.stringify(next);
   const was = typeof raw === "string" ? sha1(raw) : "";
+  const markWas = mark === null ? "" : sha1(mark);
   if (room && isOrderRoom(room) && dataKey(room.order)) {
     const commands: (string | number)[][] = [["HSET", key, email, value], ...(lift ? [liftCommand(listId, email)] : []), ...rest];
-    return (await orderWriteIfSame(room.order, [{ key, field: email, sha1: was }, { key: marks, field: print, exists: erased }], commands)) !== null;
+    return (await orderWriteIfSame(room.order, [{ key, field: email, sha1: was }, { key: marks, field: print, sha1: markWas }], commands)) !== null;
   }
   let written: boolean;
   try {
-    const result = repliesFor(await redisPipeline([["EVAL", CONTACT_WRITE_IF, 2, key, marks, email, was, value, print, erased ? "1" : "0", lift ? "1" : "0"]]), 1)?.[0];
+    const result = repliesFor(await redisPipeline([["EVAL", CONTACT_WRITE_IF, 2, key, marks, email, was, value, print, markWas, lift ? "1" : "0"]]), 1)?.[0];
     if (result !== 0 && result !== 1) throw new Error("unexpected answer");
     written = result === 1;
   } catch {
-    const read = repliesFor(await redisPipeline([["HGET", key, email], ["HEXISTS", marks, print]]), 2);
-    if (!read || read[0] !== value || (lift && read[1] !== 0)) throw new UnknownReplyError("a contact's write");
+    const read = repliesFor(await redisPipeline([["HGET", key, email], ["HGET", marks, print]]), 2);
+    if (!read || read[0] !== value || (lift ? read[1] !== null : read[1] !== mark)) throw new UnknownReplyError("a contact's write");
     written = true;
   }
   if (written && rest.length) {
@@ -926,7 +952,7 @@ async function textOrNil(command: (string | number)[], what: string): Promise<st
  */
 export async function readUnsubToken(
   token: string,
-): Promise<{ listId: string; email: string; handle: string; contact: Contact } | null> {
+): Promise<{ listId: string; email: string; handle: string; contact: Contact; raw: string } | null> {
   if (!UNSUB_TOKEN.test(token) || !isRedisConfigured()) return null;
   const raw = await textOrNil(["GET", tokenKey(token)], "an unsubscribe link");
   if (raw === null) return null;
@@ -940,30 +966,42 @@ export async function readUnsubToken(
   if (!email) return null;
   const row = await textOrNil(["HGET", leadsKey(listId), email], "the contact behind an unsubscribe link");
   const contact = parseContact(row);
-  return contact && contact.t === token ? { listId, email, handle, contact } : null;
+  return contact && row !== null && contact.t === token ? { listId, email, handle, contact, raw: row } : null;
 }
 
 /**
- * Takes an address off the list for good. Safe to press twice. Done only on
- * the row's HSET answering exactly 0 or 1 (CX-123 rule 24); any other answer,
- * or a read of the link in another shape, throws, and the door says "try
- * again", never "Unsubscribed." (app/api/mail/unsubscribe).
+ * Takes an address off the list for good. Safe to press twice. The row is
+ * written only over the one read (CAS_HSET), so a deletion, a complaint or a
+ * purchase noted in the same moment is never written over, and a person
+ * deleted meanwhile is never written back (consent audit of 9 November 2026):
+ * their row gone, the deletion has already done what the press asked, and the
+ * mark that keeps them off stays. Done only on the script answering exactly 1
+ * (written) or 0 (changed meanwhile, read again); any other answer, a write
+ * that throws, or a read of the link in another shape throws, and the door
+ * says "try again", never "Unsubscribed." (app/api/mail/unsubscribe, CX-123
+ * rule 24).
  */
 export async function unsubscribe(token: string): Promise<{ listId: string; email: string } | null> {
-  const found = await readUnsubToken(token);
-  if (!found) return null;
-  const { listId, email, contact } = found;
-  if (contact.unsub) return { listId, email };
-  // Leaving takes back the permission to see their link use as well.
-  const { clicks: _left, ...kept } = contact;
-  void _left;
-  const next: Contact = { ...kept, unsub: true, unsubAt: new Date().toISOString() };
-  const commands: (string | number)[][] = [["HSET", leadsKey(listId), email, JSON.stringify(next)]];
-  if (contact.agreed) commands.push(["INCR", unsubKey(listId)]);
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
-  const written = replies ? countOf(replies[0]) : null;
-  if (written === null || written > 1) throw new UnknownReplyError("an unsubscribe's write");
-  return { listId, email };
+  let first: { listId: string; email: string } | null = null;
+  for (let round = 0; round < CONTACT_WRITE_TRIES; round += 1) {
+    const found = await readUnsubToken(token);
+    // Gone since the first read (deleted, or its link replaced): nothing is written back, and nobody is written to.
+    if (!found) return first;
+    const { listId, email, contact, raw } = found;
+    first = { listId, email };
+    if (contact.unsub) return first;
+    // Leaving takes back the permission to see their link use as well.
+    const { clicks: _left, ...kept } = contact;
+    void _left;
+    const next: Contact = { ...kept, unsub: true, unsubAt: new Date().toISOString() };
+    const reply = repliesFor(await redisPipeline([["EVAL", CAS_HSET, 1, leadsKey(listId), email, sha1(raw), JSON.stringify(next)]]), 1)?.[0];
+    const each = repliesFor(reply, 1);
+    if (!each || (each[0] !== 0 && each[0] !== 1)) throw new UnknownReplyError("an unsubscribe's write");
+    if (each[0] === 0) continue;
+    if (contact.agreed) await redisPipeline([["INCR", unsubKey(listId)]]);
+    return first;
+  }
+  throw new Error("a contact kept changing while it was unsubscribed");
 }
 
 /**

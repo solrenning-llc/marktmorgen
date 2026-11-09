@@ -25,7 +25,7 @@ const orderWriteAt = (c: (string | number)[] | undefined): number => {
   if (c?.[0] !== "EVAL") return -1;
   const keys = Number(c[2]);
   if (String(c[1]).startsWith("-- marktmorgen:order-write:v1")) return 3 + keys;
-  if (String(c[1]).startsWith("-- marktmorgen:order-write-if-same:v1")) return 4 + keys + 4 * Number(c[3 + keys]);
+  if (String(c[1]).startsWith("-- marktmorgen:order-write-if-same:v1")) return 4 + keys + 3 * Number(c[3 + keys]);
   return -1;
 };
 import { installSesMailFixture } from "./ses-mail-fixture";

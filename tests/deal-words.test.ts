@@ -178,8 +178,9 @@ is("a look-alike that confusables.txt reads as a letter with a mark is read as t
 is("so the table has them", [table.get(0x03b7), table.get(0x13eb), table.get(0xabbb)], ["n", "o", "o"]);
 
 part("Final review: a sentence that starts right after a dot with a word that is also a domain ending");
+// Changed 9 Nov 2026 (audit ALTO 1, rule 23): "Twelve" is a figure in words now held to the facts, so the facts of that case say "Twelve lessons."; it still tests "Live" after a dot.
 is("honest replies pass", [
-  heldToFacts("Uma aula.Eu gostei.", "Aula."), heldToFacts("Muito bom.Se quiser, pergunte.", "Aula."), heldToFacts("Twelve lessons.Live sessions too.", "Lessons."),
+  heldToFacts("Uma aula.Eu gostei.", "Aula."), heldToFacts("Muito bom.Se quiser, pergunte.", "Aula."), heldToFacts("Twelve lessons.Live sessions too.", "Twelve lessons."),
   heldToFacts("Lessons.Top quality.", "Lessons."), heldToFacts("That was great.It's fun.", probe), heldToFacts("That was great.It\nhelps.", probe), heldToFacts("That was great.It", probe),
   heldToFacts("Ottimo corso.Io lo consiglio.", "Corso."), heldToFacts("Goede cursus.Net als vorig jaar.", "Cursus."),
 ], [true, true, true, true, true, true, true, true, true]);

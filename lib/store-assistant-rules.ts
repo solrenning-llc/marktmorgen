@@ -313,6 +313,30 @@ const DEAL_TERMS = [
   // Portuguese
   "descontos?", "cup(?:om|ons)", "cup(?:[aã]o|[oõ]es)", "ofertas? limitadas?", "[uú]ltima oportunidade", "s[oó] hoje", "frete gr[aá]tis", "depoimentos?",
   "testemunhos?", "cinco estrelas", "mais vendid[oa]s?",
+  // Something for nothing, a price cut, a bonus, a saving or a result multiplied, and scarcity, added 9 November 2026
+  // (audit ALTO 1: "half price", "free today" and "double their savings" were shown). Each term's longest run of
+  // letters is one it cannot match without (anchorOf), so its quick check never skips it; a term the facts hold is allowed.
+  // English
+  "free(?<![\\p{L}\\p{N}][\\-\\u2010\\u2011]free)(?<!feel free)(?! to )", "complimentary", "no charge", "no extra cost", "at no cost", "half[- ]?price",
+  "half[- ]?off", "bonus(?:es)?", "doubl(?:e|es|ed|ing)(?![- ]?(?:check|click|tap)\\p{L}*)", "tripl(?:e|es|ed|ing)", "twice (?:as|the|your|their)",
+  "save up to", "save over", "save more", "save money", "save big", "save on", "savings?", "cheap(?:er|est)", "lowest price", "special (?:offers?|prices?|deals?)",
+  "flash sales?", "clearance", "bogo", "buy one get one", "limited offers?", "limited editions?", "limited spots", "limited seats", "limited places",
+  "limited stock", "limited availability", "limited supply", "few left", "only one left", "almost gone", "selling out", "while supplies last",
+  "while stocks? lasts?", "while (?:it|they) lasts?", "before it'?s gone", "now or never", "price (?:goes|will go) up", "won't last",
+  // Spanish
+  "gratis", "gratuit(?:o|a|os|as|amente)", "sin costo", "sin coste", "sin cargo", "mitad de precio", "medio precio", "bonificacion(?:es)?",
+  "de regalo", "ahorr\\p{L}*", "el doble", "doble de", "ofertas? especial(?:es)?", "por tiempo limitado", "quedan pocos?", "pocas unidades",
+  // French
+  "gratuit\\p{L}*", "moitie prix", "en cadeau", "economis\\p{L}*", "le double", "offres? speciales?", "prix special", "duree limitee", "stock limite",
+  // German
+  "kostenlos\\p{L}*", "umsonst", "halbe[nr]? preis\\p{L}*", "geschenkt", "spar(?:en|e|st|t)", "verdopp\\p{L}*", "doppelt so", "sonderpreis\\p{L}*",
+  "nur fur kurze zeit", "begrenzt\\p{L}*",
+  // Italian
+  "omaggio", "in regalo", "meta prezzo", "risparmi\\p{L}*", "il doppio", "raddoppi\\p{L}*", "prezzo speciale", "offerta speciale", "tempo limitato",
+  // Dutch
+  "kosteloos", "halve prijs", "voor de helft", "bespaar\\p{L}*", "besparing\\p{L}*", "verdubbel\\p{L}*", "speciale prijs", "beperkte tijd", "op is op",
+  // Portuguese
+  "sem custo", "metade do preco", "meio preco", "brindes?", "de presente", "economiz\\p{L}*", "o dobro", "dobr(?:a|am|ar|e|ou)", "preco especial",
 ].filter((term, i, all) => all.indexOf(term) === i);
 /** Between the words of a term: any run of spaces (a line break, a no-break space) or a hyphen of any kind. */
 const BETWEEN = "[\\s\\-\\u2010-\\u2015]+";
@@ -504,6 +528,145 @@ function numberForms(n: string): string[] {
   const digits = n.replace(/[.,]/g, "");
   const whole = /^(.*)[.,]0{1,2}$/.exec(n);
   return whole ? [digits, whole[1].replace(/[.,]/g, "")] : [digits];
+}
+/**
+ * What each number word is worth, folded, in the seven store languages: a
+ * value added to the number being read, or (MULTIPLIERS) a hundred or a
+ * thousand that multiplies it. Every NUMBER_PIECES word and article is here,
+ * so a number the pattern finds can always be read (tests/assistant-honest-and-capped.test.ts).
+ */
+const PIECE_VALUES: Record<string, number> = {
+  // English
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
+  fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fourty: 40, fifty: 50, sixty: 60,
+  seventy: 70, eighty: 80, ninety: 90,
+  // Spanish
+  uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12, trece: 13, catorce: 14,
+  quince: 15, dieci: 10, veinte: 20, veinti: 20, treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90,
+  cien: 100, quinientos: 500, setecientos: 700, novecientos: 900,
+  // French
+  deux: 2, trois: 3, quatre: 4, cinq: 5, sept: 7, huit: 8, neuf: 9, dix: 10, onze: 11, douze: 12, treize: 13, quatorze: 14, quinze: 15,
+  seize: 16, vingt: 20, vingts: 20, trente: 30, quarante: 40, cinquante: 50, soixante: 60, septante: 70, octante: 80, huitante: 80, nonante: 90,
+  // German
+  eins: 1, zwei: 2, zwo: 2, drei: 3, vier: 4, funf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9, zehn: 10, elf: 11, zwolf: 12, sechzehn: 16,
+  siebzehn: 17, zwanzig: 20, dreissig: 30, "drei\u00dfig": 30, vierzig: 40, funfzig: 50, sechzig: 60, siebzig: 70, achtzig: 80, neunzig: 90,
+  // Italian
+  due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, undici: 11, dodici: 12, tredici: 13, quattordici: 14,
+  quindici: 15, sedici: 16, diciassette: 17, diciotto: 18, diciannove: 19, venti: 20, vent: 20, trenta: 30, trent: 30, quaranta: 40, quarant: 40,
+  cinquanta: 50, cinquant: 50, sessanta: 60, sessant: 60, settanta: 70, settant: 70, ottanta: 80, ottant: 80, novanta: 90, novant: 90,
+  // Dutch
+  twee: 2, drie: 3, vijf: 5, zes: 6, zeven: 7, negen: 9, tien: 10, twaalf: 12, dertien: 13, veertien: 14, vijftien: 15, zestien: 16, zeventien: 17,
+  achttien: 18, negentien: 19, twintig: 20, dertig: 30, veertig: 40, vijftig: 50, zestig: 60, zeventig: 70, tachtig: 80, negentig: 90,
+  // Portuguese
+  dois: 2, duas: 2, quatro: 4, sete: 7, oito: 8, dez: 10, doze: 12, treze: 13, dezesseis: 16, dezasseis: 16, dezessete: 17, dezassete: 17,
+  dezoito: 18, dezenove: 19, dezanove: 19, vinte: 20, quarenta: 40, sessenta: 60, oitenta: 80, cem: 100, duzentos: 200, duzentas: 200,
+  trezentos: 300, trezentas: 300, quinhentos: 500, quinhentas: 500,
+  // Articles that are the number one inside a number ("einundzwanzig", "vingt et un")
+  un: 1, une: 1, una: 1, ein: 1, eine: 1, een: 1, um: 1, uma: 1,
+};
+const MULTIPLIERS: Record<string, number> = {
+  hundred: 100, hundreds: 100, ciento: 100, cientos: 100, cent: 100, cents: 100, hundert: 100, cento: 100, honderd: 100,
+  thousand: 1_000, thousands: 1_000, mil: 1_000, mille: 1_000, milles: 1_000, tausend: 1_000, mila: 1_000, duizend: 1_000,
+};
+/**
+ * Pieces that are also a common word of another store language ("once" in
+ * English, "due" and "sei" in English and Italian, "neuf" for new, "cent" in
+ * "per cent"): a figure only inside a number of several pieces or next to a
+ * unit (a price, a period, a percentage), never alone.
+ */
+const AMBIGUOUS_PIECES = new Set(["once", "due", "sei", "neuf", "cent", "cents", "vent"]);
+/** Every word a number in words is made of, longest first, and the joins between them. */
+const NUMBER_TOKENS = [...new Set([...Object.keys(PIECE_VALUES), ...Object.keys(MULTIPLIERS), ...NUMBER_JOINS])].sort((a, b) => b.length - a.length);
+/** The number words a piece of folded text is made of, in order, joins and separators left out; null when they cannot be told apart. */
+function numberTokens(text: string, from = 0, tried = new Map<number, string[] | null>()): string[] | null {
+  if (from >= text.length) return [];
+  // Each position is read once (tried), so the time grows only with the length of the number.
+  if (tried.has(from)) return tried.get(from)!;
+  let found: string[] | null = null;
+  if (/[\s\-\u2010-\u2015]/u.test(text[from])) found = numberTokens(text, from + 1, tried);
+  else {
+    for (const token of NUMBER_TOKENS) {
+      if (!text.startsWith(token, from)) continue;
+      const rest = numberTokens(text, from + token.length, tried);
+      if (rest) { found = NUMBER_JOINS.includes(token) ? rest : [token, ...rest]; break; }
+    }
+  }
+  tried.set(from, found);
+  return found;
+}
+/**
+ * The value of a number in words, as one figure, or null when it cannot be
+ * read: pieces are added, a hundred multiplies what comes before it, a
+ * thousand closes a group ("deux mille trois cents" is 2,300), and the
+ * French "quatre-vingt" is four twenties.
+ */
+function numberValue(tokens: string[]): number | null {
+  let total = 0, current = 0;
+  tokens.forEach((token, i) => {
+    const multiplier = MULTIPLIERS[token];
+    if (multiplier === 100) current = (current || 1) * 100;
+    else if (multiplier === 1_000) { total += (current || 1) * 1_000; current = 0; }
+    else if ((token === "vingt" || token === "vingts") && tokens[i - 1] === "quatre") current += 80 - 4;
+    else current += PIECE_VALUES[token] ?? Number.NaN;
+  });
+  const value = total + current;
+  return Number.isSafeInteger(value) ? value : null;
+}
+const NUMBER_WORDS_FOUND = new RegExp(`${WORD_EDGE_BEFORE}${NUMBER_WORD}${WORD_EDGE_AFTER}`, "gu");
+/** A figure's unit, read from the words around it: money, a percentage, a unit of time, or none ("plain"). */
+const MONEY_BEFORE = /(?:\p{Sc}|(?<![\p{L}\p{N}])(?:usd|eur|gbp|brl|chf|cad|aud))\s?$/u;
+const MONEY_AFTER = /^\s?(?:\p{Sc}|(?:dollars?|bucks|usd|euros?|eur|pounds?|gbp|reais|real|brl|francs?|chf|cad|aud|dolares|dolar|pfund|sterlin[ae]|centavos?|centimos?|centimes?|cents?)(?![\p{L}\p{N}]))/u;
+const PERCENT_AFTER = /^\s?(?:%|(?:percent|per[\s-]?cent|por[\s-]?ciento|pour[\s-]?cent|prozent|per[\s-]?cento|procent|por[\s-]?cento|pct)(?![\p{L}\p{N}]))/u;
+/** Units of time (TIME_UNITS) by what they measure, so "14 days" is never "14 weeks". */
+const TIME_KINDS: [string, RegExp][] = [
+  ["hour", /^(?:hours?|horas?|heures?|stunden?|or[ae]|uur|uren)(?![\p{L}\p{N}])/u],
+  ["day", /^(?:days?|dias?|jours?|tag(?:e|en|ig\p{L}*)?|giorn[oi]|dag(?:en|s|se)?|daagse)(?![\p{L}\p{N}])/u],
+  ["week", /^(?:weeks?|semanas?|semaines?|wochen?|wochig\p{L}*|settiman[ae]|weken)(?![\p{L}\p{N}])/u],
+  ["month", /^(?:months?|mes(?:es)?|mois|monat(?:e|en|ig\p{L}*)?|mes[ei]|maand(?:en|s)?)(?![\p{L}\p{N}])/u],
+  ["year", /^(?:years?|anos?|ans?|annees?|jahr(?:e|en|ig\p{L}*)?|ann[oi]|jaar|jaren)(?![\p{L}\p{N}])/u],
+  ["minute", /^(?:minutes?|minutos?|minuten?|minuti|minuut)(?![\p{L}\p{N}])/u],
+];
+function figureKind(folded: string, start: number, end: number): string {
+  if (MONEY_BEFORE.test(folded.slice(Math.max(0, start - 5), start))) return "money";
+  const after = folded.slice(end, end + 24);
+  if (MONEY_AFTER.test(after)) return "money";
+  if (PERCENT_AFTER.test(after)) return "percent";
+  const unit = after.replace(/^[\s\-\u2010-\u2015]+/u, "");
+  for (const [kind, find] of TIME_KINDS) if (find.test(unit)) return kind;
+  return "plain";
+}
+/** French numbers that a hundred follows ("deux cents"): there, "cents" is a hundred, not the coin. */
+const FRENCH_HUNDREDS = new Set(["deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"]);
+/** A figure in a text: the forms its value is written in, and what it counts (figureKind). */
+type Figure = { forms: string[]; kind: string };
+/**
+ * Every figure in a folded text, in digits or in words of any store
+ * language, with what it counts. "One" alone, and an ambiguous piece alone
+ * with no unit beside it (AMBIGUOUS_PIECES), is a word, not a figure. A
+ * number in words that cannot be read is a figure no fact holds ("?").
+ */
+function figuresIn(folded: string): Figure[] {
+  const figures: Figure[] = [];
+  for (const m of folded.matchAll(NUMBERS)) figures.push({ forms: numberForms(m[0]), kind: figureKind(folded, m.index, m.index + m[0].length) });
+  if (!/\p{L}/u.test(folded)) return figures;
+  for (const m of folded.matchAll(NUMBER_WORDS_FOUND)) {
+    let tokens = numberTokens(m[0]);
+    let end = m.index + m[0].length;
+    // "fifty cents": an English number, then the coin, is money, not five thousand.
+    if (tokens && tokens.length > 1 && (tokens.at(-1) === "cent" || tokens.at(-1) === "cents") && !FRENCH_HUNDREDS.has(tokens.at(-2)!)) {
+      tokens = tokens.slice(0, -1);
+      end = m.index + m[0].lastIndexOf("cent");
+    }
+    const kind = figureKind(folded, m.index, end);
+    if (tokens && tokens.length === 1 && kind === "plain" && (PIECE_VALUES[tokens[0]] === 1 || AMBIGUOUS_PIECES.has(tokens[0]))) continue;
+    const value = tokens ? numberValue(tokens) : null;
+    figures.push({ forms: [value === null ? "?" : String(value)], kind });
+  }
+  return figures;
+}
+/** Whether a text writes a figure, in digits or in words of any store language (the reminder's line may write none). */
+export function writesAFigure(text: string): boolean {
+  return figuresIn(foldedText(text)).length > 0;
 }
 const LINK = /\b(?:https?:\/\/|www\.)\S+/i;
 
@@ -784,9 +947,15 @@ export function heldToFacts(raw: string, facts: string): boolean {
   for (const site of sitesIn(raw)) {
     if (!factSites.has(site)) return false;
   }
-  const factNumbers = new Set((factsFolded.match(NUMBERS) ?? []).flatMap(numberForms));
-  for (const n of folded.match(NUMBERS) ?? []) {
-    if (!numberForms(n).some((form) => factNumbers.has(form))) return false;
+  // Every figure, in digits or in words, is one the facts hold: the same value, and the same unit when the reply gives
+  // one, so "14 days" in the facts allows "fourteen days" but never "$14" nor "14 weeks".
+  const factFigures = new Map<string, Set<string>>();
+  for (const figure of figuresIn(factsFolded)) {
+    // A number in words the facts hold but that cannot be read ("?") allows nothing.
+    for (const form of figure.forms) if (form !== "?") factFigures.set(form, (factFigures.get(form) ?? new Set<string>()).add(figure.kind));
+  }
+  for (const figure of figuresIn(folded)) {
+    if (!figure.forms.some((form) => { const kinds = factFigures.get(form); return kinds !== undefined && (figure.kind === "plain" || kinds.has(figure.kind)); })) return false;
   }
   const held = dealWordsOf(reply, store);
   if (held !== "hidden") return held === "held";

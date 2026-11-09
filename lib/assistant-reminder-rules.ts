@@ -51,7 +51,7 @@
  * Stripe calls around it are ASSIST_REMIND_REQUEST_UNITS of the store's
  * public requests.
  */
-import { ASSISTANT_OUTPUT_TOKENS, ASSISTANT_PRODUCTS, DEAL_WORDS, MAX_ASSISTANT_REPLY, heldToFacts } from "@/lib/store-assistant-rules";
+import { ASSISTANT_OUTPUT_TOKENS, ASSISTANT_PRODUCTS, DEAL_WORDS, MAX_ASSISTANT_REPLY, heldToFacts, writesAFigure } from "@/lib/store-assistant-rules";
 import { MAX_CART } from "@/lib/cart-rules";
 
 /** What the creator sets in the studio: whether the box is offered at checkout. Off until they switch it on. */
@@ -107,7 +107,7 @@ const PRESSURE =
 
 /**
  * The model's line as it may be sent, or "" when it may not: one line,
- * bounded, no digit, link, exclamation or quotation of a deal, no pressure
+ * bounded, no figure in digits or words, link, exclamation or quotation of a deal, no pressure
  * word in any language the store speaks, and nothing the products' own words
  * do not hold (heldToFacts).
  */
@@ -115,7 +115,8 @@ export function neutralLine(raw: unknown, facts: string): string {
   if (typeof raw !== "string") return "";
   const text = raw.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().replace(/^["“'«]+|["”'»]+$/g, "").trim();
   if (!text || text.length > MAX_ASSIST_REMIND_LINE) return "";
-  if (/\d/.test(text) || /[!¡]/.test(text) || /https?:|www\.|@/.test(text)) return "";
+  // No figure at all, in digits or in words of any store language ("ten thousand cooks", "five hours a week").
+  if (/\d/.test(text) || writesAFigure(text) || /[!¡]/.test(text) || /https?:|www\.|@/.test(text)) return "";
   if (DEAL_WORDS.test(text) || PRESSURE.test(text)) return "";
   if (!heldToFacts(text, facts)) return "";
   return text.slice(0, MAX_ASSISTANT_REPLY);

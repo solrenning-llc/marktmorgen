@@ -322,9 +322,10 @@ export type AssistantAnswer =
   | { ok: false; reason: "off" | "question" | "spent" | "failed" };
 
 /**
- * Answers one message. The month's pool is reserved at this request's worst
- * cost before the model is asked; settled at what the model billed when it
- * answers; given back whole when the provider refused before doing any work;
+ * Answers one message. The month's pool is reserved at a message's worst
+ * cost before the store's facts are read or the model is asked; settled at
+ * what the model billed when it answers; settled at what the reads cost when
+ * it stops before the model or the provider refused before doing any work;
  * kept whole when it may have billed and gave nothing back (a timeout).
  */
 export async function askAssistant(input: { store: Store; token?: unknown; text: unknown; facts?: string; now?: number }): Promise<AssistantAnswer> {
@@ -350,22 +351,38 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
   // No key on this deployment: the question can still be left for the creator.
   if (!modelKeySet()) return { ok: false, reason: "spent" };
 
-  const facts = input.facts ?? (await readAssistantFacts(store));
-  const request = assistantRequest(store, facts, before, text);
-  if (!request) return { ok: false, reason: "failed" };
-  const modelHold = aiRequestHoldMicroUsd(ASSISTANT_MODEL, { inputBytes: request.inputBytes, blocks: 1, media: null, maxTokens: ASSISTANT_OUTPUT_TOKENS });
-  if (modelHold === null) return { ok: false, reason: "failed" };
-  const hold = Math.min(assistantMessageWorstMicroUsd(), modelHold + assistantMessageExtraMicroUsd());
-
-  const reserved = await pool("reserve", store.statsId, window.id, hold, assistantPoolMicroUsd());
+  // The month's pool is asked first, at a message's worst, before anything of the catalog is read: a spent pool refuses
+  // for one command, and every read of the store's products and pages is paid from the pool, so no question costs
+  // what the add-on's month does not hold (audit ALTO 2, 9 Nov 2026: refused questions read the catalog unpriced).
+  const statsId = store.statsId;
+  const hold = assistantMessageWorstMicroUsd();
+  const reserved = await pool("reserve", statsId, window.id, hold, assistantPoolMicroUsd());
   if (reserved === 0) return { ok: false, reason: "spent" };
   if (reserved !== 1) return { ok: false, reason: "failed" };
+  // Stopped before the model: what this message read of the store is spent (its commands and bytes, at their most);
+  // facts handed in were read by the caller, so then it all goes back.
+  const readOnly = () =>
+    input.facts === undefined ? pool("settle", statsId, window.id, hold, assistantMessageExtraMicroUsd()) : pool("release", statsId, window.id, hold);
+
+  let facts: string;
+  try {
+    facts = input.facts ?? (await readAssistantFacts(store));
+  } catch (error) {
+    await readOnly();
+    throw error;
+  }
+  const request = assistantRequest(store, facts, before, text);
+  const modelHold = request && aiRequestHoldMicroUsd(ASSISTANT_MODEL, { inputBytes: request.inputBytes, blocks: 1, media: null, maxTokens: ASSISTANT_OUTPUT_TOKENS });
+  if (!request || modelHold === null || modelHold + assistantMessageExtraMicroUsd() > hold) {
+    await readOnly();
+    return { ok: false, reason: "failed" };
+  }
 
   const answered = await postToModel(request.body, ASSISTANT_TIMEOUT_MS);
   if (!answered.ok) {
-    // Refused with an error status: nothing was billed, so it all goes back. Otherwise it may have been: kept.
-    if (answered.billed) await pool("settle", store.statsId, window.id, hold, hold);
-    else await pool("release", store.statsId, window.id, hold);
+    // Refused with an error status: the model billed nothing, but the reads were made. Otherwise it may have billed: kept.
+    if (answered.billed) await pool("settle", statsId, window.id, hold, hold);
+    else await readOnly();
     return { ok: false, reason: "failed" };
   }
   const settled = Math.min(hold, assistantSettledMicroUsd(answered.data.usage));
@@ -384,7 +401,9 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
   // Not known, or not shown. When the model said it did not know, the creator sees the question; never who asked.
   if (json && json.status === "unknown") {
     await redisPipeline([
-      ["LPUSH", missedKey(store.statsId), JSON.stringify({ q: text, at: Math.floor(now / 1000) })],
+      // Kept as the model read it (forAi): an address, a phone number or a link typed into the question is not kept
+      // for the creator, who never learns who asked (audit MEDIUM 1, 9 Nov 2026).
+      ["LPUSH", missedKey(store.statsId), JSON.stringify({ q: forAi(text, 600), at: Math.floor(now / 1000) })],
       ["LTRIM", missedKey(store.statsId), 0, ASSISTANT_MISSED_KEPT - 1],
       ["EXPIRE", missedKey(store.statsId), ASSISTANT_MISSED_SECONDS],
     ]).catch((error) => console.error("keeping an unanswered question failed", error));

@@ -287,8 +287,9 @@ async function main(): Promise<void> {
   is("past the pool, nothing is asked of the model: the chat becomes the creator's form", [spent.ok ? "answered" : spent.reason, asked.length], ["spent", callsBefore]);
   is("the studio sees none left", (await assistantLeft(store, now))?.left, 0);
   is("and the question can still be left for the creator, at no AI cost", (await handToCreator({ store, email: "late@example.com", text: "Is there a printed version?", now })).ok, true);
-  // Two at once with room for exactly one.
-  await redis.pipeline([["HSET", `nl:assist:pool:${store.statsId}:${window.id}`, "spent", String(assistantPoolMicroUsd() - Math.max(holdOf("Is it a PDF?"), holdOf("Is it printable?")) - 1)]]);
+  // Two at once with room for exactly one. Changed 9 Nov 2026 (audit ALTO 2, rule 23): the pool is reserved at a message's
+  // worst before the facts are read (the request's own size is not known yet), so "room for one" is the worst plus one.
+  await redis.pipeline([["HSET", `nl:assist:pool:${store.statsId}:${window.id}`, "spent", String(assistantPoolMicroUsd() - worst - 1)]]);
   const both = await Promise.all([askAssistant({ store, text: "Is it a PDF?", facts, now }), askAssistant({ store, text: "Is it printable?", facts, now })]);
   is("two at once with room for one: one is answered, one is told the month is used", both.map((r) => (r.ok ? "answered" : r.reason)).sort(), ["answered", "spent"]);
 

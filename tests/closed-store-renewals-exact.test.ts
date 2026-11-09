@@ -213,7 +213,7 @@ async function main() {
     // left it: the pass reaches an end with members still running, and that end is never taken for the last.
     const r = await runs(many(5_000, "active", "Live"), "offset", 12);
     is("pages that shift as stopped ones leave: never done while one runs", r.doneTooEarly, false);
-    is("and every one is stopped within 12 runs", { finished: r.finished, running: r.running }, { finished: true, running: 0 });
+    is("and every one is stopped, in 6 runs", { finished: r.finished, running: r.running, ran: r.ran }, { finished: true, running: 0, ran: 6 });
     is("at most 50 searches a run", r.mostSearches <= 50, true);
   }
 

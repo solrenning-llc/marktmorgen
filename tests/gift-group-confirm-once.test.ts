@@ -100,6 +100,7 @@ async function main(): Promise<void> {
     const second = await outcome(confirmPurchase(store, one.s.id, one.s as never));
     const afterSecond = await held(one.hour);
     is("the first run confirms and gives its own room back once", [first, afterFirst], ["sent", one.before - 1]);
+    is("the run after it tells again (M1's path, under the same email keys) and answers sent", second, "sent");
     is("the run after it never gives back another checkout's room", afterSecond, one.before - 1);
 
     part(`${kind}: M1, the record's last write lands with its reply in another shape, so the first run throws`);

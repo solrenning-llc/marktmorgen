@@ -50,7 +50,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
-  "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
+  "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:", "nl:confirm-room:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
@@ -239,6 +239,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:cm:": E, "nl:cm:evmail:": X(30), "nl:cm:evmailq": I, "nl:cm:evq": I, "nl:cm:link:": X(1),
   "nl:cm:mail:": X(30), "nl:cm:mailq": I, "nl:cm:rl:": E, "nl:cm:unsub:": T("nl:cm:"),
   "nl:confirm:": X(40),
+  // A checkout whose admitted room was given back, once (lib/purchase-email.ts), an hour past its held hours.
+  "nl:confirm-room:": X(2),
   "nl:contract-reserve:v1": C,
   // A store copy's progress, named by the receiving store (lib/store-copy.ts), seven days; its one-step lock, a minute.
   "nl:copy:": er(7), "nl:copy:lock:": X(1),

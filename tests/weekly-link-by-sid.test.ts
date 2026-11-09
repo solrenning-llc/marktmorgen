@@ -308,6 +308,18 @@ async function main(): Promise<void> {
     is("no file signs a stop link for the address itself", byAddress, []);
   }
 
+  part("The pages never offer a stop by replying: nothing reads the replies (VR 2)");
+  {
+    const nowhere = await press(addressLink("gone-nowhere"), "off");
+    is("an address that leads nowhere: nothing is changed", nowhere.status, 404);
+    is("its page offers the newest email's link, not a reply", [/repl(y|ying)/i.test(nowhere.page), /newest/.test(nowhere.page)], [false, true]);
+    const unknown = await weeklyPage(new NextRequest(`${ORIGIN}/api/store/weekly?h=x&t=nope`, { headers: { host: HOST } }));
+    const text = await unknown.text();
+    is("a link not recognized: its page offers the newest email's link, not a reply", [unknown.status, /repl(y|ying)/i.test(text), /newest/.test(text)], [400, false, true]);
+    const route = readFileSync(join(process.cwd(), "app/api/store/weekly/route.ts"), "utf8");
+    is("no text of the stop page promises a stop by replying", /by replying|replying to/i.test(route), false);
+  }
+
   part("Nothing left the process but the emails");
   is("no other request", elsewhere, []);
 }

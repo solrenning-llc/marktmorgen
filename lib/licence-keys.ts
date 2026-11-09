@@ -669,10 +669,11 @@ export function storeHasKeys(store: Store): boolean {
  * claude5/licence-refunds-combined, HIGH 2: a pending refund revoked the key
  * at once and was read, so one that then failed left a paid sale's key
  * revoked for good). A succeeded refund that is only part of the charge
- * counts as pending while another refund of that charge is on its way (one
- * GET /refunds?charge= inside the same lookups, asked only when the charge
- * reads refunded in full and this refund alone does not cover it; Claude 2's
- * focal money review of #2868, HIGH). A dispute Stripe closed as lost takes
+ * counts as pending while another refund of that charge is on its way, for
+ * a row of the pages and a kept refund read back alike (one GET
+ * /refunds?charge= inside the same lookups, above the same reserve, asked
+ * only when the charge reads refunded in full and this refund alone does not
+ * cover it; Claude 2's focal money review of #2868, HIGH). A dispute Stripe closed as lost takes
  * the key back as a full refund does (queue 388 [TB14]): the disputes closed
  * since the last run are read with the first page of refunds, from Stripe's
  * closing events, so a lost dispute revokes within the same five minutes;
@@ -965,7 +966,9 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     const undone = !givesBack && undoneRow(refund);
     if (!givesBack && !undone) return "nothing";
     // A full refund not yet through: the keyless sale is marked pending, and the refund stays unread until it settles.
-    const pending = givesBack && refund.object !== "dispute" && refund.status === "pending";
+    // A succeeded part of a full refund whose rest is still pending counts as pending too (below), the one rule for a
+    // row of the pages and a kept refund read back alike.
+    let pending = givesBack && refund.object !== "dispute" && refund.status === "pending";
     // Asked with the row's batch (seenOf), before any visit of it.
     if (seenBefore.has(id)) {
       // Read by an earlier run: a kept refund read back is let go now.
@@ -1026,6 +1029,25 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         if (plan && handles.has(plan.meta.store ?? "")) sales.push({ reference: plan.session, products: deliveredIds(plan.meta) });
       } else return "later";
     } else return "later";
+
+    // A succeeded refund that is only part of a charge read as refunded in full (Stripe counts a refund still pending
+    // in amount_refunded) takes nothing back while another refund of that charge is on its way: it may still fail,
+    // and a key revoked then stays revoked on a sale mostly paid. All of the charge's refunds are read (one lookup,
+    // from the run's own lookups above the same reserve); while one is on its way the sale is held exactly like a
+    // pending refund, and anything unknown keeps the refund unread (Claude 2's focal money review of #2868 at
+    // 9fa5c95602, HIGH). Asked of a kept refund read back as of a row of the pages: a kept one held so is moved
+    // behind the others due (requeueHeld). A single refund of the whole charge, and a lost dispute, need no read.
+    if (sales.length > 0 && givesBack && !pending && refund.object !== "dispute" && !wholeOnItsOwn(refund)) {
+      if (lookups <= reserve) return "later";
+      lookups -= 1;
+      try {
+        if ((await chargeRefundsSettled(account, refund)) === "held") pending = true;
+      } catch (error) {
+        if (!(error instanceof StripeListUnreadable)) throw error;
+        console.error("reading the refunds of a refunded charge failed", store.handle, error);
+        return "held";
+      }
+    }
 
     // The refund is marked read only once every key it takes back is revoked for sure: a reply in an unknown shape
     // throws UnknownReplyError, and the refund stays unread for the next run (sweep A3 finding 2, CX-123 rule 24).

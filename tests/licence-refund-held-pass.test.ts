@@ -57,9 +57,12 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 
 type Status = "requires_action" | "pending" | "succeeded" | "failed";
 /** A refund as Stripe gives it, its charge expanded: `full` when the charge is refunded in full. */
+// Regra 23: the row now carries its own amount, as every refund Stripe sends does: a refund of the whole charge is whole
+// on its own. Without it the job reads the charge's refunds first (#2868's 5bb167d833, merged here); no assertion changed.
 const refundRow = (id: string, pi: string, created: number, status: Status, full: boolean): Row => ({
   id,
   object: "refund",
+  amount: 2900,
   created,
   status,
   payment_intent: pi,

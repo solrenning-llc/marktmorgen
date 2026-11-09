@@ -45,6 +45,10 @@ const byId = new Map<string, Row>();
 let events: Row[] = [];
 /** The charges whose own refunds were read (GET /refunds?charge=). */
 const chargeReads: string[] = [];
+/** Payments of offers taken in one click: GET /payment_intents/{id} answers them with the offer's metadata. */
+const upsellPayments: Record<string, Row> = {};
+/** Every Stripe lookup a run spends from its REFUND_LOOKUPS: checkouts, payments, invoices and a charge's refunds. */
+let lookupsSpent = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -55,6 +59,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     const found = byId.get(one[1]);
     return found ? answer(found) : answer({ error: { message: "No such refund" } }, 404);
   }
+  if (path === "/checkout/sessions" || path === "/invoices" || /^\/payment_intents\//.test(path) || (path === "/refunds" && url.searchParams.has("charge"))) lookupsSpent += 1;
   if (path === "/refunds" && url.searchParams.has("charge")) {
     // A charge's own refunds, as they stand now (a kept one as GET /refunds/{id} answers it), the charge as its id.
     const charge = url.searchParams.get("charge") ?? "";
@@ -83,7 +88,10 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     if (unreadablePayments.has(intent)) return answer({ object: "list", data: "not a list", has_more: false });
     return list(sessionsByPayment[intent] ?? []);
   }
-  if (/^\/payment_intents\/pi_/.test(path)) return answer({ id: path.split("/").pop(), object: "payment_intent", metadata: {} });
+  if (/^\/payment_intents\/pi_/.test(path)) {
+    const id = path.split("/").pop() ?? "";
+    return answer({ id, object: "payment_intent", metadata: upsellPayments[id] ?? {} });
+  }
   return list([]);
 }) as typeof fetch;
 
@@ -300,6 +308,41 @@ async function main(): Promise<void> {
   is("p: the $19 fails: the key of a sale mostly paid stays valid", await checkKey(store, app, pKey), "valid");
   is("q: the $19 fails: the pending mark is cleared, and the paid sale gets its key", ((await keyForSale(store, app, q.reference, "buyer@example.com")) as { state?: string } | null)?.state, "issued");
   is("r: the $19 goes through: the key is revoked, the $10 read and let go", [await checkKey(store, app, rKey), await seenOf(r.id), await keptIds()], ["revoked", 1, []]);
+
+  part("The kept refunds' reads of a charge's refunds come from the run's lookups, above what is kept for the pass");
+  // Three kept $10 refunds of offers (no checkout: the checkout, then the payment, then the charge's refunds: three
+  // lookups each), a fourth of a checkout, then ten full refunds in the window that need one lookup each. The kept ones
+  // may spend only REFUND_LOOKUPS less PASS_LOOKUPS (20 - 10): the fourth's charge read is left for a later run, and the
+  // ten of the window are all handled in the same run.
+  await fresh();
+  const offers = ["61", "62", "63"].map((n) => {
+    const pi = `pi_LicHeldEnded0${n}`;
+    upsellPayments[pi] = { kind: "upsell", store: "licheldended", product: app.id };
+    return { reference: pi, pi, id: `re_LicHeldEnded0${n}` };
+  });
+  const fourth = sale("64");
+  const window = Array.from({ length: 10 }, (_, i) => sale(`7${i}`));
+  const keysOf = async (sales: { reference: string }[]) =>
+    Promise.all(sales.map(async (s) => ((await keyForSale(store, app, s.reference, "buyer@example.com")) as { key?: string } | null)?.key ?? ""));
+  const keptKeys = await keysOf([...offers, fourth]);
+  const windowKeys = await keysOf(window);
+  const keptCreated = NOW - 7_000;
+  const keptSales = [...offers, fourth];
+  await keepThenPass(keptSales.map((s) => ({ ...s, created: keptCreated })));
+  for (const s of keptSales) {
+    byId.set(s.id, partRow(s.id, s.pi, keptCreated, "succeeded", 1000, chargeOf(s), 2900));
+    // The rest of each charge, still pending, made before the window (so it is not one of its rows).
+    byId.set(`${s.id}N`, partRow(`${s.id}N`, s.pi, keptCreated + 1, "pending", 1900, chargeOf(s), 2900));
+  }
+  listed = window.map((s, i) => refundRow(s.id, s.pi, NOW - 10 - i, "succeeded", true));
+  await due();
+  chargeReads.length = 0;
+  lookupsSpent = 0;
+  const handled = await run();
+  is("the ten full refunds of the window are handled in the same run", [handled, ...(await Promise.all(windowKeys.map((k) => checkKey(store, app, k))))], [10, ...window.map(() => "revoked")]);
+  is("the kept ones read three charges' refunds, the fourth's left for a later run", [...new Set(chargeReads)].sort(), offers.map(chargeOf).sort());
+  is("no lookup past the run's twenty", lookupsSpent <= 20, true);
+  is("every kept key stays valid while the rest of its charge is pending", await Promise.all(keptKeys.map((k) => checkKey(store, app, k))), keptSales.map(() => "valid"));
   done();
 }
 

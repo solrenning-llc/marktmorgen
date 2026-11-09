@@ -74,9 +74,11 @@ const partial = (n: number, created: number): Row => ({
 });
 /** `count` partial refunds of other sales, newest first, all newer than `older`. */
 const partials = (count: number, older: number, tag = 0): Row[] => Array.from({ length: count }, (_, i) => partial(tag * 10_000 + i, older + count - i));
+// Regra 23: the row now carries its own amount, as every refund Stripe sends does: a refund of the whole charge is whole
+// on its own. Without it the job reads the charge's refunds first (#2868's 5bb167d833, merged here); no assertion changed.
 const full = (id: string, pi: string, created: number, status: "succeeded" | "pending" | "failed" = "succeeded"): Row => {
   const back = status !== "failed";
-  return { id, object: "refund", created, status, payment_intent: pi, charge: { object: "charge", amount: 2900, amount_refunded: back ? 2900 : 0, refunded: back } };
+  return { id, object: "refund", amount: 2900, created, status, payment_intent: pi, charge: { object: "charge", amount: 2900, amount_refunded: back ? 2900 : 0, refunded: back } };
 };
 
 let store: Store;

@@ -26,7 +26,8 @@
  */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { type Affiliate, type Line, bookCsv, creditPayPalSale, bookSize, readBook, tierLines } from "@/lib/affiliates";
+import { type Affiliate, type Line, addPayout, bookCsv, creditPayPalSale, bookSize, readBook, tierLines } from "@/lib/affiliates";
+import { buyerLedger } from "@/lib/segments";
 import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
 import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
 import * as commissionView from "@/lib/affiliate-commission-view";
@@ -146,22 +147,27 @@ async function main(): Promise<void> {
   is("the spreadsheet says held, with the refund and the commission unknown, never 0.00", [csvRow.includes("held: partly refunded, amount unknown"), csvRow.includes("unknown,30,unknown"), csvRow.includes("0.00")], [true, true, false]);
   const studio = renderToStaticMarkup(createElement(AffiliateCommissionHistory, { who: new Map([[AFF, { email: "affiliate@example.com" }]]), refundsChecked: true, invoicesChecked: true, lines: heldBook.lines, total: heldBook.lines.length }));
   is("the creator's list says held, not an amount earned", [studio.includes("Held"), studio.includes("$0.00")], [true, false]);
-  is("and says why, and that it stays held", studio.includes("PayPal refunded part of this payment. The amount refunded is not known here, so no commission is paid on it. It stays held."), true);
+  // Rule 23 (pre-review of 3b4b8ac4e1, MEDIUM 1): "It stays held" and "until ... known" promised a reading that never
+  // happens; the words now say only what is true.
+  is("and says why, promising nothing", studio.includes("PayPal refunded part of this payment. The amount refunded can&#x27;t be seen here, so this sale earns nothing."), true);
   is("the affiliate's page has the words in every language", Object.values(AFFILIATES_WORDS).every((w) => typeof w.lineStatus.held === "string" && w.lineStatus.held.length > 0), true);
   is("in English", AFFILIATES_WORDS.en.lineStatus.held, "held: partly refunded, amount unknown");
 
   part("The program's words say what happens to a PayPal sale refunded in part, in every language");
   // VR 2: "a partly refunded one earns on what was kept" is not true for a PayPal sale, which is held instead. Each of
   // the three places that promise it (the affiliate's terms, a partner share, a partner's invitation) says so.
+  // Rule 23 (pre-review of 3b4b8ac4e1, MEDIUM 1): the sentence no longer says "until the amount refunded is known",
+  // which never happens (the amount is not read, and the watch lets the order go after PayPal's 180 days).
   const paypalHeld: Record<string, string> = {
-    en: "A sale paid with PayPal and partly refunded is held, earning nothing, until the amount refunded is known.",
-    es: "Una venta pagada con PayPal y reembolsada en parte queda retenida, sin generar nada, hasta que se conozca el importe reembolsado.",
-    fr: "Une vente payée avec PayPal et partiellement remboursée est retenue, sans rien rapporter, jusqu'à ce que le montant remboursé soit connu.",
-    de: "Ein mit PayPal bezahlter und teilweise erstatteter Verkauf wird zurückgehalten und bringt nichts ein, bis der erstattete Betrag bekannt ist.",
-    it: "Una vendita pagata con PayPal e rimborsata in parte resta trattenuta, senza far guadagnare nulla, finché l'importo rimborsato non è noto.",
-    nl: "Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, wordt vastgehouden en levert niets op tot het terugbetaalde bedrag bekend is.",
-    pt: "Uma venda paga com PayPal e parcialmente reembolsada fica retida, sem gerar nada, até que o valor reembolsado seja conhecido.",
+    en: "A sale paid with PayPal and partly refunded earns nothing, because the amount refunded can't be seen here.",
+    es: "Una venta pagada con PayPal y reembolsada en parte no genera nada, porque aquí no se puede ver el importe reembolsado.",
+    fr: "Une vente payée avec PayPal et partiellement remboursée ne rapporte rien, car le montant remboursé n'est pas visible ici.",
+    de: "Ein mit PayPal bezahlter und teilweise erstatteter Verkauf bringt nichts ein, weil der erstattete Betrag hier nicht sichtbar ist.",
+    it: "Una vendita pagata con PayPal e rimborsata in parte non fa guadagnare nulla, perché qui l'importo rimborsato non è visibile.",
+    nl: "Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, levert niets op, omdat het terugbetaalde bedrag hier niet te zien is.",
+    pt: "Uma venda paga com PayPal e parcialmente reembolsada não gera nada, porque o valor reembolsado não pode ser visto aqui.",
   };
+  is("no language promises the amount will be known", Object.values(AFFILIATES_WORDS).every((w) => !w.termRefunds.includes("until the amount refunded is known") && !w.termRefunds.includes("known")), true);
   is("seven languages", Object.keys(AFFILIATES_WORDS).sort(), Object.keys(paypalHeld).sort());
   for (const [lang, w] of Object.entries(AFFILIATES_WORDS)) {
     const sentence = paypalHeld[lang];
@@ -184,7 +190,10 @@ async function main(): Promise<void> {
   const recruit = { id: "bbbbbbbbbbbb", status: "approved", by: { id: AFF, percent: 10 } } as unknown as Affiliate;
   const inviter = { id: AFF, status: "approved", by: null } as unknown as Affiliate;
   const heldSale: Line = { ref: "paypal:x", pi: `paypal:${CAPTURE}`, aff: recruit.id, at: NOW, product: "", title: "", base: 4900, total: 4900, currency: "usd", rate: 30, self: false, how: "click", refunded: 0, commission: 0, status: "held" };
-  const tier = tierLines([inviter, recruit], [heldSale], new Map());
+  // Called with a fourth argument (the store's statsId) through a wider type, so this line works with today's three
+  // parameters and with claude5/affiliate-tier-self's four (pre-review LEVE 5): an extra argument is ignored by JS.
+  const tiersOf = tierLines as unknown as (everyone: Affiliate[], lines: Line[], flags: Map<string, never>, statsId: string) => Line[];
+  const tier = tiersOf([inviter, recruit], [heldSale], new Map(), SID);
   is("one second-tier line, held, earning nothing payable", tier.map((l) => [l.how, l.status, l.commission]), [["tier2", "held", 0]]);
   part("A partial refund keeps the purchase");
   is("nothing taken back", watched.revoked, 0);
@@ -200,10 +209,21 @@ async function main(): Promise<void> {
   const size = await bookSize(store);
   is("the partial refund is one row counted beforehand", size?.rows, 1);
 
-  part("Looked at again, it is written down once");
+  part("Looked at again, it is written down once, and not written again");
   await redis.pipeline([["ZADD", `nl:ppsell:watch:${SID}`, "0", ORDER]]);
-  await watch();
+  const sent: string[] = [];
+  const plain = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    for (const command of commands) if (String(command[1]).startsWith("nl:ppsell:refunded:")) sent.push(String(command[0]));
+    return plain.call(redis, commands);
+  };
+  try {
+    await watch();
+  } finally {
+    redis.pipeline = plain;
+  }
   is("one mark, not two", await marks(), 1);
+  is("the later look only reads the mark: no ZADD, no EXPIRE", sent, ["ZSCORE"]);
 
   part("Then refunded in full: the known amount, counted once, and the book checked again");
   captures.set(CAPTURE, "REFUNDED");
@@ -218,6 +238,50 @@ async function main(): Promise<void> {
   const whole = await readPayPalRefundsWithCoverage(SID, 0);
   is("the reading is whole again", whole.partial, false);
   is("one refund in full", whole.rows.map((r) => r.capture), [CAPTURE]);
+
+  part("A commission paid before PayPal refunded part of the sale is not taken back from later sales");
+  await setup();
+  captures.set(CAPTURE, "COMPLETED");
+  await watch();
+  await addPayout(store, { aff: AFF, cents: 1470, currency: "usd", date: "2026-10-01", reference: "synthetic" });
+  is("before: nothing owed", (await readBook(store)).rows[0]?.owed, 0);
+  captures.set(CAPTURE, "PARTIALLY_REFUNDED");
+  await redis.pipeline([["ZADD", `nl:ppsell:watch:${SID}`, "0", ORDER]]);
+  await watch();
+  const paidThenPartly = await readBook(store);
+  const paidLine = paidThenPartly.lines.find((l) => l.ref === `paypal:${ORDER}`);
+  is("the affiliate owes nothing back: no automatic deduction", paidThenPartly.rows[0]?.owed, 0);
+  is("the line says paid, partly refunded", [paidLine?.status, paidLine?.commission], ["paid, partly refunded", 1470]);
+  is("the affiliate's page has the words in every language", Object.values(AFFILIATES_WORDS).every((w) => typeof w.lineStatus["paid, partly refunded"] === "string"), true);
+  is("in English", AFFILIATES_WORDS.en.lineStatus["paid, partly refunded"], "paid, partly refunded, amount unknown");
+  const paidCsv = bookCsv(paidThenPartly, paidThenPartly.rows.map((r) => r.affiliate)).split("\n").find((row) => row.includes(`paypal:${ORDER}`)) ?? "";
+  is("the spreadsheet says so, its refund unknown", [paidCsv.includes("paid, partly refunded, amount unknown"), paidCsv.includes("unknown,30,14.70")], [true, true]);
+  const paidStudio = renderToStaticMarkup(createElement(AffiliateCommissionHistory, { who: new Map([[AFF, { email: "affiliate@example.com" }]]), refundsChecked: true, invoicesChecked: true, lines: paidThenPartly.lines, total: paidThenPartly.lines.length }));
+  is("the creator's list says paid, partly refunded, and that nothing is taken back", [paidStudio.includes("Paid, partly refunded, amount unknown"), paidStudio.includes("nothing is taken back from later commissions")], [true, true]);
+  const later: Paid = { ...paid, order: "9O190127TN3647109", capture: "9C679366HH908709", email: "later@example.com", at: NOW + 120 } as Paid;
+  await creditPayPalSale(store, later, "Synthetic course");
+  const afterLater = await readBook(store);
+  is("a later sale is owed in full (Mark as paid opens with it alone)", afterLater.rows[0]?.owed, 1470);
+  is("and offered in full", payableLines(afterLater, new Set()).reduce((sum, line) => sum + line.cents, 0), 1470);
+
+  part("A commission never paid stays held after a payout made after the partial refund");
+  await setup();
+  captures.set(CAPTURE, "PARTIALLY_REFUNDED");
+  await watch();
+  await addPayout(store, { aff: AFF, cents: 500, currency: "usd", date: "2026-10-02", reference: "synthetic" });
+  const notPaid = await readBook(store);
+  is("the sale stays held, earning nothing", notPaid.lines.find((l) => l.ref === `paypal:${ORDER}`)?.status, "held");
+  is("the later payout is not taken for it", notPaid.rows[0]?.owed, -500);
+
+  part("The buyer ledger says the true reason its counts may be off");
+  await setup();
+  captures.set(CAPTURE, "PARTIALLY_REFUNDED");
+  await watch();
+  const ledger = (await buyerLedger({ ...store, pastBuyers: true } as Store)) as unknown as { partial: boolean; more?: boolean; partlyRefunded?: boolean };
+  is("partial, because a PayPal sale was refunded in part, not because there is more to read", [ledger.partial, ledger.more, ledger.partlyRefunded], [true, false, true]);
+  const emailStudio = readFileSync(join(process.cwd(), "components/email-studio.tsx"), "utf8");
+  is("the email studio has the true words for it", emailStudio.includes("Some PayPal sales were refunded in part, and the amount refunded can&apos;t be seen here"), true);
+  is("and the 'more to read' words only when there is more to read", emailStudio.includes('{more ? " There is more to read'), true);
 
   part("Another sale of the same affiliate, not refunded, is paid as usual beside the held one");
   await setup();

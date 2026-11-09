@@ -15,6 +15,11 @@
  * F.   N2 (Claude 1 on #2872): a give-back's two commands run one at a time, and a second taker past the places paid
  *      for runs its whole take between them. No reply is altered. Two places paid for: the count
  *      stays at two, a later address is told full, and only two people hold the product.
+ * G.   Claude 5's pre-review of ea47d9ee, ALTO 1: the grant's request times out (no reply at all) and its write lands
+ *      only after the run read the address back. The mark is kept, never given back on a read that may be stale, so
+ *      two places paid for are held by two people and a third is told full.
+ * H.   Claude 5's pre-review of ea47d9ee, ALTO 2: a place whose grant never landed stays counted for its address; once
+ *      that address's link has run out, the link page sends it a new one (never "full"), and it takes its place.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
@@ -23,7 +28,7 @@ import { askPlace, placesTaken, settleGroup, startGroup, takePlace } from "@/lib
 import { confirmPurchase } from "@/lib/purchase-email";
 import { importedFor } from "@/lib/imported-purchases";
 import { paidPeriod } from "./billing-period-fixture";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -273,6 +278,48 @@ async function main(): Promise<void> {
   is("a fifth address later is told full: never a place more than paid", await take(await f1.link("fy2@example.com")), "full");
   const holders = (await Promise.all(["al2", "bo2", "ce2", "di2", "fy2"].map((x) => owns(`${x}@example.com`)))).filter((o) => o.length).length;
   is("only two people hold the product", holders, 2);
+
+  part("G. ALTO 1: the grant's request times out with no reply and its write lands after the run read the address back");
+  const g1 = await paidGroup(2);
+  const fyToken = await g1.link("fy3@example.com");
+  let late: Command[] | null = null;
+  redis.pipeline = (async (commands: Command[]) => {
+    if (!late && commands.some(isGrant(g1.id))) {
+      late = commands;
+      throw new Error("Redis request timed out");
+    }
+    const replies = await real(commands);
+    // The write in transit lands right after the run's read-back of the address.
+    if (late && commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:imp:buy:"))) {
+      await real(late);
+      redis.pipeline = real;
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  const fy3First = await take(fyToken);
+  restore();
+  const gus3 = await take(await g1.link("gus3@example.com"));
+  const hal3 = await take(await g1.link("hal3@example.com"));
+  const fy3Again = await take(fyToken);
+  is("fy3 not done (rule 24), gus3 taken, hal3 full, then fy3's link reads its landed gift", [fy3First, gus3, hal3, fy3Again], ["threw", "taken", "full", "already"]);
+  is("two places paid for: fy3 and gus3 hold the product, hal3 nothing; two counted", [await owns("fy3@example.com"), await owns("gus3@example.com"), await owns("hal3@example.com"), await placesTaken(g1.id)], [[product.id], [product.id], [], 2]);
+
+  part("H. ALTO 2: the grant never lands, the second place is taken, and the first address's link runs out");
+  const h1 = await paidGroup(2);
+  redis.pipeline = (async (commands: Command[]) => {
+    if (commands.some(isGrant(h1.id))) throw new Error("Redis request timed out");
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const ann = await take(await h1.link("ann4@example.com"));
+  restore();
+  const ben = await take(await h1.link("ben4@example.com"));
+  advance((24 * 60 * 60 + 60) * 1000);
+  sent.length = 0;
+  const annAsk = await ask(h1.id, "ann4@example.com");
+  const fresh = sent.map((e) => /[?&]take=([0-9a-f]{64})/.exec(e.text)?.[1]).find(Boolean) ?? "";
+  is("ann4 not done, ben4 taken; ann4 asks again and is sent a new link, never 'full'", [ann, ben, annAsk, fresh.length], ["threw", "taken", "sent", 64]);
+  is("ann4 takes the place paid for with it, a third address is told full", [await take(fresh), await take(await h1.link("cal4@example.com"))], ["taken", "full"]);
+  is("two places paid for: ann4 and ben4 hold the product; two counted", [await owns("ann4@example.com"), await owns("ben4@example.com"), await owns("cal4@example.com"), await placesTaken(h1.id)], [[product.id], [product.id], [], 2]);
 
   done();
 }

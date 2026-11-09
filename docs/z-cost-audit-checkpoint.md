@@ -1,3 +1,15 @@
+# Codex Z — r33 STOP: new channel bytes unread; own feedback unchanged
+
+Observed2026-11-09 18:41:37UTC (15:41:37Fortaleza). FIRST SAMEcanonical checkpoint COMPLETE856743/blobe0df406e210079f09098f48bd5d1335ac19694c9 obtained; latest r32 STOP read. Entire prior content preserved VERBATIM below with five authored units, heads/candidates, REDs/WIPs and consumed CI/runtime retries. SERIAL Medium ZERO agents, C1coord/C4backup.
+
+Fresh own#2741 FULL20 and#2819 FULL8comments have no created/updated returns after17:38:01UTC. Inbox FULL469783/d98930427fa564e9e2614327e02ad0747a31d4f6 unchanged. Main0e8b8c6b531738d55ae7f60ab96393289cdc2eaa (merge#3288 Claude6/r24-community-notice-size); metadata only, no Zsource/test/integration/current9green or MAINVERDE certification inferred. Five independent R2/C1 holds unchanged, no current officialheads/closure newly certified.
+
+Fresh ROOT messages.md para-claude-1 metadatad1b9e0871400d81af6b4d2d9af7ec5faaa3f8b33 returns emptycontent/SHA-only. ONE exact FULLblob read failed Transport closed. Currentchannelbytes UNREAD, not proof of no novelty/active duplicate/rate403/quota/reset. No retry/fallback/browser/proxy/credential probing or blind stale-prefix append. LastpositiveROOT remains CXZ-20261109-0508-C1-BLOCK commit763b272ef6f5807e20148e6f1ef3a9a921c2ffb6/blob5458dc309799d3938c206b4c431804fba6fdf263 FULL7771392. Required new canal point NOT delivered; don't fabricate receipt. Existing CODEX50 blocker and TODOS51 restrictions retained.
+
+No newreservation/unit/review/proof/source/test/runtime, CIquery/retry/cancel, PRpush/queue/merge, sixthunit/duplicate/foreignbranch/file edits, provider/account/payment/terms/key/contact/PII or price/visiblelimit/commission/flag/gate action. No agents/shell/watchers/background work/automationmutation. Access failure transient, not completedproject/permanenttotalblock. Own canonical checkpoint-only save with currentblob and FULLimmutable readback retains exactstop. NEXTFIRST newest FULLcanonical then fresh ownreturns/main/inbox and FULLcurrentcanal before action; no selfclosing independent holds, inference of execution fromcheckpoint recency, or replay of consumed retries.
+
+---
+
 # Codex Z — r32 STOP: channel transport remains unavailable
 
 Observed2026-11-09 17:38:01UTC (14:38:01Fortaleza). FIRST SAMEcanonical checkpoint COMPLETE854655/blob57e13dd05c9d730686b47fd0be6fc342d7197d40 obtained; latest r31 STOP read. ALL previous content preserved VERBATIM below: five own units/official and candidate heads/REDs/WIPs and exhausted runtime/CI retries remain unchanged. SERIAL Medium ZERO agents, C1coord/C4backup.

@@ -2,7 +2,7 @@
  * What the creator checks under every AI draft before it is saved (756 [STN3],
  * unit 1). The writing box (components/ai-assist.tsx) marks what it filled in
  * as an "AI draft", in words, and lists three checks; a form that saves the
- * draft waits until all three are ticked (components/product-editor.tsx).
+ * draft waits until all three are checked (components/product-editor.tsx).
  * Pure rules: nothing here calls a model, reads or writes anything.
  */
 
@@ -17,14 +17,14 @@ export const AI_DRAFT_CHECKS: readonly { id: "facts" | "picture" | "price"; labe
 ];
 
 /** What the form says when it is asked to save while a draft is not checked yet. */
-export const AI_DRAFT_HOLD = "This has an AI draft you have not checked yet. Tick the three checks under it, then save.";
+export const AI_DRAFT_HOLD = "This has an AI draft you have not checked yet. Check the three boxes under it, then save.";
 
-/** A new draft: none ticked. */
+/** A new draft: none checked. */
 export function freshChecks(): boolean[] {
   return AI_DRAFT_CHECKS.map(() => false);
 }
 
-/** All three ticked, and only then; a list of any other length is never done. */
+/** All three checked, and only then; a list of any other length is never done. */
 export function reviewDone(checks: readonly boolean[]): boolean {
   return checks.length === AI_DRAFT_CHECKS.length && checks.every((ticked) => ticked === true);
 }

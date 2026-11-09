@@ -1280,6 +1280,7 @@
     "components/agent-proposals.tsx",
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",
+    "components/ai-draft-review.tsx",
     "components/ai-posts.tsx",
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",

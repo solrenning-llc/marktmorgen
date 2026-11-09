@@ -861,16 +861,21 @@ function LessonEditor({
   const streams = useContext(Streams);
 
   async function loadText() {
+    onError(null);
     setLoadingText(true);
     try {
       const response = await fetch(`/api/store/course?id=${productId}&lessonId=${lesson.id}`, { cache: "no-store" });
-      const data = (await response.json()) as { ok?: boolean; text?: string };
-      const read = data.ok ? data.text ?? "" : "";
-      setText(read);
-      setSavedText(read);
+      const data = (await response.json()) as { ok?: boolean; text?: unknown };
+      // Only a text that came back as text opens the box: a failed or unknown read
+      // is said, never shown as an empty lesson whose Save would replace the real one.
+      if (!response.ok || data.ok !== true || typeof data.text !== "string") {
+        onError("The lesson text could not be read just now. Try again in a moment.");
+        return;
+      }
+      setText(data.text);
+      setSavedText(data.text);
     } catch {
-      setText("");
-      setSavedText("");
+      onError("The lesson text could not be read just now. Try again in a moment.");
     } finally {
       setLoadingText(false);
     }

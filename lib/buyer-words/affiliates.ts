@@ -159,6 +159,7 @@ const en = {
     "own purchase": "own purchase",
     refunded: "refunded",
     "partly refunded": "partly refunded",
+    held: "held: partly refunded, amount unknown",
   } as Record<string, string>,
   paidByHead: (store: string) => `Paid to you by ${store}`,
 
@@ -474,7 +475,7 @@ const es: AffiliatesWords = {
     `${date} · una venta de alguien que trajiste · ${amount} antes de impuestos · ${percent}${S}%${status ? ` · ${status}` : ""}`,
   saleLine: (date, amount, percent, status) =>
     `${date} · ${amount} antes de impuestos · ${percent}${S}%${status ? ` · ${status}` : ""}`,
-  lineStatus: { "own purchase": "compra propia", refunded: "reembolsada", "partly refunded": "reembolsada en parte" },
+  lineStatus: { "own purchase": "compra propia", refunded: "reembolsada", "partly refunded": "reembolsada en parte", held: "retenida: reembolsada en parte, importe desconocido" },
   paidByHead: (store) => `Lo que te ha pagado ${store}`,
 
   payPalLabel: "Dónde te paga PayPal",
@@ -760,7 +761,7 @@ const fr: AffiliatesWords = {
   tierLine: (date, amount, percent, status) =>
     `${date} · une vente d'une personne que vous avez amenée · ${amount} hors taxes · ${percent}${S}%${status ? ` · ${status}` : ""}`,
   saleLine: (date, amount, percent, status) => `${date} · ${amount} hors taxes · ${percent}${S}%${status ? ` · ${status}` : ""}`,
-  lineStatus: { "own purchase": "achat personnel", refunded: "remboursée", "partly refunded": "partiellement remboursée" },
+  lineStatus: { "own purchase": "achat personnel", refunded: "remboursée", "partly refunded": "partiellement remboursée", held: "retenue : partiellement remboursée, montant inconnu" },
   paidByHead: (store) => `Ce que ${store} vous a versé`,
 
   payPalLabel: "Où PayPal vous paie",
@@ -1052,7 +1053,7 @@ const de: AffiliatesWords = {
   tierLine: (date, amount, percent, status) =>
     `${date} · ein Verkauf von jemandem, den Sie geworben haben · ${amount} vor Steuern · ${percent}${S}%${status ? ` · ${status}` : ""}`,
   saleLine: (date, amount, percent, status) => `${date} · ${amount} vor Steuern · ${percent}${S}%${status ? ` · ${status}` : ""}`,
-  lineStatus: { "own purchase": "eigener Kauf", refunded: "erstattet", "partly refunded": "teilweise erstattet" },
+  lineStatus: { "own purchase": "eigener Kauf", refunded: "erstattet", "partly refunded": "teilweise erstattet", held: "zurückgehalten: teilweise erstattet, Betrag unbekannt" },
   paidByHead: (store) => `Von ${store} an Sie gezahlt`,
 
   payPalLabel: "Wohin PayPal Sie bezahlt",
@@ -1348,7 +1349,7 @@ const it: AffiliatesWords = {
     `${date} · una vendita di una persona che hai portato · ${amount} al netto delle tasse · ${percent}${S}%${status ? ` · ${status}` : ""}`,
   saleLine: (date, amount, percent, status) =>
     `${date} · ${amount} al netto delle tasse · ${percent}${S}%${status ? ` · ${status}` : ""}`,
-  lineStatus: { "own purchase": "acquisto tuo", refunded: "rimborsata", "partly refunded": "rimborsata in parte" },
+  lineStatus: { "own purchase": "acquisto tuo", refunded: "rimborsata", "partly refunded": "rimborsata in parte", held: "trattenuta: rimborsata in parte, importo sconosciuto" },
   paidByHead: (store) => `Pagato a te da ${store}`,
 
   payPalLabel: "Dove ti paga PayPal",
@@ -1638,7 +1639,7 @@ const nl: AffiliatesWords = {
   tierLine: (date, amount, percent, status) =>
     `${date} · een verkoop van iemand die jij bracht · ${amount} vóór belasting · ${percent}${S}%${status ? ` · ${status}` : ""}`,
   saleLine: (date, amount, percent, status) => `${date} · ${amount} vóór belasting · ${percent}${S}%${status ? ` · ${status}` : ""}`,
-  lineStatus: { "own purchase": "eigen aankoop", refunded: "terugbetaald", "partly refunded": "deels terugbetaald" },
+  lineStatus: { "own purchase": "eigen aankoop", refunded: "terugbetaald", "partly refunded": "deels terugbetaald", held: "vastgehouden: deels terugbetaald, bedrag onbekend" },
   paidByHead: (store) => `Door ${store} aan je betaald`,
 
   payPalLabel: "Waar PayPal je uitbetaalt",
@@ -1936,7 +1937,7 @@ const pt: AffiliatesWords = {
     `${date} · uma venda de alguém que trouxe · ${amount} antes de impostos · ${percent}${S}%${status ? ` · ${status}` : ""}`,
   saleLine: (date, amount, percent, status) =>
     `${date} · ${amount} antes de impostos · ${percent}${S}%${status ? ` · ${status}` : ""}`,
-  lineStatus: { "own purchase": "compra própria", refunded: "reembolsada", "partly refunded": "parcialmente reembolsada" },
+  lineStatus: { "own purchase": "compra própria", refunded: "reembolsada", "partly refunded": "parcialmente reembolsada", held: "retida: parcialmente reembolsada, valor desconhecido" },
   paidByHead: (store) => `Pago a si por ${store}`,
 
   payPalLabel: "Onde o PayPal lhe paga",

@@ -252,7 +252,10 @@ export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonl
     const out: { kind: AllowanceKind; used: number; figure: number }[] = [];
     for (const [i, kind] of kinds.entries()) {
       const raw: unknown = reply[i];
-      if (raw !== null && typeof raw !== "string" && typeof raw !== "number") return null;
+      // Only what INCRBY writes is a count: a confirmed none (null), its decimal text with no sign, space, point,
+      // exponent, base prefix or leading zero, or the same whole number. Number() would read "", " ", "0x0", "0.0"
+      // and "0e4" as 0, an unknown count taken for nothing used (Codex Z on #3169).
+      if (raw !== null && typeof raw !== "number" && !(typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw))) return null;
       const n = raw === null ? 0 : Number(raw);
       if (!Number.isSafeInteger(n) || n < 0) return null;
       out.push({ kind, used: n, figure: allowanceFor(store, kind, now / 1000) });
@@ -268,16 +271,20 @@ export function allowanceUsedWords(store: AllowanceStore, kind: AllowanceKind, n
   return usedWords(kind, allowanceFor(store, kind, now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
-/** What has been taken of a kind in the store's window, for the studio; 0 when it cannot be read. */
+/**
+ * What has been taken of a kind in the store's window, read exactly (rule 24): null when it cannot be read (no
+ * window, no Redis, a lost or malformed reply), 0 only for a count never taken. Every decision that spends (a model
+ * call, an email) and every screen that says a figure reads this one, and a null is never room or "0 used".
+ */
+export async function allowanceUsedExact(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number | null> {
+  return (await allowancesUsedStrict(store, [kind], now))?.[0]?.used ?? null;
+}
+
+/**
+ * The same count with an unread one taken as 0. Kept only for the studio's main page (app/studio/page.tsx, held by
+ * another agent's unit; its "0 of N used" when the count is unread is still to be changed there) and for tests that
+ * measure what a call took. Never use it for a decision or a new screen: read allowanceUsedExact.
+ */
 export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {
-  const window = allowanceWindow(store, now);
-  const id = idOf(store);
-  if (!window || !id || !isRedisConfigured()) return 0;
-  try {
-    const [raw] = await redisPipeline([["GET", key(kind, id, window.id)]]);
-    const n = Number(raw);
-    return Number.isSafeInteger(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
+  return (await allowanceUsedExact(store, kind, now)) ?? 0;
 }

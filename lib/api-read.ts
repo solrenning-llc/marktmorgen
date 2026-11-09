@@ -17,6 +17,7 @@
  */
 import { apiError } from "@/lib/api-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { productIds, readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
@@ -191,10 +192,13 @@ async function scannedPage<T>(hold: Hold, most: ReadWork, read: () => Promise<{ 
 async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<{ page: Page<Record<string, unknown>>; readBytes: number }> {
   if (!store.listId || !isRedisConfigured()) return { page: { data: [], next: null }, readBytes: 0 };
   const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";
-  const [reply] = await redisPipeline([["HSCAN", leadsKey(store.listId), start, "COUNT", API_PAGE]]);
-  if (!Array.isArray(reply) || reply.length < 2) return { page: { data: [], next: null }, readBytes: 0 };
-  const next = String(reply[0]);
-  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  // HSCAN answers [cursor, [field, value, ...]] (CX-123 rule 24): a page in any other shape is unknown, never a
+  // last or empty page, so a sync is never told it has the whole list when it has part of it (502 in the route).
+  const reply = repliesFor(repliesFor(await redisPipeline([["HSCAN", leadsKey(store.listId), start, "COUNT", API_PAGE]]), 1)?.[0], 2);
+  const cursorReply = reply?.[0];
+  const next = typeof cursorReply === "string" && /^\d{1,20}$/.test(cursorReply) ? cursorReply : countOf(cursorReply) !== null ? String(cursorReply) : null;
+  const flat = stringList(reply?.[1]);
+  if (next === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
   const data: Record<string, unknown>[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const c = parseContact(flat[i + 1]);
@@ -202,7 +206,7 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
     const mailable = c.agreed && !c.unsub;
     if (onlyAgreed && !mailable) continue;
     data.push({
-      email: String(flat[i]),
+      email: flat[i],
       name: c.name || null,
       agreed: c.agreed,
       agreed_at: isoFromText(c.agreedAt),
@@ -217,7 +221,7 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
     });
   }
   // The bytes the scan answered with, for the reading that pays for them (chargedLeads).
-  const readBytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
+  const readBytes = flat.reduce((n, v) => n + Buffer.byteLength(v), 0);
   return { page: { data, next: next === "0" ? null : next }, readBytes };
 }
 

@@ -312,7 +312,7 @@ function readRefundPass(raw: unknown): RefundPass | null {
  * and a run that resumes a pass first reads the newest page, so a refund made meanwhile does not wait for the pass.
  *
  * The owner's decision 18 (9 November 2026): a meeting ends only once the money went back for good. A refund on its way
- * whose charge reads refunded in full is looked up once: when it is a call's, it is marked as one in the read set and
+ * (whatever its charge reads now) is looked up once: when it is a call's, it is marked as one in the read set and
  * held (the anchor stays at or below it, so the next pass reads it again; no lookup again); when not, it is read. A
  * succeeded part of a call's charge waits for the charge's refunds to add up, from its own MEET_CHARGE_READS. A refund
  * that failed or was canceled ends nothing. A call's refund on its way more than seven days is said once a day.
@@ -383,10 +383,12 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         if (inPass) hold(created);
       };
       const dispute = refund.object === "dispute";
-      // A refund still on its way may still fail: only one whose charge reads refunded in full (Stripe counts it there)
-      // can end a meeting once it goes through, and it is held only when it is a call's (the owner's decision 18).
+      // A refund still on its way may still fail, and may still give the whole charge back once it goes through: nothing
+      // says Stripe already counts it in the charge's amount_refunded (main's #3188 reads it the other way), so every one
+      // is held when it is a call's, whatever its charge reads now (the owner's decision 18; 2nd pre-review of
+      // 779bcbfc0d). A succeeded one ends a meeting only on a charge read refunded in full.
       const onItsWay = !dispute && REFUND_ON_ITS_WAY.has(refund.status as string);
-      const givesBack = dispute ? rowGivesBack(refund) : (onItsWay || refund.status === "succeeded") && refundedInFull(refund.charge);
+      const givesBack = dispute ? rowGivesBack(refund) : onItsWay || (refund.status === "succeeded" && refundedInFull(refund.charge));
       if (!givesBack) {
         passed();
         continue;

@@ -173,7 +173,7 @@ export async function sendCallReminders(
     const store = await findStore(handle).catch(() => null);
     // A store switched off after notices about its content (lib/takedown.ts) still reminds: the buyer paid for this
     // call, and the reminder carries only the booking's own details (its time, its place or room, its calendar file
-    // and the buyer's page to move it), nothing of the store's switched-off pages. Held in tests/suspended-store-mail.test.ts.
+    // and the buyer's page to move it), nothing of the store's switched-off pages. Held in tests/suspended-store-updates-calls.test.ts.
     const done: string[] = [];
     if (!store || store.callsId !== callsId) {
       await redisPipeline([["ZREM", REMINDER_QUEUE, ...members.map((m) => m.member)]]);

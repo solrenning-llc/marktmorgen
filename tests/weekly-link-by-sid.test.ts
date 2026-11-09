@@ -27,6 +27,7 @@ import * as report from "@/lib/stats-report";
 import { BUSY_FLOOR, maybeBusyAlert, setWeeklyOff, weeklyMemberToken, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { GET as weeklyPage, POST as weeklyRoute } from "@/app/api/store/weekly/route";
 import { POST as releaseRoute } from "@/app/api/store/release/route";
+import { POST as renameRoute } from "@/app/api/store/rename/route";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -113,6 +114,11 @@ async function letGo(owner: string, store: Store, handle: string): Promise<numbe
   return response.status;
 }
 
+/** Renames the store from the studio, as its owner does (app/api/store/rename/route.ts); the answer's status. */
+async function rename(owner: string, store: Store, handle: string): Promise<number> {
+  return (await renameRoute(await studio(owner, store, "/api/store/rename", { handle }))).status;
+}
+
 /** The team list, through whatever the module offers for a store (before the fix: the address only). */
 const teamOf = async (store: Store): Promise<unknown> => (report.weeklyTeam as (s: unknown) => Promise<string[]>)(store).catch((error: Error) => `threw: ${error.message}`);
 const setTeam = (store: Store, emails: string[]) => (report.setWeeklyTeam as (s: unknown, e: string[]) => Promise<void>)(store, emails);
@@ -186,9 +192,13 @@ async function main(): Promise<void> {
     // What the code before this change wrote: the list under the address.
     redis.run(["SADD", "nl:weekly:to:reef", "ana@example.com"]);
     is("read under its address", await teamOf(reef), ["ana@example.com"]);
-    is("the store is renamed", (await renameHandle(owner, "reef-two")).ok, true);
+    // Rule 23: renamed through the studio's route, which keeps the list by the store's id before the address
+    // changes (the red version renamed with renameHandle and relied on reading every address the store still owns,
+    // which brought back members the owner had taken out after a rename on main: the part below).
+    is("the store is renamed", await rename(owner, reef, "reef-two"), 200);
     reef = await fresh(owner);
     is("renamed: the members still get it", await teamOf(reef), ["ana@example.com"]);
+    is("renamed: nothing is left under the old address", redis.run(["EXISTS", "nl:weekly:to:reef"]), 0);
     is("the old address is let go", await letGo(owner, reef, "reef"), 200);
     reef = await fresh(owner);
     is("let go: the members still get it", await teamOf(reef), ["ana@example.com"]);
@@ -201,7 +211,8 @@ async function main(): Promise<void> {
     is("the store now at the address keeps its member", await teamOf(next), ["ana@example.com"]);
     is("the owner changes the list: kept by the store's id", (await setTeam(reef, ["ben@example.com"]).then(() => "ok", (e: Error) => e.message)), "ok");
     is("changed", await teamOf(reef), ["ben@example.com"]);
-    is("renamed again", (await renameHandle(owner, "reef-three")).ok, true);
+    // Rule 23: through the studio's route, as above (the red version: renameHandle).
+    is("renamed again", await rename(owner, reef, "reef-three"), 200);
     reef = await fresh(owner);
     is("renamed again: still the same list", await teamOf(reef), ["ben@example.com"]);
     const memberLink = (report as Record<string, unknown>).weeklyMemberStopUrl as ((s: Store, e: string) => string) | undefined;
@@ -209,6 +220,83 @@ async function main(): Promise<void> {
     is("a member's own link names the store by its id", /[?&]s=[0-9a-f]{32}&/.test(own), true);
     const left = await press(own);
     is("the member's own link stops their copy after a rename", [left.status, await teamOf(reef)], [200, []]);
+  }
+
+  part("A list kept under an address before a rename on main never comes back after its members left (pre-review P2)");
+  {
+    const owner = "skiff@example.com";
+    let skiff = await paidStore(owner, "skiff", "Skiff");
+    // On main: the owner chose M and N, under the address of then.
+    redis.run(["SADD", "nl:weekly:to:skiff", "m@example.com", "n@example.com"]);
+    // On main: renamed (main read the list under the current address only, so the owner chose again: N only).
+    is("renamed on main", (await renameHandle(owner, "skiff-two")).ok, true);
+    redis.run(["SADD", "nl:weekly:to:skiff-two", "n@example.com"]);
+    skiff = await fresh(owner);
+    is("main's list: N only", await teamOf(skiff), ["n@example.com"]);
+    // On main: N pressed "Stop my copy" in an email signed for skiff-two.
+    redis.run(["SREM", "nl:weekly:to:skiff-two", "n@example.com"]);
+    is("nobody gets the weekly copy (M taken out, N stopped)", await teamOf(skiff), []);
+    is("renamed back to the address of then, from the studio", await rename(owner, skiff, "skiff"), 200);
+    skiff = await fresh(owner);
+    is("back at the address of then: still nobody", await teamOf(skiff), []);
+    is("renamed once more, from the studio", await rename(owner, skiff, "skiff-three"), 200);
+    skiff = await fresh(owner);
+    is("the old address is let go", await letGo(owner, skiff, "skiff"), 200);
+    skiff = await fresh(owner);
+    is("let go: still nobody", await teamOf(skiff), []);
+    is("let go: nothing is left under the address", redis.run(["EXISTS", "nl:weekly:to:skiff"]), 0);
+  }
+
+  part("A list left under an address by a store before: never read by the store that renames to it");
+  {
+    redis.run(["SADD", "nl:weekly:to:raft-two", "stray@example.com"]);
+    const owner = "raft@example.com";
+    let raft = await paidStore(owner, "raft", "Raft");
+    is("renamed from the studio to that address", await rename(owner, raft, "raft-two"), 200);
+    raft = await fresh(owner);
+    is("nobody from the list left there", await teamOf(raft), []);
+  }
+
+  part("Keeping the list by the store's id before a rename: a refused write never loses it, and the address stays");
+  {
+    const owner = "keel@example.com";
+    let keel = await paidStore(owner, "keel", "Keel");
+    redis.run(["SADD", "nl:weekly:to:keel", "ana@example.com"]);
+    const pipeline = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      // As Redis refuses a SADD past its memory while other writes still run: only the other commands of the batch are done.
+      if (commands.some((c) => c[0] === "SADD" && /^nl:weekly:(team|to):/.test(String(c[1])))) {
+        const others = commands.filter((c) => c[0] !== "SADD");
+        if (others.length) await pipeline(others);
+        throw new Error("Redis error: OOM command not allowed when used memory > 'maxmemory'");
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    const status = await rename(owner, keel, "keel-two");
+    redis.pipeline = pipeline;
+    is("the rename is refused", status >= 500, true);
+    keel = await fresh(owner);
+    is("the store keeps its address", keel.handle, "keel");
+    is("the members still get it", await teamOf(keel), ["ana@example.com"]);
+    is("renamed once the write goes through", await rename(owner, keel, "keel-two"), 200);
+    is("and the members still get it", await teamOf(await fresh(owner)), ["ana@example.com"]);
+  }
+
+  part("A rename from the studio stays inside a studio request's commands (tests/plan-cost-registry.ts, UNIT_COST.studio)");
+  {
+    const owner = "oar@example.com";
+    const oar = await paidStore(owner, "oar", "Oar");
+    redis.run(["SADD", "nl:weekly:to:oar", "ana@example.com"]);
+    const pipeline = redis.pipeline.bind(redis);
+    let count = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      count += commands.length;
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    const status = await rename(owner, oar, "oar-two");
+    redis.pipeline = pipeline;
+    is("renamed", status, 200);
+    is(`at most twenty commands (${count})`, count <= 20, true);
   }
 
   part("Every numbers email builds its stop link the one way");

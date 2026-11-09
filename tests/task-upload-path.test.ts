@@ -15,9 +15,10 @@
  * (tests/failure-cleanup-world.ts) and the in-memory Redis (tests/redis-stub.ts).
  *
  * The pre-review of the fix (9 November 2026) added: a hand-in that takes the name off the list and then lets the file
- * go (none there yet, the wrong kind, too big, no room, work not kept) puts the name back on the list, since the
- * browser's PUT may still land within the door's five minutes and would otherwise be kept for ever, outside the sweep
- * and the room; the sweep keeps a file that is a student's handed-in work whatever the list says; the door lists its
+ * go (none there yet, the wrong kind, too big, no room, work not kept, or a function cut off by its time limit) leaves
+ * the name held for the sweep, since the browser's PUT may still land within the door's five minutes and would
+ * otherwise be kept for ever, outside the sweep and the room (the second pre-review: the hold is written when the name
+ * is taken, so no exit, written or not, can miss it, and the sweep deletes a held file only when no work keeps it); the sweep keeps a file that is a student's handed-in work whatever the list says; the door lists its
  * name again after asking the file store, in case the sweep took an old listing of it meanwhile; the door's whole cost
  * is priced and held inside a buyer action; and a file the door refuses is said honestly, since the SDK's error says
  * nothing of why.
@@ -121,6 +122,8 @@ async function ask(name: string, type = PDF): Promise<{ status: number; error?: 
 }
 
 const listed = async (path: string) => (await redis.pipeline([["ZSCORE", "nl:tasks:doors", path]]))[0] !== null;
+/** Whether a name a hand-in took is held for the sweep (lib/assignment.ts, takeTaskUpload). */
+const held = async (path: string) => (await redis.pipeline([["ZSCORE", "nl:tasks:held", path]]))[0] !== null;
 const store = (path: string, contentType = PDF, size = 4) => files.set(path, { bytes: new Uint8Array(size).fill(0x25), contentType, at: Date.now() });
 
 /** The hand-in, as the lesson's form sends it. */
@@ -193,7 +196,7 @@ async function main(): Promise<void> {
   const early = browserName(folder, "pdf");
   is("the door opens", (await ask(early)).status, 200);
   is("handed in before the browser's PUT landed: missing", await handIn(early), "missing");
-  is("the name is back on the sweep's list", await listed(early), true);
+  is("the name is held for the sweep", await held(early), true);
   store(early);
   const late = await sweepTaskUploads(deleteFile, Date.now() + DAY_MS + 3_600_000);
   is("the file that landed later is swept the next day", [late.includes(early), files.has(early)], [true, false]);
@@ -205,14 +208,14 @@ async function main(): Promise<void> {
   setFailDeletes(true);
   is("a file of another kind is refused", await handIn(wrong), "type");
   setFailDeletes(false);
-  is("and, not deleted, its name is back on the list", await listed(wrong), true);
+  is("and, not deleted, its name is held for the sweep", await held(wrong), true);
   const big = browserName(folder, "pdf");
   is("the door opens", (await ask(big)).status, 200);
   store(big, PDF, rules.MAX_TASK_FILE_BYTES + 1);
   setFailDeletes(true);
   is("a file over the limit is refused", await handIn(big), "too_big");
   setFailDeletes(false);
-  is("and, not deleted, its name is back on the list", await listed(big), true);
+  is("and, not deleted, its name is held for the sweep", await held(big), true);
 
   part("The sweep never deletes a student's handed-in work, whatever the list says");
   const kept = browserName(folder, "pdf");
@@ -236,6 +239,47 @@ async function main(): Promise<void> {
   files.get = plain;
   is("and its name is on the list for the file it lets in", await listed(raced), true);
 
+  part("A hand-in cut off between taking the name and writing the work leaves nothing for ever (second pre-review, MÉDIO 1)");
+  const cut = browserName(folder, "pdf");
+  is("the door opens", (await ask(cut)).status, 200);
+  store(cut);
+  is("a hand-in takes the name", await takeTaskUpload(cut), true);
+  is("a second hand-in cannot take it again", await takeTaskUpload(cut), false);
+  // ... and the function is stopped here (its time limit), before the room and the work.
+  const afterCut = await sweepTaskUploads(deleteFile, Date.now() + 2 * DAY_MS);
+  is("the sweep deletes the file no work keeps", [afterCut.includes(cut), files.has(cut)], [true, false]);
+  const good = browserName(folder, "pdf");
+  is("the door opens", (await ask(good)).status, 200);
+  store(good);
+  is("a hand-in that keeps its file", await handIn(good), "ok");
+  is("lets go of its hold", await held(good), false);
+  const afterGood = await sweepTaskUploads(deleteFile, Date.now() + 2 * DAY_MS);
+  is("and the sweep leaves the handed-in file alone", [afterGood.includes(good), files.has(good)], [false, true]);
+
+  part("One door's file is deleted at most as often as its price counts (second pre-review, MÉDIO 2)");
+  const twice = browserName(folder, "pdf");
+  is("the door opens", (await ask(twice)).status, 200);
+  store(twice, "image/png");
+  let deletes = 0;
+  const plainDelete = files.delete.bind(files);
+  files.delete = ((key: string) => {
+    if (key === twice) deletes += 1;
+    return plainDelete(key);
+  }) as typeof files.delete;
+  is("a file of another kind is refused", await handIn(twice), "type");
+  files.delete = plainDelete;
+  await sweepTaskUploads(async (paths) => {
+    deletes += paths.filter((path) => path === twice).length;
+    await deleteFile(paths);
+  }, Date.now() + 3 * DAY_MS);
+  const advancedPriced = (registry as Record<string, unknown>).TASK_DOOR_ADVANCED_OPERATIONS;
+  // The browser's PUT, the hand-in's delete and the sweep's: each an Advanced Operation of the file store.
+  is("its upload and every delete of it are priced", typeof advancedPriced === "number" && 1 + deletes <= advancedPriced, true);
+  const handInLine = registry.COST_LINES.flatMap((line) => line.sources).find((source) => source.file === "app/api/store/course/task/route.ts");
+  is("the hand-in's own head and deletes are named in a cost line", ["headFile(path)", "deleteFile(path)"].every((name) => handInLine?.names.includes(name)), true);
+  const workBytes = (registry as Record<string, unknown>).TASK_WORK_BYTES;
+  is("the sweep's read of the work is counted in bytes", typeof workBytes === "number" && workBytes >= rules.MAX_ANSWER_TEXT + rules.MAX_FEEDBACK, true);
+
   part("The door's whole cost is priced, inside one buyer action");
   const prices = registry as Record<string, unknown>;
   const door = prices.TASK_DOOR_COST as number | undefined;
@@ -244,9 +288,18 @@ async function main(): Promise<void> {
   is("the head and the two advanced operations are priced, never zero", [simple ?? 0, advanced ?? 0].every((price) => price > 0), true);
   is("the door counts them", typeof door === "number" && door > (simple ?? 0) + 2 * (advanced ?? 0), true);
   is("the door, all of it, costs no more than one buyer action", typeof door === "number" && door <= registry.UNIT_COST.buyer, true);
+  const advancedCount = (prices.TASK_DOOR_ADVANCED_OPERATIONS as number | undefined) ?? 0;
+  is("and counts each priced advanced operation", typeof door === "number" && door > 2 * (simple ?? 0) + advancedCount * (advanced ?? 0) && advancedCount >= 3, true);
 
   part("A file the door refuses is said honestly, in every language");
   is("every language has its words", LANGUAGE_CODES.every((language) => (coursesWords(language) as unknown as Record<string, unknown>).taskFileFailed), true);
+
+  part("The sweep's notes sit where they belong");
+  const lib = readFileSync("lib/assignment.ts", "utf8");
+  const doc = lib.indexOf("Deletes, with `remove`, the files uploaded");
+  const sweep = lib.indexOf("export async function sweepTaskUploads");
+  const between = lib.slice(doc, sweep);
+  is("sweepTaskUploads' own note is right above it", doc > 0 && sweep > doc && !between.includes("function ") && !between.includes("const "), true);
 
   part("The component and the lesson page send the name the door checks");
   const component = readFileSync("components/lesson-task.tsx", "utf8");

@@ -43,8 +43,11 @@ import { essentialLimitState, type LimitState } from "@/lib/request-guard";
  * picture: an attach takes a fresh one only when its own ZREM took it off
  * that list (takePictureDoor), and the course job's sweep (sweepPictureDoors)
  * deletes one only when its own ZREM did, PICTURE_SWEEP_AFTER_SECONDS (30
- * days, owner decision DONO-8 of 9 November 2026) after its door, and only
- * once the file itself was read and was stored after that door's note.
+ * days, owner decision DONO-8 of 9 November 2026) after its door, only while
+ * its store's note is still there (the code before this list took a picture
+ * off the store's list only, so a picture with no store note was taken, and
+ * is kept), and only once the file itself was read and was stored after that
+ * door's note.
  * One ZREM answers 1 once, so an attach and the sweep never both win a
  * picture: a picture the sweep deleted was never put on a product, a link or
  * a page. A buyer's review photo, an email's picture and a picture put on
@@ -297,10 +300,18 @@ export async function dropTakenPictures(taken: Map<string, number>, paths: strin
  * Only a picture proven unused is deleted (owner decision DONO-8, 9 November 2026; Claude 2 on #3347):
  *   - this run's own ZREM took it off the list of unclaimed pictures (exactly 1): an attach that took it after the
  *     list was read keeps its file (as lib/assignment.ts sweepTaskUploads does);
+ *   - its note is still on its store's list (ZSCORE a score): a store note is kept until its picture is taken or
+ *     swept, and the code before the list of unclaimed pictures took a picture off the store's list only, so a
+ *     picture with no store note was taken there (after a rollback; Claude 2 on #3347 @1eef9e91e1) and is kept,
+ *     its file left (storage, never a picture deleted from under a record); a store note read in another shape is
+ *     unknown, and the picture is put back for the next run;
  *   - its file, read with `look` (the file store's head), was stored strictly after its note, as dropTakenPictures
  *     checks: a file stored before it is not that door's upload, and is kept;
  *   - a file check that fails or answers in another shape is unknown, never "unused": the picture is put back for the
  *     next run, and its store note keeps counting.
+ * The file store's clock and the function's are not the same: should the file store's run ahead, a file stored just
+ * before a late note could read as stored after it. The taken mark the late note reads, and its taking itself back
+ * off both lists, still keep such a picture; a deletion needs both to miss.
  * Its store's note is taken off once its file is gone (or proven not to be the door's), so the store's cap counts it
  * until then; a removal of the note answered in another shape leaves it to dropLeftBehind and the list's expiry. A
  * delete that fails puts its pictures back on the list for the next run. The list, the pipeline and each ZREM are read
@@ -357,22 +368,40 @@ export async function sweepPictureDoors(
       return false;
     });
     if (won.length === 0) continue;
+    // Each store note read before the file: a picture taken off its store's list only (by the code before the list
+    // of unclaimed pictures, after a rollback; Claude 2 on #3347) has no note there, and is kept. Exact shapes only:
+    // null is no note, a score is a note, anything else (or no reply) is unknown, kept and put back.
+    const notes = await redisPipeline(won.map(([path]) => ["ZSCORE", doorsKey(path) as string, path])).then((replies) => repliesFor(replies, won.length), () => null);
+    if (!notes) {
+      console.error(`${won.length} unclaimed pictures: their store notes could not be read, so they are kept and put back for the next run`);
+      await putBack(won, "store notes unknown");
+      continue;
+    }
+    const stillNoted = won.filter((_, i) => notes[i] !== null && scoreOf(notes[i]) !== null);
+    const oddNotes = won.filter((_, i) => notes[i] !== null && scoreOf(notes[i]) === null);
+    const unnoted = won.length - stillNoted.length - oddNotes.length;
+    if (oddNotes.length) {
+      console.error(`${oddNotes.length} unclaimed pictures: their store notes came back in another shape, so they are kept and put back for the next run`);
+      await putBack(oddNotes, "store note unknown");
+    }
+    if (unnoted) console.error(`${unnoted} unclaimed pictures: no longer on their store's list (taken there), so they are kept`);
+    if (stillNoted.length === 0) continue;
     // Each file read before anything is deleted: stored after its note is the door's own upload, never taken.
-    const read = await Promise.all(won.map(([path, noted]) => look(path).then(
+    const read = await Promise.all(stillNoted.map(([path, noted]) => look(path).then(
       (file) => {
         const stored = file && typeof file === "object" ? new Date(file.uploadedAt).getTime() : NaN;
         return Number.isFinite(stored) ? (stored > noted ? "unused" : "older") : "unknown";
       },
       (error: unknown) => (error instanceof BlobNotFoundError ? "gone" : "unknown"),
     )));
-    const unused = won.filter((_, i) => read[i] === "unused");
-    const notOurs = won.filter((_, i) => read[i] === "gone" || read[i] === "older");
-    const unsure = won.filter((_, i) => read[i] === "unknown");
+    const unused = stillNoted.filter((_, i) => read[i] === "unused");
+    const notOurs = stillNoted.filter((_, i) => read[i] === "gone" || read[i] === "older");
+    const unsure = stillNoted.filter((_, i) => read[i] === "unknown");
     if (unsure.length) {
       console.error(`${unsure.length} unclaimed pictures: their files could not be read, so they are kept and put back for the next run`);
       await putBack(unsure, "file check unknown");
     }
-    const older = won.filter((_, i) => read[i] === "older").length;
+    const older = stillNoted.filter((_, i) => read[i] === "older").length;
     if (older) console.error(`${older} unclaimed pictures: their files were stored before their notes, so they are kept`);
     let gone = notOurs;
     if (unused.length) {

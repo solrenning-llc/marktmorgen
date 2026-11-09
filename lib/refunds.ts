@@ -253,9 +253,20 @@ export async function givenBack(account: string | null | undefined, payment: unk
  */
 export type GivenBackRow = Record<string, unknown>;
 
-/** Whether one row of a job's reading takes its sale back: a full refund going through, or a dispute lost. */
+/**
+ * Whether one row of a job's reading takes its sale back: a full refund going through, or a dispute lost, or one
+ * closed as prevented by a resolution whose own money was taken and not put back (disputeMoneyGone). A prevented row
+ * whose money cannot be read throws (rule 24), never "not given back": lostDisputesSince() never builds one (it stops
+ * the page as not read whole instead), and a job that let it pass as not given back would move its place past it.
+ */
 export function rowGivesBack(row: GivenBackRow): boolean {
-  if (row.object === "dispute") return row.status === "lost" && refundedInFull(row.charge);
+  if (row.object === "dispute") {
+    if (row.status === "lost") return refundedInFull(row.charge);
+    if (row.status !== "prevented") return false;
+    const gone = disputeMoneyGone(row);
+    if (gone === null) throw new Error("a prevented dispute's money could not be read");
+    return gone && refundedInFull(row.charge);
+  }
   if (row.status !== "succeeded" && row.status !== "pending") return false;
   return refundedInFull(row.charge);
 }
@@ -272,7 +283,8 @@ export const LOST_DISPUTE_PAGES = 3;
 /**
  * The disputes on the creator's account that Stripe closed as lost since
  * (each the whole order taken back, whatever its amount: the owner's rule of
- * 4 November 2026, in the header)
+ * 4 November 2026, in the header), and those closed as prevented by a
+ * resolution whose own money was taken and not put back (disputeMoneyGone)
  * `since` (seconds), read from the closing events, which Stripe keeps thirty
  * days: each as a row rowGivesBack() takes, `id` the event's, `created` the
  * time it closed, `payment_intent` the payment it took back, `charge` the
@@ -370,18 +382,27 @@ export async function lostDisputesSince(
     const page = listed.data as unknown[];
     if (!page.every(closingKnown)) return leave(false);
     const events = page as Record<string, unknown>[];
+    // A prevented closing is a resolution (the money went back to the buyer, as a lost dispute's does) or a block
+    // (the creator keeps it), read by the dispute's own money (disputeMoneyGone, lib/retained-revenue.ts). One whose
+    // money cannot be read is unknown (rule 24): the page stops as not read whole, as an event closingKnown() does
+    // not read does, so the place stays before it and nothing on it is passed over as not given back.
+    const disputeOf = (event: Record<string, unknown>) => (event.data as { object: Record<string, unknown> }).object;
+    if (events.some((event) => disputeOf(event).status === "prevented" && disputeMoneyGone(disputeOf(event)) === null)) return leave(false);
     for (const event of events) {
-      const dispute = (event.data as { object: Record<string, unknown> }).object;
-      if (dispute.status !== "lost") continue;
+      const dispute = disputeOf(event);
+      const resolution = dispute.status === "prevented" && disputeMoneyGone(dispute) === true;
+      if (dispute.status !== "lost" && !resolution) continue;
       const chargeId = idOf(dispute.charge);
       const created = event.created as number;
       newest = Math.max(newest, created);
       found.push({
         object: "dispute",
         id: event.id,
-        status: "lost",
+        status: resolution ? "prevented" : "lost",
+        ...(resolution ? { balance_transactions: dispute.balance_transactions } : {}),
         created,
         payment_intent: idOf(dispute.payment_intent) || null,
+        // The charge's money taken back for good, as a lost dispute takes it: what refundedInFull() reads on it.
         charge: { object: "charge", id: chargeId, disputed: true, dispute: { status: "lost" } },
       });
     }

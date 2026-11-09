@@ -98,7 +98,7 @@ export function WinBackEditor({
       <ul className="mt-4 space-y-2 text-sm text-ink-soft">
         {bullet("Only to somebody who agreed to hear from you and has not left your list, with your list's one-click unsubscribe. Never to somebody who already came back.")}
         {bullet("One email per ended membership, and at most one per person and product in six months.")}
-        {bullet(`The link works for ${OFFER_DAYS} days, only for the address it was sent to, with no second free trial.`)}
+        {bullet(`The link works for ${OFFER_DAYS} days, only for the address it was sent to, with no second free trial. It stops about half an hour before the ${OFFER_DAYS} days end, so a last payment still fits in that time.`)}
         {bullet("An offer of more than one payment is sent only for memberships charged every month. Payment plans, and memberships sold to end after a set number of payments, get none.")}
       </ul>
       {on ? <p className="mt-4 text-sm font-semibold text-ink">{`Sent so far: ${sent}.`}</p> : null}

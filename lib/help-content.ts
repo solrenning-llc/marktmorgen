@@ -263,7 +263,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "Can I give a countdown offer to people who download my freebie?",
         a: [
-          "Yes. Under \u201cA welcome offer with a deadline of their own\u201d, choose a paid product, a discount of 10% to 50% and how long it lasts: 24, 48 or 72 hours, or 7 days. Whoever asks for one of your free products sees it on the page they pick their copy up from, with the time left counting down, and a button that opens your checkout with the discount already taken off by Stripe, for the address the free copy went to.",
+          "Yes. Under \u201cA welcome offer with a deadline of their own\u201d, choose a paid product, a discount of 10% to 50% and how long it lasts: 24, 48 or 72 hours, or 7 days. The offer the person sees ends about half an hour before that, so a last payment still fits in that time. Whoever asks for one of your free products sees it on the page they pick their copy up from, with the time left counting down, and a button that opens your checkout with the discount already taken off by Stripe, for the address the free copy went to.",
           "The deadline is real. It starts when the person asks for the free product and is kept for them, so asking again, on another device or a month later, never starts it again. When it ends, the button goes, the page says when it ended, and the product is at its usual price. With the reminder on, one email goes before the end, only to someone who agreed to hear from you and confirmed their address. Your numbers count these sales as \u201cWelcome offer\u201d beside the other discounts.",
         ],
       },

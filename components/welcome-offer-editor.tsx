@@ -157,7 +157,7 @@ export function WelcomeOfferEditor({
             </label>
           ) : null}
           <p className="text-sm text-ink-soft">
-            {`Someone who asks for a free product is offered ${percent}% off ${title} for ${hoursWords(hours)} from that moment${remind ? ", with one reminder before the end" : ""}.`}
+            {`Someone who asks for a free product is offered ${percent}% off ${title} for ${hoursWords(hours)} from that moment${remind ? ", with one reminder before the end" : ""}. The offer they see ends about half an hour early, so a last payment still fits in that time.`}
           </p>
           {error ? (
             <p className="notice notice-error" role="alert">

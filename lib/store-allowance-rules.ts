@@ -160,3 +160,13 @@ export function usedWords(kind: AllowanceKind, limit: number, reset: string, sta
 
 /** What a visitor or a buyer is told when a store cannot take what they sent: never the store's plan. */
 export const VISITOR_REFUSAL = "This store can't take this right now. Please try again later.";
+
+/**
+ * How many of the store's emails this month are used, as the studio's sending tools say it after "…emails for this
+ * month:" (agreements, payment requests). An unread count (null, lib/store-allowance.ts allowanceUsedExact) is said
+ * to be unknown, never "0 of N used".
+ */
+export function emailsUsedLine(used: number | null, limit: number): string {
+  const all = limit.toLocaleString("en-US");
+  return used === null ? `${all} in all. How many are used could not be read just now; reload the page to check.` : `${used.toLocaleString("en-US")} of ${all} used.`;
+}

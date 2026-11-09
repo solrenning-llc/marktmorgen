@@ -241,11 +241,17 @@ const receiverOf = (line: BatchLine) => payAddress(line.affiliate).slice(0, 127)
  * Its fingerprint, kept with a batch on its way instead of the address (review of Codex H2 on #2681): an HMAC
  * under a key derived from the server's own secret, so it cannot be turned back by guessing addresses (Revisor 2's
  * privacy note). Empty when there is no secret: then the batch keeps none and a retry is left for a manual check.
+ *
+ * The address is an email (recipient_type EMAIL), taken in small letters and without spaces around it on every side
+ * the fingerprint is made, so the same address written back by PayPal in capitals still matches (pre-review of the
+ * creator's own check). Assumption: PayPal's OpenAPI types the receiver as a free string and does not say how it
+ * writes it back. A fingerprint kept before this, of an address that had capitals, no longer matches: that batch is
+ * left for a check (fails closed), never sent to another address.
  */
 const RECEIVER_PRINT_LABEL = "paypal-payout-receiver/v1";
 function receiverPrint(address: string): string {
   const key = deriveKey(RECEIVER_PRINT_LABEL);
-  return key ? createHmac("sha256", key).update(address).digest("hex") : "";
+  return key ? createHmac("sha256", key).update(address.trim().toLowerCase()).digest("hex") : "";
 }
 
 /** The body PayPal is sent for one batch (payments_payouts_batch_v1, create_payout_request). */
@@ -438,9 +444,11 @@ export type OwnCheckResult =
    * "id": no payout batch ID, or not one; "gone": no batch left for the creator's check under that field;
    * "not-found": PayPal finds no such payment in the creator's own account; "other": it is another batch's payment;
    * "mismatch": its amounts or people are not this batch's, or cannot be matched; "used": the ID is already held for
-   * another batch; "unknown": PayPal's answer is not known; "error": not saved. Nothing is marked in any of them.
+   * another batch; "moved": the batch changed in our records while PayPal was read; "unknown": PayPal's answer is not
+   * known; "error": not known to be saved (Redis's answer to the hold may have been lost after it was applied, so the
+   * studio never says it was not). Nothing else is marked in any of them.
    */
-  | { ok: false; reason: "id" | "gone" | "not-found" | "other" | "mismatch" | "used" | "reconnect" | "unknown" | "busy" | "error" };
+  | { ok: false; reason: "id" | "gone" | "not-found" | "other" | "mismatch" | "used" | "moved" | "reconnect" | "unknown" | "busy" | "error" };
 
 /** PayPal sends at most 15,000 items in one batch, read here a thousand a page. */
 const OWN_CHECK_MAX_PAGES = 16;
@@ -452,6 +460,15 @@ type ReadItem = { sender: string; receiver: string; currency: string; value: str
  * Reads one payout batch of the creator's own PayPal, every page, with the creator's own app: an ID of another
  * account's payment is not found under it. Null when PayPal says there is no such payment; throws when the answer is
  * not known or not read exactly (rule 24).
+ *
+ * Source: PayPal's official OpenAPI description, github.com/paypal/paypal-rest-api-specifications,
+ * openapi/payments_payouts_batch_v1.json (read 09/11/2026): GET /v1/payments/payouts/{payout_batch_id} with page,
+ * page_size (at most 1000) and total_required; payout_batch has batch_header (with sender_batch_header), items
+ * (payout_item: sender_item_id, receiver, amount {currency, value}), total_items and total_pages. total_pages is not
+ * a required property there: total_required=true asks for it, and an answer without it is not known (never "one
+ * page"). Assumptions, not in that description: the form PayPal writes amount.value back in (a string it calls an
+ * integer or a decimal fraction, so it is compared as a decimal: sameAmount), and how it writes the receiver back
+ * (an email here, compared in small letters without spaces around it: receiverPrint). Any other form is refused.
  */
 async function readBatchForCheck(auth: string, id: string): Promise<{ sender: string; items: ReadItem[] } | null> {
   const items: ReadItem[] = [];
@@ -485,6 +502,21 @@ async function readBatchForCheck(auth: string, id: string): Promise<{ sender: st
   }
 }
 
+/** A plain decimal amount (digits, then optionally a point and digits), in a single form: 030.50 and 30.5 are 30.5. */
+function decimalForm(value: string): string | null {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(value);
+  if (!match) return null;
+  const whole = match[1].replace(/^0+(?=\d)/, "");
+  const part = (match[2] ?? "").replace(/0+$/, "");
+  return part ? `${whole}.${part}` : whole;
+}
+
+/** Whether PayPal's amount is the one we sent, as a decimal ("30" is "30.00"); never for a form that is not plain. */
+function sameAmount(paypalValue: string, sent: string): boolean {
+  const read = decimalForm(paypalValue);
+  return read !== null && read === decimalForm(sent);
+}
+
 /**
  * Whether PayPal's batch is exactly the one we sent: each person once, for what we sent them, in the batch's currency,
  * to the address whose fingerprint we kept. A line kept with no fingerprint cannot be matched, so it never is.
@@ -498,7 +530,7 @@ function sameBatch(sent: OpenBatch, items: ReadItem[]): boolean {
   }
   return sent.lines.every((line) => {
     const item = byPerson.get(line.a.slice(0, 63));
-    return Boolean(item && line.r && item.currency === sent.currency.toUpperCase() && item.value === plainAmount(line.c, sent.currency) &&
+    return Boolean(item && line.r && item.currency === sent.currency.toUpperCase() && sameAmount(item.value, plainAmount(line.c, sent.currency)) &&
       receiverPrint(item.receiver) === line.r);
   });
 }
@@ -550,7 +582,9 @@ export async function resolveOwnCheck(store: Store, field: string, paypalId: unk
     return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (): Promise<OwnCheckResult> => {
       const now = checkable(await readOpen(statsId));
       if ("ok" in now) return now;
-      if (JSON.stringify(now) !== JSON.stringify(first)) return { ok: false, reason: "gone" };
+      if (JSON.stringify(now) !== JSON.stringify(first)) return { ok: false, reason: "moved" };
+      // Not confirmed is not "not saved": Redis may have applied the hold before its answer was lost, so the studio
+      // says it could not confirm the save and asks for a reload (pre-review, VR 2), never that nothing was saved.
       if (!(await promoteBatch(statsId, field, id, now))) return { ok: false, reason: "error" };
       return { ok: true, batch: id, people: now.lines.length };
     });

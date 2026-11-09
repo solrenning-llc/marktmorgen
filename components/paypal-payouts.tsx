@@ -33,17 +33,29 @@ const MESSAGES: Record<string, string> = {
   changed: "That payment no longer matches this page. Reload the page and try again.",
   id: "Enter the payout batch ID from PayPal: a code of capital letters and numbers, like 5UXD2E8A7EBQJ. Nothing was changed.",
   "not-found": "PayPal finds no payment with that ID in the PayPal account you connected. Check that you copied the payout batch ID, not another number. Nothing was changed.",
-  other: "That ID is for a different payment in your PayPal, not this one. Look for the payment with the reference shown below. Nothing was changed.",
+  other: "That ID is for a different payment in your PayPal, not this one. Look for the payment whose sender batch ID is {reference}, our reference for this one. Nothing was changed.",
   mismatch: "The payment with that ID does not match this one: the people or the amounts are different, or we cannot match who it went to. Nothing was changed.",
   used: "That ID is already used for another payment here. Nothing was changed.",
   "own-unknown": "We could not get a clear answer from PayPal about that ID, so nothing was changed. Try again in a few minutes.",
-  "own-error": "Nothing was saved, and nothing was sent. Try again in a moment.",
+  // Not "nothing was saved": the save may have gone through before its answer was lost (pre-review, VR 2).
+  "own-error": "We could not confirm it was saved. Reload the page to see where it stands.",
+  "own-lost": "We could not confirm it was saved. Reload the page to see where it stands.",
+  "own-moved": "This payment changed in our records while we were checking it with PayPal, so nothing was changed. Reload the page to see it as it is now, then check the ID again.",
+  lost: "We did not get an answer, so we cannot tell whether this went through. Reload the page to see where it stands before you try again.",
   pending: "Nobody was paid just now. But we could not confirm that this payment was cleared from our records, so our daily check may still send it from your PayPal, to the same people for the same amounts. Until then, they show as on their way. Do not pay them another way, or they could be paid twice.",
 };
 
+/**
+ * Sends one request. No answer at all, or one that cannot be read, is "lost": the server may have done it, so the
+ * panel never says it did not (pre-review, VR 2).
+ */
 async function send(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const response = await fetch("/api/store/affiliates/paypal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  return (await response.json().catch(() => ({ ok: false, error: "error" }))) as Record<string, unknown>;
+  try {
+    const response = await fetch("/api/store/affiliates/paypal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    return (await response.json()) as Record<string, unknown>;
+  } catch {
+    return { ok: false, error: "lost" };
+  }
 }
 
 /**
@@ -84,18 +96,24 @@ export function PayPalPayouts({
   const [busy, setBusy] = useState<string | null>(null);
   const [sure, setSure] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The payment left for the creator's check whose form the error belongs to; null for the panel's own error. */
+  const [errorAt, setErrorAt] = useState<string | null>(null);
   const amount = formatMoney(cents, currency);
 
-  async function act(op: string, extra: Record<string, unknown> = {}) {
+  async function act(op: string, extra: Record<string, unknown> = {}, at: string | null = null) {
     setBusy(op);
     setError(null);
+    setErrorAt(null);
     const data = await send({ op, ...extra });
     setBusy(null);
     setSure(false);
     if (!data.ok) {
       // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
-      const reason = op === "resolve" && (data.error === "error" || data.error === "unknown") ? `own-${String(data.error)}` : String(data.error);
-      setError((typeof (data as { message?: unknown }).message === "string" && (data as { message: string }).message) || (MESSAGES[reason] ?? MESSAGES.error));
+      const own = op === "resolve" && MESSAGES[`own-${String(data.error)}`] ? `own-${String(data.error)}` : "";
+      const words = MESSAGES[own || String(data.error)] ?? MESSAGES.error;
+      // A refusal of a payment's ID is shown with that payment's own form, naming its reference (pre-review, AAA).
+      setError((typeof (data as { message?: unknown }).message === "string" && (data as { message: string }).message) || words.replace("{reference}", at ? at.slice(1) : ""));
+      setErrorAt(at);
       return null;
     }
     return data;
@@ -233,8 +251,9 @@ export function PayPalPayouts({
                   batch={batch}
                   disabled={busy !== null}
                   saving={busy === "resolve"}
+                  error={errorAt === batch.id ? error : null}
                   onSave={async (paypal) => {
-                    const data = await act("resolve", { batch: batch.id, paypal });
+                    const data = await act("resolve", { batch: batch.id, paypal }, batch.id);
                     if (data) {
                       toast("PayPal confirmed this payment. Each person shows as paid once PayPal says their part went through.");
                       router.refresh();
@@ -278,7 +297,7 @@ export function PayPalPayouts({
           </button>
         </>
       )}
-      {error ? (
+      {error && !errorAt ? (
         <p className="notice notice-error mt-3 text-sm" role="alert">
           {error}
         </p>
@@ -296,11 +315,14 @@ function OwnCheckForm({
   batch,
   disabled,
   saving,
+  error,
   onSave,
 }: {
   batch: OwnCheckView;
   disabled: boolean;
   saving: boolean;
+  /** Why the last ID given for this payment was refused, shown with its field; null when none was. */
+  error: string | null;
   onSave: (paypal: string) => Promise<boolean>;
 }) {
   const id = useId();
@@ -335,7 +357,8 @@ function OwnCheckForm({
           className="field mt-1"
           value={paypal}
           onChange={(e) => setPaypal(e.target.value)}
-          aria-describedby={`${id}-help`}
+          aria-describedby={error ? `${id}-help ${id}-error` : `${id}-help`}
+          aria-invalid={error ? true : undefined}
           autoComplete="off"
           autoCapitalize="characters"
           spellCheck={false}
@@ -344,6 +367,11 @@ function OwnCheckForm({
           disabled={disabled}
         />
       </label>
+      {error ? (
+        <p id={`${id}-error`} className="notice notice-error mt-2 text-sm" role="alert">
+          {error}
+        </p>
+      ) : null}
       <p className="mt-2 text-sm text-ink-soft">
         We read this payment from your PayPal and check it was sent to these people for these amounts. Nothing is sent, and
         nothing changes if it does not match.

@@ -60,6 +60,7 @@ import { claimHandle as claimStore, ensureListId, ensureStatsId, ensureStoreId, 
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { cookieValues } from "./meeting-withdrawal-page-world";
+import { communityWords } from "@/lib/buyer-words/community";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -295,13 +296,33 @@ async function main(): Promise<void> {
     }
     const members = () => CommunityMembersPage({ params: Promise.resolve(handle), searchParams: Promise.resolve({}) });
     const fine = await draw(members);
-    is("members, control: the count is said", [fine.startsWith("PAGE_FAILED") ? fine.slice(0, 160) : "drawn", fine.includes("1 member has chosen to be listed"), fine.includes(LIST)], ["drawn", true, false]);
+    // The privacy promise is true whatever the count: it is said with the count, and without it when the count did not read.
+    const PRIVACY = /Only the name each chose is shown; nobody(&#x27;|')s email address is, ever\./;
+    const privacyTimes = (html: unknown) => (typeof html === "string" ? (html.match(new RegExp(PRIVACY.source, "g")) ?? []).length : -1);
+    is("members, control: the count is said, with the privacy promise once", [fine.startsWith("PAGE_FAILED") ? fine.slice(0, 160) : "drawn", fine.includes("1 member has chosen to be listed"), fine.includes(LIST), privacyTimes(fine)], ["drawn", true, false, 1]);
     const unknown = await withOdd(zcard, ["QUEUED"], () => draw(members));
+    // Rule 23: one expected value added (the privacy promise, said once); the four before it are unchanged.
     is(
-      "members, the count unread: drawn, no number, says the list could not be loaded",
-      [typeof unknown === "string" && unknown.startsWith("PAGE_FAILED"), typeof unknown === "string" && /chosen to be listed/.test(unknown), typeof unknown === "string" && unknown.includes(LIST), typeof unknown === "string" && unknown.includes("Zed Quill")],
-      [false, false, true, true],
+      "members, the count unread: drawn, no number, says the list could not be loaded, and still says nobody's email address is shown",
+      [typeof unknown === "string" && unknown.startsWith("PAGE_FAILED"), typeof unknown === "string" && /chosen to be listed/.test(unknown), typeof unknown === "string" && unknown.includes(LIST), typeof unknown === "string" && unknown.includes("Zed Quill"), privacyTimes(unknown)],
+      [false, false, true, true, 1],
     );
+    // In every store language: the promise said alone is exactly the second sentence of the count, word for word.
+    const words = (await import("@/lib/buyer-words/community-names-unread")) as Record<string, unknown>;
+    const alone = typeof words.listedPrivacy === "function" ? (words.listedPrivacy as (language: unknown) => string) : null;
+    const PROMISES: Record<string, string> = {
+      en: "Only the name each chose is shown; nobody's email address is, ever.",
+      es: "Solo se muestra el nombre que eligió cada uno; la dirección de email de nadie, nunca.",
+      fr: "Seul le nom choisi par chacun est affiché\u00a0; jamais l'adresse e-mail de personne.",
+      de: "Gezeigt wird nur der Name, den jeder gewählt hat, niemals eine E-Mail-Adresse.",
+      it: "Si vede solo il nome scelto da ciascuno; l'indirizzo email di nessuno, mai.",
+      nl: "Alleen de naam die ieder koos wordt getoond; nooit iemands e-mailadres.",
+      pt: "Só se mostra o nome que cada um escolheu; nunca o endereço de email de ninguém.",
+    };
+    for (const [language, promise] of Object.entries(PROMISES)) {
+      const said = alone ? alone(language) : null;
+      is(`the privacy promise alone, ${language}: the count's own second sentence, no number in it`, [said, said !== null && communityWords(language).listedTotal(3).endsWith(` ${said}`)], [promise, true]);
+    }
 
     // releaseHandle sent its HDEL and never read the answer: a release lost or in another shape passed as done.
     await original([["HSET", HANDLES, "gone-soon", "x".repeat(zed.k.length)]]);

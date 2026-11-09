@@ -144,14 +144,16 @@ async function main() {
 
   part("Deleting the review and writing it again does not reset the count (review M1 on #2863)");
   for (let round = 1; round <= 3; round += 1) {
-    is(`round ${round}: the buyer deletes their review`, statusOf(await send(ONE, { action: "delete" })), "deleted");
+    // Altered 2026-11-09 (rule 23): a delete now asks first (Claude 6's audit 21, WCAG 3.3.6); the buyer's yes is confirm=yes.
+    is(`round ${round}: the buyer deletes their review`, statusOf(await send(ONE, { action: "delete", confirm: "yes" })), "deleted");
     is(`round ${round}: the review is gone`, await kept(idOne), null);
     is(`round ${round}: written again with a photo, the words are saved and the photo is refused`, statusOf(await send(ONE, { photo: jpeg(800, 600), text: `Again ${round}.` })), "photoLimit");
     is(`round ${round}: no new put`, blobControl.puts.length, 3);
     is(`round ${round}: the new record carries the kept count`, (await kept(idOne) as unknown as { photoPuts?: number })?.photoPuts, 3);
   }
   const countKey = `nl:rev:${statsId}:${productId}:photos`;
-  is("control: the buyer's own delete keeps the count", [statusOf(await send(ONE, { action: "delete" })), redis.run(["HGET", countKey, idOne])], ["deleted", "3"]);
+  // Altered 2026-11-09 (rule 23): the delete carries the buyer's yes (confirm=yes), as the confirm step now requires.
+  is("control: the buyer's own delete keeps the count", [statusOf(await send(ONE, { action: "delete", confirm: "yes" })), redis.run(["HGET", countKey, idOne])], ["deleted", "3"]);
 
   part("A person's erasure takes the count too (second review of #2863): nothing is left under an id their address gives again");
   is("erased with their review already deleted: no review to delete", (await forgetReviewsPerson(statsId, [productId], SESSIONS[ONE].email, store)).records, 0);

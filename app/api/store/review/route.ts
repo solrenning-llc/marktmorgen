@@ -4,7 +4,7 @@ import { originFrom } from "@/lib/request-origin";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { type Door, doorFields, openDoor, readDoor } from "@/lib/review-proof";
+import { type Door, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib/review-proof";
 import { MAX_REVIEW_PHOTO_BYTES, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { checkReviewPhoto, dropReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
 import { costsPaused } from "@/lib/plan-standing";
@@ -55,16 +55,19 @@ export async function POST(request: NextRequest) {
   if (!found) return new Response("No such store.", { status: 404 });
   let store = found;
 
-  const answer = (status: string, where: Door = door) => {
-    const path =
-      back === "thanks" && where.via === "session"
-        ? `/@${store.handle}/thanks?${new URLSearchParams({ session_id: where.session, review: status, product: productId })}#r-${productId}`
-        : `/@${store.handle}/review?${new URLSearchParams({ ...doorFields(where), status, product: productId })}#r-${productId}`;
+  const answer = (status: string, where: Door = door, fragment?: string) => {
+    const path = reviewPagePath(store.handle, back, doorFields(where), productId, status, fragment);
     return new Response(null, { status: 303, headers: { Location: `${origin}${path}`, "Cache-Control": "no-store" } });
   };
 
   // A field no person can see: whatever filled it in is told it worked.
   if (read("website").trim()) return answer("saved");
+
+  // Deleting asks first (Claude 6's audit 21; WCAG 3.3.4 and 3.3.6): a delete without confirm=yes changes nothing.
+  // The page comes back with a question that names what goes, focused (components/review-form.tsx), and only its
+  // "Yes, delete my review" sends confirm=yes. Asked before the hour's limits and before Stripe: asking costs no
+  // paid call and no try; the yes is checked like any other request.
+  if (action === "delete" && read("confirm") !== "yes") return answer("confirmDelete", door, `r-${productId}-delete`);
 
   if (!(await withinStore("review", `${clientAddress(request)}|${store.handle}`, IP_LIMIT, 3600, store))) return answer("slow");
 

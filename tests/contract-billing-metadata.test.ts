@@ -767,3 +767,95 @@ test('review: a reused current or previous name is not blocked by canceled Delet
   }
  }finally{globalThis.fetch=old;}
 });
+
+/*
+ * A store keeps its own funded plan after it changes its address (audit of
+ * store handles, finding 1): renaming does not rewrite the plan's metadata in
+ * Stripe, so the plan stays under the address it was bought with. ownedBy
+ * (lib/billing.ts) already decides whose it is: the current and the earlier
+ * addresses by name, an address let go only with this store's own customer.
+ * Requiring the current address on top of that lost the store's own paid plan:
+ * the daily job read it as unknown, the funded period froze, and checkout and
+ * plan switches were refused.
+ */
+function fundedPlan(named:string,customer:Record<string,unknown>|string={id:'cus_Test000001',email:'owner@example.test'}){
+ const created=Math.floor(Date.now()/1000);
+ return{id:'sub_Test000001',customer,created,status:'active',metadata:{store:named,funding_grant:'ctr_metadata',funding_review:'test_only'},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
+}
+const renamedOwner={...store,handle:'harbor-new',stripeCustomerId:'cus_Test000001',previousHandles:['harbor'],releasedHandles:[]} as Store;
+const releasedOwner={...store,handle:'harbor-new',stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:['harbor']} as Store;
+
+test('a renamed store still owns its funded plan bought under its earlier address',async()=>{
+ const old=globalThis.fetch,plan=fundedPlan('harbor');
+ let reads=0,writes=0;globalThis.fetch=async(input,init)=>{reads++;if(init?.method!=='GET')writes++;return new URL(String(input)).pathname==='/v1/subscriptions/sub_Test000001'?Response.json(plan):Response.json({object:'search_result',data:[plan],has_more:false});};
+ activationObservations.accept=true;
+ try{
+  for(const owner of [renamedOwner,releasedOwner]){
+   activationObservations.calls.length=0;
+   assert.equal(ownedBy(owner,plan),true,owner.previousHandles.length?'previous address':'released address, own customer');
+   assert.equal((await startedFromObservedSubscription(owner,plan))?.subscriptionId,plan.id,'observed: the store\'s own funded plan');
+   assert.equal(activationObservations.calls.length,1,'its funded receipt is checked once, under the store\'s statsId');
+   assert.equal(activationObservations.calls[0].statsId,owner.statsId);
+   const read=await readSubscription(plan.id,owner);
+   assert.equal(read.state,'active','the daily job reads the funded plan, not unknown');
+   assert.equal(read.state==='active'&&read.period?.funded,true,'and keeps its funded period moving');
+   assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,plan.id,'checkout and switch see the live plan');
+  }
+  assert.equal(writes,0);
+ }finally{globalThis.fetch=old;activationObservations.accept=false;}
+});
+
+test('an address let go stays closed to a funded plan paid by someone else',async()=>{
+ activationObservations.calls.length=0;activationObservations.accept=true;
+ try{
+  for(const customer of [{id:'cus_Foreign001',email:'owner@example.test'},{id:'cus_Foreign001',email:'other@example.test'}]){
+   const plan=fundedPlan('harbor',customer);
+   assert.equal(ownedBy(releasedOwner,plan),false);
+   assert.equal(await startedFromObservedSubscription(releasedOwner,plan),null);
+  }
+  // An address this store never had is never its own either.
+  assert.equal(await startedFromObservedSubscription(renamedOwner,fundedPlan('somebody-else')),null);
+  assert.equal(activationObservations.calls.length,0,'no foreign plan reaches activation');
+ }finally{activationObservations.accept=false;}
+});
+
+test('a renamed store still owns its funded plan switch made under its earlier address',async()=>{
+ const g=grant('switch'),raw=switchObservation(g);
+ switchActivationObservations.calls.length=0;switchActivationObservations.accept=true;
+ try{
+  for(const owner of [renamedOwner,releasedOwner]){
+   assert.equal((await startedFromObservedSubscription(owner,raw))?.cycle,'year');
+   const final={...raw,metadata:{store:'harbor',funding_action:'switch',funding_grant:g.id,funding_review:g.reviewId}};
+   assert.equal((await startedFromObservedSubscription(owner,final))?.cycle,'year');
+  }
+  assert.equal(switchActivationObservations.calls.length,4);
+  assert.equal(await startedFromObservedSubscription(releasedOwner,{...raw,customer:'cus_Foreign001'}),null,'released address, another customer');
+  assert.equal(switchActivationObservations.calls.length,4);
+ }finally{switchActivationObservations.accept=false;}
+});
+
+test('the way back from a funded checkout is kept when the store changed its address meanwhile',async()=>{
+ const old=globalThis.fetch,plan=fundedPlan('harbor','cus_Test000001');
+ const session={mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
+ let current:Record<string,unknown>=session,subscription:Record<string,unknown>=plan;
+ globalThis.fetch=async(input)=>Response.json(new URL(String(input)).pathname.includes('/checkout/sessions/')?current:subscription);
+ activationObservations.accept=true;
+ try{
+  for(const owner of [renamedOwner,releasedOwner]){
+   activationObservations.calls.length=0;current=session;subscription=plan;
+   assert.equal((await readStartedSubscription(owner,'cs_test_Activation001'))?.active,true,'funded return after renaming');
+   assert.equal(activationObservations.calls.length,1);
+   current={...session,metadata:{store:'harbor'}};subscription={...plan,metadata:{store:'harbor'}};
+   assert.equal((await readStartedSubscription(owner,'cs_test_Activation001'))?.active,true,'unfunded return after renaming');
+  }
+  // Released: only with this store's own customer; another store's name: never.
+  activationObservations.calls.length=0;
+  current={...session,customer:'cus_Foreign001'};subscription={...plan,customer:'cus_Foreign001'};
+  assert.equal(await readStartedSubscription(releasedOwner,'cs_test_Activation001'),null,'released address, another customer');
+  current={...session,metadata:{...session.metadata,store:'somebody-else'}};subscription={...plan,metadata:{...plan.metadata,store:'somebody-else'}};
+  assert.equal(await readStartedSubscription(renamedOwner,'cs_test_Activation001'),null,'an address this store never had');
+  current=session;subscription={...plan,metadata:{...plan.metadata,store:'harbor-new'}};
+  assert.equal(await readStartedSubscription(renamedOwner,'cs_test_Activation001'),null,'the subscription must name the session\'s own address');
+  assert.equal(activationObservations.calls.length,0);
+ }finally{globalThis.fetch=old;activationObservations.accept=false;}
+});

@@ -44,15 +44,21 @@
  *     the base64 DUMPs it keeps), each key's name sent twice, and the marks and
  *     the report's reads; the marks kept;
  *   - Vercel: one call a run held for the route's maximum duration at 2 GB,
- *     its CPU the whole time;
+ *     its CPU the whole time, at the repository's iad1 rates and, as a line of its own, the difference up to gru1,
+ *     the dearest region (the project pins no region);
+ *   - the four lines docs/backup-costs-2026-11-08.md (#3271, section 3, items 2, 3, 4 and 8) priced outside the code
+ *     until 9 November 2026: that dearest region; one more billing block of each Upstash and Vercel unit, as R2's
+ *     rounding (no page says they do not round up); the batch of DUMPs read before the byte cap refuses it, every key
+ *     at Upstash's record cap; and every byte the function moves (Upstash, the set written and read back, the
+ *     objects read to find the verified copies, that batch) at Vercel's dearest transfer rate, a ceiling;
  *   - and the provider allowance (PROVIDER_CHARGES_BPS) on all of it.
  * No supplier's free quota is credited (MR). What the code cannot bound is in
  * BACKUP_COST_UNKNOWNS: while any is open, the fixed-cost line's reviewed
  * ceiling stays unknown, never zero.
  */
-import { BACKUP_RUN_COMMANDS, BACKUP_RUNS_PER_DAY, admitReview, backupKeptObjects, backupListPages, backupPeakSets, type BackupCostReview } from "@/lib/backup-run";
+import { BACKUP_DUMP_BATCH, BACKUP_RUN_COMMANDS, BACKUP_RUNS_PER_DAY, admitReview, backupKeptObjects, backupListPages, backupPeakSets, type BackupCostReview } from "@/lib/backup-run";
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
-import { BACKUP_SCAN_PAGES, runStoredBound } from "@/lib/backup-parts";
+import { BACKUP_SCAN_PAGES, MAX_PARTS, manifestBound, runStoredBound } from "@/lib/backup-parts";
 import {
   PROVIDER_CHARGES_BPS,
   R2_CLASS_A_MICRO_USD_PER_MILLION,
@@ -87,6 +93,37 @@ const MARK_BYTES = 1_024;
 const ANSWER_FRAME_BYTES = 64;
 /** R2 bills by decimal gigabytes. */
 const GB = 1_000_000_000;
+
+/*
+ * The rates of the four lines below, each as docs/backup-costs-2026-11-08.md (#3271, sections 2 and 3) cites it, read
+ * on 8 November 2026. No supplier's free quota is credited (MR).
+ */
+/**
+ * Vercel's dearest region for functions, gru1: $0.221 an Active CPU-hour and $0.0183 a GB-hour of Provisioned Memory
+ * (https://vercel.com/docs/functions/usage-and-pricing, last_updated 2026-06-16, read 2026-11-08). The project pins no
+ * region and the live one is not verified, so the backup's route is priced there (item 2).
+ */
+const VERCEL_DEAREST_CPU_MICRO_USD_PER_HOUR = 221_000;
+const VERCEL_DEAREST_MEMORY_MICRO_USD_PER_GB_HOUR = 18_300;
+/**
+ * Vercel's dearest transfer rate, Fast Origin Transfer at "$0.06 – $0.43" a GB by region
+ * (https://vercel.com/docs/manage-cdn-usage and https://vercel.com/docs/pricing/regional-pricing, read 2026-11-08).
+ * No page bills a function's outbound calls; "not listed" is not "not billed", so every byte the function moves is
+ * priced at the top of the range, a ceiling (item 3).
+ */
+const VERCEL_TRANSFER_MICRO_USD_PER_GB = 430_000;
+/**
+ * Upstash's command block: "$0.20 per 100K" (https://upstash.com/docs/redis/overall/billing, read 2026-11-08). The page
+ * states no rounding, and silence is not "no rounding": one more block of each unit is priced, as R2's (item 8).
+ */
+const UPSTASH_COMMAND_BLOCK = 100_000;
+/**
+ * Upstash's maximum record size, "100 MB" on Pay-As-You-Go (the same billing page, read 2026-11-08), read as 100 MiB,
+ * the dearer reading: the most one key's DUMP can weigh, since the backup does not cap a key's size (item 4).
+ */
+const UPSTASH_MAX_RECORD_BYTES = 100 * 1_024 * 1_024;
+/** A DUMP comes back as base64 (lib/redis.ts, redisPipelineBase64): 4 bytes for every 3, rounded up. */
+const base64Bytes = (bytes: number) => Math.ceil(bytes / 3) * 4;
 
 /**
  * The route's longest run, in seconds: app/api/cron/backup/route.ts's maxDuration (a literal there, as Next.js reads
@@ -159,6 +196,26 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
   const marks = up(((MARK_KEYS * MARK_BYTES) / GB) * UPSTASH_MICRO_USD_PER_GB_MONTH);
   const hours = routeSeconds / 3_600;
   const vercel = up(runs * (VERCEL_FUNCTION_GB * hours * VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR + hours * VERCEL_CPU_MICRO_USD_PER_HOUR + VERCEL_CALL_MICRO_USD_PER_MILLION / 1_000_000));
+  // The same calls at gru1, less what the line above already counts at iad1 (the invocation is priced alike).
+  const region = up(runs * (VERCEL_FUNCTION_GB * hours * (VERCEL_DEAREST_MEMORY_MICRO_USD_PER_GB_HOUR - VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) + hours * (VERCEL_DEAREST_CPU_MICRO_USD_PER_HOUR - VERCEL_CPU_MICRO_USD_PER_HOUR)));
+  // One more block of each unit: Upstash commands, bandwidth (a GB) and storage (a GB-month), Vercel CPU (an hour) and
+  // memory (a GB-hour), at the dearest region.
+  const blocks = up(
+    (UPSTASH_COMMAND_BLOCK / 1_000_000) * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS
+    + UPSTASH_MICRO_USD_PER_GB_TRANSFER
+    + UPSTASH_MICRO_USD_PER_GB_MONTH
+    + VERCEL_DEAREST_CPU_MICRO_USD_PER_HOUR
+    + VERCEL_DEAREST_MEMORY_MICRO_USD_PER_GB_HOUR,
+  );
+  // The batch of DUMPs read before the byte cap refuses it, every key at the record cap: the copied bytes above stop at
+  // the cap, these are the bytes past it.
+  const overshootBytes = BACKUP_DUMP_BATCH * base64Bytes(UPSTASH_MAX_RECORD_BYTES);
+  const overshoot = up(((runs * overshootBytes) / GB) * UPSTASH_MICRO_USD_PER_GB_TRANSFER);
+  // Every byte the function moves: Upstash's (above), the overshoot, the set written and read back, and the objects
+  // read to find the verified copies (at most `kept`, each read only up to a manifest's bound: lib/backup-run.ts).
+  const verifyBytes = kept * manifestBound(MAX_PARTS);
+  const movedBytes = runTransfer + overshootBytes + 2 * setBytes + verifyBytes;
+  const transfer = up(((runs * movedBytes) / GB) * VERCEL_TRANSFER_MICRO_USD_PER_GB);
 
   const used: BackupCostLine[] = [
     { id: "r2-storage", microUsd: storage, basis: `the review's ceiling of ${review.maxStoredBytes} bytes (at least ${sets} sets of ${setBytes}: the retention, two more and the 3 months' copies), never passed, plus one GB-month of rounding` },
@@ -168,6 +225,10 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
     { id: "upstash-transfer", microUsd: upstashTransfer, basis: `${runs} runs × ${runTransfer} bytes: ${scanPages} SCAN pages of ${BACKUP_SCAN_NAMES_PER_PAGE} names of ${BACKUP_SCAN_NAME_BYTES} bytes, ${runBytes} copied bytes, each key's name sent twice, the marks and the report's reads` },
     { id: "upstash-storage", microUsd: marks, basis: `${MARK_KEYS} marks of at most ${MARK_BYTES} bytes kept` },
     { id: "vercel", microUsd: vercel, basis: `${runs} calls of ${routeSeconds} s at ${VERCEL_FUNCTION_GB} GB, CPU the whole time` },
+    { id: "vercel-region", microUsd: region, basis: `the same ${runs} calls at gru1, the dearest region ($0.221 a CPU-hour, $0.0183 a GB-hour), less the iad1 rates above` },
+    { id: "billing-blocks", microUsd: blocks, basis: `one more block of each unit: ${UPSTASH_COMMAND_BLOCK} Upstash commands, 1 GB of Upstash bandwidth, 1 GB-month of Upstash storage, 1 CPU-hour and 1 GB-hour at gru1` },
+    { id: "upstash-overshoot", microUsd: overshoot, basis: `${runs} runs × ${BACKUP_DUMP_BATCH} keys read before the byte cap refuses them, each at Upstash's record cap (${UPSTASH_MAX_RECORD_BYTES} bytes, ${base64Bytes(UPSTASH_MAX_RECORD_BYTES)} as base64)` },
+    { id: "vercel-transfer", microUsd: transfer, basis: `${runs} runs × ${movedBytes} bytes moved (${runTransfer} with Upstash, ${overshootBytes} past the cap, ${setBytes} written and read back, up to ${verifyBytes} read to find the verified copies) at $0.43 a GB, the dearest rate` },
   ];
   const sum = used.reduce((n, line) => n + line.microUsd, 0);
   const allowance = up((sum * PROVIDER_CHARGES_BPS) / 10_000);

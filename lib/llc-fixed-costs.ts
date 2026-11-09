@@ -28,7 +28,10 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
   * (retention + 2 + 3 sets, backupPeakSets in lib/backup-run.ts: 35 for a 30-day retention, the 3 newest months' copies
   * included; one run at a time writes only below it) with a GB-month and a million of each class of rounding,
   * a Class A for each object's deletion (a month's mark included) and two listings a run, Upstash at every command and
-  * byte the caps allow (200 SCAN pages a run at the most), no free quota. No copy is kept past 120 days
+  * byte the caps allow (200 SCAN pages a run at the most), Vercel at its dearest region (gru1), one more billing block
+  * of each Upstash and Vercel unit, the batch of DUMPs read past the byte cap at Upstash's record cap, and every byte
+  * the function moves at Vercel's dearest transfer rate (the four lines of docs/backup-costs-2026-11-08.md, section 3,
+  * in the code since 9 November 2026), no free quota. No copy is kept past 120 days
   * (BACKUP_MAX_COPY_DAYS, the bucket's lifecycle rule: backupLifecycleDays). It prices the database copy only: the files
   * and videos copy's Cloudflare Worker (the Workers Paid $5 monthly minimum an account and its CPU,
   * docs/backup-costs-2026-11-08.md on #3271) is not in it yet and must be before any review. Not a reviewed ceiling:

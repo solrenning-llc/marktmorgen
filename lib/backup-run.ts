@@ -189,8 +189,11 @@ export const BACKUP_LOCK_MS = 900_000;
  * (backupStale) before the last one ages out of the retention.
  */
 export const BACKUP_MIN_RETENTION_DAYS = BACKUP_BUCKET_LOCK_DAYS + 2;
-/** Keys copied per request. */
-const BATCH = 100;
+/**
+ * Keys copied per request. The whole batch is read before the byte cap can refuse it, so lib/backup-cost.ts prices this
+ * many keys at Upstash's record cap in every run (line "upstash-overshoot"): a smaller batch lowers that line.
+ */
+export const BACKUP_DUMP_BATCH = 100;
 const DAY_MS = 86_400_000;
 const STALE_MS = 48 * 3_600_000;
 const LAST_OK = "nl:backup:last-ok";
@@ -834,7 +837,7 @@ async function copy(
   const into: BackupObjectStore = folder === null ? store : { putNew: (id, bytes) => store.putNew(folder + id, bytes), read: (id, most) => store.read(folder + id, most) };
   let done: Awaited<ReturnType<typeof copyInParts>>;
   try {
-    done = await copyInParts({ maxRows: review.maxRows, maxCommands: review.maxCommands - BACKUP_RUN_COMMANDS, ...runLimits(review), batch: BATCH, now }, key, into);
+    done = await copyInParts({ maxRows: review.maxRows, maxCommands: review.maxCommands - BACKUP_RUN_COMMANDS, ...runLimits(review), batch: BACKUP_DUMP_BATCH, now }, key, into);
   } catch {
     return { ok: false, reason: "export_error" };
   }

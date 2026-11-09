@@ -277,6 +277,15 @@ export async function sendDueAlerts(now: number, until = Date.now() + 20_000): P
   return out;
 }
 
+/**
+ * A report this run could not read or send is moved an hour on (XX: only while
+ * it is still listed), never dropped: the next run tries it again, and the
+ * reports behind it in the due list are reached instead of being blocked.
+ */
+async function postpone(id: string, now: number): Promise<void> {
+  await redisPipeline([["ZADD", ALERTS_DUE, "XX", now + HOUR, id]]).catch(() => console.error("child-safety reminders: one that could not be sent could not be moved on"));
+}
+
 async function remindOne(id: string, now: number, out: SweepResult): Promise<void> {
   if (!ID.test(id)) {
     out.unknown += 1;
@@ -296,6 +305,7 @@ async function remindOne(id: string, now: number, out: SweepResult): Promise<voi
   const alert = parse(read[0]);
   if (!alert) {
     out.unknown += 1;
+    await postpone(id, now);
     return;
   }
   const n = alert.sends;
@@ -303,7 +313,23 @@ async function remindOne(id: string, now: number, out: SweepResult): Promise<voi
   const after: Alert = { ...alert, lastSentAt: now, sends: alert.sends + 1, warned: alert.warned || warning };
   const last = after.sends >= ALERT_SENDS || nextDue(after) >= alert.firstAt + ALERT_DAYS * DAY;
   const link = newToken(id);
-  after.tokens = [...alert.tokens, link.hash].slice(-(ALERT_SENDS + 1));
+  // The urgent email's link is always kept; the reminders' newest links after it, within the record's bound.
+  after.tokens = [alert.tokens[0], ...[...alert.tokens.slice(1), link.hash].slice(-ALERT_SENDS)];
+  const keep = Math.max(3_600, Math.ceil((alert.firstAt + ALERT_KEEP_SECONDS * 1000 - now) / 1000));
+  // The link's hash is kept before the email goes (XX: only while still open), so the email the owner holds always
+  // closes the report: a send said failed that was delivered, or a write-back that was lost, never leaves it dead.
+  const stored = repliesFor(await redisPipeline([["SET", alertKey(id), JSON.stringify({ ...alert, tokens: after.tokens }), "EX", keep, "XX"]]), 1);
+  if (stored?.[0] === null) {
+    // Marked handled, or run out, since it was read: nothing to send, out of the list.
+    await redisPipeline([["ZREM", ALERTS_DUE, id]]);
+    out.ended += 1;
+    return;
+  }
+  if (stored?.[0] !== "OK") {
+    out.unknown += 1;
+    await postpone(id, now);
+    return;
+  }
   const { subject, text } = reminderText(alert, n, now, handledUrl(link.token), last);
   const sent = await sendEmail({
     meter: { by: "company" },
@@ -316,6 +342,7 @@ async function remindOne(id: string, now: number, out: SweepResult): Promise<voi
   if (!sent) {
     // Left due: the next run tries again, under the same key, so it is never sent twice.
     out.failed += 1;
+    await postpone(id, now);
     return;
   }
   out.sent += 1;
@@ -332,7 +359,6 @@ async function remindOne(id: string, now: number, out: SweepResult): Promise<voi
     return;
   }
   // Only a report still open is written back (XX): one marked handled in between stays closed.
-  const keep = Math.max(3_600, Math.ceil((alert.firstAt + ALERT_KEEP_SECONDS * 1000 - now) / 1000));
   const replies = repliesFor(
     await redisPipeline([
       ["SET", alertKey(id), JSON.stringify(after), "EX", keep, "XX"],

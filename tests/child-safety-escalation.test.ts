@@ -214,10 +214,12 @@ async function main(): Promise<void> {
   is("the page with the report unread says so, keeps the button and closes nothing", [/could not be read just now/.test(unreadPage), /Mark this report handled/.test(unreadPage), /not one of an open report/.test(unreadPage)], [true, true, false]);
   is("marking it handled while it cannot be read closes nothing", [await answering((c) => c[0] === "GET" && String(c[1]).startsWith("nl:csa:alert:"), "QUEUED", () => closeAlert(oddToken)), redis.run(["ZSCORE", ALERTS_DUE, oddId]) !== null], ["unknown", true]);
   sent.length = 0;
-  const whenDue = odd + DAY + 60_000;
+  // The cron runs every hour; a report that could not be read is moved an hour on, so each run is an hour later.
+  let whenDue = odd + DAY + 60_000;
   for (const reply of ["QUEUED", 7, ["x"], "{not json", JSON.stringify({ kind: "other" })]) {
     const result = await answering((c) => c[0] === "GET" && String(c[1]).startsWith("nl:csa:alert:"), reply, () => sendDueAlerts(whenDue));
     is(`record read as ${JSON.stringify(reply)}: unknown, not sent, still due`, [result.sent, result.unknown, sent.length, redis.run(["ZSCORE", ALERTS_DUE, oddId]) !== null], [0, 1, 0, true]);
+    whenDue += HOUR;
   }
   const listOdd = await answering((c) => c[0] === "ZRANGEBYSCORE", "QUEUED", () => sendDueAlerts(whenDue));
   is("the due list off its shape: nothing sent", [listOdd.sent, listOdd.unknown, sent.length], [0, 1, 0]);

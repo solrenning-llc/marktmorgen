@@ -21,8 +21,12 @@
  *       nothing in the code keeps.
  *   (4) The help answer about deleting says a store may not be able to do it
  *       at once, and where to write then.
+ *   (5) So do the Privacy Policy's own words on deleting and the opening of
+ *       the deletion page: neither promises the link is always emailed.
  */
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isValidElement, type ReactNode } from "react";
 import { NextRequest } from "next/server";
 import DeletePage from "@/app/privacy/delete/page";
@@ -185,6 +189,14 @@ async function main(): Promise<void> {
     is("the answer is found", Boolean(answer), true);
     is("never promises the link is always emailed", /If the store knows it, we email you a link/.test(words), false);
     is("says a store may not be able to do it at once, and where to write", /support@marktmorgen\.com/.test(words) && /says why/i.test(words), true);
+
+    part("(5) The Privacy Policy and the page's own opening say the same");
+    const plain = (file: string) => readFileSync(join(process.cwd(), file), "utf8").replace(/\{" "\}/g, " ").replace(/\s+/g, " ");
+    const policy = plain("app/privacy/page.tsx");
+    const opening = /If a store knows it, we email it a link that works for an hour/.test(policy);
+    is("the Privacy Policy never promises the link is always emailed", opening, false);
+    is("the Privacy Policy says where to write when it does not come", /we try to email it a link.{0,600}support@marktmorgen\.com/.test(policy), true);
+    is("the deletion page's opening never promises the link is always emailed", /nobody to ask: we email you a link/.test(plain("app/privacy/delete/page.tsx")), false);
   } finally {
     if (keyBefore === undefined) delete process.env.NIMBUS_DATA_KEY;
     else process.env.NIMBUS_DATA_KEY = keyBefore;

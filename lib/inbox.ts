@@ -344,12 +344,33 @@ async function answering(store: Store, id: string, to: string): Promise<string> 
   return store.email;
 }
 
-/** Gives a conversation back to nobody, if it is still given to `stale` when read now. */
+/**
+ * The conversation's record written over only while it is still exactly the text read, its expiry kept: a
+ * compare-and-set that never re-creates a record deleted meanwhile (a buyer's erasure, forgetInboxPerson) and
+ * never overwrites a change made meanwhile (another assignee). Modelled by lib/redis-memory.ts. 1 written, 0 not.
+ */
+export const INBOX_GIVE_BACK = `-- marktmorgen:inbox-give-back:v1
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
+  return 1
+end
+return 0`;
+
+/**
+ * Gives a conversation back to nobody, if it is still given to `stale` when read now. Only the record's
+ * `assigned` changes (INBOX_GIVE_BACK): no index entry, chat link or expiry is written, so nothing a buyer's
+ * erasure removed in between comes back, and the record only gets smaller, so the data room it was counted
+ * in still covers it. A reply in an unknown shape throws UnknownReplyError (rule 24); the caller tells the owner.
+ */
 async function giveBack(store: Store, id: string, stale: string): Promise<void> {
-  if (!store.statsId) return;
-  const current = await readKept(store.statsId, id);
+  if (!store.statsId || !CONVERSATION_ID.test(id)) return;
+  const key = convKey(store.statsId, id);
+  const [raw] = await redisPipeline([["GET", key]]);
+  if (typeof raw !== "string") return;
+  const current = parseKept(raw);
   if (!current || current.assigned !== stale) return;
-  await write(store, store.statsId, store.handle, { ...current, assigned: "" }, null, false);
+  const swapped = repliesFor(await redisPipeline([["EVAL", INBOX_GIVE_BACK, 1, key, raw, JSON.stringify({ ...current, assigned: "" })]]), 1)?.[0];
+  if (swapped !== 0 && swapped !== 1) throw new UnknownReplyError("giving back a conversation whose person left");
 }
 
 /** One email to whoever has the conversation (the owner when nobody does), at most every half hour for one conversation. */

@@ -72,7 +72,7 @@ is("a start after the end keeps nothing (said by the page, never swapped in sile
 is(
   "by kind: products, calls, tips and free trials are apart",
   (["products", "calls", "tips", "trials"] as const).map((kind) => filterSales(SALES, { ...EMPTY_FILTER, kind }).length),
-  [3, 1, 1, 1],
+  [4, 1, 1, 1],
 );
 is("a sale with no email address is kept by every filter but one on the buyer", [filterSales([sale({ email: null })], EMPTY_FILTER).length, filterSales([sale({ email: null })], { ...EMPTY_FILTER, email: "a" }).length], [1, 0]);
 

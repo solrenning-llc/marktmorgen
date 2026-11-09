@@ -984,8 +984,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
       // The creator told once about an order whose affiliate link was never confirmed (owner's decision 6, 9 November 2026).
       { file: "lib/affiliates.ts", names: ["tellPending", "pendingNotice"] },
+      { file: "lib/refused-tries.ts", names: ["REFUSED_TRIES", "REFUSED_TRY_COMMANDS", "REFUSED_MAX_SECONDS"] },
     ],
-    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
+    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them. An email a sender refused for certain may already have been taken (a stop after the figure, a 4xx after the request): a caller that asks again counts the refusal first (lib/refused-tries.ts, REFUSED_TRY_COMMANDS commands, the count kept as tests/store-data-registry.ts says) and stops at REFUSED_TRIES, so one email takes the figure at most that many times; a refusal never sends, so the provider share of the email taken is not spent, and one that took nothing (the figure spent) is the job's or the request's own work.",
   },
   {
     id: "ai",

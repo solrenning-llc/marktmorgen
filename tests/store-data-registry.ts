@@ -826,6 +826,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:rec:link:@lib/recovery-address.ts": company("A recovery link", "An account's, minutes."),
   "nl:auth:rec:set:@lib/recovery-address.ts": company("A recovery address being set", "An account's, minutes."),
   "nl:auth:rec:until:@lib/recovery-address.ts": company("Until when a recovery holds", "An account's."),
+  // One count for every caller that asks again on a certain refusal (rule 30; #3377 bounded its own checkout reminders the same way).
+  "nl:refused:@lib/refused-tries.ts": short("How many times a sender refused one of the store's emails for certain (REFUSED_TRIES at most): a day, a payment request's reminders its open time (REFUSED_MAX_SECONDS)", "store", 45, MARK),
   "nl:rl:@lib/request-guard.ts": short("Per connection, person or store counts, by their scope", "request", 1),
   "nl:rlm:@lib/request-guard.ts": short("Monthly counts by their scope", "day", 62, 128),
   "nl:rev:ask:due@lib/review-ask.ts": company("Review asks due", "One sorted set for every store: each an order's, gone when asked."),

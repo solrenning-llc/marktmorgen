@@ -129,6 +129,16 @@ async function main(): Promise<void> {
   is("the pixels are named in German", px?.props.names, "Meta und Google");
   answering(null);
 
+  part("Who each sentence is about (review 6735380409)");
+  const pt = trackingConsentWords("pt");
+  const es = trackingConsentWords("es");
+  const it = trackingConsentWords("it");
+  is("pt: the purchase is credited to the affiliate, never to the buyer", /atribuída a esse afiliado/.test(pt.affiliateBody(30)) && !/lhe seja atribuída/.test(pt.affiliateBody(30)), true);
+  is("pt: the cookie, not the store, holds nothing else", /O cookie não contém mais nada sobre si/.test(pt.affiliateBody(30)), true);
+  is("es: the cookie, not the store, holds nothing else", /La cookie no contiene nada más sobre ti/.test(es.affiliateBody(30)), true);
+  is("it: the cookie is named in the nothing-else sentence", /Il cookie non contiene nient'altro su di te/.test(it.affiliateBody(30)), true);
+  is("pt: the store measures its own ads", /próprios anúncios/.test(pt.adsTitle("S")) && /próprios anúncios/.test(pt.adsBody("Meta", "S")), true);
+
   done();
 }
 

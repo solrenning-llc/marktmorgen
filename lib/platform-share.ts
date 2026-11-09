@@ -75,6 +75,15 @@ export const SHARE_PROVED_IN_TEST_MODE = false;
  */
 export const SHARING_INDEX = "nl:share:stores";
 
+/**
+ * The percentage last written on each store's memberships, by store key: by
+ * the daily job once it has read them all (lib/share-settle.ts), and, when a
+ * store's plan share changes or stops, by setSubscription (lib/store.ts) with
+ * the share its checkouts wrote until then, so that the memberships sold
+ * before the job's next run are read even when the store leaves the list.
+ */
+export const SHARE_APPLIED = "nl:share:applied";
+
 /** The parts of a store the share is decided by. */
 export type ShareStanding = Pick<Store, "shared" | "subscriptionActive" | "trialEnds" | "tier">;
 

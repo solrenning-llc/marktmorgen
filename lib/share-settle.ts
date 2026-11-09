@@ -23,6 +23,7 @@
  */
 import { BillingError, onPlatform } from "@/lib/billing";
 import { COMMISSION_LIVE } from "@/lib/plan";
+import { SHARE_APPLIED } from "@/lib/platform-share";
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
 import { saleHandles, storeForEmail, storeForHandle, type Store } from "@/lib/store";
@@ -38,8 +39,8 @@ const READ_VERSION = "2024-06-20";
 
 /** Fees older than this are settled only through a refund or a dispute (step 2). */
 export const RECENT_DAYS = 3;
-/** The rate last written on each store's memberships, by store key (step 3). */
-const APPLIED = "nl:share:applied";
+/** The rate last written on each store's memberships, by store key (step 3; lib/platform-share.ts). */
+const APPLIED = SHARE_APPLIED;
 /** When step 2 last read each account's refunds, by store key. */
 const READ_UNTIL = "nl:share:read-until";
 /** Searches step 3 may make for one store in a run, over every address it has had (rule 24). */
@@ -449,6 +450,14 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
  * address whose pass took several pages and changed a percentage is not taken
  * as finished, and the applied mark is written only when every address was
  * read to its end, every change was confirmed, and no address had such a pass.
+ *
+ * No mark and a share of 0 means that nothing sold carries a share: when a
+ * store's plan share changes or stops, setSubscription (lib/store.ts) first
+ * puts down the share its checkouts wrote until then as the mark, so a store
+ * that stopped before this job first read it, or went back to a share already
+ * confirmed, is still read here and lowered. Until 9 November 2026 it was not,
+ * and those memberships kept the old share for good
+ * (tests/share-stop-early.test.ts).
  *
  * Rule 24 bound: at most MEMBERSHIP_SEARCHES (20) searches for a store in a
  * run, over all its addresses, one at least for each. For A addresses and N

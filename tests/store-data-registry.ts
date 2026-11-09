@@ -862,7 +862,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ses:did:@lib/ses.ts": company("A send already handed to Amazon", "The company's, minutes."),
   "nl:ses:h:@lib/ses.ts": company("Amazon's sends an hour", "The company's."),
   "nl:ses:state@lib/ses.ts": company("Amazon's state", "One key, the company's."),
-  "nl:share:applied@lib/share-settle.ts": company("Shares applied, by store", "One hash for every store: a field a store."),
+  "nl:share:applied@lib/platform-share.ts": company("Shares applied, by store", "One hash for every store: a field a store."),
   "nl:share:read-until@lib/share-settle.ts": company("How far shares were read, by store", "One hash for every store: a field a store."),
   "nl:ship:done:@lib/shipments.ts": short("An order shipped", "order", 400, MARK),
   // Built, never activated: no outbox status/cleanup Redis and no UI GET.

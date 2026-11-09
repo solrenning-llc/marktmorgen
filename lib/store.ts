@@ -79,7 +79,7 @@ import { type PastSale, type StoreSale, NO_SALE, parsePastSales, parseSale, with
 import { parseTiers } from "@/lib/tier-rules";
 import { type BillingPeriod, isPeriod } from "@/lib/allowance-window";
 import { ENDED_INDEX } from "@/lib/plan-standing";
-import { SHARING_INDEX } from "@/lib/platform-share";
+import { SHARE_APPLIED, SHARING_INDEX, planShareBps } from "@/lib/platform-share";
 import { PAYING_INDEX } from "@/lib/free-pool-rules";
 import { type Cycle, type Tier, parseCycle, parseTier } from "@/lib/plan";
 import { COMMUNITY_ID } from "@/lib/community-text";
@@ -2104,8 +2104,21 @@ export async function setSubscription(
     // The stores whose sales pay a share, for the daily job that keeps what
     // was taken to what is owed (lib/share-settle.ts). Only when it changes.
     const sharing = saved.shared && saved.subscriptionActive;
-    if (sharing !== (store.shared && store.subscriptionActive)) {
-      await redisPipeline([[sharing ? "SADD" : "SREM", SHARING_INDEX, storeRef(saved)]]).catch((error) =>
+    // A membership keeps the percentage its checkout wrote (planShareBps)
+    // until the job changes it, and the job reads a store's memberships only
+    // while the store is on that list or has an applied mark. When the plan's
+    // share changes or stops, the share written until now is put down as the
+    // mark first, so the memberships sold since the job's last run are read
+    // even when the store leaves the list before it (9 November 2026,
+    // tests/share-stop-early.test.ts). Written whether or not the commission
+    // is live: a mark too many costs one search, one too few a share for good.
+    const wrote = planShareBps(store, true), writes = planShareBps(saved, true);
+    const marks = [
+      ...(wrote > 0 && writes !== wrote ? [["HSET", SHARE_APPLIED, storeRef(saved), String(wrote)]] : []),
+      ...(sharing !== (store.shared && store.subscriptionActive) ? [[sharing ? "SADD" : "SREM", SHARING_INDEX, storeRef(saved)]] : []),
+    ];
+    if (marks.length) {
+      await redisPipeline(marks).catch((error) =>
         console.error("could not keep the list of stores that pay a share", error),
       );
     }

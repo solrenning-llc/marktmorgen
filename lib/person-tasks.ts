@@ -51,6 +51,15 @@ export const TASK_REFUSALS: Readonly<Record<TaskRefusal, string>> = {
   unknown: "That task is not there anymore.",
 };
 
+/**
+ * What is said when one person's tasks, or a store's, could not be read whole
+ * (lib/crm.ts, TasksUnreadable; answered 503 "unreadable"): never "no tasks",
+ * and a change is refused with nothing written (CX-123 rule 24).
+ */
+export const TASKS_NOT_READ = "This person's tasks could not be read just now. Try again in a minute.";
+export const TASKS_NOT_CHANGED = "This person's tasks could not be read just now, so nothing was changed. Try again in a minute.";
+export const AGENDA_NOT_READ = "Your team's tasks could not be read just now. Try again in a minute.";
+
 /** What a change refused while another one is being saved says (lib/crm.ts, changePersonTasks; answered 409 "busy"). */
 export const TASKS_BUSY = "Someone else is changing tasks in this store right now. Try again in a moment.";
 

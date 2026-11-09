@@ -11,6 +11,8 @@
  *   - the sender's answer is unknown (the request throws): it may have been taken, so the same email under the same
  *     key is never sent again (money review of #3387; tests/paypal-receipt-once.test.ts has the other senders' side),
  *     and the order leaves the list at its window's end;
+ *   - the same with the answer unknown ten minutes before UTC midnight and the service back after it: one request,
+ *     as the real ledger keys an attempt with no day in it;
  *   - sent once, never twice: more sweeps send nothing more, the buyer's grant is written once;
  *   - bounded: past RECEIPT_RETRY_SECONDS (22 hours) after its first try, inside the providers' one-day idempotency window, an
  *     order whose receipt is still refused leaves the list, so it is never retried forever nor sent twice.
@@ -89,13 +91,13 @@ const realNow = Date.now.bind(Date);
 let ahead = 0;
 Date.now = () => realNow() + ahead;
 /**
- * Moves the clock to a minute after the next UTC midnight. The synthetic Resend account (tests/resend-fallback-fixture.ts)
- * keeps one ledger a UTC day, while the real ledger is kept in Redis; so a part whose tries must meet the same ledger
- * runs inside one day, whatever the time the suite starts (as tests/paypal-receipt-once.test.ts does).
+ * Moves the clock to `minutes` before the next UTC midnight. The real Resend ledger (lib/resend-fallback-budget.ts) keys
+ * an attempt by its account and its path, body and idempotency key, with no day in it; a part that crosses midnight
+ * proves the synthetic account (tests/resend-fallback-fixture.ts) keeps that ledger across days too.
  */
-const startOfNextDay = () => {
+const beforeMidnight = (minutes: number) => {
   const now = Date.now();
-  ahead += Math.ceil(now / 86_400_000) * 86_400_000 + 60_000 - now;
+  ahead += Math.ceil(now / 86_400_000) * 86_400_000 - minutes * 60_000 - now;
 };
 const handOverKey = (statsId: string) => `nl:ppsell:handover:${statsId}`;
 
@@ -156,7 +158,6 @@ async function main(): Promise<void> {
   is("never sent twice", toBuyer(second).length, 1);
 
   part("The sender's answer is unknown (the request throws): kept, and the same email is never sent again");
-  startOfNextDay();
   mail = "throws";
   const third = await pay(3);
   is("no receipt accepted", toBuyer(third).length, 0);
@@ -171,6 +172,19 @@ async function main(): Promise<void> {
   is("past its window it leaves the list", (await listed()).includes(third), false);
   is("never a second request", tries.filter((key) => key === `nimbus-paypal:${third}`).length, 1);
   is("the buyer's grant is written once for the product", (await importedFor(await fresh(), BUYER)).filter((p) => p.productId === product.id).length, 1);
+
+  part("The answer is unknown ten minutes before UTC midnight, the service back after it: still one request");
+  beforeMidnight(10);
+  mail = "throws";
+  const late = await pay(9);
+  is("no receipt accepted before midnight", toBuyer(late).length, 0);
+  is("the order stays on the list", (await listed()).includes(late), true);
+  mail = "up";
+  await sweep();
+  is("control: the sweep ran after UTC midnight", new Date(Date.now()).getUTCHours() < 2, true);
+  is("after midnight, no second request under its key", tries.filter((key) => key === `nimbus-paypal:${late}`).length, 1);
+  await sweep(22);
+  is("past its window it leaves the list, and still one request", [(await listed()).includes(late), tries.filter((key) => key === `nimbus-paypal:${late}`).length], [false, 1]);
 
   // Read through the module so the file runs before the window exists (RED); 22 hours is what it must be.
   const WINDOW = 22 * 3600;

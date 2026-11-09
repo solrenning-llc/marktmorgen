@@ -328,13 +328,21 @@ async function main(): Promise<void> {
   is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst), true);
   {
     // Inbox C4-33 (1): the day's heavy readings are the most the margin allows, with the room that exists: the first
-    // payment refunded in full (tests/plan-margin.test.ts, under US$ 65, a ceiling the owner keeps) stays under it,
+    // payment refunded in full (tests/plan-margin.test.ts, under the ceiling the owner keeps) stays under it,
     // and one more heavy reading a day would pass it. Computed as that test computes it.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
     const oneMore = 32 * (heavyWorst - lightWorst);
-    is("the first year given back stays under US$ 65 with the day's heavy readings", year < 65, true);
-    is("and one more heavy reading a day would pass it: the figure is the most the margin allows", year + oneMore >= 65, true);
+    // Rule 23 (owner's decision 8, 9 November 2026: the store's pictures count in its space, ceiling US$ 66; US$ 65
+    // before, as #2801 and #2803 do): the dollar more is room for the picture lines (the studio's picture uploads and
+    // thumbnails of #2803/#2801 when they are in, and images-space, this unit's counter), never for more readings; with
+    // them left out, the readings figure is still the one sized under US$ 65. A line not in this tree adds nothing here
+    // because it is not in the tree, never because its cost is taken as zero.
+    const pictureLines = ["picture-uploads", "picture-thumbnails", "images-space"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd("creator") ?? 0), 0);
+    is("images-space is a line of the registry", COST_LINES.some((l) => l.id === "images-space"), true);
+    is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture line", year < 66, true);
+    is("the readings figure is still the one sized under US$ 65: without the picture lines, one more heavy reading a day would pass it", year - pictureLines < 65 && year - pictureLines + oneMore >= 65, true);
+    is("the picture lines together take at most the dollar the owner added", pictureLines <= 1, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }
   {

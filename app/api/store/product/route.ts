@@ -41,6 +41,7 @@ import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact 
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
+import { adjustImages } from "@/lib/image-space";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
@@ -370,13 +371,33 @@ export async function POST(request: NextRequest) {
         if (removedCourse) {
           await dropCourse(removedCourse, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
         }
+        // The store's space (owner's decision 8, lib/image-space.ts): what was deleted with its size known gives its room
+        // back, its picture to the pictures and the rest to the files; what carries no size waits for the next listing.
+        const sizes = new Map<string, { picture: boolean; bytes: number }>();
+        for (const file of had) {
+          const bytes = (file as { bytes?: unknown }).bytes;
+          if (typeof bytes === "number") sizes.set(file.pathname, { picture: false, bytes });
+        }
+        for (const shown of going.image ? [{ path: going.image.path, bytes: going.image.bytes }, ...(going.image.small ? [going.image.small] : [])] : []) {
+          sizes.set(shown.path, { picture: true, bytes: shown.bytes });
+        }
+        const since = Date.now();
+        let pictures = 0;
+        let files = 0;
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).
-          if (await dropStream(file.pathname, removed.store).catch(() => false)) continue;
-          await del(file.pathname).catch((error: unknown) => {
-            console.error("could not delete the file of a removed product", error);
-          });
+          let gone = await dropStream(file.pathname, removed.store).catch(() => false);
+          if (!gone) {
+            gone = await del(file.pathname).then(() => true, (error: unknown) => {
+              console.error("could not delete the file of a removed product", error);
+              return false;
+            });
+          }
+          const size = gone ? sizes.get(file.pathname) : undefined;
+          if (size?.picture) pictures += size.bytes;
+          else if (size) files += size.bytes;
         }
+        await adjustImages(ref, [], pictures, { files, since });
         for (const file of filesOnProduct(going)) await dropStamped(file);
       }
     } else if (action === "link") {
@@ -397,9 +418,13 @@ export async function POST(request: NextRequest) {
       // released only after the record that pointed at it is written.
       const linked = await setProductLink(ref, id, read.url);
       if (linked.ok && linked.removed) {
-        await del(linked.removed.pathname).catch((error: unknown) => {
+        const since = Date.now();
+        const deleted = await del(linked.removed.pathname).then(() => true, (error: unknown) => {
           console.error("could not delete a file replaced by a link", error);
+          return false;
         });
+        // Its room given back to the store's pictures (owner's decision 8, lib/image-space.ts).
+        if (deleted) await adjustImages(ref, [], 0, { files: linked.removed.bytes, since });
         await dropStamped(linked.removed);
       }
       result = linked.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(linked.reason) };

@@ -73,7 +73,7 @@ export function LinkPicture({ link, folder }: { link: StoreLink; folder: string 
       await uploadPresigned(path, shrunk.blob, {
         access: "private",
         handleUploadUrl: "/api/store/image/upload",
-        clientPayload: JSON.stringify({ linkId: link.id }),
+        clientPayload: JSON.stringify({ linkId: link.id, bytes: shrunk.blob.size }),
         contentType: shrunk.blob.type,
       });
       const problem = await post({ action: "attach", path, width: shrunk.width, height: shrunk.height });

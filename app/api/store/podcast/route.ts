@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { adjustImages } from "@/lib/image-space";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setPodcastEpisodes, setProductPodcast, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -86,7 +87,15 @@ export async function POST(request: NextRequest) {
       // Audio the product's file or another episode still uses (written before the check above) is kept.
       const gone = result.removed;
       const shared = gone !== null && (product.file?.pathname === gone.pathname || result.podcast.episodes.some((episode) => episode.pathname === gone.pathname));
-      if (gone && !shared) await del(gone.pathname).catch((error: unknown) => console.error("could not delete an episode's audio", error));
+      if (gone && !shared) {
+        const since = Date.now();
+        const deleted = await del(gone.pathname).then(() => true, (error: unknown) => {
+          console.error("could not delete an episode's audio", error);
+          return false;
+        });
+        // Its room given back to the store's pictures (owner's decision 8, lib/image-space.ts).
+        if (deleted) await adjustImages(ref, [], 0, { files: gone.bytes, since });
+      }
       return Response.json({ ok: true, podcast: result.podcast });
     });
   } catch (error) {

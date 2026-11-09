@@ -173,6 +173,7 @@ export async function POST(request: NextRequest) {
     const still = new Set(imagePaths(image));
     const replaced = imagePaths(result.removed).filter((removed) => !still.has(removed));
     let given = 0;
+    const since = Date.now();
     if (replaced.length) {
       const deleted = await del(replaced).then(() => true, (error: unknown) => {
         console.error("could not delete a replaced product picture", error);
@@ -187,7 +188,7 @@ export async function POST(request: NextRequest) {
     // The store's space (owner's decision 8, lib/image-space.ts): the pictures this request took from the door counted at
     // their real sizes in place of what the door held for them, and the ones it deleted given back. Best effort.
     const settled = image ? [{ path: image.path, bytes: image.bytes }, ...(image.small ? [{ path: image.small.path, bytes: image.small.bytes }] : [])] : [];
-    await adjustImages(ref, settled.filter((each) => fresh.has(each.path)), given);
+    await adjustImages(ref, settled.filter((each) => fresh.has(each.path)), given, { since });
     return Response.json({ ok: true });
   } catch (error) {
     if (error instanceof StoreFullError) {

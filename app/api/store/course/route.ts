@@ -1,4 +1,5 @@
 import { originFrom } from "@/lib/request-origin";
+import { adjustImages } from "@/lib/image-space";
 import { addComment, deleteComment, dropComments, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
 import { COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { tellStudent } from "@/lib/lesson-comment-notify";
@@ -511,12 +512,20 @@ export async function POST(request: NextRequest) {
 
       // Storage is released only after the record that no longer points at it
       // is written, the same order every other file here is handled in.
+      const since = Date.now();
+      let freed = 0;
       for (const file of result.removed) {
         if (filesInCourse(result.course).some((f) => f.pathname === file.pathname)) continue;
         // A video the video service keeps is taken away there; anything else, from the file store.
-        if (await dropStream(file.pathname, store).catch(() => false)) continue;
-        await del(file.pathname).catch((error: unknown) => console.error("could not delete a lesson file", error));
+        let gone = await dropStream(file.pathname, store).catch(() => false);
+        if (!gone) gone = await del(file.pathname).then(() => true, (error: unknown) => {
+          console.error("could not delete a lesson file", error);
+          return false;
+        });
+        if (gone) freed += file.bytes;
       }
+      // Their room given back to the store's pictures (owner's decision 8, lib/image-space.ts).
+      await adjustImages(ref, [], 0, { files: freed, since });
       return Response.json({ ok: true, course: result.course, addedId: result.addedId, ...(stream ? { stream } : {}) });
     });
   } catch (error) {

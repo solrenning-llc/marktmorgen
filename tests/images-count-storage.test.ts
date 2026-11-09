@@ -13,9 +13,9 @@
  *   - a picture past the store's space is refused before the door signs;
  *   - deleting a product's picture gives its room back, and the door opens;
  *   - a picture deleted where its size is not known is counted until the
- *     once-a-day reconciliation lists the folder again, and then not;
- *   - a counter that cannot be read refuses (rule 24), and the next
- *     reconciliation makes it again;
+ *     listing, every two days at the most, finds it gone, and then not;
+ *   - a counter that cannot be read refuses pictures (rule 24), and the next
+ *     listing makes it again;
  *   - a buyer's review photo and an email's picture take room too: past the
  *     space the review is saved without the photo, the email's picture is
  *     refused, and nothing is written.
@@ -37,7 +37,8 @@ const ORIGIN = "https://marktmorgen.com";
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]);
 /** A JPEG that says it is 100 by 100, as the review form and the email editor send one. */
 const SMALL_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0, 100, 0, 100, 3, ...new Array(12).fill(0)]).toString("base64");
-const DAY = 24 * 60 * 60 * 1000;
+// Rule 23 (pre-review of 16edc6a536): a pass of the listing runs every two days at the most (RECONCILE_EVERY_MS).
+const PASS_DAYS = 2 * 24 * 60 * 60 * 1000;
 
 const post = (path: string, session: string, body: unknown) =>
   new NextRequest(`${ORIGIN}${path}`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) });
@@ -92,7 +93,7 @@ async function main(): Promise<void> {
     is("the new picture put on the product", await result(await productImage(post("/api/store/image", s.session, { action: "attach", id: s.id, path: next.pathname, width: 1200, height: 800 }))), [200, "ok"]);
   }
 
-  part("A reconciliation once a day corrects the counter");
+  part("A listing every two days corrects the counter");
   {
     const s = await shop("reconcile.pictures@example.com", "reconcilepics");
     const old = s.name();
@@ -101,18 +102,19 @@ async function main(): Promise<void> {
     // Deleted where its size is not known (a review's photo, a page's block): the counter still holds it.
     files.delete(old);
     is("the same day, the counter still counts the deleted picture: refused", (await s.ask(s.id)).answer, [409, "storage_setup"]);
-    shift += DAY + 1;
-    is("a day later the folder is listed again, and the door opens", (await s.ask(s.id)).answer, [200, "ok"]);
+    shift += PASS_DAYS + 1;
+    is("two days later the folder is listed again, and the door opens", (await s.ask(s.id)).answer, [200, "ok"]);
   }
 
-  part("A counter that cannot be read refuses, and the next reconciliation makes it again");
+  part("A counter that cannot be read refuses pictures, and the next listing makes it again");
   {
     const s = await shop("unread.pictures@example.com", "unreadpics");
     is("a first picture", (await s.ask(s.id)).answer, [200, "ok"]);
     redis.run(["HSET", `nl:images:space:${s.folder}`, "held", "not a number"]);
-    is("the counter unreadable the same day: refused, try again later", (await s.ask(s.id)).answer, [503, "files_unavailable"]);
-    shift += DAY + 1;
-    is("a day later it is made again from the folder, and the door opens", (await s.ask(s.id)).answer, [200, "ok"]);
+    // Rule 23: its own word since the pre-review, no time promised (lib/studio-messages.ts pictures_room_unknown).
+    is("the counter unreadable the same day: refused, try again later", (await s.ask(s.id)).answer, [503, "pictures_room_unknown"]);
+    shift += PASS_DAYS + 1;
+    is("two days later it is made again from the folder, and the door opens", (await s.ask(s.id)).answer, [200, "ok"]);
   }
 
   part("A buyer's review photo and an email's picture take room too");

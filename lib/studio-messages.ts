@@ -33,6 +33,9 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   // Also the store's calls to connected services used, or no place this month (lib/metered-limits.ts): no reason is claimed.
   slow_down: "Uploads can't start just now. Try again later.",
   files_unavailable: "File uploads are unavailable right now. Keep your file and try again in a few minutes.",
+  // A picture whose room in the store's space cannot be checked (lib/image-space.ts, owner's decision 8): no time is
+  // promised, because the store's pictures are listed again only every two days at the most.
+  pictures_room_unknown: "Your store's storage could not be checked, so new pictures are paused for now. Pictures and files you already have are not affected, and file uploads still work. Try again later.",
   // A page whose read did not come back in a known shape (lib/sales-page-store.ts readPage): nothing is decided from it.
   page_unread: "A page could not be read just now, so nothing was changed. Reload, then try again.",
   // The same, once a section update had already been counted toward the month (app/api/store/saved-blocks, apply).

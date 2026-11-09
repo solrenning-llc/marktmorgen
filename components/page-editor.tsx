@@ -4028,7 +4028,7 @@ function PicturesEditor({
           await uploadPresigned(path, shrunk.blob, {
             access: "private",
             handleUploadUrl: "/api/store/image/upload",
-            clientPayload: JSON.stringify(pageId ? { pageId } : { productId }),
+            clientPayload: JSON.stringify({ ...(pageId ? { pageId } : { productId }), bytes: shrunk.blob.size }),
             contentType: shrunk.blob.type,
           });
           added.push({ path, width: shrunk.width, height: shrunk.height, alt: "", caption: "" });

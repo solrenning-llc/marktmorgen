@@ -114,7 +114,7 @@ import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import { IMAGE_LIST_PAGES, IMAGE_SPACE_COMMANDS, IMAGE_SPACE_READ_BYTES, RECONCILE_MS } from "@/lib/image-space";
+import { IMAGE_LIST_PAGES, IMAGE_SPACE_COMMANDS, IMAGE_SPACE_READ_BYTES, RECONCILE_EVERY_MS, RECONCILE_MS } from "@/lib/image-space";
 import type { ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
@@ -881,18 +881,22 @@ const ALL_TIERS_SAME = (usd: number) => () => usd;
  */
 export const IMAGE_BLOB_ADVANCED_OP = 7 / 1e6;
 export const IMAGE_BLOB_TRIES = 11;
-/** Pages of files a reconciliation measures besides the pictures: filesHeld's Blob pages and vaultHeld's R2 pages (lib/file-store.ts, lib/vault.ts). */
+/** Pages of files the first pass measures, while no file door has (filesHeld's Blob pages, vaultHeld's R2 pages; lib/file-store.ts, lib/vault.ts). */
 export const IMAGE_FILES_BLOB_PAGES = 20;
 export const IMAGE_FILES_VAULT_PAGES = 20;
-/** The function held by one reconciliation: its deadline for listing, and as long again for the measurement it may still be waiting on. */
-export const IMAGE_RECONCILE_SECONDS = (2 * RECONCILE_MS) / 1000;
-/** One reconciliation of a store: its listings, its commands (claim, write, a second admission, a read) and its time. */
+/** The function held by one pass: its deadline, and one Blob call still waited on when it passes (lib/fetch-timeout.ts BLOB_TIMEOUT_MS). */
+export const IMAGE_RECONCILE_SECONDS = RECONCILE_MS / 1000 + 15;
+/** Passes a window can hold: one a RECONCILE_EVERY_MS at the most, in the DAY_WINDOWS days a billing month touches. */
+export const IMAGE_PASSES = Math.ceil((DAY_WINDOWS * 24 * 60 * 60 * 1000) / RECONCILE_EVERY_MS);
+/** One pass of a store: its pages of pictures, its commands (claim, write, a second admission) and its time. */
 export const IMAGE_RECONCILE_COST =
-  (IMAGE_LIST_PAGES + IMAGE_FILES_BLOB_PAGES) * IMAGE_BLOB_TRIES * IMAGE_BLOB_ADVANCED_OP
-  + IMAGE_FILES_VAULT_PAGES * (R2_CLASS_A_MICRO_USD_PER_MILLION / 1e12)
+  IMAGE_LIST_PAGES * IMAGE_BLOB_TRIES * IMAGE_BLOB_ADVANCED_OP
   + CALL + 0.5 * CPU_SECOND + IMAGE_RECONCILE_SECONDS * MEMORY_SECOND
-  + (IMAGE_SPACE_COMMANDS.claim + IMAGE_SPACE_COMMANDS.reconcile + IMAGE_SPACE_COMMANDS.door + IMAGE_SPACE_COMMANDS.heldRead) * COMMAND
+  + (IMAGE_SPACE_COMMANDS.claim + IMAGE_SPACE_COMMANDS.pass + IMAGE_SPACE_COMMANDS.door) * COMMAND
   + 2 * IMAGE_SPACE_READ_BYTES * DB_BYTE;
+/** The files measured once, by the first pass of a store no file door measured: counted once a window, though it is once a store. */
+export const IMAGE_FILES_MEASURE_COST =
+  IMAGE_FILES_BLOB_PAGES * IMAGE_BLOB_TRIES * IMAGE_BLOB_ADVANCED_OP + IMAGE_FILES_VAULT_PAGES * (R2_CLASS_A_MICRO_USD_PER_MILLION / 1e12) + 2 * COMMAND;
 /** A month of the store's picture counter at its worst, for a plan. */
 export function imagesSpaceMonthlyUsd(tier: Tier): number {
   const a = STORE_ALLOWANCES[tier];
@@ -901,7 +905,7 @@ export function imagesSpaceMonthlyUsd(tier: Tier): number {
   const reviews = publicRequests * IMAGE_SPACE_COMMANDS.take * COMMAND;
   const mail = a.integration * IMAGE_SPACE_COMMANDS.take * COMMAND;
   const opens = PAID_UPLOAD_OPENS[tier] * (IMAGE_SPACE_COMMANDS.heldRead + IMAGE_SPACE_COMMANDS.files) * COMMAND;
-  return studio + reviews + mail + opens + DAY_WINDOWS * IMAGE_RECONCILE_COST;
+  return studio + reviews + mail + opens + IMAGE_PASSES * IMAGE_RECONCILE_COST + IMAGE_FILES_MEASURE_COST;
 }
 
 export const COST_LINES: CostLine[] = [
@@ -1046,12 +1050,13 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/image-space.ts", names: ["IMAGE_SPACE_COMMANDS", "IMAGE_SPACE_READ_BYTES", "IMAGE_LIST_PAGES", "RECONCILE_EVERY_MS", "RECONCILE_MS", "IMAGE_OPEN_MAX", "admitImage", "adjustImages", "reconcileImages", "spaceUsed", "noteFilesAuthorized"] },
       { file: "lib/file-store.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
       { file: "lib/vault.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
-      { file: "app/api/store/image/upload/route.ts", names: ["await admitStorePicture(store, ref, MAX_IMAGE_BYTES, pathname)"] },
-      { file: "app/api/store/image/route.ts", names: ["await adjustImages(ref, settled.filter((each) => fresh.has(each.path)), given)"] },
+      { file: "app/api/store/image/upload/route.ts", names: ["await admitStorePicture(store, ref, declared, pathname)", "maximumSizeInBytes: declared"] },
+      { file: "app/api/store/image/route.ts", names: ["await adjustImages(ref, settled.filter((each) => fresh.has(each.path)), given, { since })"] },
+      { file: "app/api/store/product/route.ts", names: ["await adjustImages(ref, [], pictures, { files, since })"] },
       { file: "lib/review-photo.ts", names: ["await admitImage(ref, checked.bytes.length, limit)"] },
       { file: "lib/mail-pictures.ts", names: ["await admitImage(ref, checked.bytes.length, limit)"] },
     ],
-    basis: "Every studio request a door's picture or an attach (IMAGE_SPACE_COMMANDS.door, the dearer of the two, with IMAGE_SPACE_READ_BYTES read), every public request a review with a photo (take), every service request an email's picture (take), every upload start its read and note (heldRead + files); and one reconciliation every day of the window (DAY_WINDOWS), each listing IMAGE_LIST_PAGES pages of pictures and the files' 20 Blob pages, each an Advanced Operation tried IMAGE_BLOB_TRIES times at IMAGE_BLOB_ADVANCED_OP, the vault's 20 pages at R2 Class A, its commands (claim, write, a second admission and a read) and the function held IMAGE_RECONCILE_SECONDS at 2 GB. The pictures' bytes are inside the plan's storage (line storage), which no longer leaves them out.",
+    basis: "Every studio request a door's picture, an attach or a deletion that gives room back (IMAGE_SPACE_COMMANDS.door or .adjust, the dearer, with IMAGE_SPACE_READ_BYTES read), every public request a review with a photo (take), every service request an email's picture (take), every upload start its read and note (heldRead + files); and IMAGE_PASSES passes of the listing a window (one every RECONCILE_EVERY_MS at the most), each IMAGE_LIST_PAGES pages of pictures, an Advanced Operation tried IMAGE_BLOB_TRIES times at IMAGE_BLOB_ADVANCED_OP, its commands (claim, write, a second admission) and the function held IMAGE_RECONCILE_SECONDS at 2 GB; the files measured by a first pass (20 Blob pages, 20 R2 Class A pages), counted once a window though it happens once a store. The files are not measured again by a pass: the file doors measure them. The pictures' bytes are inside the plan's storage (line storage), which no longer leaves them out.",
   },
   {
     id: "workflows",

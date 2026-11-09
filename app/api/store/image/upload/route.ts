@@ -46,8 +46,12 @@ export async function POST(request: NextRequest) {
         let productId = "";
         let linkId = "";
         let pageId = "";
+        let declared = MAX_IMAGE_BYTES;
         try {
-          const parsed = JSON.parse(clientPayload ?? "{}") as { productId?: unknown; linkId?: unknown; pageId?: unknown };
+          const parsed = JSON.parse(clientPayload ?? "{}") as { productId?: unknown; linkId?: unknown; pageId?: unknown; bytes?: unknown };
+          // The picture's size as the studio made it (owner's decision 8): its room is held and signed for at that size,
+          // never more than MAX_IMAGE_BYTES; none said, the most a picture may weigh.
+          declared = typeof parsed.bytes === "number" && Number.isSafeInteger(parsed.bytes) && parsed.bytes > 0 ? Math.min(parsed.bytes, MAX_IMAGE_BYTES) : MAX_IMAGE_BYTES;
           productId = typeof parsed.productId === "string" ? parsed.productId : "";
           linkId = typeof parsed.linkId === "string" ? parsed.linkId : "";
           pageId = typeof parsed.pageId === "string" ? parsed.pageId : "";
@@ -91,13 +95,13 @@ export async function POST(request: NextRequest) {
 
         const rules = {
           allowedContentTypes: [...IMAGE_CONTENT_TYPES],
-          maximumSizeInBytes: MAX_IMAGE_BYTES,
+          maximumSizeInBytes: declared,
           validUntil: Date.now() + UPLOAD_WINDOW_MS,
         };
         // The picture takes room in the store's space before anything is signed (owner's decision 8, lib/image-space.ts),
-        // at the most it may weigh, settled to its real size when it is put on a product. Full, or a room that cannot be
-        // read, refuses the door.
-        await admitStorePicture(store, ref, MAX_IMAGE_BYTES, pathname);
+        // at the size the studio said (the signature allows no more), settled to its real size when it is put on a product.
+        // Full, or a room that cannot be read, refuses the door.
+        await admitStorePicture(store, ref, declared, pathname);
         return {
           token: await issueSignedToken({ pathname, operations: ["put"], ...rules }),
           urlOptions: { ...rules, addRandomSuffix: false, allowOverwrite: false },
@@ -109,7 +113,7 @@ export async function POST(request: NextRequest) {
     // The store's space (lib/image-space.ts), in a block of its own: full is the plan's storage sentence, a room that
     // cannot be read is a try-again-later.
     if (error instanceof StoreSpaceRefused) {
-      return Response.json({ ok: false, error: error.code }, { status: error.code === "files_unavailable" ? 503 : 409 });
+      return Response.json({ ok: false, error: error.code }, { status: error.code === "pictures_room_unknown" ? 503 : 409 });
     }
 
     const reason = error instanceof Error ? error.message : "server_error";

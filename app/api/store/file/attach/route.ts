@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { adjustImages } from "@/lib/image-space";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -96,9 +97,13 @@ export async function POST(request: NextRequest) {
       ? new Set<string>()
       : await (delivery ? Promise.resolve(delivery) : readDelivery(result.store, id)).then((found) => audioPlayedBy(found?.product)).catch(() => null);
     if (removed && removed.pathname !== file?.pathname && stillPlayed && !stillPlayed.has(removed.pathname)) {
-      await del(removed.pathname).catch((error: unknown) => {
+      const since = Date.now();
+      const deleted = await del(removed.pathname).then(() => true, (error: unknown) => {
         console.error("could not delete the replaced file", error);
+        return false;
       });
+      // Its room given back to the store's pictures (owner's decision 8, lib/image-space.ts).
+      if (deleted) await adjustImages(ref, [], 0, { files: removed.bytes, since });
       // Buyers' stamped copies of it go with it.
       await dropStamped(removed);
     }

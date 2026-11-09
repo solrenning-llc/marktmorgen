@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { adjustImages } from "@/lib/image-space";
 import { del } from "@/lib/blob";
 import {
   addStoreLink,
@@ -90,9 +91,13 @@ export async function POST(request: NextRequest) {
     }
     // A link taken off, or turned into a heading, lets its picture go, after the write.
     if (result.removed) {
-      await del(result.removed.path).catch((error: unknown) => {
+      const since = Date.now();
+      const deleted = await del(result.removed.path).then(() => true, (error: unknown) => {
         console.error("could not delete a removed link's picture", error);
+        return false;
       });
+      // Its room given back in the store's space (owner's decision 8, lib/image-space.ts).
+      if (deleted) await adjustImages(ref, [], result.removed.bytes, { since });
     }
     return Response.json({ ok: true, links: result.store.links });
   } catch (error) {

@@ -6,6 +6,7 @@ import { IMAGE_ACCEPT, MAX_SOURCE_BYTES } from "@/lib/product-image";
 import { MAIL_PICTURE_SIDE, MAX_MAIL_PICTURES, MAX_MAIL_PICTURE_BYTES, pictureCount, pictureLine, readPicture } from "@/lib/mail-picture-rules";
 import { confirmedMailPictureUrl } from "@/lib/mail-picture-response";
 import { SITE_URL } from "@/lib/site-url";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const PROBLEMS: Record<string, string> = {
   picture: "That picture could not be used. Try a JPEG, PNG or WebP photo.",
@@ -16,6 +17,11 @@ const PROBLEMS: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   forbidden: "Your role on this store cannot write emails.",
   server_error: "The picture could not be kept just now. Try again in a moment.",
+  // The store's space (owner's decision 8, lib/image-space.ts): an email's picture takes room as every picture does.
+  storage_full: STUDIO_MESSAGES.storage_full,
+  storage_trial: STUDIO_MESSAGES.storage_trial,
+  storage_setup: STUDIO_MESSAGES.storage_setup,
+  pictures_room_unknown: STUDIO_MESSAGES.pictures_room_unknown,
 };
 
 /**

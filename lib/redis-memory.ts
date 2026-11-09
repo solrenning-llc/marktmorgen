@@ -2043,7 +2043,7 @@ export class MemoryRedis {
    */
   scriptCalls = 0;
 
-  /** lib/image-space.ts: a store's pictures counted in its space, each script as it runs in Redis. */
+  /** lib/image-space.ts: a store's pictures counted in its space, each script (version 2) as it runs in Redis. */
   private imageSpace(script: string, args: string[]): unknown {
     if (args[0] !== "1") throw new Error("ERR image-space: arguments");
     const k = args[1];
@@ -2054,23 +2054,24 @@ export class MemoryRedis {
     const h = this.hash(k);
     const digits = (v: string | undefined): v is string => v !== undefined && /^\d+$/.test(v);
     const name = script.slice("-- marktmorgen:image-space-".length, script.indexOf("\n"));
-    const done = (): void => { if (h.size === 0) this.data.delete(k); };
-    if (name === "take:v1") {
+    const done = <T>(answer: T): T => { if (h.size === 0) this.data.delete(k); return answer; };
+    const keep = (seconds: string) => this.until.set(k, this.now() + Number(seconds) * 1000);
+    if (name === "take:v2") {
       const [bytes, limit, now, every] = argv.map(Number);
       const held = h.get("held"), files = h.get("files"), pend = h.get("pend"), at = h.get("try");
       const due = !digits(at) || now - Number(at) >= every ? 1 : 0;
-      if (!digits(held) || !digits(files) || (pend !== undefined && !digits(pend))) { done(); return [-1, due, 0]; }
+      if (!digits(held) || !digits(files) || (pend !== undefined && !digits(pend))) return done([-1, due, 0]);
       const total = Number(held) + Number(files) + (pend === undefined ? 0 : Number(pend));
-      if (total + bytes > limit) { done(); return [0, due, total]; }
+      if (total + bytes > limit) return done([0, due, total]);
       h.set("held", String(Number(held) + bytes));
       return [1, due, total + bytes];
     }
-    if (name === "door:v1") {
+    if (name === "door:v2") {
       const [bytes, limit, now] = argv.slice(0, 3).map(Number);
       const field = argv[3];
       const [foldBefore, most, every] = argv.slice(4).map(Number);
       const at = h.get("try");
-      const due = at === undefined || !digits(at) || now - Number(at) >= every ? 1 : 0;
+      const due = !digits(at) || now - Number(at) >= every ? 1 : 0;
       const open: [string, number, number][] = [];
       let bad = false;
       let taken = false;
@@ -2082,7 +2083,7 @@ export class MemoryRedis {
         else open.push([f, Number(m[1]), Number(m[2])]);
       }
       const heldRaw = h.get("held"), files = h.get("files");
-      if (bad || !digits(heldRaw) || !digits(files)) { done(); return [-1, due, 0]; }
+      if (bad || !digits(heldRaw) || !digits(files)) return done([-1, due, 0]);
       let held = Number(heldRaw);
       let pending = 0;
       let n = 0;
@@ -2101,79 +2102,91 @@ export class MemoryRedis {
       h.set("pend", String(pending));
       return [code, due, total];
     }
-    if (name === "adjust:v1") {
-      const give = Number(argv[0]);
-      const heldRaw = h.get("held"), pendRaw = h.get("pend");
-      if (!digits(heldRaw) || (pendRaw !== undefined && !digits(pendRaw))) { done(); return -1; }
-      let held = Number(heldRaw);
-      let pend = pendRaw === undefined ? 0 : Number(pendRaw);
-      for (let i = 1; i + 1 < argv.length; i += 2) {
-        const m = /^(\d+):\d+$/.exec(h.get(argv[i]) ?? "");
-        if (!m) continue;
-        h.delete(argv[i]);
-        held += Number(argv[i + 1]);
-        pend -= Number(m[1]);
+    if (name === "adjust:v2") {
+      const [give, fgive, since] = argv.slice(0, 3).map(Number);
+      let skipped = false;
+      const heldRaw = h.get("held"), pendRaw = h.get("pend"), files = h.get("files"), cs = h.get("cs"), fmt = h.get("fmt");
+      if (digits(heldRaw) && (pendRaw === undefined || digits(pendRaw))) {
+        let held = Number(heldRaw);
+        let pend = pendRaw === undefined ? 0 : Number(pendRaw);
+        for (let i = 3; i + 1 < argv.length; i += 2) {
+          const m = /^(\d+):\d+$/.exec(h.get(argv[i]) ?? "");
+          if (!m) continue;
+          h.delete(argv[i]);
+          held += Number(argv[i + 1]);
+          pend -= Number(m[1]);
+        }
+        if (pend < 0) pend = 0;
+        if (give > 0) {
+          if ((digits(cs) && Number(cs) >= since) || held < give) skipped = true;
+          else held -= give;
+        }
+        h.set("held", String(held));
+        h.set("pend", String(pend));
+      } else if (give > 0) skipped = true;
+      if (fgive > 0) {
+        if (digits(files) && !(digits(fmt) && Number(fmt) >= since) && Number(files) >= fgive) h.set("files", String(Number(files) - fgive));
+        else skipped = true;
       }
-      if (pend < 0) pend = 0;
-      if (held < give) { h.delete("held"); done(); return -1; }
-      h.set("held", String(held - give));
-      h.set("pend", String(pend));
-      return 1;
+      return done(skipped ? 0 : 1);
     }
-    if (name === "files:v1") {
+    if (name === "files:v2") {
       const [measured, authorized, now, arriving] = argv.map(Number);
       const cur = h.get("files"), fat = h.get("fat");
       let base = measured;
       if (digits(cur) && digits(fat) && now - Number(fat) < arriving && Number(cur) > base) base = Number(cur);
-      h.set("files", String(base + authorized));
+      else h.set("fmt", argv[2]);
       h.set("fat", argv[2]);
-      this.until.set(k, this.now() + Number(argv[4]) * 1000);
+      h.set("files", String(base + authorized));
+      keep(argv[4]);
       return 1;
     }
-    if (name === "claim:v1") {
-      const [now, every] = argv.map(Number);
+    if (name === "claim:v2") {
+      const now = Number(argv[0]);
       const at = h.get("try");
-      if (digits(at) && now - Number(at) < every) { done(); return [0, ""]; }
+      if (digits(at) && now - Number(at) < Number(argv[1])) return done([0, "", "", 0]);
+      const missing = digits(h.get("files")) ? 0 : 1;
       h.set("try", argv[0]);
-      this.until.set(k, this.now() + Number(argv[2]) * 1000);
+      keep(argv[2]);
+      const ss = h.get("ss");
+      if (digits(ss)) return [1, ss, h.get("sc") ?? "", missing];
       const held = h.get("held");
-      return [1, digits(held) ? held : ""];
+      h.set("ss", argv[0]);
+      h.set("s0", digits(held) ? held : "");
+      h.set("sum", "0");
+      h.set("sc", "");
+      return [1, argv[0], "", missing];
     }
-    if (name === "reconcile:v1") {
-      const [, held0, listed, measured] = [argv[0], argv[2], argv[3], argv[4]];
-      const claimed = Number(argv[1]);
-      const foldBefore = claimed - Number(argv[5]);
-      const arriving = Number(argv[6]);
-      let held = h.get("held");
-      if (held !== undefined && !digits(held)) held = undefined;
-      const files = h.get("files"), fat = h.get("fat");
-      let folded = 0;
-      let bad = false;
+    if (name === "pass:v2") {
+      const [now, ss, add, next, foldRaw, measured, failed] = argv;
+      if (failed === "1") {
+        if (h.get("ss") === ss) for (const f of ["ss", "s0", "sum", "sc"]) h.delete(f);
+        return done(0);
+      }
+      const sum = h.get("sum");
+      if (h.get("ss") !== ss || !digits(sum)) return done(-1);
+      if (next !== "") {
+        h.set("sum", String(Number(sum) + Number(add)));
+        h.set("sc", next);
+        if (measured !== "") { h.set("files", measured); h.set("fmt", ss); }
+        return 2;
+      }
       let pending = 0;
       for (const [f, v] of [...h]) {
         if (!f.startsWith("r:")) continue;
         const m = /^(\d+):(\d+)$/.exec(v);
-        if (!m) { h.delete(f); bad = true; }
-        else if (Number(m[2]) <= foldBefore) { h.delete(f); folded += Number(m[1]); }
+        if (!m || Number(m[2]) <= Number(ss) - Number(foldRaw)) h.delete(f);
         else pending += Number(m[1]);
       }
-      h.set("at", argv[0]);
+      let value = Number(sum) + Number(add);
+      const held = h.get("held"), s0 = h.get("s0");
+      if (digits(held) && digits(s0) && Number(held) - Number(s0) > 0) value += Number(held) - Number(s0);
+      for (const f of ["ss", "s0", "sum", "sc"]) h.delete(f);
+      h.set("held", String(value));
       h.set("pend", String(pending));
-      if (listed !== "") {
-        let value = Number(listed);
-        if (held !== undefined && held0 !== "") {
-          const delta = Number(held) - Number(held0);
-          if (delta > 0) value += delta;
-        }
-        h.set("held", String(value));
-      } else if (held !== undefined && !bad) h.set("held", String(Number(held) + folded));
-      else if (held !== undefined) h.set("held", "x");
-      if (measured !== "") {
-        let value = Number(measured);
-        if (digits(files) && digits(fat) && claimed - Number(fat) < arriving && Number(files) > value) value = Number(files);
-        h.set("files", String(value));
-      }
-      this.until.set(k, this.now() + Number(argv[7]) * 1000);
+      h.set("cs", ss);
+      h.set("at", now);
+      if (measured !== "") { h.set("files", measured); h.set("fmt", ss); }
       return 1;
     }
     throw new Error("MemoryRedis: unsupported EVAL");

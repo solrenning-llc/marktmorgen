@@ -6,6 +6,7 @@ import { ownsImagePath } from "@/lib/product-image";
 import { LINK_IMAGE_SIDE, type LinkImage } from "@/lib/store-link";
 import { checkUploadedImage } from "@/lib/uploaded-image";
 import { dropTakenPictures, takePictureDoor } from "@/lib/picture-door";
+import { adjustImages } from "@/lib/image-space";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 
@@ -83,11 +84,18 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
     }
     // Best effort, and deliberately after the write.
+    const since = Date.now();
+    let given = 0;
     if (result.removed && result.removed.path !== image?.path) {
-      await del(result.removed.path).catch((error: unknown) => {
+      const deleted = await del(result.removed.path).then(() => true, (error: unknown) => {
         console.error("could not delete a replaced link picture", error);
+        return false;
       });
+      if (deleted) given = result.removed.bytes;
     }
+    // The store's space (owner's decision 8, lib/image-space.ts): a picture taken from the door at its real size, and
+    // the one deleted given back. Best effort.
+    await adjustImages(ref, image && fresh.has(image.path) ? [{ path: image.path, bytes: image.bytes }] : [], given, { since });
     return Response.json({ ok: true });
   } catch (error) {
     if (error instanceof StoreFullError) {

@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof ImageSpaceRefused) {
       return error.reason === "full"
         ? Response.json({ ok: false, error: storageRefusal(standingOf(store)) }, { status: 409 })
-        : Response.json({ ok: false, error: "files_unavailable" }, { status: 503 });
+        : Response.json({ ok: false, error: "pictures_room_unknown" }, { status: 503 });
     }
     console.error("keeping an email's picture failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

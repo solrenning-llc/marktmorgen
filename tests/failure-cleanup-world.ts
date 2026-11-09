@@ -40,11 +40,14 @@ export async function put(pathname: string, body: Uint8Array, options: { content
   return { pathname, url: `https://blob.test/${pathname}` };
 }
 
-/** Every file under the prefix, in one page, as the file store lists them (images/ for lib/image-space.ts). */
-export async function list(options: { prefix?: string } = {}) {
+/** The files under the prefix, a page of `limit` at a time in name order from `cursor`, as the file store lists them. */
+export async function list(options: { prefix?: string; limit?: number; cursor?: string } = {}) {
   const prefix = options.prefix ?? "";
-  const blobs = [...files].filter(([pathname]) => pathname.startsWith(prefix)).map(([pathname, file]) => ({ pathname, size: file.size ?? file.bytes.length }));
-  return { blobs, hasMore: false, cursor: undefined };
+  const all = [...files].filter(([pathname]) => pathname.startsWith(prefix)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const start = options.cursor ? Number(options.cursor) : 0;
+  const end = start + (options.limit ?? 1000);
+  const blobs = all.slice(start, end).map(([pathname, file]) => ({ pathname, size: file.size ?? file.bytes.length }));
+  return { blobs, hasMore: end < all.length, cursor: end < all.length ? String(end) : undefined };
 }
 
 export async function issueSignedToken(): Promise<string> {

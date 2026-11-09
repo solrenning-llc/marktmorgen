@@ -1,4 +1,5 @@
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
+import { adjustImages } from "@/lib/image-space";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
 import {
@@ -90,12 +91,18 @@ export async function POST(request: NextRequest) {
 
     // Deliberately after the write, and best effort. A file left behind costs
     // a fraction of a cent; an option pointing at nothing costs a sale.
+    const since = Date.now();
+    let freed = 0;
     for (const file of result.removed) {
-      await del(file.pathname).catch((error: unknown) => {
+      const deleted = await del(file.pathname).then(() => true, (error: unknown) => {
         console.error("could not delete the file of a removed option", error);
+        return false;
       });
+      if (deleted) freed += file.bytes;
       await dropStamped(file);
     }
+    // Their room given back to the store's pictures (owner's decision 8, lib/image-space.ts).
+    await adjustImages(ref, [], 0, { files: freed, since });
 
     return Response.json({ ok: true });
   } catch (error) {

@@ -140,7 +140,7 @@ export function ProductImageEditor({
       await uploadPresigned(path, shrunk.blob, {
         access: "private",
         handleUploadUrl: "/api/store/image/upload",
-        clientPayload: JSON.stringify({ productId: product.id }),
+        clientPayload: JSON.stringify({ productId: product.id, bytes: shrunk.blob.size }),
         contentType: shrunk.blob.type,
         onUploadProgress: (progress) => setPercent(progress.percentage),
       });
@@ -156,7 +156,7 @@ export function ProductImageEditor({
           await uploadPresigned(smallPath, copy.blob, {
             access: "private",
             handleUploadUrl: "/api/store/image/upload",
-            clientPayload: JSON.stringify({ productId: product.id }),
+            clientPayload: JSON.stringify({ productId: product.id, bytes: copy.blob.size }),
             contentType: copy.blob.type,
           });
           small = { path: smallPath, width: copy.width };

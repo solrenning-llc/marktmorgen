@@ -36,9 +36,11 @@ test("A (MÉDIO): a whole picture taken on the day's reconciliation is lost from
   await picture(ref, 100);
   await admitImage(ref, 1, 10_000, undefined, t0); // makes the counter (first reconciliation)
   // A day later a review photo of 400 bytes is admitted (TAKE, due): the reconciliation runs inside admitImage, before the put.
-  await admitImage(ref, 400, 10_000, undefined, t0 + DAY);
+  // Rule 23: a pass is due two days later now (RECONCILE_EVERY_MS), so the photo is taken then; and the 1 byte taken at
+  // t0 was never written here, so the counter is checked as its message says, never lower (it may be higher).
+  await admitImage(ref, 400, 10_000, undefined, t0 + 2 * DAY);
   await picture(ref, 400); // the put that follows (lib/review-photo.ts)
-  assert.equal(await imagesHeld(ref), await real(ref), "the counter must never be lower than what is stored");
+  assert.ok((await imagesHeld(ref) ?? -1) >= await real(ref), "the counter must never be lower than what is stored");
 });
 
 test("B (LEVE): bytes given back after a reconciliation that already missed the deleted picture are taken off twice", async () => {

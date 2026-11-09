@@ -246,6 +246,7 @@ function centralAliases(file,root,here){
  if(file==='assistant-counter-admission.test.ts')for(const name of ['redis','store','store-assistant','metered-limits'])aliases['@/lib/'+name]=join(here,'assistant-counter-admission-world.ts');
  if(file==='embed-library-unknown.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='a8-stock-unknown.proof.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
+ if(file==='paypal-removed-owed.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='r24-soon-pages-unknown.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='r24-soon-partial-callers.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='email-platform-target-evidence.test.ts')aliases['@/lib/safe-fetch']=join(here,'email-platform-target-world.ts');

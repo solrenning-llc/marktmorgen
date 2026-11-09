@@ -55,7 +55,7 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
       console.error("the community directory could not be read", error);
       return null;
     }),
-    // The count too (rules 24 and 30): unread, no number is shown, and the page says the list could not be loaded.
+    // The count too (rules 24 and 30): unread, no number is shown, and the page says the count could not be had.
     directorySize(id).catch((error: unknown) => {
       console.error("the community directory size could not be read", error);
       return null;
@@ -97,7 +97,12 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
           </p>
         ) : null}
 
-        {read === null || total === null ? <NamesUnread language={store.language} what="membersList" className="mt-6" /> : null}
+        {/* The list unread is said as the list; only the count unread, under a list that is shown, is said as the count. */}
+        {read === null ? (
+          <NamesUnread language={store.language} what="membersList" className="mt-6" />
+        ) : total === null ? (
+          <NamesUnread language={store.language} what="membersCount" className="mt-6" />
+        ) : null}
         <ul className="mt-6 grid gap-3 sm:grid-cols-2">
           {!before ? (
             <li className="st-card flex items-center gap-3 p-4">

@@ -187,11 +187,12 @@ export async function POST(request: NextRequest) {
       if (linkCount(`${title}\n${text}`) > MAX_LINKS_IN_POST) return back(fromPage, "links");
       if (!owner && !viewer.member?.n) return back(`${home}/you`, "name");
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
-      if (!owner && (!(await within(id, key, "post")) || !(await within(id, key, "postDay")))) return back(fromPage, "slow");
       // Who the @s name is read before anything is written or a picture taken (rules 24 and 30): a reply that does
       // not read throws, and the member is told nothing was changed, instead of a post going up whose people named
-      // are never told.
+      // are never told. Read before the member's "post" and "postDay" places are taken, too: a refusal that says
+      // nothing was changed must not have used up the hour's or the day's posts.
       const named = await whoIs(id, mentionsIn(`${title}\n${text}`));
+      if (!owner && (!(await within(id, key, "post")) || !(await within(id, key, "postDay")))) return back(fromPage, "slow");
       let img: CommunityImage | null = null;
       if (path) {
         const side = (raw: string) => {
@@ -269,9 +270,10 @@ export async function POST(request: NextRequest) {
       if (linkCount(text) > MAX_LINKS_IN_COMMENT) return back(postPage, "links", "reply");
       if (!owner && !viewer.member?.n) return back(`${home}/you`, "name");
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
-      if (!owner && !(await within(id, key, "comment"))) return back(postPage, "slow", "reply");
       // Read before the comment is written, as for a post (rules 24 and 30); a hidden post tells nobody, so asks nothing.
+      // And before the member's "comment" place is taken, so a refusal here spends none of the hour's comments.
       const named = post.hid ? new Map<string, string>() : await whoIs(id, mentionsIn(text));
+      if (!owner && !(await within(id, key, "comment"))) return back(postPage, "slow", "reply");
       const parent = field("parent", 12);
       const made = await addComment(id, post.id, { parent: ITEM_ID.test(parent) ? parent : "", author: key, text }, store);
       if (!made.ok) return back(postPage, made.reason === "full" ? "fullcomments" : "gone");

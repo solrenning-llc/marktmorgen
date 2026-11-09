@@ -2891,3 +2891,51 @@ Identity update: refs/pull/3360/head=2d2cc61ba08efb674fd109ada53a0120bb448b09; o
 CXP-20261109-0529-C1-1 DELIVEREDea628b97fd8633e5a21bdba61f221284c13c7555/blobcfae92502174d8ed4d1a4fda92597010de24dcce/FULL7908578 exact FULL readback, ID once. Final STOP no409; earlier failed STOP0519 and RES0522 never published; actual RES0525/focal evidence/STOP delivered. Latest fresh prefix preserved focal evidence7903718 exactly, delta C2-0527 claim3339 FULL read after append before this receipt. It belongs to C2/C3, not P extra scope/grant. No new P causal author response or coordinator disposition in that delta.
 
 CP056a07a09c81e4e7f18d2810bcbcf0ab96413fd6/blob659bae4f7c1e8abecd6597228096599208c63b4b/FULL515480 exact before STOP. Review5823222413 and focal5823309674 BODYreadbacks exact; subject latest2d2, original broader scope remains PARTIAL. All runtime/proof evidence complete and durable privately BEFORE corresponding opinions; public wording neutral. Only own detached proof/docs and coordination, no author ref/product/CI/provider/payment/flag/PII/automation mutation. Next latest CP receipt+STOP then fresh directed causal request; do not repeat GREEN/capped graph/third review or close wider requirement without disposition. Existing continuity preserved, project ongoing; execution ends after exact receipt FULL readback, no background watcher.
+
+
+## 2026-11-09 07:36 Fortaleza — transport-blocked channel; pending3380 proof preserved
+
+FIRST latest canonical4ad88722b23c90b171fd91bd6b095812e97bad9c/blob15ba15039a850b882221088287eef22621c90b4e/FULL516828 recovered FULL, latest section/receipt read. Last verified authorized remote STOP remains CXP0529/ea628b97fd8633e5a21bdba61f221284c13c7555/blobcfae92502174d8ed4d1a4fda92597010de24dcce/FULL7908578. New authorized ROOTmetadata SHA1cc8ee9c3035abf779fe503ee680529fab979a1d obtained by fetch_file ONLY SHA, but mandatory FULL fetch_blob returned explicit Transport closed. Fresh channel UNREAD; no append/update attempted, no restored foreign bytes and no new remote STOP claimed. No403/quota/reset inferred from transport failure. No connector retry loop or alternate partial-channel write. This own CP update records failure and prior pending work, not a new product/review authorization from unseen messages.
+
+Prior run's P FIRST security3380 at990f52b170328e66d645fcc367215e4a14f78bce/tree1278bc691fcf4071a80d6fb4b6ece6fd909358d4 was completed locally but NOT formally submitted. Claim6736874762; actualREScc5f7c104a8feebc698c733c0f662137d11c5575/blob34dbe495b5e9e355d6bcb9a528067f5202b05273/FULL8097899 EXACTreadback BEFORE source/worktree/runtime. Earlier0640/0643 CAS409NOWRITE with125s/129s waits. H2 withdrew before technical work; M SECOND5824123583 separately delivered. ONE conditional coordination class demonstrated by P, independently the same class as M2, not a third defect; M1 not P reproduction. Details confined to private evidence/local report, no recipe in public CP. Own immutable9observations/5FAIL/4healthy controls; reset19+spike22+traffic75 observations PASS; registry7+closingfamilies4+closingcost6+plancost26 Node cases PASS (units/overlap explicit). Actual strict9roots1196sources0diagnostics/lint10paths0/scanner4705tracked0/whitespace0. Each child120s512MiBheap256KiB20knested100mock/types1024MiB120s/realnetDENY before imports/compilerlint;max6104nested0HTTPmock/no cap/setupfailure/reset/raise/borrow/partition/replay. No author repair/corrective GREEN, no real provider/session/browser/AT/nativeRedisLua/CI/MR certificate.
+
+Private evidence update_file ACK was successful603d8dce1f4fe49053950a7e71577f481d338654/blob529db69b719790fd3b8fd2ac53150fdcadebc189; archive22artifacts72070UTF8JSONbytes/SHA25621bcb35880db71339ff9c030fdfced4c476084cc0c77fbaa2cfe4647ed3f2e66. Its FULL readback still UNVERIFIED. Initial unchecked structuredContent TypeError hid raw error; guarded diagnostic then explicitly Transport closed. The formal-review call was after that failed readback guard and never dispatched. No P3380 review id exists from that attempt. Full local pending note/docs/reviews/p-3380-pending-delivery.md and private report/proofs retained in own detachedp3380-review. Do not mistake ACK for confirmed evidence content, completed publication or a current-head opinion. This run did NOT repeat tests/proofs/review or query CI.
+
+Native main+29pullrefs freshly confirmed below, with no inference of OPEN/MERGED/CI. Current3380df5f33b1 and33608679ebd3 ADVANCED from P's reviewed snapshots; 2843b25d768d/28689fa5c956 also advanced since prior native pass. DO NOT post old990 finding as an opinion of newdf5, or re-run/close its immutable proof before fresh authorized channel/claims and a causal focal reservation. Main e9c23 same as prior pass. No current product source read, main integration or foreign ref mutation.
+
+```
+e9c23c2062a31879b2aa7e067e200a7b8863b4fc	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+d8e871ad3ce54cd3dc708dacf7bf2bbfb0100341	refs/pull/2832/head
+b25d768db2d4398f6d089e748e7cfbd181041177	refs/pull/2843/head
+9fa5c956027753714f6e9c37d3435c20dd32ff0f	refs/pull/2868/head
+6c3077cdaefaac049ca0e12e836be68691bfd875	refs/pull/2892/head
+62eeb4ee1a7af9f2f1a38ef97b6942cf554d253d	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+c5db63a1fffc5c79a5866831d54ddff01b3825fa	refs/pull/2999/head
+8e3d930eed8ef1a2dc715f0fe101ba8e7f00cb8a	refs/pull/3014/head
+1a20dd5c31a70da2f2a95aee20f7b520b76dcd41	refs/pull/3034/head
+d4284d9d127c6f76436d9eff323527834c1d0c08	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+80931dd9a15aee852dcc474d23e4bf1069650e67	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+1b38fa1cf19813764fc9256c9b81808db7fc0c0d	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
+64dc6cf819c3cac7e34d7036e7f09bbecabfb51b	refs/pull/3317/head
+72f917007b0179c5f1761b017a6d5202cc9f4655	refs/pull/3324/head
+8679ebd3d3f9dddfd5786d3fe98fdcfe7390e346	refs/pull/3360/head
+df5f33b1f28fc2687a773287c2c2e1d93cc524fd	refs/pull/3380/head
+```
+
+Only read-only reconciliation and own CP/local notes this run. No channel mutation, claim/RES/focal/formal review, new source/test/runtime, product/foreign ref/docsreservations/price/limit/commission/flag/gate/account/payment/terms/key/contact/PII/provider changes. Existing continuity intact; transient transport block, not completed project or exhausted queue. SerialMedium0agents, no background watcher. P3360 original PARTIAL5823222413 and registry focal5823309674 remain historical; no unseen C1 disposition inferred. P3324/other completed returns and3107capped whole graphs preserved, no reset/borrow/replay. Old four original products already MERGED historically; never recreate from stale user list.
+
+Next FIRST this latest canonical section plus verifiedSTOP0529 and current channel metadata→FULL fetch_blob. If transport recovered, reconcile all new P/C1/C2/M directed originals/claims; verify exact evidence603d8dce content before any opinion. At current corrected head only requested causal delta after RES/readback; no old GREEN replay or third review. Publish qualified delivery/PONTO with exact heads and receipt only after successful reads/writes. Last remote channel publication is the evidence ACK pending readback, not a completed STOP. This CP may be written independently because its own complete exact prefix was successfully recovered; no shared-channel write bypass.

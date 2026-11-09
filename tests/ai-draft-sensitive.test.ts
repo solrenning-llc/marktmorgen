@@ -104,4 +104,31 @@ is("the warning has an id", typeof warningId, "string");
 is("the group is described by the warning", described.includes(`aria-describedby="${warningId}"`), true);
 is("no warning: the group is not described by one", renderToStaticMarkup(createElement(AiDraftReview, { checks: [false, false, false], onToggle: () => {} })).includes("aria-describedby"), false);
 
+part("Sale and product wording is not a subject; the subject in a phrase still is (Claude 6 focal return on #3436, LOW)");
+for (const [what, text, want] of [
+  ["save money with a bundle", "Save money with the bundle", []],
+  ["saves money", "This kit saves money on every batch", []],
+  ["trading cards", "Pokemon trading cards, sorted by set", []],
+  ["a trading card game", "Sleeves for any trading card game", []],
+  ["while stocks last", "Free stickers while stocks last", []],
+  ["big savings", "Big savings on every kit", []],
+  ["savings on shipping", "Savings on shipping for every order", []],
+  ["a taxing workout", "A taxing leg workout for runners", []],
+  ["treated wood", "Planters made of treated wood", []],
+  ["pressure-treated lumber", "A bench of pressure-treated lumber", []],
+  ["treated with care", "Every order is packed and treated with care", []],
+  ["the law of attraction", "The law of attraction journal", []],
+  ["money is still money", "Why money feels stressful, and what to do", ["money"]],
+  ["make money is still money", "Make money online in 30 days", ["money"]],
+  ["save money on taxes: the taxes", "Save money on your taxes this year", ["money"]],
+  ["day trading", "Day trading for beginners", ["money"]],
+  ["trading stocks", "Trading stocks with a small account", ["money"]],
+  ["penny stocks", "Penny stocks to watch", ["money"]],
+  ["retirement savings", "Grow your retirement savings", ["money"]],
+  ["a savings account", "Open a savings account that pays you", ["money"]],
+  ["how depression is treated", "How depression is treated today", ["health"]],
+  ["treated for anxiety, both words", "Treated for anxiety at twenty", ["health"]],
+  ["the law", "What the law says about refunds", ["law"]],
+] as const) is(what, safely(() => draftTopics([text], "en")), want);
+
 done();

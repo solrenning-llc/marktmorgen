@@ -135,8 +135,29 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = counted;
   }
-  is("its whole life, given up and its creator told, at most OWED_MAIL_COMMANDS", [commands <= OWED_MAIL_COMMANDS, OWED_MAIL_COMMANDS], [true, 21]);
+  // Rule 23 (pre-review of a423c617da): was 21, before a try read the erased prints (M1) and the notice was owed (A1).
+  is("its whole life, given up and its creator told, at most OWED_MAIL_COMMANDS", [commands <= OWED_MAIL_COMMANDS, OWED_MAIL_COMMANDS], [true, 46]);
   is("and three tries of its own, then one note", sends.length, REFUSED_TRIES + 1);
+  reset();
+  commands = 0;
+  redis.pipeline = async (list) => {
+    commands += list.length;
+    return counted.call(redis, list);
+  };
+  try {
+    // The email refused three times and its notice refused three times too: both owed to the end.
+    answers.push("refused", "refused", "refused", "refused", "refused", "refused");
+    await sendOrderMail(shop, message(11), "a key");
+    for (let n = 0; n < 2; n += 1) {
+      wait(OWED_MAIL_RETRY_SECONDS[0]);
+      await run();
+      wait(OWED_MAIL_RETRY_SECONDS.at(-1)!);
+      await run();
+    }
+  } finally {
+    redis.pipeline = counted;
+  }
+  is("the email and its notice both refused to the end: still at most OWED_MAIL_COMMANDS", [commands <= OWED_MAIL_COMMANDS, sends.length, owedKeys().length, due().length], [true, 2 * REFUSED_TRIES, 0, 0]);
 
   part("An email to the creator's own address: given up without telling the address that refused it");
   reset();

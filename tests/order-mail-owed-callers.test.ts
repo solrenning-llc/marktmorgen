@@ -8,6 +8,8 @@
  */
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { erasedCommand } from "@/lib/order-mail-owed";
+import { suppressedCommand } from "@/lib/suppression";
 import { done, is, part } from "./check";
 
 const read = (file: string) => readFileSync(file, "utf8");
@@ -44,5 +46,10 @@ is("the type insists on one (OrderMessage)", existsSync("lib/order-mail-owed.ts"
 part("A gift is given before its email; its email is owed, not lost");
 const gifts = read("lib/gifts.ts");
 is("the recipient's email and the buyer's receipt are owed when refused", (gifts.match(/sendOrderMail\(store, \{/g) ?? []).length, 2);
+
+part("An owed email reads the store's erased prints as lib/suppression.ts writes them (pre-review M1)");
+for (const [list, address] of [["list_1", "Buyer@Example.test "], [null, "a@example.test"], ["", "a@example.test"]] as const) {
+  is(`the same read for ${list ?? "no list"}`, erasedCommand(list, address), suppressedCommand(list, address));
+}
 
 done();

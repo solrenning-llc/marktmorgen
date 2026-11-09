@@ -326,9 +326,10 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // may retain its receipt for767days; this is not its legacy price envelope.
   "nl:orders:seen:": X(767),
   "nl:outreach:": E, "nl:outreach:stop:all": C, "nl:outreach:stoplink:": T("nl:outreach:"),
-  // Order emails owed after a certain refusal (lib/order-mail-owed.ts): the due list names no store; each email and
-  // its told mark expire within two days; the store's own list of them is erased with it.
-  "nl:owedmail:due": C, "nl:owedmail:m:": X(2), "nl:owedmail:s:": E, "nl:owedmail:told:": X(2),
+  // Order emails owed after a certain refusal (lib/order-mail-owed.ts): the due list is the company's (each member an
+  // email's hash and its store's id, gone within days); each email and its told mark expire within three days; the
+  // store's own list of them is erased with it.
+  "nl:owedmail:due": C, "nl:owedmail:m:": X(3), "nl:owedmail:s:": E, "nl:owedmail:told:": X(3),
   // Emails published on the store (lib/letters.ts): the store's list goes, and each copy through it.
   "nl:letters:s:": E, "nl:letters:i:": T("nl:letters:s:", 400),
   // Who may read an email kept for members (lib/letter-access.ts): an answer kept for minutes, a link and the counts of links asked, an hour each.

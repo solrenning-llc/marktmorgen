@@ -43,8 +43,8 @@ export function backupAlarmSignal(result: BackupRunResult): BackupAlarmSignal | 
 
 /**
  * The owner's monitor address; null while it is missing, not https, or carries a name, a password, a fragment or a
- * query. A query is refused (Claude 5's MEDIUM, 9 November 2026): "/fail" added to it would land in the query, and a
- * monitor that reads the path would take the failure for a sign of life.
+ * query, even an empty one. A query is refused (Claude 5's MEDIUM, 9 November 2026): "/fail" added to it would land in
+ * the query, and a monitor that reads the path would take the failure for a sign of life; a fragment likewise.
  */
 export function backupAlarmConfig(): BackupAlarmConfig | null {
   const raw = (process.env.BACKUP_ALARM_PING_URL ?? "").trim();
@@ -55,7 +55,9 @@ export function backupAlarmConfig(): BackupAlarmConfig | null {
   } catch {
     return null;
   }
-  if (url.protocol !== "https:" || url.username || url.password || url.hash || url.search || url.href.includes("?")) return null;
+  // An empty query or fragment ("?" or "#" at the end) leaves url.search and url.hash empty, so the href is read too
+  // (Claude 6's N3): "/fail" after a "#" would never be sent, and the failure would reach the sign of life's path.
+  if (url.protocol !== "https:" || url.username || url.password || url.hash || url.search || url.href.includes("?") || url.href.includes("#")) return null;
   return { url: url.toString().replace(/\/+$/, "") };
 }
 

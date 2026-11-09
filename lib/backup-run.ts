@@ -73,17 +73,26 @@
  * base kept with the last good copy's mark). When either fell more than
  * BACKUP_SHRINK_LIMIT_PERCENT, nothing is deleted ("prune_shrunk") and the base
  * stays the earlier, larger set, so the next days hold the prune too. With no
- * mark at all while the bucket holds copies other than the one just written
- * (the marks went with the database), or a mark without a base, nothing is
- * deleted either ("prune_unverified") and no base is written. Accepting a
+ * mark at all, the copy is compared the same way with the largest verified
+ * set the bucket holds (its manifest's rows and sizes; Claude 6's N1): fallen
+ * further (the marks went with a wiped database), nothing is deleted
+ * ("prune_shrunk") and that set becomes the base, so the hold ends once the
+ * database is back to its size; a bucket read that fails deletes nothing and
+ * writes no mark. A mark without a base deletes nothing either
+ * ("prune_unverified") and no base is written. Accepting a
  * smaller database as the new base is not built: it is the owner's decision.
  * While the prune is held, the mark keeps the moment the hold began
  * (heldSince), and step 1 makes room only from objects written since then (the
  * held copies, the newest too), never from an older, good set; when those
- * cannot make room it writes nothing ("room_shrunk"). A mark that could not be read is left as it
- * is, never rewritten without its base; a first copy with no mark is the base
- * when no other set in the bucket opens as a verified one (a failed try's
- * leftover is no copy).
+ * cannot make room it writes nothing ("room_shrunk"). The newest held copy is
+ * one of those, so on a rotation day step 1 may delete it before the day's
+ * copy is verified; if that copy then fails, only the pre-shrink sets remain
+ * until a held copy is verified again (a trade-off of the retention + 2 sets
+ * ceiling, Claude 6's N2, recorded in docs/backup.md for the owner). A mark
+ * that could not be read is left as it is, never rewritten without its base;
+ * a first copy with no mark is the base when no other set in the bucket opens
+ * as a verified one (a failed try's leftover is no copy) or none is more than
+ * the limit larger.
  *
  * Called by app/api/cron/backup/route.ts, scheduled in vercel.json twice a
  * day (the day's run and its new try); off while BACKUP_COST_REVIEW is null,
@@ -507,7 +516,16 @@ async function lastVerified(store: BackupBucket, key: Uint8Array[], listed: Back
  * in lib/backup-cost.ts).
  */
 async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[]): Promise<Set<string>> {
+  return (await setsInBucket(store, key, listed)).keep;
+}
+
+/**
+ * verifiedInBucket's reads, with each verified set's keys and bytes as its run counted them (the manifest's rows; its
+ * parts' sizes and the manifest's own), so a copy with no mark can be compared with them (Claude 6's N1).
+ */
+async function setsInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[]): Promise<{ keep: Set<string>; sets: BackupBase[] }> {
   const keep = new Set<string>();
+  const sets: BackupBase[] = [];
   for (const object of listed) {
     if (object.bytes > manifestBound(MAX_PARTS)) continue;
     if (timeLeft() <= 0) throw new RangeError("cutoff");
@@ -521,12 +539,13 @@ async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: 
       const manifest = openManifest(bytes, key);
       keep.add(object.id);
       for (const part of manifest.parts) keep.add(part.id);
+      sets.push({ keys: manifest.rows, bytes: manifest.parts.reduce((n, part) => n + part.bytes, 0) + bytes.byteLength });
     } catch {
       if (isManifestEnvelope(bytes)) throw new Unverified();
       // Not a manifest at all: a part, or a failed run's leftover.
     }
   }
-  return keep;
+  return { keep, sets };
 }
 
 /**
@@ -671,12 +690,19 @@ async function prune(
     const listed = await listAll(review, store);
     if (!listed) return { deleted, state: "prune_pages", mark };
     if (check.state === "none") {
-      // No mark, and another verified set in the bucket: the marks went with the database, so this copy is no base
-      // and the prune is held from now on. A failed try's leftover (no set opens) is no copy: this one is the base
-      // (Claude 6's MEDIUM 2, case b). These reads replace step 1's: with no mark it read none (lastVerified).
+      // No mark: the copy is compared with the largest verified set the bucket holds, its keys and its bytes each
+      // (Claude 6's N1, 9 November 2026), by the same 20% rule as against a mark's base. Fallen further (the marks
+      // went with a wiped database): the prune is held from now on, with that largest set as the base, so the hold
+      // ends once the database is back to its size and never stays for good. Not fallen (a first day's failed try,
+      // a prune or an outcome write that failed once): this copy is the base. A failed try's leftover (no set opens)
+      // is no copy. A bucket read that fails throws Unverified: nothing deleted and the mark left unwritten, so the
+      // next run decides again. These reads replace step 1's: with no mark it read none (lastVerified).
       if (listed.length > copied.parts + 1) {
-        const others = await verifiedInBucket(store, key, listed.filter((o) => o.id !== copied.id));
-        if (others.size > 0) return { deleted, state: "prune_unverified", mark: { base: null, heldSince: now } };
+        const { sets } = await setsInBucket(store, key, listed.filter((o) => o.id !== copied.id));
+        if (sets.length > 0) {
+          const largest = { keys: Math.max(...sets.map((set) => set.keys)), bytes: Math.max(...sets.map((set) => set.bytes)) };
+          if (shrank(copied.keys, largest.keys) || shrank(copied.bytes, largest.bytes)) return { deleted, state: "prune_shrunk", mark: { base: largest, heldSince: now } };
+        }
       }
       mark = { base: check.base, heldSince: null };
     }

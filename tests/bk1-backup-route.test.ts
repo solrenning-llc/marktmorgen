@@ -9,7 +9,8 @@
  *   - vercel.json without the backup route twice a day, hours apart;
  *   - the alarm's sign of life sent after anything but a clean success, or no failure signal on prune_*, room_* and
  *     last_good_copy_lost; an alarm address that is not https or carries credentials taken as on; a monitor's failure
- *     thrown; an alarm address with a query taken as on (Claude 5, 9 November 2026);
+ *     thrown; an alarm address with a query taken as on (Claude 5, 9 November 2026), or with a fragment, even an empty
+ *     one (Claude 6's N3);
  *   - the cost model pricing a route duration other than the route's maxDuration, or still saying no route runs.
  */
 import { readFileSync } from "node:fs";
@@ -94,6 +95,12 @@ async function main(): Promise<void> {
     is("an address with a query: off, never a failure sent to the sign of life's path", backupAlarmConfig(), null);
     env.BACKUP_ALARM_PING_URL = "https://hc-ping.example.test/abc-uuid?";
     is("an address with an empty query: off", backupAlarmConfig(), null);
+    // Claude 6's N3 (9 November 2026): a trailing "#" is an empty fragment (url.hash is ""), and "/fail" added to it
+    // lands in the fragment, never sent: the failure would reach the sign of life's path.
+    env.BACKUP_ALARM_PING_URL = "https://hc-ping.example.test/abc-uuid#";
+    is("an address with an empty fragment: off", backupAlarmConfig(), null);
+    env.BACKUP_ALARM_PING_URL = "https://hc-ping.example.test/abc-uuid#x";
+    is("an address with a fragment: off", backupAlarmConfig(), null);
     env.BACKUP_ALARM_PING_URL = "https://monitor.example.test/ping/abc";
     const config = backupAlarmConfig();
     is("an https address: on", config !== null, true);

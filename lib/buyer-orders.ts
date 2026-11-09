@@ -458,13 +458,19 @@ export async function callsFor(store: Store, email: string, meter?: OrdersMeter)
 }
 
 /**
- * callsFor, with whether the reading of the store's bookings stopped at its
- * pages while Stripe had more (lib/calls.ts, paidCallsRead): a booking on an
- * older checkout may then be missing, which the orders page and its link say
- * (VR 2), never shown as every booking.
+ * callsFor, with what the reading of the store's bookings could not see. The
+ * reading stops at its pages when the store has more completed checkouts than
+ * they hold (lib/calls.ts, paidCallsRead): a limit of volume, so a busy
+ * store's every reading stops there, and a booking made longer ago may be
+ * missing. The orders page and its link say so (VR 2), never as every booking
+ * and never as something a retry fixes:
+ * - `partial`: this address has a booking among those read (past or to come),
+ *   so "some of your bookings" is about someone who booked;
+ * - `unsure`: it has none among those read, so whether it booked longer ago is
+ *   not known, and only a sentence true either way is said.
  */
-export async function callsForRead(store: Store, email: string, meter?: OrdersMeter): Promise<{ calls: BookedCall[]; partial: boolean }> {
-  if (!store.stripeAccountId || !sellsAny(store, "call")) return { calls: [], partial: false };
+export async function callsForRead(store: Store, email: string, meter?: OrdersMeter): Promise<{ calls: BookedCall[]; partial: boolean; unsure: boolean }> {
+  if (!store.stripeAccountId || !sellsAny(store, "call")) return { calls: [], partial: false, unsure: false };
   const who = normaliseEmail(email);
   const now = Date.now();
   // With a meter (the orders page), each read is taken before it is made. The move of every booking the store's pages
@@ -473,12 +479,14 @@ export async function callsForRead(store: Store, email: string, meter?: OrdersMe
   // this buyer's listings, rooms, feeds and keys from it. (Until lib/calls.ts says how many it is about to read.)
   // The other reads of the same opening wait for that number and use what is left, so they never ask the store meanwhile.
   const read = meter ? await meter.takeFor(ORDERS_CALL_MOVES, () => paidCallsRead(store), (calls) => ordersMovesCommands(calls.paid.length)) : await paidCallsRead(store);
-  const { paid, partial } = read;
-  const mine = paid
-    .filter((call) => call.email !== null && normaliseEmail(call.email) === who && call.end > now)
+  const ofThis = read.paid.filter((call) => call.email !== null && normaliseEmail(call.email) === who);
+  const partial = read.partial && ofThis.length > 0;
+  const unsure = read.partial && ofThis.length === 0;
+  const mine = ofThis
+    .filter((call) => call.end > now)
     .sort((a, b) => a.start - b.start)
     .slice(0, MAX_LISTED);
-  if (mine.length === 0) return { calls: [], partial };
+  if (mine.length === 0) return { calls: [], partial, unsure };
   await meter?.take(new Set(mine.map((call) => call.product)).size * ORDERS_LISTING_COMMANDS);
   const listings = await readListings(store, mine.map((call) => call.product));
   const known = mine.flatMap((call) => {
@@ -505,7 +513,7 @@ export async function callsForRead(store: Store, email: string, meter?: OrdersMe
     setup,
     room: rooms[i],
   }));
-  return { calls, partial };
+  return { calls, partial, unsure };
 }
 
 /** Whether the store sells anything a buyer would come back for: a thing, or a call to join. */
@@ -1143,11 +1151,12 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
   const meter = new OrdersMeter(store);
   const read = await withinOpening(Promise.all([purchasesFor(store, raw, meter), callsForRead(store, raw, meter)]), meter, ORDERS_LINK_READ_MS);
   if (read === "late") return;
-  const [purchases, { calls, partial: callsPartial }] = read;
+  const [purchases, { calls, partial: callsPartial, unsure: callsUnsure }] = read;
   // A purchase whose refund could not be checked yet is still a purchase of this address: the link is sent, and the page
   // checks it when asked. Whoever asked is answered "sent" either way, so this tells them nothing.
-  // A booking list that stopped at its pages (callsPartial) sends nothing on its own: a busy store's would then email any
-  // address typed. When a link goes, its email says some bookings could not be listed.
+  // A booking list that stopped at its pages sends nothing on its own: a busy store's would then email any address typed.
+  // When a link goes, its email says what is true for this address: some of its bookings may be missing (callsPartial,
+  // it has one among those read), or one booked longer ago may be (callsUnsure, it has none among those read).
   const unchecked = meter.older.length + meter.paid.length;
   if (purchases.length === 0 && calls.length === 0 && unchecked === 0) return;
 
@@ -1166,12 +1175,13 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
     to: email,
     subject: words.ordersSubject(name),
     text: [
-      // With bookings not all read, no count and no "all": only what could be read, and the sentence that says so.
-      callsPartial ? words.ordersIntroSome(name) : words.ordersIntro(name, count, unchecked > 0),
+      // With bookings not all read, never "all": the count of what was read (or, with purchases not checked yet, the
+      // opening that says so, which claims no "all" either), and the sentence that says the rest.
+      callsPartial || callsUnsure ? (unchecked > 0 ? words.ordersIntro(name, count, true) : words.ordersIntroSome(name, count)) : words.ordersIntro(name, count, unchecked > 0),
       "",
       link,
       "",
-      ...(callsPartial ? [words.callsUnlisted, ""] : []),
+      ...(callsPartial ? [words.callsUnlisted, ""] : callsUnsure ? [words.callsMaybeUnlisted, ""] : []),
       words.ordersLinkNote,
       "",
       words.ordersIgnore,

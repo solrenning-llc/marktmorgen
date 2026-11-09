@@ -530,8 +530,9 @@ export default function DevelopersPage() {
 }`}</Code>
         <p>
           When <code className="font-mono">complete</code> is <code className="font-mono">false</code>, your Stripe account
-          had more checkouts than one reading holds, so some older bookings may be missing from the list. Read it again
-          later before you rely on it being whole.
+          has more completed checkouts than one reading looks through. The most recent bookings are listed, and some made
+          longer ago may be missing. This is a limit of volume, not a passing failure: reading again gives the same answer
+          while the store has that many checkouts, so do not treat the list as every booking.
         </p>
       </LegalSection>
 

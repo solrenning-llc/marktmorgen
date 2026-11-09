@@ -78,7 +78,9 @@ const en = {
   waiting: "Waiting for you",
   waitingMore: (n: number) => `And ${n} more. Open the email each one came in to see it.`,
   waitingUnread: "What is waiting for you could not be read just now. Try this page again in a moment.",
-  callsUnlisted: "Some of your bookings could not be listed just now. Try again later, or use the email you got when you booked.",
+  callsUnlisted: "This store has too many bookings for the list to check them all. Your most recent bookings are shown, but one you made longer ago may be missing. The email you got when you booked has its details.",
+  /** To a buyer with no booking among those read at a busy store: true whether or not they booked (lib/buyer-orders.ts, callsForRead). */
+  callsMaybeUnlisted: "This store has too many bookings for the list to check them all. If you booked here a while ago, that booking may be missing. The email you got when you booked has its details.",
   /** Each link names what it opens, so two of them never read the same (WCAG 2.4.9). `due` is a date already said, or "". */
   openRequest: (amount: string, due: string): string => (due ? `Open the ${amount} payment request due ${due}` : `Open the ${amount} payment request`),
   openToSign: (title: string): string => `Read and sign “${title}”`,
@@ -190,7 +192,7 @@ const en = {
         ? `You asked for what you bought from ${store}. Your purchases are not checked yet; the page checks them when you ask:`
         : `You asked for what you bought from ${store}. ${count === 1 ? "Here is 1" : `Here are ${count}`}, ready to open again, and older purchases the page checks when you ask:`
       : `You asked for what you bought from ${store}. ${count === 1 ? "Here it is" : `Here are all ${count}`}, ready to open again:`,
-  ordersIntroSome: (store: string) => `You asked for what you bought from ${store}. Here is what could be read just now, ready to open again:`,
+  ordersIntroSome: (store: string, count: number) => `You asked for what you bought from ${store}. ${count === 1 ? "Here is 1" : `Here are ${count}`}, ready to open again:`,
   ordersLinkNote: "The link works for 24 hours, on any device. After that, ask again from the store and a new one comes right away.",
   ordersIgnore: "If you did not ask for this, ignore this email; nothing happens unless the link is opened.",
   ordersSentBy: (store: string) => `Sent by Marktmorgen on behalf of ${store}.`,
@@ -352,7 +354,8 @@ const es: OrdersWords = {
   waiting: "Te espera",
   waitingMore: (n) => `Y ${n} más. Abre el correo con el que llegó cada uno para verlo.`,
   waitingUnread: "No pudimos leer ahora lo que te espera. Vuelve a abrir esta página en un momento.",
-  callsUnlisted: "Algunas de tus reservas no se pudieron mostrar ahora. Vuelve a intentarlo más tarde o usa el email que recibiste al reservar.",
+  callsUnlisted: "Esta tienda tiene demasiadas reservas para que la lista las revise todas. Se muestran tus reservas más recientes, pero puede faltar una que hiciste hace más tiempo. El email que recibiste al reservar tiene sus datos.",
+  callsMaybeUnlisted: "Esta tienda tiene demasiadas reservas para que la lista las revise todas. Si reservaste aquí hace tiempo, puede que esa reserva falte. El email que recibiste al reservar tiene sus datos.",
   openRequest: (amount, due) => (due ? `Abrir la solicitud de pago de ${amount} con vencimiento el ${due}` : `Abrir la solicitud de pago de ${amount}`),
   openToSign: (title) => `Leer y firmar «${title}»`,
   nothingToOpen: (store) =>
@@ -446,7 +449,7 @@ const es: OrdersWords = {
         ? `Pediste lo que le compraste a ${store}. Tus compras aún no están comprobadas; la página las comprueba cuando lo pidas:`
         : `Pediste lo que le compraste a ${store}. ${count === 1 ? "Aquí tienes 1 compra lista para abrirla de nuevo" : `Aquí tienes ${count} compras listas para abrirlas de nuevo`}, y compras anteriores que la página comprueba cuando lo pidas:`
       : `Pediste lo que le compraste a ${store}. ${count === 1 ? "Aquí lo tienes, listo para abrirlo de nuevo:" : `Aquí tienes tus ${count} compras, listas para abrirlas de nuevo:`}`,
-  ordersIntroSome: (store) => `Pediste lo que le compraste a ${store}. Aquí tienes lo que se pudo leer ahora, listo para abrirlo de nuevo:`,
+  ordersIntroSome: (store, count) => `Pediste lo que le compraste a ${store}. ${count === 1 ? "Aquí tienes 1 compra lista para abrirla de nuevo" : `Aquí tienes ${count} compras listas para abrirlas de nuevo`}:`,
   ordersLinkNote: "El enlace funciona durante 24 horas, en cualquier dispositivo. Después, vuelve a pedirlo desde la tienda y te llegará uno nuevo al instante.",
   ordersIgnore: "Si no lo pediste tú, ignora este email; no pasa nada a menos que se abra el enlace.",
   ordersSentBy: (store) => `Enviado por Marktmorgen en nombre de ${store}.`,
@@ -597,7 +600,8 @@ const fr: OrdersWords = {
   waiting: "Ce qui vous attend",
   waitingMore: (n) => `Et ${n} de plus. Ouvrez l’e-mail par lequel chacun est arrivé pour le voir.`,
   waitingUnread: "Ce qui vous attend n’a pas pu être lu pour le moment. Rouvrez cette page dans un instant.",
-  callsUnlisted: "Certaines de vos réservations n’ont pas pu être affichées pour le moment. Réessayez plus tard, ou utilisez l’e-mail reçu lors de la réservation.",
+  callsUnlisted: "Cette boutique a trop de réservations pour que la liste les vérifie toutes. Vos réservations les plus récentes sont affichées, mais une réservation plus ancienne peut manquer. L’e-mail reçu lors de la réservation en donne les détails.",
+  callsMaybeUnlisted: "Cette boutique a trop de réservations pour que la liste les vérifie toutes. Si vous avez réservé ici il y a un moment, cette réservation peut manquer. L’e-mail reçu lors de la réservation en donne les détails.",
   openRequest: (amount, due) => (due ? `Ouvrir la demande de paiement de ${amount} à régler le ${due}` : `Ouvrir la demande de paiement de ${amount}`),
   openToSign: (title) => `Lire et signer «${S}${title}${S}»`,
   nothingToOpen: (store) =>
@@ -690,7 +694,7 @@ const fr: OrdersWords = {
         ? `Vous avez demandé ce que vous avez acheté chez ${store}. Vos achats ne sont pas encore vérifiés${S}; la page les vérifie quand vous le demandez${S}:`
         : `Vous avez demandé ce que vous avez acheté chez ${store}. ${count < 2 ? "En voici 1, prêt à être rouvert" : `En voici ${count}, prêts à être rouverts`}, et des achats plus anciens que la page vérifie quand vous le demandez${S}:`
       : `Vous avez demandé ce que vous avez acheté chez ${store}. ${count < 2 ? "Le voici, prêt à être rouvert" : `Voici vos ${count}${S}achats, prêts à être rouverts`}${S}:`,
-  ordersIntroSome: (store) => `Vous avez demandé ce que vous avez acheté chez ${store}. Voici ce qui a pu être lu pour le moment, prêt à être rouvert${S}:`,
+  ordersIntroSome: (store, count) => `Vous avez demandé ce que vous avez acheté chez ${store}. ${count < 2 ? "En voici 1, prêt à être rouvert" : `En voici ${count}, prêts à être rouverts`}${S}:`,
   ordersLinkNote: `Le lien est valable 24${S}heures, sur n'importe quel appareil. Ensuite, faites une nouvelle demande depuis la boutique et un nouveau lien arrive aussitôt.`,
   ordersIgnore: `Si vous n'avez rien demandé, ignorez cet e-mail${S}; rien ne se passe tant que le lien n'est pas ouvert.`,
   ordersSentBy: (store) => `Envoyé par Marktmorgen pour le compte de ${store}.`,
@@ -840,7 +844,8 @@ const de: OrdersWords = {
   waiting: "Wartet auf Sie",
   waitingMore: (n) => `Und ${n} weitere. Öffnen Sie die E-Mail, mit der jeweils eines kam, um es zu sehen.`,
   waitingUnread: "Was auf Sie wartet, konnte gerade nicht gelesen werden. Öffnen Sie diese Seite gleich noch einmal.",
-  callsUnlisted: "Einige Ihrer Buchungen konnten gerade nicht angezeigt werden. Versuchen Sie es später noch einmal, oder nutzen Sie die E-Mail, die Sie bei der Buchung erhalten haben.",
+  callsUnlisted: "Dieser Shop hat zu viele Buchungen, als dass die Liste alle prüfen könnte. Ihre neuesten Buchungen werden angezeigt, eine ältere kann aber fehlen. Die E-Mail, die Sie bei der Buchung erhalten haben, enthält die Details.",
+  callsMaybeUnlisted: "Dieser Shop hat zu viele Buchungen, als dass die Liste alle prüfen könnte. Wenn Sie hier vor einiger Zeit gebucht haben, kann diese Buchung fehlen. Die E-Mail, die Sie bei der Buchung erhalten haben, enthält die Details.",
   openRequest: (amount, due) => (due ? `Zahlungsanfrage über ${amount}, fällig am ${due}, öffnen` : `Zahlungsanfrage über ${amount} öffnen`),
   openToSign: (title) => `„${title}“ lesen und unterschreiben`,
   nothingToOpen: (store) =>
@@ -934,7 +939,7 @@ const de: OrdersWords = {
         ? `Sie haben angefordert, was Sie bei ${store} gekauft haben. Ihre Käufe sind noch nicht geprüft; die Seite prüft sie, wenn Sie es möchten:`
         : `Sie haben angefordert, was Sie bei ${store} gekauft haben. ${count === 1 ? "Hier ist 1" : `Hier sind ${count}`}, bereit zum erneuten Öffnen, und ältere Käufe, die die Seite prüft, wenn Sie es möchten:`
       : `Sie haben angefordert, was Sie bei ${store} gekauft haben. ${count === 1 ? "Hier ist es" : `Hier sind alle ${count}`}, bereit zum erneuten Öffnen:`,
-  ordersIntroSome: (store) => `Sie haben angefordert, was Sie bei ${store} gekauft haben. Hier ist, was gerade gelesen werden konnte, bereit zum erneuten Öffnen:`,
+  ordersIntroSome: (store, count) => `Sie haben angefordert, was Sie bei ${store} gekauft haben. ${count === 1 ? "Hier ist 1" : `Hier sind ${count}`}, bereit zum erneuten Öffnen:`,
   ordersLinkNote: "Der Link gilt 24 Stunden, auf jedem Gerät. Danach fordern Sie ihn im Shop einfach erneut an, und ein neuer kommt sofort.",
   ordersIgnore: "Wenn Sie das nicht angefordert haben, ignorieren Sie diese E-Mail; es passiert nichts, solange der Link nicht geöffnet wird.",
   ordersSentBy: (store) => `Gesendet von Marktmorgen im Auftrag von ${store}.`,
@@ -1088,7 +1093,8 @@ const it: OrdersWords = {
   waiting: "Ti aspetta",
   waitingMore: (n) => `E altri ${n}. Apri l’email con cui è arrivato ciascuno per vederlo.`,
   waitingUnread: "Non è stato possibile leggere ora cosa ti aspetta. Riapri questa pagina tra un momento.",
-  callsUnlisted: "Non è stato possibile mostrare ora alcune delle tue prenotazioni. Riprova più tardi, o usa l'email ricevuta quando hai prenotato.",
+  callsUnlisted: "Questo negozio ha troppe prenotazioni perché l'elenco le controlli tutte. Sono mostrate le tue prenotazioni più recenti, ma può mancarne una fatta tempo fa. L'email ricevuta quando hai prenotato ne ha i dettagli.",
+  callsMaybeUnlisted: "Questo negozio ha troppe prenotazioni perché l'elenco le controlli tutte. Se hai prenotato qui tempo fa, quella prenotazione può mancare. L'email ricevuta quando hai prenotato ne ha i dettagli.",
   openRequest: (amount, due) => (due ? `Apri la richiesta di pagamento di ${amount} con scadenza ${due}` : `Apri la richiesta di pagamento di ${amount}`),
   openToSign: (title) => `Leggi e firma «${title}»`,
   nothingToOpen: (store) =>
@@ -1182,7 +1188,7 @@ const it: OrdersWords = {
         ? `Hai chiesto ciò che hai acquistato da ${store}. I tuoi acquisti non sono ancora verificati; la pagina li verifica quando lo chiedi:`
         : `Hai chiesto ciò che hai acquistato da ${store}. ${count === 1 ? "Eccone 1, pronto per essere riaperto" : `Eccone ${count}, pronti per essere riaperti`}, e acquisti precedenti che la pagina verifica quando lo chiedi:`
       : `Hai chiesto ciò che hai acquistato da ${store}. ${count === 1 ? "Eccolo, pronto per essere riaperto:" : `Eccoli tutti (${count}), pronti per essere riaperti:`}`,
-  ordersIntroSome: (store) => `Hai chiesto ciò che hai acquistato da ${store}. Ecco ciò che è stato possibile leggere ora, pronto per essere riaperto:`,
+  ordersIntroSome: (store, count) => `Hai chiesto ciò che hai acquistato da ${store}. ${count === 1 ? "Eccone 1, pronto per essere riaperto" : `Eccone ${count}, pronti per essere riaperti`}:`,
   ordersLinkNote: "Il link funziona per 24 ore, su qualsiasi dispositivo. Dopo, richiedilo di nuovo dal negozio e ne arriva subito uno nuovo.",
   ordersIgnore: "Se non l'hai chiesto tu, ignora questa email; non succede nulla finché il link non viene aperto.",
   ordersSentBy: (store) => `Inviata da Marktmorgen per conto di ${store}.`,
@@ -1332,7 +1338,8 @@ const nl: OrdersWords = {
   waiting: "Wacht op jou",
   waitingMore: (n) => `En nog ${n}. Open de e-mail waarmee elk binnenkwam om het te zien.`,
   waitingUnread: "Wat op je wacht, kon nu niet worden gelezen. Open deze pagina zo meteen opnieuw.",
-  callsUnlisted: "Sommige van je boekingen konden nu niet worden getoond. Probeer het later opnieuw, of gebruik de e-mail die je bij het boeken kreeg.",
+  callsUnlisted: "Deze winkel heeft te veel boekingen om ze in de lijst allemaal na te kijken. Je nieuwste boekingen staan erin, maar een oudere kan ontbreken. De e-mail die je bij het boeken kreeg, heeft de details.",
+  callsMaybeUnlisted: "Deze winkel heeft te veel boekingen om ze in de lijst allemaal na te kijken. Als je hier een tijd geleden hebt geboekt, kan die boeking ontbreken. De e-mail die je bij het boeken kreeg, heeft de details.",
   openRequest: (amount, due) => (due ? `Het betaalverzoek van ${amount}, te betalen op ${due}, openen` : `Het betaalverzoek van ${amount} openen`),
   openToSign: (title) => `‘${title}’ lezen en ondertekenen`,
   nothingToOpen: (store) =>
@@ -1425,7 +1432,7 @@ const nl: OrdersWords = {
         ? `Je vroeg om wat je bij ${store} hebt gekocht. Je aankopen zijn nog niet gecontroleerd; de pagina controleert ze wanneer je dat vraagt:`
         : `Je vroeg om wat je bij ${store} hebt gekocht. ${count === 1 ? "Hier is er 1" : `Hier zijn er ${count}`}, klaar om opnieuw te openen, en oudere aankopen die de pagina controleert wanneer je dat vraagt:`
       : `Je vroeg om wat je bij ${store} hebt gekocht. ${count === 1 ? "Hier is het" : `Hier zijn ze alle ${count}`}, klaar om opnieuw te openen:`,
-  ordersIntroSome: (store) => `Je vroeg om wat je bij ${store} hebt gekocht. Hier is wat nu gelezen kon worden, klaar om opnieuw te openen:`,
+  ordersIntroSome: (store, count) => `Je vroeg om wat je bij ${store} hebt gekocht. ${count === 1 ? "Hier is er 1" : `Hier zijn er ${count}`}, klaar om opnieuw te openen:`,
   ordersLinkNote: "De link werkt 24 uur, op elk apparaat. Vraag daarna opnieuw aan via de winkel en er komt meteen een nieuwe.",
   ordersIgnore: "Heb je hier niet om gevraagd, negeer deze e-mail dan; er gebeurt niets zolang de link niet wordt geopend.",
   ordersSentBy: (store) => `Verstuurd door Marktmorgen namens ${store}.`,
@@ -1575,7 +1582,8 @@ const pt: OrdersWords = {
   waiting: "À sua espera",
   waitingMore: (n) => `E mais ${n}. Abra o email com que cada um chegou para o ver.`,
   waitingUnread: "Não foi possível ler agora o que está à sua espera. Volte a abrir esta página daqui a pouco.",
-  callsUnlisted: "Não foi possível mostrar agora algumas das suas marcações. Tente de novo mais tarde, ou use o email que recebeu quando marcou.",
+  callsUnlisted: "Esta loja tem marcações a mais para a lista as verificar todas. As suas marcações mais recentes aparecem, mas pode faltar uma feita há mais tempo. O email que recebeu quando marcou tem os detalhes.",
+  callsMaybeUnlisted: "Esta loja tem marcações a mais para a lista as verificar todas. Se marcou aqui há algum tempo, essa marcação pode faltar. O email que recebeu quando marcou tem os detalhes.",
   openRequest: (amount, due) => (due ? `Abrir o pedido de pagamento de ${amount} que vence a ${due}` : `Abrir o pedido de pagamento de ${amount}`),
   openToSign: (title) => `Ler e assinar «${title}»`,
   nothingToOpen: (store) =>
@@ -1669,7 +1677,7 @@ const pt: OrdersWords = {
         ? `Pediu o que comprou a ${store}. As suas compras ainda não foram verificadas; a página verifica-as quando pedir:`
         : `Pediu o que comprou a ${store}. ${count === 1 ? "Aqui está 1 compra, pronta a abrir de novo" : `Aqui estão ${count} compras, prontas a abrir de novo`}, e compras anteriores que a página verifica quando pedir:`
       : `Pediu o que comprou a ${store}. ${count === 1 ? "Aqui está, pronto a abrir de novo:" : `Aqui estão as ${count} compras, prontas a abrir de novo:`}`,
-  ordersIntroSome: (store) => `Pediu o que comprou a ${store}. Aqui está o que foi possível ler agora, pronto a abrir de novo:`,
+  ordersIntroSome: (store, count) => `Pediu o que comprou a ${store}. ${count === 1 ? "Aqui está 1 compra, pronta a abrir de novo" : `Aqui estão ${count} compras, prontas a abrir de novo`}:`,
   ordersLinkNote: "A ligação funciona durante 24 horas, em qualquer dispositivo. Depois disso, peça novamente a partir da loja e chega logo uma nova.",
   ordersIgnore: "Se não pediu isto, ignore este email; nada acontece a menos que a ligação seja aberta.",
   ordersSentBy: (store) => `Enviado pela Marktmorgen em nome de ${store}.`,

@@ -106,7 +106,9 @@ async function main(): Promise<void> {
   is("a named section with its heading, before the bookings", page.includes('aria-labelledby="waiting-title"') && page.includes('<h2 id="waiting-title"') && page.indexOf("<WaitingList") < page.indexOf('aria-labelledby="calls-title"'), true);
   is("each linked to the page that was emailed to them", page.includes("href={`/@${store.handle}/pay/${request.id}`}") && page.includes("href={`/@${store.handle}/sign/${agreement.id}`}"), true);
   is("payment requests read and shown only where their page takes payment; a surprise failure is 'could not be read'", page.includes("waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))"), true);
-  is("a list that cannot be read is said, never 'nothing to open'", page.includes("{waiting.unread ? (") && page.includes("{words.waitingUnread}") && page.includes("|| waiting.unread) ? null"), true);
+  // Changed (rule 23): the anchor follows the page, which also keeps "nothing to open" away while the store's bookings
+  // could not all be checked (callsPartial, callsUnsure; tests/sales-reads-complete.test.ts); same reading, same order.
+  is("a list that cannot be read is said, never 'nothing to open'", page.includes("{waiting.unread ? (") && page.includes("{words.waitingUnread}") && page.includes("|| waiting.unread || callsPartial || callsUnsure) ? null"), true);
   is("the dates and amounts as their own pages say them", page.includes("rw.due(day(request.dueDate))") && page.includes("aw.until(said.date(agreement.expiresAt))") && page.includes("speechFor(store.language, request.currency).money(request.total)"), true);
   is("buttons tall enough to tap", (page.match(/btn st-btn btn-wrap mt-3 inline-flex min-h-11/g) ?? []).length, 2);
 

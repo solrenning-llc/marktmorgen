@@ -45,7 +45,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
-import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
+import { type Busy, isTimeZone, partsIn, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
 import { type Interval, looksLikeCalendar, parseIcs } from "@/lib/ics-parse";
 import { type Listing, type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
@@ -504,11 +504,26 @@ export async function withoutErasedBookers(store: Pick<Store, "listId">, calls: 
  * What the calendar file says when Stripe had more checkouts than one reading
  * of the bookings holds (lib/calls.ts, paidCallsRead): older checkouts, which
  * may hold a booking still to come, were not read, so the file may be missing
- * some (VR 2). Said as the calendar's description and as a note on today that
- * blocks no time.
+ * some (VR 2). The limit is one of volume, so a busy store's every reading
+ * stops there: the note promises no retry. Said as the calendar's description
+ * and as a note on today that blocks no time.
  */
 export const PARTIAL_FEED_NOTE =
-  "Some older bookings could not be read just now, so this calendar may not show every booking. It tries again within a few hours.";
+  "This store has too many bookings for this calendar to check them all. The most recent bookings are shown, but one made longer ago may be missing. The email you got for each new booking has its details.";
+
+/** The zone the store's call is offered in (as homeZone reads it), from listings already read; UTC when none names one. */
+function listingsZone(store: Store, listings: Listing[]): string {
+  const first = idsOfKind(store, "call")[0];
+  const zones = [listings.find((p) => p.id === first)?.call?.tz, ...listings.map((p) => p.call?.tz)];
+  return zones.find((tz): tz is string => isTimeZone(tz)) ?? "UTC";
+}
+
+/** Today's date as a clock in `tz` shows it at `now`, and the next day, as iCalendar all-day dates. */
+function zonedDay(now: number, tz: string): { start: string; end: string } {
+  const p = partsIn(now, tz);
+  const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, "");
+  return { start: ymd(Date.UTC(p.year, p.month - 1, p.day)), end: ymd(Date.UTC(p.year, p.month - 1, p.day + 1)) };
+}
 
 /**
  * Every booked call and dated session still to come (and those of the last
@@ -560,13 +575,14 @@ export function bookedCalendar(
   ];
   if (partial) {
     // An all-day note on today, free time, so the creator sees it where the bookings are and nothing reads it as busy.
-    const day = (ms: number) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, "");
+    // Today as the store's own clock shows it, not UTC's: at night in Brazil, UTC is already tomorrow.
+    const day = zonedDay(now, listingsZone(store, listings));
     lines.push(
       "BEGIN:VEVENT",
       `UID:bookings-not-all-read-${store.handle}@marktmorgen.com`,
       `DTSTAMP:${icsTime(now)}`,
-      `DTSTART;VALUE=DATE:${day(now)}`,
-      `DTEND;VALUE=DATE:${day(now + 86_400_000)}`,
+      `DTSTART;VALUE=DATE:${day.start}`,
+      `DTEND;VALUE=DATE:${day.end}`,
       `SUMMARY:${icsText("Some bookings may be missing here")}`,
       `DESCRIPTION:${icsText(`${PARTIAL_FEED_NOTE}\n\nFrom your Marktmorgen studio.`)}`,
       "TRANSP:TRANSPARENT",

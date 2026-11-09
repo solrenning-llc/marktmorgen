@@ -169,8 +169,11 @@ export default async function OrdersPage({ params, searchParams }: Params) {
 
   let purchases: Purchase[] | null = null;
   let calls: BookedCall[] = [];
-  // The store's bookings stopped at their pages with more left: one of this buyer's may be missing, and the page says so.
+  // The store has more bookings than one reading checks (lib/buyer-orders.ts, callsForRead): with one of this buyer's read,
+  // an older one of theirs may be missing (callsPartial); with none read, whether they booked longer ago is not known
+  // (callsUnsure). The page says which, never as something a retry fixes.
   let callsPartial = false;
+  let callsUnsure = false;
   let waiting: Waiting = { requests: [], agreements: [], requestsTotal: 0, agreementsTotal: 0, unread: false };
   let failed = false;
   // Older purchases whose refund did not fit in the opening's calls to Stripe (ORDERS_STRIPE_CALLS), and what was added to
@@ -197,7 +200,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
       })();
       const outcome = await withinOpening(reading, meter);
       if (outcome === "late") failed = true;
-      else ({ listed: purchases, booked: { calls, partial: callsPartial }, waits: waiting, discord: discordProducts, more: extras, older } = outcome);
+      else ({ listed: purchases, booked: { calls, partial: callsPartial, unsure: callsUnsure }, waits: waiting, discord: discordProducts, more: extras, older } = outcome);
     } catch (error) {
       purchases = null;
       calls = [];
@@ -261,6 +264,10 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                 <p role="status" className="st-muted mt-4">
                   {words.callsUnlisted}
                 </p>
+              ) : callsUnsure ? (
+                <p role="status" className="st-muted mt-4">
+                  {words.callsMaybeUnlisted}
+                </p>
               ) : null}
               {calls.length > 0 ? (
                 <section aria-labelledby="calls-title" className="mt-6">
@@ -274,7 +281,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                   </ul>
                 </section>
               ) : null}
-              {purchases.length === 0 && !older.cursor && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread || callsPartial) ? null : purchases.length === 0 && !older.cursor ? (
+              {purchases.length === 0 && !older.cursor && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread || callsPartial || callsUnsure) ? null : purchases.length === 0 && !older.cursor ? (
                 <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
               ) : (
                 <>

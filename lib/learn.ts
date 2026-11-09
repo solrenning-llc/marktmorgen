@@ -41,7 +41,7 @@ import { earnedCourses } from "@/lib/community-points";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
-import { purchaseRefunded } from "@/lib/refunds";
+import { disputeLost, purchaseRefunded, refundRowKnown } from "@/lib/refunds";
 import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { folderFromPathname, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
@@ -174,9 +174,10 @@ const blockedKey = (courseId: string) => `nl:course:${courseId}:blocked`;
 
 /**
  * Where a course written down came from, kept beside its start as one letter ("1760000000:p"). While Stripe cannot be
- * read, a one-off course from a source of its own (a PayPal sale, a gift, a pre-order or a group place, each taken
- * back by its own path through dropEnrollment) stays open; one from a Stripe checkout, or written before origins were
- * kept (no letter), waits on Stripe, which alone says whether it was refunded.
+ * read, every one-off course written down stays open (owner decision 18: no buyer loses access without the money
+ * back). Each is taken off the ledger only once its money is back: a PayPal sale, a gift, a pre-order or a group
+ * place by its own path through dropEnrollment; one from a Stripe checkout, or written before origins were kept (no
+ * letter), by courseLedger, once Stripe confirms the refund of the very checkout it was written for (moneyBack).
  */
 export type EnrollmentOrigin = "stripe" | "paypal" | "gift" | "preorder" | "group";
 const ORIGIN_LETTER: Record<EnrollmentOrigin, string> = { stripe: "s", paypal: "p", gift: "g", preorder: "r", group: "l" };
@@ -226,8 +227,10 @@ const sessionLegible = (row: Record<string, unknown>) => plainObject(ownField(ro
 /**
  * Whether one reading of Stripe was whole: every page read to its end, every row readable (lib/stripe-list.ts).
  * A purchase it shows stands either way; only a whole reading may say "not bought", "refunded" or "ended".
+ * `refundedAt` holds, for each course, the checkouts read as refunded in full, with the time each was created: what
+ * courseLedger matches to the start written down before it asks Stripe whether the money is back for good.
  */
-type Reading = { whole: boolean };
+type Reading = { whole: boolean; refundedAt?: Map<string, { created: number; session: Record<string, unknown> }[]> };
 
 /** What Stripe says about one address's courses here. */
 type Ledger = {
@@ -293,7 +296,13 @@ async function paidAtStripe(store: Store, email: string, reading: Reading): Prom
       if (bought.length === 0) continue;
       // Refunded in full: the one rule every door uses (lib/refunds.ts).
       if (await purchaseRefunded(account, session)) {
-        for (const product of bought) refunded.add(product.id);
+        for (const product of bought) {
+          refunded.add(product.id);
+          if (typeof session.created !== "number") continue;
+          const seen = reading.refundedAt?.get(product.id) ?? [];
+          seen.push({ created: session.created, session });
+          reading.refundedAt?.set(product.id, seen);
+        }
         continue;
       }
       for (const product of bought) {
@@ -319,6 +328,65 @@ async function paidAtStripe(store: Store, email: string, reading: Reading): Prom
     refunded.delete(id);
   }
   return { paid: found, ended, refunded };
+}
+
+/** How long a refund may stay pending before it is logged for a person to look at: it never takes the course away. */
+const REFUND_PENDING_ALERT_SECONDS = 7 * 24 * 60 * 60;
+
+/** The most refunded checkouts one reading asks Stripe to confirm; the rest wait for the next reading. */
+const CONFIRMS_PER_READING = 5;
+
+const INTENT_ID = /^pi_[A-Za-z0-9]{8,255}$/;
+
+/** A refund row of GET /refunds in its exact shape (lib/refunds.ts), with its amount as whole cents. */
+const refundLegible = (row: Record<string, unknown>) => {
+  const amount = ownField(row, "amount");
+  return refundRowKnown(row) && typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0;
+};
+
+/**
+ * Whether the money of one checkout read as refunded in full is back for good (owner decision 18,
+ * C1-20261109-1029-C5-52): its charge's dispute lost, or its refunds, listed whole, succeeded for the whole charge.
+ * A refund pending, needing action, failed or canceled is not; nor is anything that could not be read (a plan's
+ * checkout, a list that did not read or did not end), so the course stays written down and is asked about again on
+ * the next whole reading. A refund pending past REFUND_PENDING_ALERT_SECONDS is logged, never acted on.
+ */
+async function moneyBack(account: string, session: Record<string, unknown>): Promise<boolean> {
+  if (session.mode !== "payment") return false;
+  const payment = session.payment_intent;
+  if (!plainObject(payment)) return false;
+  const intent = ownField(payment, "id");
+  const charge = ownField(payment, "latest_charge");
+  const amount = plainObject(charge) ? ownField(charge, "amount") : undefined;
+  if (typeof intent !== "string" || !INTENT_ID.test(intent)) return false;
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) return false;
+  try {
+    if (await disputeLost(account, payment)) return true;
+    const query = new URLSearchParams({ payment_intent: intent, limit: "100" });
+    const read = readStripePage(await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION), refundLegible);
+    if (read.unreadable > 0 || read.hasMore) return false;
+    let back = 0;
+    let waitingSince = Infinity;
+    for (const row of read.rows) {
+      if (row.payment_intent !== intent) continue;
+      if (row.status === "succeeded") back += row.amount as number;
+      else if (row.status === "pending" || row.status === "requires_action") waitingSince = Math.min(waitingSince, row.created as number);
+    }
+    if (back >= amount) return true;
+    if (Date.now() / 1000 - waitingSince > REFUND_PENDING_ALERT_SECONDS) {
+      console.warn("a course refund has been pending for more than seven days; the course stays open until it succeeds", { account, intent });
+    }
+    return false;
+  } catch (error) {
+    console.error("confirming a course refund failed", error);
+    return false;
+  }
+}
+
+/** Takes one course off an address's ledger, its reply read exactly (CX-123 rule 24): 0 or 1, or this throws. */
+async function takeOffLedger(store: Store, email: string, productId: string): Promise<void> {
+  const reply = repliesFor(await redisPipeline([["HDEL", ledgerKey(store, email), productId]]), 1)?.[0];
+  if (reply !== 0 && reply !== 1) throw new UnknownReplyError("taking a refunded course off a ledger");
 }
 
 /** When a course in a kept answer began: whole seconds from zero up; otherwise null. */
@@ -398,11 +466,14 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
   let asked: Ledger | null = typeof cached === "string" ? parseLedger(cached) : null;
   // A kept answer was whole when it was kept: only a whole one ever is.
   let whole = true;
+  // The checkouts this request read as refunded, when it read Stripe: a kept answer has none.
+  let refundedAt: Reading["refundedAt"] = undefined;
   if (!asked) {
-    const reading: Reading = { whole: true };
+    const reading: Reading = { whole: true, refundedAt: new Map() };
     try {
       asked = await paidAtStripe(store, email, reading);
       whole = reading.whole;
+      refundedAt = reading.refundedAt;
     } catch (error) {
       // A failed read, or a page in another shape: unknown, never "bought nothing".
       console.error("reading course purchases failed", error);
@@ -429,13 +500,14 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
   } else if (ledger && typeof ledger === "object") {
     pairs.push(...Object.entries(ledger as Record<string, unknown>));
   }
-  // Written down from a source of its own, not a Stripe checkout: it stands while Stripe cannot be read.
-  const ownSource = new Set<string>();
+  // Where each came from: a Stripe checkout, or no letter (written before origins were kept), is taken off here once
+  // its refund is confirmed; every other origin by its own path.
+  const origins = new Map<string, EnrollmentOrigin | null>();
   for (const [field, value] of pairs) {
     const entry = writtenDown(value);
     if (typeof field !== "string" || entry === null) throw new UnknownReplyError("the courses written down for an address");
     recorded.set(field, entry.began);
-    if (entry.origin !== null && entry.origin !== "stripe") ownSource.add(field);
+    origins.set(field, entry.origin);
   }
 
   // Brought over from another platform: the course itself, or a course in a
@@ -449,11 +521,39 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
   }
 
   const courses = await readKind(store, "course");
+
+  // Owner decision 18 (C1-20261109-1029-C5-52): a course is taken away only once its money is back. A whole reading
+  // that found every purchase of a one-off course refunded in full shuts it (below); when the course was written
+  // down from that very checkout (its start is the checkout's time) and Stripe confirms the money is back for good
+  // (moneyBack), it is taken off the ledger, so it never opens again while Stripe cannot be read. A refund not yet
+  // confirmed takes nothing off: the course stays written down and is asked about again on the next whole reading.
+  if (whole && refundedAt && store.stripeAccountId) {
+    let confirms = 0;
+    for (const product of courses) {
+      if (!product.course || product.recurring || !asked.refunded.has(product.id)) continue;
+      const began = recorded.get(product.id);
+      const origin = origins.get(product.id);
+      if (began === undefined || (origin !== null && origin !== "stripe")) continue;
+      const own = (refundedAt.get(product.id) ?? []).find((seen) => seen.created === began);
+      if (!own) continue;
+      if (confirms === CONFIRMS_PER_READING) break;
+      confirms += 1;
+      if (!(await moneyBack(store.stripeAccountId, own.session))) continue;
+      try {
+        await takeOffLedger(store, email, product.id);
+        recorded.delete(product.id);
+      } catch (error) {
+        // Still written down: this whole reading shuts it all the same, and the next one tries again.
+        console.error("taking a refunded course off the ledger failed", error);
+      }
+    }
+  }
+
   for (const product of courses) {
     if (!product.course) continue;
     // A one-off sale written down on the thanks page stands on its own,
-    // unless Stripe now says it was refunded in full.
-    const start = product.recurring || asked.refunded.has(product.id)
+    // unless a whole reading of Stripe now says it was refunded in full.
+    const start = product.recurring || (whole && asked.refunded.has(product.id))
       ? fromStripe.get(product.id)
       : recorded.get(product.id) ?? fromStripe.get(product.id);
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));
@@ -461,15 +561,15 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
   }
 
   // Stripe could not be read whole: what it alone decides is unknown, never "bought nothing" (a paying member shut
-  // out in silence) nor "not refunded" (a refunded course open again). A purchase it did show stands, and so does a
-  // one-off course brought over from another platform or written down from a source of its own (a PayPal sale, a
-  // gift, a pre-order, a group place: each taken off the ledger by its own refund path); every other course is
-  // neither open nor shut, and is said as such.
+  // out in silence). A purchase it did show stands, and so does every one-off course brought over from another
+  // platform or written down, whatever its origin: what cannot be read keeps what there was (owner decision 18), and a
+  // refund confirmed has already taken its course off the ledger (above), so it does not open again. Every other
+  // course is neither open nor shut, and is said as such.
   const unknown = new Set<string>();
   if (!whole) {
     for (const product of courses) {
       if (!product.course || fromStripe.has(product.id)) continue;
-      if (!product.recurring && (given.has(product.id) || ownSource.has(product.id))) continue;
+      if (!product.recurring && (given.has(product.id) || recorded.has(product.id))) continue;
       result.delete(product.id);
       unknown.add(product.id);
     }
@@ -490,8 +590,9 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
     }
   }
 
-  // A student the creator took off the course stays off it.
-  const withCourse = [...result.keys()]
+  // A student the creator took off the course stays off it: shut, also where Stripe could not be read (said as
+  // shut, not "try again").
+  const withCourse = [...new Set([...result.keys(), ...unknown])]
     .map((id) => courses.find((p) => p.id === id))
     .filter((p): p is Listing => Boolean(p?.course));
   if (withCourse.length) {
@@ -501,7 +602,9 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
     const taken = flags?.map(countOf);
     if (!taken || taken.some((n) => n === null || n > 1)) throw new UnknownReplyError("whether a student was taken off a course");
     withCourse.forEach((p, i) => {
-      if (taken[i] === 1) result.delete(p.id);
+      if (taken[i] !== 1) return;
+      result.delete(p.id);
+      unknown.delete(p.id);
     });
   }
   return { paid: result, ended: asked.ended, refunded: asked.refunded, unknown };

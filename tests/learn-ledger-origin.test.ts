@@ -86,12 +86,16 @@ async function main(): Promise<void> {
     is(`${label}: paidCourses opens it with its start`, (await paidCourses(store, email)).get(one.id), START);
   }
 
-  part("What Stripe alone decides stays unknown");
+  part("What Stripe alone decides stays unknown; a one-off written down stays open");
   down = true;
   await recordEnrollment(store, "stripe@example.com", one.id, START, "stripe");
-  is("a Stripe checkout written down on the thanks page: unknown (its refund is Stripe's)", await stateOf("stripe@example.com", one), "unknown");
+  // Rule 23: these two expected "unknown" until owner decision 18 (C1-20261109-1029-C5-52, applied by
+  // C1-20261109-1054-C5-54, after this test was written): an entry is written only for a paid order, so it is proof of
+  // payment and stays open while Stripe cannot be read; a confirmed refund takes it off the ledger
+  // (tests/learn-refund-confirmed.test.ts).
+  is("a Stripe checkout written down on the thanks page: open (proof of payment; owner decision 18)", await stateOf("stripe@example.com", one), "open");
   await redis.pipeline([["HSETNX", ledgerKey("old@example.com"), one.id, String(START)]]);
-  is("an entry written before origins were kept: unknown, as before", await stateOf("old@example.com", one), "unknown");
+  is("an entry written before origins were kept: open (owner decision 18)", await stateOf("old@example.com", one), "open");
   await recordEnrollment(store, "giftclub@example.com", member.id, START, "gift");
   is("a membership course, whatever its origin: unknown (only Stripe says it is live)", await stateOf("giftclub@example.com", member), "unknown");
   down = false;

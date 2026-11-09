@@ -169,6 +169,14 @@ async function main(): Promise<void> {
   down = true;
   is("so it never opens again while Stripe cannot be read", await stateOf("back@example.com", one), "unknown");
   down = false;
+  // A new purchase after the refund (C1-20261109-1054-C5-54, point 2): written down again on its thanks page, it opens.
+  sessions["back@example.com"] = [oneOff("cs_test_back00000002", one.id, T2), ...sessions["back@example.com"]];
+  await recordEnrollment(store, "back@example.com", one.id, T2, "stripe");
+  is("bought again after the refund: written down again with the new start", await written("back@example.com", one.id), `${T2}:s`);
+  is("bought again after the refund: open", await stateOf("back@example.com", one), "open");
+  down = true;
+  is("bought again after the refund: open while Stripe cannot be read", await stateOf("back@example.com", one), "open");
+  down = false;
   sessions["parts@example.com"] = [oneOff("cs_test_part00000001", one.id, T1, { refunded: true })];
   refunds["pi_part00000001"] = [refund("re_part00000002", "pi_part00000001", "succeeded", 2900), refund("re_part00000001", "pi_part00000001", "succeeded", 2000)];
   await recordEnrollment(store, "parts@example.com", one.id, T1, "stripe");
@@ -271,7 +279,7 @@ async function main(): Promise<void> {
   refundReads = 0;
   await stateOf("paid@example.com", one);
   is("a purchase not refunded asks nothing more", refundReads, 0);
-  await stateOf("back@example.com", one);
+  await stateOf("oldback@example.com", one);
   is("a refund already taken off asks nothing more", refundReads, 0);
 
   done();

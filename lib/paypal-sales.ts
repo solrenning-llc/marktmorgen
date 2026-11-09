@@ -6,7 +6,7 @@
  *   nl:ppsell:o:<order>      an order opened: which store, which product, the price asked (3 days)
  *   nl:ppsell:paid:<order>   an order paid: the capture, the buyer's address (kept 400 days)
  *   nl:ppsell:watch:<stats>  paid orders inside PayPal's refund window, scored by when to ask next
- *   nl:ppsell:pending:<stats> orders whose payment PayPal holds as pending, until it completes or fails
+ *   nl:ppsell:pending:<stats> orders whose payment PayPal holds as pending, or is being asked to take, until it completes or fails
  *   nl:ppsell:own:<stats>:<address hash>:<product>  the paid orders behind one address's product
  *   nl:ppsell:sales:<stats>     every paid order, scored by when it was paid (400 days): the store's numbers read it
  *   nl:ppsell:refunded:<stats>  paid orders PayPal says were refunded in full, scored by when that was seen
@@ -603,6 +603,23 @@ async function watchLater(order: string, opened: Opened): Promise<void> {
   ]);
 }
 
+/**
+ * Puts an order in pending before PayPal is asked to take its payment (Claude 6's second money review of #3385,
+ * MEDIUM, probe A): whatever happens after PayPal takes it (the step that writes it down not reaching Redis, its
+ * answer lost), the sweep has the order to ask PayPal about and write down (watchPayPal), and settle's script takes it
+ * off pending with the same step that writes it down. The record keeps its own life (three days from opening, or
+ * thirty once watchLater keeps it), so nothing is kept longer than before. The answer read exactly (rule 24): one
+ * ZADD, 0 or 1; anything else, or no answer, throws, and PayPal is not asked to take anything, so a buyer is never
+ * charged for an order the sweep could not find. True when this call put it there (1), false when it was there
+ * already (0: watched by an earlier try, whose outcome this one does not know). One command more an attempted capture
+ * (Upstash: COMMAND in tests/plan-cost-registry.ts), inside the order's own work (ORDER_COMPUTE, line "orders").
+ */
+async function watchFirst(order: string, opened: Opened): Promise<boolean> {
+  const added = repliesFor(await redisPipeline([["ZADD", pendingKey(opened.s), String(Math.floor(Date.now() / 1000)), order]]), 1);
+  if (!added || (added[0] !== 0 && added[0] !== 1)) throw new UnknownReplyError("putting a PayPal order in pending before its capture");
+  return added[0] === 1;
+}
+
 /** Writes a completed payment down, once. Returns it, and whether this call wrote it. */
 async function settle(order: string, opened: Opened, captureId: string, email: string): Promise<{ paid: Paid; fresh: boolean }> {
   const paid: Paid = {
@@ -652,12 +669,20 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   if (already) return { ok: true, paid: already, fresh: false };
   const opened = await readOpened(order);
   if (!opened || opened.s !== store.statsId) return { ok: false, reason: "unknown" };
+  // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown).
+  const watchedHere = await watchFirst(order, opened);
   let done: Record<string, unknown>;
   try {
     done = await call("POST", `/v2/checkout/orders/${encodeURIComponent(order)}/capture`, { body: {}, merchant: opened.m, requestId: `nl-capture-${order}` });
   } catch (error) {
-    // PayPal's words for a payment it would not take (Orders v2 errors): nothing was charged.
-    if (error instanceof PayPalError && DECLINED.has(error.code)) return { ok: false, reason: "declined" };
+    // PayPal's words for a payment it would not take (Orders v2 errors): nothing was charged. Put in pending by this
+    // call only, it holds no capture the sweep could ever find, so it is let go of pending (a removal that fails
+    // leaves it to the sweep, which lets it go when its record ends); the buyer approving again comes back here and is
+    // watched again. Already there before this call (an earlier try whose answer was lost), it stays for the sweep.
+    if (error instanceof PayPalError && DECLINED.has(error.code)) {
+      if (watchedHere) await redisPipeline([["ZREM", pendingKey(opened.s), order]]).catch((again) => console.error("letting go of a declined PayPal order failed", again));
+      return { ok: false, reason: "declined" };
+    }
     // Anything else — taken already by a request that did not get to write it
     // down, or an answer lost on the way — is settled by PayPal's order itself.
     console.error("capturing a PayPal order failed", error);

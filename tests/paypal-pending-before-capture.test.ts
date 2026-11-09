@@ -250,6 +250,18 @@ async function main(): Promise<void> {
     paid: false, owned: 0, receipts: 0, sales: 0, pending: false, owed: false, captured: 1,
   });
 
+  part("Control: watched by an earlier try whose answer was lost, then declined: still left to the sweep");
+  captureWith = "lost";
+  const earlier = await open("earlier@example.com");
+  orders.set(earlier, { id: earlier, status: "APPROVED" });
+  await returnFor(store, earlier, "none");
+  captureWith = "decline";
+  const later = await returnFor(store, earlier, "none");
+  is("the buyer is told PayPal did not take it", later.location.includes("status=paypal-declined"), true);
+  is("and the order stays in pending, nothing paid", await state(earlier, "earlier@example.com"), {
+    paid: false, owned: 0, receipts: 0, sales: 0, pending: true, owed: false, captured: 2,
+  });
+
   done();
 }
 

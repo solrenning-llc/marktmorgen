@@ -37,6 +37,8 @@ const SCOPE = "https://uri.paypal.com/payments/payouts openid";
 let posts = 0;
 /** When true, PayPal refuses the next money request for its balance (a 422 that names its error), and makes nothing. */
 let refuseNext = false;
+/** When true, PayPal refuses every token request (it is down), so the settling has no way to read a batch. */
+let tokenDown = false;
 const batches = new Map<string, string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -44,6 +46,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
+  if (url.pathname === "/v1/oauth2/token" && tokenDown) return json({ name: "INTERNAL_SERVICE_ERROR" }, 500);
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: SCOPE, expires_in: 32400 });
   if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {
     posts += 1;
@@ -156,12 +159,46 @@ async function main(): Promise<void> {
     throw new Error("Synthetic: the settling's HDEL of the '?' entry failed");
   }, () => settlePayPal(store));
   is("the settling's removal was the one that failed", stuck.hit, true);
-  is("nothing is asked of PayPal; the batch waits beside its '?' entry", [stuck.value.paid, stuck.value.waiting, posts], [0, 4, 1]);
+  // Rule 23: corrected from waiting 4 to 2 (Codex H2 LOW, review 5822092775 on #3335): the two people in the "?" entry
+  // are the same two held under the batch's id, so they wait once; 4 counted each affiliate twice.
+  is("nothing is asked of PayPal; the batch's two people wait once", [stuck.value.paid, stuck.value.waiting, posts], [0, 2, 1]);
+  is("waiting is the people really on their way", stuck.value.waiting, (await onTheirWay(store)).size);
   is("the store stays in the daily job", (await real([["SISMEMBER", "nl:pp:stores", store.sid]]))[0], 1);
   is("and the '?' entry stays, so nobody in it is put in another batch", (await onTheirWay(store)).size, 2);
   const next = await settlePayPal(store);
   is("the next run drops it and pays the batch once, with no second money request", [next.paid, next.waiting, posts, await openFields()], [2, 0, 1, []]);
   is("then nobody is left on their way", (await onTheirWay(store)).size, 0);
+
+  part("The settling's removal of the '?' entry is applied but its answer is lost: the batch's people wait once");
+  await seed(store);
+  await withFault(isUnknownDelete, async () => {
+    throw new Error("Synthetic: the HDEL of the '?' entry failed");
+  }, () => payWithPayPal(store));
+  const lost = await withFault(isUnknownDelete, async (commands) => {
+    await real(commands);
+    throw new Error("Synthetic: the settling's HDEL was applied and its answer lost");
+  }, () => settlePayPal(store));
+  is("the settling's removal was the one whose answer was lost", lost.hit, true);
+  // Rule 23: new assertion, red at 9d80ba98 (waiting 4): the same two affiliates are not counted twice.
+  is("nothing paid, nothing asked of PayPal, the two people wait once", [lost.value.paid, lost.value.waiting, posts], [0, 2, 1]);
+  const after = await settlePayPal(store);
+  is("the next run pays the batch once", [after.paid, after.waiting, posts, await openFields()], [2, 0, 1, []]);
+
+  part("The '?' entry beside a held batch cannot be removed and PayPal gives no token: the batch's people wait once");
+  await seed(store);
+  await withFault(isUnknownDelete, async () => {
+    throw new Error("Synthetic: the HDEL of the '?' entry failed");
+  }, () => payWithPayPal(store));
+  tokenDown = true;
+  const noAuth = await withFault(isUnknownDelete, async () => {
+    throw new Error("Synthetic: the settling's HDEL of the '?' entry failed");
+  }, () => settlePayPal(store)).finally(() => { tokenDown = false; });
+  is("the settling's removal failed while PayPal gave no token", noAuth.hit, true);
+  // Rule 23: new assertion, red at 9d80ba98 (waiting 4): without a token the open batches are summed once each.
+  is("nothing paid and the two people wait once", [noAuth.value.paid, noAuth.value.waiting], [0, 2]);
+  is("and two people are really on their way", (await onTheirWay(store)).size, 2);
+  const healed = await settlePayPal(store);
+  is("the next run, with a token, pays the batch once", [healed.paid, healed.waiting, posts, await openFields()], [2, 0, 1, []]);
 
   part("The '?' entry cannot be confirmed written, and taking it away is confirmed: nothing was sent, and nothing will be");
   await seed(store);

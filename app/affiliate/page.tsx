@@ -26,6 +26,7 @@ const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
   email: { tone: "error", text: "That does not look like an email address. Type the one you joined with." },
   limited: { tone: "error", text: "Too many tries for now. Wait an hour and ask again." },
   error: { tone: "error", text: "The email could not be sent just now. Try again in a moment." },
+  unsure: { tone: "error", text: "We could not confirm the email was sent. It may still arrive; check your inbox before asking again." },
 };
 
 /** Where an affiliate stands with a store, in the words the page uses. */

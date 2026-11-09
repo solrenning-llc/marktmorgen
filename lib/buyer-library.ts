@@ -43,7 +43,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
 import { withinLimit } from "@/lib/request-guard";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
 
 export const LIBRARY_LINK_SECONDS = 24 * 60 * 60;
@@ -96,7 +96,12 @@ export async function storesBoughtFrom(email: string): Promise<string[]> {
   return [...new Set(ids(all))].slice(0, MAX_LIBRARY_STORES);
 }
 
-export type LibraryRequest = "sent" | "email" | "limited" | "error";
+/**
+ * "unsure": the sender's answer is not known (a timeout, a server error), so
+ * the email may have gone; it is never said as not sent, and the link
+ * written for it stays open (VR 2).
+ */
+export type LibraryRequest = "sent" | "unsure" | "email" | "limited" | "error";
 
 /**
  * Emails a link that opens the library. "sent" whether or not the address
@@ -124,7 +129,7 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]);
   const link = `${input.origin}/library?token=${token}`;
   // One of the access emails of the store the address bought from first in the list (lib/store-allowance-rules.ts).
-  const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },
+  const outcome = await sendEmailOutcome({ meter: { by: "store", store: charged, kind: "transactional" },
     from: NIMBUS_FROM,
     to: email,
     subject: "Your purchases on Marktmorgen",
@@ -138,7 +143,7 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
       "If you did not ask for this, you can ignore it: nobody can open your library without this email.",
     ].join("\n"),
   });
-  return sent ? "sent" : "error";
+  return outcome === "sent" ? "sent" : outcome === "uncertain" ? "unsure" : "error";
 }
 
 /** The address a live library link was sent to, or null. */

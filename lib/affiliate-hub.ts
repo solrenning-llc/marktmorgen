@@ -40,7 +40,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { personKeys, personWrite } from "@/lib/joined-stores";
 
 export const HUB_LINK_SECONDS = 24 * 60 * 60;
@@ -71,7 +71,12 @@ export async function storesPromoted(email: string): Promise<string[]> {
   return Array.isArray(ids) ? [...new Set(ids.filter((id): id is string => typeof id === "string" && STORE_ID.test(id)))].slice(0, MAX_HUB_STORES) : [];
 }
 
-export type HubRequest = "sent" | "email" | "limited" | "error";
+/**
+ * "unsure": the sender's answer is not known (a timeout, a server error), so
+ * the email may have gone; it is never said as not sent, and the link
+ * written for it stays open (VR 2).
+ */
+export type HubRequest = "sent" | "unsure" | "email" | "limited" | "error";
 
 /**
  * Emails a link that opens the page. "sent" whether or not the address is
@@ -92,7 +97,7 @@ export async function requestHubLink(input: { email: string; ip: string; origin:
   // One of the access emails of the first store in the list (lib/store-allowance-rules.ts).
   const charged = await storeForId(stores[0]).catch(() => null);
   if (!charged) return "error";
-  const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },
+  const outcome = await sendEmailOutcome({ meter: { by: "store", store: charged, kind: "transactional" },
     from: NIMBUS_FROM,
     to: email,
     subject: "Your affiliate programs on Marktmorgen",
@@ -106,7 +111,7 @@ export async function requestHubLink(input: { email: string; ip: string; origin:
       "If you did not ask for this, you can ignore it: nobody can open the page without this email.",
     ].join("\n"),
   });
-  return sent ? "sent" : "error";
+  return outcome === "sent" ? "sent" : outcome === "uncertain" ? "unsure" : "error";
 }
 
 /** The address a live link was sent to, or null. */

@@ -10,7 +10,7 @@ import {
   mintPass,
   passCookie,
   recordEnrollment,
-  sendCourseLink,
+  sendCourseLinkOutcome,
   touchStudent,
 } from "@/lib/learn";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
@@ -73,6 +73,7 @@ export async function POST(request: NextRequest) {
     const token = await mintPass(store, order.email, [course.id]);
     return away(path, passCookie(store, token, origin.startsWith("https://")));
   }
-  const sent = await sendCourseLink(store, product, order.email, linkOrigin(request, store));
-  return away(`${path}?link=${sent ? "sent" : "error"}`);
+  // An answer that is not known may have gone: said as such, never as not sent (VR 2).
+  const outcome = await sendCourseLinkOutcome(store, product, order.email, linkOrigin(request, store));
+  return away(`${path}?link=${outcome === "sent" ? "sent" : outcome === "uncertain" ? "unsure" : "error"}`);
 }

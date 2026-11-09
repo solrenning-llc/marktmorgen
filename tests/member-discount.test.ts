@@ -61,7 +61,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const off = Object.keys(OFF_SUBS).find((email) => customer === `cus_${email.split("@")[0]}01`);
     return answer({ object: "list", data: customer === "cus_member0001" ? subs : off ? [OFF_SUBS[off]] : [], has_more: false });
   }
-  if (path === "/promotion_codes") return answer({ object: "list", data: codes });
+  if (path === "/promotion_codes") return answer({ object: "list", data: codes, has_more: false });
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);
     posted.push({ path, body: String(init.body), key: headers.get("Idempotency-Key") });

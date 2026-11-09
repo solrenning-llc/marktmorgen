@@ -1108,13 +1108,18 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
 export const partlyRefundedMember = (order: string) => `part:${order}`;
 
 /**
- * Writes down that PayPal refunded part of a paid order, once (ZADD NX: the first time it was seen stays its
- * score, and looking again writes nothing new). True only when both replies read exactly, each 0 or 1 (the member
- * added or already there; the key's expiry set); anything else, or a call that failed, is not known written.
- * How much was refunded is not written: nothing in this file reads it from PayPal, so it is unknown, never zero.
+ * Writes down that PayPal refunded part of a paid order, once: the mark is read first (one ZSCORE, read exactly),
+ * and only when it is not there is it written (ZADD NX, so a race keeps the first time seen, and the key's expiry),
+ * so a later look costs one read and writes nothing (pre-review of 3b4b8ac4e1, LEVE 4). True only when the mark is
+ * read there, or both writes' replies read exactly, each 0 or 1; anything else, or a call that failed, is not known
+ * written. How much was refunded is not written: nothing in this file reads it from PayPal, so it is unknown.
  */
 async function markPartlyRefunded(statsId: string, order: string, now: number): Promise<boolean> {
   try {
+    const seen = repliesFor(await redisPipeline([["ZSCORE", refundedKey(statsId), partlyRefundedMember(order)]]), 1);
+    if (!seen) return false;
+    if (typeof seen[0] === "string" && REDIS_SCORE.test(seen[0])) return true;
+    if (seen[0] !== null) return false;
     const marked = repliesFor(
       await redisPipeline([
         ["ZADD", refundedKey(statsId), "NX", String(now), partlyRefundedMember(order)],

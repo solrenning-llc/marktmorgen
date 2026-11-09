@@ -769,7 +769,9 @@ function Compose(props: {
   const [channels, setChannels] = useState<string[] | null>(null);
   // How many buyers are of each kind, from the ledger the choices below read (270 [GR1], unit 3c); null until read.
   const [kinds, setKinds] = useState<Partial<Record<RfmGroup, number>> | null>(null);
-  const [partial, setPartial] = useState(false);
+  // Why the counts may be off (lib/segments.ts, Ledger): more to read than one reading takes, or a PayPal sale refunded in part.
+  const [readMore, setReadMore] = useState(false);
+  const [partlyRefunded, setPartlyRefunded] = useState(false);
   const [segments, setSegments] = useState<Segment[]>(props.segments);
   const [groupName, setGroupName] = useState("");
   const parsedSpent = readSegmentSpend(spentText, props.currency as Currency);
@@ -821,7 +823,10 @@ function Compose(props: {
           const read = a.kinds as Record<string, unknown>;
           setKinds(Object.fromEntries(RFM_GROUPS.flatMap((g) => (Number.isSafeInteger(read[g.id]) && (read[g.id] as number) >= 0 ? [[g.id, read[g.id] as number]] : []))));
         }
-        if (typeof a.partial === "boolean") setPartial(a.partial);
+        if (typeof a.partial === "boolean") {
+          setReadMore(typeof a.more === "boolean" ? a.more : a.partial);
+          setPartlyRefunded(a.partlyRefunded === true);
+        }
         const shown = countError.current;
         countError.current = null;
         if (shown !== null) setError((current) => (current === shown ? null : current));
@@ -1214,7 +1219,8 @@ function Compose(props: {
               is taken off. A sale in another currency counts as a purchase for where
               they came from and when they last bought, but its amount is not added to what they spent, which counts only your
               store&apos;s currency.
-              {partial ? " There is more to read than one reading takes, so the oldest sales, refunds or disputes may be left out and these counts may be a little off." : ""}
+              {readMore ? " There is more to read than one reading takes, so the oldest sales, refunds or disputes may be left out and these counts may be a little off." : ""}
+              {partlyRefunded ? " Some PayPal sales were refunded in part, and the amount refunded can't be seen here, so what those buyers spent counts the whole sale." : ""}
             </p>
           </div>
         </details>

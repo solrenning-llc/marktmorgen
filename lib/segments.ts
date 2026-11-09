@@ -51,11 +51,17 @@ const segmentsKey = (listId: string) => `nl:mail:segs:${listId}`;
  * checkout once, an offer taken after paying not counted again (270 [GR1]).
  */
 export type LedgerEntry = { cents: number; last: number; channel: string; orders: number };
-export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean };
+/**
+ * `partial`: the counts may be off, for either reason below. `more`: a list was cut short or unread, or an invoice's
+ * payment was not found. `partlyRefunded`: a PayPal sale was refunded in part, whose amount can't be seen, so its
+ * buyer's spending counts the whole sale (audit R13, MEDIUM 2; pre-review of 3b4b8ac4e1, LEVE 3). Said apart so the
+ * email studio gives the true reason.
+ */
+export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean; more?: boolean; partlyRefunded?: boolean };
 
 type Row = [string, number, number, string, number];
-/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes; 5: invoices' payments; 6: each renewal counted as a time they bought). */
-const LEDGER_SHAPE = 6;
+/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes; 5: invoices' payments; 6: each renewal counted as a time they bought; 7: why it is partial, `m` and `q`). */
+const LEDGER_SHAPE = 7;
 /** Pages of a hundred refunds read for the ledger; `partial` when there were more. */
 const TAKEN_BACK_PAGES = 10;
 /** How long the renewals are read for one ledger before the reading stops, partial: inside the email route's minute. */
@@ -166,9 +172,9 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
     const [cached] = bytes > 0 ? await redisPipeline([["GETRANGE", ledgerKey(store.statsId), 0, taken.covers - 1]]) : [null];
     if (typeof cached === "string" && cached) {
       try {
-        const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; v?: number };
+        const kept = JSON.parse(cached) as { c?: string; p?: boolean; m?: boolean; q?: boolean; r?: Row[]; v?: number };
         if (kept.c === store.currency && kept.v === LEDGER_SHAPE && Array.isArray(kept.r)) {
-          return { buyers: new Map(kept.r.map(([e, cents, last, channel, orders]) => [e, { cents, last, channel, orders }])), partial: kept.p === true };
+          return { buyers: new Map(kept.r.map(([e, cents, last, channel, orders]) => [e, { cents, last, channel, orders }])), partial: kept.p === true, more: kept.m === true, partlyRefunded: kept.q === true };
         }
       } catch {
         // Read again below.
@@ -200,12 +206,13 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
     stripe ? readStoreRefunds(store, 0, TAKEN_BACK_PAGES) : Promise.resolve(none),
     stripe ? readStoreDisputes(store, 0) : Promise.resolve(none),
     // PayPal's refunds, as the numbers read them (lib/stats.ts): unread is partial, never none.
-    store.paypalSeller ? readPayPalRefundsWithCoverage(store.statsId, 0).catch(() => null) : Promise.resolve(none),
+    store.paypalSeller ? readPayPalRefundsWithCoverage(store.statsId, 0).catch(() => null) : Promise.resolve({ ...none, partly: false, uncovered: false }),
     // Each invoice's payment (270 [GR1], unit 3a): a membership's payment, or its first through checkout, is refunded by that payment.
     stripe ? readInvoicePayments(store, 0, ALL_TIME_PAGES, until).catch(() => null) : Promise.resolve({ byInvoice: new Map<string, string[]>(), partial: false }),
   ]);
   const { sales } = paid;
-  const readPartial = paid.partial || renewals.partial || refunds.partial || disputes.partial || !paypalBack || paypalBack.partial;
+  // PayPal's refunds not all reached (uncovered) is "more to read"; one refunded in part is said apart (partlyRefunded).
+  const readPartial = paid.partial || renewals.partial || refunds.partial || disputes.partial || !paypalBack || paypalBack.uncovered;
   // An invoice whose payment had to be looked up and was not found (the list unread, cut short, or a charge with no payment
   // intent) leaves its refunds unmatched: the reading is then partial, never "none refunded".
   let missed = false;
@@ -257,8 +264,10 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
     buyers.set(email, row);
   }
   // Partial when any list was cut short or unread, or when an invoice's payment was needed and not found.
-  const partial = readPartial || missed;
-  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial };
+  const more = readPartial || missed;
+  const partlyRefunded = paypalBack?.partly === true;
+  const partial = more || partlyRefunded;
+  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial, more, partlyRefunded };
   // Buyers brought over from another platform (lib/imported-purchases.ts): history, never a sale.
   // Nothing spent here and no purchase date here; they first came "imported".
   for (const email of (await importedBuyers(store.statsId).catch(() => new Map<string, number>())).keys()) {
@@ -266,7 +275,7 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   }
   if (store.statsId && isRedisConfigured()) {
     const rows: Row[] = [...out.buyers].map(([e, r]) => [e, r.cents, r.last, r.channel, r.orders]);
-    await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, r: rows, v: LEDGER_SHAPE }), "EX", LEDGER_SECONDS]]).catch(() => {});
+    await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, m: more, q: partlyRefunded, r: rows, v: LEDGER_SHAPE }), "EX", LEDGER_SECONDS]]).catch(() => {});
   }
   return out;
 }

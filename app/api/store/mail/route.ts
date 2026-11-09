@@ -184,6 +184,9 @@ export async function POST(request: NextRequest) {
         // How many of the store's buyers are of each kind (270 [GR1], unit 3c), from the same ledger: no extra read.
         kinds: Object.fromEntries(rfmSummary(ledger.buyers.values(), now).map((k) => [k.id, k.buyers])),
         partial: ledger.partial,
+        // Why, so the studio says the true reason (lib/segments.ts, Ledger).
+        more: ledger.more ?? ledger.partial,
+        partlyRefunded: ledger.partlyRefunded === true,
       });
     }
 

@@ -20,6 +20,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { modelKeySet, postToModel } from "@/lib/ai";
@@ -134,14 +135,20 @@ export function assistantShown(store: Store, now = Date.now()): boolean {
   );
 }
 
-/** What the month's pool has left, in replies at their worst cost, and what was used. */
+/** What the month's pool has left, in replies at their worst cost, and what was used. Throws UnknownReplyError on an off-shape read. */
 export async function assistantLeft(store: Store, now = Date.now()): Promise<{ left: number; answered: number; capMicroUsd: number; spentMicroUsd: number; heldMicroUsd: number } | null> {
   const window = assistantWindow(store.assistantPlan, now / 1000);
   if (!window || !store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGETALL", poolKey(store.statsId, window.id)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
+  // Read exactly (rules 24 and 30): a pool lost or in another shape throws UnknownReplyError, never a month untouched.
+  const replies = repliesFor(await redisPipeline([["HGETALL", poolKey(store.statsId, window.id)]]), 1);
+  const flat = replies && stringList(replies[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the assistant's month");
   const fields = new Map<string, number>();
-  for (let i = 0; i + 1 < flat.length; i += 2) fields.set(flat[i], Number(flat[i + 1]) || 0);
+  for (let i = 0; i < flat.length; i += 2) {
+    const value = Number(flat[i + 1]);
+    if (flat[i + 1].trim() === "" || !Number.isFinite(value)) throw new UnknownReplyError("the assistant's month");
+    fields.set(flat[i], value);
+  }
   const cap = Math.min(fields.get("cap") ?? assistantPoolMicroUsd(), assistantPoolMicroUsd());
   const held = fields.get("held") ?? 0, spent = fields.get("spent") ?? 0;
   return { left: Math.max(0, Math.floor((cap - held - spent) / assistantMessageWorstMicroUsd())), answered: fields.get("n") ?? 0, capMicroUsd: cap, spentMicroUsd: spent, heldMicroUsd: held };
@@ -438,14 +445,19 @@ export async function handToCreator(input: { store: Store; token?: unknown; emai
   return { ok: true, thread: null };
 }
 
-/** The newest questions the assistant could not answer, for the studio; never who asked. */
+/**
+ * The newest questions the assistant could not answer, for the studio; never who asked. A reply lost or in another
+ * shape throws UnknownReplyError (rule 24): the studio says the list could not be read, never that there is none.
+ */
 export async function assistantMissed(store: Store, limit = 20): Promise<{ question: string; at: number }[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [rows] = await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]);
+  const replies = repliesFor(await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]), 1);
+  const rows = replies && stringList(replies[0]);
+  if (!rows) throw new UnknownReplyError("the assistant's unanswered questions");
   const out: { question: string; at: number }[] = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
+  for (const row of rows) {
     try {
-      const value = JSON.parse(String(row)) as { q?: unknown; at?: unknown };
+      const value = JSON.parse(row) as { q?: unknown; at?: unknown };
       const question = readAssistantText(value.q);
       if (question) out.push({ question, at: typeof value.at === "number" ? value.at : 0 });
     } catch {}

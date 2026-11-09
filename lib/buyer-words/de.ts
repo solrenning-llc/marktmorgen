@@ -300,6 +300,7 @@ export const de: BuyerWords = {
   missingTitle: "Diese Seite gibt es hier nicht",
   missingBody: (store) => `Sie wurde vielleicht verschoben oder entfernt. Alles, was ${store} anbietet, finden Sie auf der Startseite des Shops.`,
   noReviewsToShow: "Es gibt keine Bewertungen zum Anzeigen.",
+  reviewsUnread: "Die Bewertungen konnten gerade nicht geladen werden. Versuchen Sie es gleich noch einmal.",
   pagesOfReviews: "Seiten mit Bewertungen",
   newer: "Neuere",
   older: "Ältere",

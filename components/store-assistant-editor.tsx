@@ -71,7 +71,8 @@ export function StoreAssistantEditor({
   canBill: boolean;
   refusal: string | null;
   usage: { left: number; answered: number } | null;
-  missed: { question: string; at: number }[];
+  /** Null when the list could not be read: said, never drawn as none (rule 24). */
+  missed: { question: string; at: number }[] | null;
   notice: string;
   pin: string;
 }) {
@@ -297,7 +298,12 @@ export function StoreAssistantEditor({
         </div>
       </div>
 
-      {missed.length > 0 ? (
+      {missed === null ? (
+        <div className="mt-7 border-t border-line pt-6">
+          <p className="font-semibold text-ink">Questions the assistant could not answer</p>
+          <p className="mt-1 text-sm text-ink-soft" role="status">This list could not be read just now. Try again in a moment.</p>
+        </div>
+      ) : missed.length > 0 ? (
         <div className="mt-7 border-t border-line pt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="font-semibold text-ink">Questions the assistant could not answer</p>

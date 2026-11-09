@@ -51,11 +51,11 @@ async function main(): Promise<void> {
   const all = await searchEverything(CM, "pricing");
   is(
     "one of each, counted",
-    { post: all.post.total, lesson: all.lesson.total, event: all.event.total, member: all.member.total },
+    { post: all.post?.total, lesson: all.lesson?.total, event: all.event?.total, member: all.member?.total },
     { post: 1, lesson: 1, event: 1, member: 1 },
   );
   const none = await searchEverything(CM, "quinoa");
-  is("a word nobody wrote finds nothing anywhere", [none.post.total, none.lesson.total, none.event.total, none.member.total], [0, 0, 0, 0]);
+  is("a word nobody wrote finds nothing anywhere", [none.post?.total, none.lesson?.total, none.event?.total, none.member?.total], [0, 0, 0, 0]);
 
   part("The count is the whole match, not the page");
   redis.clear();

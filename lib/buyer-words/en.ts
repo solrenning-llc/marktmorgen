@@ -334,6 +334,7 @@ export const en = {
   missingTitle: "This page isn't here",
   missingBody: (store: string) => `It may have been moved or taken down. Everything ${store} offers is on the store's front page.`,
   noReviewsToShow: "There are no reviews to show.",
+  reviewsUnread: "The reviews could not be loaded just now. Try again in a moment.",
   pagesOfReviews: "Pages of reviews",
   newer: "Newer",
   older: "Older",

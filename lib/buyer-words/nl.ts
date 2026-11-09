@@ -297,6 +297,7 @@ export const nl: BuyerWords = {
   missingTitle: "Deze pagina is er niet",
   missingBody: (store) => `Misschien is ze verplaatst of weggehaald. Alles wat ${store} aanbiedt, staat op de voorpagina van de winkel.`,
   noReviewsToShow: "Er zijn geen beoordelingen om te tonen.",
+  reviewsUnread: "De beoordelingen konden nu niet worden geladen. Probeer het zo opnieuw.",
   pagesOfReviews: "Pagina's met beoordelingen",
   newer: "Nieuwer",
   older: "Ouder",

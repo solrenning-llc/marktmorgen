@@ -112,7 +112,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
   }
   // The newest reviews, to pick up to three to show first, with the ones already picked even when older.
   const picked = page?.blocks.find((block) => block.kind === "reviews")?.first ?? [];
-  const reviews = selected && summary && summary.visible > 0 ? await visibleReviews(store.statsId, selected.id, 0, PICKABLE_REVIEWS, picked).catch(() => []) : [];
+  const reviews = selected && summary && summary.visible > 0 ? await visibleReviews(store.statsId, selected.id, 0, PICKABLE_REVIEWS, picked).catch((): null => null) : [];
   const action = selected ? pageAction(store, selected, null, canSell(store), related) : null;
   const leadsTo = !selected || !action
     ? ""

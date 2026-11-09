@@ -313,8 +313,8 @@ export function PageEditor({
   /** For something free: the paid products that can be shown after a sign-up. */
   nextOptions: { id: string; title: string }[];
   summary: Summary | null;
-  /** The newest reviews on the page, so the preview shows real ones. */
-  reviews?: Review[];
+  /** The newest reviews on the page, so the preview shows real ones; null when they could not be read (rule 24). */
+  reviews?: Review[] | null;
   /** The store's language, so the preview speaks it as the page does. */
   lang?: LanguageCode;
   /** The numbers the store has counted for this product (lib/page-facts.ts). */
@@ -1169,8 +1169,8 @@ export function PageEditor({
   // The preview shows the reviews as the page will: the picked ones first, then the newest, three in all.
   const pickedNow = drafts.find((d) => d.block.kind === "reviews")?.block;
   const pickedIds = pickedNow?.kind === "reviews" ? pickedNow.first : [];
-  const previewFirst = pickedIds.map((id) => reviews.find((r) => r.id === id && !r.refunded)).filter((r): r is Review => r !== undefined);
-  const previewReviews = [...previewFirst, ...reviews.filter((r) => !previewFirst.includes(r))].slice(0, Math.max(3, previewFirst.length));
+  const previewFirst = reviews === null ? [] : pickedIds.map((id) => reviews.find((r) => r.id === id && !r.refunded)).filter((r): r is Review => r !== undefined);
+  const previewReviews = reviews === null ? null : [...previewFirst, ...reviews.filter((r) => !previewFirst.includes(r))].slice(0, Math.max(3, previewFirst.length));
   const reviewsPart = (heading: string) =>
     summary ? (
       <ReviewsSection heading={heading} summary={summary} reviews={previewReviews} storeName={storeName} productTitle={product.title} moreHref={null} preview picked={pickedIds} />
@@ -1981,7 +1981,7 @@ export function PageEditor({
       }
       case "reviews": {
         // Picked ones that are still shown; one hidden since no longer takes a place.
-        const offered = reviews.filter((r) => !r.refunded);
+        const offered = (reviews ?? []).filter((r) => !r.refunded);
         const chosen = block.first.filter((id) => offered.some((r) => r.id === id));
         return (
           <div className="space-y-4">
@@ -1989,7 +1989,9 @@ export function PageEditor({
             <p className="text-xs text-ink-soft">
               Only buyers can write reviews, and they appear here as they come. Without this block they still appear, at the end of the page.
             </p>
-            {offered.length > 0 ? (
+            {reviews === null ? (
+              <p className="text-xs text-ink-soft" role="status">The reviews could not be read just now, so none can be picked. Try again in a moment.</p>
+            ) : offered.length > 0 ? (
               <fieldset>
                 <legend className="field-label">{`Show first (${chosen.length} of ${MAX_PICKED_REVIEWS})`}</legend>
                 <p className="text-xs text-ink-soft">

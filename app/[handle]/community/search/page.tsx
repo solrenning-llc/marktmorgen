@@ -127,7 +127,9 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   // back with its own first page, so the tab being read needs nothing more —
   // unless it is being paged, which is one search for that one kind.
   const pages = wanted.length ? await searchEverything(id, asked) : null;
-  const used = pages?.post.used ?? [];
+  // The words each kind searched for: queryWords(asked), the same for all four, so a kind that could not be searched
+  // (null) does not take them away from the others.
+  const used = pages ? wanted : [];
   // Read, not indexed, so there is nothing that can fall out of step: the room
   // as it is now, and this person's own recent conversations and no one else's.
   // One that could not be read is unknown (null), never "no match" (CX-123
@@ -140,7 +142,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
       ])
     : [[], []];
   const count = (t: Tab): number | null =>
-    t === "room" ? (roomHits?.length ?? null) : t === "dm" ? (dmHits?.length ?? null) : (pages?.[t].total ?? 0);
+    t === "room" ? (roomHits?.length ?? null) : t === "dm" ? (dmHits?.length ?? null) : pages ? (pages[t] === null ? null : (pages[t]?.total ?? null)) : 0;
   // Nobody pressed a tab yet, so open the first one holding anything. Landing
   // on an empty Posts tab with four lessons sitting one press away reads as
   // "nothing found", and the member has to notice a small number to learn
@@ -148,7 +150,9 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const tab: Tab = chosen ?? (pages ? (TABS.find((t) => (count(t.kind) ?? 0) > 0)?.kind ?? "post") : "post");
   const empty = { posts: [], next: null, used: [], total: 0 };
   const first = indexed(tab) ? (pages?.[tab] ?? empty) : empty;
-  const page = indexed(tab) && before !== null && pages ? await search(id, asked, before, tab) : first;
+  // A kind, or a later page of it, that could not be searched is unknown (rule 24): said, never "No match".
+  const later = indexed(tab) && before !== null && pages?.[tab] ? await search(id, asked, before, tab).catch((): null => null) : first;
+  const page = later ?? empty;
 
   const spaces = await visibleSpaces(store, config, { owner, email });
   const mineIds = new Set(spaces.map((s) => s.id));
@@ -172,7 +176,12 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const talk = tab === "room" ? (roomHits ?? []).slice(0, SHOWN_TALK) : [];
   const mine = tab === "dm" ? (dmHits ?? []).slice(0, SHOWN_TALK) : [];
   // The tab being read could not be searched: said, never "No match".
-  const unsearched: "room" | "dm" | null = tab === "room" && roomHits === null ? "room" : tab === "dm" && dmHits === null ? "dm" : null;
+  const unsearched: "room" | "dm" | "index" | null =
+    tab === "room" && roomHits === null ? "room"
+    : tab === "dm" && dmHits === null ? "dm"
+    : indexed(tab) && pages?.[tab] === null ? "index"
+    : later === null ? "index"
+    : null;
   // Names for whoever wrote what is listed, never their addresses.
   const talkers = [...talk.map((m) => m.a), ...mine.map((h) => h.other)].filter((a) => a !== CREATOR);
   const [members, numbers, polls] = await Promise.all([

@@ -44,7 +44,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
@@ -212,7 +212,7 @@ export async function summaryOf(statsId: string | null, productId: string): Prom
   return parseSummary(raw);
 }
 
-/** The reviews on a product's page, newest first. */
+/** The reviews on a product's page, newest first. Throws UnknownReplyError when a reply is not in its exact shape. */
 export async function visibleReviews(
   statsId: string | null,
   productId: string,
@@ -226,15 +226,22 @@ export async function visibleReviews(
   first: string[] = [],
 ): Promise<Review[]> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([
-    ["ZREVRANGEBYSCORE", visibleKey(statsId, productId), "+inf", "-inf", "LIMIT", offset, limit],
-  ]);
-  const list = Array.isArray(ids) ? (ids as string[]).filter((id) => REVIEW_ID_PATTERN.test(id)) : [];
+  // Read exactly (rule 24): a reply lost or in another shape throws UnknownReplyError, so a page says its reviews could
+  // not be read rather than showing none. A record that answered exactly nil is gone since, and is left out.
+  const listed = repliesFor(
+    await redisPipeline([["ZREVRANGEBYSCORE", visibleKey(statsId, productId), "+inf", "-inf", "LIMIT", offset, limit]]),
+    1,
+  );
+  const ids = listed && stringList(listed[0]);
+  if (!ids) throw new UnknownReplyError("a product's reviews");
+  const list = ids.filter((id) => REVIEW_ID_PATTERN.test(id));
   const picked = offset === 0 ? first.filter((id) => REVIEW_ID_PATTERN.test(id)).slice(0, 3) : [];
   const wanted = [...new Set([...picked, ...list])];
   if (wanted.length === 0) return [];
-  const [rows] = await redisPipeline([["HMGET", productKey(statsId, productId), ...wanted]]);
-  const read = (Array.isArray(rows) ? rows : []).map(parseReview);
+  const answered = repliesFor(await redisPipeline([["HMGET", productKey(statsId, productId), ...wanted]]), 1);
+  const rows = answered && repliesFor(answered[0], wanted.length);
+  if (!rows || rows.some((row) => row !== null && typeof row !== "string")) throw new UnknownReplyError("a product's review records");
+  const read = rows.map(parseReview);
   const byId = new Map<string, Review>();
   wanted.forEach((id, i) => {
     const review = read[i];

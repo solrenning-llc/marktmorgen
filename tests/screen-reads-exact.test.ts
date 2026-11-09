@@ -137,7 +137,7 @@ async function main(): Promise<void> {
   is("the editor takes an unknown list", editor.includes("missed: { question: string; at: number }[] | null;"), true);
   is(
     "the editor says it in a live region",
-    editor.includes('role="status">The questions the assistant could not answer could not be read just now. Try again in a moment.</p>'),
+    editor.includes('role="status">This list could not be read just now. Try again in a moment.</p>'),
     true,
   );
 

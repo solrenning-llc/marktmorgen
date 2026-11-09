@@ -356,47 +356,66 @@ export async function search(
   const max = before === null ? "+inf" : `(${before}`;
   // One word needs no working set: its own list is already the answer.
   if (used.length === 1) {
-    const [rows, held] = await redisPipeline([
-      ["ZREVRANGEBYSCORE", wordKey(id, kind, used[0]), max, "-inf", "WITHSCORES", "LIMIT", 0, SEARCH_PAGE],
-      ["ZCARD", wordKey(id, kind, used[0])],
-    ]);
-    return { ...readPage(rows), used, total: Number(held) || 0 };
+    const replies = repliesFor(
+      await redisPipeline([
+        ["ZREVRANGEBYSCORE", wordKey(id, kind, used[0]), max, "-inf", "WITHSCORES", "LIMIT", 0, SEARCH_PAGE],
+        ["ZCARD", wordKey(id, kind, used[0])],
+      ]),
+      2,
+    );
+    const total = replies ? countOf(replies[1]) : null;
+    if (!replies || total === null) throw new UnknownReplyError("a community search");
+    return { ...readPage(replies[0]), used, total };
   }
   // Several words: every one of them has to be there. The working set is this
   // one search's alone and lets go of itself within the minute.
   // Web Crypto, so the course and community files the studio's editors share with the server bundle for the browser.
   const work = `${base(id)}:q:${Array.from(globalThis.crypto.getRandomValues(new Uint8Array(9)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
   try {
-    const [count] = await redisPipeline([
-      ["ZINTERSTORE", work, used.length, ...used.map((word) => wordKey(id, kind, word)), "AGGREGATE", "MAX"],
-      ["EXPIRE", work, WORK_SECONDS],
-    ]);
-    if (!Number(count)) return { ...EMPTY, used };
-    const [rows] = await redisPipeline([
-      ["ZREVRANGEBYSCORE", work, max, "-inf", "WITHSCORES", "LIMIT", 0, SEARCH_PAGE],
-    ]);
+    const made = repliesFor(
+      await redisPipeline([
+        ["ZINTERSTORE", work, used.length, ...used.map((word) => wordKey(id, kind, word)), "AGGREGATE", "MAX"],
+        ["EXPIRE", work, WORK_SECONDS],
+      ]),
+      2,
+    );
+    const count = made ? countOf(made[0]) : null;
+    if (count === null) throw new UnknownReplyError("a community search");
+    if (count === 0) return { ...EMPTY, used };
+    const rows = repliesFor(
+      await redisPipeline([["ZREVRANGEBYSCORE", work, max, "-inf", "WITHSCORES", "LIMIT", 0, SEARCH_PAGE]]),
+      1,
+    );
+    if (!rows) throw new UnknownReplyError("a community search");
     // ZINTERSTORE answers with how many are in the set it just made, which is
     // the whole match count, so nothing extra is asked for it.
-    return { ...readPage(rows), used, total: Number(count) || 0 };
+    return { ...readPage(rows[0]), used, total: count };
   } finally {
     await redisPipeline([["DEL", work]]).catch(() => {});
   }
 }
 
-/** A Redis reply of member, score, member, score… as ids and the next cursor. */
+/**
+ * A Redis reply of member, score, member, score… as ids and the next cursor, read exactly (rule 24): a reply that is
+ * not a list of strings in pairs, or a score that is not a number, throws UnknownReplyError, so the search page says it
+ * could not search rather than "No match".
+ */
 function readPage(rows: unknown): { posts: string[]; next: number | null } {
-  const flat = Array.isArray(rows) ? rows.map(String) : [];
+  const flat = stringList(rows);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a community search page");
   const posts: string[] = [];
   let last = 0;
-  for (let i = 0; i + 1 < flat.length; i += 2) {
+  for (let i = 0; i < flat.length; i += 2) {
+    const score = Number(flat[i + 1]);
+    if (flat[i + 1].trim() === "" || !Number.isFinite(score)) throw new UnknownReplyError("a community search page");
     posts.push(flat[i]);
-    last = Number(flat[i + 1]) || last;
+    last = score || last;
   }
   return { posts, next: posts.length === SEARCH_PAGE && last > 0 ? last : null };
 }
 
 /**
- * Every kind at once, each in its own list.
+ * Every kind at once, each in its own list. A kind that could not be searched is null: unknown, never "no match".
  *
  * Four searches, run together rather than one after another: they share
  * nothing, and a member waiting four round trips to be told which tab to press
@@ -406,11 +425,11 @@ export async function searchEverything(
   id: string,
   raw: string,
   kinds: readonly SearchKind[] = ["post", "lesson", "event", "member"],
-): Promise<Record<SearchKind, SearchPage>> {
+): Promise<Record<SearchKind, SearchPage | null>> {
   const done = await Promise.all(
-    kinds.map((kind) => search(id, raw, null, kind).catch(() => ({ ...EMPTY }))),
+    kinds.map((kind) => search(id, raw, null, kind).catch((): null => null)),
   );
-  const out: Record<SearchKind, SearchPage> = {
+  const out: Record<SearchKind, SearchPage | null> = {
     post: { ...EMPTY },
     lesson: { ...EMPTY },
     event: { ...EMPTY },

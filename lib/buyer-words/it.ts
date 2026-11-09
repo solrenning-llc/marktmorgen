@@ -298,6 +298,7 @@ export const it: BuyerWords = {
   missingTitle: "Questa pagina non è qui",
   missingBody: (store) => `Potrebbe essere stata spostata o rimossa. Tutto ciò che offre ${store} è nella pagina principale del negozio.`,
   noReviewsToShow: "Non ci sono recensioni da mostrare.",
+  reviewsUnread: "Non è stato possibile caricare le recensioni in questo momento. Riprova tra poco.",
   pagesOfReviews: "Pagine di recensioni",
   newer: "Più recenti",
   older: "Meno recenti",

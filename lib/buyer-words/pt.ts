@@ -299,6 +299,7 @@ export const pt: BuyerWords = {
   missingTitle: "Esta página não está aqui",
   missingBody: (store) => `Pode ter sido movida ou retirada. Tudo o que ${store} oferece está na página inicial da loja.`,
   noReviewsToShow: "Não há avaliações para mostrar.",
+  reviewsUnread: "Não foi possível carregar as avaliações agora. Tente de novo em instantes.",
   pagesOfReviews: "Páginas de avaliações",
   newer: "Mais recentes",
   older: "Mais antigas",

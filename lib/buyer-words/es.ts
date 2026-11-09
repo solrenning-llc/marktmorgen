@@ -303,6 +303,7 @@ export const es: BuyerWords = {
   missingTitle: "Esta página no está aquí",
   missingBody: (store) => `Puede que se haya movido o retirado. Todo lo que ofrece ${store} está en la portada de la tienda.`,
   noReviewsToShow: "No hay reseñas que mostrar.",
+  reviewsUnread: "No se pudieron cargar las reseñas ahora mismo. Inténtalo de nuevo en un momento.",
   pagesOfReviews: "Páginas de reseñas",
   newer: "Más recientes",
   older: "Más antiguas",

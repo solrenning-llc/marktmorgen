@@ -55,7 +55,8 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
   const summary = await summaryOf(store.statsId, product.id);
   const pages = Math.max(1, Math.ceil(summary.visible / REVIEWS_PER_PAGE));
   const page = Number.isInteger(asked) && asked >= 1 ? Math.min(asked, pages) : 1;
-  const reviews = await visibleReviews(store.statsId, product.id, (page - 1) * REVIEWS_PER_PAGE, REVIEWS_PER_PAGE);
+  // One that could not be read is said, never drawn as none (rule 24).
+  const reviews = await visibleReviews(store.statsId, product.id, (page - 1) * REVIEWS_PER_PAGE, REVIEWS_PER_PAGE).catch((): null => null);
   const base = `/@${store.handle}/p/${productSegment(product)}/reviews`;
   const { w } = speech(store);
 

@@ -363,7 +363,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
     ) : null;
   // The reviews the creator picked to show first, on a page built from blocks (lib/sales-page.ts, ReviewsBlock).
   const pickedFirst = page.blocks.find((block) => block.kind === "reviews")?.first ?? [];
-  const reviews = summary && summary.visible > 0 ? await visibleReviews(store.statsId, product.id, 0, REVIEWS_ON_PAGE, pickedFirst).catch(() => []) : [];
+  const reviews = summary && summary.visible > 0 ? await visibleReviews(store.statsId, product.id, 0, REVIEWS_ON_PAGE, pickedFirst).catch((): null => null) : [];
   const count = noKeys ? 0 : stock;
   const blocks = aboutBlocks(about);
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
@@ -389,7 +389,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         reviews={reviews}
         storeName={store.name}
         productTitle={product.title}
-        moreHref={summary.visible > reviews.length ? reviewsHref : null}
+        moreHref={summary.visible > (reviews?.length ?? 0) ? reviewsHref : null}
         lang={store.language}
         picked={pickedFirst}
       />

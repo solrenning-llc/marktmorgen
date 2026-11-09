@@ -2076,7 +2076,7 @@ export default async function StudioPage({
                     ? early((async () => {
                         // The add-on's month as Stripe has it, read again when the snapshot has run out (lib/assistant-billing.ts).
                         const own = store.assistantPlan && !assistantWindow(store.assistantPlan) && isBillingConfigured() ? await serverWrite.done.then(() => syncAssistant(store)).catch(() => store) : store;
-                        const missed = assistantMissed(own).catch(() => []);
+                        const missed = assistantMissed(own).catch(() => null);
                         return (
                           <StoreAssistantEditor
                             setting={own.assistant}

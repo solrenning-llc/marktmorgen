@@ -140,7 +140,8 @@ export function ReviewsSection({
 }: {
   heading: string;
   summary: Summary;
-  reviews: Review[];
+  /** Null when they could not be read: said, never drawn as none (rule 24). */
+  reviews: Review[] | null;
   storeName: string;
   productTitle: string;
   /** Where the rest are, when there are more than these. */
@@ -198,7 +199,9 @@ export function ReviewsSection({
             .join(" · ")}
         </p>
       ) : null}
-      {reviews.length > 0 ? (
+      {reviews === null ? (
+        <p className="st-note mt-6 text-sm" role="status">{w.reviewsUnread}</p>
+      ) : reviews.length > 0 ? (
         <ul className="mt-6 space-y-3">
           {reviews.map((review) => (
             <ReviewItem key={review.id} review={review} storeName={storeName} lang={lang} picked={picked.includes(review.id)} />

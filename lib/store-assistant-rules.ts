@@ -551,7 +551,7 @@ const PIECE_VALUES: Record<string, number> = {
   eins: 1, zwei: 2, zwo: 2, drei: 3, vier: 4, funf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9, zehn: 10, elf: 11, zwolf: 12, sechzehn: 16,
   siebzehn: 17, zwanzig: 20, dreissig: 30, "drei\u00dfig": 30, vierzig: 40, funfzig: 50, sechzig: 60, siebzig: 70, achtzig: 80, neunzig: 90,
   // Italian
-  due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, undici: 11, dodici: 12, tredici: 13, quattordici: 14,
+  due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, undici: 11, dodici: 12, tredici: 13, quattordici: 14,
   quindici: 15, sedici: 16, diciassette: 17, diciotto: 18, diciannove: 19, venti: 20, vent: 20, trenta: 30, trent: 30, quaranta: 40, quarant: 40,
   cinquanta: 50, cinquant: 50, sessanta: 60, sessant: 60, settanta: 70, settant: 70, ottanta: 80, ottant: 80, novanta: 90, novant: 90,
   // Dutch

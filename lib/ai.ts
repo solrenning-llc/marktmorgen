@@ -269,6 +269,26 @@ export function modelKeySet(): boolean {
  * error status, which it does not bill; a timeout or a lost connection may
  * have been billed, and says so.
  */
+/** The first few hundred characters of an error answer, for the log; the rest of its body is never read (cancelled). */
+async function errorStart(response: Response, max = 300): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    while (text.length < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    // An error body that cannot be read says nothing more.
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  return text.slice(0, max);
+}
+
 export async function postToModel(body: string, timeoutMs: number): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; billed: boolean }> {
   const key = apiKey();
   if (!key) return { ok: false, billed: false };
@@ -288,7 +308,7 @@ export async function postToModel(body: string, timeoutMs: number): Promise<{ ok
     return { ok: false, billed: true };
   }
   if (!response.ok) {
-    console.error("the model refused", response.status, (await response.text().catch(() => "")).slice(0, 300));
+    console.error("the model refused", response.status, await errorStart(response));
     return { ok: false, billed: false };
   }
   try {

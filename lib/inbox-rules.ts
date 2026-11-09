@@ -160,11 +160,15 @@ export function inboxOrder(list: Conversation[]): Conversation[] {
   return [...list].sort((a, b) => (a.status === b.status ? b.lastAt - a.lastAt : a.status === "open" ? -1 : 1));
 }
 
-/** A text as it may go to the writing help: addresses, phone numbers and links taken out. Pure. */
+/** Common top-level domains: a bare name ending in one, written in small letters ("mysite.com/deal"), is a link; "great.It" starts a sentence. */
+const BARE_SITE = /(?<![\p{L}\p{N}@.\-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|co|app|dev|shop|store|xyz|info|biz|me|ly|link|site|online|top|club|live|page|tech|us|uk|de|fr|es|it|nl|pt|br|eu|ca|au|ch|in|academy|courses|school|email|blog|website|space|digital)(?![\p{L}\p{N}])(?:\/\S*)?/gu;
+
+/** A text as it may go to the writing help: addresses (an at sign of any width), phone numbers and links (a bare domain too) taken out. Pure. */
 export function forAi(value: string, max = MAX_MESSAGE): string {
   return value
-    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "[email]")
+    .replace(/[^\s@\uFF20\uFE6B]+[@\uFF20\uFE6B][^\s@\uFF20\uFE6B]+[.\uFF0E\u3002][^\s@\uFF20\uFE6B]+/g, "[email]")
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
+    .replace(BARE_SITE, "[link]")
     .replace(/\+?\d[\d\s().-]{7,}\d/g, "[number]")
     .slice(0, max);
 }

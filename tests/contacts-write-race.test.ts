@@ -20,6 +20,7 @@ import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppress
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimHandle, ensureListId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { joinedKeys } from "@/lib/joined-stores";
+import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { paidPeriod } from "./billing-period-fixture";
@@ -324,6 +325,30 @@ async function main() {
     await unsubscribe(token).catch(() => null);
     redis.pipeline = real;
     is("a sign-up and its unsubscribe are each counted with their row", [JSON.parse(String(row(list, email))).unsub, redis.run(["GET", `nl:store:leads:${list}:agreed`]), redis.run(["GET", `nl:store:leads:${list}:unsub`])], [true, "1", "1"]);
+  }
+
+  part("The stores an address joined, with the row (review of #3448, MEDIUM 1)");
+  {
+    // A deletion that lands between a sign-up's read and its write wins: the row is not written, and neither is the
+    // index of the stores the address joined (lib/joined-stores.ts), which is kept personal data for 13 quarters and
+    // would list this store for the erased person. A store id of the shape the index keeps (32 hex characters).
+    const sid = "fedcba9876543210fedcba9876543210";
+    for (const [what, room] of [["the store's room", ROOM], ["an order's room", orderRoom(OWNER)]] as const) {
+      const list = `review_joined_${what.length}`, email = `joiner.${what.length}@example.com`;
+      const race = raceAt(rowRead(list, 3), async () => {
+        await erase(list, email);
+        await forgetLibraryPerson(sid, email);
+      });
+      const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free", sid }, room);
+      redis.pipeline = real;
+      const listed = joinedKeys(email).some((k) => redis.run(["SISMEMBER", k, sid]) === 1);
+      is(`${what}: control: the race ran`, race.ran(), true);
+      is(`${what}: a person deleted between the read and the write has no row and is not joined`, [row(list, email), result.joined], [null, false]);
+      is(`${what}: and no index of the stores they joined is left behind`, listed, false);
+    }
+    const list = "review_joined_ok", email = "kept.joiner@example.com";
+    await upsertContact(list, email, { agreed: true, explicit: true, source: "free", sid }, ROOM);
+    is("control: without a race, a sign-up is indexed with its row", [row(list, email) !== null, joinedKeys(email).some((k) => redis.run(["SISMEMBER", k, sid]) === 1)], [true, true]);
   }
 
   part("The deleted mark where links are handed out (tokensFor, sendTo)");

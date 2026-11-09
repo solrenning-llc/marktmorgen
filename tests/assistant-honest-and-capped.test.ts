@@ -22,6 +22,11 @@
  *    and honest replies were refused: French "très" read as "tres" (3),
  *    "mille mercis", "sugar free", "free time", "double the recipe",
  *    "cheaper than buying bread", "saving the dough".
+ * F. From Claude 3's first review of #3484 (head 592ab39b94): a number with
+ *    no unit beside it, in a sentence about a price or followed by a rate
+ *    ("per month", "/month", "each"), matched a fact of any unit ("The
+ *    price is 14." with refunds within 14 days); and a lowercase Roman
+ *    numeral with a currency ("xlix dollars") was never read.
  */
 import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, setAssistant, setAssistantPlan, setSubscription, storeForEmail } from "@/lib/store";
@@ -124,6 +129,21 @@ is("and 'free of charge'", heldToFacts("It is free of charge for you.", bread), 
 is("and 'double' about money", heldToFacts("You will double your money.", bread), false);
 is("and 'cheaper' about the price", heldToFacts("It is cheaper than the usual price.", bread), false);
 is("and 'save' about money", heldToFacts("You save $20 if you buy it now.", bread), false);
+
+const sourdough = "Sourdough Basics. A video course. Price: $49. Refunds within 14 days. 12 lessons.";
+part("F. A number with no unit is a price where the sentence speaks of one");
+is("each priced figure the facts hold only as days or lessons is refused", [
+  "The price is 14.", "It costs 14 per month.", "It costs 14/month.", "The course costs fourteen a month.", "Only 12 a month.", "It costs 12 each.",
+  "Price: 12.", "It is 49 per lesson.", "Get 12 lessons for 14.", "Es kostet 14 im Monat.", "Cuesta 12 al mes.", "Ahora solo 14.", "Il co\u00fbte 12 par mois.",
+].filter((reply) => heldToFacts(reply, sourdough)), []);
+is("a lowercase Roman numeral with a currency is read", heldToFacts("It costs xcix dollars.", sourdough), false);
+is("control: and the published one in small letters is the price", heldToFacts("It costs xlix dollars.", sourdough), true);
+is("control: the published price with no sign, the counts beside a price", [
+  heldToFacts("The price is 49.", sourdough), heldToFacts("It costs $49 and has 12 lessons.", sourdough), heldToFacts("Only 12 lessons, and refunds within 14 days.", sourdough),
+  heldToFacts("Today you get 12 lessons.", sourdough), heldToFacts("Lesson 12 is the last one.", sourdough), heldToFacts("Il co\u00fbte 49 dollars et a 12 le\u00e7ons.", sourdough),
+  heldToFacts("Es kostet 49 Dollar und hat 12 Lektionen.", sourdough), heldToFacts("A mix of 12 lessons.", sourdough), heldToFacts("Il prezzo \u00e8 di 49 dollari.", sourdough),
+], [true, true, true, true, true, true, true, true, true]);
+is("control: a store's own rate may be repeated", heldToFacts("You can pay in 3 monthly payments of $20.", "Price: $60, paid once. Or in 3 monthly payments of $20."), true);
 
 part("E. What goes to the model: an address in words, a capitalized domain");
 is("'jane.doe at example dot com'", forAi("jane.doe at example dot com").includes("jane.doe"), false);

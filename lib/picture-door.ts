@@ -116,15 +116,51 @@ export async function takePictureDoor(paths: string[], now = Date.now()): Promis
  * only while no file has it, and an upload can never write over a file; the
  * time read here is a second check that a file stored before its note (a door
  * asked again for somebody's picture) is kept. Anything that cannot be read is
- * kept. Best effort: nothing here throws.
+ * kept. A note given back once (givePictureDoorBack) already spent this head's
+ * share on its first check, so its file is kept, unread. Best effort: nothing
+ * here throws.
  */
 export async function dropTakenPictures(taken: Map<string, number>, paths: string[]): Promise<void> {
   const ours: string[] = [];
   for (const path of new Set(paths)) {
     const noted = taken.get(path);
-    if (noted === undefined) continue;
+    if (noted === undefined || wasGivenBack(noted)) continue;
     const stored = await head(path).then((found) => new Date(found.uploadedAt).getTime(), () => NaN);
     if (Number.isFinite(stored) && stored > noted) ours.push(path);
   }
   if (ours.length) await del(ours).catch(() => {});
+}
+
+/**
+ * What a note given back after an unknown check carries on top of its time (ms): the door writes whole milliseconds
+ * (Date.now()), so a time with this half is a note given back once (givePictureDoorBack), never given back again.
+ */
+export const GIVEN_BACK = 0.5;
+
+/** Whether a note taken from the door (its time, from takePictureDoor) was given back once already. */
+export function wasGivenBack(noted: number): boolean {
+  return !Number.isInteger(noted);
+}
+
+/**
+ * Puts back on the door, once, the notes of pictures whose check met an unknown before it read anything (a passing
+ * outage of the file store on its head: lib/picture-check.ts, checkedPictures; Claude 2 on #2843), with the time each
+ * was signed for and GIVEN_BACK on top, so the creator's save tried again takes it and checks it, and a note given
+ * back is never given back twice. That one more head is the share of the clean-up head its check is counted with
+ * (tests/plan-cost-registry.ts, pictureCheckBlob), which a note given back never sends (dropTakenPictures), so a
+ * picture is still asked about within its one check in all, and read at most once. A note already given back, or
+ * one past its window, is not put back. Best effort: when it cannot be written the file is kept, never deleted.
+ */
+export async function givePictureDoorBack(notes: Map<string, number>, now = Date.now()): Promise<void> {
+  const byKey = new Map<string, (string | number)[]>();
+  for (const [path, noted] of notes) {
+    const key = doorsKey(path);
+    if (!key || wasGivenBack(noted) || !(noted > 0 && noted >= now - PICTURE_DOOR_SECONDS * 1000)) continue;
+    byKey.set(key, [...(byKey.get(key) ?? []), noted + GIVEN_BACK, path]);
+  }
+  if (byKey.size === 0 || !isRedisConfigured()) return;
+  // NX: a note there now is the door's own and keeps its time. The list lives a window after this, as after a note.
+  await redisPipeline([...byKey].flatMap(([key, pairs]) => [["ZADD", key, "NX", ...pairs], ["EXPIRE", key, PICTURE_DOOR_SECONDS]])).catch(
+    (error: unknown) => console.error("could not give pictures back to the door; they are kept", error),
+  );
 }

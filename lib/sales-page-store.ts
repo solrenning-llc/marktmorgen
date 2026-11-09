@@ -114,9 +114,18 @@ export async function claimPictures(statsId: string, productId: string, paths: s
  * neither in the door nor owned, refused by every later save, never put on
  * unchecked.
  * A take from the door that cannot be confirmed throws (takePictureDoor), so
- * the page is refused with server_error before it is written.
+ * the page is refused with server_error before it is written. So does a check
+ * that met an unknown (a passing outage of the file store; Claude 2 on #2843):
+ * after those it proved pictures are written down, the page is refused with
+ * server_error ("try again"), nothing of it deleted, and its note given back
+ * once when nothing was read yet (lib/picture-check.ts, checkedPictures).
  */
-export async function claimNewPictures(statsId: string, pageId: string, paths: string[], check?: (taken: string[]) => Promise<string[]>): Promise<boolean> {
+export async function claimNewPictures(
+  statsId: string,
+  pageId: string,
+  paths: string[],
+  check?: (taken: Map<string, number>) => Promise<{ good: string[]; unknown: string[] }>,
+): Promise<boolean> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return true;
   // Not known is ours to say, never "add the picture again" (Claude 4 on #2156): it throws, and the route answers
@@ -132,7 +141,8 @@ export async function claimNewPictures(statsId: string, pageId: string, paths: s
   const taken = await takePictureDoor(unclaimed);
   const tookNow = unclaimed.filter((path) => taken.has(path));
   // Checked before they are written down as this page's, and only those that are pictures are (Codex Z on #2843).
-  const checked = check && tookNow.length ? new Set(await check(tookNow)) : new Set(tookNow);
+  const checks = check && tookNow.length ? await check(new Map(tookNow.map((path) => [path, taken.get(path) as number]))) : { good: tookNow, unknown: [] };
+  const checked = new Set(checks.good);
   const fresh = tookNow.filter((path) => checked.has(path));
   if (fresh.length) {
     await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
@@ -140,6 +150,8 @@ export async function claimNewPictures(statsId: string, pageId: string, paths: s
     const now = Array.isArray(after) ? after : [];
     if (fresh.some((_, i) => now[i] !== pageId)) return false;
   }
+  // Unknown is never "not a picture" (Claude 2 on #2843): refused as a save to try again, nothing deleted.
+  if (checks.unknown.length) throw new Error("page pictures: a check that did not finish");
   return fresh.length === unclaimed.length;
 }
 

@@ -117,9 +117,10 @@ export async function POST(request: NextRequest) {
       const checked = checkedSizes(product.image);
       const keptSize = (name: string) => (fresh.has(name) ? undefined : checked.get(name));
       // A name it shows whose size the record cannot vouch for (checkedSizes) is not taken as checked, and not read on
-      // its say-so either: refused, nothing written or deleted; sent fresh through the door it is checked as any (rule 24).
-      const named = [path, ...(smallOwned ? [smallPath] : []), ...(thumbOwned ? [thumbPath] : [])];
-      if (named.some((name) => !fresh.has(name) && own.has(name) && !checked.has(name))) {
+      // its say-so either; sent fresh through the door it is checked as any (rule 24). The picture itself: refused,
+      // nothing written or deleted. One of its copies: left out, unread, as a copy that fails is (Claude 2 on #2843, LOW 2).
+      const unvouched = (name: string) => !fresh.has(name) && own.has(name) && !checked.has(name);
+      if (unvouched(path)) {
         await dropFresh([path, smallPath, thumbPath]);
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
@@ -155,7 +156,7 @@ export async function POST(request: NextRequest) {
       // The smaller copy for phones, checked exactly as the picture was.
       let small: SmallCopy | null = null;
       // A smaller copy named that is neither fresh nor this product's own is left out, and kept.
-      if (smallOwned && (fresh.has(smallPath) || own.has(smallPath))) {
+      if (smallOwned && (fresh.has(smallPath) || own.has(smallPath)) && !unvouched(smallPath)) {
         const smallWidth = side(sent?.width);
         const kept = keptSize(smallPath);
         // This product's own copy, checked when it was put on: its size from the record, its width held to its place.
@@ -182,7 +183,7 @@ export async function POST(request: NextRequest) {
       // The thumbnail copy (Encanto 5b-2), checked exactly as the smaller copy, within MAX_THUMB_BYTES and narrower
       // than the copy above it; one that fails is dropped and never written.
       let thumb: SmallCopy | null = null;
-      if (thumbOwned && (fresh.has(thumbPath) || own.has(thumbPath))) {
+      if (thumbOwned && (fresh.has(thumbPath) || own.has(thumbPath)) && !unvouched(thumbPath)) {
         const thumbWidth = side(sentThumb?.width);
         const kept = keptSize(thumbPath);
         // This product's own copy, checked when it was put on: its size from the record, its width held to its place.

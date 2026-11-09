@@ -200,6 +200,14 @@ async function main(): Promise<void> {
   is("the read fails: refused to try again, and kept", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0009", [unread]) }))), files.has(unread)], [[500, "server_error"], true]);
   is("its one read spent, it is never read again: a later save is refused as never checked, and it is still kept", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0009", [unread]) }))), files.has(unread), calls.head, calls.get], [[400, "pictures"], true, 1, 1]);
 
+  // A note given back already spent the clean-up head's share on its first check: a failing attach keeps its file, unread.
+  const back = await upload({ productId: id });
+  outage.head.add(back);
+  is("given back after an outage", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0011", [back]) }))), [500, "server_error"]);
+  calls.head = 0;
+  calls.get = 0;
+  is("then put on a product and refused after its check (no width): its file kept, its one head and read, and no clean-up head", [await result(await productImage(post("/api/store/image", session, { action: "attach", id, path: back, width: 0, height: 0, alt: "" }))), files.has(back), calls.head, calls.get], [[400, "invalid"], true, 1, 1]);
+
   const before = await upload({ productId: id });
   files.set(before, { bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]), contentType: "image/jpeg", at: 1 });
   is("a file that is not a picture but was stored before its note: refused", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0010", [before]) }))), [400, "pictures"]);

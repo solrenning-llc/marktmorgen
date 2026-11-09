@@ -390,7 +390,11 @@ export const STUDIO_DOOR_BLOB = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVAN
  * try, and one read, a private-blob fetch, so its whole bytes cross at Blob transfer and at Fast Origin Transfer on a
  * miss and the fetch is one CDN request, as PICTURE_READ counts a private picture read (Claude 1 on #2803 and #2801,
  * Claude 4 on #2848, 6711058709). A request whose picture fails then asks the Blob once more about each file it took
- * (dropTakenPictures, a head with every try): counted with the check, since a file is checked at most once.
+ * (dropTakenPictures, a head with every try): counted with the check, since a file is checked at most once. A page
+ * save's check that met an unknown before its read gives its note back once (lib/picture-door.ts, givePictureDoorBack;
+ * Claude 2 on #2843), so the save tried again sends one more head: that head is this clean-up head's share, since a
+ * note given back never sends one (dropTakenPictures keeps its file), and a page save's own check deletes from the head
+ * it already sent. So a file is still asked about within this one check in all, and read at most once.
  */
 export function pictureCheckBlob(bytes: number): number {
   return BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + bytes * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE) + CDN_PER_REQUEST + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
@@ -965,7 +969,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/image/route.ts", names: ["head(thumbPath)", "firstBytes(thumbPath)"] },
       { file: "lib/picture-check.ts", names: ["checkedPictures", "isStoredPicture"] },
       { file: "lib/sales-page.ts", names: ["MAX_PAGE_PICTURES"] },
-      { file: "lib/picture-door.ts", names: ["PICTURE_DOOR_SECONDS", "PICTURE_DOOR_MAX", "takePictureDoor", "dropTakenPictures"] },
+      { file: "lib/picture-door.ts", names: ["PICTURE_DOOR_SECONDS", "PICTURE_DOOR_MAX", "takePictureDoor", "dropTakenPictures", "givePictureDoorBack"] },
       { file: "app/api/store/link-image/route.ts", names: ["checkedSizes", "checkUploadedImage"] },
     ],
     basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (studioBlobMonthly). A door is its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try. A request reads only a file it took from the picture door, each once: a name a product's or a link's record already shows, sent again and not fresh, is answered from the record, written only after that file passed the checks (checkedSizes; a size the record cannot vouch for is read again), and any other name is refused before a read (C1-20261107-1550-TODOS-10). So every check spends a note a door wrote: the dearest kind a request is a page save of MAX_PAGE_PICTURES pictures with their 24 doors, 25 requests for 24 doors and 24 checks; and a month may also read the notes alive when it began, at most PICTURE_DOOR_MAX a store, counted on top. A check is a head with every try and a plain read at the most the door lets a file be (MAX_IMAGE_BYTES), its bytes counted whole (firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206), crossing at Blob transfer and Fast Origin Transfer, with one CDN request, as PICTURE_READ counts a private picture read (Claude 4 on #2848, 6711058709), and the clean-up head a failed request sends (dropTakenPictures). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). No new store call: the record read is the one the route already makes. Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), the storage of images/ (item 3), and the pictures' own bucket copy (lib/picture-r2-copy.ts, off).",

@@ -19,12 +19,13 @@
  *
  *   nl:csa:held:<store>:<YYYY-MM-DD>   set      products held automatically that day, 2 days
  */
+import { createHash } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeRef } from "@/lib/store";
-import { type Report, reportedProduct } from "@/lib/takedown";
+import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
 
 /** Automatic holds a store takes from child-safety reports in one UTC day; past them the owner decides. */
@@ -45,7 +46,12 @@ const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:
 export async function holdReported(report: { kind: ReportKind; url: string }, store: Store, now = Date.now()): Promise<HoldOutcome> {
   if (report.kind !== "child_safety") return "not_held";
   try {
-    const product = await reportedProduct({ url: report.url } as Report, store);
+    // Read exactly (rule 24): an address that names no product of this store is no_product; a read that fails or
+    // answers off its shape is unknown, never "names nothing" (lib/takedown.ts reportedProduct swallows it).
+    const id = productIdIn(report.url, store);
+    if (!id) return "no_product";
+    const product = await readListingExactly(store, id);
+    if (product === "unknown") return "unknown";
     if (!product) return "no_product";
     const key = countKey(store, new Date(now).toISOString().slice(0, 10));
     // The day's cap is counted in products: a second report of the same product, or a retry, adds nothing.
@@ -82,6 +88,20 @@ const WHAT_HAPPENED: Record<HoldOutcome, string> = {
   failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 8 says.",
 };
 
+const NOTICE_NOT_KEPT = "The notice itself could not be confirmed as kept, and the person was told to try again: if no notice email with this address reaches the support inbox, act on this email alone.";
+
+/** The product id a store address names (/@handle/p/<product>), or null. */
+function productIdIn(url: string, store: Store): string | null {
+  try {
+    const parts = new URL(url).pathname.split("/").filter(Boolean);
+    const at = parts.indexOf("p");
+    const segment = at >= 0 ? decodeURIComponent(parts[at + 1] ?? "") : "";
+    return segment ? productIdFromAddress(store, segment) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Only a Marktmorgen address is shown in the urgent email; anything else is named, not quoted. */
 function where(url: string): string {
   try {
@@ -105,7 +125,12 @@ function deadline(ms: number): string {
  * itself. It names where and what was done; it never quotes the reporter's
  * words, since those may describe the content. False when it was not sent.
  */
-export async function alertOwner(report: { kind: ReportKind; url: string; work?: string }, outcome: HoldOutcome, now = Date.now()): Promise<boolean> {
+export async function alertOwner(
+  report: { kind: ReportKind; url: string; work?: string },
+  outcome: HoldOutcome,
+  now = Date.now(),
+  noticeKept = true,
+): Promise<boolean> {
   if (report.kind !== "child_safety" && report.kind !== "intimate_image") return false;
   const handle = handleIn(report.url);
   const child = report.kind === "child_safety";
@@ -120,6 +145,7 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
         "Do not open, download, forward or describe the reported content, and do not ask any AI agent to look at it.",
         "If you have actual knowledge of apparent child sexual abuse material, report it to NCMEC's CyberTipline (report.cybertip.org) as soon as reasonably possible, and keep the content preserved.",
         "The steps, with the law, are in docs/incident-response.md.",
+        ...(noticeKept ? [] : ["", NOTICE_NOT_KEPT]),
       ]
     : [
         "A request to remove an intimate image shared without consent was sent from /report (TAKE IT DOWN Act).",
@@ -128,7 +154,9 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
         `Remove it within ${TAKE_IT_DOWN_HOURS} hours: by ${deadline(now + TAKE_IT_DOWN_HOURS * 3_600_000)}, and make reasonable efforts to remove any identical copies on the site.`,
         "",
         "Do not forward or describe the image, and do not ask any AI agent to look at it.",
-        "The steps are in docs/incident-response.md. The request itself, with the person's signature, is in the notice email.",
+        noticeKept
+          ? "The steps are in docs/incident-response.md. The request itself, with the person's signature, is in the notice email."
+          : `The steps are in docs/incident-response.md. ${NOTICE_NOT_KEPT}`,
       ];
   return sendEmail({
     meter: { by: "company" },
@@ -136,7 +164,8 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
     to: SUPPORT_EMAIL,
     subject: subject.slice(0, 200),
     text: lines.join("\n"),
-    idempotencyKey: `report-urgent-${report.kind}-${now}-${handle || "none"}`,
+    // One urgent email per address and kind a day: a retry after a failed notice does not send it twice.
+    idempotencyKey: `report-urgent-${report.kind}-${createHash("sha256").update(report.url).digest("hex").slice(0, 24)}-${new Date(now).toISOString().slice(0, 10)}`,
   })
     .catch(() => false)
     .then((sent) => {

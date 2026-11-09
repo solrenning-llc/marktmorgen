@@ -75,7 +75,9 @@ export function readReport(raw: Record<string, unknown>): { ok: true; report: Re
   // Longer than is kept is refused, never cut: a cut address is a broken one.
   if (typeof raw.url === "string" && raw.url.trim().length > MAX_REPORT_URL) return { ok: false, problem: "url" };
   if (!/^https?:\/\/\S+$/i.test(report.url)) return { ok: false, problem: "url" };
-  if (report.work.length < 20) return { ok: false, problem: "work" };
+  // A child-safety report needs no words about the content at all: where it is is enough, and asking for more invites
+  // a description of the images.
+  if (kind !== "child_safety" && report.work.length < 20) return { ok: false, problem: "work" };
   if (!EMAIL.test(report.email)) return { ok: false, problem: "email" };
   // A child-safety report is never held back for a name, a signature or a sworn statement.
   if (kind === "child_safety") return { ok: true, report: { ...report, accurate: false } };

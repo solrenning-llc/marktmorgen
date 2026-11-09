@@ -148,9 +148,10 @@ async function main(): Promise<void> {
 
   part("The urgent email is not sent twice for one retry, and says when the notice was not kept");
   sent.length = 0;
-  await alertOwner({ kind: "intimate_image", url, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18));
-  await alertOwner({ kind: "intimate_image", url, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18, 0, 5));
-  is("the same address and kind on the same day carry the same key, so the provider sends one", sent.length === 2 && sent[0].key === sent[1].key && Boolean(sent[0].key), true);
+  const retried = `https://marktmorgen.com/@safetyshop/p/${many[1]}`;
+  await alertOwner({ kind: "intimate_image", url: retried, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18));
+  await alertOwner({ kind: "intimate_image", url: retried, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18, 0, 5));
+  is("the same address and kind on the same day carry the same key, so the provider sends one", sent.length === 1 || (sent.length === 2 && sent[0].key === sent[1].key && Boolean(sent[0].key)), true);
   sent.length = 0;
   await alertOwner({ kind: "intimate_image", url, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18), false);
   is("a notice that was not kept is said, not pointed to", [sent.at(-1)?.text.includes("could not be confirmed as kept"), sent.at(-1)?.text.includes("is in the notice email")], [true, false]);
@@ -160,7 +161,7 @@ async function main(): Promise<void> {
   is("the form offers both kinds and points to the CyberTipline", [page.includes("child_safety"), page.includes("intimate_image"), page.includes("report.cybertip.org")], [true, true, true]);
   is("it asks people not to send or describe the images", page.includes("Do not upload, attach or describe"), true);
   is("it does not promise more than is done: an intimate image is removed within 48 hours", [page.includes("we act on those at once"), page.includes("removed within 48")], [false, true]);
-  is("a child-safety report usually comes off at once, and is otherwise acted on by hand, in the intro and after sending", [page.includes("usually comes off the store at once"), page.match(/act on it\s+by hand/g)?.length ?? 0 >= 2], [true, true]);
+  is("a child-safety report usually comes off at once, and is otherwise acted on by hand, in the intro and after sending", [page.includes("usually comes off the store at once"), (page.match(/act on it\s+by hand/g)?.length ?? 0) >= 2], [true, true]);
   const terms = readFileSync("app/terms/page.tsx", "utf8");
   is("the Terms forbid it and say it is reported", [terms.includes('id="child-safety"'), terms.includes("Exploited Children (NCMEC)")], [true, true]);
   const procedure = readFileSync("docs/incident-response.md", "utf8");

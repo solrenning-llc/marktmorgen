@@ -39,6 +39,19 @@
  *     A period set to end with no renewal gets no such grace. A period whose
  *     cash proof was acknowledged (funded=true) also gets no inferred next
  *     allowance: another period needs its own acknowledged funding proof.
+ *   - A change of billing interval does not open a window (9 November 2026).
+ *     Stripe starts a new period on the day of the change (lib/billing.ts,
+ *     switchPlan), so a window named by the period's first day would start
+ *     every allowance again, once per switch: one switch a day gave 31 in a
+ *     month paid once. When the period of the same subscription moves while a
+ *     window is open (setSubscription, lib/store.ts), the store keeps that
+ *     window as its allowance anchor, and from then on counts in it to its end
+ *     and in whole months after it, the period deciding only whether the
+ *     store pays at that moment. Never a short window between the open one and
+ *     the new period's day, which would be a second allowance in one month;
+ *     never a longer one, which would take allowance away. Only another
+ *     subscription leaves it behind. An anchor that cannot be read lets in to
+ *     nothing, like a period that is not known.
  *
  * Nothing here touches the network: pages that print when an allowance
  * opens again read the same window the counters do.
@@ -49,8 +62,14 @@ import { type PlanFields, standingOf } from "@/lib/plan-standing";
 /** What Stripe last said about the period a store paid for, in seconds (lib/store.ts). */
 export type BillingPeriod = { start: number; end: number; renews: boolean; /** Only an acknowledged committed cash proof may set this. No inferred renewal. */ funded?: true };
 
+/**
+ * The window a store's allowances were counted in when its period moved without a renewal (an interval switch), in
+ * milliseconds, and the subscription it belongs to (lib/store.ts, setSubscription). Its months go on from it.
+ */
+export type AllowanceAnchor = { subscriptionId: string; start: number; end: number };
+
 /** The fields of a store the window is worked out from. */
-export type WindowFields = PlanFields & { cycle?: Cycle; period?: BillingPeriod | null };
+export type WindowFields = PlanFields & { cycle?: Cycle; period?: BillingPeriod | null; allowanceAnchor?: AllowanceAnchor | null };
 
 export type AllowanceWindow = {
   /** "2026-10-19" for a billing month, "2026-10" for a calendar month. Goes into every counter's key. */
@@ -108,6 +127,15 @@ export function samePeriod(a: BillingPeriod | null, b: BillingPeriod | null): bo
   return a === b || (!!a && !!b && a.start === b.start && a.end === b.end && a.renews === b.renews && a.funded === b.funded);
 }
 
+/** Whether an anchor read from a store's record is one windows can be counted from: one window, at most a billing month long. */
+export function isAllowanceAnchor(value: unknown): value is AllowanceAnchor {
+  if (!value || typeof value !== "object") return false;
+  const { subscriptionId, start, end } = value as Record<string, unknown>;
+  return typeof subscriptionId === "string" && subscriptionId.length > 0 && subscriptionId.length <= 128
+    && Number.isSafeInteger(start) && Number.isSafeInteger(end) && (start as number) > 0 && (end as number) > (start as number)
+    && (end as number) - (start as number) <= LONGEST_WINDOW_DAYS * 86_400_000;
+}
+
 /** The billing month of a paid period around `now`: the period itself for a monthly plan, its month on the period's day for a yearly one. */
 function monthOfPeriod(period: BillingPeriod, cycle: Cycle, now: number): AllowanceWindow | null {
   const start = period.start * 1000;
@@ -144,11 +172,51 @@ function anchorOf(period: BillingPeriod, yearly: boolean): { anchor: number; off
 }
 
 /**
+ * The months of an anchor: the anchored window itself up to its end, then whole months from it, cut to a month's last
+ * day as Stripe cuts a period and counted from the anchor (anchorOf), so 31 January is followed by 28 February and
+ * then 31 March. Null before the anchor began.
+ */
+function anchoredWindow(anchor: AllowanceAnchor, now: number): AllowanceWindow | null {
+  if (now < anchor.start - CLOCK_SKEW_SECONDS * 1000) return null;
+  if (now < anchor.end) return { id: day(anchor.start), start: anchor.start, end: anchor.end, billing: true };
+  const { anchor: from, offset } = anchorOf({ start: anchor.start / 1000, end: anchor.end / 1000, renews: true }, false);
+  const ends = new Date(anchor.end), at = new Date(now);
+  // The month that holds `now`, found from the calendar months between, then stepped to exactly.
+  let k = Math.max(0, (at.getUTCFullYear() - ends.getUTCFullYear()) * 12 + at.getUTCMonth() - ends.getUTCMonth() - 1);
+  while (k > 0 && addMonthsMs(from, offset + k) > now) k -= 1;
+  for (let guard = 0; guard < 4; guard += 1, k += 1) {
+    const start = addMonthsMs(from, offset + k);
+    const end = addMonthsMs(from, offset + k + 1);
+    if (now >= start && now < end) return { id: day(start), start, end, billing: true };
+  }
+  return null;
+}
+
+/**
+ * A window worked out from the period (or the trial, or the calendar), read through the store's allowance anchor:
+ * a paying store with one counts in its months instead, while the period says it pays; one that cannot be read
+ * lets in to nothing; one of another subscription is not this plan's.
+ */
+function throughAnchor(store: WindowFields, window: AllowanceWindow | null, now: number): AllowanceWindow | null {
+  if (!window || !window.billing) return window;
+  const anchor = store.allowanceAnchor;
+  if (anchor === undefined || anchor === null) return window;
+  if (!isAllowanceAnchor(anchor)) return null;
+  if (anchor.subscriptionId !== store.subscriptionId) return window;
+  return anchoredWindow(anchor, now);
+}
+
+/**
  * The window a store's allowances are counted in right now, or null when it
  * pays and its period is not known: then nothing that costs money may start.
  */
 export function allowanceWindow(store: WindowFields, now = Date.now()): AllowanceWindow | null {
   if (!Number.isFinite(now)) return null;
+  return throughAnchor(store, periodWindow(store, now), now);
+}
+
+/** The window as the period alone tells it (allowanceWindow before the anchor is read). */
+function periodWindow(store: WindowFields, now: number): AllowanceWindow | null {
   const standing = standingOf(store, now / 1000);
   // A free trial: the trial itself, one window from the day it began.
   if (standing === "trial") {
@@ -192,7 +260,12 @@ export function allowanceWindow(store: WindowFields, now = Date.now()): Allowanc
  */
 export function windowAt(store: WindowFields, atMs: number): AllowanceWindow | null {
   if (!Number.isFinite(atMs)) return null;
-  const known = allowanceWindow(store, atMs);
+  return throughAnchor(store, periodWindowAt(store, atMs), atMs);
+}
+
+/** windowAt as the period alone tells it. */
+function periodWindowAt(store: WindowFields, atMs: number): AllowanceWindow | null {
+  const known = periodWindow(store, atMs);
   if (known) return known;
   if (standingOf(store, atMs / 1000) !== "paid" || !store.subscriptionId) return null;
   const period = store.period;
@@ -208,6 +281,33 @@ export function windowAt(store: WindowFields, atMs: number): AllowanceWindow | n
     if (atMs < end) return yearly ? monthOfPeriod({ start: start / 1000, end: end / 1000, renews: true }, "year", atMs) : { id: day(start), start, end, billing: true };
   }
   return null;
+}
+
+/**
+ * The allowance anchor a store's record must carry once `next` is written over `previous` at `now`
+ * (lib/store.ts, setSubscription, in the same write as the period). One already kept for the same subscription stays
+ * as it is, readable or not, through a plan seen stopped and running again. Otherwise, when the period of the same
+ * subscription moves so that it begins inside the paid window open now (an interval switch: Stripe begins the new
+ * period at the moment of the change), the open window becomes the anchor, whether or not the new period already
+ * counts (a period a little in the future does too). The open window is
+ * what the snapshot says, or, when it has missed a renewal, the window that renewal opened (windowAt). A renewal,
+ * a trial's end, a change that keeps the period, a plan not running and another subscription write none.
+ */
+export function anchorAfter(previous: WindowFields, next: WindowFields, now = Date.now()): AllowanceAnchor | null {
+  if (!next.subscriptionId || previous.subscriptionId !== next.subscriptionId) return null;
+  const kept = previous.allowanceAnchor;
+  if (kept !== undefined && kept !== null && (!isAllowanceAnchor(kept) || kept.subscriptionId === next.subscriptionId)) return kept;
+  if (!Number.isFinite(now)) return null;
+  if (standingOf(next, now / 1000) !== "paid" || !isPeriod(next.period)) return null;
+  const open = windowAt({ ...previous, allowanceAnchor: null }, now);
+  if (!open || !open.billing) return null;
+  // Only a period that begins inside the open window, after it began, moved without a renewal: one that begins at its
+  // end or later is the next payment's, one that begins at its start is the same month, and one that begins before it
+  // is no switch (an older snapshot written late).
+  const begins = next.period.start * 1000;
+  if (!(open.start < begins && begins < open.end)) return null;
+  const anchor = { subscriptionId: next.subscriptionId, start: open.start, end: open.end };
+  return isAllowanceAnchor(anchor) ? anchor : null;
 }
 
 /** The window's name, or null: what a counter's key carries. */

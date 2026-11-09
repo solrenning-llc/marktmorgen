@@ -21,7 +21,7 @@
  */
 import { switchPlan, lookupKey } from "@/lib/billing";
 import { PLAN_PRICES, TRIAL_DAYS, type Cycle, type Tier } from "@/lib/plan";
-import { addMonthsMs, allowanceWindow, windowAt, windowId, type AllowanceWindow } from "@/lib/allowance-window";
+import { addMonthsMs, allowanceWindow, anchorAfter, windowAt, windowId, type AllowanceWindow } from "@/lib/allowance-window";
 import { takeAllowance } from "@/lib/store-allowance";
 import { ALLOWANCE_KINDS, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -217,6 +217,26 @@ async function main(): Promise<void> {
     const unreadable = { ...store, allowanceAnchor: { subscriptionId: SUB, start: "soon", end: 0 } as unknown as Store["allowanceAnchor"] };
     is("an anchor that cannot be read lets in to nothing", [allowanceWindow(unreadable, clock), windowAt(unreadable, clock + DAY)], [null, null]);
     is("and a cost asked for under it is refused", (await takeAllowance(unreadable, "studio", 1, clock)).ok, false);
+    const moved = { ...unreadable, cycle: "month" as const, period: { start: clock / 1000, end: addMonthsMs(clock, 1) / 1000, renews: true } };
+    is("a later write of the same subscription keeps it as read, never drops it to the period's window", anchorAfter(unreadable, moved, clock), unreadable.allowanceAnchor);
+    is("another subscription leaves it behind", anchorAfter(unreadable, { ...moved, subscriptionId: "sub_SwitchKeeps0009" }, clock), null);
+
+    part("6. The months after an anchor are cut as Stripe cuts them, from the anchor's day");
+    // A yearly plan begun on 31 January, switched to monthly on 10 February: its window of 31 January to 28 February runs
+    // on, and then 28 February to 31 March and 31 March to 30 April, never a month from a cut 28th.
+    const jan31 = Date.UTC(2027, 0, 31, 9);
+    const yearly = { subscriptionActive: true, subscriptionId: SUB, trialEnds: 0, planEndedAt: "", cycle: "year" as const,
+      period: { start: jan31 / 1000, end: addMonthsMs(jan31, 12) / 1000, renews: true } };
+    const switchedAt = Date.UTC(2027, 1, 10, 9);
+    const monthly = { ...yearly, cycle: "month" as const, period: { start: switchedAt / 1000, end: addMonthsMs(switchedAt, 1) / 1000, renews: true } };
+    const cut = { ...monthly, allowanceAnchor: anchorAfter(yearly, monthly, switchedAt) };
+    is("the anchor is the open yearly month", cut.allowanceAnchor, { subscriptionId: SUB, start: jan31, end: Date.UTC(2027, 1, 28, 9) });
+    is("then whole months from the anchor's day", [Date.UTC(2027, 1, 27), Date.UTC(2027, 2, 1), Date.UTC(2027, 3, 1)].map((t) => shape(allowanceWindow({ ...cut, period: { start: switchedAt / 1000, end: addMonthsMs(switchedAt, 3) / 1000, renews: true } }, t))),
+      [{ id: "2027-01-31", start: "2027-01-31T09:00:00.000Z", end: "2027-02-28T09:00:00.000Z" },
+        { id: "2027-02-28", start: "2027-02-28T09:00:00.000Z", end: "2027-03-31T09:00:00.000Z" },
+        { id: "2027-03-31", start: "2027-03-31T09:00:00.000Z", end: "2027-04-30T09:00:00.000Z" }]);
+    is("a renewal of the same subscription writes no other anchor", anchorAfter(cut, { ...cut, period: { start: monthly.period.end, end: addMonthsMs(monthly.period.end * 1000, 1) / 1000, renews: true } }, monthly.period.end * 1000 + 60_000), cut.allowanceAnchor);
+    is("past a period that does not renew, its anchor opens nothing", allowanceWindow({ ...cut, period: { ...monthly.period, renews: false } }, monthly.period.end * 1000 + 60_000), null);
   } finally {
     Date.now = realNow;
   }

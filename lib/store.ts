@@ -77,7 +77,7 @@ import { type WelcomeOffer, NO_WELCOME_OFFER, parseWelcomeOffer } from "@/lib/we
 import { type InboxSetting, NO_INBOX, parseInboxSetting } from "@/lib/inbox-rules";
 import { type PastSale, type StoreSale, NO_SALE, parsePastSales, parseSale, withPastSale } from "@/lib/store-sale";
 import { parseTiers } from "@/lib/tier-rules";
-import { type BillingPeriod, isPeriod } from "@/lib/allowance-window";
+import { type AllowanceAnchor, type BillingPeriod, anchorAfter, isAllowanceAnchor, isPeriod } from "@/lib/allowance-window";
 import { ENDED_INDEX } from "@/lib/plan-standing";
 import { SHARING_INDEX } from "@/lib/platform-share";
 import { PAYING_INDEX } from "@/lib/free-pool-rules";
@@ -421,6 +421,18 @@ export type Store = {
    * from records written before.
    */
   period?: BillingPeriod | null;
+  /**
+   * The window the store's allowances were counted in when the period of its
+   * subscription moved without a renewal (a change of billing interval: Stripe
+   * starts a new period on that day), in milliseconds (9 November 2026). Its
+   * allowances go on being counted in it and in whole months after it, so a
+   * switch never starts them again (lib/allowance-window.ts, anchorAfter).
+   * Written only by setSubscription, with the period, in one write; kept
+   * while the subscription is the same. Null or absent: the period's own
+   * months. One that cannot be read is kept as read, so nothing that costs
+   * money starts on it, never dropped.
+   */
+  allowanceAnchor?: AllowanceAnchor | null;
   /**
    * Whether the plan is at the prices that go with a share of each sale
    * (lib/plan.ts isSharedPrice), as Stripe last said. False for a store that
@@ -922,6 +934,20 @@ export async function imageFolder(email: string): Promise<string> {
   return (await sha256Hex(`nimbus-images:${email.toLowerCase()}`)).slice(0, 24);
 }
 
+/**
+ * A store's allowance anchor as read: none, a whole one, or one that cannot be read, kept as an anchor that is never
+ * a window (lib/allowance-window.ts isAllowanceAnchor), never dropped to none.
+ */
+function anchorRead(value: unknown): AllowanceAnchor | null {
+  if (value === undefined || value === null) return null;
+  return isAllowanceAnchor(value) ? { subscriptionId: value.subscriptionId, start: value.start, end: value.end } : { subscriptionId: "", start: 0, end: 0 };
+}
+
+/** The anchor as a field of the record: absent when there is none, so a record never switched reads and saves as before. */
+function anchorField(anchor: AllowanceAnchor | null): { allowanceAnchor?: AllowanceAnchor } {
+  return anchor ? { allowanceAnchor: anchor } : {};
+}
+
 function parseStore(raw: unknown): Store | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -972,6 +998,9 @@ function parseStore(raw: unknown): Store | null {
       trialEnds: typeof value.trialEnds === "number" && value.trialEnds > 0 ? value.trialEnds : 0,
       // Records from before the period was kept have none: no billing month is known.
       period: isPeriod((value as { period?: unknown }).period) ? { ...((value as { period: BillingPeriod }).period) } : null,
+      // Records from before it, and every plan never switched mid-period, have none. One that cannot be read stays as
+      // read: lib/allowance-window.ts then lets in to nothing, never to the period's own fresh window.
+      ...anchorField(anchorRead((value as { allowanceAnchor?: unknown }).allowanceAnchor)),
       // Every store from before there was a share pays none.
       shared: value.shared === true,
       // Stores written before this was kept have none: read as never ended.
@@ -2068,7 +2097,7 @@ export async function setSubscription(
     const unpaid = fields.active && (fields.renewalUnpaid ?? unpaidBefore > 0);
     const renewalUnpaidSince = unpaid ? unpaidBefore || Math.floor(Date.now() / 1000) : 0;
 
-    const saved = await save({
+    const next: Store = {
       ...store,
       stripeCustomerId: customerId,
       subscriptionId,
@@ -2082,7 +2111,11 @@ export async function setSubscription(
       period,
       planEndedAt,
       renewalUnpaidSince,
-    });
+    };
+    // A period that moved without a renewal (an interval switch) keeps the window that was open: written in this same
+    // write as the period, never after it, so no reader ever sees the new period without it (lib/allowance-window.ts).
+    // Undefined is not written (JSON), so a record with no anchor saves as before.
+    const saved = await save({ ...next, allowanceAnchor: undefined, ...anchorField(anchorAfter(store, next, Date.now())) });
     // Kept in line by the day its plan ended, for the daily job that looks
     // at what such a store still keeps (lib/plan-closing.ts), and taken out
     // of line the moment a plan runs again. Only when it changes: this is

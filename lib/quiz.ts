@@ -31,7 +31,7 @@ import { reserveQuizSubmission } from "@/lib/quiz-usage";
 import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rules";
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
@@ -668,10 +668,19 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
   );
 }
 
-/** Deletes one student's tries, results and passes in these courses' quizzes (lib/person-erasure.ts). `who` is lib/learn.ts emailKey. */
+/**
+ * Deletes one student's tries, results and passes in these courses' quizzes (lib/person-erasure.ts). `who` is
+ * lib/learn.ts emailKey. Only the exact one-slot DEL count, from zero up to the distinct keys sent, says how many
+ * were deleted; any other reply throws UnknownReplyError, so the erasure reports this part as not done for a retry
+ * instead of a finished part that may have deleted nothing (CX-123 rule 24).
+ */
 export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string): Promise<number> {
   if (!courses.length || !isRedisConfigured()) return 0;
-  const keys = courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])]);
-  const [gone] = await redisPipeline([["DEL", ...keys]]);
-  return Number(gone) || 0;
+  const keys = [
+    ...new Set(courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])])),
+  ];
+  const replies = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
+  const gone = replies ? countOf(replies[0]) : null;
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a student's quiz tries, results and passes");
+  return gone;
 }

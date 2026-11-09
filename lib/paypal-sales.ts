@@ -42,6 +42,7 @@
 import { CONSENT_META, type DigitalConsent, consentMetaValue, deliversDigitally, validConsent } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
+import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -310,9 +311,21 @@ export function paypalReady(store: Store, product: Listing): boolean {
   return sellsThroughPayPal(store) && sellsWithPayPal(product);
 }
 
-/** The price PayPal is asked for: the product's, less the store's sale while one runs. */
+/**
+ * The percentage off PayPal takes for this visitor: the store's sale or the fair price for the country their
+ * connection is in (store.visitorCountry, from the edge, lib/visitor.ts), whichever is larger, never both — what
+ * the product page shows (components/store-product.tsx, offNow) and the Stripe checkout takes off.
+ */
+function payPalOff(store: Store, product: Listing, nowSeconds: number): { sale: number; fair: number } {
+  const sale = saleOff(store.sale, product, nowSeconds);
+  const fair = fairOff(store.fair, product, store.visitorCountry ?? "");
+  return fair > sale ? { sale: 0, fair } : { sale, fair: 0 };
+}
+
+/** The price PayPal is asked for: the product's, less the store's sale or the visitor's fair price. */
 export function payPalPrice(store: Store, product: Listing, nowSeconds = Math.floor(Date.now() / 1000)): number {
-  return salePrice(product.priceCents, saleOff(store.sale, product, nowSeconds));
+  const off = payPalOff(store, product, nowSeconds);
+  return salePrice(product.priceCents, off.sale || off.fair);
 }
 
 /** The order PayPal is sent (checkout_orders_v2, order_request): the creator's account is the payee. */
@@ -348,7 +361,8 @@ export function orderBody(store: Store, product: Listing, cents: number, urls: {
  * An order opened: the store, the product, the price asked, the merchant, when;
  * and what the visit carried, as a Stripe checkout carries it in its
  * metadata: the channel (lib/visit-channel.ts), the affiliate and their
- * share (lib/affiliates.ts), and the store sale's percent and what it took off.
+ * share (lib/affiliates.ts), and what the store sale (with its percent) or the
+ * visitor's fair price (noted as meta.fair, "IN:50") took off.
  */
 type Opened = {
   s: string;
@@ -394,7 +408,8 @@ export async function openOrder(store: Store, product: Listing, origin: string, 
   // before PayPal's page opens.
   const admitted = await admitOrders(store, 1);
   if (!admitted.ok) return { ok: false, reason: admitted.reason === "paused" ? "paused" : "error" };
-  const cents = payPalPrice(store, product);
+  const at = Math.floor(Date.now() / 1000);
+  const cents = payPalPrice(store, product, at);
   const returnUrl = `${origin}/api/store/paypal/return?store=${encodeURIComponent(store.handle)}`;
   const cancelUrl = `${origin}/@${store.handle}/p/${product.id}`;
   try {
@@ -406,7 +421,9 @@ export async function openOrder(store: Store, product: Listing, origin: string, 
     const links = Array.isArray(made.links) ? (made.links as { rel?: unknown; href?: unknown }[]) : [];
     const approve = links.find((l) => l.rel === "payer-action" || l.rel === "approve");
     if (!ORDER_ID.test(order) || typeof approve?.href !== "string" || !approve.href.startsWith("https://")) return { ok: false, reason: "error" };
-    const salePercent = saleOff(store.sale, product, Math.floor(Date.now() / 1000));
+    // Which discount it was, as a Stripe checkout notes it (metadata[sale] or metadata[fair]).
+    const { sale: salePercent, fair: fairPercent } = payPalOff(store, product, at);
+    const fairNote: Record<string, string> = fairPercent > 0 ? { fair: `${store.visitorCountry}:${fairPercent}` } : {};
     const opened: Opened = {
       s: store.statsId,
       h: store.handle,
@@ -416,9 +433,9 @@ export async function openOrder(store: Store, product: Listing, origin: string, 
       m: store.paypalSeller.merchant,
       at: Math.floor(Date.now() / 1000),
       // The yes first, so the cap on kept fields can never leave it out.
-      meta: cleanMeta(digital && extras.digitalConsent ? { [CONSENT_META]: consentMetaValue(extras.digitalConsent, "digital"), ...extras.meta } : extras.meta),
+      meta: cleanMeta(digital && extras.digitalConsent ? { [CONSENT_META]: consentMetaValue(extras.digitalConsent, "digital"), ...fairNote, ...extras.meta } : { ...fairNote, ...extras.meta }),
       ...(extras.via && /^[a-z0-9]{12}$/.test(extras.via.aff) ? { via: { aff: extras.via.aff, rate: Math.max(0, Math.min(100, Number(extras.via.rate) || 0)) } } : {}),
-      ...(salePercent > 0 ? { off: Math.max(0, product.priceCents - cents), sale: salePercent } : {}),
+      ...(salePercent > 0 ? { off: Math.max(0, product.priceCents - cents), sale: salePercent } : fairPercent > 0 ? { off: Math.max(0, product.priceCents - cents) } : {}),
     };
     await redisPipeline([["SET", orderKey(order), JSON.stringify(opened), "EX", 3 * 86_400]]);
     return { ok: true, url: approve.href, order };

@@ -87,6 +87,8 @@ const guid = () => {
 /** The subscriptions Stripe says are running, by the store's address. */
 const running = new Map<string, Record<string, unknown>>();
 let stripe: "up" | "down" = "up";
+/** Whether the key reads the stores' own customers: false is a key for another account or mode. */
+let customersReachable = true;
 const stripeAsked: string[] = [];
 
 // --------------------------------------------------------------- the email
@@ -141,6 +143,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (path === "/checkout/sessions" && method === "GET") return json({ object: "list", data: [], has_more: false });
     const one = [...running.values()].find((subscription) => path === `/subscriptions/${String(subscription.id)}`);
     if (one) return json(one);
+    // Regra 23 (plan-lifecycle audit, M2): a 404 for the store's own plan counts on the closing day only when
+    // the same key reads the store's own customer, so this world, whose ended plans answer 404, has its customers.
+    const customer = /^\/customers\/(cus_[A-Za-z0-9]+)$/.exec(path);
+    if (customer && method === "GET" && customersReachable) return json({ id: customer[1], object: "customer" });
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
   }
 
@@ -403,6 +409,13 @@ async function main(): Promise<void> {
   part("The day: what is removed, and what stays");
   const storeBefore = (await storeForEmail(ana.email))!;
   const listed = (await readAllListings(storeBefore)).map((listing) => [listing.title, listing.priceCents]);
+  // Plan-lifecycle audit, M2: a key for another account or mode says 404 for the plan and finds nothing by search
+  // either; with the store's own customer unreadable too, that is not Stripe saying the plan ended.
+  customersReachable = false;
+  const keptBefore = objects.size;
+  const wrongKey = await closeOne(ana.email, A + C * DAY, hands);
+  is("a 404 on a key that does not read the store's customer removes nothing", [wrongKey.state, wrongKey.note, objects.size], ["held", "Stripe could not be asked", keptBefore]);
+  customersReachable = true;
   const removed = await closeOne(ana.email, A + C * DAY, hands);
   is("with no plan at Stripe, what the store kept is removed", [removed.state, removed.note], ["removed", "6 files"]);
   const after = (await storeForEmail(ana.email))!;

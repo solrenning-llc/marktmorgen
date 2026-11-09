@@ -30,6 +30,7 @@ import {
   WARN_BEFORE_HOURS,
   alertKey,
   closeAlert,
+  readAlert,
   sendDueAlerts,
 } from "@/lib/child-safety-alerts";
 import { POST as reportRoute } from "@/app/api/report/route";
@@ -92,6 +93,7 @@ async function dropping<T>(match: (command: Commands[number]) => boolean, reply:
   }
 }
 
+const readAlertOf = async (token: string) => (await readAlert(token)) !== null;
 const tokenOf = (mail: Sent | undefined) => mail?.text.match(LINK)?.[1] ?? "";
 const idOf = (token: string) => token.slice(0, 32);
 const due = () => redis.run(["ZRANGEBYSCORE", ALERTS_DUE, "-inf", "+inf"]) as string[];
@@ -198,7 +200,8 @@ async function main(): Promise<void> {
   redis.clear();
   sent.length = 0;
   const batchAt = Date.UTC(2026, 10, 2, 9, 0);
-  for (let n = 0; n < ALERT_BATCH + 5; n++) await alertOwner({ kind: "child_safety", url }, "held", batchAt + n);
+  // Distinct requests (a retry of one request the same day opens nothing new, below).
+  for (let n = 0; n < ALERT_BATCH + 5; n++) await alertOwner({ kind: "child_safety", url, work: `Placeholder request ${n}` }, "held", batchAt + n);
   sent.length = 0;
   is("one run sends at most the batch", (await sendDueAlerts(batchAt + DAY + HOUR)).sent, ALERT_BATCH);
   is("the next run the rest", (await sendDueAlerts(batchAt + DAY + 2 * HOUR)).sent, 5);
@@ -239,7 +242,7 @@ async function main(): Promise<void> {
   is("the reschedule unconfirmed: counted unknown, the alert kept", [writeOdd.unknown, redis.run(["ZSCORE", ALERTS_DUE, oddId]) !== null], [1, true]);
   const openOdd = await answering((c) => c[0] === "ZCARD", "QUEUED", async () => {
     sent.length = 0;
-    await alertOwner({ kind: "child_safety", url }, "held", odd + 5);
+    await alertOwner({ kind: "child_safety", url, work: "Another placeholder request" }, "held", odd + 5);
     return sent[0]?.text ?? "";
   });
   is("opening an alert unconfirmed: the urgent email still goes, says reminders could not be set up", [LINK.test(openOdd), /could not be set up/i.test(openOdd)], [false, true]);
@@ -284,6 +287,40 @@ async function main(): Promise<void> {
   is("a run that meets a full batch of unreadable reports sends none of them", [blocked.sent, blocked.unknown], [0, ALERT_BATCH]);
   is("the next hour's run reaches the report behind them", (await sendDueAlerts(stuck + 2 * HOUR + DAY + 2 * 60_000)).sent, 1);
   is("and the unreadable ones are still on the list, never dropped", unreadable.every((id) => redis.run(["ZSCORE", ALERTS_DUE, id]) !== null), true);
+
+  part("A retry of the same request the same day opens no second alert (Claude 3 on #3486)");
+  redis.clear();
+  sent.length = 0;
+  const twice = Date.UTC(2026, 10, 6, 9, 0);
+  const records = () => (redis.run(["SCAN", "0", "MATCH", "nl:csa:alert:*", "COUNT", 1000]) as [string, string[]])[1].length;
+  const request = { kind: "child_safety", url, work: "Placeholder request A", email: "first@example.com" };
+  await alertOwner(request, "held", twice);
+  const firstOfTwo = tokenOf(sent[0]);
+  const originalRecord = String(redis.run(["GET", alertKey(idOf(firstOfTwo))]) ?? "");
+  const originalDue = redis.run(["ZSCORE", ALERTS_DUE, idOf(firstOfTwo)]);
+  await alertOwner(request, "held", twice + 5 * 60_000);
+  await alertOwner(request, "held", twice + HOUR);
+  is("the same address, sender and words the same day: one open alert", [due().length, records()], [1, 1]);
+  is("the original is kept as it was: its record and its due time", [String(redis.run(["GET", alertKey(idOf(firstOfTwo))]) ?? ""), redis.run(["ZSCORE", ALERTS_DUE, idOf(firstOfTwo)])], [originalRecord, originalDue]);
+  is("a retry's email carries no second handled link", sent.slice(1).every((mail) => !LINK.test(mail.text)), true);
+  is("and its link still closes it", (await readAlertOf(firstOfTwo)), true);
+  sent.length = 0;
+  is("one reminder series: one reminder the next day, after all three were due", (await sendDueAlerts(twice + DAY + 90 * 60_000)).sent, 1);
+  await alertOwner({ ...request, email: "second@example.com" }, "held", twice + 2 * HOUR);
+  is("another sender on the same address the same day gets its own alert", due().length, 2);
+  await alertOwner({ ...request, work: "Placeholder request B" }, "held", twice + 3 * HOUR);
+  is("other words on the same address the same day get their own", due().length, 3);
+  await alertOwner({ ...request, kind: "intimate_image" }, "not_held", twice + 4 * HOUR);
+  is("the other kind gets its own", due().length, 4);
+  await alertOwner(request, "held", twice + DAY);
+  is("the same request the next UTC day gets its own", due().length, 5);
+  const before = due().length;
+  const oddClaim = await answering((c) => c[0] === "SET" && String(c[1]).startsWith("nl:csa:once:"), "QUEUED", async () => {
+    sent.length = 0;
+    await alertOwner({ ...request, work: "Placeholder request C" }, "held", twice + 5 * HOUR);
+    return sent[0]?.text ?? "";
+  });
+  is("the claim answered off its shape: unknown, no alert opened, the urgent email still goes and says so", [due().length, records(), LINK.test(oddClaim), /could not be set up/i.test(oddClaim)], [before, before, false, true]);
 
   part("Wired into a cron that runs every hour, and documented");
   const quiet = readFileSync("app/api/cron/quiet/route.ts", "utf8");

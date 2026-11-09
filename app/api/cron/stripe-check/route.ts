@@ -32,9 +32,10 @@ export async function GET(request: NextRequest) {
   }
   // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
   // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
-  // own value, so a run never deletes another run's lock.
+  // own value, so a run never deletes another run's lock. It is held longer than maxDuration (180 s) with room, so it
+  // cannot run out while this run still works and let a second run start beside it.
   const lock = claimValue();
-  const got = await claimMark("nl:stripe-check:lock", 120, lock);
+  const got = await claimMark("nl:stripe-check:lock", 210, lock);
   if (got === "taken") return Response.json({ ok: true, busy: true });
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {

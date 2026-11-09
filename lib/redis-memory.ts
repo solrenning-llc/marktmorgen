@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 import { personInResponse } from "@/lib/form-respondent";
 import type { Answers } from "@/lib/forms";
+import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 /**
  * A Redis that lives in memory, for testing the parts of this codebase whose
  * behaviour only shows up across several commands.

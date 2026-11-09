@@ -21,6 +21,7 @@ import { StorePixels } from "@/components/store-pixels";
 import { StoreTracking } from "@/components/store-tracking";
 import { NO_PIXELS, pixelNames, type Pixels } from "@/lib/pixels";
 import { LANGUAGE_CODES, LANGUAGES } from "@/lib/store-language";
+import { trackingConsentWords } from "@/lib/buyer-words/tracking-consent";
 import type { Store } from "@/lib/store";
 import { answering } from "./security/next-headers";
 import { done, is, part } from "./check";
@@ -85,7 +86,8 @@ async function main(): Promise<void> {
     const locale = LANGUAGES[code].locale;
     part(`${LANGUAGES[code].english}: both requests in the store's language, and marked`);
     const aff = affiliate(code);
-    const ask = pixels(code, "ask");
+    // The names as components/store-tracking.tsx joins them, in the store's language (checked at the end).
+    const ask = pixels(code, "ask", pixelNames(PIXELS, trackingConsentWords(code).and));
     const on = pixels(code, "on");
     const off = pixels(code, "off");
     const gpc = withGpc(true, () => pixels(code, "ask"));

@@ -264,6 +264,18 @@ export async function readBrokenMove(email: string): Promise<{ from: string; to:
 }
 
 /**
+ * Moves of the sign-in address one store makes in a calendar month (UTC), counted by the store, never by the
+ * address, so moving from address to address finds no fresh count (Codex G2 and Claude 5 on #2271). Taken at the
+ * tap, before anything moves (takeMoveRoom).
+ */
+export const MOVES_PER_STORE_PER_MONTH = 10;
+/**
+ * Moves the company pays for in a calendar month (UTC), all stores together: the ceiling of the move's own work,
+ * its EVAL (NOTE_MOVE_COPY) and the commands around it, taken before any of it (Claude 1's decision on #2271).
+ */
+export const MOVES_PER_MONTH = 2_000;
+
+/**
  * Notes, with a running move's record, the fingerprint of the store record it
  * wrote at the new address (lib/store.ts copyPrint), just before the old one is
  * taken away: a repair then deletes a copy left behind while it is still that,

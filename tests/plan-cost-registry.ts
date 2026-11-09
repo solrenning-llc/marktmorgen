@@ -62,7 +62,7 @@ import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
 import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
-import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
+import { PAID_UPLOAD_OPENS, uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, MAX_REPORT_ROWS } from "@/lib/imports";
@@ -361,11 +361,16 @@ export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
 /**
  * Vercel Blob operations, from the official page read on 6 November 2026 (Claude 4, C4-20261106-0830-C5-39;
  * https://vercel.com/docs/vercel-blob/usage-and-pricing, "Managed Infrastructure pricing", on-demand rates): an
- * upload (put) is an Advanced Operation, $5.00 per million; a head or a read is a Simple Operation, $0.40 per million.
- * The operations a plan includes are never counted as zero (rule MR).
+ * upload (put) is an Advanced Operation and a head or a read is a Simple Operation. That page prices them as
+ * "Regional"; its $5.00 / $0.40 per million is the iad1 example. The regional table
+ * (https://vercel.com/docs/pricing/regional-pricing, last updated 14 September 2026) gives $4.50-7.00 and $0.35-0.56,
+ * the dearest at gru1 (https://vercel.com/docs/pricing/regional-pricing/gru1: $7.00 and $0.56), as read by Claude 1 on
+ * 7 November 2026 (#2848, comment 6708241908). The store's Blob region is not reviewed
+ * (docs/plan-capacity-provider-review.md), so the dearest region is counted until a verified region and its dated
+ * official page say otherwise. The operations a plan includes are never counted as zero (rule MR).
  */
-export const BLOB_ADVANCED_OP = 5 / 1e6;
-export const BLOB_SIMPLE_OP = 0.4 / 1e6;
+export const BLOB_ADVANCED_OP = 7 / 1e6;
+export const BLOB_SIMPLE_OP = 0.56 / 1e6;
 /**
  * The puts one upload request may send: @vercel/blob tries a failed put again up to VERCEL_BLOB_RETRIES times (10 unless
  * set; dist getRetries), and no official page says a put tried again, or refused, is not billed. Unknown is never zero:
@@ -383,6 +388,9 @@ export const BLOB_HEAD_TRIES = BLOB_PUT_TRIES;
  * try (MR audit item 9, Claude 4 C4-20261106-2790-C56-167), until an official source says otherwise.
  */
 export const BLOB_TOKEN_TRIES = BLOB_PUT_TRIES;
+/** filesHeld (lib/file-store.ts) lists at most this many pages of 1000, each an Advanced Operation tried as a put is; a vault open measures once. */
+export const BLOB_LIST_PAGES = 20;
+export const BLOB_LIST_MEASURES_PER_OPEN = 1;
 /** One studio picture door (app/api/store/image/upload): its put and its token, every try, and the head that checks the name is free. */
 export const STUDIO_DOOR_BLOB = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVANCED_OP + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
 /**
@@ -968,7 +976,22 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/picture-door.ts", names: ["PICTURE_DOOR_SECONDS", "PICTURE_DOOR_MAX", "takePictureDoor", "dropTakenPictures"] },
       { file: "app/api/store/link-image/route.ts", names: ["checkedSizes", "checkUploadedImage"] },
     ],
-    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (studioBlobMonthly). A door is its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try. A request reads only a file it took from the picture door, each once: a name a product's or a link's record already shows, sent again and not fresh, is answered from the record, written only after that file passed the checks (checkedSizes; a size the record cannot vouch for is read again), and any other name is refused before a read (C1-20261107-1550-TODOS-10). So every check spends a note a door wrote: the dearest kind a request is a page save of MAX_PAGE_PICTURES pictures with their 24 doors, 25 requests for 24 doors and 24 checks; and a month may also read the notes alive when it began, at most PICTURE_DOOR_MAX a store, counted on top. A check is a head with every try and a plain read at the most the door lets a file be (MAX_IMAGE_BYTES), its bytes counted whole (firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206), crossing at Blob transfer and Fast Origin Transfer, with one CDN request, as PICTURE_READ counts a private picture read (Claude 4 on #2848, 6711058709), and the clean-up head a failed request sends (dropTakenPictures). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). No new store call: the record read is the one the route already makes. Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), the storage of images/ (item 3), and the pictures' own bucket copy (lib/picture-r2-copy.ts, off).",
+    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (studioBlobMonthly). A door is its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try. A request reads only a file it took from the picture door, each once: a name a product's or a link's record already shows, sent again and not fresh, is answered from the record, written only after that file passed the checks (checkedSizes; a size the record cannot vouch for is read again), and any other name is refused before a read (C1-20261107-1550-TODOS-10). So every check spends a note a door wrote: the dearest kind a request is a page save of MAX_PAGE_PICTURES pictures with their 24 doors, 25 requests for 24 doors and 24 checks; and a month may also read the notes alive when it began, at most PICTURE_DOOR_MAX a store, counted on top. A check is a head with every try and a plain read at the most the door lets a file be (MAX_IMAGE_BYTES), its bytes counted whole (firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206), crossing at Blob transfer and Fast Origin Transfer, with one CDN request, as PICTURE_READ counts a private picture read (Claude 4 on #2848, 6711058709), and the clean-up head a failed request sends (dropTakenPictures). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free), at the dearest regional rate, gru1, US$ 7.00 and US$ 0.56 a million (vercel.com/docs/pricing/regional-pricing, read on 7 November 2026), because the store's Blob region is not reviewed. No new store call: the record read is the one the route already makes. Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), the storage of images/ (item 3), and the pictures' own bucket copy (lib/picture-r2-copy.ts, off).",
+  },
+  {
+    id: "blob-list",
+    feature: "Vercel Blob listing for the storage measurement of a vault open: every page, every try (MR audit item 5, 6 November 2026)",
+    monthlyUsd: (tier) => PAID_UPLOAD_OPENS[tier] * BLOB_LIST_MEASURES_PER_OPEN * BLOB_LIST_PAGES * BLOB_PUT_TRIES * BLOB_ADVANCED_OP,
+    sources: [
+      { file: "lib/file-store.ts", names: ["filesHeld", "page < 20", "blob.list"] },
+      { file: "lib/storage-quota.ts", names: ["storageUsed", "filesHeld(folder)"] },
+      { file: "lib/vault-storage.ts", names: ["openReservedVault", "storageUsed(input.folder, limit)"] },
+      { file: "lib/storage-reservations.ts", names: ["reserveStorage", "await measure()"] },
+      { file: "app/api/store/vault/route.ts", names: ["reserveStoreUpload(store, bytes, \"r2\")", "openReservedVault"] },
+      { file: "lib/upload-budget.ts", names: ["backend!=='r2'"] },
+      { file: "lib/upload-budget-policy.ts", names: ["PAID_UPLOAD_OPENS"] },
+    ],
+    basis: "A list is an Advanced Operation and goes through the same retrying request as a put (@vercel/blob list() calls requestApi), so BLOB_PUT_TRIES each; vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026, prices it as Regional, and it is counted at the dearest regional rate, gru1, US$ 7.00 a million (vercel.com/docs/pricing/regional-pricing, read on 7 November 2026), because the store's Blob region is not reviewed. filesHeld lists the store's prefix up to 20 pages of 1000, a page one Advanced Operation. A paying plan reaches it through one door, a vault open (openReservedVault, one measure per reserveStorage, so one per open), and each open first spends one of the plan's PAID_UPLOAD_OPENS (reserveStoreUpload), so a retry by the browser is another counted open. The product-file door (app/api/store/file/route.ts) and the stream door (app/api/store/stream/route.ts) are closed: reserveStoreUpload answers false for any backend but r2 before their measure. Not in this line, and said so: the studio page's measure for a store whose plan has ended (app/studio/page.tsx, once per render, STUDIO_PAGE_UNITS) and the daily closing job's measures and lists of ended stores (lib/plan-closing.ts), which a store that pays nothing causes and which belong to the closing exposure; and dropStamped (lib/pdf-stamp.ts), whose listFiles has no page cap and lists one product file's stamped copies, one per sale, on a legacy Blob path only (a vault path lists R2): unbounded until a cap or an official count of copies exists, never counted as zero.",
   },
   {
     id: "free-delivery",

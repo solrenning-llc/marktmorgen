@@ -68,6 +68,9 @@ async function main(): Promise<void> {
 
   part("Capped per store per day, so the form is not a weapon");
   is("the cap", CHILD_SAFETY_HOLDS_PER_DAY, 3);
+  const again = [];
+  for (let n = 0; n < 2; n++) again.push(await holdReported({ kind: "child_safety", url }, (await storeForEmail(owner))!));
+  is("the same product reported again, or a retry, is held again and does not spend the day", again, ["held", "held"]);
   const others = [];
   for (let n = 0; n < 4; n++) {
     const other = await addProduct(owner, `Another ${n}`, "On sale", "9", null);
@@ -76,9 +79,11 @@ async function main(): Promise<void> {
   const results = [];
   for (const other of others) results.push(await holdReported({ kind: "child_safety", url: `https://marktmorgen.com/@safetyshop/p/${other}` }, (await storeForEmail(owner))!));
   is("after the cap, the owner decides", results, ["held", "held", "capped", "capped"]);
+  is("a product over the cap stays over it when reported again", await holdReported({ kind: "child_safety", url: `https://marktmorgen.com/@safetyshop/p/${others[2]}` }, (await storeForEmail(owner))!), "capped");
+  is("and it was never taken off", (await readListing((await storeForEmail(owner))!, others[2]))?.hidden, false);
   const failing = redis.pipeline.bind(redis);
   // Only the day's count answers off its shape; the product is read as it is.
-  redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "INCR" ? [null, null] : failing(commands))) as typeof redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "SADD" ? [null, null, null] : failing(commands))) as typeof redis.pipeline;
   const unread = await holdReported({ kind: "child_safety", url: `https://marktmorgen.com/@safetyshop/p/${others[3]}` }, (await storeForEmail(owner))!).catch(() => "threw");
   redis.pipeline = failing;
   is("a count that cannot be read holds nothing and does not throw", unread, "unknown");
@@ -93,6 +98,9 @@ async function main(): Promise<void> {
   is("it says not to open the content, and that no AI agent may look at it", [alert?.text.includes("Do not open, download, forward or describe"), alert?.text.includes("AI")], [true, true]);
   is("it names the CyberTipline and the procedure", [alert?.text.includes("report.cybertip.org"), alert?.text.includes("docs/incident-response.md")], [true, true]);
   sent.length = 0;
+  await alertOwner({ kind: "child_safety", url: "https://elsewhere.example/page" }, "no_product", Date.UTC(2026, 10, 9, 18));
+  is("an address outside Marktmorgen is named, never shown, in the urgent email", [sent.at(-1)?.text.includes("elsewhere.example"), sent.at(-1)?.text.includes("an address outside Marktmorgen")], [false, true]);
+  sent.length = 0;
   await alertOwner({ kind: "intimate_image", url, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18));
   is("an intimate-image request says by when it has to be removed", [TAKE_IT_DOWN_HOURS, sent.at(-1)?.text.includes("by November 11, 2026, 6:00 PM UTC")], [48, true]);
 
@@ -106,11 +114,23 @@ async function main(): Promise<void> {
   is("the product is off the store", (await readListing((await storeForEmail(owner))!, fresh.product.id))?.hidden, true);
   is("the notice and the urgent email both reach the inbox", [sent.length, sent.some((mail) => /^URGENT/.test(mail.subject))], [2, true]);
   is("counted by kind only on the transparency page", (await transparencyCounts(Date.now())).years.some((year) => year.notices.child_safety === 1), true);
+  const store2 = await addProduct(owner, "Reported While The Store Cannot Be Read", "On sale", "9", null);
+  if (!store2.ok) throw new Error("no product");
+  sent.length = 0;
+  const reading = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands[0]?.[0] === "GET" && String(commands[0]?.[1]).includes("safetyshop")) throw new Error("timed out");
+    return reading(commands);
+  }) as typeof redis.pipeline;
+  const blind = await reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ ...CHILD, url: `https://marktmorgen.com/@safetyshop/p/${store2.product.id}` }) }));
+  redis.pipeline = reading;
+  is("a store that cannot be read: the owner is told it could not be confirmed, never that the address names nothing", [blind.status, sent.some((mail) => /^URGENT/.test(mail.subject) && mail.text.includes("could not be confirmed"))], [200, true]);
 
   part("Where people read it");
   const page = readFileSync("app/report/page.tsx", "utf8") + readFileSync("components/report-form.tsx", "utf8");
   is("the form offers both kinds and points to the CyberTipline", [page.includes("child_safety"), page.includes("intimate_image"), page.includes("report.cybertip.org")], [true, true, true]);
   is("it asks people not to send or describe the images", page.includes("Do not upload, attach or describe"), true);
+  is("it does not promise more than is done: an intimate image is removed within 48 hours", [page.includes("we act on those at once"), page.includes("removed within 48")], [false, true]);
   const terms = readFileSync("app/terms/page.tsx", "utf8");
   is("the Terms forbid it and say it is reported", [terms.includes('id="child-safety"'), terms.includes("Exploited Children (NCMEC)")], [true, true]);
   const procedure = readFileSync("docs/incident-response.md", "utf8");

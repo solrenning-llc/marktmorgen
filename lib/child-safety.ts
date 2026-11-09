@@ -6,8 +6,9 @@
  * store at once: it is unpublished, never deleted, so the files and records
  * stay as they are for the report to NCMEC and for the time the law asks them
  * to be kept (18 U.S.C. § 2258A(h)). Anybody can fill in the form, so the
- * automatic step is capped per store per day (CHILD_SAFETY_HOLDS_PER_DAY);
- * past it, the owner decides. A request to remove an intimate image shared
+ * automatic step is capped per store per day (CHILD_SAFETY_HOLDS_PER_DAY),
+ * counted in distinct products, so reports of one product and retries never
+ * spend the day; past it, the owner decides. A request to remove an intimate image shared
  * without consent is not taken down automatically: the owner has 48 hours to
  * remove it (TAKE_IT_DOWN_HOURS) and is told by when.
  *
@@ -16,7 +17,7 @@
  * description, and it says that nobody, person or AI agent, opens, downloads,
  * forwards or describes the content.
  *
- *   nl:csa:held:<store>:<YYYY-MM-DD>   counter  automatic holds that day, 2 days
+ *   nl:csa:held:<store>:<YYYY-MM-DD>   set      products held automatically that day, 2 days
  *   nl:csa:keep:<store>:<product>      "1"      preservation hold, 400 days (unit 2)
  *
  * Unit 2: the hold also marks the product for KEEP_SECONDS, before it is
@@ -87,16 +88,24 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
   try {
     const product = await reportedProduct({ url: report.url } as Report, store);
     if (!product) return "no_product";
+    const key = countKey(store, new Date(now).toISOString().slice(0, 10));
+    // The day's cap is counted in products: a second report of the same product, or a retry, adds nothing.
     const replies = repliesFor(
       await redisPipeline([
-        ["INCR", countKey(store, new Date(now).toISOString().slice(0, 10))],
-        ["EXPIRE", countKey(store, new Date(now).toISOString().slice(0, 10)), COUNT_SECONDS],
+        ["SADD", key, product.id],
+        ["SCARD", key],
+        ["EXPIRE", key, COUNT_SECONDS],
       ]),
-      2,
+      3,
     );
-    const count = replies?.[0];
-    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
-    if (count > CHILD_SAFETY_HOLDS_PER_DAY) return "capped";
+    const added = replies?.[0];
+    const count = replies?.[1];
+    if ((added !== 0 && added !== 1) || typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
+    if (count > CHILD_SAFETY_HOLDS_PER_DAY) {
+      // A product over the cap is taken back out of the day's set, so it never passes for one already held.
+      if (added === 1) await redisPipeline([["SREM", key, product.id]]).catch(() => console.error("a capped child-safety hold could not be taken out of the day's count"));
+      return "capped";
+    }
     // Kept before it is taken off: a creator who acts in between can still not remove or change it.
     const kept = repliesFor(await redisPipeline([["SET", keepKey(store, product.id), "1", "EX", KEEP_SECONDS]]), 1);
     if (kept?.[0] !== "OK") return "unknown";
@@ -109,13 +118,24 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
-  held: "The product it points at was taken off the store at once (unpublished). Nothing was deleted: its files and records are kept as they are, and the creator cannot remove, edit or publish it for 400 days.",
-  no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it from the notice email.",
-  not_held: "Nothing was taken off automatically. Act on it from the notice email.",
-  capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it from the notice email.`,
-  unknown: "Taking it off the store could not be confirmed. Act on it now from the notice email.",
-  failed: "Taking it off the store did not work. Act on it now from the notice email.",
+  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes or course lessons, from the studio. People who bought it before may still reach its files: switching that off is not automatic yet.",
+  no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
+  not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
+  capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 8 says.`,
+  unknown: "Taking it off the store could not be confirmed. Act on it now by hand, as docs/incident-response.md section 8 says.",
+  failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 8 says.",
 };
+
+/** Only a Marktmorgen address is shown in the urgent email; anything else is named, not quoted. */
+function where(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === "marktmorgen.com" || host === "www.marktmorgen.com") return url;
+  } catch {
+    // not an address: said below
+  }
+  return "an address outside Marktmorgen (see the notice email)";
+}
 
 function deadline(ms: number): string {
   const at = new Date(ms);
@@ -138,7 +158,7 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
     ? [
         "A report of child sexual exploitation was sent from /report.",
         "",
-        `Where: ${report.url}`,
+        `Where: ${where(report.url)}`,
         WHAT_HAPPENED[outcome],
         "",
         "Do not open, download, forward or describe the reported content, and do not ask any AI agent to look at it.",
@@ -148,7 +168,7 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
     : [
         "A request to remove an intimate image shared without consent was sent from /report (TAKE IT DOWN Act).",
         "",
-        `Where: ${report.url}`,
+        `Where: ${where(report.url)}`,
         `Remove it within ${TAKE_IT_DOWN_HOURS} hours: by ${deadline(now + TAKE_IT_DOWN_HOURS * 3_600_000)}, and make reasonable efforts to remove any identical copies on the site.`,
         "",
         "Do not forward or describe the image, and do not ask any AI agent to look at it.",
@@ -161,5 +181,10 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
     subject: subject.slice(0, 200),
     text: lines.join("\n"),
     idempotencyKey: `report-urgent-${report.kind}-${now}-${handle || "none"}`,
-  }).catch(() => false);
+  })
+    .catch(() => false)
+    .then((sent) => {
+      if (!sent) console.error("the urgent report email was not sent", report.kind);
+      return sent;
+    });
 }

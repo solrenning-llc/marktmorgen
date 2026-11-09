@@ -56,11 +56,12 @@ import { pairOf, send } from "@/lib/community-dm";
 import { tell } from "@/lib/community-notify";
 import { award } from "@/lib/community-points";
 import { createEvent, rsvp } from "@/lib/community-events";
-import { claimHandle as claimStore, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle as claimStore, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { cookieValues } from "./meeting-withdrawal-page-world";
 import { communityWords } from "@/lib/buyer-words/community";
+import { emailKey, mintPass, passCookieName } from "@/lib/learn";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -127,6 +128,7 @@ async function draw(page: () => Promise<ReactNode>): Promise<string> {
 
 const NAMES = "Some names could not be loaded just now. Reload the page to see them.";
 const LIST = "The members list could not be loaded just now. Reload the page to try again.";
+const COUNT = "We could not count the members just now.";
 const SEARCH = "Members could not be searched just now, so we cannot say whether any match. Try again in a moment.";
 const STUDIO_PEOPLE = "Who is coming could not be read just now";
 
@@ -227,6 +229,40 @@ async function main(): Promise<void> {
     is("control: and it is written", Number(await commentsOf()), Number(before) + 1);
   }
 
+  part("Writing as a member: an @ that did not read spends none of the member's posts or comments");
+  {
+    // The route took the member's place under "post"/"postDay" (and "comment") before reading the @s: a refusal
+    // that said "Nothing was changed" still used up the hour's and the day's posts. Now the @s are read first.
+    // Zed holds a ticket for this part only (a member without one is not let in to write); the config is put back after.
+    const ticket = await addProduct(OWNER, "Club pass", "", "0", null);
+    if (!ticket.ok) throw new Error("no product");
+    await saveConfig(cid, { ...config, access: [ticket.product.id] });
+    await original([["SET", `nl:cm:${cid}:ok:${emailKey("zed@membersexact.example")}`, JSON.stringify({ v: config.v, ok: true })]]);
+    const pass = await mintPass(club, "zed@membersexact.example", "all");
+    const asZed = (fields: Record<string, string>) => {
+      const form = new FormData();
+      form.set("handle", club.handle);
+      for (const [k, v] of Object.entries(fields)) form.set(k, v);
+      return communityPost(new NextRequest("https://marktmorgen.com/api/store/community", { method: "POST", headers: { cookie: `${passCookieName(club)}=${pass}` }, body: form })).then((r) =>
+        (r.headers.get("location") ?? "").replace(/^.*[?&]n=/, "").replace(/#.*$/, ""),
+      );
+    };
+    const slots = async () => {
+      const rows = await original([["GET", `nl:cm:rl:${cid}:${zed.k}:post`], ["GET", `nl:cm:rl:${cid}:${zed.k}:postDay`], ["GET", `nl:cm:rl:${cid}:${zed.k}:comment`]]);
+      return (rows as unknown[]).map((v) => Number(v ?? 0));
+    };
+    const start = await slots();
+    for (const [what, reply] of shapes(1)) {
+      is(`a member's post, ${what}: refused as "error"`, await withOdd(hmget(HANDLES), reply, () => asZed({ action: "post", space, from: "feed", text: `Hi @bea-ray (${what})` })), "error");
+      is(`a member's comment, ${what}: refused as "error"`, await withOdd(hmget(HANDLES), reply, () => asZed({ action: "comment", post: ownerPost.post.id, from: "post", text: `Yes @bea-ray (${what})` })), "error");
+    }
+    is("and no post, post of the day or comment was counted against the member", await slots(), start);
+    is("control: the member's post goes in", await asZed({ action: "post", space, from: "feed", text: "Hi @bea-ray" }), "posted");
+    is("control: the member's comment goes in", await asZed({ action: "comment", post: ownerPost.post.id, from: "post", text: "Yes @bea-ray" }), "commented");
+    is("control: and each is counted once", await slots(), [start[0] + 1, start[1] + 1, start[2] + 1]);
+    await saveConfig(cid, config);
+  }
+
   // What the pages show: Zed's post and comment, a room line said before names were kept with it, a conversation,
   // a notice, points, an event Zed is coming to.
   const zedPost = await createPost(cid, { space, author: zed.k, title: "Zed writes", text: "A post by Zed", img: null, kind: "post", poll: null }, club);
@@ -301,12 +337,29 @@ async function main(): Promise<void> {
     const privacyTimes = (html: unknown) => (typeof html === "string" ? (html.match(new RegExp(PRIVACY.source, "g")) ?? []).length : -1);
     is("members, control: the count is said, with the privacy promise once", [fine.startsWith("PAGE_FAILED") ? fine.slice(0, 160) : "drawn", fine.includes("1 member has chosen to be listed"), fine.includes(LIST), privacyTimes(fine)], ["drawn", true, false, 1]);
     const unknown = await withOdd(zcard, ["QUEUED"], () => draw(members));
-    // Rule 23: one expected value added (the privacy promise, said once); the four before it are unchanged.
+    // Rule 23: one expected value added (the privacy promise, said once). Then the third changed from true to false and
+    // a sixth added: with only the count unread the list is right there, so saying "The members list could not be
+    // loaded" contradicted the page; the page now says the count could not be had (COUNT), and only that.
     is(
-      "members, the count unread: drawn, no number, says the list could not be loaded, and still says nobody's email address is shown",
-      [typeof unknown === "string" && unknown.startsWith("PAGE_FAILED"), typeof unknown === "string" && /chosen to be listed/.test(unknown), typeof unknown === "string" && unknown.includes(LIST), typeof unknown === "string" && unknown.includes("Zed Quill"), privacyTimes(unknown)],
-      [false, false, true, true, 1],
+      "members, the count unread: drawn, no number, the list shown and not said unloaded, says the count could not be had, and still says nobody's email address is shown",
+      [typeof unknown === "string" && unknown.startsWith("PAGE_FAILED"), typeof unknown === "string" && /chosen to be listed/.test(unknown), typeof unknown === "string" && unknown.includes(LIST), typeof unknown === "string" && unknown.includes("Zed Quill"), privacyTimes(unknown), typeof unknown === "string" && new RegExp(`role="status"[^>]*>${COUNT.replace(/\./g, "\\.")}`).test(unknown)],
+      [false, false, false, true, 1, true],
     );
+    is("members, control: no word about the count when it read", fine.includes(COUNT), false);
+    {
+      // The count and the list both unread: the list's own notice says it all, and the count's is not said twice over.
+      const both = (c: Command[]) => zcard(c) || (c.length === 1 && c[0][0] === "ZREVRANGEBYSCORE");
+      const neither = await withOdd(both, ["QUEUED"], () => draw(members));
+      is("members, the count and the list unread: says the list could not be loaded, no number", [typeof neither === "string" && neither.includes(LIST), typeof neither === "string" && /chosen to be listed/.test(neither), privacyTimes(neither)], [true, false, 1]);
+    }
+    // In every store language: the count's own notice, its own words, never the list's.
+    {
+      const unreadWords = (await import("@/lib/buyer-words/community-names-unread")) as { COMMUNITY_NAMES_UNREAD_WORDS: Record<string, Record<string, unknown>> };
+      for (const [language, words] of Object.entries(unreadWords.COMMUNITY_NAMES_UNREAD_WORDS)) {
+        const said = words.membersCount;
+        is(`the count's notice, ${language}: its own sentence, not the list's`, [typeof said === "string" && said.length > 10, said !== words.membersList, language !== "en" || said === COUNT], [true, true, true]);
+      }
+    }
     // In every store language: the promise said alone is exactly the second sentence of the count, word for word.
     const words = (await import("@/lib/buyer-words/community-names-unread")) as Record<string, unknown>;
     const alone = typeof words.listedPrivacy === "function" ? (words.listedPrivacy as (language: unknown) => string) : null;

@@ -68,6 +68,9 @@ async function main(): Promise<void> {
   is("said as not read just now", failed.includes(UNREAD), true);
   is("never told to use the link they just used", failed.includes(FOOT), false);
   is("a link tries the same store again", failed.includes('href="/privacy/delete?store=harbor"'), true);
+  // Claude 5 on #2970 (LOW, WCAG 2.2 AAA 2.4.9, link purpose from the link text alone): out of its sentence, for
+  // example in a screen reader's list of links, the link still says what it does.
+  is("the link's own words say what it tries again", /href="\/privacy\/delete\?store=harbor"[^>]*>Try loading this store again<\/a>/.test(failed), true);
 
   part("A store answered in an unknown shape is said so too, never 'no such store' (review of #2970, MEDIUM)");
   for (const [name, prefix, reply] of [

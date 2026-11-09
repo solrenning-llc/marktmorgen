@@ -17,7 +17,11 @@ import { readProduct } from "@/lib/catalog";
 import { grantImported } from "@/lib/imported-purchases";
 import { courseAccess, mintPass, passCookieName } from "@/lib/learn";
 import { type Course, accessEndAhead, accessEndFor, accessEndState, editCourse, emptyCourse, parseCourse } from "@/lib/course";
-import { accessEndWhen } from "@/lib/course-access-end";
+import { accessEndFact, accessEndWhen } from "@/lib/course-access-end";
+import { ProductFacts } from "@/components/store-product";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { store as redis } from "./redis-stub";
@@ -77,6 +81,16 @@ async function main(): Promise<void> {
       w.accessEndedTitle.length > 0, w.accessUncheckedTitle.length > 0, w.accessUncheckedBody.length > 0], [true, true, true, true, true, true]);
   }
 
+  part("said on the sales page before anyone pays");
+  is("the line for a date still ahead, in the buyer's words", accessEndFact(set1, "en", NOW + DAY), "Access to the course ends on February 14, 2027, 8:00 AM UTC.");
+  is("no line once the date has passed: whoever buys then has no end", accessEndFact(set1, "en", NOW + 30 * DAY), null);
+  is("no line for a course with no date, or a record that could not be read", [accessEndFact(course, "en", NOW), accessEndFact(null, "en", NOW)], [null, null]);
+  is("every language places the moment", LANGUAGE_CODES.map((language) => accessEndFact(set1, language, NOW + DAY)?.includes("2027") ?? false), LANGUAGE_CODES.map(() => true));
+  const salesPage = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
+  is("the sales page reads it from the course record and hands it to both facts lines", [/accessEndFact\(course, store\.language\)/.test(salesPage), (salesPage.match(/accessEndLine=\{accessEndLine\}/g) ?? []).length], [true, 2]);
+  const studio = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
+  is("the studio draws the field beside the start date", /<CourseAccessEnd productId=\{product\.id\} endsAt=\{course\.accessEndsAt \?\? null\} passed=\{[^}]+\} \/>/.test(studio), true);
+
   part("the learner's gate, with the real ledger");
   redis.clear();
   // Stripe answers with no sale of its own (synthetic): the learner's right is the imported purchase.
@@ -103,6 +117,9 @@ async function main(): Promise<void> {
   const token = await mintPass(store, "learner@example.test", "all");
   const cookies = { get: (name: string) => (name === passCookieName(store) ? { value: token } : undefined) };
   const base: Course = { ...emptyCourse("b".repeat(32)) };
+  const shown = renderToStaticMarkup(createElement(ProductFacts, { store, product, accessEndLine: "Access to the course ends on February 14, 2027, 8:00 AM UTC." }));
+  is("the facts line under the title says it", shown.includes("Access to the course ends on February 14, 2027, 8:00 AM UTC."), true);
+  is("and says nothing when the page has no line", renderToStaticMarkup(createElement(ProductFacts, { store, product })).includes("Access to the course ends"), false);
   const ended = { ...base, accessEndsAt: JOINED + DAY, accessEndsSetAt: JOINED - DAY };
   const realNow = Date.now;
   try {

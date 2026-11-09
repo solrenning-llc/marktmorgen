@@ -18,6 +18,8 @@ import { openSession, sendMoveLink } from "@/lib/auth";
 import { keepRecoveryAddress } from "@/lib/recovery-address";
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { memberStores, putMember, readLog, readTeam } from "@/lib/team";
+import type { TeamRole } from "@/lib/team-roles";
+import { resolveAccess } from "@/lib/studio-route";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -54,14 +56,22 @@ const loseCarryReply = (to: string): Fault => (commands) =>
   carries(to)(commands) ? real(commands).then(() => Promise.reject(new Error("the reply was lost after it ran"))) : null;
 const unreadOld = (from: string): Fault => (commands) =>
   commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === addressKey(from) ? real(commands).then(() => ["not an address"]) : null;
-const unreadSessions: Fault = (commands) =>
-  commands.some((c) => c[0] === "SMEMBERS" && String(c[1]).startsWith("nl:auth:sessions:"))
-    ? real(commands).then((replies) => replies.map((reply, i) => (commands[i][0] === "SMEMBERS" && String(commands[i][1]).startsWith("nl:auth:sessions:") ? { 0: "x" } : reply)))
-    : null;
+const teamIndexKey = (email: string) => `nl:team:of:${sha(`nimbus-team-of:${email}`).slice(0, 40)}`;
+/** The first pipeline `hit` names is run, and its replies answered in a shape no Redis gives (rule 24). */
+const malformedOnce = (hit: (commands: Command[]) => boolean): Fault => {
+  let spent = false;
+  return (commands) => (!spent && hit(commands) ? ((spent = true), real(commands).then((replies) => replies.map(() => ({ 0: "x" })))) : null);
+};
 
 let n = 0;
 /** One move through the real route, with `faults` in place for the route alone. */
-async function move(recovery: string | null, faults: (from: string, to: string, sid: string) => Fault[] = () => [], mailDown = false, host = "", onTeam = false) {
+async function move(
+  recovery: string | null,
+  faults: (from: string, to: string, sid: string) => Fault[] = () => [],
+  mailDown = false,
+  host = "",
+  onTeam: boolean | { from: TeamRole; to?: TeamRole } = false,
+) {
   n += 1;
   const from = `move-rec-from-${n}@example.com`;
   const to = `move-rec-to-${n}@example.com`;
@@ -74,7 +84,10 @@ async function move(recovery: string | null, faults: (from: string, to: string, 
     await ensureStatsId(owner);
     const other = (await ensureStoreId(owner))!;
     sid = other.sid;
-    await putMember(other, from, "support");
+    // Second review (Claude 2 on #3326, finding HIGH): the new address may already be on that team, in its own role.
+    const roles = onTeam === true ? { from: "support" as TeamRole, to: undefined } : onTeam;
+    await putMember(other, from, roles.from);
+    if (roles.to) await putMember(other, to, roles.to);
   }
   if (recovery) await keepRecoveryAddress(from, recovery);
   const asker = await openSession(from);
@@ -105,8 +118,12 @@ async function move(recovery: string | null, faults: (from: string, to: string, 
   const told = mails.filter((m) => m.subject === SUBJECT || (m.subject === FINISHED && m.to === from));
   const all = mails.map((m) => m.to);
   const fromKey = (await real([["GET", addressKey(from)]]))[0];
-  const members = sid ? (await readTeam(sid)).members.map((m) => m.email) : [];
+  const team = sid ? (await readTeam(sid)).members : [];
+  const members = team.map((m) => m.email);
   return {
+    toRole: team.find((m) => m.email === to)?.role ?? null,
+    // What a session of the old address would get by naming the store (?store=), as the studio reads it (finding HIGH).
+    oldOpens: sid ? (await resolveAccess(from, { pinned: sid }, null)).ok : false,
     all, fromKey, sid, members,
     log: sid ? (await readLog(sid)).map((line) => line.what) : [],
     fromTeams: sid ? (await memberStores(from)).length : 0,
@@ -184,6 +201,32 @@ async function main() {
       `${label}: both addresses are told to ask each owner to invite the new address again`,
       [out.toldFrom.includes(`Ask each store's owner to invite ${out.to} again.`), toTo?.subject, toTo?.text.includes("Ask each store's owner to invite this address again.")],
       [true, "Your places on other teams did not move with your account", true],
+    );
+  }
+
+  part("second review of #3326: no place left on the old address while the move says every place came along");
+  const both = await move(null, () => [], false, "", { from: "admin", to: "support" });
+  is(
+    "the new address already on the team: the old address is taken off it, the new keeps the role its owner gave it, and nothing is said as left behind",
+    [both.location, both.members, both.toRole, both.oldOpens, both.fromTeams],
+    ["https://marktmorgen.com/studio?address=moved", [both.to], "support", false, 0],
+  );
+  is("and the team's log says the old address's place was taken off", both.log.some((what) => what.startsWith(`Moved their sign-in from ${both.from}`) && what.includes("admin")), true);
+  const bothStuck = await move(null, (_f, _t, sid) => [once((commands) => commands.some((c) => c[0] === "SET" && c[1] === `nl:team:${sid}`))], false, "", { from: "admin", to: "support" });
+  is(
+    "the new address already on the team, and taking the old one off refused once: said, and taken off by the move's own clean-up",
+    [bothStuck.location, bothStuck.members, bothStuck.toRole, bothStuck.oldOpens],
+    ["https://marktmorgen.com/studio?address=moved-no-teams", [bothStuck.to], "support", false],
+  );
+  for (const [label, fault] of [
+    ["the old address's list of teams answered in an unknown shape", (from: string) => [malformedOnce((commands) => commands.length === 1 && commands[0][0] === "SMEMBERS" && commands[0][1] === teamIndexKey(from))]],
+    ["the other store answered in an unknown shape", (_f: string, _t: string, sid: string) => [malformedOnce((commands) => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:store:id:${sid}`)]],
+  ] as const) {
+    const out = await move(null, fault as (from: string, to: string, sid: string) => Fault[], false, "", { from: "admin" });
+    is(
+      `${label}: never said as carried, and the old address opens the store no more`,
+      [out.location, out.members.includes(out.from), out.oldOpens],
+      ["https://marktmorgen.com/studio?address=moved-no-teams", false, false],
     );
   }
   const teamAndRecovery = await move(RECOVERY, (_f, to) => [refuseCarry(to), once((commands) => commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:crm:pacc:")))], false, "", true);

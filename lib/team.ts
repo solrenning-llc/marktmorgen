@@ -42,6 +42,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
@@ -725,20 +726,50 @@ export async function dropTeam(store: Store): Promise<void> {
  * would quietly take them off every team they are on. Answers the stores
  * whose place stayed on the old address (its restrictions or API keys could
  * not be carried), so the move can say so and take them off (dropMemberships).
+ *
+ * The old address is never left on a team while the store is answered as carried (Claude 2's review of #3326): a
+ * store's team record, not this index, is what lets a session in (lib/studio-route.ts resolveAccess reads roleIn),
+ * so a place left on the record with its index entry gone would open the store to whoever signs in at the old
+ * address later, and nobody would be told. So:
+ *
+ *   - a list of stores or a store read in an unknown shape (rule 24) is never read as "nothing there": the first
+ *     throws UnknownReplyError, so nothing is said as carried and the move's clean-up runs; the second keeps that
+ *     store as stayed;
+ *   - when the new address already has the store (it is on the team, or owns it), the old address's place is not
+ *     carried but taken off, through removeMember as any teammate taken off is. The new address keeps the role the
+ *     store's owner gave it, not the higher of the two: that is the owner's own choice for the address now on the
+ *     team, and raising it would hand that address a power nobody granted to it. The old address's restrictions and
+ *     API keys go with its place (held "left"; the owner is emailed which), as merging them into the new address's
+ *     own would decide for the owner. The team's log says which role the old place had, so the owner can raise it.
+ *     A removal that cannot be finished keeps the store as stayed.
  */
 export async function moveMemberships(from: string, to: string): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
-  const [ids] = await redisPipeline([["SMEMBERS", indexKey(before)]]);
-  const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id)) : [];
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(before)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a teammate's stores");
+  const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
   // Stores whose membership stayed on the old address: their index entry is kept.
   const stayed: string[] = [];
   for (const sid of list) {
-    const store = await storeForId(sid);
-    if (!store || normaliseEmail(store.email) === after) continue;
-    const role = await withTeam(sid, async () => {
+    const found = await storeForIdExactly(sid);
+    // Confirmed gone: nothing opens it, and its index entry goes. Not known: never read as gone.
+    if (found === "none") continue;
+    if (found === "unknown") {
+      stayed.push(sid);
+      continue;
+    }
+    const store = found;
+    const owns = normaliseEmail(store.email) === after;
+    const outcome = await withTeam(sid, async (): Promise<{ moved: Role } | { taken: Role; kept: Role } | null> => {
       const team = await readTeam(sid);
-      if (!team.members.some((m) => m.email === before) || team.members.some((m) => m.email === after)) return null;
+      const mine = team.members.find((m) => m.email === before);
+      if (!mine) return null;
+      // The new address already has this store: the old place is taken off below, outside this lock (removeMember takes it).
+      if (owns) return { taken: mine.role, kept: "owner" };
+      const theirs = team.members.find((m) => m.email === after);
+      if (theirs) return { taken: mine.role, kept: theirs.role };
       // What they may do with each pipeline (639 [GL7](7)) is copied to the new address first. If that cannot
       // be confirmed, this store's membership stays on the old address: the new one never has the store without
       // its restrictions.
@@ -764,13 +795,28 @@ export async function moveMemberships(from: string, to: string): Promise<string[
         await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
         throw error;
       }
-      return team.members.find((m) => m.email === before)?.role ?? "support";
+      return { moved: mine.role };
     });
-    if (!role) continue;
+    if (!outcome) continue;
+    if ("taken" in outcome) {
+      try {
+        await removeMember(store, before);
+      } catch (error) {
+        console.error("taking a moved address off a team its new address is already on failed; the move's clean-up takes it off", error);
+        stayed.push(sid);
+        continue;
+      }
+      await logTeam(sid, {
+        who: after,
+        role: outcome.kept,
+        what: `Moved their sign-in from ${before}, already on the team: the place at ${before} (${outcome.taken}) was taken off, and ${outcome.kept} kept`,
+      });
+      continue;
+    }
     // The old address's restrictions go only once the team names the new one.
     await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
-    await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
+    await logTeam(sid, { who: after, role: outcome.moved, what: `Moved their sign-in from ${before}` });
   }
   // The old address keeps only the stores that stayed on it; SREM with no member is an error in Redis, so it is sent only with some.
   const moved = list.filter((sid) => !stayed.includes(sid));
@@ -785,6 +831,13 @@ export async function moveMemberships(from: string, to: string): Promise<string[
  * teams. Each goes through removeMember, as any teammate taken off does: their API keys are paused, the owner is
  * told of those, and the team's log says why. True only when the index and every store on it were read and settled;
  * the person is told to ask each owner to invite the new address again.
+ *
+ * Kept on purpose, although it reaches past the person (Claude 2's review of #3326, finding LOW): the removal also
+ * pauses every key on that store whose maker was never recorded (lib/api-key-pause.ts leftTeam, held "told"),
+ * which may include the owner's own keys made before makers were recorded. Such a key may be the person's, and
+ * after this they are on that team at neither address, so it is never left open on a guess; the owner is emailed
+ * the keys by name and may turn each back on at once. Pausing only the person's recorded keys would leave theirs
+ * among the unrecorded ones working for somebody no longer on the team.
  */
 export async function dropMemberships(email: string): Promise<boolean> {
   if (!isRedisConfigured()) return true;

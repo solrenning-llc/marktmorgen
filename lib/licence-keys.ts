@@ -198,6 +198,34 @@ const warnedKey = (store: Store, product: Pick<Listing, "id">) => `${base(store,
  */
 export const REFUNDED_SALE = "refunded before a key";
 
+/**
+ * The same place's mark while the full refund is still `pending` (Claude 2's focal money review of #2868, LOW): a sale
+ * holding it is given no key either, but its refund stays unread, so the next runs read it again. A refund Stripe then
+ * answers `succeeded` (or a lost dispute) turns it into REFUNDED_SALE; only one Stripe answers exactly `failed` or
+ * `canceled` clears it, so the paid sale can be given its key. Never a key (it has spaces), and never shorter than
+ * REFUNDED_SALE, so turning it final never grows what the store's room was charged for it.
+ */
+export const PENDING_REFUND_SALE = "refund pending, no key yet";
+
+/**
+ * KEYS[1] a product's sales (`:sale`); ARGV the sale, the mark expected there, and what replaces it ("" deletes it).
+ * Changes the place only while it still holds that mark, and answers 1, or 0 when it holds anything else: a key settled
+ * in the meantime is never overwritten nor deleted. No writer else changes a field of `:sale` once written (settle and
+ * the marks use HSETNX), so this is the only way a mark moves. It never grows the place (REFUNDED_SALE is shorter than
+ * PENDING_REFUND_SALE); a deleted mark's bytes are not given back to the room, so the room only ever errs high.
+ */
+const SALE_SWAP = `-- marktmorgen:license-sale-swap:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1]) else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
+return 1`;
+
+/** Swaps a sale's mark for `next` ("" clears it) only while the place holds `expected`; any reply but 0 or 1 is unknown. */
+async function swapSale(store: Store, product: Pick<Listing, "id">, reference: string, expected: string, next: string): Promise<boolean> {
+  const reply = countOf(repliesFor(await redisPipeline([["EVAL", SALE_SWAP, 1, saleKey(store, product), reference, expected, next]]), 1)?.[0]);
+  if (reply !== 0 && reply !== 1) throw new UnknownReplyError("the swap of a refunded sale's mark");
+  return reply === 1;
+}
+
 /** Keys go to Redis in batches this size, well under any request limit. */
 const BATCH = 1_000;
 
@@ -272,11 +300,14 @@ function usable(store: Store, product: Listing): boolean {
  */
 export async function keyOfSale(store: Store, product: Listing, reference: string): Promise<SaleKey | null> {
   const known = await readSale(store, product, reference);
-  return known?.state === "refunded" ? null : known;
+  return known?.state === "refunded" || known?.state === "pending" ? null : known;
 }
 
-/** A sale's key as keyOfSale reads it, or that it was refunded before it had one (and whether a buyer's place still waits). */
-type SaleRead = SaleKey | { state: "refunded"; waiting: boolean } | null;
+/**
+ * A sale's key as keyOfSale reads it, or that it was refunded before it had one (and whether a buyer's place still
+ * waits), or that a full refund of it is still pending (PENDING_REFUND_SALE): no key either way.
+ */
+type SaleRead = SaleKey | { state: "refunded"; waiting: boolean } | { state: "pending" } | null;
 
 async function readSale(store: Store, product: Listing, reference: string): Promise<SaleRead> {
   if (!store.statsId || !isRedisConfigured() || !reference) return null;
@@ -285,6 +316,7 @@ async function readSale(store: Store, product: Listing, reference: string): Prom
     ["HEXISTS", waitingKey(store, product), reference],
   ]);
   if (key === REFUNDED_SALE) return { state: "refunded", waiting: Number(waiting) === 1 };
+  if (key === PENDING_REFUND_SALE) return { state: "pending" };
   if (typeof key === "string" && key) {
     const [raw] = await redisPipeline([["HGET", infoKey(store, product), key]]);
     // No record yet (the moment between the sale's key and its record in settle) is not revoked; a reply of another
@@ -310,6 +342,8 @@ export async function keyForSale(store: Store, product: Listing, reference: stri
   if (known?.state === "issued") return known;
   // Refunded before it had a key: none is given, and a place it kept on an empty pool is let go.
   if (known?.state === "refunded") return refundedSale(store, product, reference, known.waiting);
+  // A full refund still pending: no key while it is, and a place kept on an empty pool stays, served if the refund fails.
+  if (known?.state === "pending") return null;
   const setup = activeKeys(product) as KeySetup;
 
   if (setup.source === "generated") {
@@ -347,6 +381,7 @@ async function settle(store: Store, product: Listing, reference: string, email: 
     // Lost to a key given a moment ago from somewhere else, or to the refund job's mark: then no key at all.
     const again = await readSale(store, product, reference);
     if (again?.state === "refunded") return refundedSale(store, product, reference, again.waiting);
+    if (again?.state === "pending") return null;
     return again ?? { state: "waiting" };
   }
   const info: Info = { r: reference, e: email, at: Math.floor(Date.now() / 1000) };
@@ -564,7 +599,12 @@ export function storeHasKeys(store: Store): boolean {
  * made that payment (a cs_… reference), or the payment itself for an offer
  * taken in one click (a pi_… reference). Both the product bought and the one
  * ticked at checkout lose their keys, since both were paid by that payment.
- * A partial refund changes nothing. A dispute Stripe closed as lost takes
+ * A partial refund changes nothing. A full refund still pending revokes a
+ * key already given, but a sale with none yet only gets PENDING_REFUND_SALE,
+ * and that refund stays unread until Stripe says it went through (the mark
+ * turns final) or answers it failed or canceled (the mark is cleared, so the
+ * paid sale can be given its key); every failed or canceled refund read is
+ * looked up once for that, inside the same lookups. A dispute Stripe closed as lost takes
  * the key back as a full refund does (queue 388 [TB14]): the disputes closed
  * since the last run are read with the first page of refunds, from Stripe's
  * closing events, so a lost dispute revokes within the same five minutes;
@@ -739,7 +779,14 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       const id = typeof refund.id === "string" ? refund.id : "";
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
-      if (!rowGivesBack(refund)) continue;
+      const givesBack = rowGivesBack(refund);
+      // A refund Stripe answers exactly failed or canceled takes nothing back, but may undo the mark a pending one left
+      // (PENDING_REFUND_SALE): its sale is looked up like any refund's, and only that mark is cleared. Any other row
+      // that gives nothing back is skipped as before (Claude 2's focal money review of #2868, LOW).
+      const undone = !givesBack && refund.object !== "dispute" && (refund.status === "failed" || refund.status === "canceled");
+      if (!givesBack && !undone) continue;
+      // A full refund not yet through: the keyless sale is marked pending, and the refund stays unread until it settles.
+      const pending = givesBack && refund.object !== "dispute" && refund.status === "pending";
       const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
       if (Number(seen) === 1) {
         newest = Math.max(newest, created);
@@ -815,6 +862,8 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       // The refund is marked read only once every key it takes back is revoked for sure: a reply in an unknown shape
       // throws UnknownReplyError, and the refund stays unread for the next run (sweep A3 finding 2, CX-123 rule 24).
       let here = 0;
+      // A sale marked pending by this refund (now or before): the refund stays unread, read again next run.
+      let held = false;
       try {
         for (const sale of sales) {
           for (const productId of sale.products) {
@@ -824,14 +873,24 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
             // stays unread for the next run (review of #2868, CX-123 rule 24).
             if (!product && hasProduct(store, productId)) throw new UnknownReplyError("a refunded product's listing");
             if (!product) continue;
+            if (undone) {
+              // Only the pending mark is cleared, and only while it is still there: a key, the final mark or nothing
+              // stays as it is (SALE_SWAP). Asked whether or not the product still hands out keys.
+              await swapSale(store, product, sale.reference, PENDING_REFUND_SALE, "");
+              continue;
+            }
+            let heldHere = false;
             // A sale of a product set to hand out keys takes the refunded mark in the key's place when it has none yet,
             // with HSETNX, so it is never given one: settle's HSETNX of a key and this one cannot both win (Claude 2's
             // second money review of #2868, HIGH). A product never set up for keys gets no mark and keeps no data for it.
             let taken = true;
             if (product.keys) {
-              const marked = countOf(repliesFor(await orderWrite(store, [["HSETNX", saleKey(store, product), sale.reference, REFUNDED_SALE]]), 1)?.[0]);
+              // A pending refund writes its own mark, which denies the key the same way but can still be undone.
+              const mark = pending ? PENDING_REFUND_SALE : REFUNDED_SALE;
+              const marked = countOf(repliesFor(await orderWrite(store, [["HSETNX", saleKey(store, product), sale.reference, mark]]), 1)?.[0]);
               if (marked !== 0 && marked !== 1) throw new UnknownReplyError("HSETNX of a refunded sale's mark");
               taken = marked === 0;
+              if (!taken && pending) heldHere = true;
             }
             if (taken) {
               const key = repliesFor(await redisPipeline([["HGET", saleKey(store, product), sale.reference]]), 1)?.[0];
@@ -840,14 +899,26 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
               // 4's second review of #2868, CX-123 rule 24). A product never set up for keys answers none: no key.
               if (key === null && !product.keys) continue;
               if (typeof key !== "string" || !key) throw new UnknownReplyError("HGET of a sale's license key");
-              if (key !== REFUNDED_SALE) {
+              if (key === PENDING_REFUND_SALE) {
+                // Still pending: held. Through (succeeded, or a dispute lost): the mark turns final, only while it is
+                // still the pending one; a key settled after another run cleared it is revoked next run (0 is unknown).
+                if (pending) heldHere = true;
+                else if (!(await swapSale(store, product, sale.reference, PENDING_REFUND_SALE, REFUNDED_SALE))) {
+                  throw new UnknownReplyError("the swap of a pending refund's mark");
+                }
+              } else if (key !== REFUNDED_SALE) {
                 // A key whose record settle has not written yet is not "nothing to revoke": the refund stays unread and
                 // the next run revokes the record written meanwhile (Claude 2's second money review of #2868, MEDIUM).
                 if (!(await setRevoked(store, product, key, true, "refund"))) throw new RecordNotWrittenYet();
                 here += 1;
               }
             }
-            // A buyer still waiting for a key from an empty pool is not given one.
+            // A buyer still waiting for a key from an empty pool keeps the place while the refund is pending, and is
+            // served if it fails; once it is through, they are not given one.
+            if (heldHere) {
+              held = true;
+              continue;
+            }
             const dropped = countOf(repliesFor(await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]), 1)?.[0]);
             if (dropped === null) throw new UnknownReplyError("HDEL of a buyer waiting for a license key");
           }
@@ -855,6 +926,10 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       } catch (error) {
         if (!(error instanceof UnknownReplyError)) throw error;
         console.error("revoking a refunded sale's license key could not be confirmed", store.handle, error);
+        unsure = true;
+        continue;
+      }
+      if (held) {
         unsure = true;
         continue;
       }

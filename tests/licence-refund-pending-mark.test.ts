@@ -79,7 +79,7 @@ const isMark = (value: unknown) => typeof value === "string" && /\s/.test(value)
 /** The pending refund's own mark: a mark, not the final one. */
 const isPendingMark = (value: unknown) => isMark(value) && value !== REFUNDED_SALE;
 /** The compare-and-swap the job turns or clears a pending mark with. */
-const isSwap = (command: Command) => String(command[0]).toUpperCase() === "EVAL" && String(command[1]).includes("licence-sale-swap");
+const isSwap = (command: Command) => String(command[0]).toUpperCase() === "EVAL" && String(command[1]).includes("license-sale-swap");
 
 async function give(product: Listing, reference: string, email = "buyer@example.com"): Promise<unknown> {
   try {

@@ -13,6 +13,7 @@ import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
 import { CODE_LETTERS, MAX_LINKS } from "@/lib/short-link-rules";
 import { statusTime } from "@/lib/status-page";
+import { SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS } from "@/lib/short-link-open-rules";
 import { answering } from "./security/next-headers";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -111,6 +112,24 @@ async function main() {
   is("LEVE: refused for the hour", refused.status, 503);
   is("LEVE: Retry-After runs to the hour's end", Math.abs(refused.retry - (end - Date.now()) / 1000) <= 2, true);
   is("LEVE: the text names the hour's end", refused.text.includes(statusTime(end)), true);
+
+  // Added with the fix (9 November 2026).
+  part("One address looks up only a few codes nobody has on an instance; a link this instance knows still opens for it");
+  redis.clear(); forgetShortLinkOpenMemory(); tiredFolders = new Set();
+  startOfHour();
+  const k = await store("known@example.com", "known");
+  const kcode = await link(k.s, "reel");
+  const k2 = await link(k.s, "story");
+  is("the link opens and its store is now known here", (await open(kcode)).status, 302);
+  const prober = fresh();
+  for (let i = 0; i < SHORT_LINK_MISSES_PER_ADDRESS; i += 1) await open(codeOf(500 + i), prober);
+  const before = await hourCount();
+  const over = await open(codeOf(600), prober);
+  is("one more code from that address: 429, sent nowhere, nothing counted", [over.status, over.to, await hourCount()], [429, null, before]);
+  is("it says so plainly and when it ends, in Coordinated Universal Time", [/do not exist/.test(over.text), /Coordinated Universal Time/.test(over.text), over.retry > 0 && over.retry <= SHORT_LINK_MISS_WINDOW_MS / 1000], [true, true, true]);
+  is("a link whose store this instance knows still opens for that address", (await open(kcode, prober)).status, 302);
+  is("a link of the same store this instance has not opened is refused for that address only", [(await open(k2, prober)).status, (await open(k2)).status], [429, 302]);
+  is("the figures held", [SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS], [10, HOUR]);
   done();
 }
 main();

@@ -33,7 +33,7 @@ import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
 import { calendarWindow } from "@/lib/allowance-window";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import {
-  SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS,
+  SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS,
   SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_USED_UP_PAUSE_MS,
 } from "@/lib/short-link-open-rules";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
@@ -52,6 +52,10 @@ type Command = (string | number)[];
 // The figures the route is held to (lib/short-link-open-rules.ts).
 const PER_ADDRESS = 30;
 const UNPAID_PER_HOUR = 60;
+// Added 9 November 2026 (Claude 2's first cost review of #3330): the shared hour is counted in units, an unpaid store read
+// three and a code nobody has one, so it holds 180 lookups of codes nobody has.
+const READ_UNITS = 3;
+const LOOKUPS_PER_HOUR = UNPAID_PER_HOUR * READ_UNITS;
 const HOUR = 3_600_000;
 
 let commands: string[][] = [];
@@ -144,18 +148,25 @@ async function main(): Promise<void> {
   is("the link is not read", linkReads(), 0);
   later(61_000);
 
+  // Rule 23 (9 November 2026, Claude 2's first cost review): every UNPAID_PER_HOUR in this part was the hour's figure in opens;
+  // it is now LOOKUPS_PER_HOUR, the same hour in units, a code nobody has one unit.
   part("Codes nobody has, from many addresses: at most the hour's figure read, then a 503 that reads nothing");
   commands = [];
-  let ended = 0;
+  pipelines = 0;
+  await open(missing(3), fresh());
+  // Added 9 November 2026 (Claude 2's first cost review): what one code nobody has costs, counted and looked up.
+  const missPipelines = pipelines;
+  const missCommands = commands.length;
+  let ended = 1;
   let paused = 0;
   let pausedAnswer: Awaited<ReturnType<typeof open>> | null = null;
-  for (let i = 0; i < UNPAID_PER_HOUR + 40; i += 1) {
+  for (let i = 1; i < LOOKUPS_PER_HOUR + 40; i += 1) {
     const answer = await open(missing(i + 10), fresh());
     if (answer.to?.endsWith("/l/ended")) ended += 1;
     if (answer.status === 503) { paused += 1; pausedAnswer = answer; }
   }
-  is("the first ones are told the link ended, as before", ended <= UNPAID_PER_HOUR && ended >= UNPAID_PER_HOUR - 1, true);
-  is("no more than the hour's figure are read", linkReads() <= UNPAID_PER_HOUR, true);
+  is("the first ones are told the link ended, as before", ended <= LOOKUPS_PER_HOUR && ended >= LOOKUPS_PER_HOUR - 1, true);
+  is("no more than the hour's figure are read", linkReads() <= LOOKUPS_PER_HOUR, true);
   is("the rest are refused", paused >= 40, true);
   is("the refusal sends nobody anywhere and is never kept", [pausedAnswer?.to ?? null, pausedAnswer?.cache.includes("no-store")], [null, true]);
   is("it says when links open again", /UTC/.test(pausedAnswer?.text ?? "") && Number(pausedAnswer?.retry) > 0, true);
@@ -163,6 +174,9 @@ async function main(): Promise<void> {
   const quiet = await open(missing(5_000), fresh());
   is("once the instance knows the hour is used, an open sends nothing at all", [quiet.status, commands.length], [503, 0]);
   const live = await open(code, fresh());
+  // Kept on 9 November 2026 (Claude 2's first cost review, ALTO 1): a link this instance has not paid for a moment ago is
+  // still refused once the hour is used, because a code cannot be told from one nobody has before it is read; the hour
+  // now takes 180 codes nobody has and one address only SHORT_LINK_MISSES_PER_ADDRESS of them, the residual risk.
   is("a live link is refused too, honestly, without being called ended", [live.status, live.to], [503, null]);
 
   part("The next hour opens again");
@@ -207,11 +221,24 @@ async function main(): Promise<void> {
   const heaviestPipelines = pipelines;
   const heaviestCommands = commands.length;
   is("the free store without a place is refused, never sent on nor called ended", [heaviest.status, heaviest.to], [503, null]);
-  is("it was counted in the hour again", commands.filter((c) => c[0] === "INCR" && c[1].startsWith("nl:slink:open:")).length, 2);
+  // Rule 23 (9 November 2026, Claude 2's first cost review, ALTO 2): was 2, the lookup and the spill past the resting hour;
+  // a resting store's open never lands in the shared hour now: only its lookup, given back.
+  is("it was counted in the shared hour only for its lookup", commands.filter((c) => (c[0] === "INCR" || c[0] === "INCRBY") && c[1].startsWith("nl:slink:open:")).length, 1);
   is("it waits on no more pipelines and sends no more commands than the registry prices", [
     heaviestPipelines <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits, heaviestCommands <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands,
     unpaidPipelines <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits, unpaidCommands <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands,
   ], [true, true, true, true]);
+  // Added 9 November 2026 (Claude 2's first cost review): the same store's link on a new instance, its mark now written: the
+  // lookup, the store's id and mark, refused on the mark and counted in the resting hour, its record never read.
+  forgetShortLinkOpenMemory();
+  commands = [];
+  pipelines = 0;
+  const marked = await open(free, fresh());
+  const markPipelines = pipelines;
+  const markCommands = commands.length;
+  is("a resting store's link on a new instance is refused on its mark, nothing in the shared hour kept", [
+    marked.status, commands.some((c) => c[0] === "GET" && c[1].startsWith("nl:store:") && !c[1].startsWith("nl:store:id:")),
+  ], [503, false]);
   is("priced with room: two pipelines and four commands over the heaviest measured", [
     SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits >= heaviestPipelines + 2, SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands >= heaviestCommands + 4,
   ], [true, true]);
@@ -269,7 +296,17 @@ async function main(): Promise<void> {
   // Rule 23 (9 November 2026, third pre-review): was "under $26" ($25.17 at 11 waits and 21 commands); a resting store's first
   // open past the resting hour is counted in the shared hour again, so the heaviest is measured at 10 pipelines and 19 commands,
   // priced with its room at 12 and 23: $27.16 measured.
+  // Added 9 November 2026 (Claude 2's first cost review): a unit of the shared hour is priced at the dearer of a code nobody
+  // has (measured above, with room) and a third of the heaviest unpaid open, so the hour in units costs no less than in opens
+  // (three units, not more, keep this hour about where it was in opens: $28.34 against $27.16).
+  const miss = request(missPipelines + 2, missCommands + 4, 64);
+  const unit = Math.max(miss, unpaid / READ_UNITS);
+  const unitsMonth = (SHORT_LINK_UNPAID_PER_HOUR + SHORT_LINK_KNOWN_UNPAID_PER_HOUR) * READ_UNITS * MONTH_HOURS * unit;
+  console.log(`  cost  a code nobody has $${miss.toFixed(6)} (${missPipelines} pipelines and ${missCommands} commands measured), a unit of the shared hour $${unit.toFixed(6)}; the shared hour in units $${unitsMonth.toFixed(2)} a month`);
+  is("a code nobody has was measured: counted and looked up, two pipelines and three commands", [missPipelines, missCommands], [2, 3]);
+  is("the figures are the code's: three units a store read, the registry holds them", [SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_UNPAID_COMPANY_COST.readUnits], [READ_UNITS, READ_UNITS]);
   is("the shared count's unpaid opens stay under $28 a month", readMonth < 28, true);
+  is("the shared hour in units, every unit at its dearer price, stays under $29 a month", unitsMonth < 29, true);
   // Rule 23 (9 November 2026, third pre-review): was "under $6" (two counts a minute); three a minute now: $8.09 measured.
   is("one instance's counts beyond them stay under $9 a month", instanceMonth < 9, true);
   // Rule 23 (9 November 2026, third pre-review): was "one instance's store opens off the count stay under $22 a month" ($21.49,
@@ -289,6 +326,17 @@ async function main(): Promise<void> {
   is("the resting hour is held in the registry, priced above zero, its instances unknown", [
     SHORT_LINK_UNPAID_COMPANY_COST.restPerHour, restMonth > 0, SHORT_LINK_UNPAID_COMPANY_COST.instances,
   ], [SHORT_LINK_REST_UNPAID_PER_HOUR, true, null]);
+  // Added 9 November 2026 (Claude 2's first cost review, ALTO 2): past the resting hour a resting store's opens are refused and
+  // never counted in the shared hour, so what they read is held per resting store, their number unknown, never zero: its
+  // record at most once a resting mark's time, and on each instance each of its links looked up once while remembered.
+  const markOpen = request(markPipelines + 2, markCommands + 4, 4_096);
+  const restingStoreMonth = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.storeReadsPerHour * MONTH_HOURS * unpaid;
+  const restingStoreInstanceMonth = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.lookupsPerInstancePerHour * MONTH_HOURS * markOpen;
+  console.log(`  cost  past the resting hour, per resting store: its record $${restingStoreMonth.toFixed(2)} a month; per instance, its links looked up $${restingStoreInstanceMonth.toFixed(2)} a month (an open refused on its mark $${markOpen.toFixed(6)}: ${markPipelines} pipelines and ${markCommands} commands measured)`);
+  is("a resting store's open refused on its mark was measured: at most 4 pipelines and 9 commands", [markPipelines <= 4, markCommands <= 9], [true, true]);
+  is("past the resting hour, one resting store's record reads stay under $21 a month", restingStoreMonth < 21, true);
+  is("past the resting hour, one resting store's lookups on one instance stay under $18 a month", restingStoreInstanceMonth < 18, true);
+  is("their number is held unknown, never zero", [SHORT_LINK_UNPAID_COMPANY_COST.restingStores, SHORT_LINK_UNPAID_COMPANY_COST.instances, restingStoreMonth > 0, restingStoreInstanceMonth > 0], [null, null, true, true]);
   // It is not a line of lib/llc-fixed-costs.ts: those lines enter CURRENT_COMMERCIAL_TERMS, which only the owner changes.
   const ids = (list: readonly { id: string }[] | readonly string[]) => list.map((x) => (typeof x === "string" ? x : x.id));
   is("nothing that feeds the commercial terms names it", [

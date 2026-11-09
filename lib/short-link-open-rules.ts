@@ -7,20 +7,30 @@
  * (SHORT_LINK_OPEN_UNITS, lib/traffic.ts). What no store pays for is the
  * company's (MR item 2), in three parts:
  *
- *   - one hour's count every server instance shares, made before anything is
- *     read: at most SHORT_LINK_UNPAID_PER_HOUR opens no store pays for read
- *     the database in an hour (a code nobody has, a store gone, a request
- *     that could not be counted, a connection over its share, the first open
- *     of a store found resting once the resting hour is used), and at most
- *     SHORT_LINK_KNOWN_UNPAID_PER_HOUR more, only for links paid on that
- *     instance a moment ago, while the hour is used;
+ *   - one hour's count every server instance shares, made before a code is
+ *     looked up, in units (since 9 November 2026, Claude 2's first cost
+ *     review): a code looked up takes one unit, given back once its store
+ *     pays; a code nobody has keeps its one; an open whose store's record was
+ *     read and that no store pays for (a store gone, a record or count that
+ *     could not be read, a connection over its share) is counted again at
+ *     SHORT_LINK_UNPAID_READ_UNITS. At most SHORT_LINK_UNPAID_PER_HOUR such
+ *     reads, or SHORT_LINK_UNPAID_READ_UNITS times as many codes nobody has,
+ *     read in an hour, and at most SHORT_LINK_KNOWN_UNPAID_PER_HOUR reads
+ *     more, only for links paid on that instance a moment ago, while the hour
+ *     is used. One address may make one instance look up at most
+ *     SHORT_LINK_MISSES_PER_ADDRESS codes nobody has in
+ *     SHORT_LINK_MISS_WINDOW_MS, so a few addresses cannot fill the hour;
  *   - a second hour's count every instance shares, the resting hour, for
  *     stores over their own requests only: at most
  *     SHORT_LINK_REST_UNPAID_PER_HOUR opens an hour, each the first open of a
  *     link whose store is found resting (moved out of the shared hour once its
  *     store is known) or a store asked again whether it still rests (counted
- *     here before it is read). So a store over its own requests never uses the
- *     hour every other store's links need, until the resting hour is used;
+ *     here before it is read). Past it a resting store's open is refused and
+ *     never counted in the shared hour, so a store that cannot pay never uses
+ *     the hour every other store's links need; what it reads past it is held
+ *     per resting store (its resting mark, written for SHORT_LINK_TIRED_MAX_MS
+ *     once the resting hour is used) and per instance (it remembers the
+ *     store), their numbers unknown, never zero;
  *   - on each instance, one count a minute while either hour is used or a
  *     count is unreadable. How many instances run is not known, never zero
  *     (SHORT_LINK_UNPAID_COMPANY_COST, tests/plan-cost-registry.ts).
@@ -32,8 +42,20 @@
  * (SHORT_LINK_ENDED_MS).
  */
 
-/** Opens in an hour (UTC), in the count every instance shares, that no store pays for and that read the database. */
+/**
+ * Opens in an hour (UTC), in the count every instance shares, that read a found link's store and that no store pays
+ * for; the count is kept in units (SHORT_LINK_UNPAID_READ_UNITS each), so a code nobody has, one unit, is one of
+ * SHORT_LINK_UNPAID_PER_HOUR * SHORT_LINK_UNPAID_READ_UNITS lookups.
+ */
 export const SHORT_LINK_UNPAID_PER_HOUR = 60;
+/**
+ * Units an open that read its store's record and that no store pays for takes in the shared hour; a code looked up
+ * and not found takes one. Held in tests/short-link-open-cap.test.ts: this many lookups cost at least one such read.
+ */
+export const SHORT_LINK_UNPAID_READ_UNITS = 3;
+/** Codes nobody has that one address may make one instance look up in SHORT_LINK_MISS_WINDOW_MS (memory only, no cost). */
+export const SHORT_LINK_MISSES_PER_ADDRESS = 10;
+export const SHORT_LINK_MISS_WINDOW_MS = 3_600_000;
 /** How long an hour's count is kept: past its hour, so a late request still finds it. */
 export const SHORT_LINK_UNPAID_KEY_SECONDS = 2 * 3600;
 /** Commands an open sends to be counted before it reads: INCR and EXPIRE, in one pipeline. */
@@ -56,8 +78,9 @@ export const SHORT_LINK_TIRED_MS = 60_000;
 /**
  * Opens in an hour (UTC), in a second count every instance shares, of stores over their own requests: the first open
  * of a link whose store is found resting, moved there out of the shared hour, and a store asked again whether it still
- * rests, counted there before it is read. Past it, a first one stays counted in the shared hour, and a store due to be
- * asked again stays resting in the instance's memory for a minute, nothing sent.
+ * rests, counted there before it is read. Past it, a first one is refused and never counted in the shared hour (since
+ * 9 November 2026, Claude 2's first cost review), its store's resting mark kept SHORT_LINK_TIRED_MAX_MS, and a store
+ * due to be asked again stays resting in the instance's memory for a minute, nothing sent.
  */
 export const SHORT_LINK_REST_UNPAID_PER_HOUR = 120;
 /** How long an instance that found the hour used waits before counting again, instead of the rest of the hour. */
@@ -69,7 +92,7 @@ export const SHORT_LINK_KNOWN_KEPT = 5_000;
 export const SHORT_LINK_CONNECTION_MS = 60_000;
 /** Links, stores and connections an instance remembers each way at the most; past it the oldest are forgotten. */
 export const SHORT_LINK_TIRED_KEPT = 5_000;
-/** Opens past SHORT_LINK_UNPAID_PER_HOUR, in the same count, that may still read for a link its store paid for on that instance a moment ago (SHORT_LINK_KNOWN_MS); one that ends unpaid stays counted, so they are a ceiling too. */
+/** Opens past SHORT_LINK_UNPAID_PER_HOUR, in the same count (in SHORT_LINK_UNPAID_READ_UNITS each), that may still read for a link its store paid for on that instance a moment ago (SHORT_LINK_KNOWN_MS); one that ends unpaid stays counted, so they are a ceiling too. */
 export const SHORT_LINK_KNOWN_UNPAID_PER_HOUR = 20;
 /** How long an instance remembers which store a link it read belongs to: a link's store never changes. */
 export const SHORT_LINK_OWNER_MS = 3_600_000;

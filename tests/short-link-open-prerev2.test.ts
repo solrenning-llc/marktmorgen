@@ -14,7 +14,7 @@ import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { CODE_LETTERS } from "@/lib/short-link-rules";
 import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
-import { SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNPAID_PER_HOUR } from "@/lib/short-link-open-rules";
+import { SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS } from "@/lib/short-link-open-rules";
 import { SHORT_LINK_UNPAID_COMPANY_COST } from "./plan-cost-registry";
 import { calendarWindow } from "@/lib/allowance-window";
 import { answering } from "./security/next-headers";
@@ -101,7 +101,11 @@ async function main(): Promise<void> {
   const codes: string[] = [];
   for (let i = 0; i < 40; i += 1) codes.push((await make("e@example.com", "echo", `l${i}`)).code);
   for (const c of codes) await open(c); // paid: each is now known on this instance
-  for (let i = 0; i < 61; i += 1) await open(missing(i)); // the hour is used
+  // Rule 23 (9 November 2026, Claude 2's first cost review): was 61 codes nobody has; the shared hour is now counted in units
+  // (SHORT_LINK_UNPAID_READ_UNITS for a store read, one for a lookup) and one address looks up only a few codes nobody has,
+  // so the hour is set used directly, one unit past its figure.
+  await redis.pipeline([["SET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`, String(SHORT_LINK_UNPAID_PER_HOUR * SHORT_LINK_UNPAID_READ_UNITS + 1)]]);
+  await open(missing(0)); // this instance learns the hour is used
   for (const c of codes) await redis.pipeline([["DEL", `nl:slink:${c}`]]); // the creator deletes the links
   commands = [];
   for (const c of codes) await open(c);
@@ -109,10 +113,13 @@ async function main(): Promise<void> {
   console.log(`  P3 link reads while the hour was used: ${reads}`);
   // Rule 23 (9 November 2026, with the fix): was 0, what the registry held then; such reads are now counted in the shared
   // hour and allowed only up to SHORT_LINK_KNOWN_UNPAID_PER_HOUR past its figure (registered as knownPerHour).
-  is("P3: links read while the hour is used stay within the registered figure", [reads <= SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_COMPANY_COST.knownPerHour], [true, SHORT_LINK_KNOWN_UNPAID_PER_HOUR]);
+  // Rule 23 (9 November 2026, Claude 2's first cost review): was reads <= SHORT_LINK_KNOWN_UNPAID_PER_HOUR; the allowance is
+  // now in units, SHORT_LINK_UNPAID_READ_UNITS for each store read, and a link gone is one lookup, one unit.
+  is("P3: links read while the hour is used stay within the registered figure", [reads <= SHORT_LINK_KNOWN_UNPAID_PER_HOUR * SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_UNPAID_COMPANY_COST.knownPerHour], [true, SHORT_LINK_KNOWN_UNPAID_PER_HOUR]);
   // Added with the fix: every one of them was counted, and the shared count never passed the two figures together.
   const hourCount = Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0]);
-  is("P3: the reads that ended unpaid are counted, and admitted only within the hour's two figures", reads > 0 && hourCount >= SHORT_LINK_UNPAID_PER_HOUR + reads, true);
+  // Rule 23 (9 November 2026, Claude 2's first cost review): was hourCount >= SHORT_LINK_UNPAID_PER_HOUR + reads; the hour is in units now.
+  is("P3: the reads that ended unpaid are counted, and admitted only within the hour's two figures", reads > 0 && hourCount >= SHORT_LINK_UNPAID_PER_HOUR * SHORT_LINK_UNPAID_READ_UNITS + reads, true);
 
   // Everything below was added with the fix (9 November 2026).
   // Rule 23 (9 November 2026, third pre-review): the title said "asked again on the instance's minute"; it is now asked on its
@@ -197,7 +204,9 @@ async function main(): Promise<void> {
   part("A paused hour says when to try again, without promising more");
   reset();
   topOfHour();
-  for (let i = 0; i < SHORT_LINK_UNPAID_PER_HOUR + 1; i += 1) await open(missing(1_000 + i));
+  // Rule 23 (9 November 2026, Claude 2's first cost review): was SHORT_LINK_UNPAID_PER_HOUR + 1 codes nobody has; the hour is
+  // in units now and one address looks up only a few codes nobody has, so the hour is set used directly.
+  await redis.pipeline([["SET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`, String(SHORT_LINK_UNPAID_PER_HOUR * SHORT_LINK_UNPAID_READ_UNITS + 1)]]);
   const paused = await open(missing(5_000));
   is("503 with the time to try again, and no promise of when it opens", [paused.status, /Try this link again after .* UTC/.test(paused.text), /opens again by/i.test(paused.text)], [503, true, false]);
 

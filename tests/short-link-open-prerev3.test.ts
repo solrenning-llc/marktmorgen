@@ -52,7 +52,7 @@ async function link(s: { sid: string; statsId?: string | null }, name: string) {
   return made.link.code;
 }
 const startOfHour = () => later(HOUR - (Date.now() % HOUR) + 1_000);
-const hourCount = async () => Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0]);
+const hourCount = async () => Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0] ?? 0);
 const restCount = async () => Number((await redis.pipeline([["GET", `nl:slink:tired:${Math.floor(Date.now() / HOUR)}`]]))[0]);
 
 async function main() {
@@ -121,15 +121,20 @@ async function main() {
   is("five first opens: the resting hour holds them, the shared hour none", [await restCount(), await hourCount()], [5, 0]);
   is("the figures: the resting hour has its own, larger than the shared one", SHORT_LINK_REST_UNPAID_PER_HOUR > SHORT_LINK_UNPAID_PER_HOUR, true);
 
-  part("Past the resting hour's figure, a resting store's first opens go back to the shared hour, so every read stays counted");
+  // Rule 23 (9 November 2026, Claude 2's first cost review of #3330, ALTO 2): was "Past the resting hour's figure, a resting
+  // store's first opens go back to the shared hour", [503, 1] and [503, 2, false]: that spill let one store that cannot pay
+  // fill the hour every other store's links need. Past it the open is now refused and never counted in the shared hour;
+  // what the store reads past it is held by its resting mark, kept SHORT_LINK_TIRED_MAX_MS (priced per resting store in
+  // tests/short-link-open-cap.test.ts).
+  part("Past the resting hour's figure, a resting store's first opens are refused, never counted in the shared hour, and its mark is kept longer");
   await redis.pipeline([["SET", `nl:slink:tired:${Math.floor(Date.now() / HOUR)}`, String(SHORT_LINK_REST_UNPAID_PER_HOUR)]]);
   const w1 = await link(v.s, "w1");
   const w2 = await link(v.s, "w2");
-  is("one more first open past it: refused, and counted in the shared hour", [(await open(w1)).status, await hourCount()], [503, 1]);
+  is("one more first open past it: refused, and nothing in the shared hour", [(await open(w1)).status, await hourCount()], [503, 0]);
   commands = [];
-  is("the next, with the resting hour known used here: left in the shared hour, nothing sent to the resting one", [
+  is("the next, with the resting hour known used here: nothing in the shared hour, nothing sent to the resting one", [
     (await open(w2)).status, await hourCount(), commands.some((c) => c[1]?.startsWith("nl:slink:tired:")),
-  ], [503, 2, false]);
+  ], [503, 0, false]);
 
   part("The resting hour used, a store due to be asked again rests here until this instance counts again, nothing sent");
   later(SHORT_LINK_TIRED_MS + 1);
@@ -140,6 +145,24 @@ async function main() {
   const quietRest = await open(vcodes[1]);
   is("asked once, refused, the resting hour still used", [usedRest.status, after > 0], [503, true]);
   is("then refused from memory, nothing sent, and told to come back when this instance counts again", [quietRest.status, commands.length, quietRest.retry > 0 && quietRest.retry <= 60], [503, 0, true]);
+
+  // Added 9 November 2026 (Claude 2's first cost review, ALTO 2): what a resting store reads past the resting hour is held by
+  // its mark, so the mark found past it is kept the longer time.
+  part("A store found resting past the resting hour's figure keeps its mark the longer time, nothing in the shared hour");
+  redis.clear(); forgetShortLinkOpenMemory(); tiredFolders = new Set();
+  startOfHour();
+  const m = await store("m@example.com", "mike");
+  const mcode = await link(m.s, "reel");
+  tiredFolders.add(m.folder);
+  await redis.pipeline([["SET", `nl:slink:tired:${Math.floor(Date.now() / HOUR)}`, String(SHORT_LINK_REST_UNPAID_PER_HOUR)]]);
+  is("found resting: refused, nothing in the shared hour", [(await open(mcode)).status, await hourCount()], [503, 0]);
+  const markTtl = Number((await redis.pipeline([["TTL", `nl:slink:rest:${m.s.sid}`]]))[0]);
+  is("its mark is kept the longer time, so its record is read at most once that long", markTtl > SHORT_LINK_TIRED_MS / 1000 && markTtl <= SHORT_LINK_TIRED_MAX_MS / 1000, true);
+  forgetShortLinkOpenMemory();
+  commands = [];
+  is("on a new instance it is refused on its mark, its record not read", [
+    (await open(mcode)).status, commands.some((c) => c[0] === "GET" && c[1].startsWith("nl:store:") && !c[1].startsWith("nl:store:id:")),
+  ], [503, false]);
 
   part("A refusal's Retry-After is the time it will really last");
   redis.clear(); forgetShortLinkOpenMemory(); tiredFolders = new Set();

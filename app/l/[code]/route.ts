@@ -36,11 +36,11 @@ export async function GET(request: NextRequest, { params }: Params) {
     link = await findLink(code);
   } catch {
     // A link that cannot be read is not a link that ended (PR #2527): refused, kept by nobody.
-    shortLinkNotPaid(code, "unreadable");
+    shortLinkNotPaid(code, "unreadable", admission);
     return shortLinkRefusal({ state: "unknown", now: Date.now() });
   }
   if (!link) {
-    shortLinkNotPaid(code, "missing");
+    shortLinkNotPaid(code, "missing", admission);
     return ended();
   }
   const store = await payShortLinkOpen(code, link, admission);

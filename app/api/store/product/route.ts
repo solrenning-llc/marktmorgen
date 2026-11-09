@@ -48,6 +48,7 @@ import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
 import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
+import { clearTakenDown } from "@/lib/draft-preview";
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
 
@@ -426,6 +427,9 @@ export async function POST(request: NextRequest) {
       }
       const done = await setProductHidden(ref, id, body.hidden);
       result = done.ok ? { ok: true, product: done.product } : done;
+      // Published again: a mark from a takedown no longer holds its previews back (lib/draft-preview.ts). A clear
+      // that fails keeps the mark, which only refuses preview links: never a wrong opening.
+      if (done.ok && body.hidden === false) await clearTakenDown(guarded.store, id).catch((error) => console.error("preview mark not cleared", error));
     } else if (action === "unlink") {
       const cleared = await setProductLink(ref, id, null);
       result = cleared.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(cleared.reason) };

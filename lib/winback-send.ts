@@ -30,7 +30,8 @@ import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
-import { withStockHold } from "@/lib/stock";
+import { closeCheckout, withStockHold } from "@/lib/stock";
+import { withoutRecoveryLink } from "@/lib/recovery-setting";
 import { fromLine, render } from "@/lib/mail";
 import { tokensFor } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
@@ -55,6 +56,18 @@ const countKey = (statsId: string) => `nl:wb:n:${statsId}`;
 /** A day as the store's language writes it: "October 8, 2026", "8 de octubre de 2026". */
 const day = (seconds: number, language: unknown) =>
   new Date(seconds * 1000).toLocaleDateString(LANGUAGES[parseLanguage(language)].locale, { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/** A day and an hour as the store's language writes them: "October 8, 2026 at 3:00 PM UTC". */
+const dayAndHour = (seconds: number, language: unknown) =>
+  new Date(seconds * 1000).toLocaleString(LANGUAGES[parseLanguage(language)].locale, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  });
 
 /**
  * The email, and nothing else: pure, so it can be read before it is sent. In
@@ -224,7 +237,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         endedOn: day(ended, store.language),
         offer: affiliatesWords(store.language).winbackOffer(store.winback.percent, store.winback.months),
         link: `${storeBase(store)}/renew/${encodeURIComponent(product.id)}?back=${token}`,
-        until: day(nowSeconds + OFFER_DAYS * 86_400, store.language),
+        // The offer's end for the buyer, with its hour (readWinBack): the link is kept OFFER_DAYS from a moment no
+        // earlier than this, and the button stops opening CHECKOUT_OPEN_SECONDS before that; a day alone would
+        // promise the rest of it.
+        until: dayAndHour(nowSeconds + OFFER_DAYS * 86_400 - CHECKOUT_OPEN_SECONDS, store.language),
         language: store.language,
       });
       // The list email's own footer: why they get it, the one-click way off
@@ -305,7 +321,12 @@ export async function sendWinBacks(deadline: number, now = Date.now()): Promise<
 /** `percent` and `months` are the offer as it was emailed, whatever the setting says now. */
 export type WinBackGrant = { email: string; product: string; option: string; coupon: string; until: number; percent: number; months: number };
 
-/** Who a link in a come-back email is for, on this store and product, while it works. */
+/**
+ * Who a link in a come-back email is for, on this store and product, while it works. `until` is the offer's end for
+ * the buyer: the last moment the button opens a discounted checkout, CHECKOUT_OPEN_SECONDS before the link itself
+ * ends, because every one closes that long after it is made (openWinBack). The renew page reads it, so it never
+ * shows the offer while the button would answer that it ended; with no time left before it, null.
+ */
 export async function readWinBack(store: Store, product: string, token: string): Promise<WinBackGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !store.statsId || !isRedisConfigured()) return null;
   const [raw, ttl] = await redisPipeline([["GET", linkKey(token)], ["TTL", linkKey(token)]]);
@@ -313,10 +334,10 @@ export async function readWinBack(store: Store, product: string, token: string):
   try {
     const g = JSON.parse(raw) as { s?: unknown; e?: unknown; p?: unknown; o?: unknown; c?: unknown; pc?: unknown; m?: unknown };
     if (g.s !== store.statsId || g.p !== product || typeof g.e !== "string" || typeof g.c !== "string" || !g.c) return null;
-    const left = Number(ttl) > 0 ? Number(ttl) : 0;
+    const left = (Number(ttl) > 0 ? Number(ttl) : 0) - CHECKOUT_OPEN_SECONDS;
     const percent = typeof g.pc === "number" ? g.pc : 0;
     const months = typeof g.m === "number" ? g.m : 1;
-    if (!percent) return null;
+    if (!percent || left <= 0) return null;
     return { email: g.e, product, option: typeof g.o === "string" ? g.o : "", coupon: g.c, until: Math.floor(Date.now() / 1000) + left, percent, months };
   } catch {
     return null;
@@ -330,9 +351,11 @@ export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expir
  *
  * It closes by the day the email named (coupon audit, 9 November 2026): without a closing time Stripe keeps a
  * checkout open a day past the link's end. It is opened as a holding one, closing CHECKOUT_OPEN_SECONDS after it is
- * made (lib/stripe-account.ts, checkoutClosesAt), the shortest Stripe takes; with less time left on the link no
- * discounted checkout opens, and one that may close after the end, because making it took that long, is never handed
- * over. The store's coupon is one for every link, so it cannot carry one link's end (`redeem_by`).
+ * made (lib/stripe-account.ts, checkoutClosesAt), the shortest Stripe takes; so the offer ends for the buyer that
+ * long before the link does (readWinBack's `until`, which the page and the email name), and from then no discounted
+ * checkout opens. One that may close after the link's end, because making it took that long, is never handed over
+ * and is closed at Stripe. It never carries Stripe's recovery link (withoutRecoveryLink). The store's coupon is one
+ * for every link, so it cannot carry one link's end (`redeem_by`).
  */
 export async function openWinBack(
   store: Store,
@@ -353,17 +376,20 @@ export async function openWinBack(
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, grant.option)) return { ok: false, reason: "unavailable" };
   const option = product.options.length ? grant.option : undefined;
-  // Too little time left on the link for the shortest checkout Stripe makes: the offer has ended for it.
-  if (Math.floor(Date.now() / 1000) + CHECKOUT_OPEN_SECONDS > grant.until) return { ok: false, reason: "expired" };
   try {
     // A limited product holds a unit while the checkout is open, as any other checkout does; and every one is a
-    // holding checkout (held: true), so it closes in time.
+    // holding checkout (held: true), so it closes in time, never with Stripe's recovery link, which would reopen
+    // the discount after it.
     const held = await withStockHold(store, product, () =>
-      createCheckout(store, product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: true, digitalConsent: consent }),
+      createCheckout(withoutRecoveryLink(store), product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: true, digitalConsent: consent }),
     );
     if (!held.ok) return { ok: false, reason: "unavailable" };
-    // Counted from now, at least as late as the moment its closing time was set: past the end, never handed over.
-    if (Math.floor(Date.now() / 1000) + CHECKOUT_OPEN_SECONDS > grant.until) return { ok: false, reason: "expired" };
+    // Counted from now, at least as late as the moment its closing time was set: one that may close after the link's
+    // end is never handed over, and is closed at Stripe so nobody pays the discount through it.
+    if (Math.floor(Date.now() / 1000) >= grant.until) {
+      await closeCheckout(store, product, held.value.id);
+      return { ok: false, reason: "expired" };
+    }
     return { ok: true, url: held.value.url };
   } catch (error) {
     // A coupon the creator deleted in their own dashboard, most likely: said

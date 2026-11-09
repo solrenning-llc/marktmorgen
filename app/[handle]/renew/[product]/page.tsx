@@ -71,7 +71,8 @@ export default async function RenewPage({ params, searchParams }: Params) {
   const needsChoice = product ? product.options.length > 0 : false;
   // Offered only while its price can be bought (lib/product-option.ts, namedPriceOffered).
   const offer = selling && grant && product && namedPriceOffered(product, grant.option) ? grant : null;
-  const until = offer ? say.date(offer.until * 1000) : "";
+  // The offer's end for the buyer, with its hour: the button stops opening then (lib/winback-send.ts, readWinBack).
+  const until = offer ? say.dateTime(offer.until * 1000) : "";
   // The price the offer was for is gone (an option removed, even the last): said, never offered at another (lib/winback-send.ts, openWinBack).
   // Read from the product, never from the query alone.
   const priceGone = Boolean(grant && product && namedPriceGone(product, grant.option));

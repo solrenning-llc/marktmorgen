@@ -46,6 +46,17 @@ export function recoveryOn(store: Store): boolean {
   );
 }
 
+/**
+ * The store as a discounted offer's checkout reads it (lib/welcome-offer-send.ts,
+ * lib/winback-send.ts): Stripe is not asked for its recovery link, whose copy
+ * of the checkout would carry the person's discount past the offer's end. The
+ * way back to the store's "left" page stays; the buyer is not asked again for
+ * a yes they already gave or refused on the offer's own way in.
+ */
+export function withoutRecoveryLink(store: Store): Store {
+  return { ...store, recovery: { ...store.recovery, asks: false } };
+}
+
 /** The fields a checkout needs so Stripe asks for consent and keeps the email. */
 export function applyRecovery(body: URLSearchParams): void {
   body.set("consent_collection[promotions]", "auto");

@@ -17,6 +17,7 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { NO_WELCOME_OFFER, endsAt, leftWords, parseWelcomeOffer, remindAt } from "@/lib/welcome-offer";
 import { openWelcome, scheduleReminder, sendWelcomeReminders, welcomeFor } from "@/lib/welcome-offer-send";
 import { readClaimFull, recordLead, requestCopy } from "@/lib/free";
+import { CHECKOUT_OPEN_SECONDS } from "@/lib/stripe-account";
 import { readListing } from "@/lib/catalog";
 import { discountKindOf, entryOf } from "@/lib/discount-impact";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWelcomeOffer, storeForEmail } from "@/lib/store";
@@ -100,13 +101,18 @@ async function main(): Promise<void> {
   const claim = (await readClaimFull(token))!;
   const asked = Math.floor(Date.parse(claim.at) / 1000);
   let store = (await storeForEmail(OWNER))!;
+  // Rule 23 (claude5/welcome-offer-deadline, 9 November 2026): `until` was the full end, asked + 48 hours. It is now
+  // the offer's end for the buyer, the last moment the button opens a checkout that closes by the full end
+  // (CHECKOUT_OPEN_SECONDS before it), which the page, its countdown and the reminder name
+  // (tests/welcome-offer-effective-end.test.ts). The three expectations below follow it.
+  const end = asked + 48 * HOUR - CHECKOUT_OPEN_SECONDS;
   const first = await welcomeFor(store, claim, asked + 60);
-  is("the course, 25% off, until 48 hours after asking", [first?.product.title, first?.percent, first?.until, first?.ended], ["Knife Skills", 25, asked + 48 * HOUR, false]);
+  is("the course, 25% off, until 48 hours after asking, less the time a checkout stays open", [first?.product.title, first?.percent, first?.until, first?.ended], ["Knife Skills", 25, end, false]);
   const later = await welcomeFor(store, claim, asked + 10 * HOUR);
-  is("opened again ten hours later: the same end", later?.until, asked + 48 * HOUR);
+  is("opened again ten hours later: the same end", later?.until, end);
   const token2 = await ask("lead@example.com", free2.product.id, true);
   const claim2 = { ...(await readClaimFull(token2))!, at: new Date((asked + 20 * HOUR) * 1000).toISOString() };
-  is("a second free product a day later: still the same end", (await welcomeFor(store, claim2, asked + 20 * HOUR))?.until, asked + 48 * HOUR);
+  is("a second free product a day later: still the same end", (await welcomeFor(store, claim2, asked + 20 * HOUR))?.until, end);
   is("not offered on the product it is for", await welcomeFor(store, { ...claim, p: paid.product.id }), null);
 
   part("The button, while it lasts and after");
@@ -129,7 +135,9 @@ async function main(): Promise<void> {
   is("never for someone who did not agree", await scheduleReminder(store, (await readClaimFull(quiet))!, quiet, asked + HOUR), false);
   const before = sent.length;
   is("not before its time", (await sendWelcomeReminders(Date.now() + 10_000, asked + HOUR)).sent, 0);
-  const due = await sendWelcomeReminders(Date.now() + 10_000, remindAt(asked, 48) + 1);
+  // Rule 23: the reminder went at remindAt(asked, 48), twelve hours before the full end; it now goes twelve hours
+  // before the buyer's end, CHECKOUT_OPEN_SECONDS sooner, so its subject still says 12 hours. Sent a second after.
+  const due = await sendWelcomeReminders(Date.now() + 10_000, remindAt(asked, 48) - CHECKOUT_OPEN_SECONDS + 1);
   const mail = sent[sent.length - 1];
   is("sent when due, once, with the link back and the address at the bottom", [due.sent, sent.length - before, mail?.to, /25% off Knife Skills: 12 hours left/.test(mail?.subject ?? ""), mail?.text.includes(`/@harbor/free?token=${token}`), mail?.text.includes("1 Main St")], [1, 1, "lead@example.com", true, true, true]);
   is("and not again", (await sendWelcomeReminders(Date.now() + 10_000, remindAt(asked, 48) + 60)).sent, 0);

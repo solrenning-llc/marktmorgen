@@ -204,6 +204,18 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
   const entries = await readEntries(store, product);
   const entry = entries.get(session);
   if (!entry || entry.paid) return;
+  await closeCheckout(store, product, session);
+}
+
+/**
+ * Closes at Stripe a checkout opened but never handed over (an offer whose
+ * end came while Stripe made it: lib/welcome-offer-send.ts, lib/winback-send.ts),
+ * whether or not it holds a unit, so nobody can pay the discount through it.
+ * A limited product's unit is handed back only once Stripe says it expired,
+ * as releaseStockHold does; any other answer leaves the hold to stockLeft.
+ */
+export async function closeCheckout(store: Store, product: Listing, session: string): Promise<void> {
+  if (!store.stripeAccountId || !/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
   try {
     const closed = await onAccount(
       "POST",
@@ -215,6 +227,7 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
   } catch {
     return;
   }
+  if (limitedStock(product) === null || !store.statsId || !isRedisConfigured()) return;
   await redisPipeline([["HDEL", stockKey(store.statsId, product.id), session]]);
 }
 

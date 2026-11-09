@@ -25,7 +25,8 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { type Store, storeForId } from "@/lib/store";
 import { type Listing, readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { withStockHold } from "@/lib/stock";
+import { closeCheckout, withStockHold } from "@/lib/stock";
+import { withoutRecoveryLink } from "@/lib/recovery-setting";
 import { CHECKOUT_OPEN_SECONDS } from "@/lib/stripe-account";
 import { fromLine, render } from "@/lib/mail";
 import { tokensFor } from "@/lib/contacts";
@@ -47,7 +48,19 @@ export function canOfferWelcome(store: Store, product: Listing | null): product 
   return Boolean(product && product.priceCents > 0 && !product.options?.length && !product.pwyw && canSellProduct(store, product));
 }
 
+/**
+ * `until` is the offer's end for the buyer: the last moment its button opens
+ * a discounted checkout, CHECKOUT_OPEN_SECONDS before the person's full end,
+ * because every one closes that long after it is made (openWelcome). The
+ * page's countdown, its "until" and "ended" words and the reminder all read
+ * it, so nothing shown promises a time the button does not keep.
+ */
 export type WelcomeHere = { product: Listing; percent: number; until: number; ended: boolean };
+
+/** The offer's end for the buyer (WelcomeHere.until), from when they asked. */
+function welcomeEndsAt(began: number, hours: number): number {
+  return endsAt(began, hours) - CHECKOUT_OPEN_SECONDS;
+}
 
 /**
  * The offer for the person a free copy's link was sent to: begun at the
@@ -68,7 +81,7 @@ export async function welcomeFor(store: Store, claim: Pick<Claim, "e" | "p" | "a
   ]);
   if (made !== null) await redisPipeline([["INCR", countKey(store.statsId)]]).catch(() => undefined);
   const began = Number(kept) || start;
-  const until = endsAt(began, store.welcomeOffer.hours);
+  const until = welcomeEndsAt(began, store.welcomeOffer.hours);
   return { product: product as Listing, percent: store.welcomeOffer.percent, until, ended: nowSeconds >= until };
 }
 
@@ -81,8 +94,9 @@ export async function scheduleReminder(store: Store, claim: Claim, token: string
   if (!claim.c || !store.welcomeOffer.remind || !store.welcomeOffer.address || !store.statsId || !store.sid) return false;
   const offer = await welcomeFor(store, claim, nowSeconds);
   if (!offer || offer.ended) return false;
-  const began = offer.until - store.welcomeOffer.hours * 3600;
-  const when = remindAt(began, store.welcomeOffer.hours);
+  // The same time before the buyer's end (offer.until) as remindAt puts it before the full end.
+  const hours = store.welcomeOffer.hours;
+  const when = offer.until - (endsAt(0, hours) - remindAt(0, hours));
   if (when <= nowSeconds) return false;
   // One reminder per person and store, whatever else they ask for.
   // Ours only on OK or our own value read back (CX-123 rule 24, L9): anything else schedules nothing.
@@ -178,11 +192,6 @@ export async function welcomesOffered(store: Store): Promise<number> {
 
 export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "refused" | "consent" };
 
-/** Whether a holding checkout made at `nowSeconds` would still be open after `until`. */
-function closesAfter(nowSeconds: number, until: number): boolean {
-  return nowSeconds + CHECKOUT_OPEN_SECONDS > until;
-}
-
 /**
  * The checkout the offer's button opens: the offered product, the address
  * the free copy went to, the discount applied by Stripe, only while the
@@ -195,9 +204,12 @@ function closesAfter(nowSeconds: number, until: number): boolean {
  * end (`redeem_by`); the checkout does instead: it is opened as a holding
  * one, which closes CHECKOUT_OPEN_SECONDS after it is made
  * (lib/stripe-account.ts, checkoutClosesAt), the shortest Stripe takes.
- * With less time left than that, no discounted checkout opens, and one that
- * may close after the end, because making it took that long, is never
- * handed over.
+ * So the offer ends for the buyer that long before the person's full end
+ * (WelcomeHere.until), which is what the page, its countdown and the
+ * reminder say: from then, no discounted checkout opens. One that may close
+ * after the full end, because making it took that long, is never handed
+ * over and is closed at Stripe. It never carries Stripe's recovery link
+ * (withoutRecoveryLink).
  */
 export async function openWelcome(
   store: Store,
@@ -214,16 +226,19 @@ export async function openWelcome(
   if (offer.ended) return { ok: false, reason: "expired" };
   const product = await readProduct(store, offer.product.id);
   if (!product || !canOfferWelcome(store, offer.product)) return { ok: false, reason: "unavailable" };
-  // Too little time left for the shortest checkout Stripe makes: the offer has ended for this button.
-  if (closesAfter(nowSeconds, offer.until)) return { ok: false, reason: "expired" };
   try {
-    // Always a holding checkout (held: true), whether or not a limited unit is held, so it closes in time.
+    // Always a holding checkout (held: true), whether or not a limited unit is held, so it closes in time; and
+    // never with Stripe's recovery link, which would reopen the discount after it.
     const held = await withStockHold(store, product, () =>
-      createCheckout(store, product, origin, undefined, { coupon: store.welcomeOffer.coupon, email: claim.e, welcome: true, held: true, digitalConsent: consent }),
+      createCheckout(withoutRecoveryLink(store), product, origin, undefined, { coupon: store.welcomeOffer.coupon, email: claim.e, welcome: true, held: true, digitalConsent: consent }),
     );
     if (!held.ok) return { ok: false, reason: "unavailable" };
-    // Counted from now, at least as late as the moment its closing time was set: past the end, never handed over.
-    if (closesAfter(Math.max(nowSeconds, Math.floor(Date.now() / 1000)), offer.until)) return { ok: false, reason: "expired" };
+    // Counted from now, at least as late as the moment its closing time was set: one that may close after the
+    // person's full end is never handed over, and is closed at Stripe so nobody pays the discount through it.
+    if (Math.max(nowSeconds, Math.floor(Date.now() / 1000)) >= offer.until) {
+      await closeCheckout(store, product, held.value.id);
+      return { ok: false, reason: "expired" };
+    }
     return { ok: true, url: held.value.url };
   } catch (error) {
     // A coupon the creator deleted in their own dashboard, most likely.

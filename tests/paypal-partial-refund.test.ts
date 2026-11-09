@@ -37,6 +37,7 @@ import { join } from "node:path";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { readPayPalRefundsWithCoverage, refundSeen, type Paid, watchPayPal } from "@/lib/paypal-sales";
 import { payableLines } from "@/lib/paypal-payouts";
+import { BOOK_KEPT_REFUND_BYTES, bookKeptCommands } from "@/lib/api-read-rules";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -457,6 +458,42 @@ async function main(): Promise<void> {
   }
   const again = Number(await watchScore(ORDER));
   is("asked again within the hour, not at its next daily look", again > NOW && again <= NOW + 3600 + 5, true);
+
+  part("v3: the book asks about its own partial refunds, in its slices, and counts them before");
+  await setup();
+  const many: Paid[] = [];
+  for (let i = 0; i < 260; i += 1) many.push({ ...paid, order: `9O${String(i).padStart(15, "0")}`, capture: `7C${String(i).padStart(14, "0")}`, email: `m${i}@example.com` } as Paid);
+  for (const sale of many) await creditPayPalSale(store, sale, "Synthetic course");
+  const asks: { name: string; names: string[] }[] = [];
+  const counting = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    for (const command of commands) {
+      if ((command[0] === "HMGET" && String(command[1]).startsWith("nl:ppsell:back:")) || command[0] === "ZMSCORE") asks.push({ name: String(command[0]), names: command.slice(2).map(String) });
+    }
+    return counting.call(redis, commands);
+  };
+  try {
+    await readBook(store);
+  } finally {
+    redis.pipeline = counting;
+  }
+  const hmget = asks.filter((a) => a.name === "HMGET").flatMap((a) => a.names);
+  const zmscore = asks.filter((a) => a.name === "ZMSCORE").flatMap((a) => a.names);
+  is("the lasting partial mark of each payment is asked of backKey", hmget.includes(`part:paypal:${CAPTURE}`) && hmget.filter((n) => n.startsWith("part:paypal:")).length === 261, true);
+  is("the set's partial mark of each order is asked", zmscore.includes(`part:${ORDER}`) && zmscore.filter((n) => n.startsWith("part:")).length === 261, true);
+  is("no question carries more than 500 names", asks.every((a) => a.names.length > 0 && a.names.length <= 500), true);
+  is("the commands are counted before (bookKeptCommands)", asks.length <= bookKeptCommands(261), true);
+  is("each entry's bytes count the four names and their answers", BOOK_KEPT_REFUND_BYTES >= 8 * 8 + (71 + 12) + (36 + 24) + (76 + 12) + (41 + 24), true);
+  const garbled = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    const replies = await garbled.call(redis, commands);
+    return commands.map((command, i) => (command[0] === "ZMSCORE" ? command.slice(2).map((name) => (String(name) === `part:${ORDER}` ? "not-a-time" : null)) : replies[i]));
+  };
+  try {
+    is("a partial mark's time that is not whole seconds leaves the book unchecked", (await readBook(store)).refundsChecked, false);
+  } finally {
+    redis.pipeline = garbled;
+  }
 
   done();
 }

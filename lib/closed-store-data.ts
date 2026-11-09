@@ -77,6 +77,7 @@ import { problemKey } from "@/lib/pdf-stamp";
 import { tokenKey as unsubTokenKey, parseContact } from "@/lib/contacts";
 import { keyIndex as linkKeyIndex, linkKeyOf } from "@/lib/mail-clicks";
 import { unsubKey as communityUnsubKey } from "@/lib/community-mail";
+import { pictureNoteKey } from "@/lib/community-files";
 import { tokenKey as chatTokenKey } from "@/lib/inbox";
 import { linkKey as inviteLinkKey } from "@/lib/move-members";
 import { linkKey as pitchStopKey } from "@/lib/outreach";
@@ -434,6 +435,16 @@ async function fieldsOf(keys: string[], name: string): Promise<string[]> {
   return out.filter(Boolean);
 }
 
+/** A community post's picture path, read from the post as kept; "" for anything else. */
+function postPicture(raw: string): string {
+  try {
+    const path = (JSON.parse(raw) as { img?: { path?: unknown } | null } | null)?.img?.path;
+    return typeof path === "string" && /^community\/[0-9a-f]{24}\/[0-9a-f]{32}\.(webp|jpg)$/.test(path) ? path : "";
+  } catch {
+    return "";
+  }
+}
+
 export const FOLLOWERS: Readonly<Record<string, Follower>> = {
   // The list: each contact's stop link and the key its links carry.
   "nl:store:leads:": {
@@ -449,10 +460,16 @@ export const FOLLOWERS: Readonly<Record<string, Follower>> = {
       return out;
     },
   },
-  // A community's members: the link in their announcements that stops them.
+  // A community's members: the link in their announcements that stops them. And its posts: the mark each posted
+  // picture keeps for as long as its post keeps it (lib/community-files.ts, pictureNoteKey; Claude 6 on #3414).
   "nl:cm:": {
-    match: (key) => /^nl:cm:[^:]+:m$/.test(key),
-    find: async (keys) => (await fieldsOf(keys, "t")).map(communityUnsubKey),
+    match: (key) => /^nl:cm:[^:]+:m$/.test(key) || /^nl:cm:[^:]+:p:[^:]+$/.test(key),
+    find: async (keys) => {
+      const members = keys.filter((key) => key.endsWith(":m"));
+      const posts = keys.filter((key) => !key.endsWith(":m"));
+      const marks = (await stringsOf(posts)).map((raw) => postPicture(raw)).filter(Boolean).map(pictureNoteKey);
+      return [...(await fieldsOf(members, "t")).map(communityUnsubKey), ...marks];
+    },
   },
   // A conversation in the inbox: what its visitor's chat opens.
   "nl:inbox:": {

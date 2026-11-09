@@ -64,6 +64,12 @@ function uploadKey(path: string): string {
 }
 
 /**
+ * The key of a picture's note or mark, for the closing walk (lib/closed-store-data.ts, the follower of a community's
+ * posts): a closing store's posts name their pictures, and their marks go with them.
+ */
+export const pictureNoteKey = (path: string): string => uploadKey(path);
+
+/**
  * What a picture's note holds once a post took it (takeCommunityUpload), for as long as the post keeps it: no door can
  * be noted for its name, and the sweep never deletes it. Since the security reviews of #3414 (Claude 2 and Claude 6,
  * 9 November 2026) it is never let lapse: plan closing removes a community's files and keeps its posts, which print

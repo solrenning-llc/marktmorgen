@@ -229,7 +229,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:catalog:": E, "nl:catalog:move:cursor": C,
   "nl:cert:": T("nl:course:"),
   "nl:chatsum:": E,
-  "nl:cimg:": T("files"), "nl:cimg:doors": C, "nl:cimg:n:": E,
+  // A posted picture's mark goes with its post through the follower of nl:cm: (Claude 6 on #3414); a door's own note by
+  // itself within a day.
+  "nl:cimg:": T("nl:cm:", 1), "nl:cimg:doors": C, "nl:cimg:n:": E,
   "nl:closing:lock": C,
   "nl:closed:batch": C, "nl:closed:due": C, "nl:closed:walk": C, "nl:closed:lock": C,
   // Queue item 307 [EC1]: a store's closing emails, the addresses told and its members' last payments, named by its folder; the stores whose members are held.

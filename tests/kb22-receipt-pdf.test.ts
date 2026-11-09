@@ -200,6 +200,14 @@ async function main(): Promise<void> {
   is("control: tax inside the total and smaller than it still reads", smaller.ok && [smaller.receipt.taxIncluded, smaller.receipt.tax, smaller.receipt.total], [true, 99, 100]);
   const none = included(0);
   is("control: no tax on a total that adds up without it still reads", none.ok && [none.receipt.taxIncluded, none.receipt.tax], [false, 0]);
+  // Claude 6 on #2952 at fb231071 (MÉDIO, rule 24/30): the tax-on-top branch took before + tax === total with nothing
+  // before tax, so tax as large as the whole total still made a receipt. Same one-line page of 100 cents.
+  const onTop = (discount: number, tax: number, total: number) =>
+    receiptFrom(seller, REF, paidSession({ amount_subtotal: 100, amount_total: total, total_details: { amount_discount: discount, amount_shipping: 0, amount_tax: tax } }, { amount: total }), hundred);
+  is("tax on top of an amount below zero: unreadable", onTop(300, 300, 100), { ok: false, why: "unreadable" });
+  is("tax on top of nothing, the whole total: unreadable", onTop(100, 50, 50), { ok: false, why: "unreadable" });
+  const smallest = onTop(0, 1, 101);
+  is("control: tax on top of a real amount, below the total, still reads", smallest.ok && [smallest.receipt.taxIncluded, smallest.receipt.tax, smallest.receipt.total], [false, 1, 101]);
   const MAX_SECONDS = 8_640_000_000_000; // the last second a Date can hold (8.64e15 ms)
   const at = (created: number) => receiptFrom(seller, REF, paidSession({}, { created }), linesPage());
   is("a charge date past any Date: unreadable, not a crash", at(Number.MAX_SAFE_INTEGER), { ok: false, why: "unreadable" });

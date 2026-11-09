@@ -135,11 +135,13 @@ export function receiptFrom(seller: Seller, reference: string, session: unknown,
   const tax = ownField(details, "amount_tax");
   if (!amount(discount) || !amount(shipping) || !amount(tax)) return refuse("unreadable");
   // Stripe's figures must add up one way or the other: tax on top, or tax inside the prices.
+  // Either way tax is a part of the total, never all of it or more (total is above zero here): tax on top
+  // needs a real amount before it, and tax inside the prices is smaller than what they add up to.
+  if (tax > 0 && tax >= total) return refuse("unreadable");
   const before = subtotal - discount + shipping;
   let taxIncluded: boolean;
   if (before + tax === total) taxIncluded = false;
-  // Tax inside the prices is a part of the total, so it is always smaller than it (total is above zero here).
-  else if (tax > 0 && tax < total && before === total) taxIncluded = true;
+  else if (tax > 0 && before === total) taxIncluded = true;
   else return refuse("unreadable");
 
   const email = field(ownField(session, "customer_details"), "email");

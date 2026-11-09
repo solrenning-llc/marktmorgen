@@ -17,6 +17,7 @@ import {
   takeMoveRoom,
 } from "@/lib/auth";
 import { moveAccount, storeForEmail } from "@/lib/store";
+import { standingOf } from "@/lib/plan-standing";
 import { moveMemberships } from "@/lib/team";
 import { MoveSplitError, discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { holdsSecondStep } from "@/lib/second-step-gate";
@@ -74,7 +75,8 @@ export async function POST(request: NextRequest) {
   // MEDIUM, Claude 1's decision).
   const moving = await storeForEmail(from).catch(() => undefined);
   if (moving === undefined) return away("/signin?status=move-error");
-  const room = await takeMoveRoom(moving ? moving.sid : null);
+  // Paying stores count apart from the others, so stores made for free never close the way out for those who pay.
+  const room = await takeMoveRoom(moving ? { id: moving.sid, paid: standingOf(moving) === "paid" } : null);
   if (room === "store") return away("/signin?status=move-month");
   if (room === "company") return away("/signin?status=move-paused");
   if (room !== "within") return away("/signin?status=move-error");

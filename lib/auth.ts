@@ -270,14 +270,18 @@ export async function readBrokenMove(email: string): Promise<{ from: string; to:
  */
 export const MOVES_PER_STORE_PER_MONTH = 10;
 /**
+ * Moves the company pays for in a calendar month (UTC) for stores with a running paid plan, all of them together.
+ * Kept apart from the others' (MOVES_PER_MONTH_UNPAID), so stores made for free can never use up the moves of the
+ * creators who pay, nor close the way out for someone losing their inbox (Claude 5's focal review of #2271).
+ */
+export const MOVES_PER_MONTH_PAID = 1_500;
+/** The same for every other store (no plan, in a trial, or a plan that ended), all of them together. */
+export const MOVES_PER_MONTH_UNPAID = 500;
+/**
  * Moves the company pays for in a calendar month (UTC), all stores together: the ceiling of the move's own work,
  * its EVAL (NOTE_MOVE_COPY) and the commands around it, taken before any of it (Claude 1's decision on #2271).
  */
-/** Moves a month for stores with a running paid plan, all together (#2271, Claude 5's focal review). */
-export const MOVES_PER_MONTH_PAID = 1_500;
-/** The same for every other store. */
-export const MOVES_PER_MONTH_UNPAID = 500;
-export const MOVES_PER_MONTH = 2_000;
+export const MOVES_PER_MONTH = MOVES_PER_MONTH_PAID + MOVES_PER_MONTH_UNPAID;
 /** Kept past the end of any calendar month, so a count lapses only once its month is over. */
 const MOVE_ROOM_SECONDS = 32 * 86_400;
 
@@ -286,21 +290,23 @@ export type MoveRoom = "within" | "store" | "company" | "unknown";
 
 /**
  * Takes one move of the month, before anything moves (the move route, before markMoving): first the store's own
- * count, then, only within it, the company's, so a store past its count never spends the company's. Each is one
+ * count, then, only within it, the company's for its kind of store (a running paid plan, or not), so a store past
+ * its count never spends the company's, and stores without a paid plan never spend the paying ones'. Each is one
  * SET NX EX and one INCR, read in their exact shape; a reply in any other shape, or Redis not answering, is
  * "unknown" and refuses the move (SG2 rule 24): a count is never guessed as room. A unit taken by a move that then
- * fails stays taken, on the safe side. `store` is the store's own id, or null when the address holds none, which
- * takes only the company's count: such a move finds nothing to carry and writes no copy.
+ * fails stays taken, on the safe side. `store` is the store's own id and whether its plan is paid, or null when the
+ * address holds none, which takes only the others' company count: such a move finds nothing to carry.
  */
-export async function takeMoveRoom(store: string | null, now = Date.now()): Promise<MoveRoom> {
+export async function takeMoveRoom(store: { id: string; paid: boolean } | null, now = Date.now()): Promise<MoveRoom> {
   if (!isRedisConfigured()) return "unknown";
   const month = new Date(now).toISOString().slice(0, 7);
   if (!/^\d{4}-\d{2}$/.test(month)) return "unknown";
   if (store !== null) {
-    const own = await countMove(`nl:auth:move-room:${month}:${(await sha256Hex(`nimbus-move-room:${store}`)).slice(0, 32)}`, MOVES_PER_STORE_PER_MONTH);
+    const own = await countMove(`nl:auth:move-room:${month}:${(await sha256Hex(`nimbus-move-room:${store.id}`)).slice(0, 32)}`, MOVES_PER_STORE_PER_MONTH);
     if (own !== "within") return own === "over" ? "store" : "unknown";
   }
-  const all = await countMove(`nl:auth:move-room:${month}`, MOVES_PER_MONTH);
+  const paid = store?.paid === true;
+  const all = await countMove(`nl:auth:move-room:${month}:${paid ? "paid" : "unpaid"}`, paid ? MOVES_PER_MONTH_PAID : MOVES_PER_MONTH_UNPAID);
   return all === "within" ? "within" : all === "over" ? "company" : "unknown";
 }
 

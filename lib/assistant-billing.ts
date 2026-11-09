@@ -14,9 +14,11 @@
  * and only to a store whose plan is paid, not in its trial. A store whose
  * add-on payment is disputed has it ended at once and is not sold it again.
  * A store whose plan ends has its add-on set to stop at the end of the month
- * already paid: nothing more is charged for it.
+ * already paid: nothing more is charged for it. A second live add-on for one
+ * store (two starts paid at once) is set by the daily job to stop the same way,
+ * once Stripe confirms the written-down one active and renewing.
  */
-import { ADD_ON_MARK, BillingError, onPlatform, onPlatformAt, setCancelAtPeriodEnd } from "@/lib/billing";
+import { ADD_ON_MARK, BillingError, isAddOn, onPlatform, onPlatformAt, setCancelAtPeriodEnd } from "@/lib/billing";
 export { ADD_ON_MARK, isAddOn } from "@/lib/billing";
 import { standingOf } from "@/lib/plan-standing";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, setAssistantPlan, storeForHandle, storeRef } from "@/lib/store";
@@ -312,6 +314,57 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
   }
 }
 
+/**
+ * An add-on of this very store, on its own customer, active and renewing, read in its exact shape (rule 24): its own
+ * metadata marks it `addon=assistant` for this store and carries no plan's `store`, and its stop fields say it does not
+ * stop (`cancel_at_period_end` exactly false, `cancel_at` exactly null). Anything else is not known to be one.
+ */
+function renewsForStore(subscription: Record<string, unknown>, store: Store): boolean {
+  const meta = ownField(subscription, "metadata");
+  return (
+    ownField(subscription, "status") === "active" &&
+    ownField(subscription, "cancel_at_period_end") === false &&
+    hasOwnField(subscription, "cancel_at") &&
+    ownField(subscription, "cancel_at") === null &&
+    typeof store.stripeCustomerId === "string" &&
+    ownField(subscription, "customer") === store.stripeCustomerId &&
+    plainObject(meta) &&
+    ownField(meta, "addon") === ADD_ON_MARK &&
+    ownField(meta, "assistant_for") === store.handle &&
+    !hasOwnField(meta, "store")
+  );
+}
+
+/**
+ * A second live add-on beside the one a store wrote down (two starts paid at the same moment, across the checkout key's
+ * window): settled by the daily job, never left for a person. The written-down one is read again from Stripe in this
+ * run; only when it is confirmed an undisputed add-on of this store, active and renewing, is the second one read again
+ * the same way and, when it too is an undisputed active add-on of this store, set to stop at the end of the month
+ * already paid (setCancelAtPeriodEnd: never ended at once, never refunded or prorated), under a key named by that
+ * subscription so a retry is the same request. Any other reply leaves both as they are, and a stop whose reply is not
+ * acknowledged is not done: the next run reads both again. True only when Stripe acknowledged the stop.
+ */
+async function settleSecondAddOn(store: Store, secondId: string): Promise<boolean> {
+  const keptId = store.assistantPlan?.subscriptionId ?? "";
+  if (!SUBSCRIPTION_PATTERN.test(keptId) || keptId === secondId) return false;
+  try {
+    const kept = await readSubscription(keptId);
+    if (!renewsForStore(kept, store) || (await disputed(keptId))) {
+      console.error("a second add-on beside one Stripe does not confirm active and renewing: both left as they are");
+      return false;
+    }
+    const second = await readSubscription(secondId);
+    // One in dispute is never acted on here: the dispute rules (syncAssistant) stay as they are.
+    if (!renewsForStore(second, store) || (await disputed(secondId))) return false;
+    const state = await setCancelAtPeriodEnd(secondId, true, `assistant-duplicate-stop:${secondId}`);
+    if (state.state !== "active" || !state.cancelsAtEnd) throw new Error("the stop of a second add-on was not acknowledged");
+    return true;
+  } catch (error) {
+    console.error("settling a second add-on failed; the next run reads it again", error);
+    return false;
+  }
+}
+
 /** One add-on subscription met in Stripe's list (lib/billing-sync.ts): its store, by `assistant_for`, brought in line when it is that store's. */
 export async function applyListedAssistant(subscription: Record<string, unknown>): Promise<boolean> {
   const meta = subscription.metadata as Record<string, string> | null | undefined;
@@ -324,8 +377,13 @@ export async function applyListedAssistant(subscription: Record<string, unknown>
   // Only on this store's own customer: an address let go may be another store's now.
   if (!store.stripeCustomerId || customer !== store.stripeCustomerId) return false;
   if (store.assistantPlan && store.assistantPlan.subscriptionId !== id) {
-    // Another one beside the one written down: the one in good standing is kept, a person settles two.
-    if (store.assistantPlan.active || subscription.status !== "active") return false;
+    // Another one beside the one written down. Beside one in good standing, a live second one is set to stop
+    // (settleSecondAddOn); beside one no longer active, a live one is adopted below.
+    if (store.assistantPlan.active) {
+      if (!isAddOn(subscription) || subscription.status !== "active" || subscription.cancel_at_period_end === true) return false;
+      return settleSecondAddOn(store, id);
+    }
+    if (subscription.status !== "active") return false;
   }
   const known = store.assistantPlan?.subscriptionId === id ? store : ((await setAssistantPlan(storeRef(store), assistantPlanOf(subscription))) ?? store);
   await syncAssistant(known, subscription);

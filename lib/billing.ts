@@ -1135,10 +1135,14 @@ export function observeRestartedPlan(
  *
  * Errors are thrown, not swallowed: the caller has to tell the creator that
  * nothing changed, and "Stripe did not answer" is not "cancelled".
+ *
+ * `idempotencyKey` for a caller that retries the same stop on its own (the
+ * daily job settling a second add-on, lib/assistant-billing.ts).
  */
 export async function setCancelAtPeriodEnd(
   subscriptionId: string,
   cancel: boolean,
+  idempotencyKey?: string,
 ): Promise<SubscriptionState> {
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
@@ -1147,6 +1151,7 @@ export async function setCancelAtPeriodEnd(
     "POST",
     `/subscriptions/${encodeURIComponent(subscriptionId)}`,
     new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false" }),
+    idempotencyKey ? { idempotencyKey } : undefined,
   );
   // Only an identified, explicit provider observation can confirm this change.
   // Unknown replies must throw so callers retain paid access and pause evidence.

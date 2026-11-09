@@ -7,7 +7,8 @@
  *     person's erasure) answered short, long, or with anything but exactly "OK"
  *     for the SET sends no paid email; the link, in case it landed with its
  *     answer lost, is deleted; and this run's own marks are let go, so the next
- *     run, inside the same window, sends the offer once;
+ *     run, inside the same window, sends the offer once; a write that throws
+ *     (a timeout, a Redis error) takes the same path;
  *   - with Redis answering "OK", the offer goes once, as before.
  *
  * Stripe and the email sender are played by a stand-in for `fetch`.
@@ -78,6 +79,8 @@ const ODD: [string, (n: number) => unknown[]][] = [
   ["a SET reply of another word", (n) => ["QUEUED", ...Array(n - 1).fill(1)]],
   ["the SET's reply alone", () => ["OK"]],
   ["one reply too many", (n) => ["OK", ...Array(n).fill(1)]],
+  // The write thrown (a timeout, a Redis error status, an error item): the same path, never a mark held for 90 days.
+  ["a thrown write", () => { throw new Error("Redis request failed with status 500"); }],
 ];
 
 const links = () => redis.keys().filter((key) => key.startsWith(LINK)).length;

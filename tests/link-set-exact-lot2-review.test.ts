@@ -9,6 +9,8 @@
  *     with its answer lost, is deleted, the order's claim is undone and the
  *     order stays due an hour later, when it is sent once;
  *   - the same for the one reminder, which goes back on the list;
+ *   - a write that throws takes the same path, and never stops the run: the
+ *     other orders of the run are still sent;
  *   - with Redis answering "OK", the request goes once, as before.
  */
 import assert from "node:assert/strict";
@@ -86,6 +88,8 @@ const ODD: [string, (n: number) => unknown[]][] = [
   ["a SET reply of another word", (n) => ["QUEUED", ...Array(n - 1).fill(1)]],
   ["the SET's reply alone", () => ["OK"]],
   ["one reply too many", (n) => ["OK", ...Array(n).fill(1)]],
+  // The write thrown (a timeout, a Redis error status, an error item): the same path, never a run aborted with its sending mark left.
+  ["a thrown write", () => { throw new Error("Redis request failed with status 500"); }],
 ];
 
 const links = () => redis.keys().filter((key) => key.startsWith(LINK)).length;
@@ -144,6 +148,41 @@ for (const [what, reply] of ODD) {
     });
   }
 }
+
+test("a link write that throws for one order leaves the other orders of the run to be sent", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  const second = "cs_test_ReviewLinkSet02";
+  const person2 = "review-person-two@example.test";
+  const inner = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (new URL(String(input)).pathname === `/v1/checkout/sessions/${second}`) {
+      const body = await (await inner(`https://api.stripe.com/v1/checkout/sessions/${reference}`)).json();
+      const charge = { ...body.payment_intent.latest_charge, id: "ch_ReviewLinkSet02" };
+      return Response.json({ ...body, id: second, customer_details: { email: person2 }, payment_intent: { ...body.payment_intent, id: "pi_ReviewLinkSet02", latest_charge: charge } });
+    }
+    return inner(input, init);
+  }) as typeof fetch;
+  try {
+    assert.equal(await scheduleReviewAsk(r.shop, second, r.now - 8 * 86400), true);
+    let thrown = 0;
+    redis.pipeline = async (commands) => {
+      if (thrown === 0 && commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith(LINK)) {
+        thrown += 1;
+        throw new Error("Redis request failed with status 500");
+      }
+      return r.original(commands);
+    };
+    const result = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    redis.pipeline = r.original;
+    assert.equal(thrown, 1, "one link write threw");
+    assert.deepEqual(result, { sent: 1, dropped: 0, waiting: 1 }, "the other order is sent in the same run");
+    assert.equal(sentTo(r.batches).length, 1);
+    assert.deepEqual(await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 3601), { sent: 1, dropped: 0, waiting: 0 });
+    assert.deepEqual(sentTo(r.batches).sort(), [person, person2].sort(), "each order asked once");
+    assert.equal(links(), 2, "each with its one link");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
 
 test("control: Redis answers OK, the request goes once with a link that is stored", async () => {
   const oldFetch = globalThis.fetch;

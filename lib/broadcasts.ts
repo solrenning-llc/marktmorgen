@@ -18,6 +18,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
 import { needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
@@ -508,7 +509,7 @@ export async function createBroadcast(
 /** Stops a broadcast that has not started. One under way is not stopped halfway. */
 export async function cancelBroadcast(store: Store, id: string): Promise<boolean> {
   if (!BROADCAST_ID.test(id) || !store.listId) return false;
-  let acquired = false;
+  let acquired: string | null = null;
   try {
     acquired = await takeBroadcastLock(id);
     if (!acquired) return false;
@@ -531,17 +532,23 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
     // Either write may have happened: do not retry or restore a scheduled state.
     throw new BroadcastCancellationUnconfirmed();
   } finally {
-    if (acquired) await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
+    if (acquired) await releaseMark(lockKey(id), acquired);
   }
 }
 
 
-/** Only an explicit lock acknowledgement permits a reader to become a writer. */
-async function takeBroadcastLock(id: string): Promise<boolean> {
-  if (!BROADCAST_ID.test(id)) return false;
-  const reply = await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]);
-  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== "OK" && reply[0] !== null)) throw new Error("Campaign lock could not be confirmed");
-  return reply[0] === "OK";
+/**
+ * Only an explicit lock acknowledgement permits a reader to become a writer. The lock holds a value only this run
+ * writes (lib/claim-mark.ts claimValue), returned as the run's own token, and is taken only on an exact "OK"; nil is
+ * another run's (null). Any other answer throws, so nothing is read or written on it, and the lock is not let go,
+ * since it may not be ours (review of #3306, rule 24): it runs out at its expiry.
+ */
+async function takeBroadcastLock(id: string): Promise<string | null> {
+  if (!BROADCAST_ID.test(id)) return null;
+  const token = claimValue();
+  const reply = repliesFor(await redisPipeline([["SET", lockKey(id), token, "NX", "EX", 90]]), 1);
+  if (!reply || (reply[0] !== "OK" && reply[0] !== null)) throw new Error("Campaign lock could not be confirmed");
+  return reply[0] === "OK" ? token : null;
 }
 
 /**
@@ -565,7 +572,8 @@ export async function advanceBroadcast(
   given?: { keep: ((email: string) => boolean) | undefined },
 ): Promise<Broadcast | null> {
   const seconds = () => Math.floor(Date.now() / 1000);
-  if (!await takeBroadcastLock(id)) return null;
+  const lock = await takeBroadcastLock(id);
+  if (!lock) return null;
   try {
     let b = await readBroadcastForWork(id);
     if (!b) {
@@ -798,7 +806,9 @@ export async function advanceBroadcast(
     if (b.status === "sent" || b.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
     return b;
   } finally {
-    await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
+    // Let go only while it still holds this run's own value: a pass whose lock ran out never deletes the lock another
+    // run took since, so no third run can send the same campaign beside it (releaseMark never throws).
+    await releaseMark(lockKey(id), lock);
   }
 }
 

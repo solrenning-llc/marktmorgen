@@ -26,7 +26,7 @@
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
@@ -441,8 +441,11 @@ export async function advanceAnnouncement(
 /** Moves every waiting send on. For the mail job. */
 export async function advanceAnnouncements(load: (handle: string) => Promise<Store | null>, deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["SMEMBERS", QUEUE]]);
-  const ids = Array.isArray(raw) ? (raw as string[]) : [];
+  // The queue read exactly (rule 24, review of #3306): a reply in any other shape is unknown and throws, so the mail
+  // job says the sends were not moved on, never that none were waiting.
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", QUEUE]]), 1);
+  const ids = replies ? stringList(replies[0]) : null;
+  if (!ids) throw new UnknownReplyError("the community sends waiting to go out");
   let touched = 0;
   for (const id of ids) {
     if (Date.now() > deadline) break;

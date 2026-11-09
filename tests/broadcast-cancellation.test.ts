@@ -75,7 +75,11 @@ async function main() {
     }
     await seed(); lockReply = new Error("applied claim response lost"); apply = true;
     is("lost lock response remains uncertain", await uncertain(), true);
-    is("uncertain ownership is not unlocked", (await original.call(redis, [["GET", lock]]))[0], "1");
+    // Rule 23 (claude5/broadcast-lock-owner, review of #3306): was `"1"`, the fixed value every run wrote; the lock now
+    // holds the run's own token (lib/claim-mark.ts claimValue), so what is checked is that the write that landed is
+    // still there, a token and not the old shared value: uncertain ownership is still never let go.
+    const kept = (await original.call(redis, [["GET", lock]]))[0];
+    is("uncertain ownership is not unlocked", typeof kept === "string" && /^\d+\.\d{9}$/.test(kept), true);
     part("Cancellation requires both write acknowledgements");
     for (const reply of [[], [null], [true], ["ok"], ["OK", "OK"], new Error("lost save reply")]) {
       await seed(); saveReply = reply;

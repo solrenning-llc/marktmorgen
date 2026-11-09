@@ -14,11 +14,20 @@
  *     refused by the provider gave the whole hold back although those reads
  *     were made.
  * Honest replies stay shown: the controls below pass before and after.
+ *
+ * E. From the second pre-review (head e9f1681cc3): a decimal read as its
+ *    digits glued ("4.9" as the price 49), millions, "10k", cents or euros
+ *    taken for dollars, "half the usual cost", "½", dozens, Roman numerals
+ *    and a number in a language the store does not speak were still shown;
+ *    and honest replies were refused: French "très" read as "tres" (3),
+ *    "mille mercis", "sugar free", "free time", "double the recipe",
+ *    "cheaper than buying bread", "saving the dough".
  */
 import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, setAssistant, setAssistantPlan, setSubscription, storeForEmail } from "@/lib/store";
 import { askAssistant } from "@/lib/store-assistant";
 import { assistantMessageExtraMicroUsd, assistantWindow, heldToFacts } from "@/lib/store-assistant-rules";
+import { AI_CALL_INFRA_MICRO_USD } from "@/lib/spend-cost-table";
 import { neutralLine } from "@/lib/assistant-reminder-rules";
 import { forAi } from "@/lib/inbox-rules";
 import { postToModel } from "@/lib/ai";
@@ -61,6 +70,66 @@ is("a count of buyers in words", neutralLine("Join ten thousand cooks who plan t
 is("a discount not published", neutralLine("It is half price for you this week.", products), "");
 is("a result figure in words", neutralLine("Most buyers save five hours a week.", products), "");
 is("control: a neutral line is sent", neutralLine("A week of dinners, planned for you.", products), "A week of dinners, planned for you.");
+
+const bread = "Store: Bread Lab\n\n[1] Sourdough Basics\nPrice: $49, paid once.\nHow it is delivered: an online course, 10 lessons, 2 bonus videos and 1 workbook\nIts guarantee (refund promise), in the creator's words: Email me within 14 days and I refund you in full.";
+
+part("E. A figure is its value and its unit, in any form a reply writes it");
+is("a rating: '4.9' is not the price 49", heldToFacts("Rated 4.9 by our students.", bread), false);
+is("a decimal with a comma: '4,9'", heldToFacts("Note moyenne : 4,9.", bread), false);
+is("a count of buyers with 'million'", heldToFacts("Loved by a million students.", bread), false);
+is("'two million' is not 2", heldToFacts("Loved by two million students.", bread), false);
+is("'millions' (an indefinite count)", heldToFacts("Millions of bakers use it.", bread), false);
+is("Spanish 'un millón'", heldToFacts("Lo usan un millón de panaderos.", bread), false);
+is("Portuguese 'milhões'", heldToFacts("Milhões de padeiros usam.", bread), false);
+is("'10k' is not 10", heldToFacts("Over 10k bakers have taken it.", bread), false);
+is("'1k' is not 1", heldToFacts("Over 1k reviews.", bread), false);
+is("49 cents for a $49 course", heldToFacts("It costs only 49 cents.", bread), false);
+is("49 with the cent sign", heldToFacts("It costs only 49\u00a2.", bread), false);
+is("forty-nine euros for a $49 course", heldToFacts("It costs forty-nine euros.", bread), false);
+is("49 euros with the sign", heldToFacts("It costs \u20ac49.", bread), false);
+is("'half the usual cost' (a price cut)", heldToFacts("Just half the usual cost this week.", bread), false);
+is("'\u00bd price'", heldToFacts("Today it is \u00bd price.", bread), false);
+is("'1/2 price'", heldToFacts("Today it is 1/2 price.", bread), false);
+is("'a dozen lessons' (10 published)", heldToFacts("It has a dozen lessons.", bread), false);
+is("'dozens of bakers recommend it'", heldToFacts("Dozens of bakers recommend it.", bread), false);
+is("Roman numerals: 'XII lessons'", heldToFacts("The course has XII lessons.", bread), false);
+is("a number in a language the store does not speak (Swedish)", heldToFacts("Kursen kostar femtio dollar.", bread), false);
+is("a number in another script (Chinese)", heldToFacts("\u8fd9\u4e2a\u8bfe\u7a0b\u4e94\u5341\u7f8e\u5143\u3002", bread), false);
+is("the reminder email's line: 'a million bakers'", neutralLine("Loved by a million bakers at home.", "Sourdough Basics: bakers at home."), "");
+is("the reminder email's line: 'a dozen recipes'", neutralLine("A dozen recipes to bake at home.", "Sourdough Basics: recipes to bake at home."), "");
+is("control: the published price, '$49.00'", heldToFacts("It costs $49.00, paid once.", bread), true);
+is("control: the price in words, in dollars", heldToFacts("It costs forty-nine dollars.", bread), true);
+is("control: 'XII' when the store wrote 12", heldToFacts("Chapter XII is the last.", "[1] Book\nWhat the buyer gets: 12 chapters"), true);
+is("control: 'CV' and 'DC' are words, not numbers", heldToFacts("Send your CV to the studio in Washington DC.", bread), true);
+
+part("E. Honest replies in every store language are shown");
+is("French 'tr\u00e8s' (very) is not the Spanish 'tres'", heldToFacts("C'est un cours tr\u00e8s complet.", bread), true);
+is("French 'Tr\u00e8s bonne question'", heldToFacts("Tr\u00e8s bonne question : le cours est en ligne.", bread), true);
+is("French 'mille mercis'", heldToFacts("Mille mercis pour votre question.", bread), true);
+is("French: the published lessons", heldToFacts("Oui, le cours a 10 le\u00e7ons et un cahier d'exercices. Vous pouvez demander un remboursement sous 14 jours.", bread), true);
+is("Spanish", heldToFacts("S\u00ed, el curso tiene 10 lecciones y 2 v\u00eddeos extra. Cuesta 49 d\u00f3lares.", bread), true);
+is("German", heldToFacts("Ja, der Kurs hat zehn Lektionen und kostet 49 Dollar. Sie k\u00f6nnen ihn in Ihrem eigenen Tempo machen.", bread), true);
+is("Italian", heldToFacts("S\u00ec, il corso \u00e8 online e ha 10 lezioni. Puoi chiedere il rimborso entro 14 giorni.", bread), true);
+is("Dutch", heldToFacts("Ja, de cursus is online en heeft tien lessen. Je kunt binnen 14 dagen om je geld vragen.", bread), true);
+is("Portuguese", heldToFacts("Sim, o curso tem dez aulas e um caderno de exerc\u00edcios. Voc\u00ea pode estudar no seu ritmo.", bread), true);
+is("'sugar free' (a recipe, not a price)", heldToFacts("The recipes are sugar free.", bread), true);
+is("'gluten free' and 'ad free'", heldToFacts("The videos are ad free and the bread can be gluten free.", bread), true);
+is("'double the recipe'", heldToFacts("You can double the recipe for a bigger loaf.", bread), true);
+is("'cheaper than buying bread'", heldToFacts("Baking at home is cheaper than buying bread.", bread), true);
+is("'in your free time'", heldToFacts("You can watch it in your free time.", bread), true);
+is("'free of' and 'free from'", heldToFacts("The dough is free of additives and free from preservatives.", bread), true);
+is("'Saving the dough overnight'", heldToFacts("Saving the dough overnight helps.", bread), true);
+is("but 'free' alone is still a deal", heldToFacts("The course is free today.", bread), false);
+is("and 'free of charge'", heldToFacts("It is free of charge for you.", bread), false);
+is("and 'double' about money", heldToFacts("You will double your money.", bread), false);
+is("and 'cheaper' about the price", heldToFacts("It is cheaper than the usual price.", bread), false);
+is("and 'save' about money", heldToFacts("You save $20 if you buy it now.", bread), false);
+
+part("E. What goes to the model: an address in words, a capitalized domain");
+is("'jane.doe at example dot com'", forAi("jane.doe at example dot com").includes("jane.doe"), false);
+is("'MySite.com/deal'", forAi("See MySite.com/deal").includes("MySite.com"), false);
+is("'Evil.Com'", forAi("Go to Evil.Com now").includes("Evil.Com"), false);
+is("control: 'great.It helps' stays", forAi("It was great.It helps."), "It was great.It helps.");
 
 let next: { status: string; reply: string } = { status: "unknown", reply: "" };
 let calls = 0;
@@ -121,7 +190,9 @@ async function main(): Promise<void> {
   const [spentRaw] = await redis.pipeline([["HGET", poolKey, "spent"]]);
   const [heldRaw] = await redis.pipeline([["HGET", poolKey, "held"]]);
   is("refused as failed", r.ok ? "answered" : r.reason, "failed");
-  is("the reads made are spent from the pool, not given back", [Number(spentRaw ?? 0), Number(heldRaw ?? 0)], [assistantMessageExtraMicroUsd(), 0]);
+  // Rule 23: was [assistantMessageExtraMicroUsd(), 0] (the reads only). The call was made and waited on, so its own
+  // cost (AI_CALL_INFRA_MICRO_USD) is spent too, as a settled answer's is (second pre-review, MEDIUM 3).
+  is("the reads made and the call's own cost are spent from the pool, not given back", [Number(spentRaw ?? 0), Number(heldRaw ?? 0)], [assistantMessageExtraMicroUsd() + AI_CALL_INFRA_MICRO_USD, 0]);
 
   part("C. Pool spent: a refused question reads nothing of the catalog");
   await redis.pipeline([["DEL", poolKey], ["HSET", poolKey, "cap", "1"]]);

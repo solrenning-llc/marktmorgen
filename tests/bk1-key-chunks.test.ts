@@ -218,7 +218,8 @@ async function main(): Promise<void> {
     const maxRunBytes = 64 * 1024 * 1024;
     const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxParts, maxRunBytes, maxStoredBytes: 32 * parts.runStoredBound({ maxParts, maxRunBytes }), reviewedAt: "2026-11-09", source: "synthetic test review, not a real one" };
     const first = await runBackup({ now: clock, review, store: bucket, key, previousKeys: [] });
-    is("day one: the 8 MB book copied, the copy verified", [first.ok, first.ok && first.keys], [true, 21]);
+    // 23: the 21 keys and the run's own lock and day count (nl:backup:*), which are keys of ours too.
+    is("day one: the 8 MB book copied, the copy verified", [first.ok, first.ok && first.keys], [true, 23]);
     const goodObjects = [...runStore.objects.keys()];
     const mark = redis.run(["GET", "nl:backup:last-ok"]);
     clock = T0 + DAY;

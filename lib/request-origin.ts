@@ -11,15 +11,35 @@ import { SITE_URL } from "@/lib/site-url";
  * and cookies that are set on the wrong host.
  */
 export function originFrom(request: NextRequest): string {
-  const host =
-    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  if (!host) return new URL(request.url).origin;
+  // Each header is taken only as one plain value: the first of a list, a
+  // host name with an optional port, a protocol of http or https. Anything
+  // else (a protocol carrying a URL, a host with a path, a user part or a
+  // space) is never pasted into a link; the request's own URL is used.
+  const host = firstValue(request.headers.get("x-forwarded-host") ?? request.headers.get("host"));
+  if (!host || !isPlainHost(host)) return new URL(request.url).origin;
 
-  const forwardedProto = request.headers.get("x-forwarded-proto");
+  const forwardedProto = firstValue(request.headers.get("x-forwarded-proto")).toLowerCase();
   const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
-  const proto = forwardedProto ?? (isLocal ? "http" : "https");
+  const proto = forwardedProto === "http" || forwardedProto === "https" ? forwardedProto : isLocal ? "http" : "https";
   return `${proto}://${host}`;
 }
+
+/** One host name (or bracketed IPv6 address) with an optional port, and nothing else. */
+const PLAIN_HOST = /^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::\d{1,5})?$/i;
+
+/** PLAIN_HOST's shape, and an authority the URL parser itself accepts (a real IPv6 address, a port up to 65535). */
+function isPlainHost(host: string): boolean {
+  if (!PLAIN_HOST.test(host)) return false;
+  try {
+    new URL(`http://${host}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The first value of a header that may hold a comma-separated list, trimmed. */
+const firstValue = (value: string | null): string => (value ?? "").split(",")[0].trim();
 
 /** The host a request was made to, lower case, without a port. */
 export function requestHost(request: { headers: Headers }): string {

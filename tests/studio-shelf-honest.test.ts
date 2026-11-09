@@ -17,19 +17,25 @@
  *  - the day's readings used are said so, with when they come back (lib/store-readings.ts readingsBackAt); a reading
  *    that failed is said so, with how to check again; the two are never said in each other's words; neither makes
  *    a new read;
+ *  - a day's reading that could not be counted (lib/store-readings.ts takeStoreReading: its count did not reach
+ *    Redis, or its reply was not whole) is said as a reading that could not be made, never as the day's readings
+ *    used; and a count of what is left of the day that could not be read (readingsLeft) is never said, under the
+ *    numbers, as "Today's readings are used" (rule 24; rule 30: the same flow);
  *  - read as it should be, the page is as before (controls).
  *
  * Synthetic only: the Redis stand-in, a stubbed Stripe and stores made here.
  */
 import { NextRequest } from "next/server";
 import { isValidElement, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setSubscription, storeForEmail } from "@/lib/store";
 import type { CallSetup } from "@/lib/call-setup";
 import StudioPage from "@/app/studio/page";
-import { STORE_READINGS_PER_DAY, readingsBackAt } from "@/lib/store-readings";
+import { STORE_READINGS_PER_DAY, readingsBackAt, readingsLeft, takeStoreReading } from "@/lib/store-readings";
+import { ReadingLine, type NumbersReading } from "@/components/stats-panel";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -240,6 +246,63 @@ async function main(): Promise<void> {
   is("the page still renders when the visits' replies are not whole", garbled !== null, true);
   is("visits read in part are said so, never left out with no word", has(garbled, NUMBERS_UNREAD), true);
   is("the numbers are not drawn from a part", element("StatsPanel"), null);
+
+  part("A day's reading that could not be counted is never told as the day's readings used");
+  // Nothing kept, nothing used: only the count of the day's readings (takeStoreReading's INCRBY) does not reach Redis.
+  await redis.pipeline([["DEL", copyKey, dayKey]]);
+  const uncounted = await shown(NUMBERS, (command) => command[0] === "INCRBY" && command[1] === dayKey);
+  is("the page still renders when the day's count does not reach Redis", uncounted !== null, true);
+  is("a count that did not reach Redis is NOT told as the day's readings used", has(uncounted, READINGS_USED), false);
+  is("it is said as a reading that could not be made, with how to check again", [has(uncounted, NUMBERS_UNREAD), (status(NUMBERS_UNREAD) ?? "").includes(RELOAD)], [true, true]);
+  is("the numbers are not drawn", element("StatsPanel"), null);
+  // The same, with a count whose reply is not whole (rule 24): the INCRBY of the day answered with something else.
+  await redis.pipeline([["DEL", copyKey, dayKey]]);
+  const notWhole = await shown(NUMBERS, () => false, (pipeline, replies) =>
+    pipeline.some((one) => one[0] === "INCRBY" && one[1] === dayKey) ? replies.map((reply, i) => (pipeline[i][0] === "INCRBY" ? "garbled" : reply)) : replies,
+  );
+  is("a count whose reply is not whole is NOT told as the day's readings used", [notWhole !== null, has(notWhole, READINGS_USED), has(notWhole, NUMBERS_UNREAD)], [true, false, true]);
+  // The day's readings truly used, as a control: still said so.
+  await redis.pipeline([["DEL", copyKey], ["SET", dayKey, String(STORE_READINGS_PER_DAY)]]);
+  is("control: the day's readings truly used are still said so", has(await shown(NUMBERS), READINGS_USED), true);
+  // The count itself, as it answers its one caller: a refusal stays a refusal, a count that could not be made is not one.
+  const probe = { statsId: numbers.statsId };
+  const kept = redis.pipeline;
+  redis.pipeline = async () => {
+    throw new Error("synthetic Redis outage");
+  };
+  let left: unknown;
+  try {
+    left = await readingsLeft(probe);
+  } finally {
+    redis.pipeline = kept;
+  }
+  is("control: a count that cannot be made is still no reading taken (takeStoreReading)", await (async () => {
+    redis.pipeline = async () => {
+      throw new Error("synthetic Redis outage");
+    };
+    try {
+      return await takeStoreReading(probe);
+    } finally {
+      redis.pipeline = kept;
+    }
+  })(), false);
+  is("what is left of the day, not read, is said unknown (readingsLeft), never none left", (left as { unknown?: boolean }).unknown, true);
+
+  part("What is left of the day that could not be read is never told, under the numbers, as the day's readings used");
+  // A fresh copy kept, so the numbers are drawn with no new reading; only what is left of the day (readingsLeft's GET) fails.
+  await redis.pipeline([["DEL", copyKey, dayKey]]);
+  await shown(NUMBERS);
+  await shown(NUMBERS, (command, pipeline) => command[0] === "GET" && command[1] === dayKey && pipeline.some((one) => one[0] === "GET" && one[1] === `${dayKey}:heavy`));
+  const reading = element("StatsPanel")?.props.reading as NumbersReading | undefined;
+  is("the numbers are drawn from the copy kept", reading !== undefined, true);
+  const line = reading ? renderToStaticMarkup(ReadingLine({ reading })).replace(/&#x27;|&#39;/g, "'") : "";
+  is("the line under the numbers does NOT say today's readings are used", line.includes("Today's readings are used"), false);
+  is("it says what is left of the day could not be checked, with how to check again", [line.includes("We could not check what is left of today's readings just now."), line.includes(RELOAD)], [true, true]);
+  is("and offers no reading it could not count", line.includes("Update now"), false);
+  await shown(NUMBERS);
+  const calmReading = element("StatsPanel")?.props.reading as NumbersReading | undefined;
+  const calmLine = calmReading ? renderToStaticMarkup(ReadingLine({ reading: calmReading })) : "";
+  is("control: read as it should be, the line offers to update and says nothing of the kind", [calmLine.includes("Update now"), calmLine.includes("We could not check")], [true, false]);
 
   part("No new read for the notices");
   const page = readFileSync("app/studio/page.tsx", "utf8");

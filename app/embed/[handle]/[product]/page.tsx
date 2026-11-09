@@ -8,6 +8,7 @@ import { cache } from "react";
 import { type Listing, type Store, normaliseHandle } from "@/lib/store";
 import { storeForHandleExactly } from "@/lib/store-exact";
 import { readListingExactly, readListings } from "@/lib/catalog";
+import { offerableTargets } from "@/lib/child-safety-holds";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { lookStyle } from "@/lib/store-look";
 import { imageUrl } from "@/lib/product-image";
@@ -191,7 +192,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     stockLeft(store, product).catch(() => null),
     // Unknown is null, never "keys left" (CX-123 rule 24; Claude 4 on #2910): the card then draws no buy button.
     outOfKeys(store, product).catch(() => null),
-    product.bumps.length ? readListings(store, bumpTargets(product)).catch(() => []) : Promise.resolve([]),
+    // A box never offers a product kept for a child-safety report, nor a bundle holding one (lib/child-safety-holds.ts).
+    product.bumps.length ? readListings(store, bumpTargets(product)).then((found) => offerableTargets(store, found)).catch(() => []) : Promise.resolve([]),
     summaryOf(store.statsId, product.id).catch(() => null),
   ]);
   const soon = coming?.soon ?? false;

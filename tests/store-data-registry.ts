@@ -949,7 +949,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stream:v:@lib/stream.ts": { what: "What is known about a video", room: ["app/api/store/stream/route.ts", "lib/stream.ts"] },
 
   // ---------------------------------------------------------------- lib/ t–z
-  "nl:csa:keep:@lib/child-safety.ts": short("A product kept for a child-safety report: not removed, changed or published again, nor its files, options, picture, page, episodes or lessons replaced or deleted, for 400 days (18 U.S.C. 2258A(h))", "studio", 400, 64),
+  "nl:csa:keep:@lib/child-safety-holds.ts": short("A product kept for a child-safety report: not removed, changed or published again, nor its files, options, picture, page, episodes or lessons replaced or deleted, for 400 days (18 U.S.C. 2258A(h))", "studio", 400, 64),
   "nl:csa:held:@lib/child-safety.ts": short("Which products child-safety reports took off a store that day (a set of at most the cap's product ids), two days: the cap on the automatic step", "studio", 2, 128),
   "nl:report:@lib/takedown.ts": company("A takedown report", "Reports to the company."),
   "nl:report:t:@lib/takedown.ts": company("A takedown report's token", "Reports to the company."),

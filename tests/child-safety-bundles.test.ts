@@ -33,6 +33,9 @@ import { readListing, readPage } from "@/lib/catalog";
 import { offerableAfterPaying, offeredItems } from "@/lib/bundles";
 import { createCartCheckout } from "@/lib/cart-checkout";
 import { POST as extrasRoute } from "@/app/api/store/extras/route";
+import { POST as savedBlocksRoute } from "@/app/api/store/saved-blocks/route";
+import { sectionUsesKey } from "@/lib/saved-block-store";
+import { emptyBlock, type PageBlock } from "@/lib/sales-page";
 import { store as redis } from "./redis-stub";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { done, is, part } from "./check";
@@ -117,6 +120,7 @@ async function main(): Promise<void> {
   is("the cart opens with it", await cart([heldBundle, partC]), ["opened", 1]);
 
   // The report.
+  const openedBefore = opened.length;
   const outcome = await safety.holdReported({ kind: "child_safety", url: `${ORIGIN}/@${HANDLE}/p/${reported}` }, await current());
   if (outcome !== "held") throw new Error(`not held: ${outcome}`);
 
@@ -144,7 +148,20 @@ async function main(): Promise<void> {
   is("the clean bundle offers both", ids((await offeredItems(await current(), [await listing(cleanBundle)])).get(cleanBundle)), [partC, partD]);
   is("its checkout goes on", await sale(cleanBundle, []), null);
   is("its cart opens", await cart([cleanBundle, partB]), ["opened", 1]);
-  is("nothing opened at Stripe names the held product", opened.some((body) => [...body.values()].some((value) => value.split(",").includes(reported))), false);
+  is("nothing opened at Stripe since the report names the held product", opened.slice(openedBefore).some((body) => [...body.values()].some((value) => value.split(",").includes(reported))), false);
+
+  part("A saved section applied to the held product's page (regression test asked in the same review)");
+  const faq: PageBlock = { ...(emptyBlock("faq") as Extract<PageBlock, { kind: "faq" }>), items: [{ q: "A placeholder question?", a: "A placeholder answer." }] };
+  const section = (await (await savedBlocksRoute(new NextRequest(`${ORIGIN}/api/store/saved-blocks`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}`, origin: ORIGIN, host: "marktmorgen.com" }, body: JSON.stringify({ action: "save", name: "Placeholder section", blocks: [faq] }) }))).json()) as { ok: boolean; section?: { id: string } };
+  if (!section.ok || !section.section) throw new Error("no section");
+  const statsId = (await current()).statsId!;
+  // As a page's own save writes it down (lib/saved-block-store.ts, usesCommands): both product pages carry the section.
+  await redis.pipeline([["SADD", sectionUsesKey(statsId, section.section.id), reported, partD]]);
+  const applies = async () => ((await redis.pipeline([["SCAN", "0", "MATCH", "nl:fuse:m:apply:*", "COUNT", 1000]]))[0] as [string, string[]])[1].length;
+  is("applied to the held product's page: on_hold", await send(savedBlocksRoute as Handler, "saved-blocks", { action: "apply", id: section.section.id, pages: [reported] }), ON_HOLD);
+  is("with a page not held beside it: on_hold too, nothing applied", await send(savedBlocksRoute as Handler, "saved-blocks", { action: "apply", id: section.section.id, pages: [partD, reported] }), ON_HOLD);
+  is("the month's tries were not counted", await applies(), 0);
+  is("a page not held still takes it", await send(savedBlocksRoute as Handler, "saved-blocks", { action: "apply", id: section.section.id, pages: [partD] }), [200, "ok"]);
 
   part("A hold that cannot be read refuses (rule 24)");
   const store = await current();

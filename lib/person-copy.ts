@@ -211,7 +211,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       const { responses } = await readResponses(s.statsId, form.id);
       for (const r of responses) {
         // The same rule the erasure deletes by (lib/form-respondent.ts, FORGET_FORM_PERSON): a response is theirs when
-        // the form's first email question holding an address holds theirs. Another sender's response, or one whose
+        // every email question of the form that holds an address holds theirs. Another sender's response, or one whose
         // sender is not known, gives only the answers that are their address, never anybody else's words.
         const { role, named } = personInResponse(emailIds, r.answers, address);
         if (role === "none") continue;

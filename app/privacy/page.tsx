@@ -1181,7 +1181,10 @@ export default function PrivacyPage() {
           response someone else sent, an answer that is only their email address
           is taken out, and the rest is kept. A response that gives their email
           address but whose sender cannot be told (no email question holds an
-          address, or two hold different ones) is deleted whole. The result
+          address, or two hold different ones) is deleted whole. When the
+          person checks the box to hear from the creator, the email that asks
+          them to confirm goes only to the address that sent the response, and
+          to nobody when the sender cannot be told. The result
           page&apos;s web address names the result and the score, never the
           person&apos;s answers or email address. The creator is the controller of
           these answers.

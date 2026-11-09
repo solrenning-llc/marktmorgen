@@ -49,6 +49,10 @@ function main(): void {
     route.includes("if (read.email) await enroll(store, read.email,"),
     /read\.answers\[/.test(route),
   ], [true, true, true, false]);
+
+  part("The privacy policy says so");
+  const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
+  is("the confirmation goes only to the sender, and to nobody when not known", privacy.includes("the email that asks them to confirm goes only to the address that sent the response, and to nobody when the sender cannot be told"), true);
   done();
 }
 

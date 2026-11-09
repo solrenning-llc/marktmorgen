@@ -47,6 +47,7 @@
  * Pure and browser-safe: the studio's editor, the block that draws a form and
  * the route that takes the answers all read these rules.
  */
+import { emailQuestionIds, respondentOf } from "@/lib/form-respondent";
 
 export const MAX_FORMS = 20;
 export const MAX_FIELDS = 12;
@@ -329,6 +330,7 @@ export function badPoints(raw: unknown): boolean {
 export type Answers = Record<string, string | string[] | number>;
 
 export type ReadAnswers =
+  /** `email`: who sent it (lib/form-respondent.ts, respondentOf), or "" when no email question holds an address or two hold different ones. */
   | { ok: true; answers: Answers; email: string }
   | { ok: false; error: "required" | "email" | "invalid"; field: string };
 
@@ -368,7 +370,6 @@ export function branches(form: FormDef): boolean {
 
 export function readAnswers(form: FormDef, get: (name: string) => string[]): ReadAnswers {
   const answers: Answers = {};
-  let email = "";
   // Only the questions this person's own answers lead through: the others were not asked.
   const asked = pathOf(form, (id) => get(`q_${id}`).map((v) => v.trim()).find(Boolean));
   for (const field of asked) {
@@ -389,7 +390,6 @@ export function readAnswers(form: FormDef, get: (name: string) => string[]): Rea
         const text = sent[0].toLowerCase().slice(0, 254);
         if (!EMAIL.test(text)) return { ok: false, error: "email", field: field.id };
         answers[field.id] = text;
-        if (!email) email = text;
         break;
       }
       case "choice": {
@@ -411,6 +411,10 @@ export function readAnswers(form: FormDef, get: (name: string) => string[]): Rea
       }
     }
   }
+  // The address the list is offered to and sequences start for: the response's sender, by the one rule the copy,
+  // the erasure and the deal read (lib/form-respondent.ts). Never the first email question alone, which may be a
+  // friend's ("Invite a friend (email)" before "Your email"); two different addresses send nothing to anybody.
+  const email = respondentOf(emailQuestionIds(form), answers) ?? "";
   return { ok: true, answers, email };
 }
 

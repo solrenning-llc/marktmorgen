@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { get } from "@/lib/blob";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { lookUpVisitorStore, normaliseHandle } from "@/lib/store";
+import { storeLookupRefusal } from "@/lib/store-lookup";
 import { productIdFromAddress, readListing } from "@/lib/catalog";
 import { lookColours } from "@/lib/store-look";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
@@ -62,7 +63,7 @@ async function readPicture(path: string): Promise<string | null> {
   }
 }
 
-export default async function OpengraphImage({ params }: Params) {
+export default async function OpengraphImage({ params }: Params): Promise<Response> {
   const { handle, product: id } = await params;
   let decoded = "";
   try {
@@ -70,7 +71,11 @@ export default async function OpengraphImage({ params }: Params) {
   } catch {
     // An address with a broken escape in it names no store: the plain card.
   }
-  const store = decoded.startsWith("@") ? await storeForHandle(normaliseHandle(decoded)).catch(() => null) : null;
+  // The visitor's lookup (lib/store-lookup.ts): a real store always opens; an address leading nowhere asked past the
+  // connection's pace is told to wait instead of being drawn the plain card.
+  const looked = decoded.startsWith("@") ? await lookUpVisitorStore(normaliseHandle(decoded)).catch(() => null) : null;
+  if (looked?.retryAfter) return storeLookupRefusal(looked.retryAfter);
+  const store = looked?.store ?? null;
   const found = store ? await readListing(store, productIdFromAddress(store, id) ?? id).catch(() => null) : null;
   // A draft has no picture to share either.
   const product = found && !found.hidden ? found : null;

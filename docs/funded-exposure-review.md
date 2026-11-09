@@ -83,53 +83,43 @@ The first runtime integration is now the persistent exposure reservation before 
 
 Since 17 October 2026, under the owner's decision "Teto mínimo pago pela empresa" (AGENTS.md), every store that pays nothing (a free trial, no plan, an ended plan) must hold one of the calendar month's shared places before its studio, its public pages and requests, its orders and free copies or its emails cost anything (lib/free-pool.ts). The places are `FREE_POOL_BASE_STORES` (10) plus one for every `PAID_STORES_PER_FREE_STORE` (40) paying stores (lib/free-pool-rules.ts). Each such store has small figures of its own: a free trial counts its figures for the trial as a whole (1,000 visits, 100 orders paid and free together, 300 list emails on a trial of a plan with them, and the studio, API and email figures of `NON_PAYING_ALLOWANCES`), and a store with no plan or an ended one counts smaller ones by calendar month. tests/plan-cost-registry.ts works out the worst window one of them can cost (`nonPayingWorst`, about $1.36 at today's rates) and puts 1/40 of it into every paying plan's worst month (line free-share), held with the rest to the owner's 60%. The ten base places are a company fixed cost of at most ten times that worst window a month, covered by the minimum paid base. Files an ended store keeps were, until 18 October 2026, kept up to a store with no plan's room with no date: storage with no use behind it, for ever. Since that day a plan that ends keeps nothing past its closing day (`lib/plan-closing-rules.ts`, `keptRoomFor`; the same notices and checks as before), and what it keeps until then is priced once per payment in the payment's own worst case (`tests/plan-cost-registry.ts`, `PER_PAYMENT_LINES`, `retained-files`), so it is no longer an open exposure. A plan that ended before that day keeps the old rule; plans could not yet be bought then (lib/commercial-margin.ts is closed), so this legacy exposure is at most the owner's own test stores, and any such store must still be counted here before release. This does not implement the remaining enrollment, reserve migration, other-provider or annual-term controls.
 
-## Store addresses that lead nowhere: a company fixed cost (9 November 2026)
+## Store addresses that lead nowhere: a company cost per request, no ceiling (9 November 2026)
 
-Traffic audit of 9 November 2026, MÉDIO 2. Every page and route under
-`app/[handle]` first asks the database which store an address belongs to. A
-real store's pages are then counted in its own window; an address with no
-store had nothing to count it in, so a loop over made-up addresses was a read
-each time that nothing counted or paced. `lib/store-lookup.ts` now handles it,
-and whether a store is there is decided only by the address's small index
-read (`nl:store:handle:<handle>`, the read `storeForHandle` makes before the
-store's record), never by a ceiling, so no count can take a real store off
-the air (coordinator's review, 9 November 2026):
+Traffic audit of 9 November 2026, MÉDIO 2, as corrected after its
+pre-review the same day. Every page and route under `app/[handle]` first asks
+the database which store an address belongs to. A real store's pages are then
+counted in its own window; an address with no store has no window to count it
+in. `lib/store-lookup.ts` looks the address up for a visitor, and whether a
+store is there is decided by the address's small index read
+(`nl:store:handle:<handle>`, the read `storeForHandle` makes before the
+store's record) on every request, so nothing can take a real store off the air:
 
-- an address a server lately found to lead nowhere is remembered for 30
-  seconds and reads nothing;
-- an address a server has not lately found a store behind is paced in that
-  server's memory, `UNSEEN_STORE_LOOKUPS_PER_MINUTE` (30) a connection a
-  minute, before any read, at no cost; past it, that connection alone meets
-  the not-found page until its minute turns;
-- otherwise the lookup is counted for the UTC day (`nl:store-lookup:miss:<day>`,
-  a number only) and the index read, in one round trip, the count first. When
-  the index names a holder, the store's record is read as `storeForHandle`
-  reads it and the count is given back in that round trip; when it names
-  nobody, the record is never read;
-- past `STORE_MISSES_PER_DAY` (10,000) counted misses, a server stops counting
-  until the day turns: its lookups send the index read alone, a real store
-  still opens and a made-up address still reads no record;
-- a reply that cannot be read is no answer: the address is looked up the
-  normal way, so a real store still opens.
+- the index read is sent alone; when it names a holder, the store's record is
+  read exactly as `storeForHandle` reads it. A real store's lookup is two
+  commands, on a cold server as on a warm one, never paced, counted or
+  remembered, so its pages cost what the plans' public-requests line prices;
+- only an index that names nobody (no value, or a let-go name) is a miss.
+  Misses are paced per connection in each server's memory, at no cost:
+  `UNSEEN_STORE_LOOKUPS_PER_MINUTE` (30) a minute; past it, the manifest, the
+  app icon and the two sharing cards answer 429 with `Retry-After: 60`, and a
+  page answers not-found, which is what the address is;
+- nothing is remembered between requests, so a store claimed a second after
+  its address was asked about opens at once; a reply that cannot be read is
+  looked up the normal way and is not a miss.
 
-**Maximum per month for the counted misses, a company fixed cost covered from
-the minimum base: US$ 27.21**, at 10,000 misses a day for 31 days, each at its
-worst (one round trip of three commands waited at its timeout, the index value
-at its largest, the CDN request, two calls, a second of CPU and the page out;
-`tests/unknown-store-ceiling.test.ts`, at the rates of `lib/spend-cost-table.ts`
-and `tests/traffic-cost.ts`).
-
-What it does not bound: past the ceiling, each made-up address still costs
-one small read (US$ 0.00003146 at its worst, its timeout's memory included) on
-top of the function call every request is; one connection at its pace on one
-server can add at most US$ 42.13 a month of these reads. A flood from many
-machines is the host firewall's to stop (MM-SA-11, FW1, the owner's step still
-pending): no code here can tell a real store from a made-up address without
-the index read, and the owner's coordinator chose availability of real stores
-over a hard ceiling on those reads. A store whose record cannot be read is
-read in full each time its address is asked on a server where it is not
-remembered; that is one real address's record, not something a scan can
-multiply.
+What it does not bound: the pace never saves the index read, because only
+that read tells a made-up address from a real store. **Each made-up address
+costs one small read (US$ 0.00003146 at its worst, its timeout's memory
+included) on top of the request** (the whole request at its worst is printed
+by `tests/unknown-store-ceiling.test.ts`, at the rates of
+`lib/spend-cost-table.ts` and `tests/traffic-cost.ts`), as it did before the
+audit. There is no company-wide ceiling on these reads and none is claimed:
+the earlier day's count (`nl:store-lookup:miss:<day>`) was written and never
+read and bounded only itself, so it was removed. A flood, from one machine
+that ignores 429 or from many, is the host firewall's to stop (MM-SA-11, FW1,
+the owner's step still pending), as for every page drawn per request; until
+then this is an open company exposure, unknown in its monthly size, never
+zero.
 
 ## What a store keeps in the database after its closing day
 

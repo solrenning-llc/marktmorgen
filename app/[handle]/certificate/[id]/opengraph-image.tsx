@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { lookUpVisitorStore, normaliseHandle } from "@/lib/store";
+import { storeLookupRefusal } from "@/lib/store-lookup";
 import { lookColours } from "@/lib/store-look";
 import { storeKey } from "@/lib/learn";
 import { CERT_ID_PATTERN, readCertificate } from "@/lib/certificate";
@@ -22,7 +23,7 @@ export const alt = "A certificate of completion: who finished which course, and 
 
 type Params = { params: Promise<{ handle: string; id: string }> };
 
-export default async function OpengraphImage({ params }: Params) {
+export default async function OpengraphImage({ params }: Params): Promise<Response> {
   const { handle, id } = await params;
   let decoded = "";
   try {
@@ -30,7 +31,11 @@ export default async function OpengraphImage({ params }: Params) {
   } catch {
     // A broken escape names no store: the plain card.
   }
-  const store = decoded.startsWith("@") ? await storeForHandle(normaliseHandle(decoded)).catch(() => null) : null;
+  // The visitor's lookup (lib/store-lookup.ts): a real store always opens; an address leading nowhere asked past the
+  // connection's pace is told to wait instead of being drawn the plain card.
+  const looked = decoded.startsWith("@") ? await lookUpVisitorStore(normaliseHandle(decoded)).catch(() => null) : null;
+  if (looked?.retryAfter) return storeLookupRefusal(looked.retryAfter);
+  const store = looked?.store ?? null;
   const found = store && CERT_ID_PATTERN.test(id) ? await readCertificate(id).catch(() => null) : null;
   const certificate = found && store && found.store === storeKey(store) && found.withdrawnAt === 0 ? found : null;
   const colours = lookColours(store?.look ?? { theme: "light", accent: "#5a36ee" });

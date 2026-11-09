@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
-import { normaliseHandle, storeForVisitor } from "@/lib/store";
+import { lookUpVisitorStore, normaliseHandle } from "@/lib/store";
+import { storeLookupRefusal } from "@/lib/store-lookup";
 import { readPhoto } from "@/lib/store-photo";
 import { lookColours } from "@/lib/store-look";
 import { connectionRefusal, readRefusal } from "@/lib/picture-pace";
@@ -32,7 +33,9 @@ export async function GET(
   if (refused) return refused;
 
   try {
-    const store = await storeForVisitor(normaliseHandle(decoded));
+    // An address leading nowhere asked past the connection's pace is told to wait; a real store always opens.
+    const { store, retryAfter } = await lookUpVisitorStore(normaliseHandle(decoded));
+    if (retryAfter) return storeLookupRefusal(retryAfter);
     if (!store) return missing();
     // Drawn only at the address with today's fingerprint and nothing else, which
     // may be kept for good; any other is sent there, briefly, before anything

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { normaliseHandle, storeForVisitor } from "@/lib/store";
+import { lookUpVisitorStore, normaliseHandle } from "@/lib/store";
+import { storeLookupRefusal } from "@/lib/store-lookup";
 import { storeManifest } from "@/lib/store-app";
 
 /**
@@ -16,7 +17,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!decoded.startsWith("@")) return missing();
 
   try {
-    const store = await storeForVisitor(normaliseHandle(decoded));
+    // An address leading nowhere asked past the connection's pace is told to wait; a real store always opens.
+    const { store, retryAfter } = await lookUpVisitorStore(normaliseHandle(decoded));
+    if (retryAfter) return storeLookupRefusal(retryAfter);
     if (!store) return missing();
     const host = (request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "")
       .split(",")[0]

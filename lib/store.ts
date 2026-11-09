@@ -45,7 +45,7 @@ import { type Social, parseSocials } from "@/lib/store-socials";
 import type { CallPackage } from "@/lib/call-package-rules";
 import type { PodcastRef } from "@/lib/podcast-rules";
 import { cache } from "react";
-import { lookUpStore } from "@/lib/store-lookup";
+import { type StoreLookup, lookUpStore } from "@/lib/store-lookup";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -1219,25 +1219,30 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
 
 /**
  * The store behind a public address, for a visitor (lib/store-lookup.ts):
- * the same index read and record read as storeForHandle, with an address that
- * leads nowhere paced by connection, remembered for a short while and counted
- * for the company's day, so made-up addresses are not reads nothing counts.
- * The index alone decides whether a store is there, so a real store always
- * opens. For a route answering the public outside a page (an icon, the
- * manifest); pages use storeForPage. `at` is for tests.
+ * the same index read and record read as storeForHandle, nothing more, so a
+ * real store always opens and costs what it did. Only an address whose index
+ * names nobody counts against the asking connection's pace; past it the
+ * answer carries `retryAfter`, which a route answers with 429
+ * (storeLookupRefusal). For a route answering the public outside a page (an
+ * icon, the manifest, a card); pages use storeForPage. `at` is for tests.
  */
-export function storeForVisitor(handle: string, at: { now?: number; address?: string } = {}): Promise<Store | null> {
-  if (handleProblem(handle)) return Promise.resolve(null);
+export function lookUpVisitorStore(handle: string, at: { now?: number; address?: string } = {}): Promise<StoreLookup<Store>> {
+  if (handleProblem(handle)) return Promise.resolve({ store: null, retryAfter: 0 });
   return lookUpStore(handle, {
     look: storeForHandle,
     indexKey: handleKey(handle),
     // As storeForHandle reads it: a name that was let go is held, not owned.
     holderOf: (value) => (typeof value === "string" && value && !value.startsWith(RELEASED_PREFIX) ? value : null),
-    open: async (holder, also) => {
-      const [raw] = await redisPipeline([["GET", await ownerKey(holder)], ...also]);
+    open: async (holder) => {
+      const [raw] = await redisPipeline([["GET", await ownerKey(holder)]]);
       return parseStore(raw);
     },
   }, at);
+}
+
+/** The store behind a public address for a visitor, or null (lookUpVisitorStore without the pace's answer). */
+export async function storeForVisitor(handle: string, at: { now?: number; address?: string } = {}): Promise<Store | null> {
+  return (await lookUpVisitorStore(handle, at)).store;
 }
 
 /**

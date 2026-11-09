@@ -155,6 +155,19 @@ async function main(): Promise<void> {
   customers.set("cus_OtherProduct01", other);
   subscriptions.set("cus_OtherProduct01", [{ id: "sub_OtherProduct01", object: "subscription", customer: "cus_OtherProduct01", status: "active", trial_start: null, metadata: {} }]);
   is("a subscription that is no plan of ours and never had a trial: the trial", (await checkout(fresh(other))).trial, String(TRIAL_DAYS));
+  // Codex G, #3337 second review: a store field that is present but not a word is unknown, never "no plan before".
+  const oddStores: [string, unknown][] = [["null", null], ["0", 0], ["false", false], ["a list", []], ["an object", {}], ["a number", 7]];
+  for (const [i, [label, value]] of oddStores.entries()) {
+    const odd = `odd-store-${i}@example.com`;
+    const id = `cus_OddStoreVal0${i}`;
+    customers.set(id, odd);
+    subscriptions.set(id, [{ id: `sub_OddStoreVal0${i}`, object: "subscription", customer: id, status: "canceled", trial_start: null, metadata: { store: value } }]);
+    is(`a subscription whose store field is ${label}: no trial`, (await checkout(fresh(odd))).trial, null);
+  }
+  const emptied = "emptied-store@example.com";
+  customers.set("cus_EmptiedStore01", emptied);
+  subscriptions.set("cus_EmptiedStore01", [{ id: "sub_EmptiedStore01", object: "subscription", customer: "cus_EmptiedStore01", status: "active", trial_start: null, metadata: { store: "" } }]);
+  is("(control) a store field Stripe holds as an empty word is no plan of ours: the trial", (await checkout(fresh(emptied))).trial, String(TRIAL_DAYS));
   reads.length = 0;
   is("(control) an additional store: no trial, and Stripe is not asked", [(await checkout(fresh(brandNew, { extra: true }))).trial, reads.length], [null, 0]);
   is("(control) a store that already had a customer: no trial", (await checkout(fresh(brandNew, { stripeCustomerId: "cus_TrialOnce0001" }))).trial, null);

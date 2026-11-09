@@ -64,6 +64,8 @@ import { type Store, saleHandles } from "@/lib/store";
 import { toMajor } from "@/lib/money";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { ADS_SERVER_PLATFORMS, type AdsServerPlatform, LEAD_ID, adsCookieName, readAdsCookie } from "@/lib/ad-consent";
+import { noteForErasure } from "@/lib/erasure-index";
+import { KEEP_UNLESS_ERASED, suppressedAmongCommand, suppressedKey, suppressionPrint, wholeErasedReply } from "@/lib/suppression";
 
 export const META_GRAPH_VERSION = "v25.0";
 export type ServerPlatform = AdsServerPlatform;
@@ -656,13 +658,29 @@ function conversionOf(store: Store, session: AdsSession, customer: Conversion["c
 const ordinary = (store: Store, s: AdsSession) =>
   s.status === "complete" && s.payment_status === "paid" && saleHandles(store).has(s.metadata?.store ?? "") && s.metadata?.kind !== "tip";
 
-/** Keeps what a membership's renewals are sent with: the cookies and clicks, never an address or a browser. */
-async function keepForRenewals(session: AdsSession, buyer: BuyerRequest): Promise<void> {
+/**
+ * Keeps what a membership's renewals are sent with: the cookies and clicks,
+ * never an address or a browser. They are the buyer's, so they are noted for
+ * erasure under the checkout's address (lib/erasure-index.ts), first and in
+ * the same pipeline as the write, and deleting the person deletes them
+ * (audit 12, privacy). A checkout with no address keeps nothing: nothing
+ * could find it. The write is made only while the address is not among the
+ * store's deleted people, in one step with that check (KEEP_UNLESS_ERASED),
+ * so an erasure that ran first is never undone by a late sale.
+ */
+async function keepForRenewals(store: Store, session: AdsSession, buyer: BuyerRequest, now = Date.now()): Promise<void> {
   const sub = typeof session.subscription === "string" ? session.subscription : "";
   if (!SUB.test(sub)) return;
+  const email = emailOf(session);
+  const notes = email ? noteForErasure(store.statsId, email, subKey(sub), now) : [];
+  if (!email || !notes.length) return;
   const { _fbp, _fbc, _ttp, ttclid, _epik, _ga, fbclid, epik, clickAt } = buyer.cookies;
-  const kept = Object.fromEntries(Object.entries({ _fbp, _fbc, _ttp, ttclid, _epik, _ga, fbclid, epik, clickAt }).filter(([, v]) => v));
-  await redisPipeline([["SET", subKey(sub), JSON.stringify(kept), "EX", SUB_SECONDS]]);
+  const kept = JSON.stringify(Object.fromEntries(Object.entries({ _fbp, _fbc, _ttp, ttclid, _epik, _ga, fbclid, epik, clickAt }).filter(([, v]) => v)));
+  // A store with no list has deleted nobody yet (an erasure gives it one first).
+  const write = store.listId
+    ? ["EVAL", KEEP_UNLESS_ERASED, 2, subKey(sub), suppressedKey(store.listId), kept, SUB_SECONDS, suppressionPrint(store.listId, email)]
+    : ["SET", subKey(sub), kept, "EX", SUB_SECONDS];
+  await redisPipeline([...notes, write]);
 }
 
 export type SendResult = "sent" | "already" | "off" | "invalid" | "unknown";
@@ -718,7 +736,7 @@ export async function sendServerPurchase(store: Store, sessionId: unknown, buyer
   const used: BuyerRequest = kept ? { ...kept, cookies: { ...kept.cookies, ...buyer.cookies } } : buyer;
   const c = conversionOf(store, session, await customerType(store, emailOf(session), sessionId, created));
   await deliver(store, stored, c, used, now);
-  await keepForRenewals(session, used).catch(() => {});
+  await keepForRenewals(store, session, used, now).catch(() => {});
   return "sent";
 }
 
@@ -750,7 +768,7 @@ export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Dat
     const created = typeof row.created === "number" ? row.created : 0;
     const c = conversionOf(store, row, await customerType(store, emailOf(row), row.id as string, created));
     if (await deliver(store, stored, c, buyer, now)) count += 1;
-    await keepForRenewals(row, buyer).catch(() => {});
+    await keepForRenewals(store, row, buyer, now).catch(() => {});
   }
   return count;
 }
@@ -797,13 +815,34 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
   if (!left.length) return 0;
   const stored = await readStored(store.statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
-  const kept = await redisPipeline(left.map((row) => ["GET", subKey(SUB.test(subOf(row)) ? subOf(row) : "none")]));
+  const emailOfRow = (row: InvoiceRow) => (typeof row.customer_email === "string" ? row.customer_email : "");
+  // With the reads, whether each renewal's address was deleted from the store
+  // (lib/suppression.ts), read whole: a renewal of a deleted person is never
+  // sent, also from a record kept before it was noted for erasure, and that
+  // record goes. A reply not whole sends nothing this pass.
+  const asked = store.listId ? left.map(emailOfRow) : [];
+  const read = await redisPipeline([...left.map((row) => ["GET", subKey(SUB.test(subOf(row)) ? subOf(row) : "none")]), ...(asked.length ? [suppressedAmongCommand(store.listId as string, asked)] : [])]);
+  const kept = repliesFor(read, left.length + (asked.length ? 1 : 0));
+  if (!kept) return 0;
+  let erased: (string | number | null)[];
+  try {
+    erased = asked.length ? wholeErasedReply(kept[left.length], asked.length) : [];
+  } catch {
+    return 0;
+  }
   let count = 0;
   for (let i = 0; i < left.length && Date.now() < deadline; i += 1) {
     const row = left[i];
     const cookies = parse<Record<string, string> | null>(kept[i], null);
     // Only a membership whose first payment was sent from here, with the buyer's yes.
     if (!cookies) continue;
+    // A deleted person: nothing goes, and what was kept for them goes.
+    if (asked.length && erased[i] !== null) {
+      await redisPipeline([["DEL", subKey(subOf(row))]]).catch(() => {});
+      continue;
+    }
+    // No address on the invoice: whether it was deleted is not known, so nothing goes this time.
+    if (!emailOfRow(row)) continue;
     // A renewal's mark is kept forty days: only while the store's data room
     // has space for it (lib/store-data.ts), else renewals wait for room.
     if (!(await keepFor(store, RENEWAL_MARK_BYTES, 40 * 86400, now))) break;

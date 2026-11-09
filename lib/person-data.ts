@@ -153,6 +153,8 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/free.ts", how: "erased", via: "lib/erasure-index.ts", what: "Their free-product links" },
   { file: "lib/free.ts", how: "expires", days: 1, what: "Counts that limit how often one address may ask, as one-way hashes, for an hour" },
   { file: "lib/store-join.ts", how: "erased", via: "lib/erasure-index.ts", what: "Their sign-up confirmation links" },
+  { file: "lib/ad-events.ts", how: "erased", via: "lib/erasure-index.ts", what: "The ad cookies and ad click ids a membership they bought with their yes to ad measurement reports its later payments with; none of their later payments is reported to an ad platform after they are deleted" },
+  { file: "lib/ad-events.ts", how: "open", what: "What a checkout opened with their yes to ad measurement carries to its sale (network address, browser, page, ad cookies), kept under the checkout's own token for four days and gone by itself" },
   { file: "lib/buyer-orders.ts", how: "expires", days: 1, what: "A link to their purchases already emailed works for 24 hours" },
   { file: "lib/membership-manage.ts", how: "expires", days: 1, what: "A link to manage their membership already emailed works for an hour" },
   { file: "lib/request-guard.ts", how: "expires", days: 32, what: "Counts that limit how often one address may ask for things, kept as one-way hashes for at most 32 days" },

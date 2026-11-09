@@ -311,7 +311,9 @@ export default function PrivacyPage() {
           ad measurement is never sent. We keep the token sealed; for four days,
           the request that opened a checkout; for 400 days, the cookies and ad
           click id a membership&apos;s later payments are sent with, never an
-          address or browser; for three days (40 for a membership payment) that
+          address or browser, deleted with the buyer when they are deleted
+          from the store, after which none of their later payments is sent;
+          for three days (40 for a membership payment) that
           each was sent; and the platform&apos;s last answer for the creator to
           see.
         </p>

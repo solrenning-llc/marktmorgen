@@ -370,6 +370,12 @@ async function main(): Promise<void> {
   const paidRestingStoreMonth = resting.paidStoreReadsPerHour * MONTH_HOURS * unpaid;
   console.log(`  cost  per paying store out of its own requests: its record $${paidRestingStoreMonth.toFixed(4)} a month at most`);
   is("a paying store out of its own requests: its record reads stay under the registry's month (cents)", Math.ceil(paidRestingStoreMonth * 100) <= resting.paidMonthCeilingUsdCents, true);
+  // Added with Claude 2's focal on #3330 @39da7f44db (LEVE 2): a paying store's opens refused past its paid reads in flight,
+  // counted in a count of its own, at most paidRefusalsPerHour an hour one by one, each at paidRefusal's waits and
+  // commands (measured with room in tests/short-link-open-rest-cap5.test.ts), a store's links and ids read, no record.
+  const paidRefusalMonth = resting.paidRefusalsPerHour * MONTH_HOURS * request(resting.paidRefusal.waits, resting.paidRefusal.commands, 4_096);
+  console.log(`  cost  per paying store, its opens refused past its paid reads in flight: $${paidRefusalMonth.toFixed(4)} a month at most`);
+  is("a paying store's refusals past its paid reads in flight stay under the registry's month (cents)", Math.ceil(paidRefusalMonth * 100) <= resting.paidRefusalMonthCeilingUsdCents, true);
   is("one resting store's lookups on one instance stay under the registry's month (cents)", Math.ceil(restingStoreInstanceMonth * 100) <= resting.instanceMonthCeilingUsdCents, true);
   is("those figures wait for the owner's approval", resting.approvedByOwner, false);
   is("their number is held unknown, never zero", [SHORT_LINK_UNPAID_COMPANY_COST.restingStores, SHORT_LINK_UNPAID_COMPANY_COST.instances, restingStoreMonth > 0, restingStoreInstanceMonth > 0], [null, null, true, true]);

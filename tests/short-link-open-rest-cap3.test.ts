@@ -10,7 +10,7 @@ import { addLink } from "@/lib/short-links";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, storeFolder } from "@/lib/store";
 import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
-import { SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_STORE_READS_PER_HOUR } from "@/lib/short-link-open-rules";
+import { SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_PAID_REFUSALS_PER_HOUR, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_STORE_READS_PER_HOUR } from "@/lib/short-link-open-rules";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -77,7 +77,14 @@ async function main() {
   is("MEDIUM: past its own count, every read was counted first in the store's own counts: at most 20 + SHORT_LINK_PAID_FLIGHT_PER_STORE", recordReads <= SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_PAID_FLIGHT_PER_STORE, true);
   // Added with the fix: the resting hour keeps every read past the store's own count, and a second burst in the hour reads nothing more.
   is("the store's hour holds every read it did not pay for", Number((await redis.pipeline([["GET", `nl:slink:rest:${out.s.sid}:cap:${Math.floor(Date.now() / HOUR)}`]]))[0]) >= recordReads, true);
-  is("and the resting hour every instance shares holds no more than its own count's refusals", restUsed <= SHORT_LINK_STORE_READS_PER_HOUR, true);
+  // Rule 23 (Claude 2's focal on #3330 @39da7f44db, LEVE 2): was "restUsed <= SHORT_LINK_STORE_READS_PER_HOUR", while an open
+  // refused past the store's paid reads in flight was counted in no hour. Each is now counted in a count of the store's own,
+  // and past SHORT_LINK_PAID_REFUSALS_PER_HOUR of them it is the store's own refusal past its counts, in the resting hour too:
+  // that hour holds the store's own count's refusals and those, no more. A paying store with room is not held by that hour
+  // (tests/short-link-open-rest-cap4.test.ts).
+  const paidOut = Number((await redis.pipeline([["GET", `nl:slink:rest:${out.s.sid}:paidout:${Math.floor(Date.now() / HOUR)}`]]))[0] ?? 0);
+  console.log(`  MEDIUM its refusals past its paid reads in flight, counted: ${paidOut}`);
+  is("and the resting hour every instance shares holds no more than its own count's refusals and those past its paid flight's figure", restUsed <= SHORT_LINK_STORE_READS_PER_HOUR + Math.max(0, paidOut - SHORT_LINK_PAID_REFUSALS_PER_HOUR), true);
   forgetShortLinkOpenMemory();
   const before = recordReads;
   await Promise.all(out.codes.map((c) => open(c)));

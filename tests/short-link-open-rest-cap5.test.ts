@@ -9,6 +9,8 @@ import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/li
 import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
 import { SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_STORE_READS_PER_HOUR } from "@/lib/short-link-open-rules";
+import * as rules from "@/lib/short-link-open-rules";
+import { SHORT_LINK_UNPAID_COMPANY_COST } from "./plan-cost-registry";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -17,8 +19,12 @@ type Command = (string | number)[];
 const HOUR = 3_600_000;
 // Every paid-burst place taken (ZADD on a store's paid reads in flight), and how many were in flight with it (ZCARD).
 let paidPlaces: number[] = [];
+let pipelines = 0;
+let commands = 0;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: Command[]) => {
+  pipelines += 1;
+  commands += batch.length;
   const values = await real(batch);
   batch.forEach((c, i) => {
     if (c[0] === "ZCARD" && /^nl:slink:rest:[0-9a-f]{32}:paidflight$/.test(String(c[1]))) paidPlaces.push(Number(values[i]));
@@ -97,6 +103,54 @@ async function main() {
   const pastAgain = paidPlaces.filter((x) => x > SHORT_LINK_PAID_FLIGHT_PER_STORE).length;
   console.log(`  LEVE 2 (b) ${second.filter((r) => r.status === 302).length} x 302, ${pastAgain} past the paid flight again`);
   is("LEVE 2 (b): no open of the second burst is refused past the paid flight (each costs its six pipelines)", pastAgain, 0);
+
+  // Added with the fix (rule 23: the RED checks above keep their words and figures).
+  part("LEVE 2 (c): the minute's mark past, the paying store opens its 60 at once again");
+  later(61_000);
+  forgetShortLinkOpenMemory();
+  const check = await open(store.codes[0]);
+  const third = await Promise.all(store.codes.slice(0, 60).map((c) => open(c)));
+  console.log(`  LEVE 2 (c) the open that asks again ${check.status}; then ${third.filter((r) => r.status === 302).length} x 302 of 60`);
+  is("LEVE 2 (c): asked again, it pays and its 60 open", [check.status, third.every((r) => r.status === 302)], [302, true]);
+
+  part("LEVE 2 (d): one refusal past the paid flight, alone and past its hour's figure, measured against the registry");
+  const fill = async (refusals: number) => {
+    redis.clear();
+    forgetShortLinkOpenMemory();
+    later(HOUR - (Date.now() % HOUR) + 1_000);
+    await payingStore(`measure${refusals}@example.com`, `measure${refusals}`, `Measure${String(refusals).padStart(6, "0")}`);
+  };
+  const measure = async (refusals: number) => {
+    await fill(refusals);
+    const s = (await storeForEmail(`measure${refusals}@example.com`))!;
+    const codes = redis.keys().filter((k) => /^nl:slink:[a-z0-9]{6,}$/i.test(k)).map((k) => k.slice("nl:slink:".length));
+    const t = Date.now();
+    const batch: Command[] = [];
+    for (let i = 0; i < SHORT_LINK_STORE_READS_PER_HOUR; i += 1) batch.push(["ZADD", rules.shortLinkStoreFlightKey(s.sid), t, `f${i}`]);
+    for (let i = 0; i < SHORT_LINK_PAID_FLIGHT_PER_STORE; i += 1) batch.push(["ZADD", rules.shortLinkPaidFlightKey(s.sid), t, `p${i}`]);
+    if (refusals > 0) batch.push(["SET", rules.shortLinkPaidRefusedKey(s.sid, t), String(refusals)]);
+    await real(batch);
+    pipelines = 0;
+    commands = 0;
+    paidPlaces = [];
+    const r = await open(codes[0]);
+    const mark = (await real([["GET", rules.shortLinkRestKey(s.sid)]]))[0];
+    const own = Number((await real([["GET", rules.shortLinkPaidRefusedKey(s.sid, t)]]))[0] ?? 0);
+    return { status: r.status, pipelines, commands, past: paidPlaces.some((x) => x > SHORT_LINK_PAID_FLIGHT_PER_STORE), mark, own };
+  };
+  const alone = await measure(0);
+  const past = await measure(rules.SHORT_LINK_PAID_REFUSALS_PER_HOUR);
+  const cost = SHORT_LINK_UNPAID_COMPANY_COST;
+  console.log(`  LEVE 2 (d) alone: ${alone.status}, ${alone.pipelines} pipelines, ${alone.commands} commands, counted ${alone.own}; past its figure: ${past.status}, ${past.pipelines} pipelines, ${past.commands} commands, counted ${past.own}, marked ${past.mark !== null}`);
+  is("LEVE 2 (d): alone, refused past the paid flight, counted once in its store's count, no mark", [alone.status, alone.past, alone.own, alone.mark], [503, true, 1, null]);
+  is("LEVE 2 (d): alone, priced with room in the registry (two pipelines and four commands over the measured)", [
+    cost.perRestingStore.paidRefusal.waits >= alone.pipelines + 2, cost.perRestingStore.paidRefusal.commands >= alone.commands + 4,
+  ], [true, true]);
+  is("LEVE 2 (d): past its figure, counted and the store marked resting a minute", [past.status, past.own, past.mark !== null], [503, rules.SHORT_LINK_PAID_REFUSALS_PER_HOUR + 1, true]);
+  is("LEVE 2 (d): past its figure, inside the resting hour's price (the heaviest unpaid open)", [
+    past.pipelines <= cost.heaviestUnpaid.waits, past.commands <= cost.heaviestUnpaid.commands,
+  ], [true, true]);
+  is("LEVE 2 (d): the registry holds the code's figure", cost.perRestingStore.paidRefusalsPerHour, rules.SHORT_LINK_PAID_REFUSALS_PER_HOUR);
   done();
 }
 main();

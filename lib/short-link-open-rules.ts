@@ -155,6 +155,18 @@ export const SHORT_LINK_PAID_BURST_COMMANDS = 6;
  * unpaid reads are fewer than that).
  */
 export const SHORT_LINK_PAID_FLIGHT_PER_STORE = 40;
+/**
+ * A paying store's opens refused past its paid reads in flight (SHORT_LINK_PAID_FLIGHT_PER_STORE) that may be refused
+ * one by one in an hour (Claude 2's focal on #3330 @39da7f44db, LEVE 2: each such refusal sent six pipelines and was
+ * counted in no hour). Every one is counted, in a count of that store's own (shortLinkPaidRefusedKey), with the
+ * give-back of its places; past this figure, or a count that cannot be read, the refusal is the store's own refusal
+ * past its counts: counted in the resting hour, the store marked resting a minute where it had no mark and kept so in
+ * the instance's memory, so the opens after it send nothing more than an open refused on its mark. A store with room
+ * opens SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_PAID_FLIGHT_PER_STORE at once all the same.
+ */
+export const SHORT_LINK_PAID_REFUSALS_PER_HOUR = 20;
+/** A paying store's opens refused past its paid reads in flight this hour (SHORT_LINK_PAID_REFUSALS_PER_HOUR), kept two hours. */
+export const shortLinkPaidRefusedKey = (sid: string, now: number) => `nl:slink:rest:${sid}:paidout:${hourOf(now)}`;
 /** A paying store's reads past its opens in flight, in flight: a sorted set scored by when each took its place, kept two times SHORT_LINK_FLIGHT_MS. */
 export const shortLinkPaidFlightKey = (sid: string) => `nl:slink:rest:${sid}:paidflight`;
 /** How long a store without a paid plan rests, without a gap, before its links are turned off (the owner's decision 14). */

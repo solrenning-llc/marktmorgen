@@ -90,6 +90,8 @@
  *   nl:slink:rest:<sid>:check string "1", the one open that asks a store whose moment is past (SET NX), kept SHORT_LINK_TIRED_MS
  *   nl:slink:rest:<sid>:cap:<hour> string the store's reads this hour it did not pay for, kept two hours
  *   nl:slink:rest:<sid>:flight zset   the store's opens in flight, by when each took its place, each lapsing SHORT_LINK_FLIGHT_MS later
+ *   nl:slink:rest:<sid>:paidflight zset a paying store's reads past its opens in flight, in flight, each lapsing SHORT_LINK_FLIGHT_MS later
+ *   nl:slink:rest:<sid>:paidout:<hour> string a paying store's opens refused past those this hour, kept two hours
  *   nl:slink:rest:<sid>:back  string the studio's notice that its links were turned off (lib/short-link-rest.ts)
  *
  * The owner's decision 14 on #3330 (9 November 2026) did not approve the US$81.49 a month one resting store could cost
@@ -102,6 +104,9 @@
  *     of stores that pay with fewer than the figure's unpaid reads this hour, which pays each read (Claude 2's focal),
  *     each such read taking first a place among that store's own paid reads in flight (SHORT_LINK_PAID_FLIGHT_PER_STORE),
  *     given back once paid, never in a count another store fills (its re-reviews: 180 reads at once; 20 x 302, 40 x 503);
+ *     an open refused past those is counted in a count of the store's own, SHORT_LINK_PAID_REFUSALS_PER_HOUR an hour one by
+ *     one, and past it is the store's own refusal past its counts (the resting hour, a minute's mark, the instance's
+ *     memory), so a burst past them stops at the mark (Claude 2's focal on #3330 @39da7f44db: they were counted nowhere);
  *   - a store without a paid plan that has rested SHORT_LINK_OFF_AFTER_MS without a gap (its record read at least once
  *     a SHORT_LINK_OFF_KEEP_SECONDS, saying so each time) has its links turned off: a short static page (410, kept by
  *     the CDN CACHE_SECONDS) that promises nothing, its record read again once a day at most, never renewed by the page,
@@ -124,8 +129,8 @@ import {
   SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_KEY_SECONDS, SHORT_LINK_UNPAID_PER_HOUR,
   SHORT_LINK_USED_UP_PAUSE_MS, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS,
   SHORT_LINK_FLIGHT_MS, SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_OFF_KEEP_SECONDS, SHORT_LINK_PAID_REST_MAX_MS,
-  SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_STORE_READS_PER_HOUR,
-  hourOf, offState, readRestMark, shortLinkPaidFlightKey, shortLinkRestCheckKey, shortLinkRestHourKey, shortLinkRestKey, shortLinkStoreFlightKey, shortLinkStoreHourKey,
+  SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_PAID_REFUSALS_PER_HOUR, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_STORE_READS_PER_HOUR,
+  hourOf, offState, readRestMark, shortLinkPaidFlightKey, shortLinkPaidRefusedKey, shortLinkRestCheckKey, shortLinkRestHourKey, shortLinkRestKey, shortLinkStoreFlightKey, shortLinkStoreHourKey,
   shortLinkUnpaidKey,
 } from "@/lib/short-link-open-rules";
 import { CACHE_SECONDS } from "@/lib/short-link-rules";
@@ -418,8 +423,8 @@ async function payOpen(
   const hourKey = shortLinkStoreHourKey(link.sid, now);
   const place = `${now}:${randomBytes(6).toString("hex")}`;
   const capBack: (string | number)[][] = [["ZREM", flightKey, place]];
-  // What every open gives back however it ends: its place in flight, and the resting hour's unit a paying store's read
-  // past its opens in flight reserved (set below). A read the store itself could not pay for is added to its hour's
+  // What every open gives back however it ends: its place in flight, and the place among the store's own paid reads in
+  // flight a paying store's read past its opens in flight took (set below). A read the store itself could not pay for is added to its hour's
   // unpaid reads first (Claude 2's NIT: INCR before the place goes).
   let back: (string | number)[][] = capBack;
   // Whether this open is a paying store's read past its opens in flight, counted in that store's own counts: then a
@@ -528,7 +533,19 @@ async function payOpen(
     if (paidInFlight === null || paidInFlight > SHORT_LINK_PAID_FLIGHT_PER_STORE) {
       outcome.kept = false;
       known.delete(code);
-      await redisPipeline(paidBack).catch(() => {});
+      // Counted, in a count of the store's own, with the give-back of its places (Claude 2's focal on #3330 @39da7f44db,
+      // LEVE 2: a refusal here was counted in no hour). Up to SHORT_LINK_PAID_REFUSALS_PER_HOUR an hour it is refused
+      // alone; past it, or a count that cannot be read, it is the store's own refusal past its counts: counted in the
+      // resting hour, a minute's mark where none is, and this instance's memory, so a later burst stops at the mark.
+      const refusedKey = shortLinkPaidRefusedKey(link.sid, now);
+      const sent = [...paidBack, ["INCR", refusedKey], ["EXPIRE", refusedKey, SHORT_LINK_UNPAID_KEY_SECONDS]];
+      let refusals: number | null = null;
+      try {
+        refusals = countOf(await redisPipeline(sent), sent.length);
+      } catch {
+        refusals = null;
+      }
+      if (refusals === null || refusals > SHORT_LINK_PAID_REFUSALS_PER_HOUR) return restRefused(link.sid, code, now, mark === null ? "short" : null, []);
       return shortLinkRefusal({ state: "tired", now, until: now + SHORT_LINK_TIRED_MS });
     }
     back = paidBack;

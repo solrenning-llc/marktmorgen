@@ -1,0 +1,560 @@
+
+FILE z-3318-controls.proof.ts
+  ok    prevented classification
+  ok    prevented before boundary
+  ok    prevented exact end releases
+  ok    prevented unpaid renewal still refuses
+  ok    charge_refunded classification
+  ok    charge_refunded before boundary
+  ok    charge_refunded exact end releases
+  ok    charge_refunded unpaid renewal still refuses
+  ok    lost classification
+  ok    lost before boundary
+  ok    lost exact end releases
+  ok    lost unpaid renewal still refuses
+  ok    won classification
+  ok    won before boundary
+  ok    won exact end releases
+  ok    won unpaid renewal still refuses
+  ok    unknown remains open "future_unknown"
+  ok    unknown remains open "PREVENTED"
+  ok    unknown remains open " prevented"
+  ok    unknown remains open "charge_refunded "
+  ok    unknown remains open null
+  ok    unknown remains open 0
+  ok    unknown remains open ["prevented"]
+  ok    unknown remains open {"status":"prevented"}
+  ok    synthetic store created
+  ok    bounded run 0 has no failure
+  ok    bounded run 1 has no failure
+  ok    bounded run 2 has no failure
+  ok    prevented finalized
+  ok    prevented read once only
+  ok    charge_refunded finalized
+  ok    charge_refunded read once only
+  ok    lost finalized
+  ok    lost read once only
+  ok    won finalized
+  ok    won read once only
+  ok    unknown retains open memory
+  ok    unknown still reread each run
+  ok    actual persisted unknown still pauses
+Z_OPERATION_VOLUME [{"run":1,"commands":44,"jsonBytes":23347,"providerGET":6,"failed":0,"complete":true},{"run":2,"commands":8,"jsonBytes":726,"providerGET":2,"failed":0,"complete":true},{"run":3,"commands":8,"jsonBytes":726,"providerGET":2,"failed":0,"complete":true}]
+Z_PROVIDER_PATHS ["/v1/disputes","/v1/disputes/du_Z3318prevented","/v1/disputes/du_Z3318chargerefunded","/v1/disputes/du_Z3318lost","/v1/disputes/du_Z3318won","/v1/disputes/du_Z3318futureunknown","/v1/disputes","/v1/disputes/du_Z3318futureunknown","/v1/disputes","/v1/disputes/du_Z3318futureunknown"]
+
+39 checks, all passing.
+Z_VOLUME {"runs":174,"mocks":10,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-dispute-closed-statuses.test.ts
+
+Stripe's closed statuses are not read as still open
+  ok    prevented reads as lost (the money went back)
+  ok    charge_refunded reads as lost (the charge was refunded)
+  ok    won is unchanged
+  ok    warning_closed is unchanged
+  ok    lost is unchanged
+  ok    needs_response is still open
+  ok    under_review is still open
+  ok    warning_needs_response is still open
+  ok    warning_under_review is still open
+  ok    "something_new" is unknown, still open (never closed or won)
+  ok    "Prevented" is unknown, still open (never closed or won)
+  ok    "PREVENTED" is unknown, still open (never closed or won)
+  ok    " prevented" is unknown, still open (never closed or won)
+  ok    "charge_refunded " is unknown, still open (never closed or won)
+  ok    "" is unknown, still open (never closed or won)
+  ok    null is unknown, still open (never closed or won)
+  ok    undefined is unknown, still open (never closed or won)
+  ok    0 is unknown, still open (never closed or won)
+  ok    ["prevented"] is unknown, still open (never closed or won)
+  ok    {"status":"prevented"} is unknown, still open (never closed or won)
+
+A plan dispute listed as prevented
+  ok    recorded once, nothing failed
+  ok    written as lost, with the period it covered
+  ok    paused while the period it paid for runs
+  ok    checkout closed while the period it paid for runs
+  ok    no pause 21 days later
+  ok    no pause 400 days later
+  ok    remembered as final, not open
+  ok    not read again by id the next day
+
+A plan dispute listed as charge_refunded
+  ok    recorded once, nothing failed
+  ok    written as lost, with the period it covered
+  ok    paused while the period it paid for runs
+  ok    checkout closed while the period it paid for runs
+  ok    no pause 21 days later
+  ok    no pause 400 days later
+  ok    remembered as final, not open
+  ok    not read again by id the next day
+
+An open plan dispute past the list window, re-read as prevented
+  ok    re-read and recorded
+  ok    written as lost, keeping the period first read
+  ok    its period long over: nothing paused
+  ok    checkout open again
+  ok    its re-read slot is freed (final)
+
+An open plan dispute past the list window, re-read as charge_refunded
+  ok    re-read and recorded
+  ok    written as lost, keeping the period first read
+  ok    its period long over: nothing paused
+  ok    checkout open again
+  ok    its re-read slot is freed (final)
+
+Stuck ones never hold every re-read slot
+  ok    no stuck one is still open
+  ok    the later win is read in a following run
+  ok    and no longer kept as open on the store
+  ok    the run after asks Stripe no dispute by id and is complete
+
+Controls: an open dispute and an undocumented status stay open
+  ok    needs_response: written as open
+  ok    needs_response: still paused past the period
+  ok    needs_response: kept for a re-read
+  ok    something_new: written as open
+  ok    something_new: still paused past the period
+  ok    something_new: kept for a re-read
+
+56 checks, all passing.
+Z_VOLUME {"runs":1097,"mocks":69,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-dispute.test.ts
+
+Stripe's statuses read as what the bank decided
+  ok    won
+  ok    an inquiry closed without a chargeback
+  ok    lost
+  ok    needs_response is open
+  ok    under_review is open
+  ok    warning_needs_response is open
+  ok    warning_under_review is open
+  ok    something_new is open
+  ok    undefined is open
+
+Open pauses, won lifts, lost pauses to the end of the period paid for
+  ok    open pauses
+  ok    won does not
+  ok    lost pauses before the period ends
+  ok    lost stops pausing once it ended
+  ok    no dispute pauses nothing
+  ok    a period that could not be read is kept for a year
+  ok    a broken entry is dropped
+  ok    coveredUntil reads the latest line end
+  ok    coveredUntil is 0 with no lines
+  ok    a known dispute takes its new status and keeps what was first read
+  ok    a decided dispute is never reopened
+  ok    reading a record never drops one that still pauses
+  ok    past the limit, none that still pauses is dropped
+  ok    past the limit, a decided one goes first
+
+A paused plan stops what costs us to run, without ending
+  ok    paid up before
+  ok    not paid up while disputed
+  ok    emails to the list stop
+  ok    its domain and look stay
+  ok    costs stand as an ended plan
+  ok    costsPaused
+  ok    routes refuse with their own code
+  ok    an unpaid renewal keeps its own code
+  ok    won: paid up again
+  ok    a plan that is not running is not paused by it
+
+The upload routes refuse with plan_disputed
+  ok    app/api/store/file/route.ts asks costPauseCode
+  ok    app/api/store/image/upload/route.ts asks costPauseCode
+  ok    app/api/store/mail/picture/route.ts asks costPauseCode
+  ok    app/api/store/vault/route.ts asks costPauseCode
+  ok    app/api/store/stream/route.ts asks costPauseCode
+  ok    app/api/store/file/route.ts answers plan_disputed with 409, not a server error
+  ok    app/api/store/image/upload/route.ts answers plan_disputed with 409, not a server error
+  ok    the studio has a sentence for it
+  ok    the course editor stops on it
+
+The studio and the Terms say the same words
+  ok    the notice says what pauses, what stays and what comes next
+  ok    the Terms use the same words
+  ok    the studio shows the notice
+  ok    the daily job runs it
+
+The daily job writes a dispute of a plan payment on its store
+  ok    counts
+  ok    the plan's dispute is written down
+  ok    and pauses the store's costs
+  ok    the list asked looks back 120 days and expands the invoice
+  ok    nothing but reads is sent to Stripe
+  ok    the same dispute again changes nothing
+  ok    one that matched no plan is asked about again within the week
+  ok    and no longer after it
+  ok    disputes already read cost no subscription read
+  ok    still one
+  ok    the bank's decision is written
+  ok    won lifts the pause
+  ok    a decided dispute listed again costs no subscription read
+
+A reply for another subscription, or with no id, decides nothing (rule 30)
+  ok    each misread reply is counted as failed, none recorded or unmatched
+  ok    no dispute is written on the store from a reply for another subscription
+  ok    costs are not paused on a misread reply
+  ok    nothing is remembered for a misread dispute
+  ok    the right reply, read after the week an unmatched one is asked about, is still written
+
+A reply that is not an object (null, a string, a number) decides nothing
+  ok    each is counted as failed, none recorded or unmatched
+  ok    no dispute is written on the store
+  ok    nothing is remembered for them, so the next run reads them again
+
+Bounded, newest first, and open ones past the window read by id
+  ok    stops at the page cap, not complete
+  ok    a new dispute is read first in the next run
+  ok    and only it costs a subscription read
+  ok    a deadline already passed asks Stripe nothing
+  ok    an open dispute the list no longer returns is read by id
+  ok    and its decision is written
+  ok    once decided it is not read again
+
+74 checks, all passing.
+Z_VOLUME {"runs":332,"mocks":46,"over":false}
+reading plan dispute du_Broken1 failed BillingError: Stripe billing failed (500 unknown): boom
+    at onPlatform ([stdin]:37897:11)
+    at async applyDispute ([stdin]:37966:24)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38269:19) {
+  status: 500,
+  code: 'unknown'
+}
+reading plan dispute du_Broken1 failed BillingError: Stripe billing failed (500 unknown): boom
+    at onPlatform ([stdin]:37897:11)
+    at async applyDispute ([stdin]:37966:24)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38277:19) {
+  status: 500,
+  code: 'unknown'
+}
+reading plan dispute du_Broken1 failed BillingError: Stripe billing failed (500 unknown): boom
+    at onPlatform ([stdin]:37897:11)
+    at async applyDispute ([stdin]:37966:24)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38282:5) {
+  status: 500,
+  code: 'unknown'
+}
+reading plan dispute du_Broken1 failed BillingError: Stripe billing failed (500 unknown): boom
+    at onPlatform ([stdin]:37897:11)
+    at async applyDispute ([stdin]:37966:24)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38285:5) {
+  status: 500,
+  code: 'unknown'
+}
+reading plan dispute du_WrongId1 failed Error: Stripe answered for another subscription
+    at applyDispute ([stdin]:37967:56)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38307:18)
+reading plan dispute du_NoId1 failed Error: Stripe answered for another subscription
+    at applyDispute ([stdin]:37967:56)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38307:18)
+reading plan dispute du_Later1 failed Error: Stripe answered for another subscription
+    at applyDispute ([stdin]:37967:56)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38307:18)
+reading plan dispute du_NullBody1 failed Error: Stripe answered for another subscription
+    at applyDispute ([stdin]:37967:56)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38328:18)
+reading plan dispute du_TextBody1 failed Error: Stripe answered for another subscription
+    at applyDispute ([stdin]:37967:56)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38328:18)
+reading plan dispute du_NumberBody1 failed Error: Stripe answered for another subscription
+    at applyDispute ([stdin]:37967:56)
+    at async syncPlanDisputes ([stdin]:38016:24)
+    at async main ([stdin]:38328:18)
+plan disputes: more than one run's pages; the oldest wait for the next run
+plan disputes: more than one run's pages; the oldest wait for the next run
+
+Z_STATUS 0 null
+
+FILE plan-refund-rules.test.ts
+
+First payment, within the window: the whole payment, never more than was taken
+  ok    in full
+  ok    on the last second of the window
+  ok    one second late: nothing on a monthly payment
+  ok    no card fee taken from the guarantee
+  ok    fee not read yet does not hold the guarantee back
+  ok    a coupon: what was taken, not the list price
+  ok    tax shown on top comes back with it
+  ok    a partial refund already made: only the rest
+  ok    fully refunded already: nothing
+  ok    over-refunded record: nothing, never negative
+  ok    a zero charge: nothing was paid
+  ok    a charge that did not succeed: nothing
+  ok    a customer balance paid part of the invoice: cannot tell
+  ok    a first charge that was a switch, inside the window: still the guarantee
+
+Not the first payment
+  ok    a monthly renewal: nothing
+  ok    a switch charge: nothing (section 5)
+  ok    a billing reason this code does not know: cannot tell
+  ok    a monthly renewal inside 30 days: still nothing
+
+Disputes: never a refund on top of what the bank returns
+  ok    open (warning_needs_response): nothing now
+  ok    open (warning_under_review): nothing now
+  ok    open (needs_response): nothing now
+  ok    open (under_review): nothing now
+  ok    open (something_new): nothing now
+  ok    lost for part of the charge: cannot tell
+  ok    lost: the bank already returned it
+  ok    prevented: treated as already returned
+  ok    won: the policy applies again
+  ok    inquiry closed: the policy applies again
+
+Yearly: months not started, at the monthly price, less Stripe's fee
+  ok    second month: 2 kept
+  ok    first month (renewal, any time): 1 kept
+  ok    first yearly payment within 30 days: the guarantee instead
+  ok    first yearly payment after 30 days: months
+  ok    all twelve started: nothing
+  ok    a coupon so large the months kept cover it: nothing, never negative
+  ok    a switch charge on a yearly plan (maybe the yearly payment itself): cannot tell, never a silent no
+  ok    a debit balance (charge above the invoice total): cannot tell
+  ok    fee in another currency than the charge: cannot tell
+  ok    month 9 with a fee larger than the month left: the fee, not the months
+  ok    tax with a partial refund: the total never passes the policy
+  ok    fee not read yet: cannot tell
+  ok    monthly price unknown: cannot tell
+  ok    charged in another currency: cannot tell
+  ok    tax comes back for the part refunded
+  ok    a partial refund counts against the policy's figure
+  ok    refunded past the policy's figure: nothing more
+  ok    a disputed yearly payment: nothing
+
+Never more than was taken, whatever the input (10,000 random cases)
+  ok    no refund above what is left of the charge or the policy's total, none zero or fractional
+
+Bad data is never read as money
+  ok    negative amount
+  ok    fractional amount
+  ok    NaN refunded
+  ok    tax above amount
+  ok    negative fee
+  ok    a yearly monthly price that is not money
+
+Months start on Stripe's billing anchor
+  ok    Jan 31 + 1 month is Feb 28
+  ok    Jan 31 + 2 months is Mar 31
+  ok    before the period: none started
+  ok    at its first second: one
+  ok    Feb 28 14:59: still one
+  ok    Feb 28 15:00: two
+  ok    a year on: twelve, never more
+
+The rule is the one the refund page states
+  ok    the guarantee reads REFUND_DAYS
+  ok    months kept at the monthly price
+  ok    the card fee kept on a yearly refund
+  ok    renewals refunded only inside the guarantee's days
+  ok    inside them, every payment for the same store since the first (owner, 31/10/2026 15h41; lib/plan-refund.ts)
+  ok    once per person, by email address or by card (lib/plan-refund.ts personPaidBefore)
+  ok    never that the creator's Stripe customers are untouched (closing stops the renewals sold there)
+
+67 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-standing.test.ts
+
+Where a store stands
+  ok    a store that never started a plan
+  ok    one inside a plan's free days
+  ok    one that pays
+  ok    one whose plan is over
+  ok    a plan that is not running has ended, even where the day was never written down
+  ok    the store this site runs itself pays nobody and stands as paid
+  ok    only a store that pays, with a subscription behind it, can have an hour added to an invoice
+
+How long its video may be watched in a month
+  ok    a paid plan has a finite monthly playback threshold
+  ok    an internal paid store has the same finite threshold
+  ok    a trial plays for the hours a plan covers
+  ok    a store with no plan, before one or after one, for a few
+  ok    which is far less than a plan's
+  ok    setup playback is limited to fifteen recorded minutes
+
+How much it may keep
+  ok    a paid plan has the brake every plan has
+  ok    a trial is capped by its chosen tier
+  ok    a store with no plan has five gigabytes, before one or after one
+  ok    which is twelve cents a month at the dearest rate a file is kept at
+  ok    and a trial that keeps all it may costs us little over a dollar a month
+  ok    unavailable storage is not treated as an empty store
+  ok    unavailable storage cannot authorize an upload
+  ok    one that would take a store with no plan past its figure is not
+  ok    it is what is left that a file has to fit in
+  ok    a store that held more when its plan ended cannot add to it
+  ok    paid uploads must fit the confirmed remaining room
+
+What an upload is told
+  ok    each standing has its own word
+  ok    and the studio has a sentence for each
+  ok    trial refusal points to the tier-specific limit
+  ok    a store is not told to start a plan while none can be started
+  ok    R2 admission measures confirmed usage under its shared reservation
+  ok    the door for lesson videos measures a store against its own figure and holds a file to what is left
+
+The day a plan ends is written down once
+  ok    a new store has no such day, and stands as never started
+  ok    looking at a store that never started a plan does not end one
+  ok    a plan that starts leaves it empty
+  ok    the first time it is seen to be over, the day is written
+  ok    and seen again, it is the same day
+  ok    a plan that runs again wipes it
+
+What the pages say
+  ok    the Terms disclose all paid tiers and the capped trial
+  ok    the Terms disclose finite paid and setup playback thresholds
+  ok    and that a store holding more when its plan ends cannot add to it, with where its date is said
+  ok    the help discloses tier-specific storage and finite playback
+  ok    so does the page about courses
+  ok    the studio shows a store its own figures
+  ok    and the lesson page pauses by the store's own hours
+
+43 checks, all passing.
+Z_VOLUME {"runs":76,"mocks":0,"over":false}
+could not read what a store is storing BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth ([stdin]:34837:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async requestApi ([stdin]:35318:16)
+    at async list ([stdin]:36157:20)
+
+Z_STATUS 0 null
+
+FILE checkup-disputes.test.ts
+
+Read only, on the creator's account
+  ok    a GET on the creator's own account, from the last 180 days
+  ok    two waiting: a problem, with the next due date
+  ok    in Stripe's own words for an unanswered one
+  ok    where to answer, and the studio's page to look first
+  ok    one waiting is said as one
+  ok    an appeal waiting for an answer is one too
+  ok    one past its due date: said, and never given as the next date
+  ok    all past: no next date at all
+
+None waiting
+  ok    some with the bank, an appeal among them: fine, counted
+  ok    none at all: fine
+  ok    a status Stripe adds that this does not know: not checked, never fine
+
+Unknown is never fine
+  ok    Stripe failing: not checked
+  ok    Stripe not answering: not checked, on time
+  ok    an odd answer: not checked
+  ok    could not be read at all: not checked
+  ok    a row that is not a dispute: not checked
+  ok    a dispute with no id: not checked
+  ok    the same dispute twice (a stuck cursor): not checked
+  ok    the first page read, the second out of time: what was read is kept, said as at least
+  ok    the second page failing, none waiting: not checked
+
+At most three pages
+  ok    three pages read, then it stops
+  ok    more than it reads, none waiting: not checked, never fine
+  ok    more than it reads, some waiting: at least
+  ok    the next page starts after the last one read
+
+No Stripe account
+  ok    left out: the payments line already says nothing can be sold
+  ok    each reader waits at most CHECK_WAIT_MS
+
+26 checks, all passing.
+Z_VOLUME {"runs":19,"mocks":16,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (82.663275ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (88.50791ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (33.419649ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (1.970322ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.139651ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.144958ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.394795ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (66.715099ms)
+✔ every store figure taken in the code is a kind a line prices (42.279803ms)
+✔ every email sent names a meter, and each file only the meters it may use (64.185464ms)
+✔ the units a figure is taken in cost at least what they stand for (8.429134ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.645131ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.228765ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.285931ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.112309ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.132349ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.326272ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.146791ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.825595ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.077607ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.042681ms)
+✔ Path push fits its reserved studio requests (0.077907ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.0534ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.104538ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.190717ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (32.224436ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 447.602698
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (117.368331ms)
+✔ each family is bounded one way at least, and what it says can be checked (46.244182ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.463694ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.008287ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.404339ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.297964ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.162234ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 181.415108
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3318-7CWJ6T

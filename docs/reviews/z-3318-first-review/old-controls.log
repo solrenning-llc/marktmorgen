@@ -1,0 +1,65 @@
+
+FILE z-3318-controls.proof.ts
+  FAIL  prevented classification
+        expected "lost"
+        got      "open"
+  ok    prevented before boundary
+  FAIL  prevented exact end releases
+        expected false
+        got      true
+  ok    prevented unpaid renewal still refuses
+  FAIL  charge_refunded classification
+        expected "lost"
+        got      "open"
+  ok    charge_refunded before boundary
+  FAIL  charge_refunded exact end releases
+        expected false
+        got      true
+  ok    charge_refunded unpaid renewal still refuses
+  ok    lost classification
+  ok    lost before boundary
+  ok    lost exact end releases
+  ok    lost unpaid renewal still refuses
+  ok    won classification
+  ok    won before boundary
+  ok    won exact end releases
+  ok    won unpaid renewal still refuses
+  ok    unknown remains open "future_unknown"
+  ok    unknown remains open "PREVENTED"
+  ok    unknown remains open " prevented"
+  ok    unknown remains open "charge_refunded "
+  ok    unknown remains open null
+  ok    unknown remains open 0
+  ok    unknown remains open ["prevented"]
+  ok    unknown remains open {"status":"prevented"}
+  ok    synthetic store created
+  ok    bounded run 0 has no failure
+  ok    bounded run 1 has no failure
+  ok    bounded run 2 has no failure
+  FAIL  prevented finalized
+        expected "final"
+        got      "open:7ad7061218e04c50a58c11a1c3b3e39f"
+  FAIL  prevented read once only
+        expected 1
+        got      3
+  FAIL  charge_refunded finalized
+        expected "final"
+        got      "open:7ad7061218e04c50a58c11a1c3b3e39f"
+  FAIL  charge_refunded read once only
+        expected 1
+        got      3
+  ok    lost finalized
+  ok    lost read once only
+  ok    won finalized
+  ok    won read once only
+  ok    unknown retains open memory
+  ok    unknown still reread each run
+  ok    actual persisted unknown still pauses
+Z_OPERATION_VOLUME [{"run":1,"commands":40,"jsonBytes":13403,"providerGET":6,"failed":0,"complete":true},{"run":2,"commands":22,"jsonBytes":2101,"providerGET":4,"failed":0,"complete":true},{"run":3,"commands":22,"jsonBytes":2101,"providerGET":4,"failed":0,"complete":true}]
+Z_PROVIDER_PATHS ["/v1/disputes","/v1/disputes/du_Z3318prevented","/v1/disputes/du_Z3318chargerefunded","/v1/disputes/du_Z3318lost","/v1/disputes/du_Z3318won","/v1/disputes/du_Z3318futureunknown","/v1/disputes","/v1/disputes/du_Z3318prevented","/v1/disputes/du_Z3318chargerefunded","/v1/disputes/du_Z3318futureunknown","/v1/disputes","/v1/disputes/du_Z3318prevented","/v1/disputes/du_Z3318chargerefunded","/v1/disputes/du_Z3318futureunknown"]
+
+39 checks, 8 failing.
+Z_VOLUME {"runs":198,"mocks":14,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3318-JW2SIH

@@ -1,0 +1,27 @@
+[
+  {
+    "label": "old-controls",
+    "files": [
+      "z-3318-controls.proof.ts"
+    ],
+    "status": 1,
+    "seconds": 0.514,
+    "bytes": 2707
+  },
+  {
+    "label": "head",
+    "files": [
+      "z-3318-controls.proof.ts",
+      "plan-dispute-closed-statuses.test.ts",
+      "plan-dispute.test.ts",
+      "plan-refund-rules.test.ts",
+      "plan-standing.test.ts",
+      "checkup-disputes.test.ts",
+      "plan-cost-registry.test.ts",
+      "store-data-registry.test.ts"
+    ],
+    "status": 0,
+    "seconds": 5.213,
+    "bytes": 26482
+  }
+]

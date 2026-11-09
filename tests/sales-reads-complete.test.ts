@@ -12,6 +12,12 @@
  *    (`complete`), the calendar feed (a note in the file) and the buyer's
  *    orders page and its link's email (lib/buyer-orders.ts, callsForRead).
  *    Nothing is refused for it.
+ * 3. What they say is true (VR 2): the ceiling is one of volume (a store with
+ *    more completed checkouts than the pages hold), so no reader promises that
+ *    trying again makes the list whole; only a buyer with a booking read is
+ *    told about "your bookings", and anyone else at a busy store gets a
+ *    sentence that is true whether or not they booked, with the email's count
+ *    kept; the calendar's note falls on today in the store's own zone.
  *
  * Synthetic stores and a stand-in for Stripe only.
  */
@@ -30,8 +36,8 @@ import { paidPeriod } from "./billing-period-fixture";
 // Read through the modules, so the test runs (and fails on its checks) before they have these.
 const { bookedCalendar, newFeedToken } = calendar;
 const PARTIAL_FEED_NOTE = String((calendar as Record<string, unknown>).PARTIAL_FEED_NOTE ?? "(none yet)");
-const callsForRead = async (store: Store, email: string): Promise<{ calls: unknown[]; partial: boolean | null }> => {
-  const read = (buyerOrders as Record<string, unknown>).callsForRead as ((s: Store, e: string) => Promise<{ calls: unknown[]; partial: boolean }>) | undefined;
+const callsForRead = async (store: Store, email: string): Promise<{ calls: unknown[]; partial: boolean | null; unsure?: boolean }> => {
+  const read = (buyerOrders as Record<string, unknown>).callsForRead as ((s: Store, e: string) => Promise<{ calls: unknown[]; partial: boolean; unsure?: boolean }>) | undefined;
   return read ? read(store, email) : { calls: await buyerOrders.callsFor(store, email), partial: null };
 };
 import { readFileSync } from "node:fs";
@@ -46,6 +52,8 @@ type Session = Record<string, unknown> & { id: string; created: number; status: 
 /** The sessions Stripe holds in "listed" mode; in "busy" mode every page is full and says there are more. */
 let sessions: Session[] = [];
 let busy = false;
+/** In "busy" mode, the newest checkout is this buyer's booking of the store's call (a booking that was read). */
+let busyBooker: { email: string; handle: string } | null = null;
 /** Every checkout-list request, as asked. */
 let asked: URL[] = [];
 
@@ -56,7 +64,15 @@ function listSessions(url: URL): Response {
   const after = url.searchParams.get("starting_after");
   if (busy) {
     const from = after ? Number(after.replace("cs_busy_", "")) + 1 : 0;
-    const data = Array.from({ length: limit }, (_, i) => ({ id: `cs_busy_${from + i}`, object: "checkout.session", status: "complete", payment_status: "paid", created: NOW - 60 - from - i, metadata: {}, amount_total: 500, currency: "usd" }));
+    const data = Array.from({ length: limit }, (_, i) => {
+      const row: Record<string, unknown> = { id: `cs_busy_${from + i}`, object: "checkout.session", status: "complete", payment_status: "paid", created: NOW - 60 - from - i, metadata: {}, amount_total: 500, currency: "usd" };
+      if (busyBooker && from + i === 0) {
+        const start = Date.now() + 2 * 86_400_000;
+        row.metadata = { kind: "call", store: busyBooker.handle, product: "call1", title: "Intro call", start: String(start), end: String(start + 1_800_000) };
+        row.customer_details = { email: busyBooker.email, name: "Booked Buyer" };
+      }
+      return row;
+    });
     return Response.json({ object: "list", data, has_more: true });
   }
   const since = Number(url.searchParams.get("created[gte]") ?? 0);
@@ -143,22 +159,74 @@ async function main(): Promise<void> {
   const selling = { ...base, catalog: { ...base.catalog, items: [...base.catalog.items, { ...(base.catalog.items[0] ?? {}), id: "call1", kind: KIND.call | KIND.paid }] } } as Store;
   busy = true;
   const partialCalls = await callsForRead(selling, "bo.buyer@example.com");
-  is("callsForRead: partial, with what it could read", [partialCalls.partial, partialCalls.calls], [true, []]);
+  // Changed (rule 23): this buyer has no booking among those read, so the list is not "partial" for them (they would be
+  // told "some of your bookings" with none); it is `unsure`, which the page says in a sentence true either way.
+  is("callsForRead: a buyer with no booking read is not partial but unsure, with what it could read", [partialCalls.partial, partialCalls.unsure, partialCalls.calls], [false, true, []]);
   busy = false;
   sessions = [];
   const wholeCalls = await callsForRead(selling, "bo.buyer@example.com");
   is("a whole reading is not partial", wholeCalls.partial, false);
   for (const code of LANGUAGE_CODES) {
     const words = ordersWords(code) as Record<string, unknown>;
-    const some = typeof words.ordersIntroSome === "function" ? String(words.ordersIntroSome("Harbor Kitchen")) : "";
-    is(`${code}: has the sentence for bookings not all listed, and the email's opening that claims no count`, [typeof words.callsUnlisted === "string" && words.callsUnlisted.length > 20, some.includes("Harbor Kitchen"), /\d/.test(some)], [true, true, false]);
+    const some = typeof words.ordersIntroSome === "function" ? String((words.ordersIntroSome as (s: string, n: number) => string)("Harbor Kitchen", 3)) : "";
+    // Changed (rule 23): the opening used to carry no count; it now keeps the count of what was read (pre-review: the
+    // email lost it), and still never says "all" (checked in English below).
+    is(`${code}: has the sentence for bookings not all listed, and the email's opening that counts only what was read`, [typeof words.callsUnlisted === "string" && words.callsUnlisted.length > 20, some.includes("Harbor Kitchen"), some.includes("3")], [true, true, true]);
   }
   const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
   is("the orders page reads callsForRead and shows the sentence", [page.includes("callsForRead(store, email, meter)"), page.includes("{words.callsUnlisted}")], [true, true]);
+  is("and, to a buyer with no booking read at a busy store, the sentence that is true either way", [page.includes("booked: { calls, partial: callsPartial, unsure: callsUnsure }"), page.includes("{words.callsMaybeUnlisted}")], [true, true]);
   const orders = readFileSync("lib/buyer-orders.ts", "utf8");
   // Changed after RED (rule 23): the first version asked for the link to be sent on a partial booking list alone, which
   // would email any address typed at a busy store; the link still goes only with something read, and its email says so.
-  is("the link still goes only with something read (a partial list alone emails nobody), and its email says some bookings could not be listed", [orders.includes("if (purchases.length === 0 && calls.length === 0 && unchecked === 0) return;"), orders.includes("callsPartial ? words.ordersIntroSome(name)"), orders.includes("...(callsPartial ? [words.callsUnlisted, \"\"] : [])")], [true, true, true]);
+  // Changed (rule 23): the opening now keeps the count of what was read, and the unsure sentence goes to a buyer with no
+  // booking read; the link is still sent only with something read.
+  is("the link still goes only with something read (a partial list alone emails nobody), and its email counts what was read and says which sentence is true", [orders.includes("if (purchases.length === 0 && calls.length === 0 && unchecked === 0) return;"), orders.includes("words.ordersIntroSome(name, count)"), orders.includes("...(callsPartial ? [words.callsUnlisted, \"\"] : callsUnsure ? [words.callsMaybeUnlisted, \"\"] : [])")], [true, true, true]);
+
+  part("The ceiling is one of volume: a busy store's list is partial on every reading, and nothing promises a retry fixes it");
+  busy = true;
+  busyBooker = null;
+  const first = await callsForRead(selling, "never.booked@example.com");
+  const later = await callsForRead(selling, "never.booked@example.com");
+  is("a later reading of a busy store is just as cut (the truth the words must tell)", [first.unsure, later.unsure], [true, true]);
+  const retry = /try again|tries again|again later|just now|in a few hours/i;
+  const en = ordersWords("en") as Record<string, unknown>;
+  const enMaybe = String(en.callsMaybeUnlisted ?? "");
+  is("English: neither the buyer's sentences nor the calendar's note promise a retry", [retry.test(String(en.callsUnlisted)), retry.test(enMaybe), retry.test(PARTIAL_FEED_NOTE)], [false, false, false]);
+  is("English: they say the store has more bookings than one reading checks", [/too many bookings/.test(String(en.callsUnlisted)), /too many bookings/.test(enMaybe), /too many bookings/.test(PARTIAL_FEED_NOTE)], [true, true, true]);
+  is("English: the email's opening never says \"all\"", [/\ball\b/.test(String((en.ordersIntroSome as (s: string, n: number) => string)?.("Harbor Kitchen", 3) ?? "all")), /\ball\b/.test(String((en.ordersIntroSome as (s: string, n: number) => string)?.("Harbor Kitchen", 1) ?? "all"))], [false, false]);
+  const oldRetries = ["Vuelve a intentarlo", "Réessayez", "Versuchen Sie es später", "Riprova", "Probeer het later", "Tente de novo", "Try again"];
+  for (const code of LANGUAGE_CODES) {
+    const words = ordersWords(code) as Record<string, unknown>;
+    const said = [String(words.callsUnlisted ?? ""), String(words.callsMaybeUnlisted ?? "")];
+    is(`${code}: both sentences, in its own words where it is not English, with no old promise of a retry`, [said.every((t) => t.length > 40), code === "en" || (said[0] !== en.callsUnlisted && said[1] !== enMaybe), said.some((t) => oldRetries.some((r) => t.includes(r)))], [true, true, false]);
+  }
+  const apiDocs = readFileSync("app/developers/page.tsx", "utf8").split('<LegalSection title="Bookings">')[1]?.split("</LegalSection>")[0] ?? "";
+  is("the developer page says `complete: false` is a limit of volume, not a passing failure, and promises no retry", [/limit of volume, not a passing failure/.test(apiDocs.replace(/\s+/g, " ")), /again later/i.test(apiDocs.replace(/\s+/g, " "))], [true, false]);
+
+  part("Only a buyer with a booking read is told about \"your bookings\"");
+  is("a buyer with no booking at all is not flagged partial (PROVA)", first.partial === true && first.calls.length === 0, false);
+  busyBooker = { email: "booked.buyer@example.com", handle: selling.handle };
+  const booker = await callsForRead(selling, "booked.buyer@example.com");
+  const stranger = await callsForRead(selling, "never.booked@example.com");
+  is("a buyer whose booking was read, at a busy store: partial, not unsure", [booker.partial, booker.unsure], [true, false]);
+  is("anyone else at the same store: unsure, not partial", [stranger.partial, stranger.unsure], [false, true]);
+  busy = false;
+  busyBooker = null;
+  sessions = [];
+  const calm = await callsForRead(selling, "booked.buyer@example.com");
+  is("a whole reading: neither", [calm.partial, calm.unsure], [false, false]);
+
+  part("The calendar's all-day note falls on today in the store's own zone, not in UTC");
+  const zoned = (tz: string) => [{ id: "call1", title: "Intro call", kind: KIND.call | KIND.paid, call: { tz } }] as unknown as Parameters<typeof bookedCalendar>[3];
+  const at = async (now: number, tz: string) => (bookedCalendar as (...args: unknown[]) => string)(await feedStore.store(), [], now, zoned(tz), new Map(), true);
+  // 23:30 on November 9 in Fortaleza is 02:30 on November 10 in UTC; 05:00 on November 10 in Tokyo is 20:00 on November 9 in UTC.
+  const evening = await at(Date.UTC(2026, 10, 10, 2, 30), "America/Fortaleza");
+  is("Fortaleza, 23:30: the note is on November 9", [evening.includes("DTSTART;VALUE=DATE:20261109"), evening.includes("DTEND;VALUE=DATE:20261110")], [true, true]);
+  const morning = await at(Date.UTC(2026, 10, 9, 20, 0), "Asia/Tokyo");
+  is("Tokyo, 05:00: the note is on November 10", [morning.includes("DTSTART;VALUE=DATE:20261110"), morning.includes("DTEND;VALUE=DATE:20261111")], [true, true]);
+  const monthEnd = await at(Date.UTC(2026, 11, 31, 20, 0), "Asia/Tokyo");
+  is("across a year: January 1, ending January 2", [monthEnd.includes("DTSTART;VALUE=DATE:20270101"), monthEnd.includes("DTEND;VALUE=DATE:20270102")], [true, true]);
   done();
 }
 

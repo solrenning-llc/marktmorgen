@@ -125,17 +125,26 @@ export async function handleForDomain(name: string): Promise<string | null> {
 
 /**
  * Points the domain at the store's new address after a rename, when it
- * still points at its old one; one not proved stays not proved.
+ * still points at its old one; one not proved stays not proved. True when it
+ * is known to follow (or had nothing to follow); false when that is not known
+ * (Claude 4 on #2859, 6728179008: the read and the swap's reply are read
+ * exactly, CX-123 rule 24), so the creator is told, and Check again
+ * (proveDomain) moves it from the old address.
  */
-export async function pointDomain(name: string, from: string[], handle: string): Promise<void> {
-  const [raw] = await redisPipeline([["GET", domainKey(name)]]);
-  const holder = typeof raw === "string" ? raw.replace(/^\?/, "") : "";
-  if (holder && from.includes(holder)) {
-    const value = typeof raw === "string" && raw.startsWith(UNPROVED) ? `${UNPROVED}${handle}` : handle;
-    // Written only if nobody changed it since it was read.
-    await redisPipeline([["EVAL", SWAP_KEEPING_TTL, 1, domainKey(name), raw as string, value]]);
+export async function pointDomain(name: string, from: string[], handle: string): Promise<boolean> {
+  try {
+    const raw = await domainHolder(name);
+    const holder = raw === null ? "" : raw.replace(/^\?/, "");
+    if (raw === null || !holder || !from.includes(holder)) return true;
+    const value = raw.startsWith(UNPROVED) ? `${UNPROVED}${handle}` : handle;
+    // Written only if nobody changed it since it was read; 0 (changed meanwhile) is not known to follow either.
+    const replies = repliesFor(await redisPipeline([["EVAL", SWAP_KEEPING_TTL, 1, domainKey(name), raw, value]]), 1);
+    return replies !== null && replies[0] === 1;
+  } catch {
+    return false;
+  } finally {
+    cache.delete(name);
   }
-  cache.delete(name);
 }
 
 /** Sets the key only while it still holds the value read, keeping its time to live. */
@@ -321,8 +330,17 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
   // is read back; one that cannot be read asks Vercel nothing.
   const claim = `${UNPROVED}${store.handle}`;
   const claimed = await claimMark(domainKey(name), UNPROVED_SECONDS, claim);
-  if (claimed === "taken") return { ok: false, reason: "taken" };
   if (claimed === "unknown") throw new UnknownReplyError("a domain's claim");
+  // A nil is not always another store (Claude 4 on #2859, 6728179008): this store's own claim may be left from a press
+  // whose answer was not known, or whose write to the store failed after the claim, and it would read as "taken" for
+  // up to UNPROVED_SECONDS. Who holds it is read exactly (it throws when that cannot be told, before Vercel is asked):
+  // this store's own value, under an address it still owns (as proveDomain reads it), goes on; anything else, an
+  // address this store let go of included, stays taken. Only the exact `claim` is ever let go below, never a proof.
+  if (claimed === "taken") {
+    const holder = await domainHolder(name);
+    const ours = [store.handle, ...store.previousHandles];
+    if (holder === null || !ours.includes(holder.replace(/^\?/, ""))) return { ok: false, reason: "taken" };
+  }
 
   const added = await vercel("POST", `/v10/projects/${vercelProject()}/domains`, { name });
   // Already on this project (a second press, or added by hand) is fine;

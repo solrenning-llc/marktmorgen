@@ -29,6 +29,8 @@ export function RenameForm({ current }: { current: string }) {
   const router = useRouter();
   const [handle, setHandle] = useState("");
   const [state, setState] = useState<State>({ kind: "closed" });
+  // Kept on screen, not a toast: the creator has a step to take (lib/domains.ts pointDomain, Claude 4 on #2859).
+  const [domainBehind, setDomainBehind] = useState(false);
 
   const preview = handle.trim().replace(/^@+/, "").toLowerCase();
 
@@ -36,6 +38,7 @@ export function RenameForm({ current }: { current: string }) {
     event.preventDefault();
     if (state.kind === "saving") return;
     setState({ kind: "saving" });
+    setDomainBehind(false);
 
     try {
       const response = await fetch("/api/store/rename", {
@@ -49,6 +52,7 @@ export function RenameForm({ current }: { current: string }) {
         setState({ kind: "closed" });
         setHandle("");
         toast("Address changed.");
+        if (data.domainBehind === true) setDomainBehind(true);
         router.refresh();
         return;
       }
@@ -66,13 +70,21 @@ export function RenameForm({ current }: { current: string }) {
 
   if (state.kind === "closed") {
     return (
-      <button
-        type="button"
-        onClick={() => setState({ kind: "open" })}
-        className="mt-4 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
-      >
-        Change my address
-      </button>
+      <>
+        {domainBehind ? (
+          <p className="notice notice-warn mt-4" role="status">
+            Your address changed, but your own domain still opens the old one. To move it, go to{" "}
+            <a href="#domain" className="underline underline-offset-2">Your own domain</a> and press Check again.
+          </p>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setState({ kind: "open" })}
+          className="mt-4 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
+        >
+          Change my address
+        </button>
+      </>
     );
   }
 

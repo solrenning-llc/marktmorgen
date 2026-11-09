@@ -348,6 +348,20 @@ export async function sendReviewRequests(
       if (!taken || countOf(taken[0]) !== 1) continue;
     }
     const token = await mintReviewLink(store, entry.reference, email);
+    if (!token) {
+      // The link was not stored (rule 24): nothing is sent, and the claim is undone as unclaim does below, so the order
+      // is asked again in an hour: the first's own mark goes (never one another run holds), the reminder goes back on
+      // the list.
+      const at = nowSeconds + RETRY_SECONDS.stripe;
+      if (claim) {
+        await releaseMark(sentKey(entry.reference), claim);
+        await later(member, at);
+      } else {
+        await redisPipeline([["ZADD", ASK_DUE_KEY, at, member]]);
+        counts.waiting += 1;
+      }
+      continue;
+    }
     const stop = await stopLink(store, email);
     const fromName = store.mail?.fromName || store.name;
     const words = requestText(store, open.map((p) => p.title), entry.paidAt, `${storeBase(store)}/review?ask=${token}`, stage);

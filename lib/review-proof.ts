@@ -48,6 +48,7 @@ import { deliveredIds } from "@/lib/bundle-rules";
 import { takesReviews } from "@/lib/house-store";
 import { noteForErasure } from "@/lib/erasure-index";
 import { type StripePage, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { repliesFor as linkWriteReplies } from "@/lib/redis-reply";
 
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{10,200}$/;
@@ -207,11 +208,20 @@ const linkKey = (token: string) => `nl:rev:link:${sha(`nimbus-review-link:${toke
 
 type LinkGrant = { s: string; r: string; e: string };
 
-/** A link for the review request: one order, one address, 60 days. */
-export async function mintReviewLink(store: Store, reference: string, email: string): Promise<string> {
+/**
+ * A link for the review request: one order, one address, 60 days. Null when Redis did not say it stored it (rule 24):
+ * a reply short, long or other than exactly "OK" for the SET, and then the link, in case it landed with its answer
+ * lost, is deleted, so no email carries a link that may open nothing.
+ */
+export async function mintReviewLink(store: Store, reference: string, email: string): Promise<string | null> {
   const token = randomBytes(24).toString("hex");
   const grant: LinkGrant = { s: store.statsId ?? "", r: reference, e: email };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", REVIEW_LINK_SECONDS], ...noteForErasure(store.statsId, email, linkKey(token))]);
+  const write = [["SET", linkKey(token), JSON.stringify(grant), "EX", REVIEW_LINK_SECONDS], ...noteForErasure(store.statsId, email, linkKey(token))];
+  const saved = linkWriteReplies(await redisPipeline(write), write.length);
+  if (saved?.[0] !== "OK") {
+    await redisPipeline([["DEL", linkKey(token)]]).catch(() => {});
+    return null;
+  }
   return token;
 }
 

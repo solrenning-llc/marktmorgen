@@ -84,7 +84,7 @@ import { MAX_ROOM_LENGTH, readSetup } from "@/lib/call-setup";
 import { MAX_GROUPS, MAX_GROUP_LENGTH, MAX_PREFIX_LENGTH } from "@/lib/key-setup";
 import { MAX_KEY_LENGTH } from "@/lib/licence-keys";
 import { MAX_TITLE as MAX_AGREEMENT_TITLE, readDraft as readAgreementDraft } from "@/lib/agreement-rules";
-import { createAgreement, saveAgreement } from "@/lib/agreement-store";
+import { changeAgreement, createAgreement } from "@/lib/agreement-store";
 import { createRequest, changeRequest } from "@/lib/payment-request-store";
 import { readDraft as readRequestDraft } from "@/lib/payment-request-rules";
 import { requestsIn } from "@/lib/traffic";
@@ -339,7 +339,7 @@ function costlyLink(index: number): string {
 }
 
 /** The title of each purchase the page lists, in order (not a bundle's or a call's). */
-const listed = (html: string) => [...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><p class="font-semibold">([^<]+)<\/p>/g)].map((m) => m[1]);
+const listed = (html: string) => [...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><h2 class="font-semibold">([^<]+)<\/h2>/g)].map((m) => m[1]);
 
 /** The next batch of older purchases, from where the cursor says (a checkout, lib/buyer-orders.ts olderCursor), as the button asks for it. */
 const older = (from: string, by = token) => olderRoute(new NextRequest(`${ORIGIN}/api/store/orders/older?${new URLSearchParams({ handle: HANDLE, token: by, older: from })}`));
@@ -691,7 +691,7 @@ async function everyLimit(shape: CardShape): Promise<string[]> {
     assert.ok(draft.ok);
     const made = await createAgreement(full, draft.draft);
     assert.ok(made.ok);
-    await saveAgreement({ ...made.agreement, sent: [Date.now()] });
+    await changeAgreement(full, made.agreement.id, (current) => ({ ...current, sent: [Date.now()] }));
   }
   const ids = drafts.ids;
   checkouts = [
@@ -1057,6 +1057,9 @@ test("without JavaScript, each language describes only the purchases on the curr
     assert.ok(await setLanguage(OWNER, language));
     const batch = renderToStaticMarkup(await pageTree((await storeForEmail(OWNER))!, { token, older: checkouts[checked].id as string }));
     assert.equal(listed(batch).length, 3, language);
+    // WCAG 2.4.10: the batch's own page is its h1, then each purchase an h2 under it, with no level skipped.
+    const headings = [...batch.matchAll(/<h([1-6])[^>]*>([^<]*)<\/h\1>/g)].map((m) => `h${m[1]}:${m[2]}`);
+    assert.deepEqual(headings, [`h1:${ordersWords(language).olderTitle}`, ...listed(batch).map((title) => `h2:${title}`)], `${language}: ${headings.join(" | ")}`);
     assert.ok(batch.includes(expected[language]), `${language}: the page must describe this batch, not additions to a list on another page`);
     assert.ok(!batch.includes(ordersWords(language).olderShown(3)), `${language}: the accumulated-list status belongs only to the JavaScript view`);
   }

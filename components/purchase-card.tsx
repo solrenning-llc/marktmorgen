@@ -70,11 +70,12 @@ function Delivery({ delivery, language }: { delivery: CardDelivery; language: un
  * open it again. Drawn inside the list's OrdersSharedProvider, whose words its
  * bundles and keys take.
  */
-export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardModel; language: unknown; titleRef?: (node: HTMLParagraphElement | null) => void }) {
+export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardModel; language: unknown; titleRef?: (node: HTMLHeadingElement | null) => void }) {
   const key = (found: CardKey) => <OrdersKey key={found.slot} title={found.title} label={found.label} value={found.value} revoked={found.revoked} waiting={found.waiting} />;
   return (
     <li className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
-      <p className="font-semibold" ref={titleRef} tabIndex={titleRef ? -1 : undefined}>{card.title}</p>
+      {/* A heading under the page's h1, so the list is walked purchase by purchase (WCAG 2.4.10). */}
+      <h2 className="font-semibold" ref={titleRef} tabIndex={titleRef ? -1 : undefined}>{card.title}</h2>
       <p className="st-muted mt-1 text-sm">{card.meta}</p>
       <div className="mt-4 space-y-3">
         {card.preorderLine ? <p className="st-muted text-sm">{card.preorderLine}</p> : null}
@@ -127,7 +128,7 @@ export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardM
       {card.keys.map(key)}
       {card.review ? (
         <p className="mt-4 text-sm">
-          <Link prefetch={false} href={card.review.href} className="st-footer-link font-semibold underline underline-offset-4">
+          <Link prefetch={false} href={card.review.href} className="st-footer-link inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
             {card.review.label}
           </Link>
         </p>

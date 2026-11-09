@@ -256,7 +256,7 @@ async function main(): Promise<void> {
   is("nor one from another store's folder", parseProductImage({ ...big, small: { ...copy, path: `images/${"b".repeat(24)}/${"2".repeat(32)}.webp` } })?.small, null);
   is("both files are deleted together", imagePaths({ ...big, small: copy }), [big.path, copy.path]);
   const card = withoutComments(read("components/store-product.tsx"));
-  is("the store page's card hands the browser both", /srcSet=\{servedSrcSet\(image\)\}/.test(card) && /sizes=\{image\.small \?/.test(card), true);
+  is("the store page's card hands the browser both", /srcSet=\{servedSrcSet\(image\)\}/.test(card) && /sizes=\{smallerCopies\(image\)\.length \?/.test(card), true);
   is("and tells it to fetch the first product's picture first", /fetchPriority=\{first \? "high" : undefined\}/.test(card), true);
   is("the product's own page hands it both too", /srcSet=\{servedSrcSet\(product\.image\)\}/.test(withoutComments(read("app/[handle]/p/[product]/page.tsx"))), true);
   const editor = withoutComments(read("components/product-image-editor.tsx"));
@@ -323,7 +323,7 @@ async function main(): Promise<void> {
   const plans = withoutComments(read("lib/billing-sync.ts"));
   is("the daily check of plans asks only about a store that names a subscription", /if \(!store\.subscriptionActive \|\| !store\.subscriptionId \|\|/.test(plans), true);
   const studio = withoutComments(read("app/studio/page.tsx"));
-  is("and so does the studio", /store\?\.subscriptionId && isBillingConfigured\(\)\s*\?\s*await readSubscription/.test(studio), true);
+  is("and so does the studio", /store\?\.subscriptionId && isBillingConfigured\(\)\s*\?\s*(?:await |early\()readSubscription/.test(studio), true);
 
   part("Its pages are the pages every store has, and say that it is a demo");
   const layout = withoutComments(read("app/[handle]/layout.tsx"));

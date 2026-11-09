@@ -16,6 +16,8 @@
  *                                             five saves, newest first, as "<ms>\n<json>"; kept
  *                                             as long as the page (since 18 October 2026: until
  *                                             then forgotten 30 days after the last save)
+ *   nl:product:landing:<statsId>:<productId> -> its campaigns' landing words (lib/campaign-landing-store.ts),
+ *                                             forgotten with the page
  *
  * A page and its earlier versions take room in the store's data room
  * (lib/store-data.ts) before they are written, one slot for the page (with
@@ -29,7 +31,8 @@
  * another page is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { dropLandings } from "@/lib/campaign-landing-store";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
@@ -122,6 +125,8 @@ export async function claimNewPictures(statsId: string, pageId: string, paths: s
   const [owners] = await redisPipeline([["HMGET", picsKey(statsId), ...unique]]);
   if (!Array.isArray(owners) || owners.length !== unique.length) throw new UnknownReplyError("page pictures: HMGET");
   const list = owners;
+  // An owner is a name or nobody (null); any other answer is unknown, and throws as the read above does.
+  if (list.some((owner) => owner !== null && typeof owner !== "string")) throw new UnknownReplyError("page pictures: an owner");
   if (unique.some((_, i) => typeof list[i] === "string" && list[i] !== "" && list[i] !== pageId)) return false;
   const unclaimed = unique.filter((_, i) => list[i] !== pageId);
   const taken = await takePictureDoor(unclaimed);
@@ -151,34 +156,49 @@ export async function releasePictures(statsId: string, productId: string, paths:
   return mine;
 }
 
-/** A product's page, or the empty page when it has none (or it cannot be read). */
+/**
+ * A product's page, or the empty page when Redis confirms none is kept (a GET
+ * that answers null). Any other answer (no reply, more than one, a slot that
+ * is not a text, a kept record that is not a page) throws UnknownReplyError,
+ * so nothing is ever decided from an empty page that was not (CX-123 rule 24;
+ * Codex T's proof, C4-20261106-2610-C6-153). A failed request throws as before.
+ */
 export async function readPage(statsId: string | null, productId: string): Promise<SalesPage> {
   if (!statsId || !isRedisConfigured()) return { ...EMPTY_PAGE, blocks: [] };
-  const [raw] = await redisPipeline([["GET", pageKey(statsId, productId)]]);
-  return pageOf(raw);
+  const replies = repliesFor(await redisPipeline([["GET", pageKey(statsId, productId)]]), 1);
+  if (!replies) throw new UnknownReplyError("a page read");
+  return pageOf(replies[0]);
 }
 
+/** A kept page from its GET or MGET slot: null is "none kept", a page's JSON is the page, anything else throws. */
 function pageOf(raw: unknown): SalesPage {
-  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) return { ...EMPTY_PAGE, blocks: [] };
+  if (raw === null) return { ...EMPTY_PAGE, blocks: [] };
+  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) throw new UnknownReplyError("a kept page");
   try {
-    return parsePage(JSON.parse(raw));
+    return pageRecordExact(raw, "a kept page");
   } catch {
-    return { ...EMPTY_PAGE, blocks: [] };
+    throw new UnknownReplyError("a kept page");
   }
 }
 
-/** Values of many keys, a hundred at a command (MGET): what the whole export reads (lib/store-export.ts). */
+/**
+ * Values of many keys, a hundred at a command (MGET): what the whole export
+ * reads (lib/store-export.ts). Each command must answer exactly one list with
+ * one slot per key asked, or the whole read throws UnknownReplyError.
+ */
 async function readMany(keys: string[]): Promise<unknown[]> {
   const out: unknown[] = [];
   for (let i = 0; i < keys.length; i += 100) {
-    const [raw] = await redisPipeline([["MGET", ...keys.slice(i, i + 100)]]);
-    const values = Array.isArray(raw) ? raw : [];
-    for (let n = 0; n < Math.min(100, keys.length - i); n += 1) out.push(values[n] ?? null);
+    const asked = keys.slice(i, i + 100);
+    const replies = repliesFor(await redisPipeline([["MGET", ...asked]]), 1);
+    const values = replies ? repliesFor(replies[0], asked.length) : null;
+    if (!values) throw new UnknownReplyError("a batch of page reads");
+    out.push(...values);
   }
   return out;
 }
 
-/** The pages of many products, in their order, a hundred at a command. */
+/** The pages of many products, in their order, a hundred at a command; throws like readPage when any answer is unknown. */
 export async function readPages(statsId: string | null, productIds: string[]): Promise<SalesPage[]> {
   if (!statsId || !isRedisConfigured()) return productIds.map(() => ({ ...EMPTY_PAGE, blocks: [] }));
   return (await readMany(productIds.map((id) => pageKey(statsId, id)))).map(pageOf);
@@ -318,14 +338,50 @@ export async function readVersions(statsId: string | null, productId: string): P
   return out;
 }
 
-/** Forgets the page of a product that is gone, and gives back its room. Returns the picture files it was the one showing, to delete. */
+/**
+ * A page was dropped, but not all it held could be confirmed gone (its campaigns' landings): what is left stays
+ * counted in the store's room. `pictures` are still the files the page was the one showing, released and to delete.
+ */
+export class PageDropIncomplete extends Error {
+  constructor(readonly pictures: string[], readonly kept: unknown) {
+    super("The page was deleted, but some of its records could not be confirmed gone; they stay counted until they are.");
+  }
+}
+
+/**
+ * What a route deletes after dropPage failed: the pictures it released when it got that far (PageDropIncomplete),
+ * none otherwise; and the failure is said in the log, never taken for a page dropped whole (Codex G2, #1947).
+ */
+export function picturesOfFailedDrop(error: unknown): string[] {
+  console.error("a removed page's records could not all be confirmed gone; what is left stays counted in the store's room", error);
+  return error instanceof PageDropIncomplete ? error.pictures : [];
+}
+
+/**
+ * Forgets the page of a product that is gone, and gives back its room. Returns the picture files it was the one
+ * showing, to delete. When its campaigns' landings cannot be confirmed gone, the rest is still done and it throws
+ * PageDropIncomplete with those pictures: never a page said dropped whole while its landings may be kept.
+ */
 export async function dropPage(statsId: string | null, productId: string, room: DataStore): Promise<string[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const held = await readPage(statsId, productId).catch(() => ({ ...EMPTY_PAGE, blocks: [] }));
   const shown = picturePaths(held);
-  await redisPipeline([["DEL", pageKey(statsId, productId), versionsKey(statsId, productId)], ...usesCommands(statsId, productId, sectionsOn(held), [])]);
-  await giveData(room, [{ slot: PAGE_SLOT(productId), bytes: 0, set: true }, { slot: VERSIONS_SLOT(productId), bytes: 0, set: true }]);
+  // A failed page step does not keep its campaigns' landings: they are still tried below, and the failure is said
+  // after them (Claude 5 on #1947). The page's room is given back only once its records are confirmed sent.
+  let pageFailed: { error: unknown } | null = null;
+  try {
+    await redisPipeline([["DEL", pageKey(statsId, productId), versionsKey(statsId, productId)], ...usesCommands(statsId, productId, sectionsOn(held), [])]);
+    await giveData(room, [{ slot: PAGE_SLOT(productId), bytes: 0, set: true }, { slot: VERSIONS_SLOT(productId), bytes: 0, set: true }]);
+  } catch (error) {
+    pageFailed = { error };
+  }
+  // Its campaigns' landings are its page's words: they go with it (lib/campaign-landing-store.ts). Their room is
+  // given back only by the step that drops them, so one not confirmed stays counted.
+  const landings = await dropLandings(statsId, productId, room).then(() => null, (error: unknown) => ({ error }));
+  if (pageFailed) throw new PageDropIncomplete([], pageFailed.error);
   // A test's counts stay until they expire, counted on their own.
   if (held.test) await noteData(room, [endedTest(Date.now())]);
-  return releasePictures(statsId, productId, shown);
+  const pictures = await releasePictures(statsId, productId, shown);
+  if (landings) throw new PageDropIncomplete(pictures, landings.error);
+  return pictures;
 }

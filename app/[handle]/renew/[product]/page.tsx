@@ -16,6 +16,7 @@ import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import { readListing } from "@/lib/catalog";
 import { readWinBack } from "@/lib/winback-send";
 import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
+import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -139,6 +140,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
               <button type="submit" className="btn st-btn btn-lg btn-block mt-5">
                 {m.comeBackWith}
               </button>
+              <WhoAnswers store={store} className="st-muted mt-3 text-center text-sm" />
             </form>
           ) : priceGone ? null : product && selling ? (
             needsChoice ? (
@@ -155,6 +157,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
                 <button type="submit" className="btn st-btn btn-lg btn-block">
                   {price ? m.renewPrice(price) : m.renew}
                 </button>
+                <WhoAnswers store={store} className="st-muted mt-3 text-center text-sm" />
               </form>
             )
           ) : product ? (

@@ -35,5 +35,10 @@ export function done(): void {
       ? `\n${checks} checks, all passing.`
       : `\n${checks} checks, ${failures} failing.`,
   );
-  process.exit(failures === 0 ? 0 : 1);
+  // Ends by its exit code, never process.exit(): Node 24 can deadlock inside process.exit() when a V8 background
+  // task waits for a garbage collection only the main thread can run (nodejs/node#64560; 9 CI verify jobs hung
+  // 48 min after "96 checks, all passing." on 6 November). A normal end tears the heap down first. Anything a test
+  // leaves open still ends the run: the timer below does not hold the process, it only fires if something else does.
+  process.exitCode = failures === 0 ? 0 : 1;
+  setTimeout(() => process.exit(process.exitCode), 2_000).unref();
 }

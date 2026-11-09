@@ -320,9 +320,12 @@ test("a store nobody can charge cannot be visited past the visits it has", () =>
   // its free trial has no invoice yet, and one with no plan has none at
   // all, so the visits themselves are the limit there: its pages rest at
   // them (lib/traffic.ts; tests/traffic.test.ts holds where and for whom).
-  for (const page of ["app/[handle]/page.tsx", "app/[handle]/p/[product]/page.tsx"]) {
-    assert.match(readFileSync(join(process.cwd(), page), "utf8"), /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/, `${page} must rest with its store`);
-  }
+  assert.match(readFileSync(join(process.cwd(), "app/[handle]/page.tsx"), "utf8"), /if \(await isResting\(store\)\) return <StoreResting store=\{store\} \/>;/, "app/[handle]/page.tsx must rest with its store");
+  // Rule 23 (traffic audit, 9 November 2026): the product page now counts itself inside the load its title shares,
+  // before the product is read, and draws the resting page from it; the same rest, one admission a request.
+  const product = readFileSync(join(process.cwd(), "app/[handle]/p/[product]/page.tsx"), "utf8");
+  assert.match(product, /if \(await isResting\(store\)\) return \{ store, asked, resting: true \};/, "the product page must rest with its store");
+  assert.match(product, /if \(found\.resting\) return <StoreResting store=\{found\.store\} \/>;/, "the product page must draw the resting page");
   assert.ok(TRIAL_VISITS <= VISITS_INCLUDED.creator, "a trial of any plan has no more than the smallest plan's visits: it has paid for none");
 });
 

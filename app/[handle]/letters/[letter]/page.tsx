@@ -30,14 +30,18 @@ const load = cache(async (raw: string, id: string) => {
   if (!decoded.startsWith("@")) return null;
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store || store.suspended) return null;
+  // Counted as one of the store's public requests before the email is read (traffic audit, 9 November 2026): past
+  // the window, neither the title nor the page reads it. The page and its title share this one count (React cache).
+  if (await isResting(store)) return { store, letter: null, resting: true as const };
   const letter = await readLetter(store, id);
-  return letter ? { store, letter } : null;
+  return letter ? { store, letter, resting: false as const } : null;
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, letter: id } = await params;
   const found = await load(handle, id);
   if (!found) return { title: "Not found — Marktmorgen" };
+  if (found.resting) return { title: `${speech(found.store).w.restingTitle} — ${found.store.name}`, robots: { index: false, follow: true } };
   const { store, letter } = found;
   // Only the subject, never the words: an email kept for members is not offered to search engines either.
   return {
@@ -65,8 +69,8 @@ export default async function LetterPage({ params, searchParams }: Params) {
   const { handle, letter: id } = await params;
   const found = await load(handle, id);
   if (!found) notFound();
+  if (found.resting) return <StoreResting store={found.store} />;
   const { store, letter } = found;
-  if (await isResting(store)) return <StoreResting store={store} />;
   const say = speech(store);
   const w = letterWords(store.language);
   const date = new Intl.DateTimeFormat(say.lang.locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });

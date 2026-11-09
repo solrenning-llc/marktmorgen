@@ -63,6 +63,10 @@ import { LIBRARY_WAITING_UNITS, affiliateLoadUnits, affiliatePageUnits, listingU
 import { MAX_POST_PAGES } from "@/lib/store-sitemap";
 import { affiliateLoadRead, affiliatePageRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { BOOK_STRIPE_READS, bookTimesUnits } from "@/lib/book-page-rules";
+import { DISPUTE_READS_PER_READING } from "@/lib/calls";
+import { CALENDAR_STRIPE_PAGES } from "@/lib/read-ceilings";
+import { bookTimesRead } from "./plan-cost-registry";
 import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
 import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
@@ -290,6 +294,14 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And the card's own wait on Redis, held by a test rather than only a comment (Claude 5 on #1969).
   assert.ok(LIBRARY_WAITING_UNITS * laterPageCost() >= libraryWaitingRead() + libraryCardWait(), `library card with its wait: ${LIBRARY_WAITING_UNITS} x ${laterPageCost()} < ${libraryWaitingRead()} + ${libraryCardWait()}`);
   assert.ok((LIBRARY_WAITING_UNITS - 1) * laterPageCost() < libraryWaitingRead(), `library card: ${LIBRARY_WAITING_UNITS} units, one more than needed`);
+  // A booking page's open times (traffic audit, 9 November 2026; lib/book-page-rules.ts): taken before the creator's
+  // Stripe account is asked, at every size of store more than they cost at their worst, and not a request more than needed
+  // for a store with no call listing to read. Their Stripe reads are lib/calls.ts's pages and disputes, which may not move apart.
+  assert.equal(BOOK_STRIPE_READS, CALENDAR_STRIPE_PAGES + DISPUTE_READS_PER_READING);
+  for (let listings = 0; listings <= MAX_PRODUCTS; listings += 1) assert.ok(bookTimesUnits(listings) * laterPageCost() >= bookTimesRead(listings), `booking times, ${listings} call listings: ${bookTimesUnits(listings)} x ${laterPageCost()} < ${bookTimesRead(listings)}`);
+  assert.ok((bookTimesUnits(0) - 1) * laterPageCost() < bookTimesRead(0), `booking times: ${bookTimesUnits(0)} units, one more than needed`);
+  for (const odd of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) assert.equal(bookTimesUnits(odd), bookTimesUnits(MAX_PRODUCTS), `an unknown count of call listings (${odd}) is priced at the most`);
+  console.log(`a booking page's times: ${bookTimesUnits(1)} requests besides the page for a store with one call ($${bookTimesRead(1).toFixed(6)} at most), ${bookTimesUnits(MAX_PRODUCTS)} at the largest`);
   const typicalBook = { fields: 50 + 50 + 1_000 + 40 + 20, rows: 5, listings: 20, stripePages: 23 };
   const typicalLoad = { sliceBytes: 12_000, listings: 3, codes: null };
   console.log(`an affiliate program's book worked out: ${affiliatePageUnits(typicalBook)} requests for 50 affiliates and 1,000 sales ($${affiliatePageRead(typicalBook).toFixed(6)}), at most once a day; each other load ${affiliateLoadUnits(typicalLoad)} ($${affiliateLoadRead(typicalLoad).toFixed(6)}), ${affiliateLoadUnits({ ...typicalLoad, codes: 5 })} with codes; at $${laterPageCost().toFixed(6)} a request`);

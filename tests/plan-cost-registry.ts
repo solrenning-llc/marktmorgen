@@ -93,6 +93,9 @@ import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
+import { BOOK_STRIPE_READS } from "@/lib/book-page-rules";
+import { FEED_TIMEOUT_MS, MAX_FEEDS } from "@/lib/calendar-sync";
+import { CALENDAR_CALLS, LISTING_READ_BYTES } from "@/lib/read-ceilings";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
@@ -368,6 +371,49 @@ export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_B
  * public requests before it is drawn, held above it in tests/plan-cost-registry.test.ts.
  */
 export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + (16 + 2 * (1 + SHARE_COMMANDS_PER_REQUEST)) * COMMAND + 64_000 * DB_BYTE + CERTIFICATE_PDF_MAX_BYTES * ORIGIN_PER_BYTE;
+/**
+ * One reading of a booking page's open times, besides the page's own request (app/[handle]/book/[product]/page.tsx:
+ * slotsForProduct, and a booking's move, slotsForMove; both read lib/calls.ts readBusy), at the most, for a store of
+ * `listings` call products (traffic audit, 9 November 2026). Taken as bookTimesUnits(listings) of the store's
+ * requests before anything of it is read (lib/book-page-rules.ts), held above this in tests/plan-cost-registry.test.ts:
+ *   - the creator's Stripe account, BOOK_STRIPE_READS reads (five pages of a hundred completed checkouts with their
+ *     payments and charges, and five disputes asked about), each waited on EXPORT_PAGE_SECONDS at 2 GB as the export
+ *     and the calendar feed price them, its body worked through at a tenth of a second (STRIPE_LIST_PAGE);
+ *   - the creator's own calendars (lib/calendar-sync.ts, calendarBusy): MAX_FEEDS read side by side when their
+ *     reading is old, waited on FEED_TIMEOUT_MS, each of FEED_MAX_BYTES parsed at BOOK_FEED_PARSE_CPU (a review
+ *     ceiling), and each reading read and written four times at BOOK_FEED_READING_BYTES (2,000 times as JSON pairs);
+ *   - every call listing, one GET each (lib/catalog.ts, readListings) at LISTING_READ_BYTES;
+ *   - the diary of holds and bookings (one HGETALL of up to twice CALENDAR_CALLS entries at BOOK_DIARY_ENTRY_BYTES)
+ *     and its refunded entries let go, the bookings' moves (lib/call-records.ts, readMoves: a hundred at an MGET),
+ *     and the twenty bookings caught up after the page is sent (catchUpBookings: EXISTS each and its listing; a
+ *     booking it confirms is its order's own work, priced in the orders line);
+ *   - BOOK_TIMES_COMMANDS commands besides the listings (counted below), and the times sent on with the page
+ *     (BOOK_TIMES_SENT_BYTES: a horizon's every start).
+ * A team's hosts and their calendars are priced in the team-scheduling line.
+ */
+export const BOOK_FEED_PARSE_CPU = 0.5;
+export const BOOK_FEED_READING_BYTES = 65_536;
+export const BOOK_DIARY_ENTRY_BYTES = 512;
+export const BOOK_TIMES_SENT_BYTES = 100_000;
+/**
+ * The commands of a reading besides its listings, counted from the code: coming soon (1); a package's token and what
+ * is left of it (4); a draft's owner (2); the diary (HGETALL and the holds that ran out let go: 2); the creator's
+ * calendars (their settings and home zone, 2; each feed's two readings, 2; each feed read again: its mark taken and
+ * let go, 3, its readings written and its error cleared, 3: MAX_FEEDS x 8); the bookings' moves (CALENDAR_CALLS / 100
+ * MGET); the refunded entries let go (1); the catch-up (20 EXISTS and 20 listings); the team asked whether it is one (2).
+ */
+export const BOOK_TIMES_COMMANDS = 1 + 4 + 2 + 2 + 2 + MAX_FEEDS * 8 + CALENDAR_CALLS / 100 + 1 + 20 + 20 + 2;
+export function bookTimesRead(listings: number): number {
+  return readShapeCost({
+    seconds: FEED_TIMEOUT_MS / 1000,
+    cpu: 0.5 + MAX_FEEDS * BOOK_FEED_PARSE_CPU + BOOK_STRIPE_READS * 0.1,
+    commands: BOOK_TIMES_COMMANDS + listings,
+    dbBytes: listings * LISTING_READ_BYTES + 2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES + MAX_FEEDS * 4 * BOOK_FEED_READING_BYTES
+      + CALENDAR_CALLS * 128 + 20 * LISTING_READ_BYTES,
+    outBytes: BOOK_TIMES_SENT_BYTES,
+    stripePages: BOOK_STRIPE_READS,
+  });
+}
 /**
  * What one next product after a purchase costs besides the model (lib/next-offer.ts),
  * at the most: its commands and its counting, the listings it reads (a product's
@@ -1182,6 +1228,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
       { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
       { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
+      // A booking page is counted before its call is read, and its open times are taken before the creator's Stripe account is asked,
+      // for a page and for a booking's move (traffic audit, 9 November 2026; bookTimesRead held in tests/plan-cost-registry.test.ts).
+      { file: "app/[handle]/book/[product]/page.tsx", names: ["if (await isResting(store, undefined, who)) return", "takePublicRequest(store, who, undefined, bookTimesUnits(idsOfKind(store, \"call\").length))", "if (open && !(await bookTimes(store, who)))", "if (movable && !moved && !(await bookTimes(store, \"buyer\")))"] },
+      { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS"] },

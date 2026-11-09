@@ -104,23 +104,31 @@ type Params = {
  * the same prices, options, plan, box for the product offered alongside,
  * limited quantity and checkout. A page that sold the same thing on
  * different terms would be a page nobody could trust.
+ *
+ * As the store page does, a store with no plan a visit can be charged to rests once it has had its month's visits
+ * (lib/traffic.ts). The page is counted as one of the store's public requests here, before anything of the product
+ * is read (traffic audit, 9 November 2026): past the window, neither the title nor the page reads the listing, the
+ * description or the sales page. The page and its title share this one count within a request (React cache).
  */
-const load = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string } | null> => {
+const load = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string; resting: false } | { store: Store; asked: string; resting: true } | null> => {
   const decoded = decodeURIComponent(raw);
   if (!decoded.startsWith("@")) return null;
   const asked = normaliseHandle(decoded);
   const store = await storeForPage(asked);
   if (!store) return null;
+  if (await isResting(store)) return { store, asked, resting: true };
   // The id alone, or the title's words with the id at the end (lib/product-slug.ts).
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
   // A draft has no page until the creator publishes it.
-  return product && !product.hidden ? { store, product, asked } : null;
+  return product && !product.hidden ? { store, product, asked, resting: false } : null;
 });
 
-async function pageOf(store: Store, product: Listing): Promise<SalesPage> {
+/** The product's description and its sales page, each read once a request, by the title and by the page (React cache). */
+const aboutOf = cache((statsId: Store["statsId"], productId: string): Promise<string> => readAbout(statsId, productId));
+const pageOf = cache(async (statsId: Store["statsId"], productId: string, has: boolean): Promise<SalesPage> => {
   // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage).
-  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => ({ ...EMPTY_PAGE, blocks: [] })) : { ...EMPTY_PAGE, blocks: [] };
-}
+  return has ? readPage(statsId, productId).then((page) => livePage(page, saleClock())).catch(() => ({ ...EMPTY_PAGE, blocks: [] })) : { ...EMPTY_PAGE, blocks: [] };
+});
 
 /**
  * The page as this visitor is shown it, while it runs a test of a second
@@ -146,8 +154,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
   const found = await load(handle, id);
   if (!found) return { title: "Not found — Marktmorgen" };
+  // Resting: the title says so, and names nothing of the product, which was not read.
+  if (found.resting) return { title: `${speech(found.store).w.restingTitle} — ${found.store.name}`, robots: { index: false, follow: true } };
   const { store, product } = found;
-  const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
+  const [about, page] = await Promise.all([product.about ? aboutOf(store.statsId, product.id) : Promise.resolve(""), pageOf(store.statsId, product.id, product.page)]);
   const description =
     page.seoDescription || product.summary || aboutExcerpt(about) || speech(store).w.productDescription(product.title, store.name);
   const title = page.seoTitle || `${product.title} — ${store.name}`;
@@ -252,6 +262,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
     if (store) redirect(`/@${store.handle}`);
     notFound();
   }
+  if (found.resting) return <StoreResting store={found.store} />;
   const { product, asked } = found;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).
   const store = await forVisitor(found.store);
@@ -265,9 +276,6 @@ export default async function ProductPage({ params, searchParams }: Params) {
   }
   if (asked !== store.handle && !reachedOn) permanentRedirect(productPath(store, product));
 
-  // As the store page does: a store with no plan a visit can be charged to
-  // rests once it has had its month's visits (lib/traffic.ts).
-  if (await isResting(store)) return <StoreResting store={store} />;
   // Switched off after notices about its content (lib/takedown.ts).
   if (store.suspended) return <StoreResting store={store} suspended />;
 
@@ -307,10 +315,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
       </p>
     ) : null;
   const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts] = await Promise.all([
-    product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
+    product.about ? aboutOf(store.statsId, product.id) : Promise.resolve(""),
     stockLeft(store, product).catch(() => null),
     outOfKeys(store, product).catch(() => false),
-    pageOf(store, product),
+    pageOf(store.statsId, product.id, product.page),
     summaryOf(store.statsId, product.id).catch(() => null),
     // What its order bump offers, drawn in the same box as on the store page.
     product.bumps.length ? readListings(store, bumpTargets(product)) : Promise.resolve([]),

@@ -2564,3 +2564,61 @@ OffPR2514candidate8a/fourC6candidates remainlast-known/unpromoted, notfreshlyrec
 ### Delivery receipt — 2026-11-08 23:41 Fortaleza
 
 PONTO CXP-20261108-2338-C1-1 DELIVEREDdb12dc01c33a1485352712179306312edd4f85c2/blob3d49a88c852760acbb2fc0a08fc0d21745f84733/FULL7141614 exactFULLreadback. OneCAS409NOWRITE02:38:25UTC; wait134s thenfreshmetadata/FULL7135935/prefixEXACT/delta6561FULLread G112+M2339RES. M3316claimed, Pskip; M2832admittedreport notPMERGEDcert. G3299EPOCH unchanged/nonewPgrant. Final P3107review5821065138 BODYreadbackEXACT, conditional residual CLOSED but remaining capped wholecoverage INCONCLUSIVE, nosecondfinancialcleanapproval. Sourceauthor/refuntouched, ownuntrackedproof/docs only; scanner-generatedpycache removed. No rerun/CI/queue/merge/automation/backgroundwatch. NextstartlatestCP+thisSTOP; do not repost.
+
+
+## 2026-11-09 00:40 Fortaleza — #3317 independent security review delivered
+
+FIRST canonical1f33c8e3ac13c493b82d2bf52d05cf93d0679c38/blob3127974b8b64ec9e99707864ee8c7f2455000d62/FULL467625 lastsectionFULL and ownPSTOP2338FULL read. Freshchannel7194206 indexed24sections; directedC1-C4-47/C6requests/M/U/T/CXC2 payloads FULL read, not everypeertechnicalpayload. C1-C4-47 forC4/C6 backup/retained work is not Pgrant. C6new3317request0030 compatiblecourse security, preflightemptydiscussion/free; Uexplicitno3317claim. Fresh7194700 delta494 C5closingpaginationFULLread; no competingclaim.
+
+# Codex P independent security review: PR #3317
+
+Exact head64dc6cf819c3cac7e34d7036e7f09bbecabfb51b/tree385dbb9429eb461f7f53d86d7c2fe6b2124aea79, base d8941c907a5604ff864218518d1575c0d8876411. C6 request0030; preflightOPEN/unmerged/empty discussion; claim6731604779 before source. Channel RES86008bcafef3ab522436d4d1bbc6398ef48b2e0c/blob7151fcfc1b5020a26e8391e2b91bb24501b0bb74/FULL7195810 exactreadback BEFORE checkout/source/diff/tests. Scope only own proof/docs; author source/tests/ref unchanged.
+
+Complete two-path delta read. tellCreatorOfWork retains its input signature and one-hour per-course decision, but builds the studio URL from trusted SITE_URL; request origin is no longer destructured or interpolated. Existing product path/store query/#work retained. Student review email remains on the creator request origin. Read both caller contexts: student hand-in calls originFrom(request), creator route is guarded by jsonAccess/guardStoreWrite before review. This review does not certify every session/cookie/host control or real proxy configuration. site-url.ts is a static HTTPS platform URL. No commercial values, flags or email content copy changed.
+
+Author permanent tests/assignments.test.ts byte-identical at RED-only parent and final:5545ab2326ea9ae5de9828d67f8d90fbad863498. Exact final graph with ONLY previous lib/assignment-notify.ts overlaid:54checks/2FAIL, wrong request host in creator notice. Final54PASS. No altered author assertion. Own complementary controls18PASS: exact platform path/query/fragment for foreign shop/official/foreign-port origin, creator destination and hourly throttle preserved, no duplicate message, waiting review sends none, approved student link retains creator-request origin. This synthetic origin boundary is demonstrated, not a real attack or provider delivery.
+
+Linked real-route task-hand-in-kept8, task-room-unknown10, assignment-giveback-once17PASS. Total107final passing observations with overlap. Actual strict TypeScript semantic closure4roots/1028sources/0diagnostics, ES2017/Bundler, no filtering. ESLint both changed files0warnings/errors, scanner4688tracked/0, corrective diff whitespace0. Own artifact scanner separately recorded. No full suite/build/browser/AT/real provider/native Redis-Lua/CI/queue/merge/publication/global-cost certificate. Author's wider15-test linked execution remains AUTHOR evidence, not P execution.
+
+Per child predeclared120s outer/512MiB heap/types1024/256KiB output/20000ALLnested MemoryRedis.run/100mockHTTP; external fetch/socket denied before imports/compiler/lint. Guard stops before dispatch and latches exit86 at process exit on exceeded counters. Maximum867nested Redis/4mockHTTP, no cap reached/raised/reset/divided/replayed. Serial zero agents. Exact-lock offline donor ee4ba5640d542cb07c7ed382f256c816b076026d739bbe30d906870f351e67df, no install.
+
+Two harness setup failures are preserved, not product RED: (1) extra parenthesis in generated guard caused child parse failure before test execution; fixed guard syntax, original source/log/ledger retained. (2) own control initially omitted the permanent fixture's synthetic RESEND_API_KEY; sendEmail correctly refused without configuration and control then dereferenced missing message. Retained source/log/ledger, added exactly the synthetic fixture setting. No author change, cap replay or prior passed test repetition: continuation jobs begin at own control; permanent RED/GREEN not rerun. No runtime cap was reached in either setup failure.
+
+Main freshnative d8941c907a5604ff864218518d1575c0d8876411, known25pullrefs unchanged plus3317 exact; no CI state inferred from identities. Native norm diff79f4→d894 is empty for AGENTS.md/CLAUDE.md/docs/agent-inbox.md. Canonical P checkpoint1f33c8e3/FULL467625 and lastPSTOP2338 read first; channel24headers indexed and directed C1/C6/M/U/T/C2 sections read FULL, not allpeer payloads claimed. C1-C4-47 applies to C4/C6 backup/retained work, no P grant. P3107closedfocal/remainingqualifiedcoverage preserved; M3316/U2832/G3299 owners not duplicated.
+
+Disposition only AFTER complete durable evidence/readback: no HIGH/MEDIUM/LOW finding in this two-path security correction; PODE ENTRAR within this scope once required exact-head gates are met. No token leak claimed or global security approval.
+
+
+DELIVERED security COMMENT5821404588 exact64dc, BODYreadbackEXACT. Evidence6731656340/FULL34028 EXACTreadback BEFORE opinion,36artifacts/107631rawJSONbytes/SHA25675e22f162d8b6e3c4245c52f2374e6d6ca3de44ec19bf7a530ce9a0376e49f25. NoH/M/Lfound, PODEENTRARscopeonlysubjecttogates; PdoesNOTmerge/operateforeignPR. Finalownprobe missingfixturekey failure retained then18PASS, guardparsefailure before test retained; no cap reached/replay ofpassedgraphs. No new productcode.
+
+Native current27identities(main+25known+3317), NOTcurrentCIorMERGED certificate:
+```
+d8941c907a5604ff864218518d1575c0d8876411	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+d8e871ad3ce54cd3dc708dacf7bf2bbfb0100341	refs/pull/2832/head
+daaf5306187d4aa43c9f47590d429dcb10656519	refs/pull/2843/head
+66dfd8a571a734d6b787b4552b7b53759d239a48	refs/pull/2868/head
+6c3077cdaefaac049ca0e12e836be68691bfd875	refs/pull/2892/head
+aae8fcf5f8ce7118007f58d371c2b6c722dd2d18	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+c5db63a1fffc5c79a5866831d54ddff01b3825fa	refs/pull/2999/head
+b5dd4dc3791ed83c60cdc59bd1a38e95f9420b1d	refs/pull/3014/head
+0cdb49725fbb78d341e648ae4758a5f0ab88f0f4	refs/pull/3034/head
+9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+442a057113c87b8728e1a23711510fa852bd0e6d	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+1b38fa1cf19813764fc9256c9b81808db7fc0c0d	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
+64dc6cf819c3cac7e34d7036e7f09bbecabfb51b	refs/pull/3317/head
+```
+Allprevious25pullrefsunchanged; main79f4→d894 advanced, normAGENTS/CLAUDE/inboxbyte-id. PrioroffPRcandidatesnotreconfirmed/promoted. P3107focal5821065138 CLOSEDintervalcount only, twoWHOLE100capremainINCONCLUSIVE/no unconditionalsecondfinance. 3135/3263/3245/3054previousreturnsunchanged;2020C1scope/2514CodeQLHIGHHOLDintact. M3316/U2832/G3299/S3309credits/budgetqualificationspreserved; authorqueue/admission≠PMERGEDcert. OriginalPfourproductsalreadyMERGEDnorecreate. No foreignproduct/ref/PRpush/docsreservations/CIqueryretrycancel/enqueue/merge/providers/PII/contact/commercial/flag/automationchange/subagent/backgroundwatch. Projectongoing/transientdependencies, keep existingcontinuity. FinalPONTOafterfreshFULL/dedup/readback; nextreadthislatestsectionandSTOP, doNOTrepeat3317withoutcausalnewdelta/request.

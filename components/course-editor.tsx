@@ -7,7 +7,8 @@ import { LessonText } from "@/components/lesson-text";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { useRouter } from "next/navigation";
-import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
+import { uploadMessage, uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
+import { UploadRefused } from "@/lib/upload-refusal";
 import { toast } from "@/components/toast";
 import { QuizEditor } from "@/components/quiz-editor";
 import { CourseDayPreview } from "@/components/course-day-preview";
@@ -136,28 +137,25 @@ type Door = { endpoint: string; library: string; id: string; expires: number; si
  * (app/api/store/stream). "off" when the service is not set up, and the
  * video then goes into the file store as it always has.
  */
-async function openDoor(lessonId: string, file: File): Promise<{ door: Door } | { off: true } | { error: string }> {
+async function openDoor(lessonId: string, file: File): Promise<{ door: Door } | { off: true } | { error: string; message?: unknown }> {
   try {
     const response = await fetch("/api/store/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lessonId, name: file.name, bytes: file.size, type: file.type }),
     });
-    const data = (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as { ok?: boolean; error?: string; door?: Door };
+    const data = (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as { ok?: boolean; error?: string; message?: unknown; door?: Door };
     if (data.ok && data.door) return { door: data.door };
     if (data.error === "off") return { off: true };
-    return { error: data.error ?? "server_error" };
+    // With the door's own sentence when it sent one (a spent studio window's), for lib/upload-refusal.ts.
+    return { error: data.error ?? "server_error", message: data.message };
   } catch {
     return { error: "server_error" };
   }
 }
 
-/** The video service turned the upload away before it began: why, in MESSAGES' words. */
-class VideoRefused extends Error {
-  constructor(readonly code: string) {
-    super(code);
-  }
-}
+/** The video service's door turned the upload away before it began: its word, and its own sentence when it sent one. */
+class VideoRefused extends UploadRefused {}
 
 /**
  * Sends one lesson's video where it is kept: to the video service when it is
@@ -167,7 +165,7 @@ class VideoRefused extends Error {
  */
 async function putVideo(lessonId: string, chosen: File, folder: string, onProgress: (percent: number) => void): Promise<string> {
   const opened = await openDoor(lessonId, chosen);
-  if ("error" in opened) throw new VideoRefused(opened.error);
+  if ("error" in opened) throw new VideoRefused(opened.error, opened.message);
   if ("door" in opened) {
     const { door } = opened;
     await tusUpload(
@@ -189,12 +187,16 @@ async function putVideo(lessonId: string, chosen: File, folder: string, onProgre
   return uploadSoldFile(chosen, { folder, ownerId: lessonId }, onProgress);
 }
 
-/** What went wrong with an upload, as a key of MESSAGES. */
-function uploadProblem(thrown: unknown): string {
-  if (thrown instanceof VideoRefused) return MESSAGES[thrown.code] ? thrown.code : "server_error";
-  if (thrown instanceof TusError) return thrown.reason === "refused" ? "invalid" : "upload_stopped";
-  const reason = uploadReason(thrown);
-  return MESSAGES[reason] ? reason : "server_error";
+/**
+ * What went wrong with an upload: its door's word (for STOPS_THE_REST) and the creator's sentence, the door's own
+ * reason when it gave one (lib/upload-refusal.ts), never a fixed "something went wrong" for a refusal.
+ */
+function uploadProblem(thrown: unknown): { key: string; words: string } {
+  if (thrown instanceof TusError) {
+    const key = thrown.reason === "refused" ? "invalid" : "upload_stopped";
+    return { key, words: MESSAGES[key] };
+  }
+  return { key: uploadReason(thrown), words: uploadMessage(thrown, MESSAGES) };
 }
 
 async function post(payload: Record<string, unknown>): Promise<Answer> {
@@ -646,7 +648,7 @@ const SKIPPED_WORDS: Record<Skipped["reason"], string> = {
 };
 
 /** An upload that went wrong this way stops the rest: the next one would go wrong the same way. */
-const STOPS_THE_REST = new Set(["renewal_unpaid", "plan_disputed", "uploads_pending", "upload_refresh", "slow_down", "video_unavailable", "storage_full", "signed_out", "unavailable", "not_course", "too_many", "unknown", "forbidden"]);
+const STOPS_THE_REST = new Set(["renewal_unpaid", "plan_disputed", "uploads_pending", "upload_refresh", "slow_down", "video_unavailable", "storage_full", "signed_out", "unavailable", "not_course", "too_many", "unknown", "forbidden", "studio_used", "two_step_required", "locked", "role", "store_gone", "gone"]);
 
 const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
@@ -730,6 +732,7 @@ function VideosToLessons({
       known.add(lesson.id);
       onCourse(added.course);
       let problem: string | null = null;
+      let words: string | null = null;
       try {
         const pathname = await putVideo(lesson.id, file, folder, (percent) => setWorking({ at: i + 1, of: take.length, name: file.name, percent }));
         const placed = await postPatiently({ id: productId, action: "media", lessonId: lesson.id, kind: "video", pathname, name: file.name });
@@ -741,13 +744,13 @@ function VideosToLessons({
           problem = placed.error && MESSAGES[placed.error] ? placed.error : "server_error";
         }
       } catch (thrown) {
-        problem = uploadProblem(thrown);
+        ({ key: problem, words } = uploadProblem(thrown));
       }
       if (problem) {
         // Its lesson goes again, so no empty lesson is left behind.
         const removed = await postPatiently({ id: productId, action: "edit", op: "lesson-remove", lessonId: lesson.id });
         if (removed.ok && removed.course) onCourse(removed.course);
-        missed.push({ name: file.name, why: MESSAGES[problem] });
+        missed.push({ name: file.name, why: words ?? MESSAGES[problem] });
         if (STOPS_THE_REST.has(problem)) {
           take.slice(i + 1).forEach((f) => missed.push({ name: f.name, why: "Not sent, because the video before it could not go." }));
           break;
@@ -898,7 +901,7 @@ function LessonEditor({
         }
       }
     } catch (thrown) {
-      onError(MESSAGES[uploadProblem(thrown)]);
+      onError(uploadProblem(thrown).words);
     } finally {
       setUploading(null);
     }

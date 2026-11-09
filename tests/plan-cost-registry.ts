@@ -577,11 +577,26 @@ export const ORDERS_METERED_MOVES = COMMAND + MOVES_PER_MGET * (MOVE_BYTES + MOV
 export const LOCKED_UNTIL_STAR_COMMANDS = 3;
 /** What those commands add to a studio request, as UNIT_COST.studio takes them (the same sum, so no rounding is lost). */
 export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) - request("studio", 20 + TAKE_COMMANDS, 50_000);
+/**
+ * The body a studio upload's door reads at the most (app/api/store/image/upload, app/api/store/file: limited(request,
+ * 16_000)), and so what a hand-back can receive and send back.
+ */
+export const UPLOAD_DOOR_BODY_BYTES = 16_000;
+/**
+ * A studio upload asks its door twice (lib/upload-refusal.ts): askDoor, the studio request the window counts, and the
+ * file store library's own request, which the door answers by handing back what it issued (lib/upload-hand-back.ts,
+ * handedBack) before anything is read or counted. That second invocation runs no database command, but it is a call:
+ * priced at the lightest request's shape with its body received and sent back, and carried by every studio request
+ * as if each were an upload, since a window may be spent on nothing else (review of #3171 by Claude 6;
+ * tests/upload-hand-back-cost.test.ts counts the invocations).
+ */
+export const UPLOAD_HAND_BACK_EXTRA = request("light", 0, 0) + 2 * UPLOAD_DOOR_BODY_BYTES * ORIGIN_PER_BYTE;
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
-  // three commands more in the "*" state, taken as if every load paid them (review of #2556 at 0e308316).
-  studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000),
+  // three commands more in the "*" state, taken as if every load paid them (review of #2556 at 0e308316), and an
+  // upload's hand-back call, taken as if every request were an upload (review of #3171).
+  studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) + UPLOAD_HAND_BACK_EXTRA,
   // An API request: the key, the store and the answer.
   api: request("light", 20 + TAKE_COMMANDS, 20_000),
   // A message written to the inbox, and its index.

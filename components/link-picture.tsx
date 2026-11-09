@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { uploadPresigned } from "@vercel/blob/client";
+import { uploadMessage, uploadThroughDoor } from "@/lib/upload-refusal";
 import { toast } from "@/components/toast";
 import { shrink } from "@/components/product-image-editor";
 import { Icon } from "@/components/icons";
@@ -70,9 +70,10 @@ export function LinkPicture({ link, folder }: { link: StoreLink; folder: string 
         return;
       }
       const path = imagePath(folder, crypto.randomUUID().replace(/-/g, ""), shrunk.blob.type);
-      await uploadPresigned(path, shrunk.blob, {
+      // Through the door that reads its own answer, so a refusal says why (lib/upload-refusal.ts).
+      await uploadThroughDoor(path, shrunk.blob, {
         access: "private",
-        handleUploadUrl: "/api/store/image/upload",
+        door: "/api/store/image/upload",
         clientPayload: JSON.stringify({ linkId: link.id }),
         contentType: shrunk.blob.type,
       });
@@ -83,8 +84,9 @@ export function LinkPicture({ link, folder }: { link: StoreLink; folder: string 
       }
       toast(link.image ? "Picture replaced." : "Picture added.");
       router.refresh();
-    } catch {
-      setError(MESSAGES.server_error);
+    } catch (thrown) {
+      // The door's own reason (a spent studio window, a second step, a paused plan...), or that it did not finish.
+      setError(uploadMessage(thrown, MESSAGES));
     } finally {
       setBusy(null);
       if (input.current) input.current.value = "";

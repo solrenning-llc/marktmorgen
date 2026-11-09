@@ -19,6 +19,7 @@
  * (tests/vault-upload.test.ts).
  */
 import { PIECES_PER_ASK } from "@/lib/vault-rules";
+import { UploadRefused } from "@/lib/upload-refusal";
 
 /** The pauses before a piece is tried again, in ms. After the last one the upload gives up. */
 export const PIECE_PAUSES_MS = [1_000, 3_000, 5_000, 10_000, 20_000, 60_000];
@@ -27,16 +28,17 @@ const AT_ONCE = 3;
 
 export type VaultFile = { pathname: string; bytes: number; contentType: string };
 
-/** Why an upload stopped: our door said no (`reason` is its word), or the store could not be reached for too long. */
-export class VaultUploadError extends Error {
-  constructor(readonly reason: string) {
-    super(`upload ${reason}`);
-  }
-}
+/**
+ * Why an upload stopped: our door said no (`reason` is its word, `said` its own sentence when it sent one, such as a
+ * spent studio window's), or the store could not be reached for too long.
+ */
+export class VaultUploadError extends UploadRefused {}
 
 type DoorAnswer = {
   ok?: boolean;
   error?: string;
+  /** The door's own sentence, sent with some refusals (a spent studio window's, lib/studio-route.ts refusedJson). */
+  message?: string;
   upload?: { pathname: string; pieces: number; pieceBytes: number; multipart?: boolean };
   pieces?: { number: number; url: string; type: string | null }[];
   file?: VaultFile;
@@ -92,7 +94,7 @@ export async function vaultUpload(file: File | Blob, ownerId: string, name: stri
 
   const opened = await door({ action: "open", ownerId, name, bytes: file.size, type: file.type, multipart: true });
   if (opened.error === "off") return null;
-  if (!opened.ok || !opened.upload) throw new VaultUploadError(opened.error ?? "server_error");
+  if (!opened.ok || !opened.upload) throw new VaultUploadError(opened.error ?? "server_error", opened.message ?? "");
   const { pathname, pieces, pieceBytes } = opened.upload;
   // Older servers ignore the negotiation and keep their single-PUT protocol.
   const needsEtags = opened.upload.multipart === true || pieces > 1;
@@ -113,7 +115,7 @@ export async function vaultUpload(file: File | Blob, ownerId: string, name: stri
     const numbers: number[] = [];
     for (let n = number; n <= pieces && numbers.length < PIECES_PER_ASK; n += 1) if (!etags[n - 1]) numbers.push(n);
     const answer = await door({ action: "sign", pathname, numbers });
-    if (!answer.ok || !answer.pieces) throw new VaultUploadError(answer.error ?? "server_error");
+    if (!answer.ok || !answer.pieces) throw new VaultUploadError(answer.error ?? "server_error", answer.message ?? "");
     for (const piece of answer.pieces) addresses.set(piece.number, { url: piece.url, type: piece.type });
     const mine = addresses.get(number);
     if (!mine) throw new VaultUploadError("server_error");
@@ -174,7 +176,7 @@ export async function vaultUpload(file: File | Blob, ownerId: string, name: stri
   }
 
   const closed = await door({ action: "done", pathname, etags: needsEtags ? etags : [] });
-  if (!closed.ok || !closed.file) throw new VaultUploadError(closed.error ?? "server_error");
+  if (!closed.ok || !closed.file) throw new VaultUploadError(closed.error ?? "server_error", closed.message ?? "");
   options.onProgress?.(100);
   return closed.file;
 }

@@ -16,7 +16,7 @@ import { AGENDA_UNITS, MAX_TASK_RECORD_BYTES, agendaReadUnits } from "@/lib/pers
 import { IncludedBytes, PAGE_INCLUDED_BYTES, STUDIO_UNIT_SENT_BYTES, sentUnits } from "@/lib/sent-bytes";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
-import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
+import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, UPLOAD_HAND_BACK_EXTRA, apiReadCost } from "./plan-cost-registry";
 import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
@@ -419,8 +419,8 @@ test("the tasks agenda at its most fits the studio requests it counts", () => {
 });
 
 test("the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2))", () => {
- // UNIT_COST.studio prices one request moving PAGE_INCLUDED_BYTES, no more.
- assert.equal(request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, PAGE_INCLUDED_BYTES), UNIT_COST.studio);
+ // UNIT_COST.studio prices one request moving PAGE_INCLUDED_BYTES, no more, and an upload's hand-back call (review of #3171).
+ assert.equal(request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, PAGE_INCLUDED_BYTES) + UPLOAD_HAND_BACK_EXTRA, UNIT_COST.studio);
  assert.ok(LEDGER_BYTES_PER_UNIT === STUDIO_UNIT_SENT_BYTES && request("light", 2, STUDIO_UNIT_SENT_BYTES) <= UNIT_COST.studio, "a studio request counted past the included bytes covers its megabyte");
  // The page at its worst: a task's person looked up (?who=) and not there, so the agenda is drawn below; every part
  // that reads or sends by size at the most it moved without a request of its own before: the lookup's copy of the

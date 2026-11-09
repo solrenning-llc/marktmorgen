@@ -33,7 +33,7 @@ import { LicenceKeyEditor } from "@/components/licence-key-editor";
 import { PdfStampToggle } from "@/components/pdf-stamp-toggle";
 import { PdfPreviewToggle } from "@/components/pdf-preview-toggle";
 import { toast } from "@/components/toast";
-import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
+import { uploadMessage, uploadSoldFile } from "@/lib/sold-file-upload";
 import {
   MAX_PRODUCTS,
   MAX_SUMMARY_LENGTH,
@@ -1961,7 +1961,8 @@ export function ProductEditor({
       }
       router.refresh();
     } catch (thrown) {
-      setFileError({ id, message: MESSAGES[uploadReason(thrown)] ?? MESSAGES.server_error });
+      // The door's own reason (a spent studio window, a second step, a full storage...), or that it did not finish.
+      setFileError({ id, message: uploadMessage(thrown, MESSAGES) });
     } finally {
       setFileBusyId(null);
       setPercent(0);

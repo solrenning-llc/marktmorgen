@@ -11,7 +11,7 @@ import type { VideoReach } from "@/lib/page-depth";
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SavedSections } from "@/components/saved-sections";
 import { useRouter } from "next/navigation";
-import { uploadPresigned } from "@vercel/blob/client";
+import { refusalOf, uploadMessage, uploadThroughDoor } from "@/lib/upload-refusal";
 import { shrink } from "@/components/product-image-editor";
 import { IMAGE_ACCEPT, MAX_ALT_LENGTH, MAX_SOURCE_BYTES, imagePath, imageUrl } from "@/lib/product-image";
 import { Icon } from "@/components/icons";
@@ -3920,7 +3920,8 @@ const PICTURE_PROBLEMS: Record<string, string> = {
   unreadable: "That picture could not be opened. Try a JPEG, PNG or WebP.",
   source: "That picture is over 30 MB. Pick a smaller one, or a screenshot of it.",
   too_big: "That picture is still over 1 MB after shrinking. Try a simpler one.",
-  failed: "That picture could not be sent. Check your connection and try again.",
+  // No reason given (the door's own reasons are said as they are, lib/upload-refusal.ts): only that this one is not added.
+  failed: "That picture did not finish uploading, so it was not added. Try again in a moment.",
 };
 
 /** The long side a page's picture is shrunk to: sharp across the page's column on any screen. */
@@ -4025,15 +4026,18 @@ function PicturesEditor({
         }
         const path = imagePath(folder, crypto.randomUUID().replace(/-/g, ""), shrunk.blob.type);
         try {
-          await uploadPresigned(path, shrunk.blob, {
+          // Through the door that reads its own answer, so a refusal says why (lib/upload-refusal.ts).
+          await uploadThroughDoor(path, shrunk.blob, {
             access: "private",
-            handleUploadUrl: "/api/store/image/upload",
+            door: "/api/store/image/upload",
             clientPayload: JSON.stringify(pageId ? { pageId } : { productId }),
             contentType: shrunk.blob.type,
           });
           added.push({ path, width: shrunk.width, height: shrunk.height, alt: "", caption: "" });
-        } catch {
-          setError(PICTURE_PROBLEMS.failed);
+        } catch (thrown) {
+          // The door's own reason when it gave one; otherwise only that this picture is not added (others may be).
+          const reason = refusalOf(thrown).reason;
+          setError(reason && reason !== "server_error" ? uploadMessage(thrown) : PICTURE_PROBLEMS.failed);
         }
         setBusy((n) => Math.max(0, n - 1));
       }

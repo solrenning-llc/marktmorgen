@@ -10,6 +10,8 @@ import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES, ownsImagePath } from "@/lib/produ
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { costPauseCode } from "@/lib/plan-standing";
 import { notePictureDoor } from "@/lib/picture-door";
+import { handedBack } from "@/lib/upload-hand-back";
+import { SESSION_COOKIE, sessionIdShaped } from "@/lib/session-id";
 
 /** How long the creator has to start the upload after asking for the door. */
 const UPLOAD_WINDOW_MS = 5 * 60 * 1000;
@@ -38,6 +40,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // The browser asked this door already and read its answer (lib/upload-refusal.ts askDoor), so a refusal says why;
+    // the file store's library now asks for what was issued then, and is given it back unchanged: nothing is checked,
+    // counted or signed twice, and it grants nothing the browser does not already hold.
+    const issued = handedBack(body);
+    // Only to a browser holding a session id's shape: a caller with none has no counted upload to hand back, so it is
+    // refused as the signed path refuses it, with nothing read (lib/session-id.ts, as lib/auth.ts emailForSession).
+    if (issued && !sessionIdShaped(request.cookies.get(SESSION_COOKIE)?.value)) return Response.json({ ok: false, error: "signed_out" }, { status: 401 });
+    if (issued) return Response.json(issued);
     const answer = await handleUploadPresigned({
       body,
       request,

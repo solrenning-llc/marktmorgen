@@ -96,9 +96,10 @@ test("the builder says when only the first products are listed", () => {
 test("MEDIUM 3: a studio request's shape is the cost registry's", () => {
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   // The registry's studio request: the same base of commands and bytes, with the take and whatever else each request
-  // also sends (main added LOCKED_UNTIL_STAR_COMMANDS).
+  // also sends (main added LOCKED_UNTIL_STAR_COMMANDS), and whatever each request also costs beside it (an upload's
+  // hand-back call, UPLOAD_HAND_BACK_EXTRA, review of #3171).
   const bytes = CART_LINK_UNIT_BYTES.toLocaleString("en-US").replace(/,/g, "_");
-  assert.ok(new RegExp(`studio: request\\("studio", ${CART_LINK_UNIT_COMMANDS} \\+ TAKE_COMMANDS( \\+ [A-Z_]+)*, ${bytes}\\),`).test(registry));
+  assert.ok(new RegExp(`studio: request\\("studio", ${CART_LINK_UNIT_COMMANDS} \\+ TAKE_COMMANDS( \\+ [A-Z_]+)*, ${bytes}\\)( \\+ [A-Z_]+)*,`).test(registry));
   assert.equal(cartLinkUnits(1, 1), 1);
   assert.equal(cartLinkUnits(24, 24 * MAX_PRODUCT_BYTES), Math.ceil((24 * MAX_PRODUCT_BYTES) / CART_LINK_UNIT_BYTES));
   assert.equal(cartLinkUnits(40, 0), 3);

@@ -165,7 +165,8 @@ test('a paid switch cannot report new rights until its durable funding activatio
  };
  switchActivationObservations.calls.length=0;switchActivationObservations.accept=false;
  try{
-  await assert.rejects(switchPlan('sub_Test000001',{tier:'creator',cycle:'year'},g),/activation was not acknowledged/);
+  // Stripe already switched: not confirmed, so the route never says nothing changed.
+  await assert.rejects(switchPlan('sub_Test000001',{tier:'creator',cycle:'year'},g),(e:unknown)=>e instanceof Error&&e.name==='SwitchUnconfirmedError'&&/activation was not acknowledged/.test(e.message));
   assert.equal(writes.length,2);assert.equal(switchActivationObservations.calls.length,1);
   assert.equal(writes.some(v=>v.has('metadata[funding_action]')),false);
   switchActivationObservations.accept=true;writes.length=0;
@@ -218,7 +219,7 @@ test('a foreign or malformed switch result cannot finalize metadata or request a
     if(init?.method==='POST'){writes.push(new URLSearchParams(String(init.body)));return Response.json(updated);}
     return Response.json({...base,items:{data:[{...sourcePeriod(),id:'si_test',quantity:1,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}});
    };
-   await assert.rejects(switchPlan('sub_Test000001',{tier:'creator',cycle:'year'},g));
+   await assert.rejects(switchPlan('sub_Test000001',{tier:'creator',cycle:'year'},g),{name:'SwitchUnconfirmedError'});
    assert.equal(writes.length,2);assert.equal(switchActivationObservations.calls.length,0);assert.equal(writes.some(v=>v.has('metadata[funding_action]')),false);
   }
  }finally{globalThis.fetch=old;switchActivationObservations.accept=false;}

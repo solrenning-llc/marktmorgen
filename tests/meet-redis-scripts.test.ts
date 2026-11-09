@@ -2,7 +2,8 @@
  * The Redis scripts of lib/meet-connect.ts, read from the file itself, answer the same on the stand-in
  * (lib/redis-memory.ts) as on Redis (CX-123 rules 24 and 30): KEEP_UNLESS_GONE keeps a store's new meeting
  * connection, indexed first, only while the renewal lock is the writer's and no deletion of that account was
- * confirmed since its consent flow began (forgetUser's mark); KEEP_TEST_UNLESS_GONE keeps a test meeting
+ * confirmed since its consent flow began (forgetUser's mark) and, when it replaces another account's, takes the store
+ * out of that account's index and forgets the test meeting made on it in the same step; KEEP_TEST_UNLESS_GONE keeps a test meeting
  * (lib/meet-test.ts) only while the store's connection is there and listed under the account it was made on, no
  * deletion of that account was confirmed since the make or the move began, and the record is still the one read.
  *
@@ -34,7 +35,7 @@ const K = source.match(/const KEEP_UNLESS_GONE = `([\s\S]*?)`;/)?.[1] ?? "";
 const T = source.match(/const KEEP_TEST_UNLESS_GONE = `([\s\S]*?)`;/)?.[1] ?? "";
 
 test("lib/meet-connect.ts defines the script", () => {
-  assert.match(K, /^-- marktmorgen:meet-keep:v1\n/);
+  assert.match(K, /^-- marktmorgen:meet-keep:v2\n/);
 });
 
 test("lib/meet-connect.ts defines the test meeting's script", () => {
@@ -44,32 +45,46 @@ test("lib/meet-connect.ts defines the test meeting's script", () => {
 type Arg = string | number;
 type Case = { name: string; setup: Arg[][]; run: Arg[]; reply: number | "error"; after: Arg[][]; state: unknown[] };
 
-const KEYS = ["lock", "conn", "idx", "gone"];
-// The connection, the index's type (a set only once the store was added to it), and the lock (never touched by the script).
-const STATE: Arg[][] = [["GET", "conn"], ["TYPE", "idx"], ["GET", "lock"]];
-const nothing = [null, "none", "T"];
-const kept = ["J", "set", "T"];
-const keep = (name: string, setup: Arg[][], run: Arg[], reply: number | "error", state: unknown[] = nothing): Case => ({
+// The lock, the store's connection, the new account's index, its deletion mark, the replaced account's index ("old")
+// and the store's test meeting ("test").
+const KEYS = ["lock", "conn", "idx", "gone", "old", "test"];
+// The connection, the index's type (a set only once the store was added to it), the lock (never touched by the
+// script), whether the replaced account's index still lists the store, and the test meeting.
+const STATE: Arg[][] = [["GET", "conn"], ["TYPE", "idx"], ["GET", "lock"], ["SISMEMBER", "old", "s1"], ["GET", "test"]];
+const nothing = [null, "none", "T", 0, null];
+const kept = ["J", "set", "T", 0, null];
+const keep = (name: string, setup: Arg[][], run: Arg[], reply: number | "error", state: unknown[] = nothing, after: Arg[][] = STATE): Case => ({
   name,
   setup: [["SET", "lock", "T"], ...setup],
   run: ["EVAL", K, ...run],
   reply,
-  after: STATE,
+  after,
   state,
 });
-const call = (cutoff: Arg = 1001, store: Arg = "s1", token: Arg = "T", connection: Arg = "J"): Arg[] => [4, ...KEYS, token, connection, cutoff, store];
+const call = (cutoff: Arg = 1001, store: Arg = "s1", token: Arg = "T", connection: Arg = "J", replaced: Arg = "0", keys: Arg[] = KEYS): Arg[] => [
+  6,
+  ...keys,
+  token,
+  connection,
+  cutoff,
+  store,
+  replaced,
+];
+/** Another account's connection was the store's: listed under that account, with the test meeting made on it. */
+const OLD: Arg[][] = [["SET", "conn", "OLDCONN"], ["SADD", "old", "s1"], ["SET", "test", "TM"]];
+const untouched = ["OLDCONN", "none", "T", 1, "TM"];
 
 const CASES: Case[] = [
   keep("keeps and indexes the connection while the lock is ours and no deletion was confirmed", [], call(), 1, kept),
-  keep("keeps nothing once the lock is another's", [["SET", "lock", "X"]], call(), 0, [null, "none", "X"]),
-  keep("keeps nothing once the lock is gone", [["DEL", "lock"]], call(), 0, [null, "none", null]),
+  keep("keeps nothing once the lock is another's", [["SET", "lock", "X"]], call(), 0, [null, "none", "X", 0, null]),
+  keep("keeps nothing once the lock is gone", [["DEL", "lock"]], call(), 0, [null, "none", null, 0, null]),
   keep("keeps it when the deletion is older than the flow", [["SET", "gone", "1000"]], call(), 1, kept),
   keep("keeps nothing when the deletion is at the flow's start", [["SET", "gone", "1001"]], call(), 2),
   keep("keeps nothing when the deletion is after the flow's start", [["SET", "gone", "2000"]], call(), 2),
   keep("keeps nothing when the mark does not read as a time", [["SET", "gone", "soon"]], call(), 2),
   keep("keeps nothing when the mark is empty", [["SET", "gone", ""]], call(), 2),
   keep("keeps nothing when the mark is longer than sixteen digits", [["SET", "gone", "12345678901234567"]], call(), 2),
-  keep("an index of another type is Redis's error, with no connection kept outside it", [["SET", "idx", "text"]], call(), "error", [null, "string", "T"]),
+  keep("an index of another type is Redis's error, with no connection kept outside it", [["SET", "idx", "text"]], call(), "error", [null, "string", "T", 0, null]),
   keep("a cutoff of 0 is refused", [], call(0), -1),
   keep("a negative cutoff is refused", [], call(-5), -1),
   keep("a cutoff that is not a whole number is refused", [], call("1.5"), -1),
@@ -78,13 +93,35 @@ const CASES: Case[] = [
   keep("an empty store is refused", [], call(1001, ""), -1),
   keep("an empty token is refused", [], call(1001, "s1", ""), -1),
   keep("an empty connection is refused", [], call(1001, "s1", "T", ""), -1),
-  keep("a key too few is refused", [], [3, ...KEYS.slice(0, 3), "T", "J", 1001, "s1"], -1),
-  keep("a key too many is refused", [], [5, ...KEYS, "more", "T", "J", 1001, "s1"], -1),
+  keep("a key too few is refused", [], [5, ...KEYS.slice(0, 5), "T", "J", 1001, "s1", "0"], -1),
+  keep("a key too many is refused", [], [7, ...KEYS, "more", "T", "J", 1001, "s1", "0"], -1),
   keep("an argument too many is refused", [], [...call(), "extra"], -1),
   keep("an argument too few is refused", [], call().slice(0, -1), -1),
-  keep("a key count with a leading zero is Redis's own error", [], ["04", ...KEYS, "T", "J", 1001, "s1"], "error"),
-  keep("a negative key count is Redis's own error", [], [-1, ...KEYS, "T", "J", 1001, "s1"], "error"),
+  keep("a key count with a leading zero is Redis's own error", [], ["06", ...KEYS, "T", "J", 1001, "s1", "0"], "error"),
+  keep("a negative key count is Redis's own error", [], [-1, ...KEYS, "T", "J", 1001, "s1", "0"], "error"),
   keep("more keys than arguments is Redis's own error", [], [9, ...KEYS, "T"], "error"),
+  // Another account's connection replaced: its index and its test meeting go in the same step (pre-review M3).
+  keep("replacing another account's: the store leaves its index and its test meeting is forgotten", OLD, call(1001, "s1", "T", "J", "1"), 1, kept),
+  keep("the same account's: its index and test meeting are left as they are", OLD, call(1001, "s1", "T", "J", "0"), 1, ["J", "set", "T", 1, "TM"]),
+  keep("replacing another account's once the lock is another's: nothing changes", [...OLD, ["SET", "lock", "X"]], call(1001, "s1", "T", "J", "1"), 0, [
+    "OLDCONN",
+    "none",
+    "X",
+    1,
+    "TM",
+  ]),
+  keep("replacing another account's after a deletion since the flow began: nothing changes", [...OLD, ["SET", "gone", "2000"]], call(1001, "s1", "T", "J", "1"), 2, untouched),
+  keep(
+    "an old index of another type is Redis's error, with the old connection and test meeting as they were",
+    [["SET", "conn", "OLDCONN"], ["SET", "old", "text"], ["SET", "test", "TM"]],
+    call(1001, "s1", "T", "J", "1"),
+    "error",
+    ["OLDCONN", "set", "T", "string", "TM"],
+    [["GET", "conn"], ["TYPE", "idx"], ["GET", "lock"], ["TYPE", "old"], ["GET", "test"]],
+  ),
+  keep("a replaced flag other than 0 or 1 is refused", OLD, call(1001, "s1", "T", "J", "2"), -1, untouched),
+  keep("an empty replaced flag is refused", OLD, call(1001, "s1", "T", "J", ""), -1, untouched),
+  keep("a replaced account's index that is the new account's own is refused", OLD, call(1001, "s1", "T", "J", "1", ["lock", "conn", "idx", "gone", "idx", "test"]), -1, untouched),
 ];
 
 // The test meeting's script: the store's connection ("conn"), the stores listed under the account it was made on

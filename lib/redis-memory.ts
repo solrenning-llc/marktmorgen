@@ -1161,7 +1161,7 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-session-refuse:v1\n")) return this.studioDemo("sessionRefuse", args);
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
-        if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
+        if (key.startsWith("-- marktmorgen:meet-keep:v2\n")) return this.meetKeep(args);
         if (key.startsWith("-- marktmorgen:meet-test-keep:v1\n")) return this.meetTestKeep(args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];
@@ -2046,22 +2046,32 @@ export class MemoryRedis {
 
   /**
    * lib/meet-connect.ts KEEP_UNLESS_GONE, step for step: a store's new meeting connection kept, and indexed first,
-   * only while the renewal lock is the writer's and no deletion of its account is at or after the cutoff; -1, as the
-   * script answers, for a call of any other shape. A key count Redis itself refuses throws Redis's own error
-   * (tests/meet-redis-scripts.test.ts holds it to Redis).
+   * only while the renewal lock is the writer's and no deletion of its account is at or after the cutoff, with the
+   * replaced account's index left and its test meeting forgotten in the same step; -1, as the script answers, for a
+   * call of any other shape. A key count Redis itself refuses, or an index of another type, throws Redis's own error
+   * at the step Redis would (tests/meet-redis-scripts.test.ts holds it to Redis).
    */
   private meetKeep(args: string[]): unknown {
     const { keys, argv } = this.evalParts(args);
-    if (keys.length !== 4 || argv.length !== 4 || argv[0] === "" || argv[1] === "" || !/^[1-9][0-9]{0,15}$/.test(argv[2]) || argv[3] === "") return -1;
-    const [lock, conn, index, goneMark] = keys;
-    const [token, connection, cutoff, statsId] = argv;
+    if (keys.length !== 6 || argv.length !== 5 || argv[0] === "" || argv[1] === "" || !/^[1-9][0-9]{0,15}$/.test(argv[2]) || argv[3] === "") return -1;
+    if ((argv[4] !== "0" && argv[4] !== "1") || (argv[4] === "1" && keys[4] === keys[2])) return -1;
+    const [lock, conn, index, goneMark, oldIndex, test] = keys;
+    const [token, connection, cutoff, statsId, replaced] = argv;
     if (this.run(["GET", lock]) !== token) return 0;
     const gone = this.run(["GET", goneMark]);
     if (typeof gone === "string" && (!/^[0-9]{1,16}$/.test(gone) || Number(gone) >= Number(cutoff))) return 2;
-    this.live(index);
-    const held = this.data.get(index);
-    if (held !== undefined && !(held instanceof Set)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+    const aSet = (key: string) => {
+      this.live(key);
+      const held = this.data.get(key);
+      if (held !== undefined && !(held instanceof Set)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+    };
+    aSet(index);
     this.run(["SADD", index, statsId]);
+    if (replaced === "1") {
+      aSet(oldIndex);
+      this.run(["SREM", oldIndex, statsId]);
+      this.run(["DEL", test]);
+    }
     this.run(["SET", conn, connection]);
     return 1;
   }

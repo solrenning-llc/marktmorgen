@@ -386,20 +386,30 @@ export async function finishConsent(
 
 /**
  * KEYS[1] the renewal lock, KEYS[2] the store's connection, KEYS[3] the stores the provider account connected (its
- * index), KEYS[4] that account's deletion mark (forgetUser); ARGV[1] the lock's token, ARGV[2] the new connection,
+ * index), KEYS[4] that account's deletion mark (forgetUser), KEYS[5] the index of the account whose connection this
+ * one replaces, KEYS[6] the store's test meeting (testKey); ARGV[1] the lock's token, ARGV[2] the new connection,
  * ARGV[3] the cutoff: the time, in milliseconds, at or after which a deletion of that account stops this flow,
- * ARGV[4] the store. 1 the store is indexed and the connection kept; 0 the lock is no longer ours and nothing is
+ * ARGV[4] the store, ARGV[5] "1" when the connection replaced is another account's, "0" otherwise. 1 the store is
+ * indexed and the connection kept, and, when it replaces another account's, the store has left that account's index
+ * and the test meeting made on it is forgotten, all in this one step; 0 the lock is no longer ours and nothing is
  * written; 2 a deletion at or after the cutoff (or a mark that does not read as a time) and nothing is written; -1 a
- * call of any other shape, refused before anything is read or written. The index is written before the connection,
- * so an index Redis refuses (a key of another type) stops the script before any connection is kept outside it.
- * Mirrored for tests in lib/redis-memory.ts.
+ * call of any other shape (a replaced account's index that is this account's own included), refused before anything
+ * is read or written. The index is written before the connection, so an index Redis refuses (a key of another type)
+ * stops the script before any connection is kept outside it; an old account's index Redis refuses stops it after the
+ * new index only, with the old connection, its index and its test meeting as they were (an extra place in the new
+ * account's index is harmless: forgetUser only forgets a connection of the account it is told about). Mirrored for
+ * tests in lib/redis-memory.ts.
  */
-const KEEP_UNLESS_GONE = `-- marktmorgen:meet-keep:v1
-if #KEYS ~= 4 or #ARGV ~= 4 or ARGV[1] == "" or ARGV[2] == "" or #ARGV[3] > 16 or not string.match(ARGV[3], "^[1-9]%d*$") or ARGV[4] == "" then return -1 end
+const KEEP_UNLESS_GONE = `-- marktmorgen:meet-keep:v2
+if #KEYS ~= 6 or #ARGV ~= 5 or ARGV[1] == "" or ARGV[2] == "" or #ARGV[3] > 16 or not string.match(ARGV[3], "^[1-9]%d*$") or ARGV[4] == "" or (ARGV[5] ~= "0" and ARGV[5] ~= "1") or (ARGV[5] == "1" and KEYS[5] == KEYS[3]) then return -1 end
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
 local gone = redis.call("GET", KEYS[4])
 if gone and (#gone > 16 or not string.match(gone, "^%d+$") or tonumber(gone) >= tonumber(ARGV[3])) then return 2 end
 redis.call("SADD", KEYS[3], ARGV[4])
+if ARGV[5] == "1" then
+  redis.call("SREM", KEYS[5], ARGV[4])
+  redis.call("DEL", KEYS[6])
+end
 redis.call("SET", KEYS[2], ARGV[2])
 return 1`;
 
@@ -441,9 +451,24 @@ async function keepConnection(
     await revoke(provider, access).catch(() => {});
     return { ok: false, error: "expired" };
   }
-  const keys = [held.key, connKey(input.statsId, provider), userKey(provider, traded.account.id), goneKey(provider, traded.account.id)];
+  // A different account connected in its place: the store leaves the old account's index and the test meeting made
+  // on it is forgotten in the same step that keeps the new one (KEEP_UNLESS_GONE). Before, both were a pipeline after
+  // the keep whose failure was swallowed: the old account's test meeting stayed under the new connection, to be given
+  // back as its own and moved or deleted with its token, and the old index kept listing the store.
+  const replaced = before && before.account.id !== traded.account.id ? before : null;
+  const index = userKey(provider, traded.account.id);
+  const keys = [
+    held.key,
+    connKey(input.statsId, provider),
+    index,
+    goneKey(provider, traded.account.id),
+    replaced ? userKey(provider, replaced.account.id) : index,
+    testKey(input.statsId, provider),
+  ];
   const replies = repliesFor(
-    await redisPipeline([["EVAL", KEEP_UNLESS_GONE, keys.length, ...keys, held.token, JSON.stringify(connection), input.startedAt - GONE_MARGIN_MS, input.statsId]]),
+    await redisPipeline([
+      ["EVAL", KEEP_UNLESS_GONE, keys.length, ...keys, held.token, JSON.stringify(connection), input.startedAt - GONE_MARGIN_MS, input.statsId, replaced ? "1" : "0"],
+    ]),
     1,
   );
   const keptAs = replies ? countOf(replies[0]) : null;
@@ -454,14 +479,9 @@ async function keepConnection(
     return { ok: false, error: "removed" };
   }
   if (keptAs !== 1) throw new UnknownReplyError("keeping a meeting connection only while its account was not deleted since");
-  // A different account connected in its place: the old one's access is given back.
-  if (before && before.account.id !== traded.account.id) {
-    await giveBack(input.statsId, before).catch(() => {});
-    await redisPipeline([
-      ["SREM", userKey(provider, before.account.id), input.statsId],
-      ["DEL", testKey(input.statsId, provider)],
-    ]).catch(() => {});
-  }
+  // A different account connected in its place: the old one's access is given back (its index and test meeting
+  // already went with the keep above).
+  if (replaced) await giveBack(input.statsId, replaced).catch(() => {});
   return { ok: true, view: viewOf(connection), replaced: Boolean(before) };
 }
 

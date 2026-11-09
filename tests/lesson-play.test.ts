@@ -260,6 +260,53 @@ async function main(): Promise<void> {
     is("the page picks them by the store's standing", read("app/[handle]/course/[product]/[lesson]/page.tsx").includes("w.pausedPaidRest("), true);
   }
 
+  part("MEDIO (review of #3402, security M2 = money M2): anonymous previews take at most half the plan's hours over the window, not half of what is left at each moment");
+  {
+    // Before: anonymous presses could hold half of what was left at once; once that was watched, half of the new rest,
+    // and so on: on Studio's 32 h, 16, 8, 4, 2, 1 hours left after five cycles, the printed hours gone from students.
+    await fresh(3600, 0);
+    let granted = 0;
+    let measured = 0;
+    for (let cycle = 0; cycle < 8; cycle += 1) {
+      for (let i = 0; i < 200; i += 1) {
+        const got = await play(file, STUDIO_LIMIT, WINDOW, undefined, { anonymous: true });
+        if (got?.kind !== "stream") break;
+        granted += lifeOf(got);
+      }
+      // Everything held was watched, measured and given back, as the hourly reading would.
+      measured += (await held()) * rules.HOLD_UNIT_SECONDS;
+      await redis.pipeline([["DEL", HOLDS], ["SET", SECONDS, String(measured)]]);
+    }
+    console.log(`anonymous seconds granted over eight cycles: ${granted}, measured ${measured} of ${STUDIO_LIMIT}`);
+    is("over eight cycles of watching, anonymous previews hold at most half of Studio's 32 hours", measured <= STUDIO_LIMIT / 2, true);
+    is("so the store's students still find at least half of them", STUDIO_LIMIT - measured >= STUDIO_LIMIT / 2, true);
+    is("a paying student still plays", (await play(file, STUDIO_LIMIT, WINDOW))?.kind, "stream");
+    is("and the next anonymous press is told the rest is kept for students", (await play(file, STUDIO_LIMIT, WINDOW, undefined, { anonymous: true }))?.kind, "kept");
+  }
+
+  part("MEDIO (review of #3402, money M1): playback past a token's end is unverified, so it is open, and the store stays in line to be read");
+  {
+    // tests/plan-cost-registry.ts called it "Not verified, and open" while OPEN was empty, so the line passed at
+    // exactly the plan's hours (rule "unknown fails").
+    const registry = await import("./plan-cost-registry");
+    const open = (registry.OPEN as { id: string; what: string }[]).find((item) => item.id === "video-playback-past-hold");
+    is("the unverified stop at a token's end is an OPEN item of the cost registry", Boolean(open && /token/.test(open.what)), true);
+    // A press puts the store in line to be read for a player's whole life and an hour (WATCHING_FOR_MS), as the
+    // opened mark did before 9 November: watching past a half-hour token is read, not left until the next press.
+    await fresh(3600, 0);
+    const start = Date.now();
+    is("a press plays", (await play(file, STORE_LIMIT, WINDOW))?.kind, "stream");
+    const { measureDue } = await import("@/lib/watch");
+    await measureDue(Number.POSITIVE_INFINITY, start + 2.5 * H);
+    is("2.5 h on, its units given back", await held(), 0);
+    const due = async () => (await redis.pipeline([["ZSCORE", "nl:watch:due", FOLDER]]))[0];
+    is("the store is still in line to be read", (await due()) !== null, true);
+    await measureDue(Number.POSITIVE_INFINITY, start + 4.9 * H);
+    is("4.9 h on, still in line", (await due()) !== null, true);
+    await measureDue(Number.POSITIVE_INFINITY, start + 6 * H);
+    is("past a player's whole life and an hour, it leaves the line", await due(), null);
+  }
+
   part("LEVE: the reading's own hold commands are priced");
   {
     const registry = read("tests/plan-cost-registry.ts");

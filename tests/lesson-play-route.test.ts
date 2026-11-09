@@ -8,6 +8,8 @@
  * from playing is said in true words. Synthetic store, stand-in Redis and video
  * service; nothing is sent anywhere.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { renderToReadableStream } from "react-dom/server";
 import LessonPage from "@/app/[handle]/course/[product]/[lesson]/page";
@@ -35,6 +37,7 @@ globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof f
 
 const OWNER = "kiln@example.com";
 const STUDENT = "student@example.com";
+const STUDENT_TWO = "second@example.com";
 const BASE = "https://marktmorgen.com";
 const PREVIEW_VIDEO = "0b7c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d";
 const PAID_VIDEO = "1b7c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d";
@@ -92,7 +95,8 @@ async function main(): Promise<void> {
   await redis.pipeline([record(PREVIEW_VIDEO, previewVideo.pathname), record(PAID_VIDEO, paidVideo.pathname)]);
   const started = Math.floor(Date.now() / 1000) - 86_400;
   await redis.pipeline([["SET", `nl:learn:paid:${storeKey(store)}:${emailKey(STUDENT)}`, JSON.stringify({ p: { [id]: started }, x: [], r: [] }), "EX", 600]]);
-  const sessions = { stranger: "", student: await openSession(STUDENT) };
+  await redis.pipeline([["SET", `nl:learn:paid:${storeKey(store)}:${emailKey(STUDENT_TWO)}`, JSON.stringify({ p: { [id]: started }, x: [], r: [] }), "EX", 600]]);
+  const sessions = { stranger: "", student: await openSession(STUDENT), second: await openSession(STUDENT_TWO) };
   type Who = keyof typeof sessions;
   const w = coursesWords(store.language);
   const HOLDS = `nl:watch:hold:${folder}`;
@@ -113,7 +117,7 @@ async function main(): Promise<void> {
   let anonymous = 0;
   let learner = 0;
   const press = async (who: Who, lesson = "lesson000001", ip = "198.51.100.1", origin = BASE) => {
-    if (origin === BASE && (who === "student" || lesson === "lesson000001")) {
+    if (origin === BASE && (who === "student" || (who === "stranger" && lesson === "lesson000001"))) {
       if (who === "student") learner += 1;
       else anonymous += 1;
     }
@@ -229,6 +233,37 @@ async function main(): Promise<void> {
     // VR 2: this store pays for its plan; it is never told it has none.
     const paid = (w as unknown as { pausedPaidRest?: (store: string) => string }).pausedPaidRest;
     is("a paid store's pause says its plan's hours are used, never that it has no paid plan", typeof paid === "function" && drawn.includes(inHtml(paid(current.name))) && !drawn.includes(inHtml(w.pausedRest(current.name))), true);
+  }
+
+  part("MEDIO (review of #3402, security M1): one live hold a person a store; pressing another lesson moves it, never adds one");
+  {
+    // Before: the same token came back only for the same lesson, so a student pressing different lessons held a new
+    // block each time, and could hold the store's whole video time without watching (another student then got busy).
+    const src = async (who: Who, lesson: string, play: string) => /src="([^"]+)"/.exec((await page(who, lesson, { play })).replace(/&amp;/g, "&"))?.[1] ?? "";
+    const expires = (url: string) => new URL(url).searchParams.get("expires");
+    await redis.pipeline([["DEL", `nl:watch:sec:${folder}:${windowId((await storeForEmail(OWNER)) as Store)}`]]);
+    const live = await press("student", "lesson000002");
+    const heldBefore = await held();
+    const moved = await press("student", "lesson000001");
+    is("the student's press of another lesson plays", /^[0-9a-f]{24}$/.test(moved.play), true);
+    is("and holds nothing more", await held(), heldBefore);
+    const [a, b] = [await src("student", "lesson000002", live.play), await src("student", "lesson000001", moved.play)];
+    is("its token is the other video's, ending when the live one does", [b.startsWith(PLAYER), a !== b, expires(a) === expires(b)], [true, true, true]);
+
+    // Presses at once, alternating lessons: still one block, so a person can never sum blocks by racing them.
+    await redis.pipeline([["DEL", HOLDS]]);
+    const many = await Promise.all(Array.from({ length: 8 }, (_, i) => press("second", i % 2 ? "lesson000001" : "lesson000002", `198.51.100.${200 + i}`)));
+    is("eight presses at once by one student all play", many.every((p) => /^[0-9a-f]{24}$/.test(p.play)), true);
+    is("and hold one half-hour block, six units, not eight", await held(), 6);
+  }
+
+  part("LEVE (review of #3402, security L3): a connection past its pace reads nothing of the store");
+  {
+    const route = readFileSync(join(process.cwd(), "app/api/store/course/play/route.ts"), "utf8");
+    is("its refusal comes before the store and the listing are read", route.indexOf('if (paced !== "within")') > 0 && route.indexOf('if (paced !== "within")') < route.indexOf("storeForHandle("), true);
+    const registry = readFileSync(join(process.cwd(), "tests/store-data-registry.ts"), "utf8");
+    const line = registry.split("\n").find((l) => l.includes('"nl:learn:playing:@lib/lesson-play.ts"')) ?? "";
+    is("NIT: the kept token's registry line says half an hour at most, not four hours", [line.includes("four hours"), /half an hour/.test(line)], [false, true]);
   }
 
   part("A student's presses are paced too");

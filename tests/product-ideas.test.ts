@@ -236,7 +236,7 @@ async function main(): Promise<void> {
   // Focal review of #3441 (Claude 2, LEVE B): the model is sent a title's straight quotes as ”, so an echo of what it was sent is the same product.
   is(
     "a product the store already has is never suggested again, whatever quote marks it comes back with",
-    kept([idea("The ”Starter” Guide"), idea("The “Starter” Guide"), idea('The "Starter" Guide'), idea("The «Starter» Guide"), idea("Weekend Bake Plan")], ['The "Starter" Guide']).map((x) => x.title),
+    kept([idea("The ”Starter” Guide"), idea("The “Starter” Guide"), idea('The "Starter" Guide'), idea("The «Starter» Guide"), idea("Bread ‹Basics› Notes"), idea("Weekend Bake Plan")], ['The "Starter" Guide', "Bread <Basics> Notes"]).map((x) => x.title),
     ["Weekend Bake Plan"],
   );
   is("and the title as sent to the model is the one it would echo", ideaRequest(shape({ head: [{ title: 'The "Starter" Guide', summary: "A guide." }] }), "")?.prompt.includes("The ”Starter” Guide"), true);

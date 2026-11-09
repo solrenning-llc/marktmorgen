@@ -94,7 +94,7 @@ import { emitEvent } from "@/lib/webhooks";
 import { recordLead } from "@/lib/affiliate-leads";
 import { VIDEO_ROOM_NOTE, isVideoRoom, roomOf } from "@/lib/call-rooms";
 import { alertCreator } from "@/lib/phone-alerts";
-import { MEET_STORES, callMeeting, callMoved, linkUpdates } from "@/lib/meet-links";
+import { callMeeting, callMoved, keepMeetStore, linkUpdates } from "@/lib/meet-links";
 import type { MeetRecord } from "@/lib/meet-records";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
@@ -1686,7 +1686,7 @@ export async function confirmBooking(input: {
   if (team) {
     await confirmTeam(store, product.id, team.hosts, team.claim, start, end).catch((error) => console.error("confirming a team booking's hosts failed", error));
     // The five-minute job reads this store's refunds while it has team bookings to come, so a refund gives the hosts their time back.
-    await redisPipeline([["ZADD", MEET_STORES, end, `${store.callsId}|${store.handle}`]]).catch(() => {});
+    await keepMeetStore(store, end);
   }
   const hosts = team?.emails ?? [];
   // Reminders are emails too, so the demo plans none (writesAboutBookings).

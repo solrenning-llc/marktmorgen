@@ -6,7 +6,7 @@
  *   - with more stores with meetings to come than one run reads, every one of them has its refunds read within the runs
  *     the rotation needs (before: ZRANGEBYSCORE ... LIMIT 0 20 by the last meeting's end took the same twenty stores
  *     every run, so the 21st onwards never had a refund read, and a refunded call kept its meeting);
- *   - a store that comes in after the others were read goes first;
+ *   - a store that comes in after the others were read goes first, and one that left the list leaves the rotation;
  *   - each run reads at most MEET_REFUND_STORES stores and sends at most MEET_REFUND_TURN_COMMANDS commands on the
  *     store list and the rotation;
  *   - a store whose turn waited more than a day is said in the log, once a day;
@@ -78,7 +78,7 @@ async function main(): Promise<void> {
       await run();
       perRun.push(new Set(asked).size);
       for (const one of asked) reached.add(one);
-      const listCommands = sent.filter((command) => command[1] === MEET_STORES || command[1] === TURNS || command[2] === TURNS).length;
+      const listCommands = sent.filter((command) => command[1] === MEET_STORES || String(command[1]).startsWith(TURNS)).length;
       is(`run ${i + 1}: at most MEET_REFUND_TURN_COMMANDS commands on the store list and the rotation`, listCommands <= constant("MEET_REFUND_TURN_COMMANDS"), true);
     }
     is("each run reads at most MEET_REFUND_STORES stores", perRun.every((count) => count <= constant("MEET_REFUND_STORES")), true);
@@ -92,6 +92,11 @@ async function main(): Promise<void> {
     asked = [];
     await run();
     is("goes first", asked.includes(account(26)), true);
+    // A store that left the list leaves the rotation too, so the rotation never grows past the list.
+    await redis.pipeline([["ZREM", MEET_STORES, `${(26).toString(16).padStart(16, "c")}|kiln026`]]);
+    await run();
+    const [turns, listed] = await redis.pipeline([["ZCARD", TURNS], ["ZCARD", MEET_STORES]]);
+    is("a store that left the list leaves the rotation", [Number(turns), Number(listed)], [25, 25]);
   }
 
   part("A store whose turn waited more than a day");

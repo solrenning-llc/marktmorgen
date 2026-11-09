@@ -21,7 +21,10 @@
  * its meeting removed (a one-to-one call) or its buyer taken off the guest
  * list (a group). Refunds are read from Stripe, as the license keys read
  * them (lib/licence-keys.ts): only for stores with meetings still to come,
- * from where the last run stopped, a bounded number per run, each once. A
+ * MEET_REFUND_STORES a run in turns, the store read longest ago first (so
+ * every one has its turn, however many there are and whatever the order of
+ * their meetings), from where the last run stopped, a bounded number per
+ * run, each once. A
  * partial refund changes nothing, the rule every other door follows
  * (lib/refunds.ts).
  *
@@ -44,6 +47,8 @@
  *   nl:meet:rf:<callsId>:seen          refunds already read, and `call:<id>` for a call's refund held for later
  *   nl:meet:rf:<callsId>:pass          where a pass over the refunds stands
  *   nl:meet:rf:<callsId>:said:<charge> a call's refund pending more than seven days was said today
+ *   nl:meet:refund-turns               when each store of nl:meet:stores last had its refunds read, in ms
+ *   nl:meet:refund-turns:said          a turn that waited more than a day was said today
  */
 import { whereOf } from "@/lib/call-place";
 import { saleHandles } from "@/lib/store";
@@ -63,7 +68,6 @@ import type { Store } from "@/lib/store";
 import { isClaimId, isHostId, releaseClaim } from "@/lib/host-claims";
 
 const BATCH = 40;
-const REFUND_STORES = 20;
 const REFUND_PAGES = 2;
 const REFUND_LOOKUPS = 10;
 const REFUND_KEEP_SECONDS = 30 * 86_400;
@@ -220,18 +224,69 @@ export async function syncMeetings(
   return run;
 }
 
-/** Refunds in full since the last run, for every store with meetings still to come. */
+/**
+ * The stores one run reads the refunds of, at the most: the ones whose refunds were read longest ago (never read
+ * first), so every store with meetings to come has its turn once every ceil(stores / MEET_REFUND_STORES) runs that
+ * reach the end of their stores, whatever the order of their meetings (before: ZRANGEBYSCORE ... LIMIT 0 20 by the
+ * last meeting's end took the same twenty every run, and the 21st onwards never had a refund read).
+ */
+export const MEET_REFUND_STORES = 20;
+/**
+ * The Redis commands one run sends on the store list and the rotation, outside each store's own refunds (refundsOf,
+ * MEET_REFUND_PLACE_COMMANDS and MEET_REFUND_ROW_COMMANDS): the ZRANGEBYSCORE of the stores whose last meeting ended a
+ * day ago and their ZREM (as before); the ZUNIONSTORE that brings a new store into the rotation and the ZINTERSTORE
+ * that takes a store that left the list out of it; the ZRANGEBYSCORE WITHSCORES of the MEET_REFUND_STORES whose turn is
+ * oldest; the one ZADD of the turns taken; and, only when the oldest turn waited more than a day, one SET NX EX of the
+ * day's log line. The rotation (REFUND_TURNS) holds the list's members, no more, with a time each.
+ */
+export const MEET_REFUND_TURN_COMMANDS = 7;
+/** When each store's refunds were last read (ms), for every member of MEET_STORES: the rotation above. */
+const REFUND_TURNS = "nl:meet:refund-turns";
+/** A turn that waited longer than this is said in the log, once a day: well inside the pass's seven days and Stripe's thirty. */
+const REFUND_TURN_LATE_MS = 86_400_000;
+const REFUND_TURN_SAID = "nl:meet:refund-turns:said";
+
+/** Refunds in full since the last run, for every store with meetings still to come, in turns. */
 async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, deadline: number): Promise<number> {
   const now = Date.now();
   // Stores whose last meeting is over leave the list.
   const [old] = await redisPipeline([["ZRANGEBYSCORE", MEET_STORES, 0, now - 86_400_000, "LIMIT", 0, 100]]);
   const stale = Array.isArray(old) ? (old as unknown[]).map(String) : [];
   if (stale.length) await redisPipeline([["ZREM", MEET_STORES, ...stale]]);
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", MEET_STORES, now - 86_400_000, now + 400 * 86_400_000, "LIMIT", 0, REFUND_STORES]]);
-  const members = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  // The rotation follows the list: a store new to it comes in at 0 (never read, so first), one that left it goes out,
+  // and every other keeps when it was last read. Then the stores whose turn is oldest.
+  const replies = repliesFor(
+    await redisPipeline([
+      ["ZUNIONSTORE", REFUND_TURNS, 2, REFUND_TURNS, MEET_STORES, "WEIGHTS", 1, 0, "AGGREGATE", "MAX"],
+      ["ZINTERSTORE", REFUND_TURNS, 2, REFUND_TURNS, MEET_STORES, "WEIGHTS", 1, 0],
+      ["ZRANGEBYSCORE", REFUND_TURNS, "-inf", "+inf", "WITHSCORES", "LIMIT", 0, MEET_REFUND_STORES],
+    ]),
+    3,
+  );
+  const page = replies?.[2];
+  if (!Array.isArray(page) || page.length % 2 !== 0) throw new UnknownReplyError("the stores whose refunds to read");
+  const turns: { member: string; last: number }[] = [];
+  for (let i = 0; i < page.length; i += 2) {
+    const last = Number(page[i + 1]);
+    if (typeof page[i] !== "string" || !Number.isFinite(last)) throw new UnknownReplyError("the stores whose refunds to read");
+    turns.push({ member: page[i] as string, last });
+  }
+  // The oldest turn, never read or not, waited more than a day: the runs do not keep up with the stores. Said once a
+  // day, for whoever reads the logs; the refunds are still read in turn.
+  const oldest = turns[0];
+  if (oldest && oldest.last > 0 && now - oldest.last > REFUND_TURN_LATE_MS) {
+    const [first] = await redisPipeline([["SET", REFUND_TURN_SAID, "1", "NX", "EX", 86_400]]);
+    if (first === "OK") {
+      console.error("a store's refunds for meetings waited more than a day for their turn", { store: oldest.member, waitedMs: now - oldest.last, stores: MEET_REFUND_STORES });
+    }
+  }
   let handled = 0;
-  for (const member of members) {
+  const taken: (string | number)[] = [];
+  for (const { member } of turns) {
     if (Date.now() > deadline) break;
+    // Taken whatever comes of it: a store that cannot be read, or whose read failed, waits for its next turn like the
+    // others (its anchor still holds what it did not read), so it never keeps another store from its turn.
+    taken.push(Date.now(), member);
     const [callsId, handle] = member.split("|");
     const store = callsId && handle ? await storeFor(handle) : null;
     if (!store || store.callsId !== callsId || !store.stripeAccountId) continue;
@@ -240,6 +295,8 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
       return 0;
     });
   }
+  // XX: a store that left the list meanwhile is not brought back into the rotation.
+  if (taken.length) await redisPipeline([["ZADD", REFUND_TURNS, "XX", ...taken]]);
   return handled;
 }
 

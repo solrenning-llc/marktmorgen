@@ -1774,6 +1774,7 @@
     "app/api/store/course/file/route.ts",
     "app/api/store/course/link/route.ts",
     "app/api/store/course/open/route.ts",
+    "app/api/store/course/play/route.ts",
     "app/api/store/course/progress/route.ts",
     "app/api/store/course/quiz/route.ts",
     "app/api/store/course/route.ts",

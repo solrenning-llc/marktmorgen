@@ -97,7 +97,9 @@ async function main(): Promise<void> {
     is("at least one opening plays", lives.some((l) => l > 0), true);
     is("the playback the tokens allow is within the hour left", sum(lives) <= 3600, true);
     is("no token is good for longer than the lesson and its pauses (25 minutes)", Math.max(...lives) <= 25 * 60, true);
-    is("once the room is reserved, the page waits on the room rather than saying the hours are used", kinds.at(-1), null);
+    // Rule 23 (9 November 2026, pre-review finding 3): was null, said as "Refresh the page in a moment", which is false
+    // when the wait is hours. A press refused because other tokens hold the room is its own kind, "busy".
+    is("once the room is reserved, the page waits on the room rather than saying the hours are used", kinds.at(-1), "busy");
     const scores = (await redis.pipeline([["ZRANGEBYSCORE", HOLDS, "-inf", "+inf", "WITHSCORES"]]))[0] as string[];
     const latest = Math.max(0, ...scores.filter((_, i) => i % 2 === 1).map(Number));
     is("every token's time is held in the store's reservations, held at least as long as the token lasts", latest >= (Date.now() + Math.max(...lives) * 1000) - 2_000, true);
@@ -180,9 +182,11 @@ async function main(): Promise<void> {
   {
     await fresh(600, STORE_LIMIT - 3600);
     const first = await openings(5, STORE_LIMIT);
-    is("the room is held", first.kinds.at(-1), null);
+    // Rule 23 (9 November 2026, pre-review finding 3): was null; busy is its own kind now.
+    is("the room is held", first.kinds.at(-1), "busy");
     is("ten minutes on, nothing watched yet", await measure(FOLDER, Date.now() + 10 * 60 * 1000), 0);
-    is("the tokens still out keep their room", (await openings(1, STORE_LIMIT)).kinds, [null]);
+    // Rule 23 (9 November 2026, pre-review finding 3): was [null]; busy is its own kind now.
+    is("the tokens still out keep their room", (await openings(1, STORE_LIMIT)).kinds, ["busy"]);
   }
 
   part("a store with playback held stays in line to be read until it is given back");

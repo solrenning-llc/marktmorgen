@@ -645,6 +645,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:learn:enr:@lib/learn.ts": { what: "What a buyer is enrolled in", parts: [kept(KEY, "The record itself, one a buyer."), item(128, "Each product's place in it.")] },
   "nl:learn:link:@lib/learn.ts": short("A course link and its opens, an hour", "store", 1, LINK_BYTES, MAIL("course link")),
   "nl:learn:passes:@lib/learn.ts": { what: "The passes a buyer was given, so a deletion can find them", parts: [per("store", 90, MARK, "A pass's place, ninety days.", MAIL("course link"))] },
+  "nl:learn:play:@lib/lesson-play.ts": short("A press of Play's player for the page it sends back to, taken once, two minutes", "request", 1, 2 * KB, REQ("lesson play")),
+  "nl:learn:playing:@lib/lesson-play.ts": short("A signed-in viewer's lesson token while it is good, four hours at most", "request", 1, 2 * KB, REQ("lesson play")),
   "nl:learn:paid:@lib/learn.ts": short("A buyer's paid courses, ten minutes", "request", 1, 2 * KB, REQ("page")),
   "nl:learn:pass:@lib/learn.ts": short("A buyer's pass into the store, ninety days, from an emailed link", "store", 90, LINK_BYTES, MAIL("course link")),
   "nl:learn:rate:addr:@lib/learn.ts": short("Links asked per address", "request", 1, KEY, REQ("course link")),

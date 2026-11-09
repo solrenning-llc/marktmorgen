@@ -86,3 +86,12 @@ export const HOLD_MIN_SECONDS = 60;
 export const HOLD_SETTLE_MS = MEASURE_EVERY_MS;
 /** The longest token a hold is asked for (lib/stream.ts PLAYER_SECONDS, four hours), in units: one opening's most. */
 export const HOLD_UNITS_MOST = (4 * 60 * 60) / HOLD_UNIT_SECONDS;
+
+/**
+ * What an anonymous press of Play on a free preview leaves of the window's room (lib/watch.ts, holdPlayback): never
+ * less than this share, in basis points, of what the window has left by what was measured. Visitors who are not the
+ * store's students, however many and from however many connections, so hold at most the other half at once, and its
+ * students always find the rest (pre-review of the video hours ceiling, 9 November 2026: 26 anonymous loads of a
+ * one-hour preview held a Studio plan's 32 hours).
+ */
+export const PREVIEW_KEEP_BPS = 5_000;

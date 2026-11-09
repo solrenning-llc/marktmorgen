@@ -152,14 +152,31 @@ export async function watchedForAdmission(folder: string, month = calendarWindow
 export { HOLD_MIN_SECONDS, HOLD_SETTLE_MS, HOLD_UNIT_SECONDS } from "@/lib/watch-rules";
 
 /**
+ * What a hold answers (holdPlayback): the seconds the token may be good for; "paused" when what was measured leaves
+ * less than HOLD_MIN_SECONDS; `busy` when tokens still out hold the room, with the moment the time they do not use is
+ * back by; "kept" when an anonymous preview would take the window below PREVIEW_KEEP_BPS of what it has left; null
+ * when anything could not be read.
+ */
+export type HoldAnswer = number | "paused" | "kept" | { busy: number } | null;
+
+/**
  * Holds up to `wanted` seconds of playback for a token about to be signed, in
  * the store's window `month`, against `limit` seconds. Answers the seconds
  * the token may be good for (whole units are held for them, a last part unit
- * counted whole); "paused" when what was measured leaves less than
- * HOLD_MIN_SECONDS; null when the room
- * is held by tokens still out (it comes back at a reading) or when anything
- * could not be read, and then no token is signed (CX-123 rule 24: unknown is
- * never room; what may have been written stays held, and goes at a reading).
+ * counted whole, every one scored with the moment the token runs out);
+ * "paused" when what was measured leaves less than HOLD_MIN_SECONDS; `busy`
+ * when the room is held by tokens still out (it comes back at a reading),
+ * with the moment unused time is back by: the earliest of those tokens' end,
+ * HOLD_SETTLE_MS, a reading's interval (MEASURE_EVERY_MS) and the five-minute
+ * job's margin (MEASURE_SOON_MS); "kept" when `keepBps` (an anonymous preview:
+ * PREVIEW_KEEP_BPS) would be crossed; null when anything could not be read,
+ * and then no token is signed (CX-123 rule 24: unknown is never room; what may
+ * have been written stays held, and goes at a reading).
+ *
+ * The units are added and counted before the measured figure is read, and the
+ * reading (measure) adds what was watched before it lets units go: so however
+ * the two pipelines interleave (neither is one step), the time a unit allowed is
+ * always in the count, in the figure, or in both, never in neither.
  *
  * Also puts the store in line to be read whenever a unit may stay held (the
  * step after the units, with any give-back), and the hourly reading goes on
@@ -167,56 +184,74 @@ export { HOLD_MIN_SECONDS, HOLD_SETTLE_MS, HOLD_UNIT_SECONDS } from "@/lib/watch
  * hold nobody reads would keep the room forever. A unit whose line was not
  * joined for certain signs no token, and the next opening with room joins it.
  */
-export async function holdPlayback(folder: string, month: string, limit: number, wanted: number, now = Date.now()): Promise<number | "paused" | null> {
+export async function holdPlayback(folder: string, month: string, limit: number, wanted: number, now = Date.now(), keepBps = 0): Promise<HoldAnswer> {
   if (!isRedisConfigured() || !FOLDER_PATTERN.test(folder) || !WINDOW_ID.test(month)) return null;
   if (!Number.isSafeInteger(limit) || limit < 0 || !Number.isSafeInteger(wanted) || wanted < 1) return null;
+  if (!Number.isSafeInteger(keepBps) || keepBps < 0 || keepBps > 10_000) return null;
   const units = Math.min(Math.ceil(wanted / HOLD_UNIT_SECONDS), Math.floor(PLAYER_SECONDS / HOLD_UNIT_SECONDS), HOLD_UNITS_MOST);
   const runsOut = now + units * HOLD_UNIT_SECONDS * 1000;
   const mark = randomBytes(6).toString("hex");
   const slots = Array.from({ length: units }, (_, i) => `${mark}:${i}`);
   let replies: unknown[];
   try {
+    // Added and counted first, the measured figure read last (see above).
     replies = await redisPipeline([
-      ["GET", secondsKey(folder, month)],
       ["ZADD", holdKey(folder), ...slots.flatMap((slot) => [runsOut, slot])],
       ["ZCARD", holdKey(folder)],
+      ["GET", secondsKey(folder, month)],
     ]);
   } catch (error) {
     console.error("could not hold a lesson video's playback; no player", error);
     return null;
   }
   if (!Array.isArray(replies) || replies.length !== 3) return null;
-  const measured = textCountOf(replies[0]);
-  const added = replies[1];
-  const count = replies[2];
+  const added = replies[0];
+  const count = replies[1];
+  const measured = textCountOf(replies[2]);
   if (measured === null || added !== units || typeof count !== "number" || !Number.isSafeInteger(count) || count < units) return null;
   const used = measured === "absent" ? 0 : measured;
   // The seconds this window has left by what was measured, and those other tokens still out leave of them:
   // their units counted whole, so this errs toward holding more, never less.
   const left = limit - used;
   const free = left - (count - units) * HOLD_UNIT_SECONDS;
-  const granted = free >= HOLD_MIN_SECONDS ? Math.min(units * HOLD_UNIT_SECONDS, free) : 0;
+  // What this opening may take: an anonymous preview leaves its share of `left` to the store's students.
+  const open = free - Math.ceil(Math.max(0, left) * keepBps / 10_000);
+  const granted = open >= HOLD_MIN_SECONDS ? Math.min(units * HOLD_UNIT_SECONDS, open) : 0;
   const keep = Math.ceil(granted / HOLD_UNIT_SECONDS);
   const back = slots.slice(keep);
   const writes: (string | number)[][] = [];
   if (back.length) writes.push(["ZREM", holdKey(folder), ...back]);
+  // A part grant's units run out with its token, not with the time first asked for, so they go back on time.
+  const rescore = keep > 0 && granted < units * HOLD_UNIT_SECONDS;
+  if (rescore) writes.push(["ZADD", holdKey(folder), "XX", ...slots.slice(0, keep).flatMap((slot) => [now + granted * 1000, slot])]);
   // In line to be read whenever a unit may be held past this step: always but when the hours measured are used,
   // where nothing is kept and the store has nothing to be read for. NX: a store already in line keeps its place.
   if (left >= HOLD_MIN_SECONDS) writes.push(["ZADD", DUE, "NX", now + MEASURE_SOON_MS, folder]);
+  // Refused because other tokens hold the room: when the earliest of them is read back.
+  const busy = keep === 0 && left >= HOLD_MIN_SECONDS && free < HOLD_MIN_SECONDS;
+  if (busy) writes.push(["ZRANGEBYSCORE", holdKey(folder), "-inf", "+inf", "WITHSCORES", "LIMIT", 0, 1]);
+  let done: unknown[] = [];
   if (writes.length) {
     try {
-      const done = await redisPipeline(writes);
-      // Units not taken back for certain stay held, and no token is signed on them; nor on a line not joined
-      // for certain (the next opening joins it, and the reading gives them back).
-      if (!Array.isArray(done) || done.length !== writes.length || (back.length && done[0] !== back.length)) return null;
+      done = await redisPipeline(writes);
     } catch (error) {
       console.error("could not give back a lesson video's held playback, or put its store in line; held until a reading", error);
       return null;
     }
+    // Units not taken back or moved for certain stay held, and no token is signed on them; nor on a line not joined
+    // for certain (the next opening joins it, and the reading gives them back).
+    if (!Array.isArray(done) || done.length !== writes.length || (back.length && done[0] !== back.length)) return null;
+    const moved = rescore ? done[back.length ? 1 : 0] : 0;
+    if (typeof moved !== "number" || !Number.isSafeInteger(moved) || moved < 0) return null;
   }
   if (keep > 0) return granted;
-  // Nothing taken: the hours measured are used, or tokens still out hold the rest for now.
-  return left < HOLD_MIN_SECONDS ? "paused" : null;
+  if (left < HOLD_MIN_SECONDS) return "paused";
+  if (!busy) return "kept";
+  // Nothing taken: tokens still out hold the rest for now. The earliest's end, read in its exact shape, or unknown.
+  const first = stringList(done[done.length - 1]);
+  const ends = first !== null && first.length === 2 ? textCountOf(first[1]) : null;
+  if (typeof ends !== "number") return null;
+  return { busy: ends + HOLD_SETTLE_MS + MEASURE_EVERY_MS + MEASURE_SOON_MS };
 }
 
 /** The stores whose video was watched at all in a month. */
@@ -299,9 +334,6 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
   const gone = [...last.keys(), ...resync].filter((id) => !there.has(id));
   if (gone.length) writes.push(["HDEL", lastKey(folder), ...gone]);
 
-  // Units held for tokens that ran out a reading's interval before this one are in the service's total now:
-  // given back to the store, in the same step as what was watched (holdPlayback).
-  writes.push(["ZREMRANGEBYSCORE", holdKey(folder), "-inf", now - HOLD_SETTLE_MS]);
   if (added > 0) {
     // Added to the store's window (lib/allowance-window.ts), where its video
     // stops; the line of stores is kept by the calendar month.
@@ -317,6 +349,10 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
       ["EXPIRE", foldersKey(month), KEEP_SECONDS],
     );
   }
+  // Units held for tokens that ran out a reading's interval before this one are in the service's total now:
+  // given back to the store, in the same step as what was watched and after it (holdPlayback), so a hold that
+  // interleaves with this step never sees the units gone before the watching is added.
+  writes.push(["ZREMRANGEBYSCORE", holdKey(folder), "-inf", now - HOLD_SETTLE_MS]);
   if (writes.length) await redisPipeline(writes);
   return added;
 }

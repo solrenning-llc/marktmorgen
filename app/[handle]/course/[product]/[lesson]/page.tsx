@@ -12,7 +12,8 @@ import { lookStyle } from "@/lib/store-look";
 import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
-import { courseAccess, doneLessons, emailKey, lessonVideo } from "@/lib/learn";
+import { courseAccess, doneLessons, emailKey, lessonPageVideo, type LessonVideo } from "@/lib/learn";
+import { isPlayTicket, takePlayTicket } from "@/lib/lesson-play";
 import { type Attempt, attemptOf, heldBack, passedForGate, readQuizFor, studentQuiz } from "@/lib/quiz";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
@@ -120,11 +121,28 @@ export default async function LessonPage({ params, searchParams }: Params) {
   if (blocker && !lesson.preview) redirect(`${base}/${blocker}?held=1#${findLesson(course, blocker)?.lesson.task ? "task" : "quiz"}`);
 
   const query = await searchParams;
-  const [body, video, quiz, attempt, task, work] = await Promise.all([
-    lesson.hasBody ? readBody(course.id, lesson.id) : Promise.resolve(""),
+  // The lesson's video, holding nothing (lib/learn.ts, lessonPageVideo): its playback is held when Play is pressed
+  // (app/api/store/course/play/route.ts), which sends the browser back here with a ticket for the player, taken once.
+  const videoShown = async (file: NonNullable<typeof lesson.video>): Promise<LessonVideo | null> => {
+    const pressed = isPlayTicket(query.play) ? await takePlayTicket(query.play, file.pathname) : null;
+    if (pressed) return { kind: "stream", ...pressed };
     // A store with no plan that can be charged plays video for the hours
     // it has, and is paused past them (lib/plan-standing.ts).
-    lesson.video ? lessonVideo(lesson.video, videoLimitFor(store), windowId(store), store) : Promise.resolve(null),
+    return lessonPageVideo(file, videoLimitFor(store), windowId(store), store);
+  };
+  // What kept a press of Play from playing, said above the button (the route's own outcomes; anything else is none).
+  const played = typeof query.play === "string" ? query.play : "";
+  const busyHours = /^busy-([1-9]|1[0-9]|2[0-4])$/.exec(played);
+  const playNotice = busyHours
+    ? w.playBusyRest(Number(busyHours[1]))
+    : played === "kept" ? w.playKeptRest
+    : played === "many" ? w.playManyRest
+    : played === "previews" ? w.playPreviewsRest
+    : played === "error" ? w.playAgainRest
+    : null;
+  const [body, video, quiz, attempt, task, work] = await Promise.all([
+    lesson.hasBody ? readBody(course.id, lesson.id) : Promise.resolve(""),
+    lesson.video ? videoShown(lesson.video) : Promise.resolve(null),
     lesson.quiz ? readQuizFor(course.id, lesson.id) : Promise.resolve(null),
     lesson.quiz && student ? attemptOf(course.id, lesson.id, who) : Promise.resolve<Attempt | null>(null),
     // An assignment, and what this student handed in for it (lib/assignment.ts).
@@ -197,6 +215,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
               </p>
             ) : null}
 
+            {/* Where a press of Play sends the browser back to (app/api/store/course/play/route.ts). */}
+            <div id="video" tabIndex={-1}>
             {lesson.video ? (
               video?.kind === "stream" ? (
                 stamp ? (
@@ -279,6 +299,26 @@ export default async function LessonPage({ params, searchParams }: Params) {
                     />
                   </div>
                 )
+              ) : video?.kind === "ready" ? (
+                // Nothing is held until Play is pressed: a plain form, so it works with no script, and the frame is
+                // drawn only on the page the press sends the browser back to. The button sits on the card, where
+                // its focus ring is drawn against the colors it was chosen for (AX274: 2.4.13, 2.5.5, 3.2.5).
+                <div
+                  className="mt-6 flex flex-col items-center justify-center gap-4 rounded-2xl p-6 text-center"
+                  style={{ border: "1px solid var(--st-line)", aspectRatio: `${video.width} / ${video.height}`, maxHeight: "75vh" }}
+                >
+                  {playNotice ? (
+                    <p className="st-note text-sm" role="status">
+                      <strong>{w.playWaitStrong}</strong>{` ${playNotice}`}
+                    </p>
+                  ) : null}
+                  <form action="/api/store/course/play" method="post">
+                    <input type="hidden" name="handle" value={store.handle} />
+                    <input type="hidden" name="product" value={product.id} />
+                    <input type="hidden" name="lesson" value={lesson.id} />
+                    <button type="submit" className="btn st-btn">{w.playLesson}</button>
+                  </form>
+                </div>
               ) : video?.kind === "preparing" ? (
                 <p className="st-note mt-6" role="status">
                   <strong>{w.preparingStrong}</strong>{` ${w.preparingRest}`}
@@ -293,6 +333,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 <p className="st-note mt-6">{w.videoNotLoaded}</p>
               )
             ) : null}
+            </div>
 
             {body ? (
               <div className="mt-6" style={{ color: "var(--st-text)" }}>

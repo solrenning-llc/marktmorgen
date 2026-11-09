@@ -110,7 +110,10 @@ async function main(): Promise<void> {
   is("so does the page about courses", ["paidVideoWords()", "hoursWords(TRIAL_VIDEO_SECONDS)", "hoursWords(SETUP_VIDEO_SECONDS)"].every(piece => read("lib/feature-pages.ts").includes(piece)), true);
   const studio = read("app/studio/page.tsx");
   is("the studio shows a store its own figures", [/storageBrakeFor\(standing, store\.tier\)/.test(studio), /videoLimitFor\(store\)/.test(studio), /SETUP_VIDEO_SECONDS/.test(studio)], [true, true, true]);
-  is("and the lesson page pauses by the store's own hours", /lessonVideo\(lesson\.video, videoLimitFor\(store\), windowId\(store\), store\)/.test(read("app/[handle]/course/[product]/[lesson]/page.tsx")), true);
+  // Rule 23 (9 November 2026, pre-review of the video hours ceiling): was lessonVideo(lesson.video, ...) on the page.
+  // The page draws without holding (lessonPageVideo) and a press of Play holds (app/api/store/course/play/route.ts).
+  is("and the lesson page pauses by the store's own hours", /lessonPageVideo\(file, videoLimitFor\(store\), windowId\(store\), store\)/.test(read("app/[handle]/course/[product]/[lesson]/page.tsx")), true);
+  is("and so does a press of Play", /lessonVideo\(video, videoLimitFor\(store\), windowId\(store\), store, \{ anonymous \}\)/.test(read("app/api/store/course/play/route.ts")), true);
 
   done();
 }

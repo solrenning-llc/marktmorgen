@@ -12,7 +12,9 @@ export async function redisPipeline(input: (string|number)[][]) {
   commands.push(input);
   if(fail)throw Error('unavailable');
   if(input.every((c)=>c[0]==='GET'))return result;
-  const units=input.filter((c)=>c[0]==='ZADD'&&c[2]!=='NX').reduce((n,c)=>n+(c.length-2)/2,0);
-  return input.map((c)=>c[0]==='GET'?result[0]:c[0]==='ZADD'?(c[2]==='NX'?1:(c.length-2)/2):c[0]==='ZCARD'?units:c[0]==='ZREM'?c.length-2:'OK');
+  // Rule 23 (9 November 2026, pre-review finding 2): a part grant's units are moved to the token's end with ZADD XX,
+  // which Redis answers 0 (nothing added); before, every ZADD here but NX was the units' first add.
+  const units=input.filter((c)=>c[0]==='ZADD'&&c[2]!=='NX'&&c[2]!=='XX').reduce((n,c)=>n+(c.length-2)/2,0);
+  return input.map((c)=>c[0]==='GET'?result[0]:c[0]==='ZADD'?(c[2]==='NX'?1:c[2]==='XX'?0:(c.length-2)/2):c[0]==='ZCARD'?units:c[0]==='ZREM'?c.length-2:'OK');
 }
 export function set(value: unknown[], options: {configured?: boolean;fail?: boolean} = {}) {result=value;configured=options.configured??true;fail=options.fail??false;commands.length=0;}

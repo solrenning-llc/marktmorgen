@@ -165,7 +165,7 @@ async function main(): Promise<void> {
       "Other viewers are using this store's video time right now. Time they do not use comes back within about 3 hours; then press Play lesson again.");
     for (const [code, set] of Object.entries(COURSES_WORDS)) {
       const own = set as unknown as Record<string, unknown>;
-      is(`${code}: every new sentence is there`, ["playLesson", "playWaitStrong", "playBusyRest", "playKeptRest", "playManyRest", "playPreviewsRest"].every((k) => own[k] !== undefined), true);
+      is(`${code}: every new sentence is there`, ["playLesson", "playWaitStrong", "playBusyRest", "playKeptRest", "playManyRest", "playPreviewsRest", "playAgainRest"].every((k) => own[k] !== undefined), true);
     }
     is("the page draws the busy words, not videoNotLoaded, for a busy press", read("app/[handle]/course/[product]/[lesson]/page.tsx").includes("w.playBusyRest("), true);
   }

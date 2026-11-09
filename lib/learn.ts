@@ -43,9 +43,10 @@ import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
 import { folderFromPathname, recordDelivery } from "@/lib/delivery";
-import { PLAYER_SECONDS, playerFor } from "@/lib/stream";
-import { isStreamPath } from "@/lib/stream-rules";
-import { holdPlayback } from "@/lib/watch";
+import { PLAYER_SECONDS, isStreamConfigured, playerFor, streamRecord } from "@/lib/stream";
+import { isStreamPath, shapeOf } from "@/lib/stream-rules";
+import { type HoldAnswer, holdPlayback, watchedForAdmission } from "@/lib/watch";
+import { HOLD_MIN_SECONDS, PREVIEW_KEEP_BPS } from "@/lib/watch-rules";
 import { calendarWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
@@ -726,13 +727,22 @@ export async function signedMedia(file: ProductFile, seconds: number): Promise<s
  *   failed     the service could make nothing of the file
  *   paused     the store has no plan an hour of video can be charged to, and
  *              has been watched for all the hours it may be this month
+ *   ready      (a lesson page only, lessonPageVideo) the video can be played:
+ *              the page draws a Play lesson button, and nothing is held yet
+ *   busy       (a press of Play) other viewers' tokens hold the room; `until`
+ *              is the moment the time they do not use is back by
+ *   kept       (an anonymous press of Play) what is left is kept for the
+ *              store's students (PREVIEW_KEEP_BPS)
  */
 export type LessonVideo =
   | { kind: "file"; src: string }
   | { kind: "stream"; src: string; width: number; height: number }
+  | { kind: "ready"; width: number; height: number }
   | { kind: "preparing" }
   | { kind: "failed" }
-  | { kind: "paused" };
+  | { kind: "paused" }
+  | { kind: "busy"; until: number }
+  | { kind: "kept" };
 
 /** What a lesson's token allows beside the video's own length: pauses, a step back. */
 const LESSON_PAUSE_SECONDS = 15 * 60;
@@ -755,6 +765,13 @@ export function lessonTokenSeconds(videoSeconds: number): number {
  * The video of a lesson, for somebody who may watch it; null when it cannot
  * be reached just now.
  *
+ * Called by a press of Play (app/api/store/course/play/route.ts), never by
+ * the drawing of a page (lessonPageVideo): a free preview is open to anyone,
+ * and a draw that held time let page loads take a store's hours (pre-review of
+ * 9 November 2026). `how.anonymous` is a press by somebody who is not the
+ * course's student nor the store's: it never takes the window below
+ * PREVIEW_KEEP_BPS of what it has left.
+ *
  * One kept by the video service (lib/stream.ts) is framed with a token good
  * for the playback held for it in the store's window (lib/watch.ts,
  * holdPlayback), and its store is put in line to have its watching measured:
@@ -767,7 +784,7 @@ export function lessonTokenSeconds(videoSeconds: number): number {
  * including for paid plans. Missing, invalid or unreadable limits never mint
  * a player token. This meter does not bound provider bytes, replay or buffering.
  */
-export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store): Promise<LessonVideo | null> {
+export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store, how: { anonymous?: boolean } = {}): Promise<LessonVideo | null> {
   // The creator contract funds each new media admission before signing a URL or querying a player.
   if (store?.period?.funded === true && !(await reservePaidResourceWindow(store))) return null;
   if (!isStreamPath(file.pathname)) {
@@ -782,17 +799,51 @@ export async function lessonVideo(file: ProductFile, limit: number | null = null
     // token lets anyone watch is held against the window's room, read with
     // the hold in one step, before it is signed, and the token is good for no
     // longer than that.
-    let paused = false;
+    let held: HoldAnswer = null;
     const player = await playerFor(file.pathname, Date.now(), async (record) => {
-      const held = await holdPlayback(folder, window, limit, lessonTokenSeconds(record.seconds));
-      if (held === "paused") paused = true;
+      held = await holdPlayback(folder, window, limit, lessonTokenSeconds(record.seconds), Date.now(), how.anonymous === true ? PREVIEW_KEEP_BPS : 0);
       return typeof held === "number" ? held : null;
     });
-    if (paused) return { kind: "paused" };
+    const answer = held as HoldAnswer;
+    if (answer === "paused") return { kind: "paused" };
+    if (answer === "kept") return { kind: "kept" };
+    if (answer !== null && typeof answer === "object") return { kind: "busy", until: answer.busy };
     if (!player) return null;
     if (player.state === "failed") return { kind: "failed" };
     if (!player.src) return { kind: "preparing" };
     return { kind: "stream", src: player.src, width: player.width, height: player.height };
+  } catch (error) {
+    console.error("reading a lesson's video failed", error);
+    return null;
+  }
+}
+
+/**
+ * What a lesson page draws for the lesson's video, holding nothing (pre-review
+ * of 9 November 2026: a free preview is open to anyone, and a page draw that
+ * held playback let 26 anonymous loads take a Studio plan's 32 hours).
+ *
+ * A file of the private store is its signed link, as lessonVideo gives it. One
+ * kept by the video service is read from its record and the window's measured
+ * figure only, with no call to the service and no token: "ready" when it can
+ * be played, and the page draws a Play lesson button whose press holds and
+ * signs (app/api/store/course/play/route.ts); "paused" when what was measured
+ * leaves less than HOLD_MIN_SECONDS; "preparing" or "failed" as its record
+ * says (the five-minute job and the service's announcements keep it current).
+ * Null when anything could not be read, or no finite limit is known.
+ */
+export async function lessonPageVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store): Promise<LessonVideo | null> {
+  if (!isStreamPath(file.pathname)) return lessonVideo(file, limit, window, store);
+  try {
+    const folder = folderFromPathname(file.pathname);
+    if (limit === null || !Number.isSafeInteger(limit) || limit < 0 || !folder || !window || !isStreamConfigured()) return null;
+    const [record, watched] = await Promise.all([streamRecord(file.pathname), watchedForAdmission(folder, window)]);
+    if (!record) return null;
+    if (record.state === "failed") return { kind: "failed" };
+    if (record.state !== "ready") return { kind: "preparing" };
+    if (watched === null) return null;
+    if (limit - watched < HOLD_MIN_SECONDS) return { kind: "paused" };
+    return { kind: "ready", ...shapeOf(record.width, record.height, null) };
   } catch (error) {
     console.error("reading a lesson's video failed", error);
     return null;

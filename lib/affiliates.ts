@@ -2342,12 +2342,19 @@ export async function notePartners(
      * the part of `base` their products' lines were charged, rounded down; left out, the sale is all `product`'s.
      */
     lines?: { product: string; cents: number }[];
+    /**
+     * With `lines`: the order's shipping held in `base` (shippingOf), one amount for the order and no product, so it
+     * is taken out before the lines are shared and no partner on some lines earns on it. A partner on every line keeps
+     * `base` whole, as an order of one product always has.
+     */
+    shipping?: number;
   },
   partners?: Affiliate[],
 ): Promise<void> {
   if (!store.statsId || !isRedisConfigured() || !sale.ref || !sale.product) return;
   const lines = sale.lines ?? [{ product: sale.product, cents: 1 }];
   const charged = lines.reduce((sum, line) => sum + line.cents, 0);
+  const goods = Math.max(0, sale.base - (sale.shipping ?? 0));
   const holders = (partners ?? (await listAffiliates(store))).filter(
     (a) => a.status === "approved" && lines.some((line) => shareOn(a.share, line.product) > 0),
   );
@@ -2367,7 +2374,7 @@ export async function notePartners(
       at: sale.at,
       product: theirs[0].product,
       title: sale.title.slice(0, 200),
-      base: whole ? sale.base : charged > 0 ? Math.floor((sale.base * weight) / charged) : 0,
+      base: whole ? sale.base : charged > 0 ? Math.floor((goods * weight) / charged) : 0,
       total: sale.total,
       currency: readCurrencyCode(sale.currency),
       percent: shareOn(partner.share, theirs[0].product),
@@ -2439,7 +2446,7 @@ type SessionLike = {
   amount_total?: unknown;
   amount_subtotal?: unknown;
   currency?: unknown;
-  total_details?: { amount_tax?: unknown } | null;
+  total_details?: { amount_tax?: unknown; amount_shipping?: unknown } | null;
   payment_intent?: unknown;
   metadata?: Record<string, string> | null;
   customer_details?: { email?: unknown } | null;
@@ -2475,8 +2482,8 @@ function bumpCents(value: unknown): number {
 /**
  * The lines of an order that holds products added at checkout or a cart: each added product at what it was
  * charged (`<bump>_cents`, bumpCents) and the order's own product at the rest of the subtotal (`amount_subtotal`,
- * before codes, shipping and tax, so what a code took off and the shipping are shared the same way). Undefined for
- * an order of one product. A subtotal that is not whole cents, or added prices above it, throw UnknownReplyError.
+ * before codes, shipping and tax, so what a code took off is shared the same way; the shipping is taken out first,
+ * shippingOf). Undefined for an order of one product. A subtotal that is not whole cents, or added prices above it, throw UnknownReplyError.
  */
 function orderLines(meta: Record<string, string>, subtotal: unknown): { product: string; cents: number }[] | undefined {
   const added = bumpsFromMeta(meta);
@@ -2486,6 +2493,20 @@ function orderLines(meta: Record<string, string>, subtotal: unknown): { product:
   const own = subtotal - lines.reduce((sum, line) => sum + line.cents, 0);
   if (own < 0) throw new UnknownReplyError("the lines of an order");
   return [{ product: meta.product ?? "", cents: own }, ...lines];
+}
+
+/**
+ * The shipping an order paid (`total_details.amount_shipping`), one flat amount for the order (lib/store-checkout.ts,
+ * lib/cart-shipping.ts): whole cents from 0, never above `base`, what was paid before tax. Stripe sends it on every
+ * checkout session, as a number or null; null is no shipping only on an order no shipping was asked for (no
+ * `metadata[ship]`, which every checkout that sends a shipping rate sets). Anything else, missing included, and null
+ * on a shipped order, throws UnknownReplyError: never read as no shipping, which would share it among the lines.
+ */
+function shippingOf(details: SessionLike["total_details"], base: number, shipped: boolean): number {
+  const shipping = details && typeof details === "object" ? details.amount_shipping : undefined;
+  if (shipping === null && !shipped) return 0;
+  if (typeof shipping !== "number" || !Number.isSafeInteger(shipping) || shipping < 0 || shipping > base) throw new UnknownReplyError("an order's shipping");
+  return shipping;
 }
 
 /**
@@ -2528,8 +2549,9 @@ export async function noteSession(
   // product, so how the buyer arrived is beside the point — and this is the
   // one part that has to run for a sale no affiliate brought at all, which is
   // most of them (lib/partner-share.ts).
-  // On an order of several lines, each partner earns on the lines of their own products (orderLines); a line that
-  // does not read writes no partner's share for the order, never a guessed base. A partner step that failed is thrown
+  // On an order of several lines, each partner earns on the lines of their own products (orderLines), the shipping
+  // taken out first (shippingOf); a line or a shipping amount that does not read writes no partner's share for the
+  // order, never a guessed base. A partner step that failed is thrown
   // once the affiliate's step is done (`settle`), so the sweep keeps the order for its next run (lib/checkout-sweep.ts,
   // failOrder) instead of losing the share; both writes are once per order (HSETNX), so the next run adds nothing twice.
   let partnerFailure: { error: unknown } | null = null;
@@ -2538,9 +2560,10 @@ export async function noteSession(
   };
   try {
     const lines = orderLines(meta, session.amount_subtotal);
+    const shipping = lines ? shippingOf(session.total_details, base, meta.ship === "yes") : undefined;
     await notePartners(
       store,
-      { ref: session.id, pi, at, product: meta.product ?? "", title: meta.title ?? "", base, total, currency, buyer, lines },
+      { ref: session.id, pi, at, product: meta.product ?? "", title: meta.title ?? "", base, total, currency, buyer, lines, shipping },
       partners,
     );
   } catch (error) {

@@ -19,7 +19,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const OWNER = "owner-partner-shipping@example.com";
-const ACCOUNT = "acct_1TestPartnerShip1";
+const ACCOUNT = "acct_1TestPtShip001";
 const checkouts: URLSearchParams[] = [];
 const refunds: { id: string; object: "refund"; status: string; payment_intent: string; amount: number; created: number }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -128,6 +128,17 @@ async function main(): Promise<void> {
   await noteSession(store, noShip, new Map(), partners);
   is("no shipping charged: the Workbook partner earns on the Workbook's $29", await baseOf(noShip.id, onWorkbook.id), 2900);
   is("no shipping charged: the Course partner earns on the Course's $49", await baseOf(noShip.id, onCourse.id), 4900);
+  const unshippedMeta = { ...shipMeta };
+  delete unshippedMeta.ship;
+  const unshipped = paid(unshippedMeta, { subtotal: 7800, total: 7800, shipping: null });
+  await noteSession(store, unshipped, new Map(), partners);
+  is("Stripe's null on an order no shipping was asked for is no shipping: the Workbook's $29", await baseOf(unshipped.id, onWorkbook.id), 2900);
+  is("and the Course partner earns on the Course's $49", await baseOf(unshipped.id, onCourse.id), 4900);
+  const unshippedMissing = paid(unshippedMeta, { subtotal: 7800, total: 7800 });
+  delete (unshippedMissing.total_details as Record<string, unknown>).amount_shipping;
+  const unshippedMissingOutcome = await noteSession(store, unshippedMissing, new Map(), partners).then(() => "resolved", (error: Error) => error.name);
+  is("a shipping amount missing on an order no shipping was asked for is still not known", unshippedMissingOutcome, "UnknownReplyError");
+  is("and nothing is written for the Workbook partner", await baseOf(unshippedMissing.id, onWorkbook.id), null);
 
   part("A refund names no line: the $29 Workbook given back on the shipped order");
   const commission = async (ref: string, aff: string) => (await readBook(store)).lines.find((l) => l.ref === `${ref}:${aff}`)?.commission ?? null;

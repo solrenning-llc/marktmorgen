@@ -179,7 +179,7 @@ async function main(): Promise<void> {
     amount_total: 6800,
     amount_subtotal: 6800,
     currency: "usd",
-    total_details: { amount_tax: 0 },
+    total_details: { amount_tax: 0, amount_shipping: 0 },
     payment_intent: "pi_codesale0001",
     metadata: metadataOf(await open(store, [ids.Workbook])),
     customer_details: { email: "buyer@example.com" },

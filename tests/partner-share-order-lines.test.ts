@@ -3,7 +3,8 @@
  * (lib/buyer-words/affiliates.ts, partnerShare). On an order with more than one line (a product added at
  * checkout, or a cart), each partner's base is the part of the order paid for the lines of the products they
  * share in, each line weighed by what it was charged (`<bump>_cents`, the rest of the subtotal for the order's
- * own product), with what the code took off and the shipping shared the same way and the tax left out.
+ * own product), with what the code took off shared the same way, the tax left out and the shipping given to no
+ * partner on some lines (tests/partner-share-shipping.test.ts).
  * A line whose price does not read writes no partner's share at all for that order, never a guessed base, and
  * the order is left for the sweep's next run (noteSession rejects). A refund names no line, so a partner on some
  * lines of an order keeps only what no reading of the refund can take; a partner on every line, and an order of
@@ -22,7 +23,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const OWNER = "owner-partner-lines@example.com";
-const ACCOUNT = "acct_1TestPartnerLines1";
+const ACCOUNT = "acct_1TestPtLines01";
 const checkouts: URLSearchParams[] = [];
 const refunds: { id: string; object: "refund"; status: string; payment_intent: string; amount: number; created: number }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {

@@ -750,8 +750,9 @@ async function dropReviewRecords(statsId: string, productId: string, members: st
  * as their own delete does: its stars leave the average with it. Returns the
  * photos to delete from the picture folder; each also goes into `files`, when
  * given, before its review's delete is tried. `leaving`, when given, is handed
- * every review found, before the first is deleted and again once all are
- * (the store page's quotes, lib/store-quotes.ts); when it throws, this throws.
+ * every review found before the first is deleted (the store page's quotes,
+ * lib/store-quotes.ts); when it throws, this throws. The caller keeps the
+ * quotes again once this returns, from the reviews as they then stand.
  */
 export async function forgetReviewsPerson(
   statsId: string | null,
@@ -801,8 +802,6 @@ export async function forgetReviewsPerson(
     if ((await deleteReview(statsId, wanted[i], ids[i], room)) !== "deleted") throw new Error("a review could not be deleted just now");
     records += 1;
   }
-  // And again once they are gone: a refresh of the quotes that read one of them before its delete has written by now.
-  if (leaving && found.length) await leaving(found);
   return { records, photos };
 }
 

@@ -26,6 +26,19 @@ const LOOK_AT = 40;
  * list read before the change is written before it and taken off by it, never written after it. Never throws.
  */
 export async function refreshStoreQuotes(store: Store): Promise<void> {
+  try {
+    await keepStoreQuotes(store);
+  } catch (error) {
+    console.error("keeping a store's newest reviews failed", error);
+  }
+}
+
+/**
+ * refreshStoreQuotes for a caller that must know it worked (a person's erasure, lib/person-erasure.ts): the quotes as
+ * the reviews now stand, whatever an earlier run of that caller found. Throws when the record is not read or not
+ * written, after taking every quote off, so the caller does not answer done.
+ */
+export async function keepStoreQuotes(store: Store): Promise<void> {
   const statsId = store.statsId;
   if (!statsId) return;
   try {
@@ -44,10 +57,10 @@ export async function refreshStoreQuotes(store: Store): Promise<void> {
     });
     if (!kept) throw new Error("the store's record was not read");
   } catch (error) {
-    console.error("keeping a store's newest reviews failed", error);
     // Not read is not "as before": since the last keep a review may have been hidden, refunded or deleted, or its
     // words changed, so nothing is quoted rather than words that may be off its page now; the next change keeps them.
     await setQuotes(storeRef(store), []).catch((cleared: unknown) => console.error("taking a store's quotes off failed", cleared));
+    throw error;
   }
 }
 

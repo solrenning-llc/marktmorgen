@@ -21,12 +21,14 @@ import { pathCampaign } from "@/lib/path-campaign";
 import { PathMissions } from "@/components/path-missions";
 import { PathReminderButton } from "@/components/path-reminder-button";
 import { PathShareCard } from "@/components/path-share-card";
+import { PathMilestone } from "@/components/path-milestone";
+import { pathShare } from "@/lib/path-share";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { pathPlanLine } from "@/lib/path-plan";
 import { largerPlanFor } from "@/lib/larger-plan";
@@ -60,17 +62,21 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
  const growthMissions=growth?pathGrowthMissions(growth.facts):[];
  const growthHref=(place:"products"|"email"|"people"|"reviews"|"numbers")=>place==="products"||place==="numbers"?studioPath(store)+"#"+place:studioPath(store,"",place);
  const larger=largerPlanFor(store,now/1000);
- const planLine=pathPlanLine(await allowanceUsed(store,"studio",now),allowanceFor(store,"studio",now/1000),larger);
+ // An unread count is said to be unknown on the line, and no plan is suggested from it (rule 24).
+ const studioUsed=await allowanceUsedExact(store,"studio",now);
+ const planLine=pathPlanLine(studioUsed,allowanceFor(store,"studio",now/1000),larger);
  const mission=returning?returnMission:progress?.today;
  const wording=record&&aiAvailableFor(store,now)?currentWordingSource(store,record,now):null;
  const campaign=returning?null:pathCampaign(progress?.today);
+ // The share card (components/path-share-card.tsx) is drawn only when it has content: the milestone links to it only then.
+ const shareable=Boolean(record&&progress&&pathShare({level:record.best,days:progress.dayOnPath,moneyCents:null,currency:store.currency,moneyAt:null}));
  const hrefFor=(place:Place)=>place.store?"/@"+encodeURIComponent(store.handle):studioPath(store,"",place.page || "")+(place.hash || "");
  return <div className="min-h-screen bg-paper text-ink">
   <StudioHeader current={store} role={access.role} stores={access.stores} owned={access.owned} action={{href:studioPath(store),label:"Back to the studio",short:"Studio"}}/>
   <StudioStorePin sid={store.sid}><main id="content" className="container-page break-words pb-20 pt-10">
    <p className="eyebrow">Marktmorgen Path</p><Link className="mt-3 inline-block underline" href="/platform/path">How Path works</Link><h1 className="t-h2 mt-3">{PATH_TITLE}</h1><p className="mt-3 text-ink-soft">{PATH_SLOGAN}</p>
    <PathCheckoutNotice notice={checkout} reviewHref={checkout.state==="preview"?"/mission":checkout.state==="live"?null:studioPath(store)+"#stripe"}/>
-   {planLine?<aside className="notice mt-6" aria-label="Your studio usage"><p>{planLine}</p>{larger?<Link className="mt-2 inline-block underline" href="/pricing">Review plans</Link>:null}</aside>:null}
+   {planLine?<aside className="notice mt-6" aria-label="Your studio usage"><p>{planLine}</p>{larger&&studioUsed!==null?<Link className="mt-2 inline-block underline" href="/pricing">Review plans</Link>:null}</aside>:null}
    {failed?<p role="alert" className="notice notice-error mt-6">Your Path could not be read just now. Please try again in a moment.</p>:null}
    {progress && record?<>
     <section className="mt-8 rounded-2xl border border-line bg-white p-6" aria-label="Your progress">
@@ -83,6 +89,7 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
      <p className="mt-2 text-sm text-ink-soft">{record.counts?"Visits and leads last read: "+new Date(record.counts.at).toISOString()+".":"Visits and leads have not been read yet."} {record.money?"Orders last read: "+new Date(record.money.at).toISOString()+".":"Orders have not been read yet."}</p>
      {!failed&&!returning&&weeklySummary?.state==="unavailable"&&streak&&record.checkins.length<=KEPT_CHECKINS&&Array.from(record.checkins).every(validPathDay)?<p className="mt-2">Current streak: {streak.days} check-in {streak.days===1?"day":"days"}. {streak.restLeft} rest {streak.restLeft===1?"day":"days"} left this week.</p>:null}
     </section>
+    {!failed&&!returning?<PathMilestone sid={store.sid} done={[...progress.days,...progress.traffic].filter(m=>m.state==="done").map(m=>({id:m.id,title:m.title}))} shareHref={shareable?"#path-share-title":null}/>:null}
     {!failed&&weeklySummary?<PathWeeklySummary summary={weeklySummary} streak={returning?null:streak}/>:null}
     <section className="mt-8" aria-labelledby="path-next"><h2 id="path-next" className="t-h3">{returning?RETURN_HEADING:progress.complete?"Your first real sale is recorded":"Your next mission"}</h2>
      {mission?<div className="mt-4 rounded-2xl border border-line bg-white p-6"><h3 className="text-xl font-semibold">{mission.title}</h3><p className="mt-3">{mission.why}</p><ol className="mt-4 list-decimal space-y-2 pl-6">{mission.steps.map(step=><li key={step}>{step}</li>)}</ol><p className="mt-4 text-sm text-ink-soft">Recorded when: {mission.closesOn}</p><a className="btn btn-primary mt-5" href={hrefFor(mission.place)}>{mission.place.label}</a></div>:<p className="mt-3">Keep listening to your customers and improving what you offer. Your reached level stays with you.</p>}

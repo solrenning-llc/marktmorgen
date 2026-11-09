@@ -27,7 +27,7 @@ import { isHouseStore } from "@/lib/house-store";
 import { canSellProduct } from "@/lib/store-checkout";
 import { isFree } from "@/lib/store-field-rules";
 import { takeBuyerRead } from "@/lib/buyer-actions";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { deliveryWords } from "@/lib/answers";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
@@ -270,10 +270,11 @@ function stillSends(store: Store): boolean {
   return store.assistReminder.on && store.recovery.address !== "" && !store.suspended && Boolean(store.statsId) && Boolean(store.stripeAccountId) && isSenderConfigured();
 }
 
-/** Whether the store's own emails have room for one more this window: read before the model is asked; taken when it is sent. */
+/** Whether the store's own emails have room for one more this window: read before the model is asked; taken when it is sent. A count that cannot be read is no room (rule 24). */
 async function emailRoom(store: Store, now: number): Promise<boolean> {
   const limit = allowanceFor(store, "email", now / 1000);
-  return Number.isSafeInteger(limit) && limit - (await allowanceUsed(store, "email", now)) >= 1;
+  const used = await allowanceUsedExact(store, "email", now);
+  return Number.isSafeInteger(limit) && used !== null && limit - used >= 1;
 }
 
 const dayWords = (store: Store, ms: number) =>

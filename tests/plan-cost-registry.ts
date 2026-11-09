@@ -356,6 +356,20 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
  * (app/api/store/community/image).
  */
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
+/**
+ * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes), at US$ 0.400 per million on
+ * demand, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing, read by
+ * Claude on 2 November 2026, docs/codex-queue.md item PP2), which also says every interaction counts: never a free quota.
+ */
+export const BLOB_SIMPLE_OPERATION = 0.4 / 1e6;
+/**
+ * The most one community picture door costs (app/api/store/community/upload, 9 November 2026): held as a call waited
+ * on for ten seconds at 2 GB, forty commands (the member, the store, its pace, the buyer action, the place, the note,
+ * its listing read back, and a place given back), twenty kilobytes through the database, and one head of the file
+ * store to refuse a name it already has. One buyer action is taken before the head; tests/community-door-cost.test.ts
+ * holds this at or under UNIT_COST.buyer, so the line buyer-actions already pays for it.
+ */
+export const COMMUNITY_DOOR_COST = request("wait", 40 + TAKE_COMMANDS, 20_000) + BLOB_SIMPLE_OPERATION;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
@@ -1334,7 +1348,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/chat/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/messages/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/push/route.ts", names: ["takeBuyerAction"] },
-      { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "takePicturePlace"] },
+      { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "head(pathname)", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)"] },
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },

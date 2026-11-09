@@ -9,7 +9,8 @@
  * out of a post, a post deleted and a door never used (deleted a day on, by
  * the courses job) give it back.
  *
- *   nl:cimg:<hash of path>   who was given the door, for a day
+ *   nl:cimg:<hash of path>   who was given the door, for a day; once the picture is in a
+ *                            post, a mark that it was taken (TAKEN_TTL_SECONDS)
  *   nl:cimg:n:<folder>       pictures the community keeps, doors not yet used included
  *   nl:cimg:doors            doors given and not yet used in a post, by when
  */
@@ -59,6 +60,19 @@ const UPLOAD_TTL_SECONDS = 24 * 60 * 60;
 function uploadKey(path: string): string {
   return `nl:cimg:${createHash("sha256").update(path).digest("hex").slice(0, 32)}`;
 }
+
+/**
+ * What a picture's note holds once a post took it (takeCommunityUpload), for TAKEN_TTL_SECONDS: no door can be
+ * noted for its name while it is there, a door noted just before is wiped, and the sweep never deletes it. A tab
+ * never appears in a member's key. After it, the file itself keeps the name: the door refuses a name the file store
+ * has (app/api/store/community/upload), and a post's picture stays there until the post is deleted.
+ */
+const TAKEN = "\ttaken\t";
+/**
+ * Three days: far past a door's own request, between its check of the file store and its note, and long enough for
+ * the daily sweep to see the mark on a name listed again a day after its door (sweepCommunityUploads).
+ */
+const TAKEN_TTL_SECONDS = 3 * 24 * 60 * 60;
 
 const countKey = (folder: string) => `nl:cimg:n:${folder}`;
 const DOORS_KEY = "nl:cimg:doors";
@@ -127,30 +141,83 @@ export async function forgetPictures(communityFolder: string): Promise<void> {
   await redisPipeline([["DEL", countKey(communityFolder)]]);
 }
 
-/** Notes who was given the door for a picture's path, when it is given. */
-export async function noteCommunityUpload(path: string, author: string, now = Date.now()): Promise<void> {
-  await redisPipeline([
-    ["SET", uploadKey(path), author, "NX", "EX", UPLOAD_TTL_SECONDS],
-    ["ZADD", DOORS_KEY, "NX", Math.floor(now / 1000), path],
-  ]);
+/**
+ * Notes who was given the door for a picture's path, before it is given, and lists the path for the sweep: true only
+ * when this member's note is written and the path is listed, read exactly (CX-123 rule 24). False, with nothing
+ * listed, when the name already has a note: another door still open, or a picture a post took (TAKEN). A note that
+ * finds the picture taken after it was listed (a post took it between the two steps) is taken back off the list and
+ * opens nothing. Throws UnknownReplyError when an answer is in another shape: no door may be given then.
+ */
+export async function noteCommunityUpload(path: string, author: string, now = Date.now()): Promise<boolean> {
+  const set = repliesFor(await redisPipeline([["SET", uploadKey(path), author, "NX", "EX", UPLOAD_TTL_SECONDS]]), 1);
+  if (!set || (set[0] !== "OK" && set[0] !== null)) throw new UnknownReplyError("a community picture's note");
+  if (set[0] === null) return false;
+  // Listed, then the note read again: a take writes TAKEN before it takes the path off the list, so either it took
+  // this listing off, or this read sees its mark.
+  const listed = repliesFor(
+    await redisPipeline([
+      ["ZADD", DOORS_KEY, "NX", Math.floor(now / 1000), path],
+      ["GET", uploadKey(path)],
+    ]),
+    2,
+  );
+  const added = listed ? countOf(listed[0]) : null;
+  if (!listed || (added !== 0 && added !== 1) || (listed[1] !== null && typeof listed[1] !== "string")) {
+    throw new UnknownReplyError("a community picture's door");
+  }
+  if (listed[1] === author) return true;
+  // Taken (or the note gone): this door is not given, and its listing must not stay for the sweep.
+  await redisPipeline([["ZREM", DOORS_KEY, path]]);
+  return false;
 }
 
 /**
  * Whether this picture was sent by this member and not used yet; it is then
  * theirs for this one post only. Somebody else's picture, or one already in
  * a post, is refused and left alone.
+ *
+ * Taken, its note becomes TAKEN (which also wipes a note another door wrote after the first step) before the path
+ * comes off the sweep's list, both confirmed: an answer in another shape throws UnknownReplyError, and the post is
+ * not made (its picture may still be listed, and the sweep keeps a picture whose note says TAKEN).
  */
 export async function takeCommunityUpload(path: string, author: string): Promise<boolean> {
   const [held] = await redisPipeline([["GETDEL", uploadKey(path)]]);
   if (held === author) {
-    // In a post now: no longer a door to sweep.
-    await redisPipeline([["ZREM", DOORS_KEY, path]]).catch(() => null);
+    // In a post now: marked, and no longer a door to sweep.
+    const replies = repliesFor(
+      await redisPipeline([
+        ["SET", uploadKey(path), `${TAKEN}${author}`, "EX", TAKEN_TTL_SECONDS],
+        ["ZREM", DOORS_KEY, path],
+      ]),
+      2,
+    );
+    const removed = replies ? countOf(replies[1]) : null;
+    if (!replies || replies[0] !== "OK" || (removed !== 0 && removed !== 1)) throw new UnknownReplyError("a community picture taken into a post");
     return true;
   }
   if (typeof held === "string" && held) {
     await redisPipeline([["SET", uploadKey(path), held, "NX", "EX", UPLOAD_TTL_SECONDS]]).catch(() => null);
   }
   return false;
+}
+
+/**
+ * Gives a picture this member's post took back to them, when the post could not use it (its file not there yet, or
+ * not readable): theirs again, listed for the sweep, for when they send the form again. Only the member whose post
+ * took it: any other note is left alone. Best effort.
+ */
+export async function untakeCommunityUpload(path: string, author: string, now = Date.now()): Promise<void> {
+  const [held] = await redisPipeline([["GET", uploadKey(path)]]);
+  if (held !== `${TAKEN}${author}`) return;
+  await redisPipeline([
+    ["SET", uploadKey(path), author, "EX", UPLOAD_TTL_SECONDS],
+    ["ZADD", DOORS_KEY, "NX", Math.floor(now / 1000), path],
+  ]);
+}
+
+/** Gives back the place a door took when the door is not given after all. Best effort: never throws. */
+export async function giveDoorPlaceBack(path: string): Promise<void> {
+  await givePicturePlace(path);
 }
 
 /** Deletes a picture a post no longer needs, and gives its place back. Best effort: never throws. */
@@ -187,6 +254,20 @@ export async function sweepCommunityUploads(now = Date.now(), limit = 300): Prom
       // It may have been taken off the list: put back, so a later sweep deletes it and gives its place back once.
       // Its door ran out a day ago (UPLOAD_TTL_SECONDS), so nobody can have put it in a post since.
       console.error("could not tell whether an unused community picture was taken off the list; listed again");
+      await redisPipeline([["ZADD", DOORS_KEY, before, path]]).catch(() => null);
+      continue;
+    }
+    // Only a door's own picture that no post took is deleted (the audit of 9 November 2026): its note gone, read
+    // exactly after the path came off the list, so no post can take it any more. A note that says a post took it
+    // (TAKEN) keeps the file, and its place stays with the post; a note still open (its member may still post it) or
+    // one that cannot be read is listed again for a later sweep. Unknown never deletes.
+    const read = await redisPipeline([["GET", uploadKey(path)]]).then((replies) => repliesFor(replies, 1), () => null);
+    const note = read ? read[0] : undefined;
+    if (typeof note === "string" && note.startsWith(TAKEN)) {
+      console.error("a community picture a post took was listed for the sweep; kept");
+      continue;
+    }
+    if (note !== null) {
       await redisPipeline([["ZADD", DOORS_KEY, before, path]]).catch(() => null);
       continue;
     }

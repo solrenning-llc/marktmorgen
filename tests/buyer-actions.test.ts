@@ -105,11 +105,15 @@ test("each picture door takes one of the community's places; deleting gives it b
   await noteCommunityUpload(path(4), "member-b", now - 2 * 86_400_000);
   await takePicturePlace(path(4), 5);
   assert.equal(await takeCommunityUpload(path(2), "member-a"), true);
+  // A day on for the database as well (9 November 2026): the sweep deletes only a door whose note is gone, and the
+  // notes above were written now, whatever time they were listed at.
+  redis.advance(86_400_000 + 1_000);
   assert.equal(await sweepCommunityUploads(now), 1);
   assert.deepEqual([deleted.includes(path(4)), deleted.includes(path(2)), await picturesKept(folder)], [true, false, 1]);
   // A sweep that cannot delete gives nothing back, and tries again later.
   await noteCommunityUpload(path(5), "member-c", now - 2 * 86_400_000);
   await takePicturePlace(path(5), 5);
+  redis.advance(86_400_000 + 1_000);
   setFailDeletes(true);
   const quiet = console.error;
   console.error = () => {};

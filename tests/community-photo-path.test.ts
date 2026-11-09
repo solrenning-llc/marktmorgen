@@ -17,7 +17,7 @@ import * as pictures from "@/lib/community-files";
 import { dropCommunityImage, noteCommunityUpload, sweepCommunityUploads, takeCommunityUpload } from "@/lib/community-files";
 import { deleted, files } from "./failure-cleanup-world";
 import { asViewer } from "./community-photo-path-world";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const folder = communityFolder("community-1");
@@ -75,6 +75,8 @@ async function main(): Promise<void> {
   is("a door for the posted picture's name is refused", await ask(victim), { status: 400, error: "invalid" });
   is("refused before a place is taken", await kept(), before);
   is("the posted picture is still not on the sweep's list", await listed(victim), false);
+  // A day and an hour on, for the file store's clock and the database's (whose notes expire by it).
+  advance(DAY_MS + 3_600_000);
   const swept = await sweepCommunityUploads(Date.now() + DAY_MS + 3_600_000);
   is("the daily sweep leaves the posted picture alone", files.has(victim) && !deleted.includes(victim), true);
   is("nothing of the victim's swept", swept, 0);
@@ -145,7 +147,8 @@ async function main(): Promise<void> {
   is("the door opens", (await ask(unused)).status, 200);
   upload(unused);
   const placesWithIt = await kept();
-  await sweepCommunityUploads(Date.now() + DAY_MS + 3_600_000);
+  advance(DAY_MS + 3_600_000);
+  await sweepCommunityUploads(Date.now() + 2 * (DAY_MS + 3_600_000));
   is("the unused picture is deleted", files.has(unused), false);
   is("its place is given back", await kept(), placesWithIt - 1);
 

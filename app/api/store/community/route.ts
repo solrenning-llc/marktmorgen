@@ -34,7 +34,7 @@ import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
 import { communityWords } from "@/lib/buyer-words/community";
 import { checkCommunityImage } from "@/lib/community-image";
-import { blobImages, dropCommunityImage, noteCommunityUpload, takeCommunityUpload } from "@/lib/community-files";
+import { blobImages, dropCommunityImage, takeCommunityUpload, untakeCommunityUpload } from "@/lib/community-files";
 import { advanceAnnouncement, queueAnnouncement } from "@/lib/community-mail";
 import {
   ITEM_ID,
@@ -201,11 +201,11 @@ export async function POST(request: NextRequest) {
         try {
           checked = await checkCommunityImage(path, id, blobImages);
         } catch (error) {
-          // Still this member's, for when they send the form again.
-          await noteCommunityUpload(path, key).catch(() => {});
+          // Still this member's, for when they send the form again (never anybody else's: lib/community-files.ts).
+          await untakeCommunityUpload(path, key).catch(() => {});
           throw error;
         }
-        if (checked === "missing") await noteCommunityUpload(path, key).catch(() => {});
+        if (checked === "missing") await untakeCommunityUpload(path, key).catch(() => {});
         if (checked !== "ok" || !w || !h) {
           // A picture refused here was deleted by the check, or is deleted now: its place goes back.
           if (checked !== "missing" && checked !== "path") await dropCommunityImage(path);

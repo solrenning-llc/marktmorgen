@@ -34,7 +34,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const list = (data: unknown[]) => Response.json({ object: "list", data, has_more: false });
   if (url.pathname === "/v1/customers") {
     if (mode === "no customer") return list([]);
-    return list([{ id: "cus_sreview0001", object: "customer" }]);
+    // The row holds its own address, the one asked for, as Stripe's exact filter gives it (rule 23: fixture only).
+    return list([{ id: "cus_sreview0001", object: "customer", email: url.searchParams.get("email") }]);
   }
   if (url.pathname === "/v1/subscriptions") {
     if (mode === "status whitespace") return list([{ ...sub, status: " " }]);

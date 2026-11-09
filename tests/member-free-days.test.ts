@@ -77,7 +77,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   // Stripe's lists carry has_more: an answer without it is not one this code reads (rule 24).
   // offrow@ has a customer row that is not one, offsub@ a subscription row that is not one (Codex S second review of #2912).
   const email = url.searchParams.get("email");
-  if (path === "/customers") return answer({ object: "list", data: email === "member@example.com" ? [{ id: "cus_member0001" }] : email === "offrow@example.com" ? [{}] : email === "offsub@example.com" ? [{ id: "cus_offsub00001" }] : [], has_more: false });
+  // Each customer row holds its own address, the one asked for, as Stripe's exact filter gives it (rule 23: fixture only).
+  if (path === "/customers") return answer({ object: "list", data: email === "member@example.com" ? [{ id: "cus_member0001", email }] : email === "offrow@example.com" ? [{}] : email === "offsub@example.com" ? [{ id: "cus_offsub00001", email }] : [], has_more: false });
   const customer = url.searchParams.get("customer");
   if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: customer === "cus_member0001" ? subs : customer === "cus_offsub00001" ? [[]] : [], has_more: false });
   if (path.startsWith("/products")) return answer({ object: "list", data: [] });

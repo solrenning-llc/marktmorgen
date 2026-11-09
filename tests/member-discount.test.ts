@@ -51,9 +51,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   // Stripe's lists carry has_more: an answer without it is not one this code reads (rule 24).
   // Rows Stripe could not have sent, one per address (Codex S second review of #2912, residual of M2):
   // a customer or a subscription row that is not a readable one is unknown, never "no membership".
+  // Each customer row holds its own address, the one asked for, as Stripe's exact filter gives it (rule 23: fixture only).
   if (path === "/customers") {
     const email = url.searchParams.get("email") ?? "";
-    const data = email === "member@example.com" ? [{ id: "cus_member0001" }] : email in OFF_CUSTOMERS ? [OFF_CUSTOMERS[email]] : email in OFF_SUBS ? [{ id: `cus_${email.split("@")[0]}01` }] : [];
+    const data = email === "member@example.com" ? [{ id: "cus_member0001", email }] : email in OFF_CUSTOMERS ? [OFF_CUSTOMERS[email]] : email in OFF_SUBS ? [{ id: `cus_${email.split("@")[0]}01`, email }] : [];
     return answer({ object: "list", data, has_more: false });
   }
   if (path === "/subscriptions") {

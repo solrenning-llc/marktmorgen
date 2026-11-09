@@ -1,6 +1,5 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { normaliseEmail } from "@/lib/auth";
 import { freeDaysSubs, giveFreeDays, type GiveResult } from "@/lib/member-free-days";
 import { BLOCK_WORDS, FREE_DAYS_MAX } from "@/lib/member-free-days-rules";
 
@@ -25,16 +24,16 @@ export async function POST(request: NextRequest) {
   if (!store.stripeAccountId) return refuse("no_stripe", "Connect your Stripe account first: memberships are kept there.");
   const raw = text(body.email, 320).trim();
   if (!EMAIL.test(raw)) return refuse("email", "Type the address the member pays with.");
-  const email = normaliseEmail(raw);
+  // The address as the creator typed it: Stripe keeps a member's with their capitals, and its filter is case-sensitive.
   const action = text(body.action, 10);
 
   if (action === "find") {
-    const subs = await freeDaysSubs(store, email);
+    const subs = await freeDaysSubs(store, raw);
     if (subs === null) return refuse("stripe", "Your Stripe account could not be read just now. Try again in a minute.", 502);
     return Response.json({ ok: true, memberships: subs });
   }
   if (action === "give") {
-    const done = await giveFreeDays(store, email, text(body.subscription, 80), body.days, body.expected, { who, role });
+    const done = await giveFreeDays(store, raw, text(body.subscription, 80), body.days, body.expected, { who, role });
     if (done.ok) return Response.json({ ok: true, nextCharge: done.nextCharge, emailed: done.emailed });
     const words: Record<Exclude<GiveResult, { ok: true }>["reason"], [string, number]> = {
       days: [`Type a whole number of days from 1 to ${FREE_DAYS_MAX}.`, 400],

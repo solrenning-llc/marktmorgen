@@ -1,6 +1,5 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { normaliseEmail } from "@/lib/auth";
 import { listCodes } from "@/lib/discount";
 import { applyMemberDiscount, memberSubs } from "@/lib/member-discount";
 
@@ -25,11 +24,11 @@ export async function POST(request: NextRequest) {
   if (!store.stripeAccountId) return refuse("no_stripe", "Connect your Stripe account first: memberships and codes are kept there.");
   const raw = text(body.email, 320).trim();
   if (!EMAIL.test(raw)) return refuse("email", "Type the address the member pays with.");
-  const email = normaliseEmail(raw);
+  // The address as the creator typed it: Stripe keeps a member's with their capitals, and its filter is case-sensitive.
   const action = text(body.action, 10);
 
   if (action === "find") {
-    const [subs, codes] = await Promise.all([memberSubs(store, email), listCodes(store.stripeAccountId)]);
+    const [subs, codes] = await Promise.all([memberSubs(store, raw), listCodes(store.stripeAccountId)]);
     if (subs === null || codes.state !== "ok") return refuse("stripe", "Your Stripe account could not be read just now. Try again in a minute.", 502);
     return Response.json({
       ok: true,
@@ -38,7 +37,7 @@ export async function POST(request: NextRequest) {
     });
   }
   if (action === "apply") {
-    const done = await applyMemberDiscount(store, email, text(body.subscription, 80), text(body.code, 80));
+    const done = await applyMemberDiscount(store, raw, text(body.subscription, 80), text(body.code, 80));
     if (done.ok) return Response.json({ ok: true });
     const words: Record<typeof done.reason, [string, number]> = {
       not_member: ["That membership is not a running one of this member at your store. Find the member again.", 409],

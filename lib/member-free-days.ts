@@ -34,6 +34,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
+import { normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { fromCreator, storeBase } from "@/lib/purchase-email";
 import { speech } from "@/lib/buyer-words";
@@ -148,7 +149,8 @@ export async function giveFreeDays(
     role: by.role,
     what: `Payments: gave ${days} free ${days === 1 ? "day" : "days"} on membership ${subscription}; next charge ${s.date(expected * 1000)} → ${s.date(nextCharge * 1000)}`,
   });
-  const emailed = await tellMember(store, email, found.row.product, days, expected, nextCharge, subscription).catch((error) => {
+  // Found under the address as typed (memberSubRows); the note goes to it in small letters, as before.
+  const emailed = await tellMember(store, normaliseEmail(email), found.row.product, days, expected, nextCharge, subscription).catch((error) => {
     console.error("emailing a member their free days failed", error);
     return false;
   });

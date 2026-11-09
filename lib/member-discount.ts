@@ -15,6 +15,7 @@
 import { onAccount } from "@/lib/stripe-account";
 import { saleHandles, type Store } from "@/lib/store";
 import { listCodes } from "@/lib/discount";
+import { customersOfAddress } from "@/lib/address-customers";
 
 /** The Stripe version lib/discount.ts reads codes with, so `discounts[0][promotion_code]` means the same here. */
 const API_VERSION = "2025-09-30.clover";
@@ -66,14 +67,13 @@ function onePage(value: unknown, what: string): Raw[] {
 }
 
 /**
- * Whether a row is one Stripe could have sent for a customer or a
- * subscription: its id, and for a subscription a status Stripe has and its
- * metadata object, readable (Codex S second review of #2912, residual of M2;
+ * Whether a row is one Stripe could have sent for a subscription: its id, a
+ * status Stripe has and its metadata object, readable (a customer row is
+ * read by lib/address-customers.ts) (Codex S second review of #2912, residual of M2;
  * its corrective focal: a non-empty status is not enough). A row
  * that is not is unknown, never left out as "not a membership": only a
  * readable row is filtered by status, store or kind.
  */
-const readableCustomer = (row: Raw): boolean => typeof row.id === "string" && CUSTOMER_PATTERN.test(row.id);
 const readableSub = (row: Raw): boolean =>
   typeof row.id === "string" && SUB_PATTERN.test(row.id) && typeof row.status === "string" && STRIPE_SUB_STATUSES.has(row.status) && !!row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata);
 
@@ -104,7 +104,14 @@ export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null 
   };
 }
 
-/** Every running membership of this store held under an address, newest customer first; null when Stripe could not be read. */
+/**
+ * Every running membership of this store held under an address, newest
+ * customer first; null when Stripe could not be read. The address is the one
+ * the creator typed: its customers are read as typed and in small letters
+ * (lib/address-customers.ts), since Stripe keeps the address as the buyer typed
+ * it and its filter is case-sensitive; a row of another address, or more
+ * customers than MAX_CUSTOMERS together, is unknown (null), never "not a member".
+ */
 export async function memberSubs(store: Store, email: string): Promise<MemberSub[] | null> {
   const rows = await memberSubRows(store, email);
   return rows === null ? null : rows.map((r) => r.row);
@@ -120,11 +127,16 @@ export async function memberSubRows(store: Store, email: string): Promise<{ row:
   if (!account) return null;
   const handles = saleHandles(store);
   try {
-    const customers = onePage(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION), "customers");
+    const customers = await customersOfAddress(
+      email,
+      MAX_CUSTOMERS,
+      (spelling) => onAccount("GET", account, `/customers?email=${encodeURIComponent(spelling)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION),
+      CUSTOMER_PATTERN,
+    );
+    if (customers.unknown) throw new Error("Stripe's customers of the address could not be read whole");
     const out: { row: MemberSub; raw: Raw }[] = [];
-    for (const customer of customers) {
-      if (!readableCustomer(customer)) throw new Error("Stripe answered a customer row in an unknown shape");
-      const subs = onePage(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id as string)}&status=all&limit=20`, undefined, API_VERSION), "subscriptions");
+    for (const customer of customers.rows) {
+      const subs = onePage(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`, undefined, API_VERSION), "subscriptions");
       for (const sub of subs) {
         if (!readableSub(sub)) throw new Error("Stripe answered a subscription row in an unknown shape");
         const row = readMemberSub(sub, handles);

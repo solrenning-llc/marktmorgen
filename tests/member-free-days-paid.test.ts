@@ -61,9 +61,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname !== "api.stripe.com") throw new Error(`unexpected request to ${url.hostname}`);
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
+  // Each customer row holds its own address, the one asked for, as Stripe's exact filter gives it (rule 23: fixture only).
   if (method === "GET" && path === "/customers") {
     if (mode === "customers out of shape") return json({ object: "list" });
-    return json({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [], has_more: false });
+    return json({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001", email: "member@example.com" }] : [], has_more: false });
   }
   if (method === "GET" && path === "/subscriptions") {
     if (mode === "subscriptions out of shape") return json({ object: "list", data: "unreadable", has_more: false });

@@ -1199,6 +1199,13 @@ export const COST_LINES: CostLine[] = [
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.
       { file: "app/api/store/assistant-memory/route.ts", names: ["guardStoreWrite", "forgetMemory"] },
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },
+      // Finding a member for a discount code or free days (settings or payments admission, one studio request) reads the address's customers as
+      // typed and in small letters (one read when they are the same; Stripe's filter is case-sensitive), side by side, both within the one
+      // MAX_CUSTOMERS: one more Stripe list at most, no API charge, no store command or byte, the request's own cost unchanged (9 November 2026).
+      { file: "lib/address-customers.ts", names: ["return trimmed === lower ? [lower] : [trimmed, lower];", "rows: all.slice(0, max)"] },
+      { file: "lib/member-discount.ts", names: ["MAX_CUSTOMERS = 20", "customersOfAddress("] },
+      { file: "app/api/store/member-discount/route.ts", names: ["guardStoreWrite(request, \"settings\")", "memberSubs(store, raw)"] },
+      { file: "app/api/store/member-free-days/route.ts", names: ["guardStoreWrite(request, \"payments\")", "freeDaysSubs(store, raw)"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).

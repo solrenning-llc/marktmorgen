@@ -45,7 +45,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.resend.com") { emails.push(JSON.parse(String(init?.body))); return json({ id: "synthetic_email" }); }
   if (url.hostname !== "api.stripe.com") throw new Error("Unexpected external request");
   const path = url.pathname.replace(/^\/v1/, ""), body = new URLSearchParams(String(init?.body ?? ""));
-  if (method === "GET" && path === "/customers") return json({ object: "list", data: [{ id: customer, created: 1 }], has_more: false });
+  // Each customer row holds its own address, the one asked for, as Stripe's exact filter gives it (rule 23: fixture only).
+  if (method === "GET" && path === "/customers") return json({ object: "list", data: [{ id: customer, email: "member@example.test", created: 1 }], has_more: false });
   if (method === "GET" && path === `/customers/${customer}`) return json({ id: customer, email: "member@example.test" });
   if (method === "GET" && path === "/subscriptions") return json({ object: "list", data: [row()], has_more: false });
   if (method === "GET" && path.startsWith("/products")) return json({ object: "list", data: [], has_more: false });

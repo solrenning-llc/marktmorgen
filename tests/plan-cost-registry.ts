@@ -708,6 +708,14 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  * Why the retry is the five-minute job's, not a plan's: NOT_A_COST.HAND_OVER_BATCH.
  */
 export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4 } as const;
+/**
+ * What a PayPal return sends before PayPal is asked to take the payment (lib/paypal-sales.ts, watchFirst; #3404), in
+ * Redis commands, held to what the real return route sends by tests/paypal-pending-before-capture.test.ts: the ZADD
+ * that puts the order in pending and the EXPIRE that renews its record to thirty days, in one pipeline, each time a
+ * capture is asked for. Inside that order's own work (line orders, ORDER_COMPUTE), besides settle's script; what the
+ * record keeps for those thirty days is in tests/store-data-registry.ts (nl:ppsell:o:).
+ */
+export const PAYPAL_CAPTURE_WATCH = { commandsPerCaptureAsked: 2 } as const;
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**
  * A narrowed email's reading of the store's buyers made by the scheduled job

@@ -6,7 +6,10 @@
  * never on the COMPLETED one. When the step that writes the payment down did not reach Redis after PayPal had taken the
  * payment, nothing was written: the order was in no list, the sweep had nothing to resume, and only the buyer opening
  * the return page again recovered it. Now the order goes into pending first, the write read exactly; a write that is
- * not confirmed means PayPal is not asked to take anything.
+ * not confirmed means PayPal is not asked to take anything. In the same step the order's record is renewed to thirty
+ * days (Claude 3's first money review of #3404, LOW 1), so a capture asked for late in its first three days still
+ * leaves the sweep a record to resume from; that renewal is read exactly too, and a record found gone asks PayPal
+ * nothing.
  *
  * Synthetic only: a stand-in for PayPal's API and Resend, the in-memory Redis, the real return route and the real
  * sweep.
@@ -22,6 +25,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { NextRequest } from "next/server";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
+import { COMMAND, ORDER_COMPUTE, PAYPAL_CAPTURE_WATCH } from "./plan-cost-registry";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
 const SELLER = "7KNGBPH2U58GQ";
@@ -98,10 +102,15 @@ const pendingWrite = (commands: Commands) => commands.some((command) => command[
 const lifeAt = (commands: Commands) => commands.findIndex((command) => command[0] === "EXPIRE" && String(command[1]).startsWith("nl:ppsell:o:"));
 const settleWrite = (commands: Commands) => commands.some((command) => command[0] === "EVAL" && String(command[1]).includes("marktmorgen:paypal-settle"));
 
+/** The pipelines that put an order in pending before its capture, as the last return sent them. */
+let watchSent: Commands[] = [];
+
 async function returnFor(store: Store, order: string, fault: Fault): Promise<{ status: number; location: string }> {
   const pipeline: Pipeline = redis.pipeline.bind(redis);
   let struck = false;
+  watchSent = [];
   redis.pipeline = (async (commands: Commands) => {
+    if (pendingWrite(commands) && lifeAt(commands) >= 0) watchSent.push(commands);
     if (struck || fault === "none") return pipeline(commands);
     if (fault === "settle" && settleWrite(commands)) {
       struck = true;
@@ -197,6 +206,8 @@ async function main(): Promise<void> {
   is("paid, handed over, one receipt, counted once, off pending, not owed, captured once", await state(healthy, "healthy@example.com"), {
     paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
   });
+  is("one step put it in pending and renewed its record, the commands tests/plan-cost-registry.ts prices", [watchSent.length, watchSent[0]?.length], [1, PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked]);
+  is("inside the order's own work (ORDER_COMPUTE)", PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked * COMMAND < ORDER_COMPUTE / 10, true);
   is("a sweep after it hands nothing over again", await sweep(), 0);
   is("and nothing moved", await state(healthy, "healthy@example.com"), { paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1 });
 

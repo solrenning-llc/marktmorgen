@@ -44,7 +44,7 @@ const sale = (handle: string) => ({ created: NOW - 60, amount_total: 1900, payme
 
 async function main() {
   await claimHandle("soldbefore@example.com", "soldbefore", "A store", "");
-  await setStripeAccount("soldbefore@example.com", "acct_1TestSoldBefore1");
+  await setStripeAccount("soldbefore@example.com", "acct_TestSoldBf01");
   await setSubscription("soldbefore@example.com", { subscriptionId: "sub_soldbefore01", active: true, tier: "creator", cycle: "month" });
   const store = (await storeForEmail("soldbefore@example.com"))!;
 

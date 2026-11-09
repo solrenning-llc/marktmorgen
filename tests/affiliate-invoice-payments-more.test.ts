@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   const canceled = Array.from({ length: 10 }, (_, n) => paid(`pi_try_${n}`, { status: "canceled" }));
   invoicesBody = list(invoice({ payments: payments(canceled, { has_more: true }) }));
   const book = await readBook(store);
-  is("unknown (not read whole) should be invoicesChecked false, not 'paid in parts / no commission'", [book.invoicesChecked, (book as any).unlinkedInvoices], [false, 0]);
+  is("unknown (not read whole) should be invoicesChecked false, not 'paid in parts / no commission'", [book.invoicesChecked, (book as unknown as { unlinkedInvoices?: number }).unlinkedInvoices], [false, 0]);
 
   part("The paid payment intent on the next page of the invoice's payments: found, linked, its commission paid");
   reset();

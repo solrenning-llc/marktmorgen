@@ -10,9 +10,12 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { sensitiveTopics, sensitiveWarning } from "@/lib/ai-draft-review";
+import * as review from "@/lib/ai-draft-review";
+import { readAiAnswer } from "@/lib/ai-response";
 import { AiDraftReview } from "@/components/ai-draft-review";
 import { done, is, part } from "./check";
+
+const { draftStrings, draftTopics, sensitiveTopics, sensitiveWarning } = review;
 
 part("Which subjects a draft is about");
 is("a bread course: none", sensitiveTopics("Forty loaves, one a week, with a shopping list."), []);
@@ -42,5 +45,63 @@ part("Where it is used");
 const assist = readFileSync("components/ai-assist.tsx", "utf8");
 is("the box reads the subjects from the draft it fills in", assist.includes("setTopics(sensitiveTopics(JSON.stringify(data.value)))"), true);
 is("and passes them to the checks", assist.includes("topics={topics}"), true);
+
+part("Read from the draft's own words, not its JSON (Claude 6 review of #3436, MEDIUM 1)");
+// A thrown error is a failure like any other, so one missing function does not hide the rest.
+const safely = (read: () => unknown) => {
+  try {
+    return read();
+  } catch (error) {
+    return `threw: ${(error as Error).message}`;
+  }
+};
+is("a word right after a line break", safely(() => draftTopics(draftStrings({ title: "Week one", body: "Overview\nInvesting for beginners" }), "en")), ["money"]);
+is("a word after a paragraph break", safely(() => draftTopics(draftStrings({ title: "Notes", body: "Hello.\n\nTaxes for freelancers" }), "en")), ["money"]);
+is("a word after a tab", safely(() => draftTopics(draftStrings("Step 1:\tDiagnosis"), "en")), ["health"]);
+is("a word deep inside a list", safely(() => draftTopics(draftStrings({ about: { lessons: ["Intro", "Stock market basics"] } }), "en")), ["money"]);
+is("the keys of the draft are never read", safely(() => draftTopics(draftStrings({ health: "Bread", law: "Rye" }), "en")), []);
+const assistNow = readFileSync("components/ai-assist.tsx", "utf8");
+is("the box never reads the subjects from the JSON text", assistNow.includes("sensitiveTopics(JSON.stringify("), false);
+
+part("A draft in another store language is never left without the warning (MEDIUM 2)");
+is("a Portuguese draft: the general warning", safely(() => draftTopics(draftStrings("Um plano para cuidar da sua saúde"), "pt")), "unread");
+is("a Spanish draft about nothing sensitive: still the general warning", safely(() => draftTopics(draftStrings("Pan casero"), "es")), "unread");
+is("a draft whose language was not said: the general warning", safely(() => draftTopics(draftStrings("Brot backen"), null)), "unread");
+is("the general warning says what to do and what is checked", safely(() => sensitiveWarning("unread")), "If this draft is about health, money or the law, have someone who knows the subject read it before you publish, such as a doctor, an accountant or a lawyer, and do not promise a result. We look for these subjects only in drafts written in English.");
+is("the writing help says which language the draft is in", readAiAnswer(true, { ok: true, value: "Hola", left: 3, language: "es" }), { ok: true, value: "Hola", left: 3, language: "es" });
+is("a language that is not a store language is not passed on", readAiAnswer(true, { ok: true, value: "Hola", left: 3, language: "xx" }), { ok: true, value: "Hola", left: 3 });
+const route = readFileSync("app/api/store/ai/route.ts", "utf8");
+is("the route answers with the store's language", route.includes("language: store.language"), true);
+is("the box reads the subjects with the draft's language", assistNow.includes("draftTopics(draftStrings(data.value), data.language)"), true);
+const general = String(safely(() => renderToStaticMarkup(createElement(AiDraftReview, { checks: [false, false, false], onToggle: () => {}, topics: "unread" }))));
+is("the general warning is drawn with its own label", [general.includes("Health, money or the law:"), general.includes("We look for these subjects only in drafts written in English.")], [true, true]);
+
+part("Common wording found, harmless drafts left alone (LOW 3 and 4)");
+for (const [what, text, want] of [
+  ["money itself", "Make money online in 30 days", ["money"]],
+  ["finance", "Personal finance for nurses", ["health", "money"]],
+  ["plural diseases", "Rare diseases explained", ["health"]],
+  ["visas", "Visas explained", ["law"]],
+  ["weight-loss with a hyphen", "A weight-loss plan", ["health"]],
+  ["taxed", "How tips are taxed", ["money"]],
+  ["cancer", "Life after cancer", ["health"]],
+  ["chronic pain", "Yoga for chronic pain", ["health"]],
+  ["healing", "Healing after loss", ["health"]],
+  ["trauma", "Writing through trauma", ["health"]],
+  ["dog treats", "Homemade dog treats, three flavors", []],
+  ["stock photos", "100 stock photos for your blog", []],
+  ["a commercial license on a font", "Includes a personal and commercial license", []],
+  ["chicken stock and cured meats", "Chicken stock and cured meats", []],
+  ["earn a certificate", "Earn a certificate when you finish", []],
+  ["the basketball court", "Drills for the basketball court", []],
+  ["a money-back guarantee", "A 30-day money-back guarantee", []],
+] as const) is(what, safely(() => draftTopics([text], "en")), want);
+
+part("Read by a screen reader with the checks (LOW 5)");
+const described = renderToStaticMarkup(createElement(AiDraftReview, { checks: [false, false, false], onToggle: () => {}, topics: ["money"] }));
+const warningId = described.match(/<p id="([^"]+)"[^>]*><strong>Sensitive topic:/)?.[1];
+is("the warning has an id", typeof warningId, "string");
+is("the group is described by the warning", described.includes(`aria-describedby="${warningId}"`), true);
+is("no warning: the group is not described by one", renderToStaticMarkup(createElement(AiDraftReview, { checks: [false, false, false], onToggle: () => {} })).includes("aria-describedby"), false);
 
 done();

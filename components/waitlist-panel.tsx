@@ -62,6 +62,7 @@ async function post(payload: Record<string, unknown>): Promise<WaitlistAnswer> {
 export function WaitlistPanel({
   productId,
   initial,
+  waitlistUnread = false,
   suggestedAddress,
   preorders = null,
   preordersUnread = false,
@@ -71,6 +72,8 @@ export function WaitlistPanel({
 }: {
   productId: string;
   initial: WaitlistView | null;
+  /** Its waitlist could not be read (lib/waitlist.ts threw): said so, never drawn as off with 0 confirmed. */
+  waitlistUnread?: boolean;
   suggestedAddress: string;
   /** Its pre-orders, when it takes or took any (lib/preorders.ts). */
   preorders?: PreorderView | null;
@@ -161,6 +164,18 @@ export function WaitlistPanel({
       </button>
     </div>
   );
+
+  // Nothing about the waitlist was read, so no switch, count or sale is drawn from a guess (VR 2).
+  if (waitlistUnread) {
+    return (
+      <div className="mt-3 rounded-[var(--r-sm)] border border-line bg-white p-4">
+        <p className="font-semibold text-ink">Coming soon, with a waitlist</p>
+        <p className="mt-1 text-sm text-ink" role="status">
+          The waitlist could not be read just now, so it is not shown here. Reload the page in a minute to see it and to change it.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-3 rounded-[var(--r-sm)] border border-line bg-white p-4">

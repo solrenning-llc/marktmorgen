@@ -1747,7 +1747,7 @@ export default async function StudioPage({
               <div id="products" className="scroll-mt-32">
                 {(async () => {
                   const newComments = early(newCommentsFor(shelf?.products ?? []));
-                  const waitlists = waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));
+                  const waitlists = waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch((error) => { console.error("the studio could not read its waitlists", error); return null; });
                   const preorders = preorderViews(store, (shelf?.products ?? []).map((p) => p.id)).catch((error) => { console.error("the studio could not read its pre-orders", error); return null; });
                   const pairChoices = early(publishedChoices(store, storeCards(store)));
                   return (

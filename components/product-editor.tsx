@@ -1831,8 +1831,8 @@ export function ProductEditor({
   ai?: { on: boolean; left: number };
   /** Per course product, the comments under its lessons since its studio page was last opened. */
   newComments?: Record<string, number>;
-  /** Per product with a waitlist, where it stands (lib/waitlist.ts). */
-  waitlists?: Record<string, WaitlistView>;
+  /** Per product with a waitlist, where it stands (lib/waitlist.ts); null when they could not be read. */
+  waitlists?: Record<string, WaitlistView> | null;
   /** Each product's pre-orders, when it takes or took any (lib/preorders.ts); null when they could not be read. */
   preorders?: Record<string, PreorderView> | null;
   /** The store's postal address for email, offered for a launch email's foot. */
@@ -2499,7 +2499,8 @@ export function ProductEditor({
                 {product.priceCents > 0 && !product.hidden ? (
                   <WaitlistPanel
                     productId={product.id}
-                    initial={waitlists[product.id] ?? null}
+                    initial={waitlists?.[product.id] ?? null}
+                    waitlistUnread={waitlists === null}
                     suggestedAddress={mailAddress}
                     preorders={preorders?.[product.id] ?? null}
                     preordersUnread={preorders === null}

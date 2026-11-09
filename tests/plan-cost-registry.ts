@@ -380,7 +380,8 @@ export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + 
  *     payments and charges, and five disputes asked about), each waited on EXPORT_PAGE_SECONDS at 2 GB as the export
  *     and the calendar feed price them, its body worked through at a tenth of a second (STRIPE_LIST_PAGE);
  *   - the creator's own calendars (lib/calendar-sync.ts, calendarBusy): MAX_FEEDS read side by side when their
- *     reading is old, waited on FEED_TIMEOUT_MS, each of FEED_MAX_BYTES parsed at BOOK_FEED_PARSE_CPU (a review
+ *     reading is old, waited on FEED_TIMEOUT_MS beside Stripe (readBusy starts them first and waits on both, so only
+ *     what runs past Stripe's wait is added), each of FEED_MAX_BYTES parsed at BOOK_FEED_PARSE_CPU (a review
  *     ceiling), and each reading read and written four times at BOOK_FEED_READING_BYTES (2,000 times as JSON pairs);
  *   - every call listing, one GET each (lib/catalog.ts, readListings) at LISTING_READ_BYTES;
  *   - the diary of holds and bookings (one HGETALL of up to twice CALENDAR_CALLS entries at BOOK_DIARY_ENTRY_BYTES)
@@ -405,7 +406,9 @@ export const BOOK_TIMES_SENT_BYTES = 100_000;
 export const BOOK_TIMES_COMMANDS = 1 + 4 + 2 + 2 + 2 + MAX_FEEDS * 8 + CALENDAR_CALLS / 100 + 1 + 20 + 20 + 2;
 export function bookTimesRead(listings: number): number {
   return readShapeCost({
-    seconds: FEED_TIMEOUT_MS / 1000,
+    // The calendars are read beside Stripe (readBusy starts them before readCallSessions and waits on both): only what
+    // their wait runs past Stripe's own (stripePages, below) is added.
+    seconds: Math.max(0, FEED_TIMEOUT_MS / 1000 - BOOK_STRIPE_READS * EXPORT_PAGE_SECONDS),
     cpu: 0.5 + MAX_FEEDS * BOOK_FEED_PARSE_CPU + BOOK_STRIPE_READS * 0.1,
     commands: BOOK_TIMES_COMMANDS + listings,
     dbBytes: listings * LISTING_READ_BYTES + 2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES + MAX_FEEDS * 4 * BOOK_FEED_READING_BYTES
@@ -1230,8 +1233,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
       // A booking page is counted before its call is read, and its open times are taken before the creator's Stripe account is asked,
       // for a page and for a booking's move (traffic audit, 9 November 2026; bookTimesRead held in tests/plan-cost-registry.test.ts).
-      { file: "app/[handle]/book/[product]/page.tsx", names: ["if (await isResting(store, undefined, who)) return", "takePublicRequest(store, who, undefined, bookTimesUnits(idsOfKind(store, \"call\").length))", "if (open && !(await bookTimes(store, who)))", "if (movable && !moved && !(await bookTimes(store, \"buyer\")))"] },
-      { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits"] },
+      { file: "app/[handle]/book/[product]/page.tsx", names: ["if (await isResting(store)) {", "if (!proved || (await isResting(store, undefined, \"buyer\"))) return", "!(await payBookTimes(store, pkg ? \"buyer\" : \"public\"))", "(await payBookTimes(store, \"buyer\")) ? await slotsForMove("] },
+      // The calendar embedded on a creator's listed site pays for its times as the booking page does (pre-review, 9 November 2026).
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["(await payBookTimes(store, \"public\")) ? await slotsForProduct("] },
+      { file: "lib/book-page-admission.ts", names: ["bookTimesUnits(idsOfKind(store, \"call\").length)", "takePublicRequest(store, \"buyer\", now, units)", "holdPublicRequests(store, units, now)", "[\"HEXISTS\", bookingDiaryKey(store.callsId), session]"] },
+      { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_IN_BASE", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits", "bookingDiaryKey"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS"] },

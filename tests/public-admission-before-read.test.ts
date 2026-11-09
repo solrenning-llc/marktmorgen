@@ -125,7 +125,11 @@ async function main(): Promise<void> {
   is("the tab title says the page rests, and names no call", (title.result as { title?: string } | null)?.title, `${speech(booking).w.restingTitle} — ${booking.name}`);
 
   part("A booking's move page is the buyer's: it stays open while the public pages rest");
-  const move = await book({ move: `cs_test_${"b".repeat(24)}` }, "203.0.113.150");
+  // Rule 23 (pre-review, 9 November 2026): a made-up ?move= no longer makes a visitor a buyer; the move is a booking in
+  // the store's diary, proved there before the buyers' reserve is used (tests/book-admission-buyer.test.ts).
+  const MOVE = `cs_test_${"b".repeat(24)}`;
+  redis.run(["HSET", `nl:call:busy:${booking.callsId}`, MOVE, JSON.stringify({ s: Date.now() + 86_400_000, e: Date.now() + 88_200_000, until: 0, session: MOVE, p: call.product.id })]);
+  const move = await book({ move: MOVE }, "203.0.113.150");
   is("the move counts against the store's window before Stripe is asked", (move.firstStripeAt ?? 0) >= 1, true);
   is("(fact) its checkout is read once", move.stripe, 1);
   is("it is not the resting page", resting(move.result), false);

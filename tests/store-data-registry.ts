@@ -400,6 +400,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:call:reminded:@lib/call-reminders.ts": short("A buyer reminded of a call", "call", 430, 2 * MARK),
   "nl:call:room:@lib/call-rooms.ts": short("A call's video room, until the call is over", "call", 430, 2 * KEY),
   "nl:call:busy:@lib/calls.ts": { what: "A store's booked calls", parts: [item(512, "One entry per call booked.", "call")] },
+  // Read-only alias of the diary above (pre-review of claude5/public-admission-book, 9 November 2026): no storage or TTL write.
+  "nl:call:busy:@lib/book-page-rules.ts": { what: "A store's booked calls, only asked whether a booking's move link names one of them (lib/book-page-admission.ts, one HEXISTS); kept and priced by nl:call:busy:@lib/calls.ts, with no duplicate bytes", line: "database-storage" },
   "nl:call:confirmed:@lib/calls.ts": { what: "A call's confirmation sent", parts: [item(MARK, "One per call.", "call")] },
   "nl:call:series:@lib/call-series-open.ts": { what: "A store's call series still running", parts: [item(224, "One member per series booked (lib/order-data.ts charges a ZADD 32 + 8 + 128 bytes, a quarter more), removed with its bytes given back at the next write once its last session is over.", "call")] },
   "nl:call:lock:@lib/calls.ts": short("A store's calls while one is booked", "request", 1, 128, REQ("checkout")),

@@ -26,6 +26,7 @@ import { type ScriptOpen, readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
 import { SlotPicker } from "@/components/slot-picker";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
+import { payBookTimes } from "@/lib/book-page-admission";
 import { bookingLength, offeredLengths } from "@/lib/call-lengths";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { chargeNow } from "@/lib/call-deposit";
@@ -254,7 +255,10 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     // frame books the call's own length, so it shows that length's times, as the booking page does.
     const offerable = offeredLengths(call.call, product.priceCents, { pkg: false, team: false }).length > 0;
     const askedLength = offerable ? bookingLength(call.call, product.priceCents, asked) : null;
-    const read = await slotsForProduct(store, call, null, askedLength?.minutes ?? null);
+    // The times are paid for before Stripe is asked, as on the booking page (lib/book-page-admission.ts): the frame's own
+    // request (lib/embed-open.ts, isResting) pays only for the frame, and a site's Referer is easy to forge. When they do
+    // not fit, nothing is read and the frame says the times could not be read.
+    const read = (await payBookTimes(store, "public")) ? await slotsForProduct(store, call, null, askedLength?.minutes ?? null) : null;
     const choices = read ? offeredLengths(call.call, product.priceCents, { pkg: false, team: read.team }) : [];
     const chosen = choices.length ? askedLength ?? choices[0] : null;
     const cents = chosen ? chosen.cents : product.priceCents;

@@ -1,14 +1,14 @@
 import { PackageOffer } from "@/components/store-product";
 import { placeLine } from "@/lib/call-place";
 import { DEMO_MOVED_NOTE, DEMO_STAYS_NOTE, isHouseStore } from "@/lib/house-store";
-import { boughtByToken, packageState } from "@/lib/call-packages";
+import { packageState } from "@/lib/call-packages";
 import { isSoon } from "@/lib/waitlist";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
-import { type Listing, type Store, normaliseHandle, storeForPage } from "@/lib/store";
+import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { lookStyle } from "@/lib/store-look";
@@ -26,9 +26,9 @@ import { imageUrl } from "@/lib/product-image";
 import { SlotPicker } from "@/components/slot-picker";
 import { type SessionChoice, SessionPicker, type SessionWords } from "@/components/session-picker";
 import { StoreTracking } from "@/components/store-tracking";
-import { idsOfKind, readListing } from "@/lib/catalog";
-import { isResting, takePublicRequest } from "@/lib/traffic";
-import { bookTimesUnits } from "@/lib/book-page-rules";
+import { readListing } from "@/lib/catalog";
+import { isResting } from "@/lib/traffic";
+import { bookedHere, packageFor, payBookTimes } from "@/lib/book-page-admission";
 import { StoreResting } from "@/components/store-resting";
 import { cache } from "react";
 import { speech } from "@/lib/buyer-words";
@@ -42,50 +42,68 @@ type Params = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-/**
- * Who the page is for: a booking's move, or a session booked from a package already bought, is what a buyer already
- * has (lib/traffic-rules.ts: it rests only at the whole window's requests); anything else is a public page.
- */
-function whoAsks(query: { [key: string]: string | string[] | undefined }): "public" | "buyer" {
-  return (typeof query.move === "string" && query.move.length > 0) || pkgOf(query) ? "buyer" : "public";
+/** A query's text value, or "". */
+function textOf(query: { [key: string]: string | string[] | undefined }, key: string): string {
+  const value = query[key];
+  return typeof value === "string" ? value : "";
 }
 
+type Loaded =
+  | { store: Store; state: "resting"; buyer: boolean }
+  | { store: Store; state: "gone" }
+  | { store: Store; state: "move"; product: CallListing }
+  | { store: Store; state: "open"; product: CallListing; pkg: Awaited<ReturnType<typeof packageFor>>; soon: boolean | null };
+
 /**
- * The store and the call an address names, read only after the page is counted (traffic audit, 9 November 2026):
- * isResting takes one of the store's requests before the listing is read, and past the window nothing of the call,
- * its times or the creator's Stripe account is read. The page and its title share this one count within a request
- * (React cache). Its times are paid for apart, before they are read (bookTimes).
+ * The store and the call an address names, each read only after it is paid for (traffic audit and its pre-review,
+ * 9 November 2026). The page is first one of the store's public requests (isResting), taken before the listing is
+ * read. Past the public share, a buyer's own link is served from the buyers' reserve only once it is proved from this
+ * store's records, a few reads at most: a package bought for this call (`?pkg=`), or a booking in this store's diary
+ * (`?move=`). A link that proves nothing is the public page, resting, and nothing else is read for it. A call's open
+ * times are then paid for before anything of them is read (lib/book-page-admission.ts, payBookTimes), from the
+ * buyers' reserve only for a package proved bought for it; when they do not fit, the page rests. The page and its
+ * title share all of it within a request (React cache), so the tab says what the page says.
  */
-const load = cache(async (raw: string, productId: string, who: "public" | "buyer"): Promise<{ store: Store; product: Listing | null; resting: boolean } | null> => {
+const load = cache(async (raw: string, productId: string, pkgToken: string, moving: string): Promise<Loaded | null> => {
   const decoded = decodeURIComponent(raw);
   if (!decoded.startsWith("@")) return null;
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) return null;
-  if (await isResting(store, undefined, who)) return { store, product: null, resting: true };
-  return { store, product: await readListing(store, productId), resting: false };
+  let pkg: Awaited<ReturnType<typeof packageFor>> | undefined;
+  if (await isResting(store)) {
+    if (pkgToken) pkg = await packageFor(store, productId, pkgToken);
+    const proved = pkgToken ? pkg !== null : moving ? await bookedHere(store, moving) : false;
+    if (!proved || (await isResting(store, undefined, "buyer"))) return { store, state: "resting", buyer: proved };
+  }
+  const product = await readListing(store, productId);
+  if (!product || !isCallProduct(product)) return { store, state: "gone" };
+  if (moving) return { store, state: "move", product };
+  if (pkg === undefined) pkg = pkgToken ? await packageFor(store, product.id, pkgToken) : null;
+  // A draft call is left off the store (lib/catalog.ts): its title, price and
+  // times are for the store's owner and team, signed in, and for a package
+  // already bought for it (a booking already paid is moved above, read from
+  // its own order). Anyone else goes where an id that does not exist goes (MM-SA-30).
+  if (product.hidden && !pkg && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) return { store, state: "gone" };
+  // Coming soon or not (lib/waitlist.ts): a state that could not be read is unknown, never "launched" (rule 24), so the
+  // calendar books and sells nothing then and says the times could not be read, as when the times themselves cannot be.
+  const soon = await isSoon(store, product.id).catch(() => null);
+  // Its times are paid for before Stripe is asked: past the window, the resting page, and nothing read.
+  if (canSellProduct(store, product) && soon === false && !(await payBookTimes(store, pkg ? "buyer" : "public"))) return { store, state: "resting", buyer: Boolean(pkg) };
+  return { store, state: "open", product, pkg, soon };
 });
-
-/**
- * The store's requests a reading of the call's open times takes, before it reads them (lib/book-page-rules.ts:
- * the creator's Stripe account, their calendars and every call listing; held against what that costs at its worst
- * in tests/plan-cost-registry.test.ts). False past the window: then nothing is read.
- */
-async function bookTimes(store: Store, who: "public" | "buyer"): Promise<boolean> {
-  return takePublicRequest(store, who, undefined, bookTimesUnits(idsOfKind(store, "call").length));
-}
 
 /** Named after what is booked, so a tab or a history entry says which. */
 export async function generateMetadata({ params, searchParams }: Params): Promise<Metadata> {
   const { handle, product: productId } = await params;
-  const found = await load(handle, productId, whoAsks(await searchParams)).catch(() => null);
-  const store = found?.store ?? null;
-  // Resting: the tab says so, and names nothing of the call, which was not read.
-  if (store && found?.resting) return { title: `${speech(store).w.restingTitle} — ${store.name}`, robots: { index: false, follow: true } };
-  const product = found?.product ?? null;
+  const query = await searchParams;
+  const loaded = await load(handle, productId, textOf(query, "pkg"), textOf(query, "move")).catch(() => null);
+  // Resting: the tab says so, and names nothing of the call, which was not read or is not drawn.
+  if (loaded?.state === "resting") return { title: `${speech(loaded.store).w.restingTitle} — ${loaded.store.name}`, robots: { index: false, follow: true } };
   // A draft call's tab names nothing for whoever only knows its id (MM-SA-30): the same as an id that does not exist.
-  if (!store || !product?.call || (product.hidden && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value)))) {
+  if (!loaded || loaded.state === "gone" || (loaded.product.hidden && loaded.state === "move" && !(await seesDrafts(loaded.store, (await cookies()).get(SESSION_COOKIE)?.value)))) {
     return { title: "Book a call — Marktmorgen", robots: { index: false, follow: true } };
   }
+  const { store, product } = loaded;
   const { w } = speech(store);
   const pick = product.call.kind === "live" ? w.pickSession : w.pickTime;
   return { title: `${pick}${bookingWords(store.language).colon}${product.title} — ${store.name}`, robots: { index: false, follow: true } };
@@ -95,17 +113,15 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
 export default async function BookPage({ params, searchParams }: Params) {
   const { handle: raw, product: productId } = await params;
   const query = await searchParams;
-  const who = whoAsks(query);
-  const loaded = await load(raw, productId, who);
+  const loaded = await load(raw, productId, textOf(query, "pkg"), textOf(query, "move"));
   if (!loaded) notFound();
   const { store } = loaded;
-  if (loaded.resting) return <StoreResting store={store} buyer={who === "buyer"} />;
-  const product = loaded.product;
-  if (!product || !isCallProduct(product)) redirect(`/@${store.handle}`);
+  if (loaded.state === "resting") return <StoreResting store={store} buyer={loaded.buyer} />;
+  if (loaded.state === "gone") redirect(`/@${store.handle}`);
+  const { product } = loaded;
 
   const status = typeof query.status === "string" ? query.status : "";
-  const moving = typeof query.move === "string" ? query.move : "";
-  if (moving) return <MovePage store={store} product={product} session={moving} status={status} />;
+  if (loaded.state === "move") return <MovePage store={store} product={product} session={textOf(query, "move")} status={status} />;
 
   // Sent here from the calendar on one of the creator's listed sites (app/embed), after a refusal or back from Stripe:
   // the site and the way back stay with the booking, read against the creator's list again, so a second try is still the
@@ -116,19 +132,10 @@ export default async function BookPage({ params, searchParams }: Params) {
 
   const { w, money, lang } = speech(store);
   const b = bookingWords(store.language);
-  // Booking from a package (lib/call-packages.ts): how many are left, said up top.
-  const pkgToken = typeof query.pkg === "string" ? query.pkg : "";
-  const found = pkgToken ? await boughtByToken(pkgToken) : null;
-  const pkg = found && found.bought.s === store.statsId && found.bought.p === product.id ? found : null;
-  // A draft call is left off the store (lib/catalog.ts): its title, price and
-  // times are for the store's owner and team, signed in, and for a package
-  // already bought for it (a booking already paid is moved above, read from
-  // its own order). Anyone else goes where an id that does not exist goes (MM-SA-30).
-  if (product.hidden && !pkg && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
+  // Booking from a package (lib/call-packages.ts), proved bought for this call in load: how many are left, said up top.
+  const pkgToken = textOf(query, "pkg");
+  const { pkg, soon } = loaded;
   const pkgState = pkg ? await packageState(pkg.bought) : null;
-  // Coming soon or not (lib/waitlist.ts): a state that could not be read is unknown, never "launched" (rule 24), so the
-  // calendar books and sells nothing then and says the times could not be read, as when the times themselves cannot be.
-  const soon = await isSoon(store, product.id).catch(() => null);
   const sellable = canSellProduct(store, product);
   const open = sellable && soon === false;
   const unread = sellable && soon === null;
@@ -141,8 +148,7 @@ export default async function BookPage({ params, searchParams }: Params) {
   // for one, the page books the call's own length, so it shows that length's times.
   const offerable = !pkgToken && product.call.kind === "weekly" && offeredLengths(product.call, product.priceCents, { pkg: false, team: false }).length > 0;
   const askedLength = offerable ? bookingLength(product.call, product.priceCents, asked) : null;
-  // Its times are paid for before Stripe is asked: past the window, the resting page, and nothing read.
-  if (open && !(await bookTimes(store, who))) return <StoreResting store={store} buyer={who === "buyer"} />;
+  // Its times were paid for in load, before Stripe is asked.
   const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null, askedLength?.minutes ?? null) : null;
   const hostChoices = (read && "hosts" in read ? read.hosts : null) ?? [];
   // Offered only where each can be booked and charged (holdAndCheckout): never from a package, with a deposit or on a team.
@@ -454,9 +460,10 @@ async function MovePage({
   // never as times that could not be read, which a refresh would not change.
   const lengthStuck = ownLength(setup, booking.end - booking.start) === "unknown";
   const movable = blocked === null && !lengthStuck;
-  // The times it may move to are paid for before Stripe is asked again, as a booking page's are.
-  if (movable && !moved && !(await bookTimes(store, "buyer"))) return <StoreResting store={store} buyer />;
-  const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start, booking.end - booking.start) : null;
+  // The times it may move to are paid for before Stripe is asked again, as a booking page's are, from the whole window:
+  // the booking is the buyer's, read above. When they do not fit, the buyer still sees their booking, and that the
+  // times could not be read just now.
+  const offer = movable && !moved && (await payBookTimes(store, "buyer")) ? await slotsForMove(store, product, session, booking.start, booking.end - booking.start) : null;
   const leftMoves = MAX_MOVES - booking.moves;
   const until = movableUntil(setup, booking.start);
   const price = money(product.priceCents);

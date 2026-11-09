@@ -19,7 +19,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import BookPage, { generateMetadata as bookMeta } from "@/app/[handle]/book/[product]/page";
 import EmbedCard from "@/app/embed/[handle]/[product]/page";
 import { StoreResting } from "@/components/store-resting";
-import { bookTimesUnits } from "@/lib/book-page-rules";
+import { bookTimesUnits, bookingDiaryKey } from "@/lib/book-page-rules";
 import { speech } from "@/lib/buyer-words";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { readSetup, type CallSetup } from "@/lib/call-setup";
@@ -81,6 +81,13 @@ const html = (result: unknown) => {
   } catch {
     return "";
   }
+};
+/** Every text in an element tree as the page returned it, its components not run (the move page holds async ones). */
+const texts = (node: unknown): string[] => {
+  if (typeof node === "string") return [node];
+  if (Array.isArray(node)) return node.flatMap(texts);
+  const props = (node as { props?: Record<string, unknown> } | null)?.props;
+  return props ? Object.values(props).flatMap(texts) : [];
 };
 
 type Shop = { store: Store; call: string; owner: string };
@@ -204,7 +211,10 @@ async function main(): Promise<void> {
   const kept = await book(last, { move: LAST }, "203.0.113.160");
   const words = bookingWords(last.store.language);
   is("the buyer still sees their booking", resting(kept.result), false);
-  is("and is told the times could not be read", html(kept.result).includes(words.timesUnread.replace(/'/g, "&#x27;")), true);
+  is("and is told the times could not be read", texts(kept.result).includes(words.timesUnread), true);
+
+  part("The buyer's proof reads lib/calls.ts's own diary");
+  is("the diary key is lib/calls.ts's busyKey", readFileSync("lib/calls.ts", "utf8").includes("const busyKey = (callsId: string) => `nl:call:busy:${callsId}`;") && bookingDiaryKey("abc") === "nl:call:busy:abc", true);
 
   part("(e) The help says what a call's booking times count");
   is("the help names the booking times' requests", /booking times/.test(readFileSync("lib/help-content.ts", "utf8")), true);

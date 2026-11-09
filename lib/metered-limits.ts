@@ -17,11 +17,25 @@
 import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
 import type { Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
-import { takePublicRequest } from "@/lib/traffic";
+import { holdPublicRequests, takePublicRequest } from "@/lib/traffic";
 
 export async function withinStore(scope: string, who: string, limit: number, windowSeconds: number, store: Store, side: "public" | "buyer" = "public"): Promise<boolean> {
-  if (!(await withinLimit(scope, who, limit, windowSeconds))) return false;
-  return takePublicRequest(store, side);
+  return (await withinStoreWhy(scope, who, limit, windowSeconds, store, side)) === null;
+}
+
+/**
+ * withinStore with the reason it refused: "tries" when the connection's short window is spent (it comes back in minutes),
+ * "window" when the store's own window has no room on that side (it comes back only when the window turns).
+ *
+ * The side "lookup" is for a request that asks about an order before anything proves it is one (lib/order-lookup.ts):
+ * it counts on the public side, and a refusal there is NOT left counted. A refused public request stays in the window's
+ * one count (lib/traffic.ts, countRequest), which is also the buyers' count, so leaving made-up lookups counted would
+ * spend the buyers' reserve just the same.
+ */
+export async function withinStoreWhy(scope: string, who: string, limit: number, windowSeconds: number, store: Store, side: "public" | "buyer" | "lookup" = "public"): Promise<"tries" | "window" | null> {
+  if (!(await withinLimit(scope, who, limit, windowSeconds))) return "tries";
+  const taken = side === "lookup" ? await holdPublicRequests(store, 1, Date.now()) : await takePublicRequest(store, side);
+  return taken ? null : "window";
 }
 
 /**

@@ -34,3 +34,4 @@ export async function takeAllowance(_store: AllowanceStore, kind: AllowanceKind)
   return state.quota;
 }
 export async function takePublicRequest() { state.publicCalls += 1; return true; }
+export async function holdPublicRequests() { return true; }

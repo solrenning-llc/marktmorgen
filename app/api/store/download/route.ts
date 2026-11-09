@@ -1,8 +1,9 @@
-import { withinStore } from "@/lib/metered-limits";
+import { withinStore, withinStoreWhy } from "@/lib/metered-limits";
+import { clientAddress } from "@/lib/request-guard";
+import { readOrderAdmitted } from "@/lib/order-lookup";
 import type { NextRequest } from "next/server";
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { type Listing, type Store, normaliseHandle, storeForHandle } from "@/lib/store";
-import { readOrder } from "@/lib/store-checkout";
 import { plain, serveFile } from "@/lib/serve-file";
 import { offerRefunded, upsellDelivery } from "@/lib/upsell";
 import { OrdersBusy, findPurchase } from "@/lib/buyer-orders";
@@ -104,7 +105,10 @@ export async function GET(request: NextRequest) {
       status: 429,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "600", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
     });
-  if (!(await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer"))) return tooOften();
+  // A link by token is counted here, on the buyers' side. A link by session id is not: a made-up id would get a counter
+  // of its own and spend the buyers' reserve, so its lookup counts on the connection and the public side, and only a
+  // paid order takes this link's count on the buyers' side (lib/order-lookup.ts).
+  if (token && !(await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer"))) return tooOften();
   if (token) {
     // Only the purchase asked for is read, by its reference, paid for before each read (lib/buyer-orders.ts, findPurchase):
     // a store with no room left for it is answered as too often, and nothing more is asked of Stripe.
@@ -151,7 +155,11 @@ export async function GET(request: NextRequest) {
   }
 
   const sessionId = request.nextUrl.searchParams.get("session_id") ?? "";
-  const order = await readOrder(store, sessionId || undefined);
+  const order = await readOrderAdmitted(store, sessionId || undefined, {
+    lookup: () => withinStoreWhy("download", `${store.handle}:c:${clientAddress(request)}`, OPENS_PER_HOUR, 3600, store, "lookup"),
+    paid: () => withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer"),
+  });
+  if (order.state === "slow" || order.state === "resting") return tooOften();
   if (order.state !== "paid") {
     return plain(STATUSES[order.state], say[order.state]);
   }

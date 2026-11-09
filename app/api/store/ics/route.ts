@@ -1,7 +1,6 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { takePublicRequest } from "@/lib/traffic";
-import { readOrder } from "@/lib/store-checkout";
+import { readOrderAdmitted, takeBuyerRequest, takeLookupRequest } from "@/lib/order-lookup";
 import { buyerNote, callInvite } from "@/lib/calls";
 import { roomOf } from "@/lib/call-rooms";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -21,10 +20,11 @@ export async function GET(request: NextRequest) {
   const sessionId = url.searchParams.get("session_id") ?? "";
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("Not found.", { status: 404 });
-  // One of the store's public requests for its window (lib/traffic.ts).
-  if (!(await takePublicRequest(store, "buyer"))) return new Response("Please try again later.", { status: 429, headers: { "Cache-Control": "no-store" } });
-
-  const order = await readOrder(store, sessionId);
+  // Counted as the download is (lib/order-lookup.ts): the lookup of an id of an order's form is one of the store's public
+  // requests for its window (lib/traffic.ts), an id that is not of that form is not counted, and only a paid order takes
+  // the buyers' side, so made-up ids never spend what the store keeps for its buyers.
+  const order = await readOrderAdmitted(store, sessionId, { lookup: () => takeLookupRequest(store), paid: () => takeBuyerRequest(store) });
+  if (order.state === "slow" || order.state === "resting") return new Response("Please try again later.", { status: 429, headers: { "Cache-Control": "no-store" } });
   if (order.state !== "paid" || !order.call || !order.product.call) {
     return new Response("Not found.", { status: 404, headers: { "Cache-Control": "no-store" } });
   }

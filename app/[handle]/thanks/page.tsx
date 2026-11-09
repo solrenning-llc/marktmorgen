@@ -1,4 +1,5 @@
-import { withinStore } from "@/lib/metered-limits";
+import { withinStoreWhy } from "@/lib/metered-limits";
+import { type AdmittedOrder, readOrderAdmitted, takeBuyerRequest } from "@/lib/order-lookup";
 import { placeLine } from "@/lib/call-place";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
@@ -21,7 +22,7 @@ import { notFound } from "next/navigation";
 import { type Listing, ensureStoreId, normaliseHandle, storeForPage, storeRef } from "@/lib/store";
 import { formatMoney, toMajor } from "@/lib/money";
 import { linkHost } from "@/lib/product-link";
-import { DOWNLOAD_WINDOW_SECONDS, type Order, readOrder } from "@/lib/store-checkout";
+import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
@@ -50,7 +51,7 @@ import { orderRoom, upsertContact } from "@/lib/contacts";
 import { listOrder } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
-import { readPaid, stillPending } from "@/lib/paypal-sales";
+import { isPayPalOrderId, readPaid, stillPending } from "@/lib/paypal-sales";
 import { paypalHandedOver } from "@/lib/paypal-handed";
 import { saleClock } from "@/lib/store-sale";
 import { readListing } from "@/lib/catalog";
@@ -146,6 +147,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const locale = LANGUAGES[store.language].locale;
   const lang = locale;
   const money = (cents: number, currency: string) => formatMoney(cents, currency, locale);
+  // An amount Stripe did not send is never printed as $0.00 (lib/store-checkout.ts, readOrder): the sentence names it in words.
+  const priceOf = (cents: number | null, currency: string) => (cents === null ? t.amountUnknown : money(cents, currency));
   const longDate = (seconds: number) =>
     new Date(seconds * 1000).toLocaleDateString(locale, { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   const o = ordersWords(store.language);
@@ -160,10 +163,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // one connection gets 60 in ten minutes per store: far more than a buyer
   // reloading, sharing and coming back ever makes, and short of a script
   // spending the creator's allowance with Stripe on made-up order numbers.
-  const allowed = sessionId
-    ? await withinStore("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "buyer")
-    : true;
-  const order: Order | { state: "slow" } = allowed ? await readOrder(store, sessionId) : { state: "slow" };
+  // A made-up number spends nothing of what the store keeps for its buyers:
+  // one that is not an order's form is not counted at all, the lookup of one
+  // that is counts on the public side, and only a paid order takes the
+  // buyers' side (lib/order-lookup.ts).
+  const who = `${clientAddress({ headers: await headers() })}|${store.handle}`;
+  const order: AdmittedOrder = await readOrderAdmitted(store, sessionId, {
+    lookup: async () => withinStoreWhy("thanks-view", who, VIEWS_PER_TEN_MINUTES, 600, store, "lookup"),
+    paid: () => takeBuyerRequest(store),
+  });
 
   // A member moved from another platform kept their membership: the studio's count says so (lib/move-members.ts).
   if (order.state === "paid" && order.product.recurring && (order.record.metadata as Record<string, string> | null)?.moved === "yes") {
@@ -184,12 +192,12 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
+            {(order.amount ?? 0) > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.sessionsReady(Number(bought?.total ?? packageMeta.sessions))}</h1>
             <p className="st-muted mt-4 text-lg">
               {t.youBought}
               <strong style={{ color: "var(--st-text)" }}>{order.product.title}</strong>
-              {t.packageBought(Number(bought?.total ?? packageMeta.sessions), store.name, money(order.amount, order.currency))}
+              {t.packageBought(Number(bought?.total ?? packageMeta.sessions), store.name, priceOf(order.amount, order.currency))}
             </p>
             {bought?.until ? (
               <p className="st-muted mt-3">{t.bookBy(longDate(bought.until))}</p>
@@ -204,7 +212,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <p className="st-muted mt-5 text-sm">{t.packageSameLink(order.email ?? t.theAddressYouPaidWith)}</p>
             <StoreTracking
               store={store}
-              event={{ type: "purchase", id: adEventId(sessionId), relay: adEventRelay(sessionId, store.handle), value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
+              event={order.amount === null ? null : { type: "purchase", id: adEventId(sessionId), relay: adEventRelay(sessionId, store.handle), value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
             />
           </div>
         </main>
@@ -241,9 +249,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
+            {(order.amount ?? 0) > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{p.thanksTitle}</h1>
-            <p className="st-muted mt-4 text-lg">{p.thanksBought(order.product.title, store.name, money(order.amount, order.currency))}</p>
+            <p className="st-muted mt-4 text-lg">{p.thanksBought(order.product.title, store.name, priceOf(order.amount, order.currency))}</p>
             <p className="mt-4">
               {!coming.soon ? p.thanksOut : day ? (order.email ? p.thanksWhen(day, order.email) : p.thanksWhenAddress(day)) : p.receiptLater}
             </p>
@@ -255,7 +263,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               </a>
               <StoreTracking
                 store={store}
-                event={{
+                event={order.amount === null ? null : {
                   type: "purchase",
                   id: adEventId(sessionId),
                   relay: adEventRelay(sessionId, store.handle),
@@ -302,12 +310,12 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
+            {(order.amount ?? 0) > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.giftOnWay}</h1>
             <p className="st-muted mt-4 text-lg">
               {t.youBought}
               <strong style={{ color: "var(--st-text)" }}>{order.option ? `${order.product.title} (${order.option.label})` : order.product.title}</strong>
-              {gift ? t.giftBoughtFor(store.name, money(order.amount, order.currency), gift.to) : t.giftBought(store.name, money(order.amount, order.currency))}
+              {gift ? t.giftBoughtFor(store.name, priceOf(order.amount, order.currency), gift.to) : t.giftBought(store.name, priceOf(order.amount, order.currency))}
             </p>
             <p className="st-muted mt-4">
               {isHouseStore(store)
@@ -323,7 +331,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               </a>
               <StoreTracking
                 store={store}
-                event={{
+                event={order.amount === null ? null : {
                   type: "purchase",
                   id: adEventId(sessionId),
                   relay: adEventRelay(sessionId, store.handle),
@@ -369,14 +377,14 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
+            {(order.amount ?? 0) > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">
               {group ? t.placesReadyCount(group.people) : t.placesReady}
             </h1>
             <p className="st-muted mt-4 text-lg">
               {t.youBought}
               <strong style={{ color: "var(--st-text)" }}>{order.option ? `${order.product.title} (${order.option.label})` : order.product.title}</strong>
-              {group ? t.groupBoughtFor(store.name, peopleWords(group.people, store.language), money(order.amount, order.currency)) : t.groupBought(store.name, money(order.amount, order.currency))}
+              {group ? t.groupBoughtFor(store.name, peopleWords(group.people, store.language), priceOf(order.amount, order.currency)) : t.groupBought(store.name, priceOf(order.amount, order.currency))}
             </p>
             {group && ready ? (
               <>
@@ -400,7 +408,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               </a>
               <StoreTracking
                 store={store}
-                event={{
+                event={order.amount === null ? null : {
                   type: "purchase",
                   id: adEventId(sessionId),
                   relay: adEventRelay(sessionId, store.handle),
@@ -576,7 +584,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
           // Paid in one go, in the store's currency, with a method a one-click
           // charge can reach again (a saved card, Apple Pay, Google Pay):
           // anything else — Klarna, iDEAL and the like — skips the offers.
-          eligible: order.amount > 0 && !order.plan && order.reusable && order.currency === store.currency,
+          eligible: (order.amount ?? 0) > 0 && !order.plan && order.reusable && order.currency === store.currency,
           created: order.created,
           secret: upsellSecret,
           upsellKey: order.upsellKey,
@@ -686,7 +694,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // for, by this checkout, with money (lib/review-proof.ts has the rule the
   // form is checked against again when it is sent).
   const toReview =
-    order.state === "paid" && sessionId && !booked && !ended && order.amount > 0 && order.email && takesReviews(store)
+    order.state === "paid" && sessionId && !booked && !ended && (order.amount ?? 0) > 0 && order.email && takesReviews(store)
       ? [order.product, ...order.bumps.map((added) => added.product), ...bundled]
           .filter(reviewable)
           .filter((p, i, all) => all.findIndex((q) => q.id === p.id) === i)
@@ -788,7 +796,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <>
               {/* A payment Stripe confirmed, of an amount, gets the drawn mark (654 [WG14]); a trial, a moved membership or
                   a free order keeps its words, since no payment was received. */}
-              {!(order.product.recurring && (order.firstChargeAt > 0 || order.trialDays > 0)) && order.amount > 0 ? (
+              {!(order.product.recurring && (order.firstChargeAt > 0 || order.trialDays > 0)) && (order.amount ?? 0) > 0 ? (
                 <PaymentReceived label={t.paymentReceived} />
               ) : (
                 <p className="st-price text-sm">
@@ -831,10 +839,10 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                               order.product.recurring.interval,
                               t.priceEvery(money(introPaid.regular, order.currency), speech(store).w.every(paidEvery)),
                             )
-                          : t.priceEvery(money(order.amount, order.currency), speech(store).w.every(paidEvery))
+                          : t.priceEvery(priceOf(order.amount, order.currency), speech(store).w.every(paidEvery))
                         : order.plan
-                          ? t.priceToday(money(order.amount, order.currency))
-                          : money(order.amount, order.currency),
+                          ? t.priceToday(priceOf(order.amount, order.currency))
+                          : priceOf(order.amount, order.currency),
                     )}
                 {t.sentenceEnd}
               </p>
@@ -1336,7 +1344,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <StoreTracking
               store={store}
               event={
-                order.state === "paid" && sessionId
+                order.state === "paid" && sessionId && order.amount !== null
                   ? {
                       type: "purchase",
                       id: adEventId(sessionId),
@@ -1428,17 +1436,27 @@ export default async function ThanksPage({ params, searchParams }: Params) {
  * purchases from it for a day, as the Stripe page does with its order.
  */
 async function PayPalThanks({ store, order }: { store: Store; order: string }) {
-  const allowed = await withinStore("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "buyer");
+  // As on the Stripe page (lib/order-lookup.ts): a number that is not an order's form is not counted; the lookup of one
+  // that is counts on the public side; only a paid order of this store takes the buyers' side.
+  const refused = isPayPalOrderId(order)
+    ? await withinStoreWhy("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "lookup")
+    : null;
   // A record or a mark that could not be read is unknown, never "not found" and never the error page (PF1): the
   // buyer is told the payment could not be checked just now.
   let unread = false;
-  const paid = allowed
-    ? await readPaid(order).catch(() => {
-        unread = true;
-        return null;
-      })
-    : null;
-  const ours = paid && paid.store === store.statsId ? paid : null;
+  const paid =
+    refused === null
+      ? await readPaid(order).catch(() => {
+          unread = true;
+          return null;
+        })
+      : null;
+  const found = paid && paid.store === store.statsId ? paid : null;
+  const buyersRoom = found ? await takeBuyerRequest(store) : true;
+  const ours = buyersRoom ? found : null;
+  const allowed = refused === null && buyersRoom;
+  // The store's own window (not the connection's short one) is what refused: it comes back only when the window turns.
+  const windowFull = refused === "window" || !buyersRoom;
   // Handed over only when the buyer's grant proves it (lib/paypal-handed.ts): this order's own, or, when the address
   // already held the product (a repeat purchase, a gift: the record keeps the first grant), this order standing behind
   // it (the Claude 4 team's re-review of #2911), which proves the payment and the access but not this order's receipt. The pending mark is no proof:
@@ -1544,11 +1562,13 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
             </>
           ) : (
             <>
-              <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{allowed ? t.notices.invalid.title : t.tooManyTries}</h1>
+              <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{allowed ? t.notices.invalid.title : windowFull ? t.notices.resting.title : t.tooManyTries}</h1>
               <p className="st-muted mt-4">
                 {allowed
                   ? t.ppWrite(store.name)
-                  : t.waitFew}
+                  : windowFull
+                    ? t.notices.resting.body
+                    : t.waitFew}
               </p>
             </>
           )}

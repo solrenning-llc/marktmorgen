@@ -24,6 +24,7 @@ export async function redisPipeline(commands: (string | number)[][]): Promise<un
 export const normaliseHandle = (value: string) => value;
 export async function storeForHandle() { state.lookups += 1; return state.storeFound ? store : null; }
 export async function takePublicRequest() { state.publicCalls += 1; return state.publicAllowed; }
+export async function holdPublicRequests() { return state.publicAllowed; }
 export async function readListing() { state.listings += 1; return { id: "p1234", hidden: false, preview: 3, file: { pathname: "synthetic.pdf" } }; }
 export const MAX_PREVIEW_PAGES = 10;
 export async function previewCopy() { state.copies += 1; return { pathname: "synthetic-preview.pdf" }; }

@@ -47,6 +47,10 @@ const en = {
       title: "We could not check this order",
       body: "Nothing is lost. Try the link again in a moment.",
     },
+    resting: {
+      title: "This page is resting",
+      body: "This store has used the visits its plan includes for now, so this page is paused until the store's next period starts. Nothing is wrong with your order and nothing is lost: use the link in the email you were sent, or open this page again later.",
+    },
     slow: {
       title: "Give it a moment",
       body: "This page was opened many times in a few minutes, so it is paused for now. Nothing is wrong with your order and nothing is lost: open your link again in a few minutes, or use the link in the email you were sent.",
@@ -70,6 +74,8 @@ const en = {
   youBought: "You bought ",
   backTo: (store: string) => `Back to ${store}`,
   theAddressYouPaidWith: "the address you paid with",
+  /** Said where an amount would be printed when Stripe did not send one (lib/store-checkout.ts, readOrder): never "$0.00". */
+  amountUnknown: "the amount you paid",
 
   // ---- A package of calls --------------------------------------------------------------------------
   sessionsReady: (sessions: number) => `Your ${sessions} sessions are ready`,
@@ -264,6 +270,10 @@ const es: ThanksWords = {
       title: "No pudimos comprobar este pedido",
       body: "No se ha perdido nada. Vuelve a probar el enlace en un momento.",
     },
+    resting: {
+      title: "Esta página está en pausa",
+      body: "Esta tienda ha usado por ahora las visitas que incluye su plan, así que esta página está en pausa hasta que empiece el siguiente periodo de la tienda. Tu pedido está bien y no se ha perdido nada: usa el enlace del email que te enviaron o vuelve a abrir esta página más tarde.",
+    },
     slow: {
       title: "Espera un momento",
       body: "Esta página se abrió muchas veces en pocos minutos, así que está en pausa por ahora. Tu pedido está bien y no se ha perdido nada: vuelve a abrir tu enlace dentro de unos minutos o usa el enlace del email que te enviaron.",
@@ -286,6 +296,8 @@ const es: ThanksWords = {
   youBought: "Compraste ",
   backTo: (store) => `Volver a ${store}`,
   theAddressYouPaidWith: "la dirección con la que pagaste",
+  /** Said where an amount would be printed when Stripe did not send one (lib/store-checkout.ts, readOrder): never "$0.00". */
+  amountUnknown: "el importe que pagaste",
 
   sessionsReady: (sessions) => `Tus ${sessions} sesiones están listas`,
   packageBought: (sessions, store, price) =>
@@ -467,6 +479,10 @@ const fr: ThanksWords = {
       title: "Nous n'avons pas pu vérifier cette commande",
       body: "Rien n'est perdu. Réessayez le lien dans un instant.",
     },
+    resting: {
+      title: "Cette page est en pause",
+      body: `Cette boutique a utilisé pour l'instant les visites incluses dans son offre, cette page est donc en pause jusqu'au début de la prochaine période de la boutique. Votre commande n'a aucun problème et rien n'est perdu${S}: utilisez le lien de l'e-mail qui vous a été envoyé, ou rouvrez cette page plus tard.`,
+    },
     slow: {
       title: "Patientez un instant",
       body: `Cette page a été ouverte de nombreuses fois en quelques minutes, elle est donc en pause pour le moment. Votre commande n'a aucun problème et rien n'est perdu${S}: rouvrez votre lien dans quelques minutes, ou utilisez le lien de l'e-mail qui vous a été envoyé.`,
@@ -489,6 +505,8 @@ const fr: ThanksWords = {
   youBought: "Vous avez acheté ",
   backTo: (store) => `Retour à ${store}`,
   theAddressYouPaidWith: "l'adresse utilisée pour payer",
+  /** Said where an amount would be printed when Stripe did not send one (lib/store-checkout.ts, readOrder): never "$0.00". */
+  amountUnknown: "le montant que vous avez payé",
 
   sessionsReady: (sessions) => `Vos ${sessions}${S}séances sont prêtes`,
   packageBought: (sessions, store, price) =>
@@ -671,6 +689,10 @@ const de: ThanksWords = {
       title: "Wir konnten diese Bestellung nicht prüfen",
       body: "Nichts ist verloren. Versuchen Sie den Link gleich noch einmal.",
     },
+    resting: {
+      title: "Diese Seite pausiert",
+      body: "Dieser Shop hat die im Tarif enthaltenen Besuche vorerst aufgebraucht, daher pausiert diese Seite, bis der nächste Zeitraum des Shops beginnt. Mit Ihrer Bestellung ist alles in Ordnung und nichts ist verloren: Nutzen Sie den Link in der E-Mail, die Sie erhalten haben, oder öffnen Sie diese Seite später erneut.",
+    },
     slow: {
       title: "Einen Moment bitte",
       body: "Diese Seite wurde in wenigen Minuten sehr oft geöffnet und ist daher vorerst pausiert. Mit Ihrer Bestellung ist alles in Ordnung und nichts ist verloren: Öffnen Sie Ihren Link in ein paar Minuten erneut oder nutzen Sie den Link in der E-Mail, die Sie erhalten haben.",
@@ -693,6 +715,8 @@ const de: ThanksWords = {
   youBought: "Sie haben gekauft: ",
   backTo: (store) => `Zurück zu ${store}`,
   theAddressYouPaidWith: "die Adresse, mit der Sie bezahlt haben",
+  /** Said where an amount would be printed when Stripe did not send one (lib/store-checkout.ts, readOrder): never "$0.00". */
+  amountUnknown: "den Betrag, den Sie bezahlt haben",
 
   sessionsReady: (sessions) => `Ihre ${sessions} Termine sind bereit`,
   packageBought: (sessions, store, price) =>
@@ -875,6 +899,10 @@ const it: ThanksWords = {
       title: "Non siamo riusciti a verificare questo ordine",
       body: "Non si è perso nulla. Riprova il link tra un momento.",
     },
+    resting: {
+      title: "Questa pagina è in pausa",
+      body: "Questo negozio ha usato per ora le visite incluse nel suo piano, quindi questa pagina è in pausa fino all'inizio del prossimo periodo del negozio. Il tuo ordine va bene e non si è perso nulla: usa il link nell'email che hai ricevuto, oppure riapri questa pagina più tardi.",
+    },
     slow: {
       title: "Aspetta un momento",
       body: "Questa pagina è stata aperta molte volte in pochi minuti, quindi per ora è in pausa. Il tuo ordine va bene e non si è perso nulla: riapri il tuo link tra qualche minuto, oppure usa il link nell'email che hai ricevuto.",
@@ -897,6 +925,8 @@ const it: ThanksWords = {
   youBought: "Hai comprato ",
   backTo: (store) => `Torna a ${store}`,
   theAddressYouPaidWith: "l'indirizzo con cui hai pagato",
+  /** Said where an amount would be printed when Stripe did not send one (lib/store-checkout.ts, readOrder): never "$0.00". */
+  amountUnknown: "l'importo che hai pagato",
 
   sessionsReady: (sessions) => `Le tue ${sessions} sessioni sono pronte`,
   packageBought: (sessions, store, price) =>
@@ -1079,6 +1109,10 @@ const nl: ThanksWords = {
       title: "We konden deze bestelling niet controleren",
       body: "Er is niets verloren. Probeer de link zo meteen opnieuw.",
     },
+    resting: {
+      title: "Deze pagina rust even",
+      body: "Deze winkel heeft de bezoeken die bij het abonnement horen voorlopig opgebruikt, dus deze pagina staat op pauze tot de volgende periode van de winkel begint. Er is niets mis met je bestelling en niets verloren: gebruik de link in de e-mail die je kreeg, of open deze pagina later opnieuw.",
+    },
     slow: {
       title: "Even geduld",
       body: "Deze pagina is in een paar minuten heel vaak geopend en staat daarom even op pauze. Er is niets mis met je bestelling en niets verloren: open je link over een paar minuten opnieuw, of gebruik de link in de e-mail die je kreeg.",
@@ -1101,6 +1135,8 @@ const nl: ThanksWords = {
   youBought: "Je kocht ",
   backTo: (store) => `Terug naar ${store}`,
   theAddressYouPaidWith: "het adres waarmee je betaalde",
+  /** Said where an amount would be printed when Stripe did not send one (lib/store-checkout.ts, readOrder): never "$0.00". */
+  amountUnknown: "het bedrag dat je betaalde",
 
   sessionsReady: (sessions) => `Je ${sessions} sessies staan klaar`,
   packageBought: (sessions, store, price) =>
@@ -1283,6 +1319,10 @@ const pt: ThanksWords = {
       title: "Não conseguimos verificar esta encomenda",
       body: "Nada se perdeu. Tente a ligação novamente daqui a pouco.",
     },
+    resting: {
+      title: "Esta página está em pausa",
+      body: "Esta loja usou por agora as visitas incluídas no seu plano, por isso esta página está em pausa até começar o próximo período da loja. A sua encomenda está bem e nada se perdeu: use a ligação do email que recebeu, ou abra esta página novamente mais tarde.",
+    },
     slow: {
       title: "Aguarde um momento",
       body: "Esta página foi aberta muitas vezes em poucos minutos, por isso está em pausa por agora. A sua encomenda está bem e nada se perdeu: abra a sua ligação novamente daqui a alguns minutos, ou use a ligação do email que recebeu.",
@@ -1305,6 +1345,8 @@ const pt: ThanksWords = {
   youBought: "Comprou ",
   backTo: (store) => `Voltar a ${store}`,
   theAddressYouPaidWith: "o endereço com que pagou",
+  /** Said where an amount would be printed when Stripe did not send one (lib/store-checkout.ts, readOrder): never "$0.00". */
+  amountUnknown: "aquilo que pagou",
 
   sessionsReady: (sessions) => `As suas ${sessions} sessões estão prontas`,
   packageBought: (sessions, store, price) =>

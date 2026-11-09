@@ -1,10 +1,11 @@
 /**
- * AUDIT PROOF (throwaway, 09/11/2026): readOrder turns an amount Stripe did
- * not send into 0 (lib/store-checkout.ts, `amount: ... : 0`), and the thanks
- * page then prints "for $0.00" and sends a purchase of value 0 to the
- * creator's ad platforms (CX-123 rule 24). And the "slow" notice promises a
- * few minutes when the refusal is the store's window, which lasts until the
- * window turns (VR 2). Each check states the DESIRED behaviour.
+ * readOrder turned an amount Stripe did not send into 0 (lib/store-checkout.ts), and the thanks page then printed "for
+ * $0.00" and sent a purchase of value 0 to the creator's ad platforms (CX-123 rule 24: unknown is never 0). It is now
+ * null, and the page names it in words and sends no purchase event with a value it does not know. The "slow" notice
+ * no longer stands for the store's window too (VR 2): that refusal is "resting", with no minutes promised.
+ *
+ * Changed from the audit's proof (rule 23): the last control (one "slow" state covered the connection's limit and the
+ * store's window) is now the desired shape, and the notice check reads the new "resting" notice as well as "slow".
  */
 import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -44,10 +45,16 @@ async function main(): Promise<void> {
   is("control: it is read as paid", order.state, "paid");
   is("DESIRED: its amount is unknown, never 0", order.state === "paid" ? order.amount : "n/a", null);
 
-  part("The 'slow' notice (thanks page) is shown for the store's window too");
+  part("The page does not print or send an amount it does not know");
   const page = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
-  is("control: the same 'slow' state covers the per-connection limit and the store's window (withinStore)", /allowed \? await readOrder\(store, sessionId\) : \{ state: "slow" \}/.test(page), true);
-  is("DESIRED: the notice does not promise 'a few minutes' for a refusal that can last until the window turns", /in a few minutes/.test(thanksWords("en").notices.slow.body), false);
+  is("every sentence with a price names an unknown one in words, never money(order.amount)", [/money\(order\.amount/.test(page), (page.match(/priceOf\(order\.amount, order\.currency\)/g) ?? []).length >= 8], [false, true]);
+  is("no purchase event is sent to the pixels with an unknown amount (five places)", (page.match(/order\.amount === null \? null : \{/g) ?? []).length + (page.match(/sessionId && order\.amount !== null/g) ?? []).length, 5);
+  is("an unknown amount is not 'payment received', and no one-click offer is made on it", [/\(order\.amount \?\? 0\) > 0 \? <PaymentReceived/.test(page), /eligible: \(order\.amount \?\? 0\) > 0/.test(page)], [true, true]);
+  is("each language has words for it", ["en", "es", "fr", "de", "it", "nl", "pt"].every((l) => thanksWords(l).amountUnknown.length > 3), true);
+
+  part("The 'slow' notice (thanks page) is for the connection; the store's window has its own");
+  is("the page asks through readOrderAdmitted, which tells the two refusals apart", /readOrderAdmitted\(store, sessionId/.test(page), true);
+  is("DESIRED: the notice does not promise 'a few minutes' for a refusal that can last until the window turns", /in a few minutes/.test(thanksWords("en").notices.resting.body), false);
   done();
 }
 

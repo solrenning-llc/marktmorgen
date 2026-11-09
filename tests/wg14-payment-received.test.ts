@@ -48,8 +48,8 @@ part("On the thanks page: only a payment Stripe confirmed, of an amount");
 const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
 const uses = thanks.match(/<PaymentReceived label=\{t\.paymentReceived\} \/>/g) ?? [];
 is("shown on the five paid views (main, package, pre-order, gift, group)", uses.length, 5);
-is("each of the four short views only for an amount, else the old words", (thanks.match(/\{order\.amount > 0 \? <PaymentReceived label=\{t\.paymentReceived\} \/> : <p className="st-price text-sm">\{t\.paid\}<\/p>\}/g) ?? []).length, 4);
-is("the main view never for a trial, a moved membership or a free order", thanks.includes("{!(order.product.recurring && (order.firstChargeAt > 0 || order.trialDays > 0)) && order.amount > 0 ? ("), true);
+is("each of the four short views only for an amount, else the old words", (thanks.match(/\{\(order\.amount \?\? 0\) > 0 \? <PaymentReceived label=\{t\.paymentReceived\} \/> : <p className="st-price text-sm">\{t\.paid\}<\/p>\}/g) ?? []).length, 4);
+is("the main view never for a trial, a moved membership or a free order", thanks.includes("{!(order.product.recurring && (order.firstChargeAt > 0 || order.trialDays > 0)) && (order.amount ?? 0) > 0 ? ("), true);
 is("never on the PayPal or waiting views (not confirmed by Stripe)", /paidWithPayPal\}<\/p>|waitingPayPal\}<\/p>/.test(thanks) && !/PaymentReceived[^\n]*(paidWithPayPal|waitingPayPal)/.test(thanks), true);
 
 part("In every buyer language");

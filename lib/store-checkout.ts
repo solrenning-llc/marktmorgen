@@ -77,6 +77,11 @@ export const DOWNLOAD_WINDOW_SECONDS = 3 * 24 * 60 * 60;
 
 const SESSION_ID_PATTERN = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 
+/** Whether `id` has the form of a Checkout Session id: anything else is not an order and needs no lookup. */
+export function isSessionId(id: unknown): id is string {
+  return typeof id === "string" && SESSION_ID_PATTERN.test(id);
+}
+
 /** The name printed at the top of Stripe's page (Stripe API 2025-09-30.clover and later). */
 const DISPLAY_NAME = "branding_settings[display_name]";
 
@@ -853,7 +858,8 @@ export type Order =
       /** What to hand over: the option's if there was one, else the product's. */
       file: ProductFile | null;
       link: string | null;
-      amount: number;
+      /** What Stripe says was paid, in the currency's smallest unit; null when Stripe did not say (unknown, never 0). */
+      amount: number | null;
       /** The address the buyer paid with, so the link can be sent again. */
       email: string | null;
       /** How long this download still has, in seconds. */
@@ -1102,7 +1108,8 @@ export async function readOrder(
     option,
     file: option ? option.file : product.options.length > 0 ? null : product.file,
     link: option ? option.link : product.options.length > 0 ? null : product.link,
-    amount: typeof session.amount_total === "number" ? session.amount_total : 0,
+    // A total Stripe did not send is unknown: never 0, which the page would print as "$0.00" and send to the pixels.
+    amount: typeof session.amount_total === "number" && Number.isFinite(session.amount_total) && session.amount_total >= 0 ? session.amount_total : null,
     currency: typeof session.currency === "string" && session.currency ? session.currency : store.currency,
     reusable: reusableMethod(session),
     email,

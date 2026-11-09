@@ -64,6 +64,11 @@ const API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? ""
     : "https://api-m.paypal.com";
 const TIMEOUT_MS = 20_000;
 const ORDER_ID = /^[A-Z0-9]{10,36}$/;
+
+/** Whether `order` has the form of a PayPal order id: anything else is not an order and needs no lookup (lib/order-lookup.ts). */
+export function isPayPalOrderId(order: unknown): order is string {
+  return typeof order === "string" && ORDER_ID.test(order);
+}
 /** The refunded mark's score as this file writes it (ZADD with String(now)): whole seconds, nothing else. */
 const REDIS_SCORE = /^[1-9]\d{0,11}$/;
 /**

@@ -22,6 +22,7 @@
  * it, the products the numbers name (Claude 5's residual LEVE on #2835), end the page in its error once the reading
  * is spent: the numbers then wait, as when they could not be read, and no product is named gone for it.
  */
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { createElement, isValidElement, type ReactNode } from "react";
@@ -366,10 +367,16 @@ async function main(): Promise<void> {
   };
   const productTitles = (panels: Record<string, unknown>[]) =>
     panels.map((props) => (props.data as { products: { title: string }[] }).products.map((p) => p.title));
-  part("Update now, when a read the page waits for fails");
+  // Rule 23 (claude5/studio-shelf-honest): the shelf was the read this part failed to end the page in its error, and
+  // checked that the day's reading was not taken for it. A shelf that cannot be read no longer ends the page: it is said
+  // where the products go (tests/studio-shelf-honest.test.ts), so the page renders, and the reading, taken once for a
+  // page that renders, is shown. The order that kept a page ending in its error from spending it is unchanged (the
+  // reading still waits for the shelf, below); no read it waits for ends the page on a Redis failure any more.
+  part("Update now, when the shelf the page waits for fails");
   const failing = await freshPage("todayfreshfault@example.com", "shelf");
-  is("the page ends in its error (precondition)", failing.loaded, false);
-  is("the day's reading is not taken for it", failing.spent, 0);
+  is("the page no longer ends in its error for it", failing.loaded, true);
+  is("the day's reading is taken once, for a page that renders", failing.spent, 1);
+  is("the reading still waits for the shelf to answer", /const answered = [^;]*firstReads\.shelf\]\)\)/.test(readFileSync("app/studio/page.tsx", "utf8")), true);
   part("Update now, when every read answers");
   const healthy = await freshPage("todayfreshok@example.com", "none");
   is("the page loads", healthy.loaded, true);

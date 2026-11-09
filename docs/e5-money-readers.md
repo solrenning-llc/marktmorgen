@@ -116,6 +116,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/gifts.ts` | PAST-SALE | 198: the gift receipt in the session's currency | yes |
 | `lib/group-buy.ts` | PAST-SALE | 243: the group receipt in the session's currency | yes |
 | `lib/payment-recovery.ts` | PAST-SALE | 258: the failed-payment email in the invoice's currency | yes |
+| `lib/plan-refund-flow.ts` | PAST-SALE | 280: `ours.currency` is the found Stripe refund's own currency, not the store's (the text scan matches `s.currency` inside `ours.currency`); the plan refund letter says that refund's amount in it | yes: an unreadable refund currency is unknown, never the store's or none |
 | `lib/preorders.ts` | PAST-SALE | 253: the pre-order receipt in the session's currency | yes |
 | `lib/purchase-email.ts` | PAST-SALE | 230: the purchase email in the session's currency | yes |
 | `lib/sale-events.ts` | PAST-SALE | 71: sale notifications in the checkout's currency | yes |

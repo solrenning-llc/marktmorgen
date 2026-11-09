@@ -175,7 +175,8 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
       break;
     }
   }
-  if (!listDone) console.error("plan disputes: more than one run's pages; the oldest wait for the next run");
+  // No cursor is kept between runs, so the next run reads the same newest pages again: say so, never that it reaches the rest.
+  if (!listDone) console.error(`plan disputes: more than ${MAX_PAGES} pages in the last ${LOOKBACK_DAYS} days; every run reads the newest again, so the oldest are not read (not complete)`);
   // Still open, and no longer in the list: asked by id.
   const stale = [...seen].filter(([id, what]) => what.startsWith("open:") && !listed.has(id)).slice(0, MAX_REREADS);
   for (const [id, what] of stale) {

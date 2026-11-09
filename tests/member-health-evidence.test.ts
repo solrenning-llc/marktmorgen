@@ -20,15 +20,21 @@ const scoredMember = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 const page = (data: unknown, has_more: unknown = false) => ({ object: "list", data, has_more });
+// `replies` answer one status's reading in turn (`replyStatus`: active, or past_due for scoredMember's rows); the other
+// live statuses each read a confirmed empty page (audit A4: one live status at a time, never status=all).
 let replies: unknown[] = [];
 let paths: string[] = [];
+let activeReads = 0;
+let replyStatus = "active";
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if ((init?.method ?? "GET") !== "GET" || url.pathname !== "/v1/subscriptions") throw new Error("Unexpected provider operation");
   paths.push(url.pathname + url.search);
-  return new Response(JSON.stringify(replies[Math.min(paths.length - 1, replies.length - 1)]), { status: 200 });
+  if (url.searchParams.get("status") !== replyStatus) return new Response(JSON.stringify(page([])), { status: 200 });
+  activeReads += 1;
+  return new Response(JSON.stringify(replies[Math.min(activeReads - 1, replies.length - 1)]), { status: 200 });
 }) as typeof fetch;
-const reset = (values: unknown[]) => { redis.clear(); replies = values; paths = []; };
+const reset = (values: unknown[], status = "active") => { redis.clear(); replies = values; paths = []; activeReads = 0; replyStatus = status; };
 
 async function main() {
   process.env.STRIPE_SECRET_KEY = "sk_test_member_health_evidence_only";
@@ -68,37 +74,40 @@ async function main() {
     ["missing item quantity", scoredMember({ items: { data: [{ current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } })],
     ["null item quantity", scoredMember({ items: { data: [{ quantity: null, current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } })],
   ] as [string, unknown][]) {
-    reset([page([row])]);
+    reset([page([row])], "past_due");
     let refused = false;
     let health = null;
     try { health = await memberHealth(store, true, 1_800_000_000_000); } catch { refused = true; }
     is(name + ": one bad row does not hide every evidenced member", refused, false);
     is(name + ": the bad row is omitted and counted explicitly", health && [health.members.length, health.unscored, health.complete, health.counts, health.atRisk], [0, 1, true, { well: 0, slipping: 0, risk: 0 }, 0]);
   }
-  reset([page([scoredMember(), scoredMember({ id: "sub_partial", customer: null })])]);
+  reset([page([scoredMember(), scoredMember({ id: "sub_partial", customer: null })])], "past_due");
   const partial = await memberHealth(store, true, 1_800_000_000_000);
   is("good evidence stays usable beside one incomplete row", partial && [partial.members.length, partial.members[0]?.email, partial.unscored], [1, "member@example.com", 1]);
   const pageSource = readFileSync("app/studio/memberships/page.tsx", "utf8");
   is("the creator is told in plain language that omitted memberships make the numbers partial", /not counted here because Stripe did not send all their details\. The numbers above leave them out and are partial\./.test(pageSource), true);
-  reset([page([scoredMember()])]);
+  reset([page([scoredMember()])], "past_due");
   const scored = await memberHealth(store, true, 1_800_000_000_000);
   is("fully evidenced owned row stays complete", [scored?.complete, scored?.unscored, scored?.members.length, scored?.members[0]?.monthly, scored?.atRisk], [true, 0, 1, 2000, 2000]);
-  reset([page([scoredMember({ items: { data: [{ quantity: 3, current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } })])]);
+  reset([page([scoredMember({ items: { data: [{ quantity: 3, current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } })])], "past_due");
   const quantity = await memberHealth(store, true, 1_800_000_000_000);
   is("confirmed item quantity remains exact", [quantity?.members[0]?.monthly, quantity?.atRisk], [6000, 6000]);
   part("Copies from before partial evidence was counted are refreshed");
-  reset([page([scoredMember({ customer: null })])]);
+  reset([page([scoredMember({ customer: null })])], "past_due");
   await redis.pipeline([["SET", `nl:health:${store.statsId}`, JSON.stringify({
     at: 1_799_999_999, currency: "usd", members: [], counts: { well: 0, slipping: 0, risk: 0 }, atRisk: 0, complete: true,
   }), "EX", 600]]);
   const refreshed = await memberHealth(store, false, 1_800_000_000_000);
-  is("an old copy without the omitted-row count cannot hide a partial report", [paths.length, refreshed?.unscored], [1, 1]);
+  // Rule 23: 1 -> 3 reads; the source is read again once for each live status (active, trialing, past_due), audit A4.
+  is("an old copy without the omitted-row count cannot hide a partial report", [paths.length, refreshed?.unscored], [3, 1]);
   part("Confirmed empty, filtered and paginated controls");
   reset([page([])]);
   is("explicit empty list confirms absence", await runningMembers(store), { rows: [], complete: true });
   reset([page([member("sub_foreign", { metadata: { store: "another-store" } }), member("sub_untagged", { metadata: {} }), member("sub_canceled", { status: "canceled" }), member("sub_plan", { metadata: { store: store.handle, kind: "plan" } })])]);
   is("confirmed unrelated and inactive records are excluded", await runningMembers(store), { rows: [], complete: true });
-  reset([page([member("sub_first")], true), page([member("sub_second", { status: "past_due" })])]);
+  // Rule 23 (fixture, not the assertion): sub_second is active, as both pages are the active reading's; a past-due row is
+  // read in its own reading (tests/member-health-live-reads.test.ts).
+  reset([page([member("sub_first")], true), page([member("sub_second")])]);
   const complete = await runningMembers(store);
   is("two complete pages counted once", [complete.rows.map(r => r.id), complete.complete], [["sub_first", "sub_second"], true]);
   is("cursor follows the confirmed last record", new URL("https://example.com" + paths[1]).searchParams.get("starting_after"), "sub_first");
@@ -112,7 +121,8 @@ async function main() {
   }
   reset(Array.from({ length: 10 }, (_, n) => page([member("sub_page" + n)], true)));
   const capped = await runningMembers(store);
-  is("existing cap remains explicitly partial", [capped.rows.length, capped.complete, paths.length], [10, false, 10]);
+  // Rule 23: 10 -> 12 reads; the cap is per live status, so trialing and past_due are still read once each (audit A4).
+  is("existing cap remains explicitly partial", [capped.rows.length, capped.complete, paths.length], [10, false, 12]);
   is("existing page size unchanged", paths.every(p => new URL("https://example.com" + p).searchParams.get("limit") === "100"), true);
   done();
 }

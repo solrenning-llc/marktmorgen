@@ -53,8 +53,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 async function main(): Promise<void> {
-  process.env.STRIPE_SECRET_KEY = "sk_test_health_reads_only_a_stand_in";
-  process.env.RESEND_API_KEY = "re_test_health_reads_only_a_stand_in";
+  process.env.STRIPE_SECRET_KEY = "sk_test_health_only_a_stand_in";
+  process.env.RESEND_API_KEY = "re_test_health_only_a_stand_in";
   redis.clear();
   const errors: string[] = [];
   const originalError = console.error;
@@ -147,6 +147,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(error);
+  process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
   process.exit(1);
 });

@@ -22,9 +22,14 @@ import { lastSeenIn, readConfig } from "@/lib/community";
 import { normaliseEmail } from "@/lib/auth";
 import { type Band, type HealthFactor, bandOf, scoreOf } from "@/lib/member-health-rules";
 
+/** Pages of a hundred read for each live status. */
 const MAX_PAGES = 10;
 const CACHE_SECONDS = 10 * 60;
-const LIVE = new Set(["active", "trialing", "past_due"]);
+/**
+ * The states of a running membership, each read on its own (Stripe filters a list by one status): never status=all
+ * filtered here, where every ended membership takes a place in the pages and an older running member is never reached.
+ */
+const LIVE = ["active", "trialing", "past_due"] as const;
 const SUBSCRIPTION_STATES = new Set(["active", "trialing", "past_due", "canceled", "unpaid", "incomplete", "incomplete_expired", "paused"]);
 const cacheKey = (store: Store) => `nl:health:${store.statsId}`;
 
@@ -108,38 +113,54 @@ export function monthlyOf(amount: number, interval: string, count: number): numb
   return Math.round((amount * per) / Math.max(1, count));
 }
 
-/** The store's running memberships, as Stripe holds them, with the member's address. */
+/**
+ * The store's running memberships, as Stripe holds them, with the member's address: each live status read on its own,
+ * MAX_PAGES pages each. Not complete when a status had more than that; the rows read are still returned.
+ */
 export async function runningMembers(store: Store): Promise<{ rows: Raw[]; complete: boolean }> {
   const account = store.stripeAccountId;
   if (!account) return { rows: [], complete: true };
   const handles = saleHandles(store);
   const rows: Raw[] = [];
-  const seen = new Set<string>();
-  let after = "";
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const query = new URLSearchParams({ status: "all", limit: "100" });
-    query.append("expand[]", "data.customer");
-    if (after) query.set("starting_after", after);
-    const listed = await onAccount("GET", account, `/subscriptions?${query}`);
-    if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length > 100 ||
-        typeof listed.has_more !== "boolean" || (listed.has_more && listed.data.length === 0)) throw new Error("Membership list could not be confirmed");
-    const data = listed.data as Raw[];
-    // Validate the entire page, including records filtered out below, before counting.
-    for (const raw of data) {
-      if (!raw || typeof raw !== "object" || Array.isArray(raw) || typeof raw.id !== "string" || !/^sub_[A-Za-z0-9]+$/.test(raw.id) ||
-          seen.has(raw.id) || typeof raw.status !== "string" || !SUBSCRIPTION_STATES.has(raw.status) ||
-          !raw.metadata || typeof raw.metadata !== "object" || Array.isArray(raw.metadata) || Object.values(raw.metadata).some(value => typeof value !== "string")) throw new Error("Membership record could not be confirmed");
-      seen.add(raw.id);
+  const kept = new Set<string>();
+  let complete = true;
+  for (const status of LIVE) {
+    const seen = new Set<string>();
+    let after = "";
+    let listDone = false;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const query = new URLSearchParams({ status, limit: "100" });
+      query.append("expand[]", "data.customer");
+      if (after) query.set("starting_after", after);
+      const listed = await onAccount("GET", account, `/subscriptions?${query}`);
+      if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length > 100 ||
+          typeof listed.has_more !== "boolean" || (listed.has_more && listed.data.length === 0)) throw new Error("Membership list could not be confirmed");
+      const data = listed.data as Raw[];
+      // Validate the entire page, including records filtered out below, before counting.
+      for (const raw of data) {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw) || typeof raw.id !== "string" || !/^sub_[A-Za-z0-9]+$/.test(raw.id) ||
+            seen.has(raw.id) || typeof raw.status !== "string" || !SUBSCRIPTION_STATES.has(raw.status) ||
+            !raw.metadata || typeof raw.metadata !== "object" || Array.isArray(raw.metadata) || Object.values(raw.metadata).some(value => typeof value !== "string")) throw new Error("Membership record could not be confirmed");
+        seen.add(raw.id);
+      }
+      for (const raw of data) {
+        const meta = raw.metadata ?? {};
+        // Counted only in the reading of its own status, and once: one that moved between two readings is not counted twice.
+        if (raw.status !== status || kept.has(raw.id as string)) continue;
+        if (handles.has(meta.store ?? "") && meta.kind !== "plan") {
+          kept.add(raw.id as string);
+          rows.push(raw);
+        }
+      }
+      if (!listed.has_more) {
+        listDone = true;
+        break;
+      }
+      after = data[data.length - 1].id as string;
     }
-    for (const raw of data) {
-      const meta = raw.metadata ?? {};
-      if (handles.has(meta.store ?? "") && meta.kind !== "plan" && LIVE.has(String(raw.status))) rows.push(raw);
-    }
-    const last = data[data.length - 1];
-    if (!listed.has_more) return { rows, complete: true };
-    after = last.id as string;
+    if (!listDone) complete = false;
   }
-  return { rows, complete: false };
+  return { rows, complete };
 }
 
 /** Every evidenced running member with a score, plus the number omitted. */

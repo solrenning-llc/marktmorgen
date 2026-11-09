@@ -85,10 +85,17 @@ export function yearlyAskEmail(input: { storeName: string; title: string; monthl
 
 type Row = { sub: string; customer: string; email: string; product: Listing; choice: YearlyChoice };
 
-/** One store's monthly members the email fits, each written to once. */
-export async function askStore(store: Store, deadline: number, now = Date.now()): Promise<number> {
+/**
+ * One store's monthly members the email fits, each written to once. `read.complete` turns false when the store's running
+ * memberships did not fit one reading: those read still get theirs, and the cut is said, never taken as all.
+ */
+export async function askStore(store: Store, deadline: number, now = Date.now(), read?: { complete: boolean }): Promise<number> {
   if (!store.yearlyAsk.on || !store.stripeAccountId || !store.statsId || !store.listId) return 0;
-  const { rows } = await runningMembers(store);
+  const { rows, complete } = await runningMembers(store);
+  if (!complete) {
+    if (read) read.complete = false;
+    console.error("yearly offer: the store's running memberships did not fit one reading; the oldest were not read", store.handle);
+  }
   const nowSeconds = Math.floor(now / 1000);
   const ids = [...new Set(rows.map((r) => productOfSub(r as Parameters<typeof productOfSub>[0])).filter(Boolean))];
   if (!ids.length) return 0;
@@ -181,8 +188,9 @@ export async function yearlyAsksThisMonth(store: Store, now = Date.now()): Promi
 }
 
 /** The daily run: every store with it on, from where the last run stopped. */
-export async function sendYearlyAsks(deadline: number): Promise<{ stores: number; sent: number }> {
-  const counts = { stores: 0, sent: 0 };
+export async function sendYearlyAsks(deadline: number): Promise<{ stores: number; sent: number; incomplete: number }> {
+  // incomplete: stores whose running memberships did not fit one reading (lib/member-health.ts).
+  const counts = { stores: 0, sent: 0, incomplete: 0 };
   if (!isRedisConfigured() || !platformKey() || !isSenderConfigured()) return counts;
   const reply = offerReplies(await redisPipeline([["GET", CURSOR_KEY]]), 1);
   if (!reply) throw new UnknownReplyError("the yearly offer cursor");
@@ -203,11 +211,13 @@ export async function sendYearlyAsks(deadline: number): Promise<{ stores: number
       if (Date.now() >= deadline) break;
       if (store.yearlyAsk.on && sellsMemberships(store)) {
         counts.stores += 1;
+        const read = { complete: true };
         try {
-          counts.sent += await askStore(store, deadline);
+          counts.sent += await askStore(store, deadline, Date.now(), read);
         } catch (error) {
           console.error("reading a store's members for the yearly offer failed", store.handle, error);
         }
+        if (!read.complete) counts.incomplete += 1;
       }
       done += 1;
     }

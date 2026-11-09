@@ -50,10 +50,17 @@ export function nudgeEmail(input: { storeName: string; title: string; courseUrl:
   };
 }
 
-/** One store's members who stopped coming, each written to once per period. */
-export async function nudgeStore(store: Store, deadline: number, now = Date.now()): Promise<number> {
+/**
+ * One store's members who stopped coming, each written to once per period. `read.complete` turns false when the store's
+ * running memberships did not fit one reading: those read still get theirs, and the cut is said, never taken as all.
+ */
+export async function nudgeStore(store: Store, deadline: number, now = Date.now(), read?: { complete: boolean }): Promise<number> {
   if (!store.nudge.on || !store.stripeAccountId || !store.statsId || !store.listId) return 0;
-  const { rows } = await runningMembers(store);
+  const { rows, complete } = await runningMembers(store);
+  if (!complete) {
+    if (read) read.complete = false;
+    console.error("come-back emails: the store's running memberships did not fit one reading; the oldest were not read", store.handle);
+  }
   const members = (await scoreMembers(store, rows, now)).filter((m) => nudgeFits(m.score, m.factors) && m.periodEnd > 0);
   if (!members.length) return 0;
   // Only those who agreed to hear from the creator and have not left the list.
@@ -117,8 +124,9 @@ export async function nudgesThisMonth(store: Store, now = Date.now()): Promise<n
 }
 
 /** The daily run: every store with it on, from where the last run stopped. */
-export async function sendMemberNudges(deadline: number): Promise<{ stores: number; sent: number }> {
-  const counts = { stores: 0, sent: 0 };
+export async function sendMemberNudges(deadline: number): Promise<{ stores: number; sent: number; incomplete: number }> {
+  // incomplete: stores whose running memberships did not fit one reading (lib/member-health.ts).
+  const counts = { stores: 0, sent: 0, incomplete: 0 };
   if (!isRedisConfigured() || !platformKey() || !isSenderConfigured()) return counts;
   const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
   const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
@@ -135,11 +143,13 @@ export async function sendMemberNudges(deadline: number): Promise<{ stores: numb
       if (Date.now() >= deadline) break;
       if (store.nudge.on && sellsMemberships(store)) {
         counts.stores += 1;
+        const read = { complete: true };
         try {
-          counts.sent += await nudgeStore(store, deadline);
+          counts.sent += await nudgeStore(store, deadline, Date.now(), read);
         } catch (error) {
           console.error("reading a store's members for come-back emails failed", store.handle, error);
         }
+        if (!read.complete) counts.incomplete += 1;
       }
       done += 1;
     }

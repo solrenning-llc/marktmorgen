@@ -10,6 +10,8 @@ import { productPath } from "@/components/store-product";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { leadIdOf } from "@/lib/ad-consent";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -45,6 +47,14 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
   const status = read("status");
   if (!token && !leave && !status) redirect(`/@${store.handle}`);
 
+  // One of the store's requests, as its other pages take (lib/traffic.ts), before
+  // a token or a product is read: past them the page rests with the store
+  // (review of #3331, siblings of R20 finding 3). The way to take an address off
+  // the list, and what it says after (taken off, or the link no longer works), is
+  // a right kept past the public share: it counts on the share kept for what
+  // people already have ("buyer") and rests only when the whole window is used.
+  const removal = !token && (leave !== "" || status === "left" || status === "expired");
+  if (await isResting(store, Date.now(), removal ? "buyer" : "public")) return <StoreResting store={store} />;
   const grant = token && WAIT_TOKEN.test(token) ? await readWaitToken(token) : leave && WAIT_TOKEN.test(leave) ? await readWaitToken(leave) : null;
   const productId = grant?.p ?? read("product");
   const listed = productId ? await readListing(store, productId) : null;

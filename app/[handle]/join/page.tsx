@@ -8,6 +8,8 @@ import { JOIN_TOKEN, readJoinToken } from "@/lib/store-join";
 import { speech } from "@/lib/buyer-words";
 import { joinWords } from "@/lib/buyer-words/join";
 import { leadIdOf } from "@/lib/ad-consent";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -38,6 +40,10 @@ export default async function JoinPage({ params, searchParams }: Params) {
   const token = read("token");
   const status = read("status");
   if (!token && !status) redirect(`/@${store.handle}`);
+  // One of the store's public requests, as its other pages take (lib/traffic.ts),
+  // before the link's token is read: past them the page rests with the store
+  // (review of #3331, siblings of R20 finding 3).
+  if (await isResting(store)) return <StoreResting store={store} />;
 
   const said = speech(store);
   const w = joinWords(store.language);

@@ -1,10 +1,11 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { API_SALES_READ } from "./plan-cost-registry";
-import { bundleItemUnits, collectionUnits } from "@/lib/page-read-rules";
+import { bundleItemUnits, collectionUnits, siteFormUnits } from "@/lib/page-read-rules";
+import { MAX_FORMS } from "@/lib/forms";
 import { MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { MAX_COLLECTION_PRODUCTS } from "@/lib/store-collections";
-import { bundleItemRead, collectionRead } from "./plan-cost-registry";
+import { bundleItemRead, collectionRead, siteFormRead } from "./plan-cost-registry";
 import { checkUnits, searchUnits, walkUnits } from "@/lib/community-read-rules";
 import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
 import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
@@ -243,6 +244,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   for (let products = 1; products <= MAX_COLLECTION_PRODUCTS; products += 1) assert.ok(collectionUnits(products) * laterPageCost() >= collectionRead(products), `collection of ${products}`);
   // The items its bundles hold (Codex G2 on #2583): every product and every one its checkout boxes offer may be a bundle of MAX_BUNDLE_ITEMS.
   for (let items = 1; items <= MAX_COLLECTION_PRODUCTS * (1 + MAX_BUMPS) * MAX_BUNDLE_ITEMS; items += 1) assert.ok(bundleItemUnits(items) * laterPageCost() >= bundleItemRead(items), `${items} bundle items`);
+  // The forms a store's own page asks (review of #3331): every one the store may have, each read whole.
+  for (let forms = 1; forms <= MAX_FORMS; forms += 1) assert.ok(siteFormUnits(forms) * laterPageCost() >= siteFormRead(forms), `${forms} forms on a page`);
+  console.log(`a store's own page asking ${MAX_FORMS} forms: ${1 + siteFormUnits(MAX_FORMS)} requests with its page ($${siteFormRead(MAX_FORMS).toFixed(6)} past it)`);
   console.log(`a collection of 8 products: ${1 + collectionUnits(8)} requests with its page ($${collectionRead(8).toFixed(6)} past it), ${1 + collectionUnits(MAX_COLLECTION_PRODUCTS)} at the largest`);
   // A community search, its access checks and each step of the walk of its archive (lib/community-read-rules.ts,
   // 4 November 2026): at every size the requests taken cost more than what they read.

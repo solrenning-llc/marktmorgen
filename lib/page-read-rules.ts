@@ -38,3 +38,18 @@ export const BUNDLE_ITEMS_PER_UNIT = 16;
 export function bundleItemUnits(items: number): number {
   return Math.min(MAX_UNITS, whole(items / BUNDLE_ITEMS_PER_UNIT));
 }
+
+/**
+ * The forms a store's own page asks (app/[handle]/[slug], formsOf), per
+ * request: one read of each, a whole form with its fields, choices and
+ * results. A page may ask every form the store has (MAX_FORMS, lib/forms.ts),
+ * more than a later page's commands hold, so they are counted once its
+ * blocks say how many and paid for before the first is read (review of
+ * #3331, siblings of R20 finding 3).
+ */
+export const SITE_PAGE_FORMS_PER_UNIT = 8;
+
+/** The requests a store's own page takes for the forms it asks, beyond the one its drawing counts (isResting). */
+export function siteFormUnits(forms: number): number {
+  return Math.min(MAX_UNITS, whole(forms / SITE_PAGE_FORMS_PER_UNIT));
+}

@@ -29,6 +29,9 @@ import { FunnelBeacon } from "@/components/store-beacon";
 import { funnelMark } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
 import { funnelWords } from "@/lib/buyer-words/funnel";
+import { isResting, takePublicRequest } from "@/lib/traffic";
+import { siteFormUnits } from "@/lib/page-read-rules";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = {
   params: Promise<{ handle: string; slug: string }>;
@@ -41,14 +44,20 @@ type Params = {
  * blocks as a product's page, in the store's look, with the store's menu at
  * the top. A page with no blocks, or one kept back, is not there.
  */
-const load = cache(async (raw: string, slug: string): Promise<{ store: Store; page: SitePage; blocks: SalesPage } | null> => {
+const located = cache(async (raw: string, slug: string): Promise<{ store: Store; page: SitePage } | null> => {
   const decoded = decodeURIComponent(raw);
   if (!decoded.startsWith("@")) return null;
   const store = await storeForPage(normaliseHandle(decoded));
   const page = store?.sitePages.find((p) => p.slug === slug.toLowerCase()) ?? null;
   if (!store || !page || store.suspended) return null;
-  const blocks = livePage(await readPage(store.statsId, siteKey(page.id)).catch(() => ({ ...EMPTY_PAGE, blocks: [] })), saleClock());
-  return blocks.blocks.length ? { store, page, blocks } : null;
+  return { store, page };
+});
+
+const load = cache(async (raw: string, slug: string): Promise<{ store: Store; page: SitePage; blocks: SalesPage } | null> => {
+  const found = await located(raw, slug);
+  if (!found) return null;
+  const blocks = livePage(await readPage(found.store.statsId, siteKey(found.page.id)).catch(() => ({ ...EMPTY_PAGE, blocks: [] })), saleClock());
+  return blocks.blocks.length ? { ...found, blocks } : null;
 });
 
 export async function generateMetadata({ params }: Pick<Params, "params">): Promise<Metadata> {
@@ -73,12 +82,21 @@ export async function generateMetadata({ params }: Pick<Params, "params">): Prom
 export default async function StoreOwnPage({ params, searchParams }: Params) {
   const { handle, slug } = await params;
   const query = searchParams ? await searchParams : {};
+  const at = await located(handle, slug);
+  if (!at) notFound();
+  // The same rule the store page follows for the creator's own domain.
+  const reachedOn = (await headers()).get("x-nimbus-domain");
+  if (reachedOn && (at.store.domain?.name !== reachedOn || !canUseDomain(at.store))) redirect(`${SITE_URL}/@${at.store.handle}/${at.page.slug}`);
+  // One of the store's public requests, as the store page and a product's page
+  // take (lib/traffic.ts), before the page's blocks, product and forms are read:
+  // past them it rests with the store (review of #3331, siblings of R20 finding 3).
+  if (await isResting(at.store)) return <StoreResting store={at.store} />;
   const found = await load(handle, slug);
   if (!found) notFound();
   const { store, page, blocks } = found;
-  // The same rule the store page follows for the creator's own domain.
-  const reachedOn = (await headers()).get("x-nimbus-domain");
-  if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) redirect(`${SITE_URL}/@${store.handle}/${page.slug}`);
+  // The forms its blocks ask, one read each: paid for before the first is read (lib/page-read-rules.ts).
+  const askedForms = formIdsOf(blocks.blocks);
+  if (askedForms.length && !(await takePublicRequest(store, "public", undefined, siteFormUnits(askedForms.length)))) return <StoreResting store={store} />;
 
   const { w } = speech(store);
   const bw = blockWords(store.language);
@@ -156,6 +174,11 @@ export default async function StoreOwnPage({ params, searchParams }: Params) {
       </main>
     </div>
   );
+}
+
+/** How many forms a page's blocks ask, each once, as formsOf reads them: counted before any is read (siteFormUnits). */
+function formIdsOf(blocks: SalesPage["blocks"]): string[] {
+  return [...new Set(blocks.flatMap((block) => (block.kind === "form" && block.form ? [block.form] : [])))];
 }
 
 /** The forms a page's blocks ask, read once each. */

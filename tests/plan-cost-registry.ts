@@ -97,7 +97,7 @@ import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
 import { SEARCH_MESSAGES } from "@/lib/community-dm";
-import { MAX_FORMS } from "@/lib/forms";
+import { MAX_FIELDS, MAX_FORMS, MAX_OPTIONS, MAX_OUTCOMES } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
@@ -755,6 +755,13 @@ export function bundleItemRead(items: number): number {
   return items * (COMMAND + bodyWork(READ_LISTING_BYTES));
 }
 
+/** A whole form as kept (lib/form-store.ts): its fields with their choices, its results and the rest, as the store's room counts it (tests/store-data-registry.ts, "nl:forms:"). */
+export const READ_FORM_BYTES = MAX_FIELDS * (MAX_OPTIONS + 2) * 240 + MAX_OUTCOMES * 2 * 1_024 + 4 * 1_024;
+/** The forms a store's own page asks (app/[handle]/[slug], formsOf), past its drawing: one HGET of a whole form each (review of #3331). */
+export function siteFormRead(forms: number): number {
+  return forms * (COMMAND + bodyWork(READ_FORM_BYTES));
+}
+
 /**
  * Review ceilings for a community search and the walk of its archive, paid
  * for since 4 November 2026 (lib/community-read-rules.ts). What working
@@ -1125,6 +1132,12 @@ export const COST_LINES: CostLine[] = [
       // A collection's products paid before they are read, and a license check before it reads the product (4 November 2026).
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
+      // A store's own page: its drawing is one of them (isResting), and the forms its blocks ask are paid for before they are read (review of #3331).
+      { file: "lib/page-read-rules.ts", names: ["SITE_PAGE_FORMS_PER_UNIT", "siteFormUnits"] },
+      { file: "app/[handle]/[slug]/page.tsx", names: ["isResting(at.store)", "siteFormUnits(askedForms.length)"] },
+      // The sign-up box's and the wait list's own pages are one of them each, before a link's token or a product is read; the way off a wait list on the buyers' share.
+      { file: "app/[handle]/join/page.tsx", names: ["isResting(store)"] },
+      { file: "app/[handle]/waitlist/page.tsx", names: ['isResting(store, Date.now(), removal ? "buyer" : "public")'] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },

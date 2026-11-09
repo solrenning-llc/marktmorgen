@@ -1541,6 +1541,7 @@
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
     "components/saved-sections.tsx",
+    "components/screen-help.tsx",
     "components/sequence-import-box.tsx",
     "components/server-events-editor.tsx",
     "components/session-picker.tsx",

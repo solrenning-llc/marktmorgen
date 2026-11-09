@@ -58,7 +58,7 @@ is("no answers outside the screens", [screenAnswers("/studio/nothing-here"), scr
 
 part("The panel");
 const html = panel("/studio/funnels", "/studio/checkup?store=s1");
-is("a native disclosure, closed until it is asked for", [/^<details[ >]/.test(html), /<details[^>]*\sopen/.test(html)], [true, false]);
+is("a native disclosure, closed until it is asked for", [/^<details[ >]/.test(html), /<details\b[^>]*?\sopen(=""|\s|>)/.test(html)], [true, false]);
 is("its button says what it is", /<summary[^>]*>.*Help for this screen.*<\/summary>/.test(html), true);
 is(
   "each answer of the screen is a link that says its question, to its place in the help center, in a new tab that is said",

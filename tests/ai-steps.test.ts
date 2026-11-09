@@ -28,7 +28,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 // The same module lib/ai.ts reads as @/lib/ai-spend (tests/aliases/ai-steps.test.ts.json), so its count is the reservations made.
-import { reservations as spent } from "./ai-steps-spend-stub";
+import { refuse, reservations as spent } from "./ai-steps-spend-stub";
 
 type Step = { step: string; state: string };
 type Steps = { run: string; onStep: (step: "read" | "write", state: "started" | "done") => void };
@@ -57,11 +57,14 @@ const DRAFT = {
 /** What the stand-in model is asked, and what it does when each call arrives. */
 let calls = 0;
 let onCall: (n: number) => void = () => {};
-globalThis.fetch = (async (input: string | URL | Request) => {
+/** What the reading answers: its facts, unless a check gives it another valid answer. */
+let readingSays = JSON.stringify(FACTS);
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   if (new URL(String(input)).hostname !== "api.anthropic.com") return new Response("{}", { status: 404 });
   calls += 1;
   onCall(calls);
-  const text = calls === 1 ? JSON.stringify(FACTS) : JSON.stringify(DRAFT);
+  // The reading is the call that carries the PDF; any other is the writing.
+  const text = String(init?.body ?? "").includes('"type":"document"') ? readingSays : JSON.stringify(DRAFT);
   return new Response(JSON.stringify({ content: [{ type: "text", text }] }));
 }) as typeof fetch;
 
@@ -96,6 +99,10 @@ async function main(): Promise<void> {
     spentBefore = spent.count;
     calls = 0;
     onCall = () => {};
+    readingSays = JSON.stringify(FACTS);
+    refuse.at = 0;
+    // Each check starts from a month with nothing used, so a plan's allowance never runs out midway.
+    redis.run(["DEL", monthKey]);
     sent.length = 0;
     unknownFor = null;
   };
@@ -174,6 +181,57 @@ async function main(): Promise<void> {
   const unconfirmed = await writePage(store, input, Date.now(), stepsOf("runbackunknown01", []));
   is("it is said as not confirmed, never as a number", unconfirmed, { ok: false, reason: "stopped", returned: null, left: null });
   is("one give-back sent, no retry", giveBacks(monthKey).length, 1);
+
+  part("A reading with nothing in it, and nothing else said: the writing step never starts");
+  fresh();
+  seen = [];
+  before = await ai.aiLeft(store);
+  readingSays = JSON.stringify({ parts: [], format: "", for: "" });
+  const empty = await writePage(store, input, Date.now(), stepsOf("runemptyfacts001", seen));
+  is("only the reading is sent", calls, 1);
+  is("the reading stays counted; the page's job is given back", before - (await ai.aiLeft(store)), READ_PDF_JOBS);
+  is("given back once, read in its exact shape", giveBacks(monthKey).map((c) => c[2]), [1]);
+  is("it says the writing step did not run, what came back and what is left", empty, { ok: false, reason: "failed", returned: 1, left: before - READ_PDF_JOBS });
+  is("the writing step never said it started", seen, [
+    { step: "read", state: "started" },
+    { step: "read", state: "done" },
+  ]);
+
+  part("The same, asked for without steps");
+  fresh();
+  before = await ai.aiLeft(store);
+  readingSays = JSON.stringify({ parts: [], format: "", for: "" });
+  const plainEmpty = await writePage(store, input, Date.now());
+  is("the page's job is given back there too", [calls, before - (await ai.aiLeft(store)), plainEmpty.ok], [1, READ_PDF_JOBS, false]);
+
+  part("The same, with the give-back's reply unknown");
+  fresh();
+  readingSays = JSON.stringify({ parts: [], format: "", for: "" });
+  unknownFor = (c) => c[0] === "DECRBY" && c[1] === monthKey;
+  const emptyUnsure = await writePage(store, input, Date.now(), stepsOf("runemptyunsure01", []));
+  is("said as not confirmed, never as a number", emptyUnsure, { ok: false, reason: "failed", returned: null, left: null });
+  is("one give-back sent, no retry", giveBacks(monthKey).length, 1);
+
+  part("The writing step's money refused: it never reaches the model");
+  fresh();
+  seen = [];
+  before = await ai.aiLeft(store);
+  refuse.at = spent.count + 2;
+  const refused = await writePage(store, input, Date.now(), stepsOf("runwriterefused1", seen));
+  is("only the reading is sent", calls, 1);
+  is("the writing step's job is given back", [before - (await ai.aiLeft(store)), refused], [READ_PDF_JOBS, { ok: false, reason: "failed", returned: 1, left: before - READ_PDF_JOBS }]);
+  is("the writing step never says it is done", seen.some((s) => s.step === "write" && s.state === "done"), false);
+
+  part("The reading's money refused, with the creator's own words to write from");
+  fresh();
+  seen = [];
+  before = await ai.aiLeft(store);
+  refuse.at = spent.count + 1;
+  const unread = await writePage(store, { ...input, notes: "Forty dinners for busy parents." }, Date.now(), stepsOf("runreadrefused01", seen));
+  is("the page is still written, from the creator's words", [unread.ok ? unread.value.headline : unread.reason, calls], [DRAFT.headline, 1]);
+  is("the reading, never sent, is not charged: its jobs are given back", [before - (await ai.aiLeft(store)), giveBacks(monthKey).map((c) => c[2])], [1, [READ_PDF_JOBS]]);
+  is("what is left is said after the give-back", unread.ok ? unread.left : null, before - 1);
+  is("the reading never says it is done", seen.some((s) => s.step === "read" && s.state === "done"), false);
 
   part("A run that is not one takes nothing");
   fresh();

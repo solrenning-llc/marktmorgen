@@ -51,7 +51,8 @@ export const AI_STEP_EXTRA_BYTES = 1_536;
 export type AiStepLine =
   | { step: AiStepId; state: AiStepState }
   | { done: true; ok: true; value: unknown; left: number }
-  | { done: true; ok: false; error: "stopped"; returned: number | null; left: number | null }
+  // A step that never reached the model, given back: "stopped" when the creator asked, "failed" otherwise.
+  | { done: true; ok: false; error: "stopped" | "failed"; returned: number | null; left: number | null }
   | { done: true; ok: false; error: string };
 
 const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -79,10 +80,10 @@ export function readStepLine(text: string): AiStepLine | "pad" | null {
   if (keys === "done,left,ok,value" && line.ok === true && count(line.left) && line.value !== undefined && line.value !== null) {
     return { done: true, ok: true, value: line.value, left: line.left as number };
   }
-  if (keys === "done,error,left,ok,returned" && line.ok === false && line.error === "stopped") {
-    const known = count(line.returned) && count(line.left);
+  if (keys === "done,error,left,ok,returned" && line.ok === false && (line.error === "stopped" || line.error === "failed")) {
+    const known = count(line.returned) && (line.returned as number) > 0 && count(line.left);
     const unknown = line.returned === null && line.left === null;
-    return known || unknown ? { done: true, ok: false, error: "stopped", returned: line.returned as number | null, left: line.left as number | null } : null;
+    return known || unknown ? { done: true, ok: false, error: line.error, returned: line.returned as number | null, left: line.left as number | null } : null;
   }
   if (keys === "done,error,ok" && line.ok === false && typeof line.error === "string" && line.error && line.error !== "stopped") {
     return { done: true, ok: false, error: line.error };

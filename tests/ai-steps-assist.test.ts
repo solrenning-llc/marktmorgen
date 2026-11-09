@@ -33,6 +33,8 @@ function main(): void {
   is("a draft", readStepLine('{"done":true,"ok":true,"value":{"a":1},"left":3}'), { done: true, ok: true, value: { a: 1 }, left: 3 });
   is("a stop with what came back", readStepLine('{"done":true,"ok":false,"error":"stopped","returned":1,"left":2}'), { done: true, ok: false, error: "stopped", returned: 1, left: 2 });
   is("a stop not confirmed", readStepLine('{"done":true,"ok":false,"error":"stopped","returned":null,"left":null}'), { done: true, ok: false, error: "stopped", returned: null, left: null });
+  is("a step not run, given back, though nobody asked to stop", readStepLine('{"done":true,"ok":false,"error":"failed","returned":1,"left":2}'), { done: true, ok: false, error: "failed", returned: 1, left: 2 });
+  is("nothing given back is not a give-back", readStepLine('{"done":true,"ok":false,"error":"failed","returned":0,"left":2}'), null);
   is("padding is skipped", readStepLine(`{"pad":"${" ".repeat(20)}"}`), "pad");
   for (const bad of ["", "not json", '{"step":"cook","state":"started"}', '{"step":"read","state":"maybe"}', '{"done":true,"ok":true,"left":-1,"value":1}', '{"done":true,"ok":false,"error":"stopped","returned":"1","left":2}', "[1]"]) {
     is(`an unknown line is never taken for a step or a result: ${bad || "(empty)"}`, readStepLine(bad), null);

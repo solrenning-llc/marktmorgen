@@ -4,7 +4,7 @@ import { allowanceWindow, windowId } from "@/lib/allowance-window";
 import { BUYER_LENSES, type BuyerLens, PREDICTS } from "@/lib/page-coach";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { reserveFundedExposure } from '@/lib/exposure-budget';
-import { consumeAiCallBudget, hasAiCallBudget, noteAiDispatch, withAiCallBudget, type AiCallReport } from '@/lib/ai-call-budget';
+import { aiDispatchCount, consumeAiCallBudget, hasAiCallBudget, noteAiDispatch, withAiCallBudget, type AiCallReport } from '@/lib/ai-call-budget';
 import { AI_ENTITLEMENT_RULES } from '@/lib/ai-entitlement-rules';
 /**
  * The writing help in the studio (lib/ai-rules.ts), on the server: asking the
@@ -371,13 +371,19 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
   return countedRun(store, now, run, jobs) as Promise<AiResult<T>>;
 }
 
-/** A job told in named steps (lib/ai-steps.ts) that ended before its last step started. */
-export type AiStopped = { ok: false; reason: "stopped"; returned: number | null; left: number | null };
+/**
+ * A job told in named steps (lib/ai-steps.ts) that ended with a step that
+ * never reached the model: "stopped" when the creator asked, "failed"
+ * otherwise. `returned` is the jobs of those steps given back, and `left`
+ * the month's after it; both null when the give-back could not be confirmed.
+ */
+export type AiStopped = { ok: false; reason: "stopped" | "failed"; returned: number | null; left: number | null };
 
 /**
- * What a job told in steps leaves undone: the jobs of the steps that never
- * started, and whether the creator asked for the stop (false when the stop's
- * mark could not be read, which starts no further step either).
+ * What a job told in steps leaves undone: the jobs of the steps whose call
+ * never reached the model (stopped, nothing to write from, or its money
+ * refused), and whether the creator asked for the stop (false when the
+ * stop's mark could not be read, which starts no further step either).
  */
 type Unrun = { jobs: number; asked: boolean };
 
@@ -408,31 +414,34 @@ async function countedRun<T>(store: Store, now: number, run: () => Promise<T | n
   } catch (error) {
     console.error("a writing job failed", error);
   }
-  // Provider work may cost money even when the response is unusable: a
-  // started attempt stays counted. A job whose own budget saw no call reach
-  // the provider (its dollar reservation refused, or it stopped before one)
-  // is given back, once: its reply is read in its exact shape, and one that
-  // cannot be confirmed is logged, never retried (R32 finding 1).
-  if (value === null) {
-    if (calls.owned && calls.dispatched === 0) {
-      const back = repliesFor(await redisPipeline([["DECRBY", key, jobs]]).catch(() => null), 1);
-      if (!back || countOf(back[0]) === null) console.error("a writing job with no provider call could not be confirmed given back");
-      return { ok: false, reason: "failed" };
-    }
-    // A job told in steps that stopped before its last one: the steps sent
-    // stay counted; the jobs of those never started are given back, once,
-    // read in their exact shape, never retried, and an unknown answer is
-    // said as not confirmed, never as a number (758 [STN5]).
-    if (unrun && Number.isSafeInteger(unrun.jobs) && unrun.jobs > 0 && unrun.jobs < jobs) {
-      const back = repliesFor(await redisPipeline([["DECRBY", key, unrun.jobs]]).catch(() => null), 1);
-      const after = back ? countOf(back[0]) : null;
-      if (after === null) console.error("the jobs of steps not run could not be confirmed given back");
-      if (!unrun.asked) return { ok: false, reason: "failed" };
-      return after === null ? { ok: false, reason: "stopped", returned: null, left: null } : { ok: false, reason: "stopped", returned: unrun.jobs, left: Math.max(0, allowance - after) };
-    }
-    return { ok: false, reason: "failed" };
+  // A job whose own budget saw no call reach the provider is given back
+  // whole, once: its reply is read in its exact shape, and one that cannot
+  // be confirmed is logged, never retried (R32 finding 1).
+  if (value === null && calls.owned && calls.dispatched === 0) {
+    const back = repliesFor(await redisPipeline([["DECRBY", key, jobs]]).catch(() => null), 1);
+    const after = back ? countOf(back[0]) : null;
+    if (after === null) console.error("a writing job with no provider call could not be confirmed given back");
+    if (!unrun) return { ok: false, reason: "failed" };
+    return settled(unrun.asked ? "stopped" : "failed", jobs, after);
   }
-  return { ok: true, value, left: Math.max(0, allowance - count) };
+  // Provider work may cost money even when the response is unusable: a
+  // started step stays counted. The jobs of steps whose call never reached
+  // the model are given back, once, read in their exact shape, never
+  // retried; an unknown answer is said as not confirmed, never as a number
+  // (758 [STN5]).
+  const give = unrun && Number.isSafeInteger(unrun.jobs) && unrun.jobs > 0 && unrun.jobs < jobs ? unrun.jobs : 0;
+  let after: number | null = null;
+  if (give > 0) {
+    const back = repliesFor(await redisPipeline([["DECRBY", key, give]]).catch(() => null), 1);
+    after = back ? countOf(back[0]) : null;
+    if (after === null) console.error("the jobs of steps not run could not be confirmed given back");
+  }
+  if (value === null) return give > 0 ? settled(unrun?.asked ? "stopped" : "failed", give, after) : { ok: false, reason: "failed" };
+  return { ok: true, value, left: Math.max(0, allowance - (give > 0 && after !== null ? after : count)) };
+
+  function settled(reason: "stopped" | "failed", returned: number, now: number | null): AiStopped {
+    return now === null ? { ok: false, reason, returned: null, left: null } : { ok: false, reason, returned, left: Math.max(0, allowance - now) };
+  }
 }
 
 const stopKey = (statsId: string, run: string) => `nl:ai:stop:${statsId}:${run}`;
@@ -1375,18 +1384,36 @@ export async function writePage(
   };
   const unrun: Unrun = { jobs: 0, asked: false };
   return countedRun(store, now, async () => {
+    // Whether a step's call reached the model is read from the job's own
+    // budget (noteAiDispatch): a step whose call never did is not charged,
+    // whatever the path that ended it (review of #3435, M1).
+    // A count that cannot be read is taken as sent: what may have been billed stays counted.
+    const sent = aiDispatchCount;
+    const reached = (before: number | null) => {
+      const now = sent();
+      return before === null || now === null || now > before;
+    };
     // What the product's own first pages hold, when the creator asked for them to be read.
-    if (pdf) say("read", "started");
-    const fileFacts = pdf ? await readPdfFacts(store, pdf) : null;
-    if (pdf) say("read", "done");
-    if (pdf && !fileFacts && !notes && !about && !summary) return null;
+    let fileFacts: string | null = null;
+    if (pdf) {
+      say("read", "started");
+      const before = sent();
+      fileFacts = await readPdfFacts(store, pdf);
+      if (reached(before)) say("read", "done");
+      else unrun.jobs += READ_PDF_JOBS;
+    }
+    // Nothing to write from: the writing step never starts, and its job is given back.
+    if (pdf && !fileFacts && !notes && !about && !summary) {
+      unrun.jobs += 1;
+      return null;
+    }
     // Between the two steps, a stop asked for is honored: the page is not
     // asked for, and its job is given back. A mark that cannot be read
     // starts nothing more either (rule 24).
     if (pdf && steps) {
       const asked = await stopAsked(store, steps.run);
       if (asked !== false) {
-        unrun.jobs = 1;
+        unrun.jobs += 1;
         unrun.asked = asked === true;
         return null;
       }
@@ -1426,7 +1453,13 @@ export async function writePage(
     ]
       .filter((l) => l !== "")
       .join("\n");
+    const writing = sent();
     const answer = await ask(store, system, prompt, 3_000);
+    // Its money refused or its call never sent: not charged, and never said done.
+    if (!reached(writing)) {
+      unrun.jobs += 1;
+      return null;
+    }
     say("write", "done");
     const json = answer ? jsonIn(answer) : null;
     if (!json) return null;

@@ -190,18 +190,26 @@ export function AiStepsAssist<T>({
       finish({ said: done });
       return;
     }
-    if (line.error === "stopped" && "returned" in line) {
-      setStates((now) => Object.fromEntries(steps.map((s) => [s.id, (now[s.id] ?? "waiting") === "waiting" ? "skipped" : now[s.id]])) as Partial<Record<AiStepId, StepView>>);
+    if ("returned" in line) {
+      // A step that never reached the model, given back: any step not done was not run and not charged.
+      setStates((now) => Object.fromEntries(steps.map((s) => [s.id, now[s.id] === "done" ? "done" : "skipped"])) as Partial<Record<AiStepId, StepView>>);
       setAnnounce("");
+      const stopped = line.error === "stopped";
       if (line.returned === null || line.left === null) {
         setAllowanceKnown(false);
-        finish({ said: "Stopped. Nothing was changed here. We could not confirm the writing jobs given back: reload to check your allowance." });
+        const words = "Nothing was changed here. We could not confirm the writing jobs given back: reload to check your allowance.";
+        finish(stopped ? { said: `Stopped. ${words}` } : { error: `The writing help could not finish just now. ${words}` });
         return;
       }
       setLeft(line.left);
       setAllowanceKnown(true);
       setReadOnce(true);
-      finish({ said: `Stopped. Nothing was changed here. The step that had started still counts; ${plural(line.returned)} given back, ${line.left} left this month.` });
+      const back = `${plural(line.returned)} given back, ${line.left} left this month.`;
+      finish(
+        stopped
+          ? { said: `Stopped. Nothing was changed here. The step that had started still counts; ${back}` }
+          : { error: `The writing help could not finish just now. Nothing was changed here. A step that ran still counts; a step that did not run is not charged: ${back} Try again in a moment.` },
+      );
       return;
     }
     const refused = REFUSED_BEFORE_START.has(line.error);

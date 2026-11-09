@@ -1119,8 +1119,12 @@ export const COST_LINES: CostLine[] = [
     id: "embed",
     feature: "Selling from any website (#518)",
     monthlyUsd: ALL_TIERS_SAME(0),
-    sources: [{ file: "lib/embed-open.ts", names: ["isResting", "recordVisit", "OPENS_PER_TEN_MINUTES"] }],
-    basis: "Page views load nothing from us; an open of a card counts as a visit and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
+    sources: [
+      { file: "lib/embed-open.ts", names: ["isResting", "OPENS_PER_TEN_MINUTES"] },
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon"] },
+      { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
+    ],
+    basis: "Page views load nothing from us; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
   },
   {
     id: "public-requests",

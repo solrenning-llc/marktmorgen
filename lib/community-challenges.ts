@@ -3,7 +3,14 @@
  * creator puts one on with a title, a few words, a first and a last day and
  * one task for every day ("Write 200 words"); members join and check in once
  * a day; each member sees their own check-ins and streak, and the creator
- * sees how many joined and checked in. No points: they are unit 2.
+ * sees how many joined and checked in.
+ *
+ * Points (unit 2): a challenge may give the community's own points
+ * (lib/community-points.ts, the same board, levels and rewards as a like)
+ * for each day's check-in, and once more for checking in on every one of its
+ * days. The creator sets both, from 0 (the default) up to
+ * MAX_CHALLENGE_DAY_POINTS and MAX_CHALLENGE_DONE_POINTS. Only the press that
+ * wrote the day's check-in gives them, so two presses at once give them once.
  *
  * A day runs midnight to midnight UTC, for everyone: a community has no time
  * zone of its own, and the pages say so with every date.
@@ -39,6 +46,7 @@ import { withLock } from "@/lib/redis-lock";
 import type { Store } from "@/lib/store";
 import { newItemId } from "@/lib/community";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { awardPoints } from "@/lib/community-points";
 import { dataBytes } from "@/lib/store-data-rules";
 import {
   CHALLENGE_DAY_MS,
@@ -55,6 +63,8 @@ import {
   MAX_CHALLENGE_ABOUT,
   MAX_CHALLENGE_AHEAD_DAYS,
   MAX_CHALLENGE_DAYS,
+  MAX_CHALLENGE_DAY_POINTS,
+  MAX_CHALLENGE_DONE_POINTS,
   MAX_CHALLENGE_TASK,
   MAX_CHALLENGE_TITLE,
   MAX_KEPT_CHALLENGES,
@@ -75,9 +85,13 @@ export type Challenge = {
   end: number;
   /** When it was made, in seconds. */
   at: number;
+  /** Community points for each day's check-in: 0 to MAX_CHALLENGE_DAY_POINTS. */
+  dayPoints: number;
+  /** Community points, once, for checking in on every day: 0 to MAX_CHALLENGE_DONE_POINTS. */
+  donePoints: number;
 };
 
-export type ChallengeInput = Pick<Challenge, "title" | "about" | "task" | "start" | "end">;
+export type ChallengeInput = Pick<Challenge, "title" | "about" | "task" | "start" | "end" | "dayPoints" | "donePoints">;
 
 const base = (id: string) => `nl:cm:${id}`;
 const indexKey = (id: string) => `${base(id)}:chs`;
@@ -137,7 +151,12 @@ function parseChallenge(raw: unknown): Challenge | null {
   const at = int(v.at);
   if (typeof v.id !== "string" || !ITEM_ID.test(v.id) || typeof v.title !== "string" || typeof v.task !== "string") return null;
   if (start === null || end === null || at === null || challengeWindowState(start, end, start) === "invalid") return null;
-  return { id: v.id, title: v.title, about: typeof v.about === "string" ? v.about : "", task: v.task, start, end, at };
+  // A record from before points (unit 2) holds neither: 0. One holding them out of shape does not read.
+  const points = (n: unknown, most: number) => (n === undefined ? 0 : typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= most ? n : null);
+  const dayPoints = points(v.dayPoints, MAX_CHALLENGE_DAY_POINTS);
+  const donePoints = points(v.donePoints, MAX_CHALLENGE_DONE_POINTS);
+  if (dayPoints === null || donePoints === null) return null;
+  return { id: v.id, title: v.title, about: typeof v.about === "string" ? v.about : "", task: v.task, start, end, at, dayPoints, donePoints };
 }
 
 /** A challenge record's reply: text or nothing; any other shape is unknown (rule 24), never "gone". */
@@ -203,7 +222,14 @@ export async function keptChallenges(id: string, now = Date.now()): Promise<Chal
 
 // ------------------------------------------------------------------ the creator's side
 
-export type InputProblem = "title" | "task" | "dates" | "too_long" | "past" | "too_far";
+export type InputProblem = "title" | "task" | "dates" | "too_long" | "past" | "too_far" | "points";
+
+/** A points field: empty is 0; otherwise a whole number from 0 to `most`, as a number or digits; anything else null. */
+function pointsField(raw: unknown, most: number): number | null {
+  if (raw === undefined || raw === null || raw === "") return 0;
+  const value = typeof raw === "number" ? raw : typeof raw === "string" && /^\d{1,4}$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
+  return Number.isSafeInteger(value) && value >= 0 && value <= most ? value : null;
+}
 
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -222,7 +248,9 @@ function utcDate(raw: unknown): number | null {
  * first and last day as `from` and `to` (YYYY-MM-DD, UTC). Words are cut to
  * their limits, never refused for length; dates that do not make a challenge
  * of 1 to MAX_CHALLENGE_DAYS days, still to come and within
- * MAX_CHALLENGE_AHEAD_DAYS, are refused with the reason.
+ * MAX_CHALLENGE_AHEAD_DAYS, are refused with the reason. `dayPoints` and
+ * `donePoints` are 0 when left empty, and refused ("points") outside 0 to
+ * their caps or when not whole numbers.
  */
 export function readChallengeInput(body: Record<string, unknown>, now = Date.now()): ChallengeInput | InputProblem {
   const title = cleanLine(body.title, MAX_CHALLENGE_TITLE);
@@ -237,7 +265,10 @@ export function readChallengeInput(body: Record<string, unknown>, now = Date.now
   if (end - start > MAX_CHALLENGE_DAYS * CHALLENGE_DAY_MS) return "too_long";
   if (end <= now) return "past";
   if (start > now + MAX_CHALLENGE_AHEAD_DAYS * CHALLENGE_DAY_MS) return "too_far";
-  return { title, about, task, start, end };
+  const dayPoints = pointsField(body.dayPoints, MAX_CHALLENGE_DAY_POINTS);
+  const donePoints = pointsField(body.donePoints, MAX_CHALLENGE_DONE_POINTS);
+  if (dayPoints === null || donePoints === null) return "points";
+  return { title, about, task, start, end, dayPoints, donePoints };
 }
 
 /**
@@ -358,6 +389,13 @@ export type CheckInResult = "checked" | "already" | "notyet" | "ended" | "gone";
  * a day: the day's field is written only when it is not there, so two
  * presses at once write it once and count it once. Never before the first
  * day or after the last.
+ *
+ * Points: only the press that wrote the day's field gives them, the day's
+ * points and, on the last day with every earlier day checked in, the
+ * challenge's bonus. Whether every earlier day was checked in is read before
+ * anything is written (only today's field can change meanwhile), exactly: a
+ * reply that cannot be read throws, with nothing written. A challenge a
+ * delete overtook gives none.
  */
 export async function checkIn(id: string, c: Challenge, member: string, room: DataStore, now = Date.now()): Promise<CheckInResult> {
   const state = challengeWindowState(c.start, c.end, now);
@@ -370,6 +408,7 @@ export async function checkIn(id: string, c: Challenge, member: string, room: Da
   const [done] = repliesFor(await redisPipeline([["HEXISTS", checkKey(id, c.id), field(member, day)]]), 1) ?? [undefined];
   if (done !== 0 && done !== 1) throw new UnknownReplyError("whether a member checked in");
   if (done === 1) return "already";
+  const bonus = c.donePoints > 0 && day === challengeDays(c) - 1 && (await everyEarlierDay(id, c, member, day)) ? c.donePoints : 0;
   await needData(room, [{ slot: slotOf(c.id), bytes: checkInBytes(member, day) }], now);
   const [added] = repliesFor(await redisPipeline([
     ["HSETNX", checkKey(id, c.id), field(member, day), "1"],
@@ -387,7 +426,33 @@ export async function checkIn(id: string, c: Challenge, member: string, room: Da
     ["EXPIREAT", countKey(id, c.id), expiresAt(c)],
   ]);
   if (await overtaken(id, c.id, room, now)) return "gone";
+  const points = c.dayPoints + bonus;
+  if (points > 0) {
+    // The check-in stands whatever happens to its points: a point write that
+    // cannot be read is never said given, and is not given again (the day's
+    // field is written), so a member may get fewer, never more.
+    await awardPoints(id, member, points, room, now).catch((error: unknown) => console.error("challenge points could not be confirmed", error));
+  }
   return "checked";
+}
+
+/** Whether a member checked in on every day before `day`, read exactly (rule 24). */
+async function everyEarlierDay(id: string, c: Challenge, member: string, day: number): Promise<boolean> {
+  if (day <= 0) return true;
+  const [got] = repliesFor(await redisPipeline([["HMGET", checkKey(id, c.id), ...Array.from({ length: day }, (_, d) => field(member, d))]]), 1) ?? [undefined];
+  if (!Array.isArray(got) || got.length !== day || got.some((x) => x !== null && x !== "1")) throw new UnknownReplyError("a member's earlier check-ins");
+  return got.every((x) => x === "1");
+}
+
+/**
+ * What a challenge gave a person for the days they checked in (0-based):
+ * the day's points for each, and its bonus when they did every day. Null
+ * for a record that does not read: unknown, never 0.
+ */
+export function challengePointsOf(c: Challenge | null, days: number[]): number | null {
+  if (!c) return null;
+  const every = days.length === challengeDays(c) && days.every((d, i) => d === i);
+  return days.length * c.dayPoints + (every ? c.donePoints : 0);
 }
 
 export type Progress = {
@@ -481,9 +546,9 @@ function daysDone(got: unknown): number[] {
  * their part, with no title and the days by number (Claude 6's review of
  * #3452, M1); a reply of an unknown shape throws, never leaves one out.
  */
-export async function challengesOf(id: string, who: string): Promise<{ challenge: string; title: string | null; joined: number; checkIns: string[] }[]> {
+export async function challengesOf(id: string, who: string): Promise<{ challenge: string; title: string | null; joined: number; checkIns: string[]; points: number | null }[]> {
   if (!isRedisConfigured()) return [];
-  const out: { challenge: string; title: string | null; joined: number; checkIns: string[] }[] = [];
+  const out: { challenge: string; title: string | null; joined: number; checkIns: string[]; points: number | null }[] = [];
   for (const ch of await keptIds(id, "-inf")) {
     const replies = repliesFor(await redisPipeline([
       ["GET", challengeKey(id, ch)],
@@ -501,6 +566,8 @@ export async function challengesOf(id: string, who: string): Promise<{ challenge
       title: c ? c.title : null,
       joined: joined === null ? 0 : Number(joined),
       checkIns: done.map((d) => (c ? dayDate(c.start, d) : `day ${d + 1}`)),
+      // What it gave them in community points; null when its record does not read (unknown, never 0).
+      points: challengePointsOf(c, done),
     });
   }
   return out;

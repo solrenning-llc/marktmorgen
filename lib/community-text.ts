@@ -119,6 +119,15 @@ export const MAX_CHALLENGE_TASK = 300;
 export const CHALLENGE_KEEP_DAYS = 30;
 /** Challenges a creator may make or delete in an hour: a person is nowhere near it. */
 export const CHALLENGE_WRITES_PER_HOUR = 30;
+/**
+ * The community points (lib/community-points.ts) a challenge may give: for
+ * one day's check-in, and once more for checking in on every one of its
+ * days. A like is one point; a day's check-in is worth at most ten likes, and
+ * a whole challenge done at most a hundred, so a challenge cannot swamp the
+ * board the likes make. Both 0 unless the creator sets them.
+ */
+export const MAX_CHALLENGE_DAY_POINTS = 10;
+export const MAX_CHALLENGE_DONE_POINTS = 100;
 
 /** Ids of spaces, posts and comments: short, random, and nothing else. */
 export const ITEM_ID = /^[0-9a-f]{12}$/;

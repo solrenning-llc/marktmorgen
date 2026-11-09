@@ -1344,6 +1344,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // Removing a like spends at most five commands after its buyer action is taken: EVAL, two ZSCOREs and two writes.
       { file: "lib/community-points.ts", names: ["REMOVE_POINT", "award"] },
+      // A challenge check-in that gives points (19 [E2] unit 2) spends, on top of unit 1's, one HMGET of the earlier
+      // days (last day only, when a bonus is set) and one charged write of three commands (awardPoints through
+      // lib/order-data.ts): a few commands, far under the hundred the heaviest action is priced at.
+      { file: "lib/community-challenges.ts", names: ["everyEarlierDay", "awardPoints(id, member, points, room, now)"] },
+      { file: "lib/community-points.ts", names: ["awardPoints", "MAX_AWARD_POINTS"] },
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR", "CHALLENGE_WRITES_PER_HOUR"] },
     ],

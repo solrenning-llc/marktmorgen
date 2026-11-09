@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   is("kept", [(await readChallenge(id, c.id))?.dayPoints, (await readChallenge(id, c.id))?.donePoints], [3, 20]);
   const key = `nl:cm:${id}:ch:${c.id}`;
   const record = JSON.parse(redis.run(["GET", key]) as string) as Record<string, unknown>;
-  const { dayPoints: _d, donePoints: _p, ...older } = record;
+  const older = Object.fromEntries(Object.entries(record).filter(([k]) => k !== "dayPoints" && k !== "donePoints"));
   redis.run(["SET", key, JSON.stringify(older)]);
   is("a record from before unit 2: 0 and 0", [(await readChallenge(id, c.id))?.dayPoints, (await readChallenge(id, c.id))?.donePoints], [0, 0]);
   redis.run(["SET", key, JSON.stringify({ ...record, dayPoints: 999 })]);

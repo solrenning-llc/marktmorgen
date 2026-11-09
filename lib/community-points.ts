@@ -29,6 +29,7 @@
  *   nl:cm:<id>:unl:<member>   when each reward reached this member (hash)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { LEVELS, MAX_LEVEL, MAX_REWARDS, type Reward, levelOf, parseRewards, toNextLevel } from "@/lib/community-levels";
 
@@ -98,6 +99,31 @@ export async function award(id: string, who: string, delta: 1 | -1, owner: DataO
   const [reply] = await redisPipeline([["EVAL", REMOVE_POINT, 2, allKey(id), day, who]]);
   if (!Array.isArray(reply) || reply.length !== 2 || reply.some((value) => value !== 0 && value !== 1)) {
     throw new Error("Community points could not be removed");
+  }
+}
+
+/** The most points one award may give: a challenge's day and its bonus (lib/community-text.ts). */
+export const MAX_AWARD_POINTS = 110;
+
+/**
+ * Gives a member several points at once, on the same boards as a like: a
+ * community challenge's check-in (lib/community-challenges.ts). Only a
+ * member's own key earns. The caller gives them once (the press that wrote
+ * the check-in); a reply that cannot be read throws, never reads as given
+ * (rule 24).
+ */
+export async function awardPoints(id: string, who: string, n: number, owner: DataOwner, now = Date.now()): Promise<void> {
+  if (!Number.isSafeInteger(n) || n < 1 || n > MAX_AWARD_POINTS) throw new Error(`Points must be a whole number from 1 to ${MAX_AWARD_POINTS}`);
+  if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return;
+  const day = dayKey(id, dayOf(now));
+  const replies = await orderWrite(owner, [
+    ["ZINCRBY", allKey(id), n, who],
+    ["ZINCRBY", day, n, who],
+    ["EXPIRE", day, DAYS_KEPT * 86_400],
+  ]);
+  const score = (raw: unknown) => (typeof raw === "string" || typeof raw === "number") && /^-?\d+(\.\d+)?$/.test(String(raw));
+  if (!Array.isArray(replies) || replies.length !== 3 || !score(replies[0]) || !score(replies[1]) || (replies[2] !== 0 && replies[2] !== 1)) {
+    throw new UnknownReplyError("community points given");
   }
 }
 

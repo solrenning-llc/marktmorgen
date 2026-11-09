@@ -839,7 +839,7 @@ function Levels({
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-levels-title">
       <h2 id="cm-levels-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Levels and rewards</h2>
       <p className="mt-2 text-ink-soft">
-        {`Every like a member's post or comment gets from somebody else is one point, and points make ${MAX_LEVEL} levels. Members see the leaderboard for 7 days, 30 days and all time, and exactly what each level opens. A level can hand over one of your courses, free: it opens for a member the day they reach it, and stays theirs.`}
+        {`Every like a member's post or comment gets from somebody else is one point, and the points a challenge gives for checking in count too (you set them on each challenge). Points make ${MAX_LEVEL} levels. Members see the leaderboard for 7 days, 30 days and all time, and exactly what each level opens. A level can hand over one of your courses, free: it opens for a member the day they reach it, and stays theirs.`}
       </p>
       {courses.length === 0 ? (
         <p className="mt-3 text-sm text-ink-soft">You have no course yet. Make one, and a level here can hand it over.</p>

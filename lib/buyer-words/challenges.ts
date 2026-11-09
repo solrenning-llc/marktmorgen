@@ -36,6 +36,8 @@ export type ChallengeWords = {
   host: string;
   counts: (joined: number, checkIns: number) => string;
   today: (n: number) => string;
+  /** What a check-in gives in community points, and checking in on every day; empty when nothing. */
+  pointsLine: (day: number, done: number) => string;
   notices: Record<ChallengeNotice, { text: string; tone: "ok" | "warn" }>;
 };
 
@@ -65,6 +67,7 @@ const en: ChallengeWords = {
   host: "You run this challenge, so you do not check in.",
   counts: (joined, checkIns) => `${joined} joined, ${checkIns} ${checkIns === 1 ? "check-in" : "check-ins"} in all.`,
   today: (n) => `${n} checked in today.`,
+  pointsLine: (day, done) => [day > 0 ? `Each check-in: ${day} ${day === 1 ? "point" : "points"}.` : "", done > 0 ? `Check in on every day: ${done} ${done === 1 ? "point" : "points"}${day > 0 ? " more" : ""}.` : ""].filter(Boolean).join(" "),
   notices: {
     joined: { text: "You joined. Come back each day to check in.", tone: "ok" },
     already: { text: "You had already joined.", tone: "ok" },
@@ -107,6 +110,7 @@ const es: ChallengeWords = {
   host: "Diriges este reto, así que no registras días.",
   counts: (joined, checkIns) => `${joined} unidos, ${checkIns} ${checkIns === 1 ? "registro" : "registros"} en total.`,
   today: (n) => `${n} registraron hoy.`,
+  pointsLine: (day, done) => [day > 0 ? `Cada registro: ${day} ${day === 1 ? "punto" : "puntos"}.` : "", done > 0 ? `Registra todos los días: ${done} ${done === 1 ? "punto" : "puntos"}${day > 0 ? " más" : ""}.` : ""].filter(Boolean).join(" "),
   notices: {
     joined: { text: "Te uniste. Vuelve cada día para registrarlo.", tone: "ok" },
     already: { text: "Ya te habías unido.", tone: "ok" },
@@ -149,6 +153,7 @@ const fr: ChallengeWords = {
   host: "Vous animez ce défi, vous ne pointez donc pas.",
   counts: (joined, checkIns) => `${joined} inscrits, ${checkIns} ${checkIns === 1 ? "pointage" : "pointages"} au total.`,
   today: (n) => `${n} ont pointé aujourd’hui.`,
+  pointsLine: (day, done) => [day > 0 ? `Chaque pointage: ${day} ${day === 1 ? "point" : "points"}.` : "", done > 0 ? `Pointez chaque jour: ${done} ${done === 1 ? "point" : "points"}${day > 0 ? " de plus" : ""}.` : ""].filter(Boolean).join(" "),
   notices: {
     joined: { text: "Vous avez rejoint le défi. Revenez chaque jour pour pointer.", tone: "ok" },
     already: { text: "Vous aviez déjà rejoint ce défi.", tone: "ok" },
@@ -191,6 +196,7 @@ const de: ChallengeWords = {
   host: "Sie leiten diese Challenge und checken daher nicht ein.",
   counts: (joined, checkIns) => `${joined} dabei, insgesamt ${checkIns} ${checkIns === 1 ? "Check-in" : "Check-ins"}.`,
   today: (n) => `${n} heute eingecheckt.`,
+  pointsLine: (day, done) => [day > 0 ? `Jeder Check-in: ${day} ${day === 1 ? "Punkt" : "Punkte"}.` : "", done > 0 ? `An jedem Tag einchecken: ${done} ${done === 1 ? "Punkt" : "Punkte"}${day > 0 ? " zusätzlich" : ""}.` : ""].filter(Boolean).join(" "),
   notices: {
     joined: { text: "Sie sind dabei. Kommen Sie jeden Tag zum Einchecken wieder.", tone: "ok" },
     already: { text: "Sie waren schon dabei.", tone: "ok" },
@@ -233,6 +239,7 @@ const it: ChallengeWords = {
   host: "Guidi questa sfida, quindi non fai il check-in.",
   counts: (joined, checkIns) => `${joined} partecipanti, ${checkIns} check-in in tutto.`,
   today: (n) => `${n} hanno fatto il check-in oggi.`,
+  pointsLine: (day, done) => [day > 0 ? `Ogni check-in: ${day} ${day === 1 ? "punto" : "punti"}.` : "", done > 0 ? `Fai il check-in ogni giorno: ${done} ${done === 1 ? "punto" : "punti"}${day > 0 ? " in più" : ""}.` : ""].filter(Boolean).join(" "),
   notices: {
     joined: { text: "Partecipi. Torna ogni giorno per il check-in.", tone: "ok" },
     already: { text: "Partecipavi già.", tone: "ok" },
@@ -275,6 +282,7 @@ const nl: ChallengeWords = {
   host: "Jij leidt deze uitdaging, dus je checkt niet in.",
   counts: (joined, checkIns) => `${joined} doen mee, ${checkIns} keer ingecheckt in totaal.`,
   today: (n) => `${n} vandaag ingecheckt.`,
+  pointsLine: (day, done) => [day > 0 ? `Elke check-in: ${day} ${day === 1 ? "punt" : "punten"}.` : "", done > 0 ? `Elke dag inchecken: ${done} ${done === 1 ? "punt" : "punten"}${day > 0 ? " extra" : ""}.` : ""].filter(Boolean).join(" "),
   notices: {
     joined: { text: "Je doet mee. Kom elke dag terug om in te checken.", tone: "ok" },
     already: { text: "Je deed al mee.", tone: "ok" },
@@ -317,6 +325,7 @@ const pt: ChallengeWords = {
   host: "Orienta este desafio, por isso não faz check-in.",
   counts: (joined, checkIns) => `${joined} participantes, ${checkIns} check-ins no total.`,
   today: (n) => `${n} fizeram o check-in hoje.`,
+  pointsLine: (day, done) => [day > 0 ? `Cada check-in: ${day} ${day === 1 ? "ponto" : "pontos"}.` : "", done > 0 ? `Faça o check-in todos os dias: ${done} ${done === 1 ? "ponto" : "pontos"}${day > 0 ? " a mais" : ""}.` : ""].filter(Boolean).join(" "),
   notices: {
     joined: { text: "Está a participar. Volte todos os dias para fazer o check-in.", tone: "ok" },
     already: { text: "Já estava a participar.", tone: "ok" },

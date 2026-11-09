@@ -63,6 +63,7 @@ export function ChallengeCard({
         <strong>{`${w.eachDay}: `}</strong>
         {c.task}
       </p>
+      {w.pointsLine(c.dayPoints, c.donePoints) ? <p className="mt-1 max-w-[70ch] text-sm">{w.pointsLine(c.dayPoints, c.donePoints)}</p> : null}
 
       {owner ? (
         <div className="mt-4 text-sm">

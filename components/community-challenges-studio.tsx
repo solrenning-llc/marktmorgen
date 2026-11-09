@@ -8,6 +8,8 @@ import {
   MAX_CHALLENGE_ABOUT,
   MAX_CHALLENGE_AHEAD_DAYS,
   MAX_CHALLENGE_DAYS,
+  MAX_CHALLENGE_DAY_POINTS,
+  MAX_CHALLENGE_DONE_POINTS,
   MAX_CHALLENGE_TASK,
   MAX_CHALLENGE_TITLE,
   MAX_KEPT_CHALLENGES,
@@ -38,6 +40,7 @@ const MESSAGES: Record<string, string> = {
   too_long: `A challenge can last up to ${MAX_CHALLENGE_DAYS} days.`,
   past: "Those days are already over. Pick days still to come.",
   too_far: `A challenge can start up to ${MAX_CHALLENGE_AHEAD_DAYS} days ahead.`,
+  points: `Points are whole numbers: 0 to ${MAX_CHALLENGE_DAY_POINTS} for each check-in, and 0 to ${MAX_CHALLENGE_DONE_POINTS} for checking in on every day.`,
   full: `You can have ${MAX_OPEN_CHALLENGES} challenges not yet over, and ${MAX_KEPT_CHALLENGES} kept in all. Delete one, or wait for one to end.`,
   busy: "Another challenge is being saved right now. Try again in a moment.",
   slow: "That is a lot of changes in an hour. Wait a little, then try again.",
@@ -79,13 +82,14 @@ const STATE_WORDS = { scheduled: "Coming up", active: "On now", ended: "Over" } 
 export function CommunityChallengesStudio({ challenges: read, canManage }: { challenges: StudioChallenge[] | null; canManage: boolean }) {
   const challenges = read ?? [];
   const router = useRouter();
-  const [draft, setDraft] = useState({ title: "", about: "", task: "", from: "", to: "" });
+  const [draft, setDraft] = useState({ title: "", about: "", task: "", from: "", to: "", dayPoints: "0", donePoints: "0" });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<{ where: string; text: string; field?: string } | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const taskRef = useRef<HTMLInputElement>(null);
   const fromRef = useRef<HTMLInputElement>(null);
+  const pointsRef = useRef<HTMLInputElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
   // Each challenge's Delete button, so the focus can go back to it.
   const deleteRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -114,14 +118,14 @@ export function CommunityChallengesStudio({ challenges: read, canManage }: { cha
     setBusy(null);
     if (!answer.ok) {
       const code = answer.error ?? "";
-      const field = code === "title" ? "title" : code === "task" ? "task" : ["dates", "too_long", "past", "too_far"].includes(code) ? "dates" : undefined;
+      const field = code === "title" ? "title" : code === "task" ? "task" : ["dates", "too_long", "past", "too_far"].includes(code) ? "dates" : code === "points" ? "points" : undefined;
       setError({ where: "new", text: MESSAGES[code] ?? MESSAGES.server_error, field });
       // The field the problem is in gets the focus, so a keyboard or screen reader user lands on it.
-      (field === "title" ? titleRef : field === "task" ? taskRef : field === "dates" ? fromRef : null)?.current?.focus();
+      (field === "title" ? titleRef : field === "task" ? taskRef : field === "dates" ? fromRef : field === "points" ? pointsRef : null)?.current?.focus();
       return;
     }
     toast("Challenge started. Members can join it now.");
-    setDraft({ title: "", about: "", task: "", from: "", to: "" });
+    setDraft({ title: "", about: "", task: "", from: "", to: "", dayPoints: "0", donePoints: "0" });
     router.refresh();
   }
 
@@ -207,6 +211,22 @@ export function CommunityChallengesStudio({ challenges: read, canManage }: { cha
               <label className="block">
                 <span className="text-sm font-semibold text-ink-soft">Last day (UTC)</span>
                 <input type="date" required value={draft.to} onChange={(e) => set({ to: e.target.value })} className="field mt-1" aria-invalid={wrong("dates") || undefined} />
+              </label>
+            </div>
+          </fieldset>
+          <fieldset aria-describedby={wrong("points") ? "ch-problem-new ch-points-help" : "ch-points-help"}>
+            <legend className="field-label">Community points (optional)</legend>
+            <p id="ch-points-help" className="mt-1 text-sm text-ink-soft">
+              {`They go on the same leaderboard and levels as likes. Leave 0 for none. Up to ${MAX_CHALLENGE_DAY_POINTS} for each check-in and ${MAX_CHALLENGE_DONE_POINTS} for checking in on every day.`}
+            </p>
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-semibold text-ink-soft">Points for each check-in</span>
+                <input ref={pointsRef} type="number" inputMode="numeric" min={0} max={MAX_CHALLENGE_DAY_POINTS} step={1} value={draft.dayPoints} onChange={(e) => set({ dayPoints: e.target.value })} className="field mt-1" aria-invalid={wrong("points") || undefined} />
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-ink-soft">Points for checking in on every day</span>
+                <input type="number" inputMode="numeric" min={0} max={MAX_CHALLENGE_DONE_POINTS} step={1} value={draft.donePoints} onChange={(e) => set({ donePoints: e.target.value })} className="field mt-1" aria-invalid={wrong("points") || undefined} />
               </label>
             </div>
           </fieldset>

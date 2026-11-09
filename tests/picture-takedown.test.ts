@@ -5,15 +5,21 @@
  * and throws, and the next press finishes it; a picture the creator replaced in the meantime, or a product the
  * creator published again, is left alone. lib/takedown.ts, lib/picture-withdraw.ts.
  *
+ * Claude 2's review of #3382 (9 November 2026): the old files are deleted only after the record names the copies, a
+ * record that cannot be read keeps every file (the originals and the copies) and throws, a press after an unconfirmed
+ * delete finishes without moving the picture twice, and an offer after paying never shows a picture taken from a
+ * product that is off the store (lib/upsell.ts, funnelView).
+ *
  * What this cannot show: copies a shared cache made before the takedown (see the PR). Synthetic data only.
  */
 import { NextRequest } from "next/server";
 import { GET as servePicture } from "@/app/api/image/[folder]/[file]/route";
-import { addProduct, claimHandle, ensureStatsId, imageFolder, setProductHidden, setProductImage, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, imageFolder, setProductFunnel, setProductHidden, setProductImage, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { readReport } from "@/lib/takedown-rules";
 import { type Report, sendOwedNotice, takeDown } from "@/lib/takedown";
 import { imageUrl, type ProductImage } from "@/lib/product-image";
+import { funnelView, newUpsellKey } from "@/lib/upsell";
 import { calls, faults, hooks, kept } from "./picture-takedown-world";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -21,8 +27,14 @@ import { done, is, part } from "./check";
 
 type Sent = { to: string[] | string; subject: string; text: string };
 const sent: Sent[] = [];
+/** How many of the next emails the email provider refuses. */
+let mailDown = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
+  if (url.hostname === "api.resend.com" && mailDown > 0) {
+    mailDown -= 1;
+    return new Response(JSON.stringify({ message: "refused" }), { status: 422 });
+  }
   if (url.hostname === "api.resend.com") {
     sent.push(JSON.parse(String(init?.body)) as Sent);
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
@@ -79,6 +91,7 @@ async function main(): Promise<void> {
   if (!(await claimHandle(OWNER, "pictureshop", "Picture shop", "")).ok) throw new Error("no store");
   await ensureStatsId(OWNER);
   await setSubscription(OWNER, { customerId: "cus_pictureshop1", subscriptionId: "sub_pictureshop1", active: true, tier: "creator", period: paidPeriod() });
+  await setStripeAccount(OWNER, "acct_1TestPictures", true);
   const read = readReport({
     kind: "copyright", url: `${ORIGIN}/@pictureshop`, work: "The cover art of my album, copied onto this product.", original: "https://example.com/album",
     name: "Rita Owner", email: "rita@example.com", contact: "+1 555 0100", signature: "Rita Owner", goodFaith: true, accurate: true,
@@ -111,22 +124,60 @@ async function main(): Promise<void> {
   is("pressing again does nothing", await press(report, plain.id), null);
   is("and moves nothing", calls.filter((c) => c.startsWith("copy ")).length, copiesBefore);
 
-  part("A delete the file store did not confirm: nothing is said to be withdrawn, and the next press finishes");
+  part("An old file's delete the file store did not confirm: the record already names the copies, nothing is lost");
   const stuck = await pictured("Poster set", 2);
   faults.del = 1;
   is("the press throws", await press(report, stuck.id), "threw");
   is("the product is off the store all the same", (await now(stuck.id)).listing.hidden, true);
-  is("its record still names the picture as it was", (await now(stuck.id)).listing.image?.path, stuck.image.path);
+  const half = (await now(stuck.id)).listing.image;
+  is("the record names the copies, served with the original bytes", [half?.path !== stuck.image.path, half?.small?.path !== stuck.image.small!.path, half ? (await fetchPicture(half.path))[2] : ""], [true, true, "ffd8ffe002010203"]);
+  is("the old files are still there: nothing is lost", [kept.has(stuck.image.path), kept.has(stuck.image.small!.path)], [true, true]);
   is("the creator is not told yet", sent.filter((m) => m.text.includes("Poster set")).length, 0);
-  // The delete landed after all, but the record was not written: the state an interrupted press can leave.
-  kept.delete(stuck.image.path);
-  kept.delete(stuck.image.small!.path);
+  const copiesStuck = calls.filter((c) => c.startsWith("copy ")).length;
   is("the next press finishes the takedown", await press(report, stuck.id), 'The product "Poster set", now unpublished');
   const finished = (await now(stuck.id)).listing.image;
-  is("the record names the new copies", [finished?.path !== stuck.image.path, finished?.small?.path !== stuck.image.small!.path], [true, true]);
-  is("which are served, with the original bytes", finished ? (await fetchPicture(finished.path)).slice(0, 1).concat((await fetchPicture(finished.path))[2]) : [], [200, "ffd8ffe002010203"]);
+  is("the picture is not moved a second time", [finished?.path === half?.path, finished?.small?.path === half?.small?.path, calls.filter((c) => c.startsWith("copy ")).length - copiesStuck], [true, true, 0]);
+  is("which is still served, with the original bytes", finished ? [(await fetchPicture(finished.path))[0], (await fetchPicture(finished.path))[2]] : [], [200, "ffd8ffe002010203"]);
   is("the old address answers not found", servedYear(await fetchPicture(stuck.image.path)), gone);
+  is("so does its smaller copy's", servedYear(await fetchPicture(stuck.image.small!.path)), gone);
   is("and the creator is told once", sent.filter((m) => m.text.includes("Poster set")).length, 1);
+
+  part("The product's record cannot be read while its picture moves: every file is kept, and the next press finishes");
+  const blind = await pictured("Brush pack", 7);
+  const catalogId = (await storeForEmail(OWNER))?.catalog.id;
+  if (!catalogId) throw new Error("the store keeps its products inline");
+  const recordKey = `nl:catalog:${catalogId}:l:${blind.id}`;
+  let held: unknown = null;
+  hooks.onCopy = async () => {
+    held = (await redis.pipeline([["GET", recordKey]]))[0];
+    await redis.pipeline([["SET", recordKey, "{not a record"]]);
+  };
+  const blindPress = await press(report, blind.id);
+  if (typeof held !== "string") throw new Error("the record was not held");
+  await redis.pipeline([["SET", recordKey, held]]);
+  is("the press throws", blindPress, "threw");
+  is("the product is off the store all the same", (await now(blind.id)).listing.hidden, true);
+  is("its record still names the picture as it was", (await now(blind.id)).listing.image?.path, blind.image.path);
+  is("the picture's files are all still there", [kept.has(blind.image.path), kept.has(blind.image.small!.path)], [true, true]);
+  is("which are still the original bytes", Buffer.from(kept.get(blind.image.path) ?? []).toString("hex"), "ffd8ffe007010203");
+  is("the creator is not told yet", sent.filter((m) => m.text.includes("Brush pack")).length, 0);
+  is("the next press finishes the takedown", await press(report, blind.id), 'The product "Brush pack", now unpublished');
+  const seen = (await now(blind.id)).listing.image;
+  is("the record names the copies, served with the original bytes", [seen?.path !== blind.image.path, seen ? (await fetchPicture(seen.path))[2] : ""], [true, "ffd8ffe007010203"]);
+  is("the old address answers not found", servedYear(await fetchPicture(blind.image.path)), gone);
+  is("and the creator is told once", sent.filter((m) => m.text.includes("Brush pack")).length, 1);
+
+  part("The email to the creator fails after the picture moved: sending it again moves nothing");
+  const unsent = await pictured("Pattern pack", 8);
+  mailDown = 1;
+  is("the press throws", await press(report, unsent.id), "threw");
+  const movedOnce = (await now(unsent.id)).listing.image;
+  is("the picture already moved", [movedOnce?.path !== unsent.image.path, kept.has(unsent.image.path)], [true, false]);
+  const copiesUnsent = calls.filter((c) => c.startsWith("copy ")).length;
+  const resent = await sendOwedNotice(report, (await now(unsent.id)).store, { type: "product", id: unsent.id }, ORIGIN);
+  is("the owed email goes out", resent !== null && resent !== "unconfirmed", true);
+  is("the picture is not moved a second time", [(await now(unsent.id)).listing.image?.path === movedOnce?.path, calls.filter((c) => c.startsWith("copy ")).length - copiesUnsent], [true, 0]);
+  is("which is still served, with the original bytes", movedOnce ? (await fetchPicture(movedOnce.path))[2] : "", "ffd8ffe008010203");
 
   part("A copy the file store did not confirm: the press throws and the record is untouched");
   const unsure = await pictured("Sticker sheet", 3);
@@ -160,6 +211,30 @@ async function main(): Promise<void> {
   is("its old address answers not found", servedYear(await fetchPicture(lost.image.path)), gone);
   const shown = await liveNames();
   is("nothing is copied for it", [...kept.keys()].filter((p) => p.startsWith(`images/${folder}/`) && !shown.has(p)), []);
+
+  part("An offer after paying whose picture comes from a product taken down: no picture is shown");
+  const cover = await pictured("Cover art", 9);
+  const sell = async (title: string) => {
+    const made = await addProduct(OWNER, title, "", "29", null);
+    if (!made.ok) throw new Error(`no product ${title}`);
+    await setProductLink(OWNER, made.product.id, `https://example.com/${made.product.id}`);
+    return made.product.id;
+  };
+  const front = await sell("Lettering course");
+  const target = await sell("Lettering workbook");
+  const funnel = await setProductFunnel(OWNER, front, { steps: [{ id: "cover1", productId: target, priceCents: 1900, headline: "", text: "", imageFrom: cover.id, yes: null, no: null }] });
+  is("the funnel is accepted, its picture from another product", funnel.ok, true);
+  const browser = newUpsellKey();
+  const offerImage = async (session: string) => {
+    const { store, listing } = await now(front);
+    const view = await funnelView({ store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
+    return [view.offer?.target.id ?? null, view.offer?.image?.path ?? null];
+  };
+  is("control: the offer shows that product's picture", await offerImage("cs_test_picturefunnel0001"), [target, cover.image.path]);
+  is("the picture's product is taken down", await press(report, cover.id), 'The product "Cover art", now unpublished');
+  const coverNow = (await now(cover.id)).listing.image;
+  is("its picture moved to a new name", coverNow !== null && coverNow.path !== cover.image.path, true);
+  is("the offer is still made, with no picture: the new name is not given out", await offerImage("cs_test_picturefunnel0002"), [target, null]);
 
   part("A product with no picture: taken down as before, nothing asked of the file store");
   const bare = await addProduct(OWNER, "Plain guide", "", "9", null);

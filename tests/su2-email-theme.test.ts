@@ -43,6 +43,9 @@ function walk(html: string): Walk {
   for (const m of html.matchAll(/<(\/?)([a-z0-9!]+)([^>]*)>|([^<]+)/gi)) {
     if (m[4] !== undefined) {
       const text = m[4].trim();
+      // Merge with main (#3030): main gave the email a <title> (the subject) in <head>. Nothing in <head> is drawn
+      // on the page, so its words have no color or background to measure; only the body's text is checked.
+      if (stack.some((frame) => frame.tag === "head")) continue;
       if (text) out.texts.push({ text, color: last("color"), bg: last("bg") });
       continue;
     }

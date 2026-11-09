@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import { StudioEmptyState } from "@/components/empty-state";
 import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { Icon } from "@/components/icons";
-import { type Store, storeForId } from "@/lib/store";
+import { type Store } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
@@ -41,12 +43,30 @@ export default async function LibraryPage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
   const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
-  const email = token ? await libraryOwner(token) : null;
+  // A link whose address could not be read is said so, never "expired" (CX-123 rule 24; Claude 5 on #2910).
+  const owner = token ? await libraryOwner(token).then((email) => ({ email }), () => null) : { email: null };
+  const email = owner?.email ?? null;
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
   const shelves: { store: Store; open: string | null; waiting: string }[] = [];
+  // What could not be read just now is said, never left out as if nothing were there (CX-123 rule 24): the list of
+  // stores itself, or each store whose record did not answer or answered out of shape, read exactly (lib/store-exact.ts;
+  // Codex J on #2910). A store confirmed gone is left out, as before.
+  let listUnread = false;
+  let storesUnread = 0;
   if (email) {
-    const stores = (await Promise.all((await storesBoughtFrom(email)).map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
+    const sids = await storesBoughtFrom(email).catch(() => null);
+    if (!sids) listUnread = true;
+    const read = await Promise.all(
+      (sids ?? []).map((sid) =>
+        storeForIdExactly(sid).then(
+          (store) => (store === "unknown" ? null : { store: store === "none" ? null : store }),
+          () => null,
+        ),
+      ),
+    );
+    storesUnread = read.filter((r) => r === null).length;
+    const stores = read.flatMap((r) => (r?.store ? [r.store] : []));
     // What waits on them at one store (lib/buyer-waiting.ts), shown only where its orders page opens to act on it, and read
     // only once that store's buyer requests paid for the read (LIBRARY_WAITING_UNITS; Codex J on #1969). Without them nothing
     // is read, and the card says it could not check, never that something waits. Payment requests are read only where they
@@ -92,6 +112,13 @@ export default async function LibraryPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">
                 What you bought from a store is here while that store is open on Marktmorgen. A store whose creator closes it takes what was bought from it along, so download the files you want to keep. <Link href="/terms#closing" className="underline underline-offset-4">How a store closes</Link>.
               </p>
+              {listUnread || storesUnread ? (
+                <p role="status" className="notice notice-error mt-6">
+                  {listUnread
+                    ? "The stores you bought from could not be read just now. Reload this page in a moment."
+                    : `${storesUnread} ${storesUnread === 1 ? "store" : "stores"} could not be read just now. Reload this page in a moment to see ${storesUnread === 1 ? "it" : "them"}.`}
+                </p>
+              ) : null}
               {shelves.length ? (
                 <ul className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {shelves.map(({ store, open, waiting }) => (
@@ -127,13 +154,17 @@ export default async function LibraryPage({ searchParams }: Params) {
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="mt-6 text-ink">Nothing is listed for this address any more.</p>
+              ) : listUnread || storesUnread ? null : (
+                <StudioEmptyState level={2} className="mt-6" title="No purchases listed" body="Nothing is listed for this address anymore. If you bought with another email address, ask for a link with that one." action={{ href: "/library", label: "Use another email address" }} />
               )}
             </>
           ) : (
             <div className="max-w-xl">
-              {token ? (
+              {!owner ? (
+                <p className="notice notice-error mb-6" role="alert">
+                  That link could not be read just now. Reload this page in a moment.
+                </p>
+              ) : token ? (
                 <p className="notice notice-error mb-6" role="alert">
                   That link has expired or was already replaced. Ask for a new one below.
                 </p>

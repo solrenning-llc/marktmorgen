@@ -91,6 +91,7 @@ import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetReviewsPerson } from "@/lib/reviews";
+import { dropReviewQuotes } from "@/lib/store-quotes";
 import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
@@ -192,8 +193,10 @@ export const ERASERS: Eraser[] = [
     module: "lib/reviews.ts",
     only: "person",
     run: async (s, files) => {
-      // Each photo goes into `files` before its review's delete is tried, so a run that throws still deletes it.
-      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files);
+      // Each photo goes into `files` before its review's delete is tried, so a run that throws still deletes it. Their
+      // name and words leave the store page's quotes before the reviews go and again after (lib/store-quotes.ts); when
+      // that fails, this part fails and the reviews are kept for the retry.
+      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files, (reviews) => dropReviewQuotes(s.store, reviews));
       return done.records;
     },
   },

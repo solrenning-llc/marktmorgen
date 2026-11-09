@@ -172,6 +172,8 @@ async function main(): Promise<void> {
   const product: Listing = (await readListing(store, added.product.id))!;
   const fresh = async () => (await storeForEmail("owner@example.com"))!;
   const listed = async () => (await redis.pipeline([["ZRANGEBYSCORE", handOverKey(statsId), "-inf", "+inf"]]))[0] as string[];
+  /** How many purchases the address holds here (HLEN: the stub keeps an empty hash a read touched, Redis keeps none). */
+  const purchasesOf = (buyer: string) => redis.run(["HLEN", importedKey(statsId, buyer)]);
   const sweep = async (hours = 1): Promise<void> => {
     ahead += hours * 3_600_000;
     await delivery.sweepPayPal(await fresh(), Date.now() + 10_000);
@@ -686,21 +688,21 @@ async function main(): Promise<void> {
   const l = await pay(19, buyerL);
   is("the return route's try: refused by Resend (422)", copies(buyerL).length, 1);
   is("the order is still owed its receipt", (await listed()).includes(l), true);
-  is("control: that try handed the purchase over and noted it in their library", [redis.run(["EXISTS", importedKey(statsId, buyerL)]), (await storesBoughtFrom(buyerL)).includes(store.sid)], [1, true]);
+  is("control: that try handed the purchase over and noted it in their library", [purchasesOf(buyerL), (await storesBoughtFrom(buyerL)).includes(store.sid)], [1, true]);
   const erasedL = await erasePerson(await fresh(), buyerL, { kind: "person" });
   is("the deletion completes", erasedL.ok, true);
-  is("control: the deletion took their purchase, library and notes", [redis.run(["EXISTS", importedKey(statsId, buyerL)]), (await storesBoughtFrom(buyerL)).includes(store.sid), redis.run(["EXISTS", notesOf(buyerL)])], [0, false, 0]);
+  is("control: the deletion took their purchase, library and notes", [purchasesOf(buyerL), (await storesBoughtFrom(buyerL)).includes(store.sid), redis.run(["EXISTS", notesOf(buyerL)])], [0, false, 0]);
   const afterErasure = snapshot();
   resendMode = "up";
   await sweep(6 / 60);
-  is("the next try does not hand the purchase over again", redis.run(["EXISTS", importedKey(statsId, buyerL)]), 0);
+  is("the next try does not hand the purchase over again", purchasesOf(buyerL), 0);
   is("nor note it in their library again", (await storesBoughtFrom(buyerL)).includes(store.sid), false);
   is("nor note anything for their deletion again", redis.run(["EXISTS", notesOf(buyerL)]), 0);
   is("no key it made or changed names them", naming(afterErasure, buyerL), []);
   is("nothing more was sent to them", copies(buyerL).length, 1);
   is("the order leaves the list", (await listed()).includes(l), false);
   await sweeps(3);
-  is("later sweeps write and send nothing of them", [redis.run(["EXISTS", importedKey(statsId, buyerL)]), naming(afterErasure, buyerL), copies(buyerL).length], [0, [], 1]);
+  is("later sweeps write and send nothing of them", [purchasesOf(buyerL), naming(afterErasure, buyerL), copies(buyerL).length], [0, [], 1]);
 
   part("L: control: a person deleted before they pay again is handed the new order on its next try");
   startOfNextDay();
@@ -711,11 +713,11 @@ async function main(): Promise<void> {
   resendMode = "422";
   const l2 = await pay(20, buyerL2);
   is("the return route's try: refused by Resend (422)", copies(buyerL2).length, 1);
-  is("and the purchase handed over", redis.run(["EXISTS", importedKey(statsId, buyerL2)]), 1);
+  is("and the purchase handed over", purchasesOf(buyerL2), 1);
   resendMode = "up";
   await sweep(6 / 60);
   is("the next try sends the receipt", copies(buyerL2).length, 2);
-  is("the purchase is still theirs", redis.run(["EXISTS", importedKey(statsId, buyerL2)]), 1);
+  is("the purchase is still theirs", purchasesOf(buyerL2), 1);
   is("and the order leaves the list", (await listed()).includes(l2), false);
 
   part("L: the deletion completes during a try, after its check: the receipt gone and its sender kept, the order leaves in that try");
@@ -766,22 +768,22 @@ async function main(): Promise<void> {
     const undo = after(isMark, () => [odd]);
     await sweep(6 / 60);
     undo();
-    is(`a mark read as ${JSON.stringify(odd) ?? "nothing"}: nothing of them handed over again`, redis.run(["EXISTS", importedKey(statsId, buyerL4)]), 0);
+    is(`a mark read as ${JSON.stringify(odd) ?? "nothing"}: nothing of them handed over again`, purchasesOf(buyerL4), 0);
     is("nothing sent", copies(buyerL4).length, 1);
     is("the order is still owed", (await listed()).includes(l4), true);
   }
   await sweep(6 / 60);
-  is("read exactly at the next sweep: nothing written, and the order leaves the list", [redis.run(["EXISTS", importedKey(statsId, buyerL4)]), (await listed()).includes(l4)], [0, false]);
+  is("read exactly at the next sweep: nothing written, and the order leaves the list", [purchasesOf(buyerL4), (await listed()).includes(l4)], [0, false]);
 
   part("M: P1 control: a deletion by the store's team keeps a purchase already handed over");
   startOfNextDay();
   resendMode = "up";
   const buyerM1 = "team-kept@example.com";
   const m1 = await pay(23, buyerM1);
-  is("handed over, its receipt sent", [redis.run(["EXISTS", importedKey(statsId, buyerM1)]), copies(buyerM1).length, (await listed()).includes(m1)], [1, 1, false]);
+  is("handed over, its receipt sent", [purchasesOf(buyerM1), copies(buyerM1).length, (await listed()).includes(m1)], [1, 1, false]);
   const teamM1 = await erasePerson(await fresh(), buyerM1, { kind: "team", who: "owner@example.com", role: "owner" });
   is("the team's deletion completes", teamM1.ok, true);
-  is("and keeps the purchase", redis.run(["EXISTS", importedKey(statsId, buyerM1)]), 1);
+  is("and keeps the purchase", purchasesOf(buyerM1), 1);
 
   /** Throws a synthetic Upstash failure on the first pipeline that writes a purchase, once. */
   const writesPurchase = (c: (string | number)[]) => c.some((arg) => String(arg).startsWith("nl:imp:buy:"));
@@ -803,12 +805,12 @@ async function main(): Promise<void> {
   const undoM2 = failOnce(writesPurchase);
   const m2 = await pay(24, buyerM2);
   undoM2();
-  is("control: the return route's try wrote no purchase and sent nothing", [redis.run(["EXISTS", importedKey(statsId, buyerM2)]), copies(buyerM2).length], [0, 0]);
+  is("control: the return route's try wrote no purchase and sent nothing", [purchasesOf(buyerM2), copies(buyerM2).length], [0, 0]);
   is("control: the order is still owed", (await listed()).includes(m2), true);
   const teamM2 = await erasePerson(await fresh(), buyerM2, { kind: "team", who: "owner@example.com", role: "owner" });
   is("the team's deletion completes", teamM2.ok, true);
   await sweep(11 / 60);
-  is("the next try hands the purchase over: they paid, and a team's deletion keeps purchases", redis.run(["EXISTS", importedKey(statsId, buyerM2)]), 1);
+  is("the next try hands the purchase over: they paid, and a team's deletion keeps purchases", purchasesOf(buyerM2), 1);
   is("no receipt is sent to an address the store deleted", copies(buyerM2).length, 0);
   is("and the order leaves the list", (await listed()).includes(m2), false);
 
@@ -839,11 +841,11 @@ async function main(): Promise<void> {
     const m3 = await paying;
     redis.pipeline = pipeline;
     is("nothing was sent to them", copies(buyerM3).length, 0);
-    is("the purchase that try wrote is taken back", redis.run(["EXISTS", importedKey(statsId, buyerM3)]), 0);
+    is("the purchase that try wrote is taken back", purchasesOf(buyerM3), 0);
     is("and so is the store in their library", (await storesBoughtFrom(buyerM3)).includes(store.sid), false);
     is("the order leaves the list", (await listed()).includes(m3), false);
     await sweeps(2);
-    is("later sweeps write nothing of them", [redis.run(["EXISTS", importedKey(statsId, buyerM3)]), copies(buyerM3).length], [0, 0]);
+    is("later sweeps write nothing of them", [purchasesOf(buyerM3), copies(buyerM3).length], [0, 0]);
   }
 
   part("M: P4: the person deleted after a try that handed the purchase over: the affiliate is still credited");
@@ -860,13 +862,13 @@ async function main(): Promise<void> {
   const undoM4 = after((c) => c[0] === "SET" && String(c[1]).startsWith("nl:orders:link:"), () => ["QUEUED"]);
   await paypalReturn(new NextRequest(`https://marktmorgen.com/api/store/paypal/return?store=harbor&token=${m4}`, { headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.26" } }));
   undoM4();
-  is("control: that try handed the purchase over, then stopped before crediting the sale", [redis.run(["EXISTS", importedKey(statsId, buyerM4)]), redis.run(["HEXISTS", `nl:aff:${statsId}:sales`, `paypal:${m4}`])], [1, 0]);
+  is("control: that try handed the purchase over, then stopped before crediting the sale", [purchasesOf(buyerM4), redis.run(["HEXISTS", `nl:aff:${statsId}:sales`, `paypal:${m4}`])], [1, 0]);
   is("control: the order is still owed", (await listed()).includes(m4), true);
   const erasedM4 = await erasePerson(await fresh(), buyerM4, { kind: "person" });
   is("the person's own deletion completes", erasedM4.ok, true);
   await sweep(11 / 60);
   is("the next try credits the affiliate for the sale paid and handed over", redis.run(["HEXISTS", `nl:aff:${statsId}:sales`, `paypal:${m4}`]), 1);
-  is("without handing anything over to the deleted person again", redis.run(["EXISTS", importedKey(statsId, buyerM4)]), 0);
+  is("without handing anything over to the deleted person again", purchasesOf(buyerM4), 0);
   is("nothing was sent to them", copies(buyerM4).length, 0);
   is("and the order leaves the list", (await listed()).includes(m4), false);
 

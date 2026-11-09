@@ -504,6 +504,9 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   if (!email || !record) return null;
   const through = (to: "sign-in" | "recovery") =>
     held?.viaRecovery ? "a login link sent to your recovery address" : to === "sign-in" ? "a login link sent to this address" : "a login link sent to the sign-in address";
+  // Everything the notice needs is read before anything is written (Claude 6 on #2948): a read that fails here spends
+  // nothing, sets no day and opens nothing, so two-step login never turns off on a login the owner was not told of.
+  const backup = await backupOf(email, record);
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
   if (countOf(removed) !== 1) return null;
@@ -517,36 +520,81 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   });
   if (!marked) return null;
   const { first, until } = marked;
-  const session = await openLockedSession(email, until, now);
-  // The same day for a later login through the recovery address, which then opens everything once it has passed.
-  await alignRecoveryLock(email, until, now);
+  // Nobody is let in and nobody told until the session opens and the recovery lock holds the same day. Short of that,
+  // the day this login set is taken back (Claude 5 on #2948): two-step login never turns off by itself on a login that
+  // never happened, of which the owner was never told. A day an earlier login set is left as it was.
+  let session = "";
+  try {
+    session = await openLockedSession(email, until, now);
+    // The same day for a later login through the recovery address, which then opens everything once it has passed.
+    await alignRecoveryLock(email, until, now);
+  } catch (error) {
+    if (session && !(await endSession(session).catch(() => false))) console.error("taking back a locked session whose recovery lock was not aligned failed");
+    if (first) await takeBackReset(email, until);
+    throw error;
+  }
   const opened = (to: "sign-in" | "recovery") => `Somebody who opened ${through(to)} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, ${LOCKED_LIST} are locked for them; after that, two-step login turns off.
 
 If that was you, keep working: everything else is open.
 
 If it was not you, somebody can read your email: log in with your app's code or a passkey, or open your studio in a browser that is still logged in and press Cancel. That logs them out and keeps two-step login on. Then change your email password.`;
-  // Told to the recovery address too: this path assumes somebody else may hold the sign-in inbox (MM-SA-19).
+  // Told to the recovery address too (MM-SA-19), read above before the login was spent.
   await tell(
     email,
     first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",
     opened("sign-in"),
-    await backupOf(email, record),
+    backup,
     opened("recovery"),
   );
   return { session, email, until };
+}
+
+/**
+ * Takes back the reset day a login without the second step set, when that login never opened: only while the record
+ * still holds that very day, under the record's lock. A failure here is logged, never thrown over the login's own.
+ */
+async function takeBackReset(email: string, until: number): Promise<void> {
+  try {
+    const undone = await withTwoStep(email, async (held) => {
+      const current = await read(email);
+      if (!current || current.reset !== until) return true;
+      return writeHeld(held, email, { ...current, reset: 0 });
+    });
+    if (!undone) console.error("taking back the reset day of a login without two-step that never opened failed");
+  } catch (error) {
+    console.error("taking back the reset day of a login without two-step that never opened failed", error);
+  }
 }
 
 /** Opens a session locked (LOCKED_NEEDS) until `until`, logged out by Cancel or a full login. */
 export async function openLockedSession(email: string, until: number, now = Date.now()): Promise<string> {
   const session = await openSession(email);
   const seconds = Math.max(60, Math.ceil((until - now) / 1000));
-  await redisPipeline([
-    // Kept as long as the session can last, with when it opened: past its day it says whether the session
-    // was opened before its account's locked sessions could not be logged out (lockedUntil).
-    ["SET", lockedKey(session), `${until}|${now}`, "EX", Math.max(seconds, SESSION_TTL_SECONDS)],
-    ["SADD", lockedSetKey(email), session],
-    ["EXPIRE", lockedSetKey(email), seconds + 86_400],
-  ]);
+  // Without its lock it is a full session: one whose lock is not confirmed is taken back, never handed out.
+  const takeBack = async () => {
+    if (!(await endSession(session))) console.error("taking back a locked session whose lock was not confirmed failed");
+  };
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(await redisPipeline([
+      // Kept as long as the session can last, with when it opened: past its day it says whether the session
+      // was opened before its account's locked sessions could not be logged out (lockedUntil).
+      ["SET", lockedKey(session), `${until}|${now}`, "EX", Math.max(seconds, SESSION_TTL_SECONDS)],
+      ["SADD", lockedSetKey(email), session],
+      ["EXPIRE", lockedSetKey(email), seconds + 86_400],
+    ]), 3);
+  } catch (error) {
+    await takeBack();
+    throw error;
+  }
+  // The lock's SET answered "OK" and the account's locked set its 0 or 1 twice (CX-123 rule 24), as openSession
+  // reads its own writes; anything else fails the login, said by the callers as a failed login, and the session's
+  // id is never given out (review of #2948 at 929dec4d; tests/auth-sessions-exact.test.ts).
+  const counted = (reply: unknown) => countOf(reply) === 0 || countOf(reply) === 1;
+  if (!replies || replies[0] !== "OK" || !counted(replies[1]) || !counted(replies[2])) {
+    await takeBack();
+    throw new UnknownReplyError("a locked session's lock");
+  }
   return session;
 }
 
@@ -646,8 +694,15 @@ export async function resetIfDue(email: string, now = Date.now()): Promise<boole
   const backup = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0 || now < record.reset) return null;
-    // Read before the record goes: an account from before kept its recovery address on it.
-    const kept = await backupOf(email, record);
+    // Read before the record goes: an account from before kept its recovery address on it. One that cannot be read
+    // (UnknownReplyError) is never taken for none: two-step login stays on and the day waits for a read that
+    // answers, so the turn-off is never told only to the sign-in inbox (MM-SA-19; VR2 audit).
+    const kept = await backupOf(email, record).catch((error: unknown) => {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      console.error("reading the recovery address before turning two-step login off failed", error);
+      return null;
+    });
+    if (kept === null) return null;
     return (await deleteHeld(held, [recordKey(email), lockedSetKey(email)])) ? kept : null;
   });
   if (backup === null) return false;

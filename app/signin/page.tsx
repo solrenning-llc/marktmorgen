@@ -148,6 +148,10 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "Your other devices may still be logged in",
     body: "This browser is logged out, but we could not log out your other devices just now. Log in again in a moment and choose “Log out of all devices” once more.",
   },
+  "out-unknown": {
+    title: "Your session may still be open on our side",
+    body: "This browser is logged out, but we could not close its session on our side just now. If you think someone else may have it, log in again in a moment and choose “Log out of all devices”.",
+  },
 };
 
 /*

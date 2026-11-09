@@ -294,6 +294,74 @@ async function main(): Promise<void> {
     is(`${label}: kept waiting, the book does not say paid`, [out, await paidCents(store)], [{ paid: 0, released: 0, waiting: 1 }, 0]);
   }
 
+  part("The affiliate's record read in an unknown shape: kept on their way, never paid twice (Claude 5 on #3272, finding 1)");
+  const recordShapes: [string, () => unknown[]][] = [
+    ["no envelope", () => []],
+    ["undefined", () => [undefined]],
+    ["the number 1", () => [1]],
+    ["an object", () => [{ odd: true }]],
+    ["a list", () => [["x"]]],
+    ["empty text", () => [""]],
+    ["text that is not JSON", () => ["not json"]],
+    ["JSON that is not a record", () => ['{"id":"x"}']],
+  ];
+  for (const [label, reply] of recordShapes) {
+    await seed(store);
+    let first = true;
+    redis.pipeline = async (commands) => {
+      if (first && commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === `nl:aff:${STATS}:people` && commands[0][2] === SARA) {
+        first = false;
+        return reply();
+      }
+      return pipeline(commands);
+    };
+    const out = await settle(store);
+    redis.pipeline = pipeline;
+    is(`${label}: kept waiting, not counted paid`, out, { paid: 0, released: 0, waiting: 1 });
+    is(`${label}: the book does not say paid, nothing written`, [await paidCents(store), (await bookIds()).length], [0, 0]);
+    is(`${label}: still on their way`, (await onTheirWay(store)).size, 1);
+    await payWithPayPal(store);
+    is(`${label}: not sent to PayPal again`, created.length, 1);
+    is(`${label}: read again with a clean answer, written once`, [await settle(store), await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
+    await payWithPayPal(store);
+    is(`${label}: one PayPal batch in all`, created.length, 1);
+  }
+
+  part("The affiliate confirmed gone (no record): the line leaves the batch, nothing is sent again");
+  await seed(store);
+  await pipeline([["HDEL", `nl:aff:${STATS}:people`, SARA]]);
+  is("settled as before: no longer waiting, nothing written", [await settle(store), (await bookIds()).length], [{ paid: 1, released: 0, waiting: 0 }, 0]);
+  await payWithPayPal(store);
+  is("no one left to pay: one PayPal batch in all", created.length, 1);
+
+  part("Written, its reply lost, then the data room full: found in the book without new room (Claude 5 on #3272, finding 2)");
+  await seed(store);
+  bookWriteAnswers(() => [], true);
+  is("the lost reply keeps it waiting", await settle(store), { paid: 0, released: 0, waiting: 1 });
+  for (const day of [1, 2, 3]) {
+    roomFull();
+    const out = await settle(store);
+    redis.pipeline = pipeline;
+    is(`day ${day}: found in the book, no longer waiting`, [out, (await onTheirWay(store)).size], [{ paid: 0, released: 0, waiting: 0 }, 0]);
+  }
+  is("one payout, $30", [(await bookIds()).length, await paidCents(store)], [1, 3000]);
+  await payWithPayPal(store);
+  is("one PayPal batch in all", created.length, 1);
+
+  part("Whether the book holds the payout, read in an unknown shape: kept on their way, nothing written");
+  for (const [label, reply] of [...shapes.filter(([l]) => l !== "null"), ["the number 1 as text", () => ["1"]] as [string, () => unknown[]]]) {
+    await seed(store);
+    redis.pipeline = async (commands) => {
+      if (commands.length === 1 && commands[0][0] === "HEXISTS" && commands[0][1] === PAYOUTS) return reply();
+      return pipeline(commands);
+    };
+    const out = await settle(store);
+    redis.pipeline = pipeline;
+    is(`${label}: kept waiting, the book does not say paid`, [out, await paidCents(store), (await bookIds()).length], [{ paid: 0, released: 0, waiting: 1 }, 0, 0]);
+    await payWithPayPal(store);
+    is(`${label}: not sent to PayPal again`, created.length, 1);
+  }
+
   done();
 }
 

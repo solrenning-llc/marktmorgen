@@ -7,7 +7,7 @@
  * What fails here:
  *   - a refresh whose read does not answer leaves the quotes as they were (words that may be off the page now);
  *   - no way to take one review's words off the record before the change is answered done (dropReviewQuote), or one
- *     that answers done on a record it could not read or write, or reads anything when nothing of it is quoted;
+ *     that answers done on a record it could not read or write, or writes anything when nothing of it is quoted;
  *   - the studio's hide, or the buyer's delete or refund, answering done before those words are taken off.
  * Controls: a healthy refresh keeps the same quotes, in the same order, as before.
  */
@@ -27,9 +27,9 @@ type Command = (string | number)[];
 const STORE_KEY = "nl:store:owner:";
 const real = redis.pipeline.bind(redis);
 let mode: "" | "failList" | "unknownStore" | "failStoreWrite" = "";
-let calls = 0;
+let writes = 0;
 redis.pipeline = (async (commands: Command[]) => {
-  calls += 1;
+  if (commands.some(([name, ...args]) => name !== "GET" && name !== "GETRANGE" && args.some((arg) => String(arg).startsWith(STORE_KEY)))) writes += 1;
   if (mode === "failList" && commands.some(([name, key]) => name === "ZREVRANGEBYSCORE" && String(key).startsWith("nl:rev:all:"))) {
     mode = "";
     throw new Error("Redis request failed with status 503 (synthetic)");
@@ -146,9 +146,11 @@ async function main(): Promise<void> {
       const w = await world(owner, "r51qnone");
       const snapshot = (await storeForEmail(owner))!;
       const later = { productId: w.b, createdAt: w.base + 10 * DAY };
-      calls = 0;
+      writes = 0;
       await dropReviewQuote(snapshot, later);
-      is("nothing of it quoted: nothing read or written", calls, 0);
+      // Read under the store's lock all the same (tests/r51-quotes-erasure-stale.test.ts): the request's own copy of
+      // the store is not the record as it is now.
+      is("nothing of it quoted: nothing written", writes, 0);
     }
     {
       const owner = "r51q-unknown@example.com";

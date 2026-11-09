@@ -3,6 +3,7 @@ import { StoreFullError, setProductFunnel } from "@/lib/store";
 import { currencyRule, readMoney } from "@/lib/money";
 import { MAX_FUNNEL_STEPS, parseFunnel } from "@/lib/funnel";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * Sets or clears what is offered after paying for one product.
@@ -18,6 +19,8 @@ export async function POST(request: NextRequest) {
   const body = guarded.body;
   const id = text(body.id, 40);
   if (!id || !("funnel" in body)) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+  const onHold = await heldRefusal(guarded.store, id);
+  if (onHold) return onHold;
 
   let funnel = null;
   if (body.funnel !== null) {

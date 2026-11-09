@@ -6,7 +6,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { plain, serveFile } from "@/lib/serve-file";
 import { MAX_PREVIEW_PAGES, previewCopy } from "@/lib/pdf-preview";
 import { clientAddress, withinEssentialLimit } from "@/lib/request-guard";
-import { holdState } from "@/lib/child-safety";
+import { heldRefusal, holdState } from "@/lib/child-safety";
 
 /** Making a preview the first time reads the whole PDF: give it the time a big one needs. */
 export const maxDuration = 60;
@@ -50,6 +50,8 @@ export async function POST(request: NextRequest) {
   if (!id || !Number.isInteger(pages) || pages < 0 || pages > MAX_PREVIEW_PAGES) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
+  const onHold = await heldRefusal(guarded.store, id);
+  if (onHold) return onHold;
   try {
     const result = await setProductPreview(guarded.ref, id, pages);
     if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });

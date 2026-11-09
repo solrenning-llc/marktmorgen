@@ -38,7 +38,7 @@ import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
 import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
 import { readListing } from "@/lib/catalog";
-import { heldRefusal } from "@/lib/child-safety";
+import { heldRefusal, holdState } from "@/lib/child-safety";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { claimUpload, dropStream } from "@/lib/stream";
@@ -69,6 +69,13 @@ export async function GET(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id") ?? "";
   const lessonId = request.nextUrl.searchParams.get("lessonId") ?? "";
   const store = access.store;
+  // A course held for a child-safety report is the store's owner's only (lib/child-safety.ts): nobody else on the
+  // team reads its lessons, quizzes or tasks. A hold that cannot be read is not a yes.
+  if (access.role !== "owner") {
+    const hold = await holdState(store, id);
+    if (hold === "held") return Response.json({ ok: false, error: "on_hold" }, { status: 409, headers: { "Cache-Control": "no-store" } });
+    if (hold === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   const product = await readListing(store, id);
   const course = product?.course ? await readCourse(product.course.id) : null;
   if (!course || !findLesson(course, lessonId)) return Response.json({ ok: false, error: "unknown" }, { status: 404 });

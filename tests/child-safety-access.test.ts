@@ -27,6 +27,7 @@ import { GET as feedRoute } from "@/app/api/store/podcast/feed/[token]/route";
 import { GET as playRoute } from "@/app/api/store/podcast/play/[token]/[episode]/route";
 import { GET as previewRoute } from "@/app/api/store/preview/route";
 import { GET as downloadRoute } from "@/app/api/store/file/download/route";
+import { GET as courseGetRoute } from "@/app/api/store/course/route";
 import { POST as aiRoute } from "@/app/api/store/ai/route";
 import { feedToken } from "@/lib/podcast-access";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -35,7 +36,8 @@ import { saveCourse, type Course } from "@/lib/course";
 import { putMember } from "@/lib/team";
 import { holdReported } from "@/lib/child-safety";
 import { PIN_HEADER } from "@/lib/studio-route";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setProductFile, setProductHidden, setProductPodcast, setProductPreview, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
+import { addOption, addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setProductFile, setProductHidden, setProductPodcast, setProductPreview, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
 import { answering } from "./security/next-headers";
 import { drawn } from "./child-safety-access-og";
 import { store as redis } from "./redis-stub";
@@ -217,9 +219,20 @@ async function main(): Promise<void> {
   const ownerDownload = await download("owner", pdfId);
   is("the owner gets past that door (the file store is absent here)", ownerDownload[0] !== 403 && ownerDownload[0] !== 401, true);
   is("the team still downloads a product that is not held", (await download("editor", freeId))[0] !== 403, true);
+  const optioned = await addOption(OWNER, pdfId, "Option A", "29");
+  if (!optioned.ok) throw new Error("no option");
+  const optionId = (await readListing((await storeForEmail(OWNER))!, pdfId))!.options[0].id;
+  is("nor by naming one of its price options", (await download("editor", optionId))[0], 403);
+  const lessonFor = async (who: Who) => {
+    const response = await courseGetRoute(asked(who, `/api/store/course?id=${courseId}&lessonId=lesson000002`));
+    return [response.status, ((await response.json()) as { error?: string }).error ?? "ok"];
+  };
+  is("someone on the team does not read its lessons from the studio", await lessonFor("editor"), [409, "on_hold"]);
+  is("the owner still does", (await lessonFor("owner"))[1] !== "on_hold", true);
 
   part("Nothing of a held product goes to an AI provider, even for the owner");
   is("a page drafted from its PDF is refused before the file is read", await ai({ kind: "page", product: pdfId, readFile: true }), [409, "on_hold"]);
+  is("an email sequence that follows it is refused before anything of it is read", await ai({ kind: "sequence", trigger: "product", productId: pdfId }), [409, "on_hold"]);
   is("a quiz drafted from a held course's lesson is refused", await ai({ kind: "quiz", id: courseId, lessonId: "lesson000002", count: 5 }), [409, "on_hold"]);
   is("a product that is not held gets past it (it has no readable file here)", (await ai({ kind: "page", product: freeId, readFile: true }))[1] !== "on_hold", true);
   is("the writing box says it is on hold, not that the allowance is unknown", readFileSync("components/ai-assist.tsx", "utf8").includes('on_hold: "This product is on hold'), true);

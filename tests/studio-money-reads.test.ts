@@ -30,6 +30,7 @@ import StudioPage from "@/app/studio/page";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { savePaidPeriod } from "@/lib/closing-holds";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.STRIPE_SECRET_KEY = "sk_test_studio_money_reads_only";
@@ -154,6 +155,11 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", workKey, "f:sub_MoneyReadsMember1", "1"]]);
   const unpaused = await shown(CLOSER);
   is("control: a membership not paused is warned of as before", [has(unpaused, "1 membership's payments are not paused yet: we try again every day"), has(unpaused, HOLDS_UNREAD)], [true, false]);
+  // A member who paid for a long period that runs well past any closing day: the amount is the unused part.
+  const nowS = Math.floor(Date.now() / 1000);
+  await savePaidPeriod(closer, "sub_MoneyReadsMember2", { inv: "in_MoneyReadsMember2", amt: 40_000, cur: "usd", ps: nowS - 10 * 86_400, pe: nowS + 400 * 86_400, e: "member@buyers.example.com" });
+  const owed = await shown(CLOSER);
+  is("control: a member who paid past the day is shown with the amount, as before", [has(owed, "1 member has paid for time after"), /: \$[0-9][0-9,]*\.[0-9]{2} in all\./.test(owed ?? ""), has(owed, "Review and refund unused time now"), has(owed, UNUSED_UNREAD)], [true, true, true, false]);
 
   part("Upcoming calls that could not be read from Stripe (guard: already said)");
   const HOST = "money-reads-calls@example.com";

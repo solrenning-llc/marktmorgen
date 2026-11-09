@@ -189,7 +189,7 @@ import { watchedForAdmission } from "@/lib/watch";
 import { hoursWords } from "@/lib/watch-rules";
 import { paidVideoSeconds, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
 import { SETUP_STORAGE_BYTES, SETUP_VIDEO_SECONDS, standingOf, videoLimitFor } from "@/lib/plan-standing";
-import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS, closingOf } from "@/lib/plan-closing";
+import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS, closingOf, readHoldCounts, readUnusedSummary } from "@/lib/plan-closing";
 import { ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, closesStore, keptRoomFor } from "@/lib/plan-closing-rules";
 import { MAX_LEADS, listSize } from "@/lib/free";
 import { readableSize } from "@/lib/product-file";
@@ -1010,7 +1010,8 @@ export default async function StudioPage({
         readNotes(current.statsId).catch(() => []),
         readSpends(current.statsId).catch(() => []),
         heardOff(current.handle).catch(() => false),
-        readTrouble(current.statsId).catch(() => ({ week: 0, last: null })),
+        // Null when it could not be read: said so under Numbers, never taken for no refusal (VR 2).
+        readTrouble(current.statsId).catch(() => null),
         // What the store recorded on its own: emails sent, products added, sales (lib/auto-marks.ts).
         readMarks(current, ...chartDays()).catch(() => []),
       ]))
@@ -1108,8 +1109,10 @@ export default async function StudioPage({
   const closesWhole = closingAt ? closesStore(closingAt.endedAt) : false;
   const closing = closingAt && (closesWhole || keptNow > keptRoom) ? { ...closingAt, bytes: keptNow, room: keptRoom, whole: closesWhole } : null;
   // Queue item 307 [EC1]: what members paid for past the closing day, from what was written down when the plan ended (no call to Stripe).
-  const unusedTime = closing?.whole ? await unusedSummary(store!, closing.day).catch(() => null) : null;
-  const notPaused = closing?.whole ? await holdCounts(folder).catch(() => null) : null;
+  // Null, for a store that closes whole, when it could not be read (or was read in a shape we do not expect): the
+  // closing card then says it could not check, in the closing email's words, never "none" (lib/plan-closing.ts).
+  const unusedTime = closing?.whole ? await unusedSummary(store!, closing.day).then(readUnusedSummary, () => null) : null;
+  const notPaused = closing?.whole ? await holdCounts(folder).then(readHoldCounts, () => null) : null;
   const dayWords = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
   /** A moment to the minute, in UTC, said so. */
   const momentWords = (ms: number) => `${new Date(ms).toLocaleString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC`;
@@ -1600,7 +1603,12 @@ export default async function StudioPage({
             {may("stats") ? <SalesLevers store={store} reading={salesRead?.state === "ok" ? salesRead.value?.levers ?? null : null} canConfigure={may("products") && may("settings")} /> : null}
             {numbers ? (
               <div id="numbers" className="scroll-mt-32">
-                {trouble.week > 0 && trouble.last ? (
+                {trouble === null ? (
+                  <div className="notice notice-warn mt-8" role="status">
+                    <p className="font-bold text-ink">We could not check just now whether Stripe opened every checkout</p>
+                    <p className="mt-1 text-sm text-ink-soft">So this page cannot tell whether a buyer could not pay in the last 7 days. Nothing was changed. Reload this page in a moment to check again.</p>
+                  </div>
+                ) : trouble.week > 0 && trouble.last ? (
                   <div className="notice notice-warn mt-8" role="status">
                     <p className="font-bold text-ink">
                       {`Stripe would not open a checkout ${trouble.week === 1 ? "once" : `${trouble.week} times`} in the last 7 days`}
@@ -2583,15 +2591,21 @@ export default async function StudioPage({
                       : ""}
                   </p>
                 ) : null}
-                {notPaused && notPaused.failed + notPaused.over > 0 ? (
+                {notPaused === null ? (
+                  <p className="mt-4 notice notice-warn">
+                    {`We could not check just now whether every membership's payments are paused. Every membership ends on ${dayWords(closing.day)}. If a member is charged before then, please refund them from Stripe. Reload this page in a moment to check again.`}
+                  </p>
+                ) : notPaused.failed + notPaused.over > 0 ? (
                   <p className="mt-4 notice notice-warn">
                     {`${notPaused.failed + notPaused.over} ${notPaused.failed + notPaused.over === 1 ? "membership's payments are" : "memberships' payments are"} not paused${notPaused.failed ? " yet: we try again every day" : ""}${notPaused.over ? `${notPaused.failed ? ", and some are" : ":"} past this closing's limit` : ""}. Every one of them ends on ${dayWords(closing.day)}. If a member is charged before then, please refund them from Stripe.`}
                   </p>
                 ) : null}
-                {unusedTime && unusedTime.members > 0 ? (
+                {unusedTime === null || unusedTime.members > 0 ? (
                   <div className="mt-4">
-                    <p className="text-ink">
-                      {`${unusedTime.members} ${unusedTime.members === 1 ? "member has" : "members have"} paid for time after ${dayWords(closing.day)}: ${unusedTime.totals.map((t) => formatMoney(t.amount, t.cur)).join(" and ")} in all. On that day each is refunded the unused part of their last payment from your own Stripe account, if its balance covers it. Marktmorgen never pays it and never takes it.`}
+                    <p className={unusedTime === null ? "notice notice-warn" : "text-ink"}>
+                      {unusedTime === null
+                        ? `We could not check just now which members paid for time after ${dayWords(closing.day)}. On that day we try to refund, from your own Stripe account, the unused part of the last payment of each member whose payments we paused. Marktmorgen never pays it and never takes it. Reload this page in a moment to check again.`
+                        : `${unusedTime.members} ${unusedTime.members === 1 ? "member has" : "members have"} paid for time after ${dayWords(closing.day)}: ${unusedTime.unused} in all. On that day each is refunded the unused part of their last payment from your own Stripe account, if its balance covers it. Marktmorgen never pays it and never takes it.`}
                     </p>
                     <p className="mt-3">
                       <a href={studioPath(store!, "", "closing-refunds")} className="btn btn-secondary">

@@ -2994,6 +2994,14 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       };
       const paypal = await readPayPalRefundsWithCoverage(store.statsId, since);
       if (paypal.cut) refundsChecked = false;
+      // A sale on this book PayPal refunded in part (audit R13, MEDIUM 2): how much came back is not read, so what it
+      // earns is unknown, never its whole commission and never a refund of nothing: no payout is made on it (rule 24).
+      // One whose payment cannot be named might be this book's, so it is unknown too; so is one of this book's orders
+      // whose record is gone. One of a sale with no line here (nobody earns on it) leaves the book as it is.
+      for (const p of paypal.partly) {
+        if (typeof p.capture !== "string" || p.capture === "" || paypalSales.has(paypalPaymentId(p.capture))) refundsChecked = false;
+      }
+      for (const order of paypal.partGone) if (paypalOrders.has(order)) refundsChecked = false;
       for (const r of paypal.rows) {
         const named = typeof r.capture === "string" && r.capture !== "";
         const sales = named ? paypalSales.get(paypalPaymentId(r.capture)) : undefined;

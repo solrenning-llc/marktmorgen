@@ -30,8 +30,7 @@
  */
 import { type Store } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
-import { type ErasureScope, workUnits } from "@/lib/erasure-rules";
-import { takeAllowance } from "@/lib/store-allowance";
+import { type ErasureScope } from "@/lib/erasure-rules";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
@@ -81,6 +80,8 @@ import { heldPaymentsOf } from "@/lib/closing-holds";
 import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
+import { workUnits } from "@/lib/erasure-rules";
+import { takeAllowance } from "@/lib/store-allowance";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 

@@ -3,8 +3,9 @@
  * 2). Synthetic only: the in-memory Redis double, a Stripe stand-in that fails, no network.
  *
  * 1. A purchase for several (app/[handle]/group/[group]/page.tsx, lib/group-buy.ts placesTaken): a count Redis
- *    answered in another shape, or could not answer, is unknown, never "nobody took a place". The page says the
- *    places could not be checked and offers no form; a full purchase is never shown as all places open.
+ *    answered in another shape, or could not answer, is unknown, never "nobody took a place". On the main's design
+ *    (merged through #2872) the page then says nothing about the places and keeps its form, since asking for a place
+ *    counts again, exactly, before any link is sent; a full purchase is never shown as all places open.
  * 2. A community event (lib/community-events.ts rsvpNumbers and rsvp; the event page and the events list): an
  *    unknown count is never "0 going" with places left and the RSVP form; a member's own place is read on its own,
  *    so an unknown count never hides it nor withholds the way in; an unknown place is never "not going"; taking a
@@ -73,30 +74,35 @@ async function groupPart(): Promise<void> {
     allTaken: html.includes("All 2 places have been taken."),
     open: /places? (is|are) still open/.test(html),
     form: html.includes("Send me the link to my place"),
-    unchecked: html.includes("We could not check how many places are left just now. Try this page again in a moment."),
   });
-  is("before anybody joins: 2 of 2 open, with the form", facts(await render()), { allTaken: false, open: true, form: true, unchecked: false });
+  // Rule 23 (this part's assertions): the "unchecked" fact goes with the page's "could not check" words, which the
+  // main's design does not have; the page says no count at all when it could not read one (open and allTaken false).
+  is("before anybody joins: 2 of 2 open, with the form", facts(await render()), { allTaken: false, open: true, form: true });
   for (const email of ["ana@example.com", "ben@example.com"]) {
     const t = Buffer.from(email.padEnd(32, "x").slice(0, 32)).toString("hex");
     await real([["SET", `nl:grp:take:${t}`, JSON.stringify({ g: id, e: email }), "EX", 3600]]);
     await takePlace({ store, token: t, recordStart: async () => {} });
   }
   is("placesTaken reads 2", await placesTaken(id), 2);
-  is("the page says every place is taken and offers no form", facts(await render()), { allTaken: true, open: false, form: false, unchecked: false });
+  is("the page says every place is taken and offers no form", facts(await render()), { allTaken: true, open: false, form: false });
 
   part("1. The count answered in an unknown shape");
-  onKey(["GET"], `nl:grp:${id}:n`, odd);
+  // Rule 23: the count is the HLEN of the marks on the main, not a GET of ":n".
+  onKey(["HLEN"], `nl:grp:${id}:m`, odd);
   is("placesTaken refuses it (throws), never 0", await placesTaken(id).then(() => "answered", () => "threw"), "threw");
-  is("the page says the places could not be checked, never all open, and offers no form", facts(await render()), { allTaken: false, open: false, form: false, unchecked: true });
-  onKey(["GET"], `nl:grp:${id}:n`, () => "2.5");
+  // Rule 23: on the main's design the form stays (asking for a place counts again before any link is sent, and says
+  // "full" here) and no count is said; still never all places open.
+  is("the page says no count, never all open; the form stays, as asking counts again", facts(await render()), { allTaken: false, open: false, form: true });
+  onKey(["HLEN"], `nl:grp:${id}:m`, () => "2.5");
   is("a count that is not a whole number is refused too", await placesTaken(id).then(() => "answered", () => "threw"), "threw");
   redis.pipeline = real;
 
   part("1. Redis could not be reached for the count");
-  onKey(["GET"], `nl:grp:${id}:n`, unreachable);
-  is("the page says the places could not be checked and offers no form", facts(await render()), { allTaken: false, open: false, form: false, unchecked: true });
+  // Rule 23: the HLEN of the marks, and the page's main design, as above.
+  onKey(["HLEN"], `nl:grp:${id}:m`, unreachable);
+  is("the page says no count, never all open; the form stays, as asking counts again", facts(await render()), { allTaken: false, open: false, form: true });
   redis.pipeline = real;
-  is("control again: all taken", facts(await render()), { allTaken: true, open: false, form: false, unchecked: false });
+  is("control again: all taken", facts(await render()), { allTaken: true, open: false, form: false });
 }
 
 async function eventPart(): Promise<void> {

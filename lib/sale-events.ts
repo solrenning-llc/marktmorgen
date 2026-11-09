@@ -30,7 +30,8 @@
  */
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { isSettled } from "@/lib/instant-pay";
 import { alertCreator } from "@/lib/phone-alerts";
 import { queuePerson } from "@/lib/email-sync";
@@ -149,6 +150,18 @@ async function tell(store: Store, record: SaleRecord, session: string): Promise<
 /**
  * Tells the listeners about each paid checkout of this store among `records`
  * that has not been told yet. Returns how many were told.
+ *
+ * Read exactly (CX-123 rule 24): the "told already?" answer is 1 (skipped) or 0
+ * (claimed, then told); the sale's mark is claimed before telling
+ * (lib/claim-mark.ts), so only a claim that is ours tells, and two places
+ * noticing the same checkout at once tell it once. Anything else tells nothing
+ * and records nothing: the recent-purchases block (lib/recent-sales.ts) keeps
+ * no dedupe and the team's chat keeps no mark, so an unknown taken as "not told"
+ * would show the same purchase twice and post the same line twice. An unknown
+ * answer for one sale leaves only that sale for a later pass (the thanks page
+ * or the five-minute job): the rest of the batch is told, and then the run
+ * throws UnknownReplyError so the caller says it was not wholly done. A
+ * pipeline answered in another shape as a whole tells nothing and throws.
  */
 export async function noteSales(store: Store, records: SaleRecord[]): Promise<number> {
   if (!listensToSales(store) || !isRedisConfigured()) return 0;
@@ -158,14 +171,38 @@ export async function noteSales(store: Store, records: SaleRecord[]): Promise<nu
   );
   if (!paid.length) return 0;
   // One round trip for which of them were told already.
-  const marks = await redisPipeline(paid.map((r) => ["EXISTS", toldKey(r.id)]));
+  const marks = repliesFor(await redisPipeline(paid.map((r) => ["EXISTS", toldKey(r.id)])), paid.length);
+  if (!marks) throw new UnknownReplyError("which sales were told already");
   let told = 0;
+  let unknown = 0;
   for (let i = 0; i < paid.length; i += 1) {
-    if (Number(marks[i]) === 1) continue;
-    await tell(store, paid[i], paid[i].id);
-    await redisPipeline([["SET", toldKey(paid[i].id), "1", "EX", TOLD_SECONDS]]);
+    const mark = countOf(marks[i]);
+    if (mark === 1) continue;
+    if (mark !== 0) {
+      unknown += 1;
+      continue;
+    }
+    const key = toldKey(paid[i].id);
+    const mine = claimValue();
+    const claimed = await claimMark(key, TOLD_SECONDS, mine);
+    if (claimed === "taken") continue;
+    if (claimed === "unknown") {
+      // A mark this run may have written is let go only while it holds this run's value, so a later pass tells it.
+      await releaseMark(key, mine);
+      unknown += 1;
+      continue;
+    }
+    try {
+      await tell(store, paid[i], paid[i].id);
+    } catch (error) {
+      // tell() throws only while reading the products, before anything is told: the mark goes, so the next pass
+      // tells it, as when the mark was written after telling.
+      await releaseMark(key, mine);
+      throw error;
+    }
     told += 1;
   }
+  if (unknown) throw new UnknownReplyError(`whether ${unknown} of ${paid.length} sales were told already`);
   return told;
 }
 

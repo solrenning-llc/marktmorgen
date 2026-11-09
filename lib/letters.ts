@@ -171,28 +171,38 @@ export async function readLetter(store: Pick<Store, "sid">, id: string): Promise
   }
 }
 
-/** The store's published emails, newest first; [] when there are none or they cannot be read. */
-export async function listLetters(store: Pick<Store, "sid">): Promise<Letter[]> {
+/**
+ * The store's published emails, newest first: [] only when Redis answered an empty list, null when they could not be
+ * read (a cut, nil or off-shape reply, a record that does not read as written, or a read that threw; rule 24, Codex G
+ * on #3143), so the page never says "none" on a guess. A record that is gone (nil) is skipped.
+ */
+export async function listLetters(store: Pick<Store, "sid">): Promise<Letter[] | null> {
   if (!isRedisConfigured() || !store.sid) return [];
   try {
-    const [ids] = await redisPipeline([["ZREVRANGE", listKey(store.sid), 0, MAX_PUBLISHED_LETTERS - 1]]);
-    const list = Array.isArray(ids) ? ids.map(String).filter((id) => LETTER_ID.test(id)) : [];
+    const range = repliesFor(await redisPipeline([["ZREVRANGE", listKey(store.sid), 0, MAX_PUBLISHED_LETTERS - 1]]), 1)?.[0];
+    // Every id is one this code wrote; any other is an unknown answer, never "none".
+    if (!Array.isArray(range) || !range.every((id) => typeof id === "string" && LETTER_ID.test(id))) return null;
+    const list = range as string[];
     if (!list.length) return [];
-    const [raws] = await redisPipeline([["MGET", ...list.map(recordKey)]]);
-    const values = Array.isArray(raws) ? raws : [];
+    const raws = repliesFor(await redisPipeline([["MGET", ...list.map(recordKey)]]), 1)?.[0];
+    if (!Array.isArray(raws) || raws.length !== list.length) return null;
     const out: Letter[] = [];
-    list.forEach((_, i) => {
+    for (const raw of raws) {
+      if (raw === null) continue;
+      if (typeof raw !== "string") return null;
+      let letter: Letter | null;
       try {
-        const letter = typeof values[i] === "string" ? parseLetter(JSON.parse(values[i] as string)) : null;
-        if (letter && letter.sid === store.sid) out.push(letter);
+        letter = parseLetter(JSON.parse(raw));
       } catch {
-        // A copy that cannot be read is not shown.
+        return null;
       }
-    });
+      if (!letter) return null;
+      if (letter.sid === store.sid) out.push(letter);
+    }
     return out;
   } catch (error) {
     console.error("reading published emails failed", error);
-    return [];
+    return null;
   }
 }
 

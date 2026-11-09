@@ -435,19 +435,6 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
 }
 
 /**
- * Takes a video out of the queue once its key was read holding `left` (null: nothing there). A newer order or
- * record may have been written and queued between that read and the ZREM (Claude 2 on #3286, N1), so the key is read
- * again after it: still `left`, the video stays out; anything else, or a read that does not read exactly (rule 24),
- * and it is queued again (NX: an entry already back keeps its time), so a paid order is never left unqueued.
- */
-async function unqueue(id: string, left: unknown, now: number): Promise<void> {
-  await redisPipeline([["ZREM", QUEUE, id]]);
-  const back = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
-  if (back && back[0] === left) return;
-  await redisPipeline([["ZADD", QUEUE, "NX", back ? now : now + LOOK_AGAIN_MS, id]]);
-}
-
-/**
  * The request is over: a refund for each language that never came. The
  * record goes only once Stripe confirms the refund succeeded; otherwise what
  * is owed is kept and looked at again (collectRefund).
@@ -577,6 +564,19 @@ async function closeOwed(id: string, pending: Pending, now: number): Promise<voi
   const folder = readStreamPath(pending.path)?.folder;
   await redisPipeline([["DEL", pendingKey(id)], ...(folder ? [["SREM", owedKey(folder), id]] : [])]);
   await unqueue(id, null, now);
+}
+
+/**
+ * Takes a video out of the queue once its key was read holding `left` (null: nothing there). A newer order or
+ * record may have been written and queued between that read and the ZREM (Claude 2 on #3286, N1), so the key is read
+ * again after it: still `left`, the video stays out; anything else, or a read that does not read exactly (rule 24),
+ * and it is queued again (NX: an entry already back keeps its time), so a paid order is never left unqueued.
+ */
+async function unqueue(id: string, left: unknown, now: number): Promise<void> {
+  await redisPipeline([["ZREM", QUEUE, id]]);
+  const back = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
+  if (back && back[0] === left) return;
+  await redisPipeline([["ZADD", QUEUE, "NX", back ? now : now + LOOK_AGAIN_MS, id]]);
 }
 
 /**

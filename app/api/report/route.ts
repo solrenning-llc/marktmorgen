@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       const store = read.report.kind === "child_safety" && handle ? await storeForHandle(handle).catch(() => undefined) : null;
       const outcome: HoldOutcome =
         read.report.kind !== "child_safety" ? "not_held" : store === undefined ? "unknown" : store ? await holdReported(read.report, store) : "no_product";
-      await alertOwner(read.report, outcome);
+      await alertOwner(read.report, outcome, Date.now(), result === "sent");
     }
     if (result === "sent") return Response.json({ ok: true });
     return Response.json({ ok: false, error: result }, { status: result === "limited" ? 429 : 503 });

@@ -4,6 +4,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { MIN_BUNDLE_ITEMS, deliverableItems } from "@/lib/bundle-rules";
+import { heldIdsAmong } from "@/lib/child-safety-holds";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { isComingSoon } from "@/lib/preorders";
 import { countHit } from "@/lib/visit";
@@ -50,8 +51,11 @@ export async function POST(request: NextRequest) {
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return away(`/@${store.handle}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/p/${product.id}#waitlist`);
-  if (product.bundle && deliverableItems(product, await readListings(store, product.bundle)).length < MIN_BUNDLE_ITEMS) {
-    return away(`/@${store.handle}`);
+  if (product.bundle) {
+    // A bundle holding a product kept for a child-safety report is not sold; a hold that cannot be read refuses.
+    const held = await heldIdsAmong(store, product.bundle).catch(() => null);
+    if (!held) return away(`/@${store.handle}?status=error`);
+    if (deliverableItems(product, await readListings(store, product.bundle), held).length < MIN_BUNDLE_ITEMS) return away(`/@${store.handle}`);
   }
   // What the visit carried, as a Stripe checkout carries it: the channel this
   // sale is credited to (lib/visit-channel.ts) and the affiliate who sent the

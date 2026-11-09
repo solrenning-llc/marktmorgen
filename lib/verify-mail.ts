@@ -207,8 +207,11 @@ export async function verifyMailLoop(deadline: number): Promise<Check[]> {
   if (hasResend() && canHearResend() && currentResendFallbackProofIsMissing()) out.push({ check: "Resend's loop", ok: true, detail: "not checked: reviewed Resend fallback proof is missing" });
   else if (hasResend() && canHearResend()) senders.push("resend");
   else out.push({ check: "Resend's loop", ok: true, detail: "not checked: Resend, or the secret that signs its announcements, is not set" });
-  const amazon = isSesConfigured() ? await sesState() : null;
+  const amazonSetUp = isSesConfigured();
+  const amazon = amazonSetUp ? await sesState() : null;
   if (amazon?.ready) senders.push("amazon");
+  // Set up, but its state not read in its exact shape: unknown, so not a pass (rule 24).
+  else if (amazonSetUp && !amazon) out.push({ check: "Amazon SES's loop", ok: false, detail: "not checked: Amazon is set up, but whether it is sending could not be read just now" });
   else out.push({ check: "Amazon SES's loop", ok: true, detail: `not checked: ${amazon ? `Amazon is not sending yet (${amazon.why})` : "Amazon is not set up"}` });
   // Both at once: each waits on its own sender, and neither on the other.
   const results = await Promise.all(senders.map((sender) => loop(sender, deadline).catch((error): Check[] => [{ check: `${NAMES[sender]}'s loop`, ok: false, detail: error instanceof Error ? error.message : "failed", loop: true }])));

@@ -57,6 +57,7 @@ import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
@@ -664,7 +665,23 @@ async function keepForRenewals(session: AdsSession, buyer: BuyerRequest): Promis
   await redisPipeline([["SET", subKey(sub), JSON.stringify(kept), "EX", SUB_SECONDS]]);
 }
 
-export type SendResult = "sent" | "already" | "off" | "invalid";
+export type SendResult = "sent" | "already" | "off" | "invalid" | "unknown";
+
+/**
+ * A sent mark taken with SET NX, read exactly (CX-123 rule 24): only the
+ * exact "OK" is this run's. nil is another run's; anything else (no reply,
+ * QUEUED, a list, a number) is not known, and nothing is sent on it, so a
+ * platform never gets one purchase twice on a guess. The mark is not let go
+ * either: it may be this run's, and it ends with its own time.
+ */
+export function markIsOurs(reply: unknown): boolean {
+  return reply === "OK";
+}
+
+/** An EXISTS of a sent mark, read exactly: 1 seen, 0 not seen, anything else unknown (null). */
+export function markSeen(reply: unknown): boolean | null {
+  return reply === 1 ? true : reply === 0 ? false : null;
+}
 
 /**
  * The thanks page's faster way: the buyer's own browser, after its pixels
@@ -686,11 +703,17 @@ export async function sendServerPurchase(store: Store, sessionId: unknown, buyer
   }
   const created = typeof session.created === "number" ? session.created : 0;
   if (!ordinary(store, session) || created < now / 1000 - 86400) return "invalid";
-  const [claimed, keptRaw] = await redisPipeline([
-    ["SET", sentKey(sessionId), "1", "NX", "EX", SENT_SECONDS],
-    ["GET", ctxKey(CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "none")],
-  ]);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["SET", sentKey(sessionId), "1", "NX", "EX", SENT_SECONDS],
+      ["GET", ctxKey(CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "none")],
+    ]),
+    2,
+  );
+  if (!replies) return "unknown";
+  const [claimed, keptRaw] = replies;
   if (claimed === null) return "already";
+  if (!markIsOurs(claimed)) return "unknown";
   const kept = parse<BuyerRequest | null>(keptRaw, null);
   const used: BuyerRequest = kept ? { ...kept, cookies: { ...kept.cookies, ...buyer.cookies } } : buyer;
   const c = conversionOf(store, session, await customerType(store, emailOf(session), sessionId, created));
@@ -708,8 +731,10 @@ export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Dat
   if (!store.statsId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
   const due = rows.filter((row) => typeof row.id === "string" && SESSION.test(row.id) && CTX_TOKEN.test(row.metadata?.ads ?? "") && ordinary(store, row));
   if (!due.length) return 0;
-  const sent = await redisPipeline(due.map((row) => ["EXISTS", sentKey(row.id as string)]));
-  const left = due.filter((_, i) => Number(sent[i]) !== 1);
+  // Read exactly: an order whose mark cannot be read waits for the next pass.
+  const sent = repliesFor(await redisPipeline(due.map((row) => ["EXISTS", sentKey(row.id as string)])), due.length);
+  if (!sent) return 0;
+  const left = due.filter((_, i) => markSeen(sent[i]) === false);
   if (!left.length) return 0;
   const stored = await readStored(store.statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
@@ -720,8 +745,8 @@ export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Dat
     const buyer = parse<BuyerRequest | null>(kept[i], null);
     // What the checkout kept is gone after four days, and an order that old is no longer worth an ad platform's while.
     if (!buyer) continue;
-    const [claimed] = await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS]]);
-    if (claimed === null) continue;
+    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS]]), 1);
+    if (!claimed || !markIsOurs(claimed[0])) continue;
     const created = typeof row.created === "number" ? row.created : 0;
     const c = conversionOf(store, row, await customerType(store, emailOf(row), row.id as string, created));
     if (await deliver(store, stored, c, buyer, now)) count += 1;
@@ -765,8 +790,10 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     const raw = row.parent?.subscription_details?.subscription ?? row.subscription;
     return typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
   };
-  const marks = await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)]));
-  const left = rows.filter((_, i) => Number(marks[i]) !== 1);
+  // Read exactly: a renewal whose mark cannot be read waits for the next pass.
+  const marks = repliesFor(await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)])), rows.length);
+  if (!marks) return 0;
+  const left = rows.filter((_, i) => markSeen(marks[i]) === false);
   if (!left.length) return 0;
   const stored = await readStored(store.statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
@@ -780,8 +807,8 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     // A renewal's mark is kept forty days: only while the store's data room
     // has space for it (lib/store-data.ts), else renewals wait for room.
     if (!(await keepFor(store, RENEWAL_MARK_BYTES, 40 * 86400, now))) break;
-    const [claimed] = await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", 40 * 86400]]);
-    if (claimed === null) continue;
+    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", 40 * 86400]]), 1);
+    if (!claimed || !markIsOurs(claimed[0])) continue;
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
     const paidAt = Number(row.status_transitions?.paid_at) || Number(row.created) || Math.floor(now / 1000);
     const c: Conversion = {
@@ -823,8 +850,8 @@ export async function sendServerLead(store: Store, request: Requested, lead: { i
     customer: null,
   };
   if (!targets(store, stored, c).length) return false;
-  const [claimed] = await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS]]);
-  if (claimed === null) return false;
+  const claimed = repliesFor(await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS]]), 1);
+  if (!claimed || !markIsOurs(claimed[0])) return false;
   const buyer: BuyerRequest = {
     ip: addressOf(request),
     userAgent: (request.headers.get("user-agent") ?? "").slice(0, 500),

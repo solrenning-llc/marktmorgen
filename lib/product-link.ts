@@ -40,6 +40,15 @@ export const LINK_PROBLEMS: Record<LinkProblem, string> = {
   long: "That link is too long to keep.",
 };
 
+/**
+ * Whether a host name is one that only exists on the visitor's own machine: localhost and any name under it,
+ * with or without the final dot that makes the same name (a URL keeps it: "localhost." is "localhost").
+ */
+export function hostIsLocal(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.+$/, "");
+  return host === "localhost" || host.endsWith(".localhost");
+}
+
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 
 /**

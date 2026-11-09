@@ -931,7 +931,16 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     // No plan can be paid for it from here: its open plan checkouts are
     // expired, and its address is marked for after its records are gone.
     await markShut(store, next.day ?? day, endedAt);
-    await expirePlanCheckouts(store, store.stripeCustomerId ? [store.stripeCustomerId] : []);
+    // Not known in full: an open plan checkout could still be paid. Its members' renewals are still stopped
+    // below on this run (a renewal is a charge whose card fee never comes back); then the day is held, its
+    // `renewals` mark not written, so the next run reads the checkouts again (stopRenewals skips what is ended).
+    const checkoutsRead = await expirePlanCheckouts(store, store.stripeCustomerId ? [store.stripeCustomerId] : []).then(
+      () => true,
+      (error) => {
+        console.error("reading a closing store's open plan checkouts failed", error);
+        return false;
+      },
+    );
     try {
       const stopped = await stopRenewals(store, until);
       if (!stopped.done) return { key, state: "held", note: "the renewals it sold are not all stopped yet" };
@@ -939,6 +948,7 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       console.error("stopping a closing store's renewals failed", error);
       return { key, state: "held", note: "Stripe could not be asked to stop its renewals" };
     }
+    if (!checkoutsRead) return { key, state: "held", note: "its open plan checkouts could not all be read" };
     next = { ...next, renewals: now };
     await save(next);
   }

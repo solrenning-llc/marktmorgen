@@ -3,7 +3,9 @@ import type React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
-import { readListing } from "@/lib/catalog";
+import { readListingExactly } from "@/lib/catalog";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 import { readDraftPreview } from "@/lib/draft-preview";
 import { aboutBlocks, readAbout } from "@/lib/product-about";
 import { ProductAbout } from "@/components/product-about-view";
@@ -31,6 +33,10 @@ export default async function DraftPreviewPage({ params }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store || !store.statsId) notFound();
+  // As the product page does: each opening is a public request of the store, counted and capped before
+  // anything else is read, and a store switched off after notices shows nothing (Claude 6 on #3440).
+  if (await isResting(store)) return <StoreResting store={store} />;
+  if (store.suspended) return <StoreResting store={store} suspended />;
   let preview: Awaited<ReturnType<typeof readDraftPreview>>;
   try {
     preview = await readDraftPreview(code);
@@ -46,7 +52,17 @@ export default async function DraftPreviewPage({ params }: Params) {
   }
   // A link opens only its own store's draft.
   if (!preview || preview.statsId !== store.statsId) notFound();
-  const product = await readListing(store, preview.productId);
+  const product = await readListingExactly(store, preview.productId);
+  if (product === "unknown") {
+    return (
+      <main id="content" className="container-page py-16">
+        <h1 className="t-h2">Private preview</h1>
+        <p className="mt-4 text-ink" role="alert">
+          We could not check this preview link just now. Reload the page in a minute.
+        </p>
+      </main>
+    );
+  }
   if (!product) notFound();
   const language = parseLanguage(store.language);
   const about = product.about ? await readAbout(store.statsId, product.id).catch(() => "") : "";
@@ -56,7 +72,7 @@ export default async function DraftPreviewPage({ params }: Params) {
       <div role="note" className="border-b-2 border-ink bg-white px-4 py-3 text-center text-sm text-ink">
         <strong>Private preview.</strong>{" "}
         {product.hidden
-          ? `This is not on sale yet. Only people with this link can see it, until ${until}.`
+          ? `This is not on sale yet. Only people with this link can see it, until ${until} (UTC).`
           : "This is on the store now."}{" "}
         {product.hidden ? null : (
           <Link href={`/@${store.handle}/p/${product.id}`} className="underline underline-offset-4">

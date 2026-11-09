@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 /**
  * A draft's private preview link, made and stopped from the studio (754 [STN1],
@@ -13,6 +13,8 @@ export function DraftPreviewLink({ productId, handle }: { productId: string; han
   const [busy, setBusy] = useState(false);
   const [link, setLink] = useState<{ url: string; until: string } | null>(null);
   const [said, setSaid] = useState("");
+  // After "Stop this link" goes away, the focus comes back here, not to the page (2.4.3).
+  const makeButton = useRef<HTMLButtonElement>(null);
 
   async function send(action: "make" | "revoke") {
     if (busy) return;
@@ -29,13 +31,18 @@ export function DraftPreviewLink({ productId, handle }: { productId: string; han
         setSaid(
           data?.error === "not_draft"
             ? "This product is on your store, so its own page is the preview."
-            : "The preview link could not be changed just now. Try again in a minute.",
+            : data?.error === "taken_down"
+              ? "This product was taken down after a notice, so it has no preview link. Publishing it again is the step the notice explains."
+              : data?.error === "suspended"
+                ? "Your store is switched off after notices, so nothing can be previewed."
+                : "The preview link could not be changed just now. Try again in a minute.",
         );
         return;
       }
       if (action === "revoke") {
         setLink(null);
         setSaid("The preview link is stopped. Nobody can open it now.");
+        requestAnimationFrame(() => makeButton.current?.focus());
         return;
       }
       if (typeof data.code !== "string" || typeof data.expiresAt !== "number") {
@@ -44,7 +51,7 @@ export function DraftPreviewLink({ productId, handle }: { productId: string; han
       }
       const until = new Date(data.expiresAt * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
       setLink({ url: `${window.location.origin}/@${handle}/preview/${data.code}`, until });
-      setSaid(`A new preview link is ready. It works until ${until}. Any older link no longer works.`);
+      setSaid(`A new preview link is ready. It works until ${until} (UTC). Any older link no longer works.`);
     } catch {
       setSaid("The preview link could not be changed just now. Try again in a minute.");
     } finally {
@@ -66,11 +73,12 @@ export function DraftPreviewLink({ productId, handle }: { productId: string; han
     <div className="mt-3 space-y-2" data-draft-preview>
       <p className="text-sm text-ink-soft">Show this draft to someone before you publish it. Only people with the link can see it, for seven days.</p>
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn btn-secondary btn-sm" aria-busy={busy} disabled={busy} aria-describedby={statusId} onClick={() => void send("make")}>
+        {/* aria-disabled, not disabled, while a change is on its way: the focus stays on the pressed button (send() ignores a second press). */}
+        <button ref={makeButton} type="button" className="btn btn-secondary btn-sm" aria-busy={busy} aria-disabled={busy} aria-describedby={statusId} onClick={() => void send("make")}>
           {link ? "Make a new preview link" : "Get a private preview link"}
         </button>
         {link ? (
-          <button type="button" className="btn btn-secondary btn-sm" aria-busy={busy} disabled={busy} onClick={() => void send("revoke")}>
+          <button type="button" className="btn btn-secondary btn-sm" aria-busy={busy} aria-disabled={busy} onClick={() => void send("revoke")}>
             Stop this link
           </button>
         ) : null}

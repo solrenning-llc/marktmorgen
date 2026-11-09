@@ -42,6 +42,10 @@ const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
 };
 
+export function funnelPickerStep(_: { open: boolean; chosen: boolean; reviewing: boolean }): { current: number; total: number; label: string } | null {
+  return null;
+}
+
 /**
  * Funnels to start from (lib/funnel-types.ts): pick a kind, choose the
  * store's own products for its steps, and the funnel is made with the pages

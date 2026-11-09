@@ -1606,9 +1606,14 @@ export default function PrivacyPage() {
           Companies House register. We use them only to send that research message and to
           continue the conversation if you reply. Our legal basis is our
           legitimate interest in understanding what creators need before we
-          build a product. You can object at any time by replying
-          &ldquo;stop&rdquo; or by emailing us, and we will not contact you
-          again.
+          build a product. You can object at any time by emailing us at{" "}
+          <a
+            href="mailto:support@marktmorgen.com"
+            className="text-black underline underline-offset-2 hover:no-underline"
+          >
+            support@marktmorgen.com
+          </a>
+          , and we will not contact you again.
         </p>
         <p>
           <strong className="text-black">Outreach by creators.</strong> A

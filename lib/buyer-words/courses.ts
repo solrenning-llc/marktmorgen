@@ -324,7 +324,7 @@ const en = {
   addTo: (app: string) => `Add to ${app}`,
   anotherApp: "Another app? Paste this address where it says “add a show by URL”",
   feedNote:
-    "The feed is yours alone: please do not share it. It keeps working for as long as you have the podcast. Spotify does not take private feeds; Apple Podcasts, Overcast, Pocket Casts and most others do.",
+    "The feed is yours alone: please do not share it. It works for as long as you have access and the podcast stays in the store. Spotify does not take private feeds; Apple Podcasts, Overcast, Pocket Casts and most others do.",
   boughtIt: "Bought it? Type the address you bought it with, and a link to your own feed is emailed to you.",
   emailMyFeed: "Email me my feed",
   /** What a podcast app shows once a buyer's access has ended. */
@@ -335,7 +335,7 @@ const en = {
   podcastSubject: (title: string) => `Your private podcast: ${title}`,
   podcastLead: (title: string, store: string) => `Here is your own feed of ${title}, from ${store}:`,
   podcastBody:
-    "Open it on your phone and choose your podcast app; new episodes then arrive in it like any show's. The feed is yours alone: please do not share it. It keeps working for as long as you have the podcast.",
+    "Open it on your phone and choose your podcast app; new episodes then arrive in it like any show's. The feed is yours alone: please do not share it. It works for as long as you have access and the podcast stays in the store.",
   courseSubject: (title: string) => `Your course: ${title}`,
   courseLead: (title: string) => `Here is your way into ${title}:`,
   courseDevice:
@@ -631,7 +631,7 @@ const es: CoursesWords = {
   addTo: (app) => `Añadir a ${app}`,
   anotherApp: "¿Otra app? Pega esta dirección donde diga «añadir un programa por URL»",
   feedNote:
-    "El feed es solo tuyo: por favor, no lo compartas. Sigue funcionando mientras tengas el pódcast. Spotify no admite feeds privados; Apple Podcasts, Overcast, Pocket Casts y la mayoría de las demás sí.",
+    "El feed es solo tuyo: por favor, no lo compartas. Funciona mientras tengas acceso y el pódcast siga en la tienda. Spotify no admite feeds privados; Apple Podcasts, Overcast, Pocket Casts y la mayoría de las demás sí.",
   boughtIt: "¿Lo compraste? Escribe la dirección con la que lo compraste y te enviaremos por email un enlace a tu propio feed.",
   emailMyFeed: "Envíame mi feed por email",
   feedEnded: (title, store) => `Tu acceso a ${title} terminó. Se vuelve a abrir si lo compras de nuevo a ${store}.`,
@@ -640,7 +640,7 @@ const es: CoursesWords = {
   podcastSubject: (title) => `Tu pódcast privado: ${title}`,
   podcastLead: (title, store) => `Aquí tienes tu propio feed de ${title}, de parte de ${store}:`,
   podcastBody:
-    "Ábrelo en tu teléfono y elige tu app de pódcast; los episodios nuevos llegarán ahí como los de cualquier programa. El feed es solo tuyo: por favor, no lo compartas. Sigue funcionando mientras tengas el pódcast.",
+    "Ábrelo en tu teléfono y elige tu app de pódcast; los episodios nuevos llegarán ahí como los de cualquier programa. El feed es solo tuyo: por favor, no lo compartas. Funciona mientras tengas acceso y el pódcast siga en la tienda.",
   courseSubject: (title) => `Tu curso: ${title}`,
   courseLead: (title) => `Aquí tienes tu enlace de acceso a ${title}:`,
   courseDevice:
@@ -934,7 +934,7 @@ const fr: CoursesWords = {
   ownFeed: `Voici votre propre flux. Ouvrez cette page sur votre téléphone et choisissez votre application de podcasts${S}: les nouveaux épisodes y arriveront comme ceux de n'importe quelle émission.`,
   addTo: (app) => `Ajouter à ${app}`,
   anotherApp: `Une autre application${S}? Collez cette adresse là où il est écrit «${S}ajouter une émission par URL${S}»`,
-  feedNote: `Ce flux est à vous seul${S}: merci de ne pas le partager. Il fonctionne aussi longtemps que vous avez le podcast. Spotify n'accepte pas les flux privés${S}; Apple Podcasts, Overcast, Pocket Casts et la plupart des autres, si.`,
+  feedNote: `Ce flux est à vous seul${S}: merci de ne pas le partager. Il fonctionne tant que vous y avez accès et que le podcast reste dans la boutique. Spotify n'accepte pas les flux privés${S}; Apple Podcasts, Overcast, Pocket Casts et la plupart des autres, si.`,
   boughtIt: `Vous l'avez acheté${S}? Saisissez l'adresse avec laquelle vous l'avez acheté, et un lien vers votre propre flux vous sera envoyé par e-mail.`,
   emailMyFeed: "Recevoir mon flux par e-mail",
   feedEnded: (title, store) => `Votre accès à ${title} a pris fin. Il se rouvre si vous l'achetez de nouveau auprès de ${store}.`,
@@ -942,7 +942,7 @@ const fr: CoursesWords = {
   sentBy: (store) => `Envoyé par Marktmorgen au nom de ${store}.`,
   podcastSubject: (title) => `Votre podcast privé${S}: ${title}`,
   podcastLead: (title, store) => `Voici votre propre flux de ${title}, de la part de ${store}${S}:`,
-  podcastBody: `Ouvrez-le sur votre téléphone et choisissez votre application de podcasts${S}; les nouveaux épisodes y arriveront comme ceux de n'importe quelle émission. Ce flux est à vous seul${S}: merci de ne pas le partager. Il fonctionne aussi longtemps que vous avez le podcast.`,
+  podcastBody: `Ouvrez-le sur votre téléphone et choisissez votre application de podcasts${S}; les nouveaux épisodes y arriveront comme ceux de n'importe quelle émission. Ce flux est à vous seul${S}: merci de ne pas le partager. Il fonctionne tant que vous y avez accès et que le podcast reste dans la boutique.`,
   courseSubject: (title) => `Votre formation${S}: ${title}`,
   courseLead: (title) => `Voici votre lien d'accès à ${title}${S}:`,
   courseDevice:
@@ -1237,7 +1237,7 @@ const de: CoursesWords = {
   addTo: (app) => `Zu ${app} hinzufügen`,
   anotherApp: "Eine andere App? Fügen Sie diese Adresse dort ein, wo „Sendung per URL hinzufügen“ steht",
   feedNote:
-    "Der Feed gehört Ihnen allein: Bitte teilen Sie ihn nicht. Er funktioniert, solange Sie den Podcast haben. Spotify nimmt keine privaten Feeds an; Apple Podcasts, Overcast, Pocket Casts und die meisten anderen schon.",
+    "Der Feed gehört Ihnen allein: Bitte teilen Sie ihn nicht. Er funktioniert, solange Sie Zugang haben und der Podcast im Shop bleibt. Spotify nimmt keine privaten Feeds an; Apple Podcasts, Overcast, Pocket Casts und die meisten anderen schon.",
   boughtIt: "Schon gekauft? Geben Sie die Adresse ein, mit der Sie ihn gekauft haben, und ein Link zu Ihrem eigenen Feed wird Ihnen per E-Mail gesendet.",
   emailMyFeed: "Meinen Feed per E-Mail senden",
   feedEnded: (title, store) => `Ihr Zugang zu ${title} ist beendet. Er öffnet sich wieder, wenn Sie ihn erneut bei ${store} kaufen.`,
@@ -1246,7 +1246,7 @@ const de: CoursesWords = {
   podcastSubject: (title) => `Ihr privater Podcast: ${title}`,
   podcastLead: (title, store) => `Hier ist Ihr eigener Feed für ${title} von ${store}:`,
   podcastBody:
-    "Öffnen Sie ihn auf Ihrem Smartphone und wählen Sie Ihre Podcast-App; neue Folgen kommen dann dort an wie bei jeder anderen Sendung. Der Feed gehört Ihnen allein: Bitte teilen Sie ihn nicht. Er funktioniert, solange Sie den Podcast haben.",
+    "Öffnen Sie ihn auf Ihrem Smartphone und wählen Sie Ihre Podcast-App; neue Folgen kommen dann dort an wie bei jeder anderen Sendung. Der Feed gehört Ihnen allein: Bitte teilen Sie ihn nicht. Er funktioniert, solange Sie Zugang haben und der Podcast im Shop bleibt.",
   courseSubject: (title) => `Ihr Kurs: ${title}`,
   courseLead: (title) => `Hier ist Ihr Zugangslink zu ${title}:`,
   courseDevice:
@@ -1539,7 +1539,7 @@ const it: CoursesWords = {
   addTo: (app) => `Aggiungi a ${app}`,
   anotherApp: "Un'altra app? Incolla questo indirizzo dove c'è scritto «aggiungi un programma tramite URL»",
   feedNote:
-    "Il feed è solo tuo: per favore non condividerlo. Continua a funzionare finché hai il podcast. Spotify non accetta feed privati; Apple Podcasts, Overcast, Pocket Casts e quasi tutte le altre sì.",
+    "Il feed è solo tuo: per favore non condividerlo. Funziona finché hai accesso e il podcast resta nel negozio. Spotify non accetta feed privati; Apple Podcasts, Overcast, Pocket Casts e quasi tutte le altre sì.",
   boughtIt: "L'hai acquistato? Scrivi l'indirizzo con cui l'hai acquistato e ti invieremo per email un link al tuo feed personale.",
   emailMyFeed: "Inviami il mio feed via email",
   feedEnded: (title, store) => `Il tuo accesso a ${title} è terminato. Si riapre se lo acquisti di nuovo da ${store}.`,
@@ -1548,7 +1548,7 @@ const it: CoursesWords = {
   podcastSubject: (title) => `Il tuo podcast privato: ${title}`,
   podcastLead: (title, store) => `Ecco il tuo feed personale di ${title}, da parte di ${store}:`,
   podcastBody:
-    "Aprilo sul telefono e scegli la tua app di podcast; i nuovi episodi arriveranno lì come quelli di qualsiasi programma. Il feed è solo tuo: per favore non condividerlo. Continua a funzionare finché hai il podcast.",
+    "Aprilo sul telefono e scegli la tua app di podcast; i nuovi episodi arriveranno lì come quelli di qualsiasi programma. Il feed è solo tuo: per favore non condividerlo. Funziona finché hai accesso e il podcast resta nel negozio.",
   courseSubject: (title) => `Il tuo corso: ${title}`,
   courseLead: (title) => `Ecco il tuo link di accesso a ${title}:`,
   courseDevice:
@@ -1842,7 +1842,7 @@ const nl: CoursesWords = {
   addTo: (app) => `Toevoegen aan ${app}`,
   anotherApp: "Een andere app? Plak dit adres waar ‘show toevoegen via URL’ staat",
   feedNote:
-    "Deze feed is alleen van jou: deel hem alsjeblieft niet. Hij blijft werken zolang je de podcast hebt. Spotify ondersteunt geen privéfeeds; Apple Podcasts, Overcast, Pocket Casts en de meeste andere wel.",
+    "Deze feed is alleen van jou: deel hem alsjeblieft niet. Hij werkt zolang je toegang hebt en de podcast in de winkel blijft. Spotify ondersteunt geen privéfeeds; Apple Podcasts, Overcast, Pocket Casts en de meeste andere wel.",
   boughtIt: "Gekocht? Vul het adres in waarmee je hem hebt gekocht, dan krijg je een link naar je eigen feed per e-mail.",
   emailMyFeed: "Mail me mijn feed",
   feedEnded: (title, store) => `Je toegang tot ${title} is afgelopen. Hij gaat weer open als je hem opnieuw koopt bij ${store}.`,
@@ -1851,7 +1851,7 @@ const nl: CoursesWords = {
   podcastSubject: (title) => `Je privépodcast: ${title}`,
   podcastLead: (title, store) => `Hier is je eigen feed voor ${title}, van ${store}:`,
   podcastBody:
-    "Open hem op je telefoon en kies je podcastapp; nieuwe afleveringen komen daar dan binnen zoals bij elke andere show. Deze feed is alleen van jou: deel hem alsjeblieft niet. Hij blijft werken zolang je de podcast hebt.",
+    "Open hem op je telefoon en kies je podcastapp; nieuwe afleveringen komen daar dan binnen zoals bij elke andere show. Deze feed is alleen van jou: deel hem alsjeblieft niet. Hij werkt zolang je toegang hebt en de podcast in de winkel blijft.",
   courseSubject: (title) => `Je cursus: ${title}`,
   courseLead: (title) => `Hier is je link naar ${title}:`,
   courseDevice:
@@ -2145,7 +2145,7 @@ const pt: CoursesWords = {
   addTo: (app) => `Adicionar ao ${app}`,
   anotherApp: "Outra aplicação? Cole este endereço onde diz «adicionar um programa por URL»",
   feedNote:
-    "O feed é só seu: por favor, não o partilhe. Continua a funcionar enquanto tiver o podcast. O Spotify não aceita feeds privados; o Apple Podcasts, o Overcast, o Pocket Casts e a maioria das outras aplicações aceitam.",
+    "O feed é só seu: por favor, não o partilhe. Funciona enquanto tiver acesso e o podcast continuar na loja. O Spotify não aceita feeds privados; o Apple Podcasts, o Overcast, o Pocket Casts e a maioria das outras aplicações aceitam.",
   boughtIt: "Já o comprou? Introduza o endereço com que o comprou e receberá por email uma ligação para o seu próprio feed.",
   emailMyFeed: "Enviar-me o meu feed por email",
   feedEnded: (title, store) => `O seu acesso a ${title} terminou. Volta a abrir se o comprar novamente a ${store}.`,
@@ -2154,7 +2154,7 @@ const pt: CoursesWords = {
   podcastSubject: (title) => `O seu podcast privado: ${title}`,
   podcastLead: (title, store) => `Aqui está o seu próprio feed de ${title}, da parte de ${store}:`,
   podcastBody:
-    "Abra-o no telemóvel e escolha a sua aplicação de podcasts; os novos episódios passam a chegar lá como os de qualquer programa. O feed é só seu: por favor, não o partilhe. Continua a funcionar enquanto tiver o podcast.",
+    "Abra-o no telemóvel e escolha a sua aplicação de podcasts; os novos episódios passam a chegar lá como os de qualquer programa. O feed é só seu: por favor, não o partilhe. Funciona enquanto tiver acesso e o podcast continuar na loja.",
   courseSubject: (title) => `O seu curso: ${title}`,
   courseLead: (title) => `Aqui está a sua ligação de acesso a ${title}:`,
   courseDevice:

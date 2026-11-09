@@ -5,6 +5,10 @@
  *   nl:pod:by:<store>:<product>:<key>  the token an address already has, so it keeps one feed
  *   nl:pod:ok:<store>:<product>:<key>  whether that address holds the product, for a few minutes
  *   nl:pod:n:<sha(token)>:<day>        how often a feed was put together that day
+ *   nl:pod:ls:<store>:<product>        every address with a feed of that product (since 9 November 2026), so
+ *                                      removing the product finds each one's feed and deletes it
+ *   nl:pod:gone:<store>                products removed whose feeds that list may not all name (made before it began):
+ *                                      a person's erasure and the copy of their data look there too
  *
  * A feed address is a secret: whoever has it can listen. So every read of it
  * and every episode fetched asks whether its address still holds the product
@@ -34,7 +38,7 @@ import { withinStore } from "@/lib/metered-limits";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { holdsProducts } from "@/lib/community-access";
 import { sendEmail } from "@/lib/email";
@@ -48,6 +52,17 @@ const addressKey = (email: string) => sha(`nimbus-podcast:${normaliseEmail(email
 export const tokenKey = (token: string) => `nl:pod:t:${sha(token)}`;
 const byKey = (sid: string, pid: string, email: string) => `nl:pod:by:${sid}:${pid}:${addressKey(email)}`;
 const okKey = (sid: string, pid: string, email: string) => `nl:pod:ok:${sid}:${pid}:${addressKey(email)}`;
+/** Every address with a feed of one product, by its addressKey (audit A1, 9 November 2026). */
+const listenersKey = (sid: string, pid: string) => `nl:pod:ls:${sid}:${pid}`;
+/** The products removed whose feeds listenersKey may not all name, so a person's erasure still reaches them. */
+const goneKey = (sid: string) => `nl:pod:gone:${sid}`;
+/**
+ * The member of listenersKey a podcast is made with (app/api/store/podcast, "enable"): every feed of that product was
+ * listed as it was made. A list without it may miss feeds made before lists began (a podcast made before 9 November
+ * 2026), so removing that product also notes it in goneKey.
+ */
+const LISTED_FROM_START = "+";
+const ADDRESS_KEY = /^[0-9a-f]{32}$/;
 
 export type FeedGrant = { s: string; h: string; p: string; e: string };
 
@@ -71,7 +86,8 @@ export async function feedToken(store: Store, productId: string, email: string):
   }
   if (set !== "OK") return null;
   // Only "OK" wrote the grant: on any other reply no link is given to a feed that may not open.
-  const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)]]);
+  // Listed with its product in the same write (audit A1), so removing the product finds this feed and deletes it.
+  const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)], ["SADD", listenersKey(sid, productId), addressKey(email)]]);
   return made === "OK" ? token : null;
 }
 
@@ -85,7 +101,7 @@ async function withGrant(store: Store, token: string, grant: FeedGrant): Promise
   const held = await grantOf(token);
   if (held === undefined) return null;
   if (held !== null) return sameGrant(held, grant) ? token : null;
-  const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant), "NX"]]);
+  const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant), "NX"], ["SADD", listenersKey(grant.s, grant.p), addressKey(grant.e)]]);
   if (made === "OK") return token;
   if (made !== null) return null;
   // null: another call wrote it first; hand it out only if it is this address's grant.
@@ -223,18 +239,28 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
  * the feed's address stops working in their podcast app. A buyer who still
  * holds the podcast asks for a new one, as on a new device.
  */
-export async function forgetPodcastPerson(store: Store, productIds: string[], email: string): Promise<number> {
-  if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
+export async function forgetPodcastPerson(store: Store, current: string[], email: string): Promise<number> {
+  if (!store.statsId || !isRedisConfigured()) return 0;
   const sid = store.statsId;
+  // And the products removed whose feeds no list may lead to (audit A1): a feed outlives its product only there.
+  const productIds = await withGone(sid, current);
+  if (!productIds.length) return 0;
   // Read exactly before anything is deleted (CX-123 rule 24): the index is the only way back to the grant that holds
   // the address, so on an unknown read both stay, the step throws and the erasure says it is not finished.
-  const held = (await indexedTokens(sid, productIds, email)).filter((t): t is string => t !== null);
+  const indexed = await indexedTokens(sid, productIds, email);
+  const held = indexed.filter((t): t is string => t !== null);
+  // And off each product's list of listeners (audit A1): an address is listed only beside a feed of that product.
+  const listed = productIds.filter((_, i) => indexed[i] !== null).map((p): (string | number)[] => ["SREM", listenersKey(sid, p), addressKey(email)]);
   const reply = repliesFor(
     await redisPipeline([["DEL", ...productIds.flatMap((p) => [byKey(sid, p, email), okKey(sid, p, email)]), ...held.map(tokenKey)]]),
     1,
   );
   const gone = reply ? countOf(reply[0]) : null;
   if (gone === null) throw new UnknownReplyError("the deletion of a person's podcast feeds");
+  if (listed.length) {
+    const taken = repliesFor(await redisPipeline(listed), listed.length);
+    if (!taken || !taken.every((r) => r === 0 || r === 1)) throw new UnknownReplyError("a person's place on a podcast's list of listeners");
+  }
   return gone;
 }
 
@@ -255,8 +281,143 @@ async function indexedTokens(sid: string, productIds: string[], email: string): 
  * given: it is a key, and the person has it in the email that sent it. Only
  * reads; never makes a feed.
  */
-export async function feedsOf(store: Store, productIds: string[], email: string): Promise<string[]> {
-  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
+export async function feedsOf(store: Store, current: string[], email: string): Promise<string[]> {
+  if (!store.statsId || !isRedisConfigured()) return [];
+  const productIds = await withGone(store.statsId, current);
+  if (!productIds.length) return [];
   const tokens = await indexedTokens(store.statsId, productIds, email);
   return productIds.filter((_, i) => typeof tokens[i] === "string" && FEED_TOKEN.test(tokens[i] as string));
+}
+
+/** The most products a store notes in goneKey; past it a removal that would need one more is refused (GoneFullError). */
+export const GONE_MAX = 50;
+/** A product's id as goneKey keeps it (lib/store.ts makes them so). */
+const GONE_ID = /^[a-z0-9]{6,40}$/;
+
+/**
+ * The products asked about and those in goneKey, each once, in that order. The note is the only way to a removed
+ * product's unlisted feeds, so it is read exactly (CX-123 rule 24): any other reply throws UnknownReplyError, and an
+ * erasure says it is not finished instead of a receipt that left them.
+ */
+async function withGone(sid: string, current: string[]): Promise<string[]> {
+  const reply = repliesFor(await redisPipeline([["SMEMBERS", goneKey(sid)]]), 1);
+  const gone = stringList(reply?.[0]);
+  if (!gone) throw new UnknownReplyError("the products removed with a podcast's feeds");
+  return [...new Set([...current, ...gone.filter((id) => GONE_ID.test(id))])];
+}
+
+/**
+ * A podcast made now has every feed of its product listed from the start (app/api/store/podcast, "enable"). true once
+ * Redis confirms the mark; false when it is not known, and the podcast is not made. A product that already has a
+ * list without the mark (a podcast of before 9 November 2026 turned off and on again) keeps it unmarked, so its removal
+ * still notes it in goneKey: a mark there could hide a feed the list never held.
+ */
+export async function markListedFromStart(store: Store, productId: string): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured()) return false;
+  const key = listenersKey(store.statsId, productId);
+  const reply = repliesFor(await redisPipeline([["EXISTS", key], ["SISMEMBER", key, LISTED_FROM_START]]), 2);
+  const exists = reply ? countOf(reply[0]) : null;
+  const marked = reply ? countOf(reply[1]) : null;
+  if (exists === null || exists > 1 || marked === null || marked > 1) return false;
+  if (marked === 1 || exists === 1) return true;
+  const [added] = await orderWrite(store, [["SADD", key, LISTED_FROM_START]]);
+  return added === 0 || added === 1;
+}
+
+/** Thrown when a page of a product's listeners could not be paid for in studio requests: nothing of it was read. */
+export class ListenersUnpaidError extends Error {
+  constructor() {
+    super("the studio requests to delete a podcast's listeners could not be taken");
+    this.name = "ListenersUnpaidError";
+  }
+}
+
+/** Thrown when goneKey already holds GONE_MAX products: nothing was deleted. */
+export class GoneFullError extends Error {
+  constructor() {
+    super("too many removed podcasts wait for their old feeds to be reached");
+    this.name = "GoneFullError";
+  }
+}
+
+/**
+ * The listeners one studio request deletes: a page of them read (SSCAN) and, for each, its index read (MGET) and its
+ * index, its answer kept for a few minutes and its grant deleted (one DEL), then taken off the list (SREM). Four
+ * commands and, for a hundred, at most about 45 KB through the database (an addressKey of 32 characters, three keys of
+ * about 80 and a token of 48 each): inside one studio request's twenty commands and fifty kilobytes
+ * (tests/plan-cost-registry.ts, UNIT_COST.studio).
+ */
+export const LISTENERS_PER_UNIT = 100;
+
+/**
+ * Deletes every listener's feed of one product (audit A1, 9 November 2026): the index, the cached answer and the grant
+ * that holds the buyer's address, for each address the product's list names, then the list. Each page is paid for
+ * before it is read: one studio request for the page, and one for each LISTENERS_PER_UNIT listeners on it (`pay`,
+ * false when the studio will not: ListenersUnpaidError, nothing more read). Every reply is read exactly (rule 24); an
+ * unknown one throws UnknownReplyError and what is left stays listed, so the next try finds it.
+ *
+ * `noteGone`, asked before the removal: a product whose list was not made with it (LISTED_FROM_START) may have feeds
+ * no list names, so it is noted in goneKey first, before anything is deleted, and a person's erasure reaches them
+ * there. A product that is not a podcast and has no list has no feeds to find, and is not noted.
+ */
+export async function dropListeners(
+  store: Store,
+  productId: string,
+  options: { podcast: boolean; noteGone: boolean; pay: (units: number) => Promise<boolean> },
+): Promise<{ dropped: number; noted: boolean }> {
+  if (!store.statsId || !isRedisConfigured()) return { dropped: 0, noted: false };
+  const sid = store.statsId;
+  const key = listenersKey(sid, productId);
+  const head = repliesFor(await redisPipeline([["EXISTS", key], ["SISMEMBER", key, LISTED_FROM_START]]), 2);
+  const exists = head ? countOf(head[0]) : null;
+  const marked = head ? countOf(head[1]) : null;
+  if (exists === null || exists > 1 || marked === null || marked > 1) throw new UnknownReplyError("a podcast's list of listeners");
+  let noted = false;
+  if (options.noteGone && marked === 0 && (options.podcast || exists === 1)) {
+    const counted = repliesFor(await redisPipeline([["SCARD", goneKey(sid)], ["SISMEMBER", goneKey(sid), productId]]), 2);
+    const size = counted ? countOf(counted[0]) : null;
+    const already = counted ? countOf(counted[1]) : null;
+    if (size === null || already === null || already > 1) throw new UnknownReplyError("the products removed with a podcast's feeds");
+    if (already === 0) {
+      if (size >= GONE_MAX) throw new GoneFullError();
+      // Not the room's (a few ids, capped): bounded by GONE_MAX in tests/store-data-registry.ts.
+      const added = repliesFor(await redisPipeline([["SADD", goneKey(sid), productId]]), 1)?.[0];
+      if (added !== 1 && added !== 0) throw new UnknownReplyError("the note of a removed podcast");
+    }
+    noted = true;
+  }
+  if (exists === 0) return { dropped: 0, noted };
+  let dropped = 0;
+  let cursor = "0";
+  do {
+    if (!(await options.pay(1))) throw new ListenersUnpaidError();
+    const page = scanPage(await redisPipeline([["SSCAN", key, cursor, "COUNT", LISTENERS_PER_UNIT]]));
+    if (!page) throw new UnknownReplyError("a page of a podcast's listeners");
+    const listed = page.items.filter((member) => member !== LISTED_FROM_START);
+    const addresses = listed.filter((member) => ADDRESS_KEY.test(member));
+    if (addresses.length) {
+      if (!(await options.pay(Math.ceil(addresses.length / LISTENERS_PER_UNIT)))) throw new ListenersUnpaidError();
+      const indexes = addresses.map((address) => `nl:pod:by:${sid}:${productId}:${address}`);
+      const tokens = repliesFor(await redisPipeline([["MGET", ...indexes]]), 1);
+      const held = listSlots(tokens?.[0]);
+      if (!held || held.length !== addresses.length || !held.every((t) => t === null || typeof t === "string")) {
+        throw new UnknownReplyError("a podcast's listeners' feeds");
+      }
+      const grants = (held as (string | null)[]).filter((t): t is string => t !== null && FEED_TOKEN.test(t)).map(tokenKey);
+      const answers = addresses.map((address) => `nl:pod:ok:${sid}:${productId}:${address}`);
+      const reply = repliesFor(await redisPipeline([["DEL", ...indexes, ...answers, ...grants]]), 1);
+      const gone = reply ? countOf(reply[0]) : null;
+      if (gone === null) throw new UnknownReplyError("the deletion of a podcast's listeners' feeds");
+      dropped += addresses.length;
+    }
+    if (listed.length) {
+      const taken = repliesFor(await redisPipeline([["SREM", key, ...listed]]), 1);
+      if ((taken ? countOf(taken[0]) : null) === null) throw new UnknownReplyError("a podcast's list of listeners");
+    }
+    cursor = page.next;
+  } while (cursor !== "0");
+  // Every listed feed is gone; the list, its mark with it.
+  const last = repliesFor(await redisPipeline([["DEL", key]]), 1);
+  if ((last ? countOf(last[0]) : null) === null) throw new UnknownReplyError("a podcast's list of listeners");
+  return { dropped, noted };
 }

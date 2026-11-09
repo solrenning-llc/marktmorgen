@@ -1220,6 +1220,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/path-reminder.ts", names: ["sendPathReminder", "PATH_REMINDER_UNITS"] },
       { file: "lib/path-facts.ts", names: ["PATH_SALE_PAGES", "PATH_REFUND_PAGES", "PATH_MONEY_SECONDS"] },
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
+      // Removing a podcast's product deletes every listener's feed: each page of its list paid for first, one studio request for
+      // the page and one for each LISTENERS_PER_UNIT listeners on it, refused without reading past the studio's figure (audit A1, 9 November 2026).
+      { file: "app/api/store/product/route.ts", names: ["countStudio(guarded.store, null, units)", "dropListeners(guarded.store, id"] },
+      { file: "lib/podcast-access.ts", names: ["LISTENERS_PER_UNIT = 100;", "options.pay(1)", "options.pay(Math.ceil(addresses.length / LISTENERS_PER_UNIT))"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
     ],

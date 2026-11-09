@@ -3,10 +3,11 @@ import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setPodcastEpisodes, setProductPodcast, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath } from "@/lib/product-file";
-import { readListing } from "@/lib/catalog";
+import { readListing, readListingExactly } from "@/lib/catalog";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { dropPodcast, editPodcast, newPodcastId, readPodcast, savePodcast, type PodcastEdit } from "@/lib/podcast";
+import { markListedFromStart } from "@/lib/podcast-access";
 
 /**
  * Everything the studio changes about a private podcast.
@@ -33,6 +34,9 @@ export async function POST(request: NextRequest) {
     if (action === "enable") {
       if (product.podcast) return Response.json({ ok: true, podcastId: product.podcast.id });
       const podcastId = newPodcastId();
+      // Every feed of it is listed by its product from the start, so removing the product finds each one and deletes
+      // it (lib/podcast-access.ts, audit A1). Not confirmed: the podcast is not made.
+      if (!(await markListedFromStart(store, id))) return fail("unavailable", 503);
       const result = await setProductPodcast(ref, id, { id: podcastId, episodes: 0 });
       if (!result.ok) return fail(result.reason);
       await savePodcast({ id: podcastId, episodes: [] });
@@ -42,6 +46,13 @@ export async function POST(request: NextRequest) {
     const podcastId = product.podcast.id;
 
     return await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
+      // Read again under the lock (audit A1): a product removed, or turned into another podcast, while this waited
+      // for it is not written to, so no episode is saved for a podcast whose product's removal already deleted it.
+      // The store's record is read again too, since the one read above may hold the product inline.
+      const now = await storeForEmail(ref);
+      const still = now ? await readListingExactly(now, id) : null;
+      if (still === "unknown") throw new UnknownReplyError("a podcast's product");
+      if (!still || still.podcast?.id !== podcastId) return fail("unknown", 404);
       // Only Redis's exact "no record" is an empty podcast; an unknown read throws (readPodcast) and nothing is
       // written, because what is written below is the whole podcast as read.
       const podcast = (await readPodcast(podcastId)) ?? { id: podcastId, episodes: [] };

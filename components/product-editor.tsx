@@ -160,6 +160,8 @@ const MESSAGES: Record<string, string> = {
   // The file named is an episode's audio of this product's podcast (app/api/store/file/attach).
   in_use: "That file is already used on this product. Choose the file from your device again.",
   preorders: "Buyers have pre-ordered this and are waiting for it. Put it on sale, which hands it to them, or refund their pre-orders in your Stripe dashboard first.",
+  // A podcast made before 9 November 2026 whose old feeds must still be reachable, and the store's list of those is full.
+  podcast_feeds: "This podcast cannot be removed yet: too many removed podcasts in your store still have old buyer feeds to delete. Write to support about it.",
   call: "This is a paid call, so it has one price, charged once, and delivers a time rather than a file. Stop selling it as a call first to change that.",
   course: "This is a course: it cannot be free, and it delivers its lessons rather than a file or a link of its own. Its lessons are changed from its own page.",
   shipped: "This is a physical product you ship: sold once, at one price, with nothing else to hand over. Under Shipping, stop shipping it first to change that.",
@@ -2018,7 +2020,7 @@ export function ProductEditor({
     // and change, which is not something to read in three seconds.
     setSilenced(quiet);
     // Removed, but its campaign words could not be confirmed deleted (#1947): said, never a plain "removed".
-    if (pending) toast("Product removed. Its campaign words could not be confirmed deleted just now. They stay counted in your store's data until they are, and they go with your store's data if you close it.");
+    if (pending) toast("Product removed. Some of what it kept (its campaign words, or its podcast's feeds) could not be confirmed deleted just now. They stay counted in your store's data until they are, and they go with your store's data if you close it.");
     else if (confirmation) toast(confirmation);
     router.refresh();
   }
@@ -2451,6 +2453,9 @@ export function ProductEditor({
                       your store. Its files, picture, description, page, reviews
                       and any course lessons are deleted with it and cannot be
                       brought back; sales already made stay in your Stripe account.
+                      {product.podcast
+                        ? " Its podcast episodes are deleted too, and the private feed of every buyer stops working for good."
+                        : null}
                       {product.hidden ? null : " To take it off your store but keep it, unpublish it instead."}
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">

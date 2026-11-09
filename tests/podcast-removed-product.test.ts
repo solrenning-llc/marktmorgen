@@ -10,6 +10,8 @@
  *
  * Checks marked [CORRETO] say what should happen; a FAIL there is the defect.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { POST as productRoute } from "@/app/api/store/product/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -82,7 +84,9 @@ async function main(): Promise<void> {
   is("[CORRETO] episode two's audio is deleted", deleted.includes(ep2), true);
   is("[CORRETO] the podcast's record is gone", redis.keys().includes(`nl:pod:${podcastId}`), false);
   is("[CORRETO] no listener grant for the removed product is left", redis.keys().filter((k) => k.startsWith("nl:pod:t:") || k.startsWith("nl:pod:by:")).length, 0);
-  is("the old feed is refused (product gone, so 410), the grant itself still readable", (await readFeedToken(token as string))?.e, BUYER);
+  // Changed with the fix (rule 23): the audit's proof read the grant as still there (its address readable, the defect's
+  // state); the grant is now deleted with the product, so the old feed's token opens nothing.
+  is("[CORRETO] the old feed's token opens nothing: its grant went with the product", await readFeedToken(token as string), null);
 
   part("The listener then asks the store to erase them (erasureScope + the podcast step, as erasePerson runs it)");
   const scope = await erasureScope((await storeForEmail(OWNER))!, BUYER);
@@ -92,6 +96,12 @@ async function main(): Promise<void> {
   await forgetPodcastPerson(scope.store, scope.productIds, BUYER);
   const left = redis.keys().filter((k) => k.startsWith("nl:pod:t:")).map((k) => redis.run(["GET", k]));
   is("[CORRETO] after the erasure no grant holds the address", left.filter((v) => typeof v === "string" && v.includes(BUYER)).length, 0);
+
+  part("What the creator and the buyer are told (added with the fix)");
+  const editor = readFileSync(join(process.cwd(), "components/product-editor.tsx"), "utf8");
+  is("the studio says, before a podcast is removed, that its episodes and every buyer's feed go", editor.includes("Its podcast episodes are deleted too, and the private feed of every buyer stops working for good."), true);
+  const words = readFileSync(join(process.cwd(), "lib/buyer-words/courses.ts"), "utf8");
+  is("the buyer is no longer told the feed works for as long as they have the podcast", words.includes("for as long as you have the podcast"), false);
   done();
 }
 

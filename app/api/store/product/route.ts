@@ -42,6 +42,12 @@ import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
+import { dropPodcastRecord, readPodcast } from "@/lib/podcast";
+import type { Podcast } from "@/lib/podcast-rules";
+import { GoneFullError, ListenersUnpaidError, dropListeners } from "@/lib/podcast-access";
+import { countStudio } from "@/lib/studio-route";
+import { studioRefusal } from "@/lib/person-tasks";
+import { withLock } from "@/lib/redis-lock";
 import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
@@ -292,15 +298,43 @@ export async function POST(request: NextRequest) {
       let before: Awaited<ReturnType<typeof readListing>>;
       let preparedCourse: Awaited<ReturnType<typeof readCourseExact>> = null;
       let taskDrops: Awaited<ReturnType<typeof readCourseTaskDrops>> = [];
+      // A private podcast goes with its product (audit A1, 9 November 2026). Its record is read exactly first: an
+      // unknown read answers 503 and removes nothing, so no episode's audio is left that no record names.
+      let podcastBefore: Podcast | null = null;
       try {
         before = await readListing(guarded.store, id);
         if (before?.course) {
           preparedCourse = await readCourseExact(before.course.id);
           if (preparedCourse) taskDrops = await readCourseTaskDrops(preparedCourse);
         }
+        if (before?.podcast) podcastBefore = await readPodcast(before.podcast.id);
       } catch (error) {
         console.error("could not read a product or its course before removing it", error);
         return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      // And every listener's feed of it, whose grant holds the buyer's address (lib/podcast-access.ts dropListeners),
+      // deleted before the product goes, each page paid for in studio requests first. Not finished (a reply not known,
+      // the studio's requests used up): nothing is removed, and the same removal asked again goes on where this
+      // stopped. A buyer whose feed went this way still holds the podcast and asks for a new feed, as on a new device.
+      // Asked again for a product already removed, what its earlier removal left listed is deleted now.
+      const refusal: { reason?: string; message?: string } = {};
+      const pay = async (units: number): Promise<boolean> => {
+        const counted = await countStudio(guarded.store, null, units);
+        if (!counted.ok) Object.assign(refusal, { reason: counted.reason, message: counted.message });
+        return counted.ok;
+      };
+      if (before || (id && PRODUCT_ID.test(id))) {
+        try {
+          await dropListeners(guarded.store, id, { podcast: !!before?.podcast, noteGone: !!before, pay });
+        } catch (error) {
+          if (error instanceof ListenersUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          if (error instanceof GoneFullError) return Response.json({ ok: false, error: "podcast_feeds" }, { status: 409 });
+          console.error("could not delete the feeds of a product's podcast before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
       }
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
       const removed = await removeProduct(ref, id, async (going, store) => {
@@ -369,6 +403,36 @@ export async function POST(request: NextRequest) {
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
         if (removedCourse) {
           await dropCourse(removedCourse, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        }
+        // A podcast's record and its episodes' audio, read again under its lock (the studio's podcast route reads the
+        // product again under it, so no episode is added once this ran). The audio of the record read before is
+        // deleted whatever this read says; a record not confirmed gone is said to the caller (cleanupPending).
+        if (going.podcast) {
+          const podcastId = going.podcast.id;
+          const audio = new Set((podcastBefore?.episodes ?? []).map((episode) => episode.pathname));
+          try {
+            await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
+              const now = await readPodcast(podcastId).catch((error: unknown) => {
+                console.error("could not read a removed product's podcast again", error);
+                cleanupPending = true;
+                return null;
+              });
+              for (const episode of now?.episodes ?? []) audio.add(episode.pathname);
+              await dropPodcastRecord(podcastId);
+            });
+          } catch (error) {
+            console.error("could not delete a removed product's podcast", error);
+            cleanupPending = true;
+          }
+          const named = new Set(had.map((file) => file.pathname));
+          had.push(...[...audio].filter((pathname) => !named.has(pathname)).map((pathname) => ({ pathname })));
+        }
+        // And a feed made while it went (a page that read the product just before): what it left listed is deleted.
+        if (going.podcast || podcastBefore) {
+          await dropListeners(removed.store, id, { podcast: false, noteGone: false, pay }).catch((error: unknown) => {
+            console.error("could not delete the feeds of a removed product's podcast", error);
+            cleanupPending = true;
+          });
         }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).

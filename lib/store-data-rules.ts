@@ -87,9 +87,11 @@ export const ORDER_DATA_BYTES = 4_608;
  * What each product an order hands over keeps for good besides: its place in
  * the buyer's record of what they bought (lib/learn.ts, recordEnrollment).
  * A course's student row is written when they first open it, and takes its
- * own room then (touchStudent).
+ * own room then (touchStudent). 4,352 until 9 November 2026; a podcast's listener is
+ * also listed by its product since (lib/podcast-access.ts, audit A1), a member's
+ * key and ENTRY_BYTES more.
  */
-export const ITEM_DATA_BYTES = 4_352;
+export const ITEM_DATA_BYTES = 4_416;
 
 /** The most products one order can hand over: a cart of MAX_CART, each with MAX_BUMPS added, every one a bundle of MAX_BUNDLE_ITEMS. */
 export const MAX_ORDER_ITEMS = (MAX_CART + MAX_BUMPS) * MAX_BUNDLE_ITEMS;

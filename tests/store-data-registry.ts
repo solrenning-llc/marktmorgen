@@ -90,6 +90,8 @@ import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 
 const KB = 1_024;
+/** lib/podcast-access.ts GONE_MAX, held there by the source check of its entry below (that module is not imported here). */
+const GONE_MAX = 50;
 /** A key with its name and a small value: what most links and records of a few fields weigh, rounded up. */
 const KEY = 256;
 /** A mark: a key of under 80 characters holding a word, a count or a time. */
@@ -239,6 +241,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:export:@app/api/store/export/route.ts": { what: "Downloads of a store's files: counted ten minutes at a time, and its whole exports since its plan ended", parts: [per("studio", 1, KEY, "Downloads counted ten minutes at a time."), capped(() => KEY, "One count of whole exports since the plan ended, sixty days.")] },
   "nl:rl:licence:@app/api/store/licence/route.ts": short("A license check's count per connection", "request", 1, KEY, REQ("license")),
   "nl:pod:@app/api/store/podcast/route.ts": short("A podcast's lock while the studio changes it", "studio", 1),
+  "nl:pod:@app/api/store/product/route.ts": short("A podcast's lock while its product is removed (audit A1)", "studio", 1),
 
   // ---------------------------------------------------------------- lib/ a–b
   "nl:adsrv:@lib/ad-events.ts": { what: "The store's server-side ad settings, its sealed tokens", parts: [capped(8 * KB, "Four platforms' sealed tokens and a test code: one record a store.")] },
@@ -792,6 +795,15 @@ export const FAMILIES: Record<string, Family> = {
   "nl:plans:pending@lib/plans.ts": company("Plans being started", "One set, minutes."),
   "nl:share:stores@lib/platform-share.ts": company("Stores whose sales pay a share", "One set for every store."),
   "nl:pod:by:@lib/podcast-access.ts": { what: "A listener's access to a private podcast", parts: [item(MARK, "One a buyer.", "membership")] },
+  // Audit A1 (9 November 2026): removing a podcast's product deletes every listed feed, then the list.
+  "nl:pod:gone:@lib/podcast-access.ts": { what: "Products removed whose old feeds a person's erasure must still reach", parts: [capped(GONE_MAX * MARK + KEY, "One set a store, at most GONE_MAX product ids (a removal that would add one more is refused); only podcasts made before their feeds were listed are noted.", src("lib/podcast-access.ts", `GONE_MAX = ${GONE_MAX};`))] },
+  "nl:pod:ls:@lib/podcast-access.ts": {
+    what: "Every address with a feed of a product, so removing the product deletes each feed",
+    parts: [
+      item(MARK, "One a buyer: their address's one-way key, beside the feed it lists.", "membership"),
+      capped(MAX_PRODUCTS * MARK, "The mark a podcast is made with, one a product the store holds (a removed product's list goes with it).", src("lib/catalog-rules.ts", "MAX_PRODUCTS")),
+    ],
+  },
   "nl:pod:n:@lib/podcast-access.ts": short("A feed's reads a day", "request", 2, 128, REQ("page")),
   "nl:pod:ok:@lib/podcast-access.ts": short("A listener's access, answered", "request", 1, KEY, REQ("page")),
   "nl:pod:t:@lib/podcast-access.ts": { what: "A listener's feed token", parts: [item(KEY, "One a buyer.", "membership")] },

@@ -97,8 +97,11 @@ function lostOnCharge(charge: ChargeLike): boolean {
 }
 
 /**
- * What a charge took, and so what a refund in full gives back: what was captured when Stripe says so (a charge
- * captured in part can never be refunded past it), otherwise its amount; 0 when neither reads.
+ * What a charge took, and so what a refund in full gives back: `amount_captured` when Stripe gives it above zero,
+ * otherwise `amount`; 0 when neither reads. A charge authorised for more than it captured (a capture in part, the rest
+ * released) can never be refunded past what was captured, so measured against `amount` its refund in full would never
+ * add up and it would stay unknown for good, holding a job's anchor; `amount_captured` equals `amount` on every charge
+ * captured whole.
  */
 function chargeTotal(charge: ChargeLike | Record<string, unknown>): number {
   const captured = (charge as { amount_captured?: unknown }).amount_captured;

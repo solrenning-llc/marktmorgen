@@ -287,9 +287,12 @@ export async function paidCalls(store: Store): Promise<
     cancel: CancelPromise | null;
     /**
      * Its charge reads refunded in full, and whether the refund succeeded could not be told on this reading (past its
-     * reads, or Stripe's answer did not read): the booking keeps its time, as the buyer may not have the money back
-     * (decision 18), but is never taken for paid: no reminder and no new link go to it (lib/call-reminders.ts,
-     * lib/call-meetings.ts). False for every booking whose payment stands, or whose full refund is still on its way.
+     * reads, or Stripe's answer did not read). The booking keeps its time, as the buyer may not have the money back
+     * (decision 18), and what it holds stays: it is still offered to no one else, the buyer's own page still shows it
+     * with its link (lib/buyer-orders.ts callsFor), and a meeting link that changes is still sent to it
+     * (lib/call-meetings.ts). What a paid booking would newly start waits for a reading that tells: no catch-up
+     * confirmation (catchUpBookings) and no reminder, which stays queued while it is still of use
+     * (lib/call-reminders.ts). False for every booking whose payment stands, or whose full refund is still on its way.
      */
     unconfirmed: boolean;
   }[]
@@ -338,7 +341,8 @@ async function callOrLost(store: Store, row: SessionRow, handles: Set<string>, r
   // confirmedBack, its reads inside `checks`): a full refund still on its way, or one past this reading's reads, keeps
   // the booking's time, as the buyer has not had the money back yet.
   // Decided from the refunds read with the booking (expand[]=…latest_charge.refunds) when they came whole, with no
-  // read; otherwise one read from `checks`. Unknown is never "paid": the booking keeps its time, marked unconfirmed.
+  // read; otherwise one read from `checks`. Unknown keeps the booking's time and what it already holds (the buyer's page
+  // and its link), marked unconfirmed, so nothing a paid booking would newly start (catch-up, reminders) is done for it.
   if (refundedInFull(row.payment_intent)) {
     let money: MoneyBack | "unknown";
     try {
@@ -624,7 +628,9 @@ export async function releaseOwnHold(store: Store, session: string): Promise<voi
 export async function catchUpBookings(store: Store, paid: PaidCall[], origin: string): Promise<void> {
   if (!isRedisConfigured() || !store.callsId) return;
   const now = Date.now();
-  const due = paid.filter((c) => c.session && c.end > now).slice(0, 20);
+  // A booking whose full refund could not be confirmed on this reading (unconfirmed; decision 18) is not confirmed
+  // here: no emails, no meeting, no lead or webhook. A later reading that tells decides it.
+  const due = paid.filter((c) => c.session && c.end > now && !c.unconfirmed).slice(0, 20);
   if (!due.length) return;
   const seen = await redisPipeline(due.map((c) => ["EXISTS", confirmedKey(c.session)]));
   const find = listingFinder(store);

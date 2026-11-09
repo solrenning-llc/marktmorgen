@@ -207,9 +207,12 @@ export async function sendCallReminders(
         continue;
       }
       // Refunded in full, and whether the refund succeeded could not be told on this reading (lib/calls.ts,
-      // unconfirmed; the owner's decision 18): no reminder is sent to someone who may have had the money back.
+      // unconfirmed; the owner's decision 18): nothing is sent to someone who may have had the money back, and it stays
+      // queued while it is still of use, so a paying buyer whose refund failed is still reminded on a later run.
       if (call.unconfirmed) {
-        counts.dropped += 1;
+        const useful = item.mark === "c" ? call.end > Date.now() : call.start === item.start && stillUseful(item.mark, call.start, Date.now());
+        if (useful) done.pop();
+        else counts.dropped += 1;
         continue;
       }
       try {

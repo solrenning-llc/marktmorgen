@@ -337,6 +337,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:lib:joined:@lib/joined-stores.ts": company("The stores an address joined the list of", "A person's, across stores: one member a store, in the set of the quarter it joined in, kept QUARTERS_KEPT quarters at the most."),
   "nl:lib:link:@lib/buyer-library.ts": short("A library link, a day", "access", 1, LINK_BYTES, MAIL("library")),
   "nl:listed:@lib/buyer-list.ts": short("An order put on the list", "order", 8, MARK),
+  "nl:refund:stuck:@lib/refunds.ts": short("The day's mark that a full refund on its way past seven days was said in the log (decision 18: an alert, never a revocation), one a charge, at most STUCK_ALERTS_PER_RUN a run", "run", 1, MARK),
   "nl:lostdispute:cursor:@lib/refunds.ts": short("Where a job that takes things back left off in a store's lost disputes, when there were more than one run reads", "run", 30),
   "nl:orders:link:@lib/buyer-orders.ts": short("A buyer's purchases link, a day", "access", 1, LINK_BYTES, MAIL("orders")),
   "nl:rl:orders:addr:@lib/buyer-orders.ts": short("Purchase links per address, an hour", "request", 1, KEY, REQ("orders link")),

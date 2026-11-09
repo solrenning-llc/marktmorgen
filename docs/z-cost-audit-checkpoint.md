@@ -1,3 +1,17 @@
+# Codex Z — r22 #3321 SECOND role clarified; ROOT reservation still pending
+
+RoleSUPERSEDESpreviousFIRSTwording: C2announcedFIRST3321inROOT01:19Fortaleza. ZtakesSECONDrequestedfinancialrole underoriginalONEclaim6732119897; clarification6732156909 BODYreadbackEXACT. No source/diff/nativefetch/worktree/proof/runtime3321yet; waitingROOTRES/fullreadback. Twoindependentroles, notthird/duplicate; no C2execution/activeprocessinferredfromclaim, no C2conclusionsborrowed.
+
+AlternativeGitDataattempt createdDRAFTchannel-tree dd99235b26dcf8fec9a12ef499ac5a81447e3154 andcommitfa80c6f9ab6f2bc4ffc095349f4482f80d76bc43 parentab2ef53d76930587d64b1b2e87a73df4e54b7113, containingoldFIRSTwording. Firstupdate_refbindingmissingbranch_name NOPUBLICATION, correctedupdate_ref(branch_name,sha,expected_sha,forcefalse) UNKNOWN04:19:24UTC. Freshcompareab2...branchat04:20:17UTC showed6commits/tipde6b9153dbd328a9f33e0e392768524022d3506e,18appendlinesONLYC6/C2/C5,nofa80/noZRES: NOTAPPLIEDatthatread. DoNOTpromoteoldFIRSTdraft. CurrentbodymustSECOND+preserveALLnewmessages. Conservativewaituntil>=04:21:24UTCbeforeNEXTROOTWRITE; no code/provider/CI duringwait.
+
+Directgitls-remotechannelattemptFAILEDunauthenticated(noUsername), no credentialread/probe/export, no assertionfreshnativeref. GitDataalternative neverforce/bypassed lease or changed productrefs. Sharedchannelauthorizedonly; no6thownproductunit. SixearlierROOT409+twoafter3318allcooldowns>=120preserved below; thoseledgersnotCI/testretries.
+
+FreshnewROOTcompare18linesFULLread: C2FIRST3321andSECONDsecurity3313(42c5)claims, C63031newMEDln#/TAKE_DATA, C5claims3268/3319/3315allTHEIRS. NoZgrant/owncorrective;3313C2SECONDdoesnotcloseZLOWsorcountasZexecution. 3318ACK6732113528exact/durableformal/evidencealreadydone, ROOTreceiptstillpending.
+
+Entireprevious796424 retainedbelow; newROOTRESTILLrequiredBEFORE3321source/tests. Nextaftercooldownfreshprefix+ID/appendSECONDreservation, readbackEXACTthenonlyownnewproofs. SERIALMediumZEROagents/5ownHOLDs/capsREDsWIPs/retriesallunchanged/sembackgroundwatcher/automationchange.
+
+---
+
 # Codex Z — r22 ACTIVE #3321 first money review, metadata/claim ONLY
 
 FIRST latestcanonicalFULL792964/blob8138876c951579e4901dc81d08aece2d62e47e38/92ab9ccbb494179d6d10700e7fc8dddfc89c7f81 recovered ENTIRELY/exactknownidentity; history/head/RED/WIP/HOLD/retry/capledgers intact below. Prior #3318technicalreview5821526475 alreadyCOMPLETE; channel0107UNPUBLISHEDafter8actual409, notpretendingposted. Allcooldowns>=120s; lastconservative04:11:12UTC haselapsedbeforeanyr22write. OwnFIVEproductunits unchanged/no6th; reviewsnotcount.

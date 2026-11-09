@@ -733,20 +733,95 @@ const TIME_KINDS: [string, RegExp][] = [
   ["year", /^(?:years?|anos?|ans?|annees?|jahr(?:e|en|ig\p{L}*)?|ann[oi]|jaar|jaren)(?![\p{L}\p{N}])/u],
   ["minute", /^(?:minutes?|minutos?|minuten?|minuti|minuut)(?![\p{L}\p{N}])/u],
 ];
+/**
+ * A rate after a figure or its currency: "per month", "a month", "/month",
+ * "each", "monthly", "al mes", "im Monat", "par mois", "per lesson". A time
+ * unit is its kind ("month"), anything else "per:" and the word.
+ */
+const RATE_STARTS = "per|a|an|each|every|par|pro|je|im|por|al|ao|cada|chaque|ogni|elke|la|le";
+const RATE_AFTER = new RegExp(`^\\s*(?:\\/\\s*|(?:${RATE_STARTS})\\s+)(\\p{L}+)`, "u");
+const RATE_WORDS: [string, RegExp][] = [
+  ["each", /^\s*(?:each|apiece|cada|chacun\p{L}*|ciascun\p{L}*|jeweils|elk)(?![\p{L}\p{N}])/u],
+  ["month", /^\s*(?:monthly|mensual\p{L}*|mensuel\p{L}*|monatlich\p{L}*|mensil\p{L}*|maandelijks|mensal\p{L}*)(?![\p{L}\p{N}])/u],
+  ["year", /^\s*(?:yearly|annually|annual|anual\p{L}*|annuel\p{L}*|jahrlich\p{L}*|annual\p{L}*|jaarlijks)(?![\p{L}\p{N}])/u],
+  ["week", /^\s*(?:weekly|semanal\p{L}*|hebdomadaire\p{L}*|wochentlich\p{L}*|settimanal\p{L}*|wekelijks)(?![\p{L}\p{N}])/u],
+  ["day", /^\s*(?:daily|diari\p{L}*|quotidien\p{L}*|taglich\p{L}*|giornalier\p{L}*|dagelijks)(?![\p{L}\p{N}])/u],
+];
+function rateOf(tail: string): string | null {
+  for (const [rate, find] of RATE_WORDS) if (find.test(tail)) return rate;
+  const word = RATE_AFTER.exec(tail)?.[1];
+  if (!word || STORE_LANGUAGE_WORDS.has(word)) return null;
+  for (const [kind, find] of TIME_KINDS) if (find.test(word)) return kind;
+  return `per:${stem(word)}`;
+}
+/**
+ * Words of a price, a payment or an offer in a sentence (MONEY_CUE, and
+ * "costs", "only", "now", "today" and theirs in the store languages): there, a
+ * number with no unit and no thing it counts is a price.
+ */
+const SENTENCE_MONEY = new RegExp(
+  `${MONEY_CUE}|(?<!\\p{L})(?:cost\\p{L}*|cuest\\p{L}*|cout\\p{L}*|kost\\p{L}*|cust\\p{L}*|vale|vaut|only|now|today|just|sale|offer|solo|solamente|ahora|hoy|oferta|seulement|maintenant|aujourd'hui|offre|nur|jetzt|heute|angebot|ora|oggi|offerta|alleen|nu|vandaag|aanbieding|somente|apenas|agora|hoje)(?!\\p{L})`,
+  "u",
+);
+/** Words that put a price right before a number: "for 14", "pour 14", "por 14". */
+const PRICE_BEFORE = /(?<!\p{L})(?:for|por|pour|fur|voor|para|per)\s*$/u;
+/** The sentence a figure is in, at most 200 signs each side: from the last sentence end before it to the next after it (a dot inside a number is none). */
+function sentenceOf(folded: string, start: number, end: number): string {
+  const head = Math.max(0, start - 200);
+  const from = head + Math.max(...[...folded.slice(head, start).matchAll(/[.!?\n](?!\d)/gu)].map((m) => m.index + 1), 0);
+  const after = folded.slice(end, end + 200);
+  const next = after.search(/[.!?\n](?!\d)/u);
+  return folded.slice(from, end + (next < 0 ? after.length : next));
+}
+/**
+ * What a figure counts. Money is in a currency and, when a rate follows,
+ * per that rate ("money:dollar/month"). A number with no unit is a price
+ * ("money:?") when a rate follows it, or when nothing it counts follows it
+ * and its sentence speaks of a price or "for" comes before it: "The price
+ * is 14.", "Only 12 a month", "12 lessons for 14" (Claude 3's first review
+ * of #3484: those matched a fact of any unit). Otherwise "plain": a count
+ * of the thing named after it ("12 lessons").
+ */
 function figureKind(folded: string, start: number, end: number): string {
+  let money: string | null = null;
+  let tail = folded.slice(end, end + 48);
   const before = MONEY_BEFORE.exec(folded.slice(Math.max(0, start - 6), start));
   if (before) {
     const ahead = folded.slice(0, start - before[0].length);
-    return `money:${before[1] ? currencyOf(before[1], ahead) : currencyOf(before[2])}`;
+    money = `money:${before[1] ? currencyOf(before[1], ahead) : currencyOf(before[2])}`;
+  } else {
+    const word = MONEY_AFTER.exec(tail);
+    const currency = word && currencyOf(word[1]);
+    if (currency) {
+      money = `money:${currency}`;
+      tail = tail.slice(word[0].length);
+    }
   }
-  const after = folded.slice(end, end + 24);
-  const word = MONEY_AFTER.exec(after);
-  const currency = word && currencyOf(word[1]);
-  if (currency) return `money:${currency}`;
-  if (PERCENT_AFTER.test(after)) return "percent";
-  const unit = after.replace(/^[\s\-\u2010-\u2015]+/u, "");
-  for (const [kind, find] of TIME_KINDS) if (find.test(unit)) return kind;
-  return "plain";
+  if (!money) {
+    if (PERCENT_AFTER.test(tail)) return "percent";
+    const unit = tail.replace(/^[\s\-\u2010-\u2015]+/u, "");
+    for (const [kind, find] of TIME_KINDS) if (find.test(unit)) return kind;
+  }
+  const rate = rateOf(tail);
+  if (money) return rate ? `${money}/${rate}` : money;
+  if (rate) return `money:?/${rate}`;
+  const next = /^\s*(\p{L}+)/u.exec(tail)?.[1];
+  if (next && !STORE_LANGUAGE_WORDS.has(next)) return "plain";
+  return SENTENCE_MONEY.test(sentenceOf(folded, start, end)) || PRICE_BEFORE.test(folded.slice(Math.max(0, start - 8), start)) ? "money:?" : "plain";
+}
+/**
+ * Whether a fact of one kind holds a reply's figure of another: a plain
+ * reply figure any fact of its value; otherwise the same kind, a price of
+ * no known currency ("money:?") any price, a figure with no rate the same
+ * figure with one ("$9" for "$9 a month"), never a rate the fact does not
+ * have ("$49 per lesson" for "$49").
+ */
+function kindHolds(reply: string, fact: string): boolean {
+  if (reply === "plain") return true;
+  const [replyBase, replyRate] = reply.split("/");
+  const [factBase, factRate] = fact.split("/");
+  if (replyRate !== undefined && replyRate !== factRate) return false;
+  return replyBase === "money:?" ? factBase.startsWith("money:") : replyBase === factBase;
 }
 /** French numbers that a hundred follows ("deux cents"): there, "cents" is a hundred, not the coin. */
 const FRENCH_HUNDREDS = new Set(["deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"]);
@@ -784,6 +859,9 @@ function figuresIn(folded: string): Figure[] {
  */
 const ROMAN = /(?<![\p{L}\p{N}])(?=[MDCLXVI]{2,}(?![\p{L}\p{N}]))M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})(?![\p{L}\p{N}])/gu;
 const NOT_ROMAN = new Set(["CV", "CD", "DC", "MD", "CC", "MC", "CL", "ML", "DL", "XL", "XXL", "XXXL", "MM", "MIX", "MI", "CI", "LI", "DI", "DIV", "VC", "IC", "CM", "LCD", "DVD", "CIV", "MIL", "MDC"]);
+const ROMAN_LOWER = /(?<![\p{L}\p{N}])(?=[mdclxvi]{2,}(?![\p{L}\p{N}]))m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})(?![\p{L}\p{N}])/gu;
+/** Words of a store language that are also numerals in small letters ("di", "mi", "vi", "ci", "li" in Italian and Spanish). */
+const NOT_ROMAN_LOWER = new Set(["di", "mi", "vi", "ci", "li", "dix", "mil", "lid", "cd", "dc", "mm"]);
 const ROMAN_VALUES: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1_000 };
 function romanValue(numeral: string): number {
   let total = 0;
@@ -804,6 +882,15 @@ function figuresOf(text: string): Figure[] {
   for (const m of plain.matchAll(ROMAN)) {
     if (!m[0] || NOT_ROMAN.has(m[0])) continue;
     figures.push({ forms: [String(romanValue(m[0]))], kind: lower.length === plain.length ? figureKind(lower, m.index, m.index + m[0].length) : "plain" });
+  }
+  // In small letters ("xlix dollars"), a numeral is read only beside a currency or a unit of time: "mix", "civil", "di" alone are words.
+  if (lower.length === plain.length) {
+    for (const m of lower.matchAll(ROMAN_LOWER)) {
+      if (!m[0] || NOT_ROMAN.has(m[0].toUpperCase()) || NOT_ROMAN_LOWER.has(m[0])) continue;
+      const kind = figureKind(lower, m.index, m.index + m[0].length);
+      if (kind === "plain" || kind === "percent" || kind.startsWith("money:?")) continue;
+      figures.push({ forms: [String(romanValue(m[0].toUpperCase()))], kind });
+    }
   }
   return figures;
 }
@@ -1167,7 +1254,7 @@ export function heldToFacts(raw: string, facts: string): boolean {
     for (const form of figure.forms) if (form !== "?") factFigures.set(form, (factFigures.get(form) ?? new Set<string>()).add(figure.kind));
   }
   for (const figure of figuresOf(raw)) {
-    if (!figure.forms.some((form) => { const kinds = factFigures.get(form); return kinds !== undefined && (figure.kind === "plain" || kinds.has(figure.kind)); })) return false;
+    if (!figure.forms.some((form) => [...(factFigures.get(form) ?? [])].some((kind) => kindHolds(figure.kind, kind)))) return false;
   }
   const held = dealWordsOf(reply, store);
   if (held !== "hidden") return held === "held";

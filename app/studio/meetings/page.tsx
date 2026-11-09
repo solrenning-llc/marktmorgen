@@ -46,8 +46,9 @@ function outcome(word: string, provider: string): { tone: "ok" | "warn" | "error
     case "expired":
       return { tone: "warn", text: "That connection attempt had expired or was started in another session. Start it again from this page." };
     // While it was connecting, the provider told us this account removed our app (lib/meet-connect.ts KEEP_UNLESS_GONE).
+    // The give-back is asked for, never confirmed here (revoke(...).catch), so the words say "asked", not "gave back".
     case "removed":
-      return { tone: "warn", text: `${name} was not connected. While it was connecting, ${name} told us this account removed our app, so we kept nothing and gave the permission back. Connect again if you still want it.` };
+      return { tone: "warn", text: `${name} was not connected. While it was connecting, ${name} told us this account removed our app, so we kept nothing and asked ${name} to cancel the access. Connect again if you still want it.` };
     case "limited":
       return { tone: "warn", text: "That is too many attempts in a few minutes. Wait a moment and try again." };
     // The paid period's resources could not be reserved (lib/contract-resource-window.ts): not a matter of tries.

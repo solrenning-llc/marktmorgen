@@ -1401,6 +1401,13 @@ export function ownedBy(store: Store, subscription: Record<string, unknown>): bo
   // An address this store let go of may be another store's now: a
   // subscription under it is this store's only when it pays as this store's
   // own customer, never by the email address alone.
+  // This runs before the current-address check on purpose, unlike
+  // sessionOwnedBy: an address let go of and then taken back stays on the
+  // released list, and a subscription seen here (webhook, daily sync) may be
+  // one another creator bought while holding it. sessionOwnedBy reads a
+  // checkout this store just opened, whose first plan makes a customer the
+  // store has not saved yet, so it counts the current address first. Do not
+  // align the two orders.
   if (store.releasedHandles.includes(named)) return sameCustomer;
   const handles = new Set([store.handle, ...store.previousHandles]);
   if (!handles.has(named)) return false;

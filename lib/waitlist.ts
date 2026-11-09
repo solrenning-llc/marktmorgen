@@ -51,8 +51,19 @@ const listKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}`;
 const jobKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:job`;
 const sendKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:send`;
 const JOBS = "nl:wl:jobs";
-/** How long a launch's send list is kept from its start, or from its last held run (runLaunches). */
-const SEND_LIST_SECONDS = 30 * 86_400;
+/**
+ * How long a launch's record and its send list are kept from their last
+ * write: the same for both, renewed together (launch, every batch, every held
+ * run), so the list never lapses while its record lives, and as long as the
+ * hold (LAUNCH_HOLD_SECONDS), so a held launch's record lives until its stop.
+ */
+const JOB_SECONDS = LAUNCH_HOLD_SECONDS;
+/**
+ * The hold's last week: a renewal read in another shape here stops the launch
+ * at once (holdLaunch), while its record still certainly lives, rather than
+ * leave it to lapse with nobody told.
+ */
+const HOLD_LAST_STRETCH = 7 * 86_400;
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -271,10 +282,10 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
   const job: LaunchJob = { handle: store.handle, note, address, total, cursor: 0, sent: 0, started: now(), finished: total ? 0 : now(), stopped: 0 };
   await redisPipeline([
     ["SREM", soonKey(sid), product.id],
-    ["SET", jobKey(sid, product.id), JSON.stringify(job), "EX", 120 * 86_400],
+    ["SET", jobKey(sid, product.id), JSON.stringify(job), "EX", JOB_SECONDS],
     ["DEL", sendKey(sid, product.id)],
     ...(total
-      ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), SEND_LIST_SECONDS], ["SADD", JOBS, `${sid}|${product.id}`]]
+      ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), JOB_SECONDS], ["SADD", JOBS, `${sid}|${product.id}`]]
       : [["DEL", listKey(sid, product.id)]]),
   ]);
   return { ok: true, total };
@@ -444,7 +455,11 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         sent += chunk.length;
       }
       job.cursor += emails.length;
-      await redisPipeline([["SET", jobKey(sid, pid), JSON.stringify(job), "EX", 120 * 86_400]]);
+      // The send list is renewed with the record, so it never lapses while the record lives.
+      await redisPipeline([
+        ["SET", jobKey(sid, pid), JSON.stringify(job), "EX", JOB_SECONDS],
+        ["EXPIRE", sendKey(sid, pid), JOB_SECONDS],
+      ]);
     }
     if (job.cursor >= job.total) {
       job.finished = now();
@@ -465,7 +480,10 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
  * A launch owed while its store is switched off. Before LAUNCH_HOLD_SECONDS
  * from its start, one EXPIRE pair renews its send list and its record, so it
  * still goes out once the store is back on; a reply not in its shape is logged
- * and the launch held as it is, tried again next run (rule 24). Past it, or
+ * and the launch held as it is, tried again next run (rule 24), except in the
+ * hold's last week (HOLD_LAST_STRETCH), where it stops at once: every write of
+ * the record is at or after its start and keeps it JOB_SECONDS, so it still
+ * lives then, and the stop is seen instead of a silent lapse. Past it, or
  * once its send list is confirmed gone (EXPIRE 0), the launch stops: its record
  * says so (`stopped`), kept as a finished launch is, the addresses already
  * handled leave the waitlist, and whoever was not emailed stays on it, so the
@@ -476,18 +494,22 @@ async function holdLaunch(sid: string, pid: string, member: string, job: LaunchJ
   if (now() - job.started < LAUNCH_HOLD_SECONDS) {
     const renewed = repliesFor(
       await redisPipeline([
-        ["EXPIRE", sendKey(sid, pid), SEND_LIST_SECONDS],
-        ["EXPIRE", jobKey(sid, pid), LAUNCH_HOLD_SECONDS],
+        ["EXPIRE", sendKey(sid, pid), JOB_SECONDS],
+        ["EXPIRE", jobKey(sid, pid), JOB_SECONDS],
       ]),
       2,
     );
     if (!renewed || !renewed.every((r) => r === 0 || r === 1)) {
-      console.error("holding a waitlist launch: its keys were renewed in an unknown shape, so it waits", new UnknownReplyError("a held launch's renewal"));
+      if (now() - job.started < LAUNCH_HOLD_SECONDS - HOLD_LAST_STRETCH) {
+        console.error("holding a waitlist launch: its keys were renewed in an unknown shape, so it waits", new UnknownReplyError("a held launch's renewal"));
+        return;
+      }
+      console.error("holding a waitlist launch: its keys were renewed in an unknown shape in the hold's last week, so it stops now", new UnknownReplyError("a held launch's renewal"));
+    } else if (renewed[1] === 0 || renewed[0] === 1) {
+      // The record lapsed between the reads: the next run's exact nil ends it.
+      // The send list still there, or none owed: held as it is.
       return;
     }
-    // The record lapsed between the reads: the next run's exact nil ends it.
-    // The send list still there, or none owed: held as it is.
-    if (renewed[1] === 0 || renewed[0] === 1) return;
   }
   const handled = job.cursor > 0 ? stringList(repliesFor(await redisPipeline([["LRANGE", sendKey(sid, pid), 0, job.cursor - 1]]), 1)?.[0]) : [];
   // An exact list of the cursor's length, or an exact empty one when the list is gone; anything else waits.

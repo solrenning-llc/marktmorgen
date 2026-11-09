@@ -13,6 +13,7 @@
  * store commands do not already count.
  */
 import { sendEmailOutcome } from "@/lib/email";
+import { countRefusal, refusedTooOften } from "@/lib/refused-tries";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import { speechFor } from "@/lib/buyer-words";
 import { type AgreementWords, agreementWords } from "@/lib/buyer-words/agreements";
@@ -34,6 +35,15 @@ const NOT_SENT = "Not sent: your store's emails for this month may be used, or e
  * move on and nothing sends it twice (9 November 2026, rule 30).
  */
 const UNCONFIRMED = "We could not confirm it was sent. It may still arrive; check before sending again.";
+/**
+ * A refusal can come after the store's figure was taken (a stop before the request, a 4xx after it), and a refused
+ * email is not one of the agreement's emails, so the day between presses never held the next one back: each is
+ * counted, a day, under the email's own place (its key's), and a press past REFUSED_TRIES takes nothing
+ * (lib/refused-tries.ts).
+ */
+const TRIED_OUT = "Not sent: the email was refused three times today. Check the address and your store's emails for this month, then send it again tomorrow.";
+const TRIED_OUT_WHY = "That email was refused three times today. Check the address and your store's emails for this month, then try again tomorrow.";
+const refusedName = (a: Pick<Agreement, "id" | "sent">) => `agree:${a.id}:${a.sent.length}`;
 
 /**
  * Emails the link to the person it is for: the first version, a new version,
@@ -73,7 +83,8 @@ export async function sendAgreementEmail(store: Store, a: Agreement, version: Ag
   }).catch(() => "uncertain" as const);
   // Written onto the record as it is now: a signature or a version given
   // while the email was on its way stays (MM-SA-03). Not known: counted and said so (UNCONFIRMED).
-  const next = await changeAgreement(store, a.id, (current) => (outcome === "refused" ? { ...current, failed: NOT_SENT } : { ...current, sent: [...current.sent, now], failed: outcome === "sent" ? "" : UNCONFIRMED }), now);
+  const room = outcome === "refused" ? await countRefusal(refusedName(a)) : true;
+  const next = await changeAgreement(store, a.id, (current) => (outcome === "refused" ? { ...current, failed: room ? NOT_SENT : TRIED_OUT } : { ...current, sent: [...current.sent, now], failed: outcome === "sent" ? "" : UNCONFIRMED }), now);
   return outcome === "uncertain" ? { sent: false, uncertain: true, agreement: next ?? a } : { sent: outcome === "sent", agreement: next ?? a };
 }
 
@@ -86,6 +97,7 @@ export async function sendAgain(store: Store, id: string, now = Date.now()): Pro
   const latest = latestOf(a);
   const version = latest ? await readVersion(a, latest.n) : null;
   if (!version) return { ok: false, why: "That agreement can't be read right now. Try again in a minute." };
+  if (await refusedTooOften(refusedName(a))) return { ok: false, why: TRIED_OUT_WHY };
   const done = await sendAgreementEmail(store, a, version, now);
   return done.uncertain ? { ok: true, sent: false, uncertain: true } : { ok: true, sent: done.sent };
 }
@@ -201,6 +213,7 @@ export async function resendSignedCopy(store: Store, id: string, now = Date.now(
   if (now - last < 24 * 3_600_000) return { ok: false, why: "The last email about it went less than 24 hours ago." };
   const version = await readVersion(a, mark.n);
   if (!version) return { ok: false, why: "That agreement can't be read right now. Try again in a minute." };
+  if (await refusedTooOften(refusedName(a))) return { ok: false, why: TRIED_OUT_WHY };
   const w = agreementWords(store.language);
   const said = speechFor(store.language, version.currency);
   const html = signedCopyHtml(store, a, version, mark.signature);
@@ -215,8 +228,9 @@ export async function resendSignedCopy(store: Store, id: string, now = Date.now(
     idempotencyKey: `nimbus-agree:${a.id}:${a.sent.length}`,
   }).catch(() => "uncertain" as const);
   // Not known: one of its emails (the next one's key moves on), not a copy known to be sent, and said so (UNCONFIRMED).
+  const room = outcome === "refused" ? await countRefusal(refusedName(a)) : true;
   await changeAgreement(store, a.id, (current) => (outcome === "refused"
-    ? { ...current, failed: NOT_SENT }
+    ? { ...current, failed: room ? NOT_SENT : TRIED_OUT }
     : outcome === "sent"
       ? { ...current, sent: [...current.sent, now], copies: current.copies + 1, failed: "" }
       : { ...current, sent: [...current.sent, now], failed: UNCONFIRMED }), now);

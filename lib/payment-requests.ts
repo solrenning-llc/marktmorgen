@@ -34,6 +34,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { isHouseStore } from "@/lib/house-store";
 import { canSell } from "@/lib/store-checkout";
 import { sendEmailOutcome } from "@/lib/email";
+import { REFUSED_MAX_SECONDS, REFUSED_SECONDS, countRefusal, refusedTooOften } from "@/lib/refused-tries";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
@@ -69,6 +70,15 @@ export function requestsOpen(store: Store): boolean {
 const NOT_SENT = "Not sent: your store's emails for this month may be used, or email could not be sent just now. You can send it again from here.";
 /** Said on a request whose email's send is not known: it may have arrived. */
 const UNCONFIRMED = "We could not confirm it was sent. It may still arrive; check before sending again.";
+/**
+ * A refusal can come after the store's figure was taken (a stop before the request, a 4xx after it), and a refused
+ * email is not one of the request's emails, so nothing else holds the next try back: each is counted
+ * (lib/refused-tries.ts, REFUSED_TRIES). By hand (and the first email), a day; the reminders by themselves, for the
+ * request's open time, since the job asks once a day.
+ */
+const TRIED_OUT_TODAY = "Not sent: the email was refused three times today. Check the address and your store's emails for this month, then send it again tomorrow.";
+const REMINDERS_STOPPED = "Not sent: this reminder was refused three times, so the reminders by themselves stopped. Check the address and your store's emails for this month; you can still send it from here.";
+const refusedName = (request: Pick<PaymentRequest, "id" | "sent">, by: "hand" | "job") => `payreq:${by}:${request.id}:${request.sent.length}`;
 
 /**
  * Emails a request, or a reminder of it, to the person it is for, from the
@@ -76,7 +86,7 @@ const UNCONFIRMED = "We could not confirm it was sent. It may still arrive; chec
  * emails for the month before it goes. Writes down when it went, or why it
  * did not, and when the next reminder is due.
  */
-export async function sendRequestEmail(store: Store, request: PaymentRequest, now = Date.now()): Promise<{ sent: boolean; uncertain?: true; request: PaymentRequest }> {
+export async function sendRequestEmail(store: Store, request: PaymentRequest, now = Date.now(), by: "hand" | "job" = "hand"): Promise<{ sent: boolean; uncertain?: true; triedOut?: true; request: PaymentRequest }> {
   const reminder = request.sent.length > 0;
   const said = speechFor(store.language, request.currency);
   const w = requestWords(store.language);
@@ -122,12 +132,22 @@ export async function sendRequestEmail(store: Store, request: PaymentRequest, no
   // email's own key all move on and nothing sends it twice, and the studio
   // says it could not be confirmed. Only a certain refusal says "Not sent"
   // (9 November 2026, rule 30).
+  // A certain refusal is counted (REFUSED_TRIES): at it, by hand the row says to try tomorrow; by the job the
+  // reminders asked for end at the ones already sent, so no next one is shown or tried, and the row says so.
+  const room = outcome === "refused" ? await countRefusal(refusedName(request, by), by === "job" ? REFUSED_MAX_SECONDS : REFUSED_SECONDS) : true;
   const done = await changeRequest(store, request.id, (current) => ({
-    next: outcome === "refused" ? { ...current, failed: NOT_SENT } : { ...current, sent: [...current.sent, now], failed: outcome === "sent" ? "" : UNCONFIRMED },
+    next: outcome === "refused"
+      ? room
+        ? { ...current, failed: NOT_SENT }
+        : by === "job"
+          ? { ...current, failed: REMINDERS_STOPPED, autoReminders: Math.max(0, Math.min(current.autoReminders, current.sent.length - 1)) }
+          : { ...current, failed: TRIED_OUT_TODAY }
+      : { ...current, sent: [...current.sent, now], failed: outcome === "sent" ? "" : UNCONFIRMED },
     answer: null,
   }), now);
   const kept = done?.request ?? request;
-  return outcome === "uncertain" ? { sent: false, uncertain: true, request: kept } : { sent: outcome === "sent", request: kept };
+  if (outcome === "uncertain") return { sent: false, uncertain: true, request: kept };
+  return room ? { sent: outcome === "sent", request: kept } : { sent: false, triedOut: true, request: kept };
 }
 
 /**
@@ -139,6 +159,8 @@ export async function remindNow(store: Store, id: string, now = Date.now()): Pro
   if (!request) return { ok: false, why: "That request is gone. Reload the page." };
   const may = canSendAgain(request, now);
   if (!may.ok) return may;
+  // Refused for certain REFUSED_TRIES times today: not tried, so the press takes nothing from the store's figure.
+  if (await refusedTooOften(refusedName(request, "hand"))) return { ok: false, why: "That email was refused three times today. Check the address and your store's emails for this month, then try again tomorrow." };
   const done = await sendRequestEmail(store, request, now);
   return done.uncertain ? { ok: true, request: done.request, sent: false, uncertain: true } : { ok: true, request: done.request, sent: done.sent };
 }
@@ -210,8 +232,10 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
         counts.skipped += 1;
         continue;
       }
-      const done = await sendRequestEmail(store, request, now);
+      const done = await sendRequestEmail(store, request, now, "job");
       if (done.sent) counts.sent += 1;
+      // Refused for certain REFUSED_TRIES times: the record now asks for no more reminders, which took it off the list.
+      else if (done.triedOut) counts.skipped += 1;
       // Not known: counted as one of its emails, so its next reminder is already set from the record, never sooner.
       else if (done.uncertain) counts.skipped += 1;
       else {

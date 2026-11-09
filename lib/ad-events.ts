@@ -50,7 +50,7 @@
  *   nl:adsrv:<statsId>          JSON { meta?, tiktok?, google?, pinterest?: sealed token, pinterestAccount?, testCode? }
  *   nl:adsrv:last:<statsId>     JSON { at, kind, meta?, tiktok?, google?, pinterest? }: the last answers, for the studio
  *   nl:adsrv:sent:<id>          an order, renewal or lead already sent (3 days; 40 for renewals)
- *   nl:adsrv:ctx:<token>        the request that opened a checkout (4 days)
+ *   nl:adsrv:ctx:<token>        the request that opened a checkout (4 days, deleted once its sale is known)
  *   nl:adsrv:sub:<subscription> the cookies and clicks a membership's renewals are sent with (400 days), never an address
  */
 import { keepFor } from "@/lib/store-data";
@@ -65,7 +65,7 @@ import { toMajor } from "@/lib/money";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { ADS_SERVER_PLATFORMS, type AdsServerPlatform, LEAD_ID, adsCookieName, readAdsCookie } from "@/lib/ad-consent";
 import { noteForErasure } from "@/lib/erasure-index";
-import { KEEP_UNLESS_ERASED, suppressedAmongCommand, suppressedKey, suppressionPrint, wholeErasedReply } from "@/lib/suppression";
+import { KEEP_UNLESS_ERASED, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wholeErasedReply } from "@/lib/suppression";
 
 export const META_GRAPH_VERSION = "v25.0";
 export type ServerPlatform = AdsServerPlatform;
@@ -686,6 +686,18 @@ async function keepForRenewals(store: Store, session: AdsSession, buyer: BuyerRe
 export type SendResult = "sent" | "already" | "off" | "invalid" | "unknown";
 
 /**
+ * Whether a sale or a lead may go, asked in the pipeline that claims it, so
+ * it is read just before it is sent (audit 12, privacy): a store with no list
+ * has deleted nobody (an erasure gives it one first) and asks nothing; with a
+ * list, an address it does not know could be a deleted one, and goes nowhere.
+ */
+const erasureAsk = (store: Store, email: string | null): (string | number)[][] =>
+  store.listId && email ? [suppressedCommand(store.listId, email)] : [];
+/** The answer to erasureAsk: only an exact "not deleted" (or nothing asked of a store with no list) lets it go. */
+const mayGo = (store: Store, email: string | null, reply: unknown): boolean =>
+  !store.listId || (Boolean(email) && markSeen(reply) === false);
+
+/**
  * A sent mark taken with SET NX, read exactly (CX-123 rule 24): only the
  * exact "OK" is this run's. nil is another run's; anything else (no reply,
  * QUEUED, a list, a number) is not known, and nothing is sent on it, so a
@@ -721,17 +733,28 @@ export async function sendServerPurchase(store: Store, sessionId: unknown, buyer
   }
   const created = typeof session.created === "number" ? session.created : 0;
   if (!ordinary(store, session) || created < now / 1000 - 86400) return "invalid";
+  // What the checkout kept is read and deleted with the claim: its sale is
+  // known now, sent from here or not, and nothing reads it after (the five-
+  // minute pass reads it only before it claims). Whether the buyer was
+  // deleted from the store is asked with it.
+  const token = CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "";
+  const email = emailOf(session);
+  const asked = erasureAsk(store, email);
   const replies = repliesFor(
     await redisPipeline([
       ["SET", sentKey(sessionId), "1", "NX", "EX", SENT_SECONDS],
-      ["GET", ctxKey(CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "none")],
+      ["GET", ctxKey(token || "none")],
+      ...(token ? [["DEL", ctxKey(token)]] : []),
+      ...asked,
     ]),
-    2,
+    2 + (token ? 1 : 0) + asked.length,
   );
   if (!replies) return "unknown";
   const [claimed, keptRaw] = replies;
   if (claimed === null) return "already";
   if (!markIsOurs(claimed)) return "unknown";
+  // A deleted person, or one not known not to be: nothing goes, and nothing is kept for renewals.
+  if (!mayGo(store, email, replies[replies.length - 1])) return "off";
   const kept = parse<BuyerRequest | null>(keptRaw, null);
   const used: BuyerRequest = kept ? { ...kept, cookies: { ...kept.cookies, ...buyer.cookies } } : buyer;
   const c = conversionOf(store, session, await customerType(store, emailOf(session), sessionId, created));
@@ -763,8 +786,13 @@ export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Dat
     const buyer = parse<BuyerRequest | null>(kept[i], null);
     // What the checkout kept is gone after four days, and an order that old is no longer worth an ad platform's while.
     if (!buyer) continue;
-    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS]]), 1);
+    // Claimed with what the checkout kept deleted (its sale is known now) and
+    // whether the buyer was deleted from the store, read just before sending.
+    const email = emailOf(row);
+    const asked = erasureAsk(store, email);
+    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS], ["DEL", ctxKey(row.metadata?.ads as string)], ...asked]), 2 + asked.length);
     if (!claimed || !markIsOurs(claimed[0])) continue;
+    if (!mayGo(store, email, claimed[claimed.length - 1])) continue;
     const created = typeof row.created === "number" ? row.created : 0;
     const c = conversionOf(store, row, await customerType(store, emailOf(row), row.id as string, created));
     if (await deliver(store, stored, c, buyer, now)) count += 1;
@@ -889,8 +917,11 @@ export async function sendServerLead(store: Store, request: Requested, lead: { i
     customer: null,
   };
   if (!targets(store, stored, c).length) return false;
-  const claimed = repliesFor(await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS]]), 1);
+  // Claimed with whether the address was deleted from the store: a lead of a deleted person goes nowhere.
+  const asked = erasureAsk(store, lead.email || null);
+  const claimed = repliesFor(await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS], ...asked]), 1 + asked.length);
   if (!claimed || !markIsOurs(claimed[0])) return false;
+  if (!mayGo(store, lead.email || null, claimed[claimed.length - 1])) return false;
   const buyer: BuyerRequest = {
     ip: addressOf(request),
     userAgent: (request.headers.get("user-agent") ?? "").slice(0, 500),

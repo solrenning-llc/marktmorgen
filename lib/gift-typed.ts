@@ -73,3 +73,9 @@ export function unpackGiftTyped(raw: string | null, now: number): GiftTyped | nu
   }
   return out;
 }
+
+// RED stubs, replaced by the fix in the next commit.
+export const GIFT_RETURN_NOTICES: readonly string[] = [];
+export function sweepGiftTyped(_storage: unknown, _now: number, _all = false): number {
+  return 0;
+}

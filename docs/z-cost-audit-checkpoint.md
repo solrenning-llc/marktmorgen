@@ -1,3 +1,45 @@
+# Codex Z — canonical continuation observed 2026-11-09 00:50:46 UTC
+
+r17 stopping after completion/readbacks of nominal #3311 enum focal. SERIAL Medium ZERO agents; no background watcher/automation changes. This section supersedes prior top's NEXT #3311 metadata-only state: reservation, technique, evidence and formal focal NOW COMPLETED below. COMPLETE prior741245-character checkpoint3d774f38e4295ddafb546cb64621554b85a984d7/blobd65ea476dc2602a1df95cde163a44a4fb68e3d29 FULL EXACT preserved below. Five own authored units, HOLDs, heads, REDs, WIPs, consumed retries/caps intact; no sixth. Reviews do not count. No product push, author-ref/product edit, main integration, CI query/retry/cancel, queue/merge, account/provider/live payment/PII change.
+
+## #3311 enum nominal focal COMPLETED — provenance closed; still PARTIAL whole checkup
+
+Exact subject e91810b99639d2727420baa32cb3f7165ba7ec81 / base787c8748ab9124fb861235c59e8e6b221c101bdc. Author request6729337124; claim6729480563 BODY exact. ROOT RES a668a76fc4625bb80d25e057a18d1fd20f0218f1/blobf36d814eca3acb1ff67627c22cefa7a9e7fd9375/FULL7018070 exact BEFORE source/diff/nativefetch/worktree/deps/proof/test/officialSDK retrieval. NO duplicated product correction. Author source/ref read-only, new own docs/reviews/z-3311-enum-focal only.
+
+Codex U documentary discovery6729312420 credited. Z INDEPENDENTLY retrieved exactly TWO official stripe/stripe-node tagv22.6.0 files through GitHub connector: src/apiVersion.ts blob66181a80523eb33f5444c725f8577e63c77d3375 declaresAPI2026-08-26.dahlia; src/resources/V2/Core/Accounts.ts bloba1c3ff746311f95676e8a1f7e5e40d5af26a36f4/FULL355019chars. Response Account.Configuration.Merchant.Capabilities.CardPayments.Status lines2034-2040 active|pending|restricted|unsupported (NOinactive); Account.Requirements.Summary.MinimumDeadline.Status lines4003-4005 currently_due|eventually_due|past_due. Allowlist now matches BOTH. Prior provenance gap for these enums CLOSED. Not independently v1 capability contract/fullAPI/nullability/live response/cost grant. Exact source metadata/excerpts ownofficial-sdk-provenance.json; fullSDK not vendored.
+
+SAME finalgraph ONLYstripe-connect reader OLD4bdc231e4a82c16f3bb1c0c12269edb33a057926:
+- current permanent91 -> OLD91/1FAIL then HEAD91PASS.
+- NEW independent ownenum21 -> OLD21/5FAIL then HEAD21PASS.
+- Original ownunknown-string13 BYTE IDENTICAL copy from nominal-focal (hash stored), HEAD13PASS; prior171 OLD13/10FAIL preserved/not replayed.
+Actual checkPOST+returnGET seeded selling=true: inactive OLDpending/persistsfalse -> HEADerror/preservetrue. Restricted controls BOTHpending/persistfalse. ALLfourpinned card values +ALLthree deadline controls PASS. Directinactive now rejects. Whole new21root OLD128nested/12mock ->HEAD106/12mock. Peroperation actualouterpipelinecommands/JSONUTF8bytes excludes setup/seeds/directobservations: firstcheckinactive15/5620->10/732;returninactive11/5439->6/551;restrictedboth11/5439unchanged. Everyroute1mockproviderGET/0requestbodybytes/0providerPOST; no physicalwire/bill/nativeRedis/payment/liveincident claim. Firstcoldcallwork disclosed.
+
+Linked current446repoassertions across6roots (91+21+13+77stripewritten+218connectconfig+26checkupdisputes) PLUS33node:test cases across2registryroots(26plan+7data), unitsSEPARATE/coverageoverlaps. OLDfails excluded. Max568nested/58HTTP differentroots; no new cap. Whole old checkup NEVER runtime rerun/extracted/partitioned. OwnAST twofixtures52+7=59assertcalltextsBYTE-ID, WHOLEfiles only3literalinactive->restricted substitutions (1checkup,2written). Types10roots796sources0UNFILTEREDstrictES2017Bundler includescheckupSTATICrootONLY; lint0warnings/errors;scanner4674tracked0;stageddiff0. Dependencies454exact/102optionalabsent/0requiredmissing BEFOREruntime, donorRO/Node24.22.1Next16.4.5/noinstall. Everychild20kALLnested/100mock/120s512MiBV8heap256KiBoutput;types120s1024/networkDENYbeforegraph/SERIAL.
+
+WHOLEcheckup CONSUMED earlier112attempts100dispatch12refused358nested/overtrue/exit1/all52EXCLUDED. NEWheadfixture DOESNOTrenew/reset. C1explicitNEW200 ONEwholefinale918 requestSTILLPENDING/no grant. SG23308aad86/lettermembers3260/3283/stripe-list-lot12425 and nativeH23265/G3300 caps/grants SEPARATE/notborrowed. C6 appeals/CI-substitution/UdocnotC1grant.
+No newHIGH/MED demonstrated in4filecorrectivedelta; this continues FIRST5820295862/5820363558, NOTSECONDfinancialopinion/unconditionalapproval/MR/globalAPI/mergecertificate. Twofinancialopinions+finalgates intact.
+
+Evidence DURABLE BEFORE opinion:
+own codex/z-3311-enum-focal@bd575a3db3a95a6f12731b5d9d3d860702b45fbd/treec5bfb2d0f9c93acbf0c18cceb7a7723bacae4a8a EXACTnative25b1883c97201e7a01c720e8ee7ba29d643f33c1.22artifacts/report0ffdec340e44abe8b0fb774e1b9fb1312d0982c4 FULL exact compare BEFORE COMMENT5820524643; formal BODY+commit_id readbackEXACT. Report path docs/reviews/z-3311-enum-focal/report.md. LogsRAWbase64reversible BEFOREviewformatting; old/newproof/source/SDK/AST/deps/typesretained. Nativeworktree /workspace/scratch/9378b617fa73/z-3311-enum CLEANproofonly. Lastsetuptruncatedtooloutput was recovered via SMALL metadata: deps454/0mismatch0requiredmissing plus6files existed, no duplicated audit/semantic invocation.
+
+## Pending own/review returns and current stop
+
+Fresh FULL discussions2741/2819/3313 at~00:50UTC: no created/updated comments after00:37:31UTC. Last earlierown2741/2819 audit00:19 likewise none after23:08. No new R2/C1 disposition, no corrective3313LOWresponse. #3024 ownMEDsharedcommunity.ts562-568/581-589 formal5820467412 remainsOPEN inheritedcandidate/stale-snapshotdoublecredit: SAME6main44f4PASS featureabsent /candidatecde4+HEAD6c8225PASS1FAIL, actual400bytesretained/cm:m0 versusfreshcontrol592. C1classify/assignSHAREDfile beforeadmission; ZNOproductfix. #3313LOWread-keyalias/XMLmalformed remainOPEN/providerrouteactualOFF; C4Workeractive NOTduplicate. No nativeRedisavailable, notborrowC6tests. #2999 completedS5820392795 retains ZyieldONLYafterACTUALprocessconfirmed, zeroZsource/ref/test/opinion; notresume.
+
+Fiveown unchanged:
+1 #2741 officialab5818b75c73ae66fffa1365677e46e0a2c3c400; separatecandidatecodex/z-2741-dependency-20261108@1f51287585afcc0ea47ace6873985c543aa2ef69/tree5a66dd7c7911dc380968db84a2133693689c8913=nativea51275f54bca536d68188e5eb872dd0d73eb0a17. R2/C1unknowncounter429dispositionpending; separateLOW40d9cdc62fa5f0684c5bac79dad22c590c6aa6f2/RED9621492237234a99fe70a283858a708abba6b653.
+2 #2819 official3fdcbe1c3bbcdeb47149ef9d959f8fc8dd5d43ac;callbackREDefe2d387ca2afefd90817dd36b36d5bf966b0a2c(6cases4FAIL2hostcontrols18syntheticcmd),R2callbackdisposition/C5TTLrace separate.
+3 reminderproof27bb340aefaadf544e91ae5c3737d92b9497c7a2/R2costattribution.
+4 askModelproofe274993fe90f426eeaa0ab6f45bdf9dcc77a5e04/R2retention.
+5 summary-read3e45aa57e31e93c8e169e19cd5757ab8485a4a15/native1f33fff165b4ea345f8cde822c826a543bba30f2/tree8158e726932e2425dac8ad581ec14d73fe18e6bb/R2execution+C1classificationowner. Existingproducer121slease/cleanupfault proofs preserved.
+Consumed retries2484verify127130387972 /2615verify127143841589+mac127144213372 /2741Windows127737110071 /2800Firefox127885731234+mac127885740971+mac128137530608 NEVERrepeat.
+
+Main787c/nativealreadyfetched/normsMV(a)read as prior; no integration/chase/CI polling. LatestROOTaaa2a037c4a3c69d976fc65dcd32fa8be0053875/blobbd92003d361e74a825d73cfc49c969122b8e9e54 afterFULL23H2+15Jpureappendlinesread. H22908ENQUEUEDnotMERGED/3265budgetpending;J2844/3195R2pending/C4-C6only; noC1Zgrant/newcorrectiveown/requestedunclaimedcompatiblefocal in these deltas. EarlierC6R12proposalsnotZownership;C1ownfinancialtakeoverandC4onlybackupscopespreserved. This is no global backlogexhaustion statement. Userfreeze/Mediumrules nottreatedasobsoletegrant; no authoredPRpush done.
+
+Next causal: C1explicitwholecheckup/SG2/otherrootgrant or R2/C1dispositiononfiveown, actualauthorcorrective3024/3313, or NEW requested trulyunclaimed compatible review (metadata/claimcheck, ROOTRES+FULLreadback BEFORE technique). No sixth/duplicate/authorforeignref. At finalROOTdelivery recordexactCP+review/result, endexecution/no backgroundpoll. All priorcontinuity preserved below.
+
+---
+
 # Codex Z — canonical continuation observed 2026-11-09 00:38:51 UTC
 
 r17 ACTIVE SERIALMediumZEROagents. Complete prior733855-character CP872622fb60b58dd34976084af07d8c1aea43b214/blob4783a5cf1d1ab2907f9fca3f972dcb2fcc777027 readbackEXACT preserved BELOW. Five ownunits/HOLDs/heads/REDs/WIPs/retry/capledger unchanged/no6th. NoCIqueryretrycancel/productpush/mainintegration/fila/merge/automation/backgroundwatcher/subagent.

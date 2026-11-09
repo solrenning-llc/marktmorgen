@@ -53,7 +53,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, listSlots, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { idsIn } from "@/lib/data-recount";
@@ -685,6 +685,29 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
   return confirmed ? left : null;
 }
 
+const WALK_PHASES = new Set(["idle", "walk", "finish"]);
+
+/**
+ * The walk's own state (one HMGET of cursor, started, phase and unfinished), read exactly (CX-123 rule 24; Claude 5's
+ * focal review of #3279): four fields, each Redis's null (never written) or the text this file writes there, digits
+ * for the cursor, the start time and the count left, a phase name. Anything else, the reply missing included, is
+ * UnknownReplyError before anything is prepared, walked, finished or written: never an idle walk, a cursor of "0" or
+ * a start time of 0 that were not read, which would start a walk over from its first page or before its gap. The
+ * cron answers 500 and the next run reads it again.
+ */
+function walkStateOf(replies: unknown): { cursor: string; started: number; phase: string; unfinished: string } {
+  const fields = listSlots(repliesFor(replies, 1)?.[0]);
+  if (!fields || fields.length !== 4) throw new UnknownReplyError("the closing walk's state (HMGET)");
+  const [cursor, started, phase, unfinished] = fields;
+  const digits = (value: unknown): value is string | null => value === null || (typeof value === "string" && /^[0-9]+$/.test(value));
+  if (!digits(cursor) || !digits(started) || !digits(unfinished) || !(phase === null || (typeof phase === "string" && WALK_PHASES.has(phase)))) {
+    throw new UnknownReplyError("the closing walk's state (HMGET)");
+  }
+  const startedAt = started === null ? 0 : Number(started);
+  if (!Number.isSafeInteger(startedAt)) throw new UnknownReplyError("the closing walk's state (HMGET)");
+  return { cursor: cursor ?? "0", started: startedAt, phase: (phase as string | null) ?? "idle", unfinished: unfinished ?? "" };
+}
+
 /**
  * One run: starts a walk when stores are due and none ran in the last
  * WALK_GAP_MS, carries one on to where it stops, and finishes its stores.
@@ -695,12 +718,12 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   if (!isRedisConfigured()) return report;
   // A move back a walk that Redis did not confirm (moveBack): this run is never said to be done.
   let unsure = false;
-  const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]);
-  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", "", ""];
-  let phase = phaseRaw || "idle";
-  let cursor = cursorRaw || "0";
+  const walk = walkStateOf(await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]));
+  const unfinishedRaw = walk.unfinished;
+  let phase = walk.phase;
+  let cursor = walk.cursor;
 
-  if (phase === "idle" || phase === "") {
+  if (phase === "idle") {
     // Walked stores left unfinished (finishStores) are finished again on every run until they are, never walked again.
     if (unfinishedRaw !== "" && unfinishedRaw !== "0") {
       const { entries, unreadable } = await readBatch();
@@ -709,10 +732,11 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       await redisPipeline([["HSET", WALK_KEY, "unfinished", left + unreadable]]);
       report.unfinished = left + unreadable;
     }
-    const started = Number(startedRaw) || 0;
-    if (now - started < WALK_GAP_MS) return { ...report, done: true };
-    const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "-inf", now, "LIMIT", 0, BATCH_MAX]]);
-    const refs = Array.isArray(due) ? (due as unknown[]).map(String) : [];
+    if (now - walk.started < WALK_GAP_MS) return { ...report, done: true };
+    // The stores due, a list of texts and at most what was asked for (rule 24): never "none due" from a reply that
+    // does not read, which would put them off while the run said it was done.
+    const refs = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "-inf", now, "LIMIT", 0, BATCH_MAX]]), 1)?.[0]);
+    if (!refs || refs.length > BATCH_MAX) throw new UnknownReplyError("the closed stores due (ZRANGEBYSCORE)");
     // None due still reads the batch below: a store prepared by a run that stopped before its walk started is walked.
     for (const ref of refs) {
       if (Date.now() > deadline) break;

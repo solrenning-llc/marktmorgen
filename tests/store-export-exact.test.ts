@@ -207,9 +207,13 @@ async function main(): Promise<void> {
   is("control: the store sells through PayPal only", [paypalStore.stripeAccountId, Boolean(paypalStore.paypalSeller)], [null, true]);
   swap((c) => c[0] === "ZREVRANGEBYSCORE" && String(c[1]).startsWith("nl:ppsell:sales:"), "throw");
   try {
-    const got = parse(await textOf(storeExport(paypalStore)));
+    const text = await textOf(storeExport(paypalStore));
+    const got = parse(text);
     const note = String(got.ordersNote ?? "");
-    is("the note names PayPal, never Stripe", [/PayPal/.test(note), /Stripe/.test(note)], [true, false]);
+    // Either the note names PayPal, or (once #3129's sales file throws on a PayPal reading that does not answer) the
+    // whole orders part is said unread; never Stripe, and never "Nothing else".
+    const partUnread = !("ordersCsv" in got) && Object.keys(got).some((key) => /^unreadPart\d+$/.test(key));
+    is("the orders are said by their real source, PayPal, never Stripe", [/PayPal/.test(note) || partUnread, /Stripe/.test(note), text.includes(NOTHING_ELSE)], [true, false, false]);
   } finally {
     restore();
   }

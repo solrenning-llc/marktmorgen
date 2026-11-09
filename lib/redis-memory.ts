@@ -1154,6 +1154,17 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/meta-ads.ts WRITE_IF_CONNECTED: a write (and its deletes) only while the connection is exactly the one read.
+        if (key.startsWith("-- marktmorgen:meta-if-connected:v1\n")) {
+          const count = Number(args[0]);
+          if (!Number.isSafeInteger(count) || count < 2 || args.length !== 1 + count + 3) throw new Error("MemoryRedis: unsupported EVAL");
+          const keys = args.slice(1, 1 + count);
+          const [seen, value, seconds] = args.slice(1 + count);
+          if (this.run(["GET", keys[0]]) !== seen) return 0;
+          this.run(seconds === "0" ? ["SET", keys[1], value] : ["SET", keys[1], value, "EX", seconds]);
+          for (const drop of keys.slice(2)) this.run(["DEL", drop]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
         if (key.startsWith("-- marktmorgen:studio-demo-door:v2\n")) return this.studioDemo("door", args);

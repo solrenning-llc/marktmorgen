@@ -42,6 +42,7 @@
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { storeForId } from "@/lib/store";
 import { costsPaused } from "@/lib/plan-standing";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
@@ -235,9 +236,41 @@ function parseRead(raw: unknown): MetaRead | null {
 }
 
 async function readConnection(statsId: string): Promise<Connection | null> {
+  return (await readConnectionAsSeen(statsId))?.c ?? null;
+}
+
+/** A connection with the exact text it was read as, the text a write made only while it is there is held to. */
+async function readConnectionAsSeen(statsId: string): Promise<{ c: Connection; seen: string } | null> {
   if (!isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", connKey(statsId)]]);
-  return parseConnection(raw);
+  const c = parseConnection(raw);
+  return c && typeof raw === "string" ? { c, seen: raw } : null;
+}
+
+/**
+ * KEYS[1] the connection, KEYS[2] the key written, KEYS[3..] keys deleted with it; ARGV[1] the connection exactly as
+ * it was read, ARGV[2] the value, ARGV[3] the seconds it is kept ("0": no expiry). 1 written, 0 the connection is no
+ * longer the one read (forgotten, reconnected, another account chosen) and nothing is written. Mirrored for tests in
+ * lib/redis-memory.ts.
+ */
+const WRITE_IF_CONNECTED = `-- marktmorgen:meta-if-connected:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+if ARGV[3] == "0" then redis.call("SET", KEYS[2], ARGV[2]) else redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3]) end
+for i = 3, #KEYS do redis.call("DEL", KEYS[i]) end
+return 1`;
+
+/**
+ * Writes `value` at `key` (and deletes `drop`) only while the store's connection is still exactly the one read, in
+ * one step with that check (CX-123 rule 30). Checking first and writing after let a deletion confirmed to Meta in
+ * between (forgetMetaUser, disconnectMeta) have what was read from Meta, or the connection itself, written again,
+ * with no index left to find it. True when written, false when the connection is no longer that one; a reply in any
+ * other shape is unknown (UnknownReplyError), never taken as written or as refused.
+ */
+async function writeIfConnected(statsId: string, seen: string, key: string, value: string, seconds: number, drop: string[] = []): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["EVAL", WRITE_IF_CONNECTED, 2 + drop.length, connKey(statsId), key, ...drop, seen, value, seconds]]), 1);
+  const written = replies ? countOf(replies[0]) : null;
+  if (written !== 0 && written !== 1) throw new UnknownReplyError("a Meta write made only while its connection is there");
+  return written === 1;
 }
 
 /**
@@ -393,15 +426,13 @@ export async function finishMeta(input: {
 
 /** Chooses which of the connected person's ad accounts is read. */
 export async function chooseAccount(statsId: string, id: unknown): Promise<boolean> {
-  const c = await readConnection(statsId);
-  if (!c || typeof id !== "string" || !c.accounts.some((a) => a.id === id)) return false;
+  const read = await readConnectionAsSeen(statsId);
+  if (!read) return false;
+  const { c, seen } = read;
+  if (typeof id !== "string" || !c.accounts.some((a) => a.id === id)) return false;
   if (c.account === id) return true;
-  await redisPipeline([
-    ["SET", connKey(statsId), JSON.stringify({ ...c, account: id })],
-    ["DEL", readKey(statsId)],
-    ["DEL", linesKey(statsId)],
-  ]);
-  return true;
+  // Only onto the connection read: one forgotten in between is not written back with the account chosen.
+  return writeIfConnected(statsId, seen, connKey(statsId), JSON.stringify({ ...c, account: id }), 0, [readKey(statsId), linesKey(statsId)]);
 }
 
 async function giveBack(statsId: string, c: Connection): Promise<void> {
@@ -475,10 +506,11 @@ export type ReadResult = "read" | "none" | "currency" | "busy" | "error" | "brok
 export type MetaBrokenHook = (owner: { email: string; handle: string }) => Promise<void>;
 
 async function markBroken(statsId: string, c: Connection, why: string, onBroken?: MetaBrokenHook): Promise<void> {
-  const now = await readConnection(statsId);
-  if (!now || now.connectedAt !== c.connectedAt || now.broken) return;
-  await redisPipeline([["SET", connKey(statsId), JSON.stringify({ ...now, broken: why })]]);
-  await onBroken?.(now.owner).catch(() => {});
+  const read = await readConnectionAsSeen(statsId);
+  if (!read || read.c.connectedAt !== c.connectedAt || read.c.broken) return;
+  // Only onto the connection read: one forgotten in between is not written back, and its owner is not told.
+  if (!(await writeIfConnected(statsId, read.seen, connKey(statsId), JSON.stringify({ ...read.c, broken: why }), 0))) return;
+  await onBroken?.(read.c.owner).catch(() => {});
 }
 
 /**
@@ -488,8 +520,10 @@ async function markBroken(statsId: string, c: Connection, why: string, onBroken?
  */
 export async function readMetaSpend(statsId: string, storeCurrency: string, now = Date.now(), onBroken?: MetaBrokenHook): Promise<ReadResult> {
   if (!isMetaConfigured() || !isRedisConfigured()) return "none";
-  const c = await readConnection(statsId);
-  if (!c || c.broken || !c.account) return c?.broken ? "broken" : "none";
+  const found = await readConnectionAsSeen(statsId);
+  if (!found || found.c.broken || !found.c.account) return found?.c.broken ? "broken" : "none";
+  // Everything this read writes is held to the connection exactly as read here (writeIfConnected).
+  const { c, seen } = found;
   const account = c.accounts.find((a) => a.id === c.account);
   if (!account) return "none";
   // Resolve the connection's own current store, including calls made by the
@@ -504,14 +538,11 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   if (got === null) return "busy";
   const window = readWindow(now);
   const note = async (read: Partial<MetaRead>) => {
-    // Written only while that very connection is still there.
-    const still = await readConnection(statsId);
-    if (!still || still.connectedAt !== c.connectedAt || still.account !== c.account) return false;
+    // Written only while that very connection is still there, in one step with that check.
     const [rawBefore] = await redisPipeline([["GET", readKey(statsId)]]);
     const before = parseRead(rawBefore);
     const next: MetaRead = { day: before?.day ?? "", at: before?.at ?? 0, problem: "", after: 0, lines: before?.lines ?? 0, cents: before?.cents ?? 0, campaigns: before?.campaigns ?? 0, ...read };
-    await redisPipeline([["SET", readKey(statsId), JSON.stringify(next), "EX", KEEP_SECONDS]]);
-    return true;
+    return writeIfConnected(statsId, seen, readKey(statsId), JSON.stringify(next), KEEP_SECONDS);
   };
   try {
     if (c.expires && c.expires * 1000 <= now) {
@@ -561,9 +592,8 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     if (!Number.isSafeInteger(said) || said !== fresh.reduce((sum, line) => sum + line.cents, 0)) throw new MetaError("busy", "Meta's ad spend did not add up");
     const [rawKept] = await redisPipeline([["GET", linesKey(statsId)]]);
     const merged = mergeLines(parseLines(rawKept), fresh, window.from, window.to);
-    const still = await readConnection(statsId);
-    if (!still || still.connectedAt !== c.connectedAt || still.account !== c.account) return "none";
-    await redisPipeline([["SET", linesKey(statsId), JSON.stringify(merged), "EX", KEEP_SECONDS]]);
+    // Kept only while that very connection is still there, in one step with that check.
+    if (!(await writeIfConnected(statsId, seen, linesKey(statsId), JSON.stringify(merged), KEEP_SECONDS))) return "none";
     await note({
       day: window.to,
       at: Math.floor(now / 1000),

@@ -8,7 +8,11 @@
  *   - the grace is 30 days: a picture a day old is kept;
  *   - a store note left behind once its picture was taken or swept no longer counts against the store's cap, and the
  *     store's list has an expiry, so such notes can never keep the upload door shut;
- *   - an untaken note still waiting for the sweep keeps counting (the cap still bounds what the file store keeps).
+ *   - an untaken note still waiting for the sweep keeps counting (the cap still bounds what the file store keeps);
+ *   - a picture taken off its store's list only (by the code before the list of unclaimed pictures, after a rollback;
+ *     Claude 2 on #3347 @1eef9e91e1) is never deleted: the sweep deletes only while the store's note is still there,
+ *     and a store note read in another shape keeps the file and puts it back;
+ *   - the refusal says unused pictures go "about" 30 days after upload: the grace counts from the door.
  *
  * Synthetic files in a file store held in memory (tests/failure-cleanup-world.ts) and the real door, attach routes and
  * sweep.
@@ -17,7 +21,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, imageFolder, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, imageFolder, setProductImage, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import * as door from "@/lib/picture-door";
 import { POST as upload } from "@/app/api/store/image/upload/route";
@@ -47,6 +51,8 @@ const run = async (now: number, look?: Look): Promise<string[] | string> => {
 
 /** Runs once, just before the pipeline it matches is sent: the moment another request's work lands in between. */
 let before: { match: (commands: (string | number)[][]) => boolean; then: () => Promise<void> } | null = null;
+/** Runs once, on the replies of the pipeline it matches: an answer that comes back in another shape. */
+let after: { match: (commands: (string | number)[][]) => boolean; change: (replies: unknown[]) => unknown } | null = null;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const hook = before;
@@ -54,7 +60,13 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
     before = null;
     await hook.then();
   }
-  return realPipeline(commands);
+  const replies = await realPipeline(commands);
+  const swap = after;
+  if (swap && swap.match(commands)) {
+    after = null;
+    return swap.change(replies as unknown[]);
+  }
+  return replies;
 }) as typeof redis.pipeline;
 
 const post = (path: string, session: string, body: unknown) =>
@@ -107,6 +119,42 @@ async function main(): Promise<void> {
   is("the product's picture is still in the file store", files.has(raced), true);
   is("and still on the product", await shown(), raced);
 
+  part("A picture taken off its store's list only (the code before this list, after a rollback) is never deleted");
+  // The door of this code notes the name on both lists; the code before it takes a picture from the store's list
+  // only (ZSCORE and ZREM there, nothing on the list of unclaimed pictures), as main did before this change.
+  const rolled = name();
+  is("the door opens", await answer(await ask(rolled)), [200, "ok"]);
+  files.set(rolled, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
+  is("the earlier code's take finds the store's note", redis.run(["ZSCORE", doors, rolled]) !== null, true);
+  redis.run(["ZREM", doors, rolled]);
+  const put = await setProductImage(OWNER, productId, { path: rolled, width: 1200, height: 800, alt: "", bytes: JPEG.length, small: null });
+  is("and puts the picture on the product", put.ok, true);
+  is("the product shows it", await shown(), rolled);
+  is("it is still on the list of unclaimed pictures (the earlier code never touches it)", onList(rolled), true);
+  is("a sweep 31 days on deletes nothing", await run(Date.now() + 31 * DAY), []);
+  is("the product's picture is still in the file store", files.has(rolled), true);
+  is("and still on the product", await shown(), rolled);
+  is("it is not looked at again", onList(rolled), false);
+  // A store note read in another shape: unknown, never "no note" nor "noted".
+  const odd = name();
+  is("another door opens", await answer(await ask(odd)), [200, "ok"]);
+  files.set(odd, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
+  after = {
+    match: (commands) => commands.some((c) => c[0] === "ZSCORE" && c[1] === doors && c[2] === odd),
+    change: (replies) => replies.map(() => "soon"),
+  };
+  is("a store note answered in another shape deletes nothing", await run(Date.now() + 31 * DAY), []);
+  after = null;
+  is("the file is kept", files.has(odd), true);
+  is("it is put back for the next run", onList(odd), true);
+  is("and its store note still counts", onStore(odd), true);
+  after = { match: (commands) => commands.some((c) => c[0] === "ZSCORE" && c[1] === doors && c[2] === odd), change: () => null };
+  is("a store note read with no reply at all deletes nothing", await run(Date.now() + 31 * DAY), []);
+  after = null;
+  is("the file is still kept and put back", [files.has(odd), onList(odd), onStore(odd)], [true, true, true]);
+  is("the next healthy run deletes it (its store note is there, stored after it, past the grace)", await run(Date.now() + 31 * DAY), [odd]);
+  is("and both notes go", [onStore(odd), onList(odd)], [false, false]);
+
   part("The sweep checks the file itself before deleting");
   // A note on a file stored before it (as a late note whose undo was lost would leave): never this note's upload.
   const older = name();
@@ -145,7 +193,8 @@ async function main(): Promise<void> {
   is("a sweep 26 hours on keeps it", await run(Date.now() + 26 * HOUR), []);
   is("the file is kept", files.has(young), true);
   is("a sweep 30 days and an hour on deletes it", await run(Date.now() + 30 * DAY + HOUR), [young]);
-  is("the refusal's sentence says when unused pictures are deleted", /30 days/.test(STUDIO_MESSAGES.pictures_waiting ?? ""), true);
+  // The grace counts from the door, and the upload comes up to minutes after it; the daily run can come later still.
+  is("the refusal's sentence says unused pictures are deleted about 30 days after upload", /about 30 days after upload/.test(STUDIO_MESSAGES.pictures_waiting ?? ""), true);
   is("and no longer says a day", /more than a day are deleted/.test(STUDIO_MESSAGES.pictures_waiting ?? ""), false);
 
   part("Store notes left behind once their picture is gone never keep the door shut");

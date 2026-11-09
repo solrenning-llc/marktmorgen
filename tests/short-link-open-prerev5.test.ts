@@ -138,17 +138,24 @@ async function main() {
   is("MEDIO: what the hour read stays inside what the registry prices for one resting store", recordReads <= bound && Number.isFinite(bound), true);
   is("MEDIO: the shared hour is left as it was", await hourCount(), 0);
 
+  // Added with the fix: the one open that takes the check and finds the store still resting stays inside the heaviest priced.
+  pipelines = 0; commandsSent = 0;
+  const still = await open(codes[0]);
+  is("the due open that takes the check and finds the store still resting: refused, inside the heaviest unpaid open priced", [still.status, pipelines <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits, commandsSent <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands], [503, true, true]);
+  console.log(`  MEDIO the check that finds the store resting: ${pipelines} pipelines and ${commandsSent} commands`);
+
   part("MEDIO: a store that pays again opens at once once one open finds it so");
   later(601_000);
   tiredFolders = new Set();
   forgetShortLinkOpenMemory();
   pipelines = 0; commandsSent = 0;
-  const back = await open(codes[0]);
+  const back = await open(codes[1]);
   is("the open that is due reads the store, finds it paying and opens", [back.status, back.to?.includes("/@restingfive")], [302, true]);
+  console.log(`  MEDIO the check that finds the store paying: ${pipelines} pipelines and ${commandsSent} commands`);
   is("that open stays inside the heaviest unpaid open priced", [pipelines <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits, commandsSent <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands], [true, true]);
   forgetShortLinkOpenMemory();
   const readsBefore = recordReads;
-  const also = await Promise.all(codes.slice(1, 11).map((c) => open(c)));
+  const also = await Promise.all(codes.slice(2, 12).map((c) => open(c)));
   is("its other links open on a fresh instance, all at once", also.every((r) => r.status === 302), true);
   is("each of them read the store (paid by the store)", recordReads - readsBefore, 10);
   done();

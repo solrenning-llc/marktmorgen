@@ -110,7 +110,7 @@ import {
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
-import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS, SHORT_LINK_OWNER_MS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_USED_UP_PAUSE_MS } from "@/lib/short-link-open-rules";
+import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS, SHORT_LINK_OWNER_MS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_KEY_SECONDS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_USED_UP_PAUSE_MS } from "@/lib/short-link-open-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
@@ -390,7 +390,13 @@ export const SHORT_LINK_OPEN_READ = CDN_PER_REQUEST + CALL + request("heavy", SH
  * is refused, and what resting stores still read is (4), per resting store, their number unknown (restingStores: null):
  * its record at most once a resting mark's time (storeReadsPerHour, counted at the shorter mark though it is kept
  * SHORT_LINK_TIRED_MAX_MS once the resting hour is used), and on each instance each of its links looked up at most
- * once while remembered (lookupsPerInstancePerHour, MAX_LINKS a SHORT_LINK_OWNER_MS). Each open of (1) and (2) is priced at heaviestUnpaid's waits and commands (the heaviest
+ * once while remembered (lookupsPerInstancePerHour, MAX_LINKS a SHORT_LINK_OWNER_MS). Since Claude 2's focal return
+ * (9 November 2026) the mark holds the moment the store rests until and lives SHORT_LINK_UNPAID_KEY_SECONDS, and once
+ * that moment is past only the open that takes nl:slink:rest:<sid>:check (SET NX, SHORT_LINK_TIRED_MS) reads the record,
+ * so storeReadsPerHour is a bound in code, site-wide; the opens in flight read it only while the store has no mark at
+ * all (its first resting burst, or its mark lapsed after SHORT_LINK_UNPAID_KEY_SECONDS without one open), at most every
+ * open each hour can hold at once (coldReadsPerLapse: the shared hour's units with the known figure, and the resting
+ * hour), once a mark's life (lapseEveryMs). Each open of (1) and (2) is priced at heaviestUnpaid's waits and commands (the heaviest
  * one measured, with room, held there), every Redis wait at its timeout, in tests/short-link-open-cap.test.ts. The
  * reviewed monthly ceiling is unknown (null), never zero, and the owner has not approved it. Kept here, not in
  * lib/llc-fixed-costs.ts: a line there enters CURRENT_COMMERCIAL_TERMS, which only the owner changes.
@@ -400,7 +406,12 @@ export const SHORT_LINK_UNPAID_COMPANY_COST = {
   knownPerHour: SHORT_LINK_KNOWN_UNPAID_PER_HOUR,
   readUnits: SHORT_LINK_UNPAID_READ_UNITS, missesPerAddress: SHORT_LINK_MISSES_PER_ADDRESS, missWindowMs: SHORT_LINK_MISS_WINDOW_MS,
   restPerHour: SHORT_LINK_REST_UNPAID_PER_HOUR, restRefusalReads: 1, restMarkSets: 1, restMarkMs: SHORT_LINK_TIRED_MS, restUsedMarkMs: SHORT_LINK_TIRED_MAX_MS,
-  perRestingStore: { storeReadsPerHour: 3_600_000 / SHORT_LINK_TIRED_MS, lookupsPerInstancePerHour: MAX_LINKS * (3_600_000 / SHORT_LINK_OWNER_MS) },
+  perRestingStore: {
+    storeReadsPerHour: 3_600_000 / SHORT_LINK_TIRED_MS,
+    coldReadsPerLapse: (SHORT_LINK_UNPAID_PER_HOUR + SHORT_LINK_KNOWN_UNPAID_PER_HOUR) * SHORT_LINK_UNPAID_READ_UNITS + SHORT_LINK_REST_UNPAID_PER_HOUR,
+    lapseEveryMs: SHORT_LINK_UNPAID_KEY_SECONDS * 1000,
+    lookupsPerInstancePerHour: MAX_LINKS * (3_600_000 / SHORT_LINK_OWNER_MS),
+  },
   restingStores: null,
   heaviestUnpaid: { waits: 12, commands: 23 },
   perInstance: {

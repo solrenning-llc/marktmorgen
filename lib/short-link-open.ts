@@ -15,9 +15,12 @@
  *   - Then one address may make this instance answer SHORT_LINK_OPENS_PER_ADDRESS
  *     opens in SHORT_LINK_ADDRESS_WINDOW_MS (lib/local-limit.ts, which costs
  *     nothing), and a code whose store this instance does not know may be
- *     looked up only while that address has looked up fewer than
- *     SHORT_LINK_MISSES_PER_ADDRESS codes nobody has here in
- *     SHORT_LINK_MISS_WINDOW_MS. The lookup is counted in its hour, one unit,
+ *     looked up only while that address's lookups here that left units in the
+ *     shared hour (a code nobody has, a store gone, a link refused for its
+ *     connection, a read nobody paid) in SHORT_LINK_MISS_WINDOW_MS, with its
+ *     lookups still in flight, are fewer than SHORT_LINK_MISSES_PER_ADDRESS;
+ *     the place is taken before anything is awaited, so a burst sent at once
+ *     cannot pass it (Claude 2's focal return on #3330). The lookup is counted in its hour, one unit,
  *     in one count every instance shares (SHORT_LINK_COUNT_COMMANDS). Past
  *     SHORT_LINK_UNPAID_PER_HOUR * SHORT_LINK_UNPAID_READ_UNITS units the open
  *     is refused until the hour ends, and this instance sends nothing more to
@@ -44,9 +47,12 @@
  *         it is asked again and still rests, up to SHORT_LINK_TIRED_MAX_MS.
  *         The open is counted in the resting hour (shortLinkRestHourKey), never
  *         the shared one; past SHORT_LINK_REST_UNPAID_PER_HOUR it is refused,
- *         and the store's mark is kept SHORT_LINK_TIRED_MAX_MS, so every
- *         instance refuses it without its record read for that long. Each
- *         store is asked again on its own time,
+ *         and the store's mark says SHORT_LINK_TIRED_MAX_MS, so every
+ *         instance refuses it without its record read for that long. The mark
+ *         holds that moment and lives two hours: once the moment is past, only
+ *         the one open that takes shortLinkRestCheckKey, site-wide, reads the
+ *         store again, and a store found paying has its mark taken away (Claude
+ *         2's focal return on #3330). Each store is asked again on its own time,
  *         counted in the resting hour before it is read, so one store waiting
  *         never waits behind another; the resting hour used, it is kept
  *         resting here a minute, nothing sent;
@@ -75,7 +81,8 @@
  *
  *   nl:slink:open:<hour>   string   the hour's lookups and opens not paid by a store, in units, kept two hours
  *   nl:slink:tired:<hour>  string   the hour's opens of stores over their own requests, kept two hours
- *   nl:slink:rest:<sid>    string   "1" while the store could not take one more request, kept SHORT_LINK_TIRED_MS (SHORT_LINK_TIRED_MAX_MS once the resting hour is used)
+ *   nl:slink:rest:<sid>    string   the moment the store rests until, SHORT_LINK_TIRED_MS on (SHORT_LINK_TIRED_MAX_MS once the resting hour is used), kept two hours
+ *   nl:slink:rest:<sid>:check string "1", the one open that asks a store whose moment is past (SET NX), kept SHORT_LINK_TIRED_MS
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLocalLimit } from "@/lib/local-limit";
@@ -88,7 +95,7 @@ import {
   SHORT_LINK_OPEN_UNITS, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_OWNER_MS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_TIRED_KEPT,
   SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_KEY_SECONDS, SHORT_LINK_UNPAID_PER_HOUR,
   SHORT_LINK_USED_UP_PAUSE_MS, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS,
-  hourOf, shortLinkRestHourKey, shortLinkRestKey, shortLinkUnpaidKey,
+  hourOf, shortLinkRestCheckKey, shortLinkRestHourKey, shortLinkRestKey, shortLinkUnpaidKey,
 } from "@/lib/short-link-open-rules";
 
 /** The two hours an open no store pays for is counted in: the one every store's links share, and resting stores' own. */
@@ -108,7 +115,7 @@ const keyOf = (hour: Hour, now: number) => (hour === "shared" ? shortLinkUnpaidK
  * moment ago, answered as ended with nothing read; or why not, and until when, where that is known.
  */
 export type ShortLinkAdmission =
-  | { state: "open"; hour: Hour; key: string; address: string; now: number }
+  | { state: "open"; hour: Hour; key: string; address: string; now: number; miss: boolean }
   | { state: "ended"; now: number }
   | { state: "hour" | "tired" | "connection" | "misses"; now: number; until: number }
   | { state: "address" | "unknown"; now: number };
@@ -129,8 +136,15 @@ const resting = new Map<string, { until: number; wait: number }>();
 const known = new Map<string, number>();
 /** A connection over its share of a store's day, by the address and the store's id. */
 const refusedConnections = new Map<string, number>();
-/** Codes nobody has that each address made this instance look up, and until when they are counted. */
-const misses = new Map<string, { n: number; until: number }>();
+/**
+ * Per address: the lookups it made this instance leave in the shared hour (`n`: a code nobody has, a store gone, a link
+ * refused for its connection, a store read nobody paid), counted until `until`; and its lookups still in flight, each
+ * held until when at the most (`flying`), taken before the count is awaited, so a burst sent at once cannot pass the cap
+ * (Claude 2's focal return on #3330, 9 November 2026).
+ */
+const misses = new Map<string, { n: number; until: number; flying: number[] }>();
+/** The longest a lookup in flight holds its address's place: the minute this instance waits after a count it could not read. */
+const FLIGHT_MS = SHORT_LINK_UNKNOWN_PAUSE_MS;
 
 /** Forgets this instance's memory (the tests, between cases). */
 export function forgetShortLinkOpenMemory(): void {
@@ -168,22 +182,49 @@ function ownerOf(code: string, now: number): string | null {
 
 const nextDay = (now: number) => (Math.floor(now / 86_400_000) + 1) * 86_400_000;
 
-/** Until when `address` may look up no more codes this instance does not know, or null while it may. */
-function missedUntil(address: string, now: number): number | null {
+/** What `address` has here at `now`, its time past forgotten; null when nothing. */
+function missesOf(address: string, now: number): { n: number; until: number; flying: number[] } | null {
   const seen = misses.get(address);
   if (!seen) return null;
   if (seen.until <= now) {
+    seen.n = 0;
+    seen.until = 0;
+  }
+  seen.flying = seen.flying.filter((end) => end > now);
+  if (seen.n === 0 && seen.flying.length === 0) {
     misses.delete(address);
     return null;
   }
-  return seen.n >= SHORT_LINK_MISSES_PER_ADDRESS ? seen.until : null;
+  return seen;
 }
 
-/** One code nobody has, looked up for `address` (memory only). */
-function missed(address: string, now: number): void {
-  const seen = misses.get(address);
-  if (seen && seen.until > now) seen.n += 1;
-  else remember(misses, address, { n: 1, until: now + SHORT_LINK_MISS_WINDOW_MS }, SHORT_LINK_TIRED_KEPT);
+/**
+ * Until when `address` may look up no more codes this instance does not know; "flying" while its lookups in flight
+ * would take it to the cap (refused for a moment, nothing sent); null while it may.
+ */
+function missedUntil(address: string, now: number): number | "flying" | null {
+  const seen = missesOf(address, now);
+  if (!seen) return null;
+  if (seen.n >= SHORT_LINK_MISSES_PER_ADDRESS) return seen.until;
+  return seen.n + seen.flying.length >= SHORT_LINK_MISSES_PER_ADDRESS ? "flying" : null;
+}
+
+/** A lookup for `address` about to be counted: its place taken before anything is awaited (memory only). */
+function takeMiss(address: string, now: number): void {
+  const seen = missesOf(address, now) ?? { n: 0, until: 0, flying: [] };
+  seen.flying.push(now + FLIGHT_MS);
+  remember(misses, address, seen, SHORT_LINK_TIRED_KEPT);
+}
+
+/** That lookup ended: its place given back, and, when it left units in the shared hour (`kept`), counted toward the cap. */
+function settleMiss(address: string, now: number, kept: boolean): void {
+  const seen = missesOf(address, now);
+  if (seen) seen.flying.shift();
+  if (!kept) return;
+  const counted = seen ?? { n: 0, until: 0, flying: [] };
+  if (counted.n === 0) counted.until = now + SHORT_LINK_MISS_WINDOW_MS;
+  counted.n += 1;
+  remember(misses, address, counted, SHORT_LINK_TIRED_KEPT);
 }
 
 /** Exactly the answers asked for, ending with INCR's count, a whole number of at least 1, and EXPIRE's 1; null for anything else. */
@@ -230,8 +271,11 @@ export async function admitShortLinkOpen(code: string, { address, now = Date.now
   }
   // An address that looked up many codes nobody has here looks up no more it does not know, so a few addresses
   // cannot fill the hour every store's links are looked up in; a link whose store this instance knows still opens.
+  // Every lookup that leaves units in the shared hour counts toward the cap (a code nobody has, a store gone, a link
+  // refused for its connection), and one in flight holds its place, so a burst sent at once cannot pass it.
   if (owner === null) {
     const missedTill = missedUntil(address, now);
+    if (missedTill === "flying") return { state: "unknown", now };
     if (missedTill !== null) return { state: "misses", now, until: missedTill };
   }
   if (!withinLocalLimit("short-link-open", address, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_ADDRESS_WINDOW_MS, now)) return { state: "address", now };
@@ -251,22 +295,29 @@ export async function admitShortLinkOpen(code: string, { address, now = Date.now
       rest.until = pausedUntil.rest;
       return { state: "tired", now, until: rest.until };
     }
-    return { state: "open", hour: "rest", key, address, now };
+    return { state: "open", hour: "rest", key, address, now, miss: false };
   }
   const isKnown = holds(known, code, now);
   // A used hour stays used until it ends; this instance only waits a minute before counting again.
   if (now < pausedUntil.shared && !isKnown) return { state: "hour", now, until: hourEnd(now) };
   if (now < unknownUntil || !isRedisConfigured()) return { state: "unknown", now };
   const key = keyOf("shared", now);
+  // A link whose store this instance does not know takes its address's place before the count is awaited.
+  const miss = owner === null;
+  if (miss) takeMiss(address, now);
+  const refuse = (refused: Refused): Refused => {
+    if (miss) settleMiss(address, now, false);
+    return refused;
+  };
   const seen = await count("shared", key, now);
-  if (seen === null) return { state: "unknown", now };
+  if (seen === null) return refuse({ state: "unknown", now });
   if (seen > LIMIT.shared) {
     // The hour is used: a link its store paid for here a moment ago is still read, counted, up to its own figure past
     // the hour's; its store pays, and the count is given back. One that ends unpaid stays counted.
-    if (isKnown && seen <= LIMIT.shared + KNOWN_LIMIT) return { state: "open", hour: "shared", key, address, now };
-    return { state: "hour", now, until: hourEnd(now) };
+    if (isKnown && seen <= LIMIT.shared + KNOWN_LIMIT) return { state: "open", hour: "shared", key, address, now, miss };
+    return refuse({ state: "hour", now, until: hourEnd(now) });
   }
-  return { state: "open", hour: "shared", key, address, now };
+  return { state: "open", hour: "shared", key, address, now, miss };
 }
 
 /**
@@ -275,10 +326,10 @@ export async function admitShortLinkOpen(code: string, { address, now = Date.now
  */
 export function shortLinkNotPaid(code: string, why: "missing" | "unreadable", admission: Open, now = Date.now()): void {
   known.delete(code);
-  if (why === "missing") {
-    remember(ended, code, now + SHORT_LINK_ENDED_MS, SHORT_LINK_TIRED_KEPT);
-    missed(admission.address, now);
-  } else remember(held, code, now + SHORT_LINK_TIRED_MS, SHORT_LINK_TIRED_KEPT);
+  if (why === "missing") remember(ended, code, now + SHORT_LINK_ENDED_MS, SHORT_LINK_TIRED_KEPT);
+  else remember(held, code, now + SHORT_LINK_TIRED_MS, SHORT_LINK_TIRED_KEPT);
+  // Its unit stays in the hour either way, so it counts toward its address's cap.
+  if (admission.miss) settleMiss(admission.address, now, true);
 }
 
 /**
@@ -286,6 +337,19 @@ export function shortLinkNotPaid(code: string, why: "missing" | "unreadable", ad
  * ended, the open counted in the hour); or the refusal to send when it does not pay.
  */
 export async function payShortLinkOpen(code: string, link: { sid: string; statsId: string }, admission: Open, now = Date.now()): Promise<Store | null | Response> {
+  // Whether this lookup left units in the shared hour: only a store that paid, or an open moved to the resting hour (its
+  // unit given back), leaves none; everything else counts toward the address's cap.
+  const outcome = { kept: true };
+  try {
+    return await payOpen(code, link, admission, now, outcome);
+  } finally {
+    if (admission.miss) settleMiss(admission.address, now, outcome.kept);
+  }
+}
+
+async function payOpen(
+  code: string, link: { sid: string; statsId: string }, admission: Open, now: number, outcome: { kept: boolean },
+): Promise<Store | null | Response> {
   remember(owners, code, { sid: link.sid, until: now + SHORT_LINK_OWNER_MS }, SHORT_LINK_TIRED_KEPT);
   if (admission.hour === "shared") {
     // What this instance learned of the store since it was counted, from another of its links: refused at once,
@@ -294,6 +358,7 @@ export async function payShortLinkOpen(code: string, link: { sid: string; statsI
     const rest = resting.get(link.sid);
     if (rest && rest.until > now) {
       known.delete(code);
+      outcome.kept = false;
       await countResting(now, [["DECR", admission.key], ["EXPIRE", admission.key, SHORT_LINK_UNPAID_KEY_SECONDS]]);
       return shortLinkRefusal({ state: "tired", now, until: rest.until });
     }
@@ -326,7 +391,29 @@ export async function payShortLinkOpen(code: string, link: { sid: string; statsI
     return unknown();
   }
   if (!Array.isArray(replies) || replies.length !== commands.length) return unknown();
-  if (replies[1] === "1") return restRefused(link.sid, code, now, false);
+  // A store found resting is refused without its record read; once its resting moment is past, only the one open that
+  // takes the check, site-wide, reads it again, so the opens in flight when it turns due do not all read it.
+  const mark = restMarkOf(replies[1], now);
+  if (mark === "resting") {
+    outcome.kept = false;
+    return restRefused(link.sid, code, now, false);
+  }
+  let checking = false;
+  if (mark === "due") {
+    let took: unknown = null;
+    try {
+      const reply = await redisPipeline([["SET", shortLinkRestCheckKey(link.sid), "1", "NX", "EX", SHORT_LINK_TIRED_MS / 1000]]);
+      took = Array.isArray(reply) && reply.length === 1 ? reply[0] : null;
+    } catch {
+      took = null;
+    }
+    // Another open is asking, or the check could not be taken: still resting, nothing read.
+    if (took !== "OK") {
+      outcome.kept = false;
+      return restRefused(link.sid, code, now, false);
+    }
+    checking = true;
+  }
   let store: Store | null | "unknown";
   try {
     store = await storeForIdRefRead(link.sid, replies[0]);
@@ -338,18 +425,24 @@ export async function payShortLinkOpen(code: string, link: { sid: string; statsI
   if (!store || store.statsId !== link.statsId) {
     resting.delete(link.sid);
     remember(ended, code, now + SHORT_LINK_ENDED_MS, SHORT_LINK_TIRED_KEPT);
-    missed(admission.address, now);
     await unpaid();
     return null;
   }
   const why = await takePublicRequestWhy(store, "public", now, SHORT_LINK_OPEN_UNITS).catch(() => "unknown" as const);
   if (why === "ok") {
+    outcome.kept = false;
     resting.delete(link.sid);
     remember(known, code, now + SHORT_LINK_KNOWN_MS, SHORT_LINK_KNOWN_KEPT);
+    // A store that rested and pays again: its mark taken away, so its links open everywhere at once (best effort; a
+    // mark left only asks it again a mark's time later).
+    if (checking) await redisPipeline([["DEL", shortLinkRestKey(link.sid)], ["DEL", shortLinkRestCheckKey(link.sid)]]).catch(() => {});
     return store;
   }
   // Only the store's own refusal marks it resting; best effort, a mark not written is read again next time.
-  if (why === "store") return restRefused(link.sid, code, now, true);
+  if (why === "store") {
+    outcome.kept = false;
+    return restRefused(link.sid, code, now, true);
+  }
   if (why === "connection") {
     // That connection alone, for that store, until its share starts again: the day's end, or the store's window's
     // end if it renews first (lib/traffic.ts keeps the share by window and day). Nobody else is refused the link.
@@ -382,12 +475,25 @@ async function restRefused(sid: string, code: string, now: number, mark: boolean
   known.delete(code);
   const restUsed = now < pausedUntil.rest;
   const markMs = restUsed ? SHORT_LINK_TIRED_MAX_MS : SHORT_LINK_TIRED_MS;
-  const first: (string | number)[][] = mark ? [["SET", shortLinkRestKey(sid), "1", "EX", markMs / 1000]] : [];
+  const markOf = (ms: number): (string | number)[] => ["SET", shortLinkRestKey(sid), String(now + ms), "EX", SHORT_LINK_UNPAID_KEY_SECONDS];
+  const first: (string | number)[][] = mark ? [markOf(markMs)] : [];
   const used = await countResting(now, first);
-  // The resting hour found used by this very count: the mark is kept the longer time too (best effort; a mark kept
-  // the shorter time only reads the store again sooner, which the resting hour's figure does not count on).
-  if (mark && used && !restUsed) await redisPipeline([["EXPIRE", shortLinkRestKey(sid), SHORT_LINK_TIRED_MAX_MS / 1000]]).catch(() => {});
+  // The resting hour found used by this very count: the store rests the longer time too (best effort; a mark kept
+  // the shorter time only asks the store again sooner, one open site-wide, which the resting hour does not count on).
+  if (mark && used && !restUsed) await redisPipeline([markOf(SHORT_LINK_TIRED_MAX_MS)]).catch(() => {});
   return shortLinkRefusal({ state: "tired", now, until: now + wait });
+}
+
+/**
+ * What a store's resting mark says at `now`: "resting" until the moment it holds (anything else written there too, so
+ * a mark that cannot be read never reads the store), "due" once that moment is past, null when there is none.
+ */
+function restMarkOf(reply: unknown, now: number): "resting" | "due" | null {
+  if (reply === null || reply === undefined) return null;
+  const text = typeof reply === "number" ? String(reply) : reply;
+  if (typeof text !== "string" || !/^[0-9]{13,15}$/.test(text)) return "resting";
+  const until = Number(text);
+  return Number.isSafeInteger(until) && until <= now ? "due" : "resting";
 }
 
 /**
@@ -424,7 +530,7 @@ export function shortLinkRefusal(admission: Refused): Response {
   if (admission.state === "misses") {
     return refusal(
       429,
-      `Your network opened too many short links that do not exist in the last hour, so new links will not open for you right now. Try this link again after ${at(admission.until)}, or use another network.`,
+      `Your network opened too many short links that do not exist or could not be opened for you in the last hour, so new links will not open for you right now. Try this link again after ${at(admission.until)}, or use another network.`,
       (admission.until - admission.now) / 1000,
     );
   }

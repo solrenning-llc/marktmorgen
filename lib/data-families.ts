@@ -394,7 +394,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ship:mail:all": C, "nl:ship:mail:closed:": C, "nl:ship:mail:due": C, "nl:ship:mail:erased:": C,
   "nl:ship:mail:person:": C, "nl:ship:mail:pool": C, "nl:ship:mail:pool:": C, "nl:ship:mail:row:": C, "nl:ship:mail:store:": C,
   "nl:slink:": T("nl:slink:store:"), "nl:slink:store:": E,
-  // The hour counts (two hours) and a resting store's mark (ten minutes at most) are the company's and gone by themselves.
+  // The hour counts and a resting store's mark (two hours each) and its check (a minute) are the company's and gone by themselves.
   "nl:slink:open:": Cr(1), "nl:slink:rest:": Cr(1), "nl:slink:tired:": Cr(1),
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,

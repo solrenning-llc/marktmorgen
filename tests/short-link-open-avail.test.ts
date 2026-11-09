@@ -97,9 +97,14 @@ async function main(): Promise<void> {
   forgetShortLinkOpenMemory();
   await open(tiredCode);
   inject = null;
-  is("the store's own refusal writes its resting mark", (await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0], "1");
+  // Rule 23 (9 November 2026, Claude 2's focal return): the mark was "1" for a minute, then gone, so every open in flight
+  // read the store again; it now holds the moment the store rests until (a minute on), and lives two hours, so once that
+  // moment is past one open alone, site-wide, asks the store again (tests/short-link-open-prerev5.test.ts).
+  const markAt = Date.now();
+  const mark = (await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0];
+  is("the store's own refusal writes its resting mark: the moment it rests until, a minute on", Math.abs(Number(mark) - (markAt + 60_000)) <= 2_000, true);
   later(61_000);
-  is("the mark lapses after a minute", (await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0], null);
+  is("after a minute the mark is still there, its moment past, so one open asks the store again", Number((await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0]) <= Date.now(), true);
 
   part("(ii) Paid opens at once do not stop the instance for the rest of the hour");
   reset();

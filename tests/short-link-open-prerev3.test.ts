@@ -156,8 +156,10 @@ async function main() {
   tiredFolders.add(m.folder);
   await redis.pipeline([["SET", `nl:slink:tired:${Math.floor(Date.now() / HOUR)}`, String(SHORT_LINK_REST_UNPAID_PER_HOUR)]]);
   is("found resting: refused, nothing in the shared hour", [(await open(mcode)).status, await hourCount()], [503, 0]);
-  const markTtl = Number((await redis.pipeline([["TTL", `nl:slink:rest:${m.s.sid}`]]))[0]);
-  is("its mark is kept the longer time, so its record is read at most once that long", markTtl > SHORT_LINK_TIRED_MS / 1000 && markTtl <= SHORT_LINK_TIRED_MAX_MS / 1000, true);
+  // Rule 23 (9 November 2026, Claude 2's focal return): the mark's TTL was the longer time itself; the mark now holds the
+  // moment the store rests until and lives two hours, so the longer time is that moment, read from its value.
+  const markUntil = Number((await redis.pipeline([["GET", `nl:slink:rest:${m.s.sid}`]]))[0]) - Date.now();
+  is("its mark is kept the longer time, so its record is read at most once that long", markUntil > SHORT_LINK_TIRED_MS && markUntil <= SHORT_LINK_TIRED_MAX_MS, true);
   forgetShortLinkOpenMemory();
   commands = [];
   is("on a new instance it is refused on its mark, its record not read", [

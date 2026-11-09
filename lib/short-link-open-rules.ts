@@ -73,7 +73,7 @@ export const SHORT_LINK_OPENS_PER_ADDRESS = 30;
 export const SHORT_LINK_ADDRESS_WINDOW_MS = 10 * 60_000;
 /** How long an instance waits before counting again after a count it could not read. */
 export const SHORT_LINK_UNKNOWN_PAUSE_MS = 60_000;
-/** How long an instance first answers a link whose store could not take one more request without reading it again, and how long the store's resting mark (shortLinkRestKey) is kept. */
+/** How long an instance first answers a link whose store could not take one more request without reading it again, how long the store's resting mark (shortLinkRestKey) says it rests, and how long one open holds the right to ask it again (shortLinkRestCheckKey). */
 export const SHORT_LINK_TIRED_MS = 60_000;
 /**
  * Opens in an hour (UTC), in a second count every instance shares, of stores over their own requests: the first open
@@ -107,5 +107,13 @@ export const hourOf = (ms: number) => Math.floor(ms / HOUR_MS);
 export const shortLinkUnpaidKey = (now: number) => `nl:slink:open:${hourOf(now)}`;
 /** The key an hour's opens of resting stores are counted in (SHORT_LINK_REST_UNPAID_PER_HOUR), apart from the shared hour. */
 export const shortLinkRestHourKey = (now: number) => `nl:slink:tired:${hourOf(now)}`;
-/** A store's resting mark: written only when the store itself could not take one more request, kept SHORT_LINK_TIRED_MS. */
+/**
+ * A store's resting mark: written only when the store itself could not take one more request. It holds the moment
+ * (milliseconds) until which the store rests, SHORT_LINK_TIRED_MS after it was found resting (SHORT_LINK_TIRED_MAX_MS
+ * once the resting hour is used), and is kept SHORT_LINK_UNPAID_KEY_SECONDS, so that once that moment is past the store
+ * is still known to have rested, and only the open that takes shortLinkRestCheckKey reads its record again (Claude 2's
+ * focal return on #3330, 9 November 2026: a mark gone made every open in flight read it).
+ */
 export const shortLinkRestKey = (sid: string) => `nl:slink:rest:${sid}`;
+/** The one open, site-wide, that asks a store whose resting moment is past whether it still rests: SET NX, kept SHORT_LINK_TIRED_MS. */
+export const shortLinkRestCheckKey = (sid: string) => `nl:slink:rest:${sid}:check`;

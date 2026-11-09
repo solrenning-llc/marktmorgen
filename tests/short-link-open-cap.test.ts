@@ -330,11 +330,18 @@ async function main(): Promise<void> {
   // never counted in the shared hour, so what they read is held per resting store, their number unknown, never zero: its
   // record at most once a resting mark's time, and on each instance each of its links looked up once while remembered.
   const markOpen = request(markPipelines + 2, markCommands + 4, 4_096);
-  const restingStoreMonth = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.storeReadsPerHour * MONTH_HOURS * unpaid;
+  // Rule 23 (9 November 2026, Claude 2's focal return): was storeReadsPerHour alone ($20.37), a figure the code did not hold:
+  // the opens in flight when a mark expired all read the record (600 in an hour, tests/short-link-open-prerev5.test.ts). The
+  // check now holds storeReadsPerHour site-wide, and a store with no mark at all is read by at most the opens the two hours
+  // hold at once, once a mark's life.
+  const resting = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore;
+  const restingStoreMonth = (resting.storeReadsPerHour * MONTH_HOURS + resting.coldReadsPerLapse * (MONTH_HOURS * HOUR) / resting.lapseEveryMs) * unpaid;
   const restingStoreInstanceMonth = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.lookupsPerInstancePerHour * MONTH_HOURS * markOpen;
   console.log(`  cost  past the resting hour, per resting store: its record $${restingStoreMonth.toFixed(2)} a month; per instance, its links looked up $${restingStoreInstanceMonth.toFixed(2)} a month (an open refused on its mark $${markOpen.toFixed(6)}: ${markPipelines} pipelines and ${markCommands} commands measured)`);
   is("a resting store's open refused on its mark was measured: at most 4 pipelines and 9 commands", [markPipelines <= 4, markCommands <= 9], [true, true]);
-  is("past the resting hour, one resting store's record reads stay under $21 a month", restingStoreMonth < 21, true);
+  // Rule 23 (9 November 2026, Claude 2's focal return): was "under $21 a month" ($20.37, the 60 an hour the code did not hold);
+  // the claims a mark's time plus a store with no mark read by every open the two hours hold at once, every two hours: $81.49.
+  is("past the resting hour, one resting store's record reads stay under $82 a month", restingStoreMonth < 82, true);
   is("past the resting hour, one resting store's lookups on one instance stay under $18 a month", restingStoreInstanceMonth < 18, true);
   is("their number is held unknown, never zero", [SHORT_LINK_UNPAID_COMPANY_COST.restingStores, SHORT_LINK_UNPAID_COMPANY_COST.instances, restingStoreMonth > 0, restingStoreInstanceMonth > 0], [null, null, true, true]);
   // It is not a line of lib/llc-fixed-costs.ts: those lines enter CURRENT_COMMERCIAL_TERMS, which only the owner changes.

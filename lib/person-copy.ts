@@ -94,7 +94,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/payment-request-store.ts": { how: "copied", what: "Payment requests the store sent you" },
   "lib/agreement-store.ts": { how: "copied", what: "Proposals and agreements the store sent you, each version's text, and your signature" },
   "lib/buyer-profile.ts": { how: "copied", what: "Notes the store's team wrote about you" },
-  "lib/form-store.ts": { how: "copied", what: "Your answers to the store's forms, and other answers that give your address" },
+  "lib/form-store.ts": { how: "copied", what: "Each response to the store's forms whose email questions give your address and no other, all of it. From any other response, only the answers that are your address" },
   "lib/learn.ts": { how: "copied", what: "Your progress in the store's courses: when you began and came back, and the lessons you finished. The browsers let in with your address and the drip emails already sent are kept as marks" },
   "lib/course-finish.ts": { how: "marks", what: "Marks that you opened and finished a course; the lessons you finished are in your course progress" },
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },

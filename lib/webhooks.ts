@@ -433,14 +433,32 @@ const CONFIG_WRITE_TRIES = 4;
  */
 async function changeConfig(statsId: string, change: (config: Config | null) => Config | null): Promise<{ before: Config | null; after: Config } | null> {
   for (let tries = 0; tries < CONFIG_WRITE_TRIES; tries += 1) {
-    const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
+    // Read exactly (CX-123 rule 24): only GET null is "no settings"; another shape is unknown and nothing is written.
+    const read = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+    if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a store's webhook settings");
+    const raw = read[0];
     const before = parseConfig(raw);
     const after = change(before);
     if (!after) return null;
-    const [saved] = await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), typeof raw === "string" ? raw : "", JSON.stringify(after)]]);
-    if (Number(saved) === 1) return { before, after };
+    // Only 1 is saved and only [-1] / [-1, n] is "changed meanwhile, made again"; any other reply is unknown: it may
+    // have landed, so the change is never made again over it, and it is never said saved (rules 24 and 30).
+    if (compareAndSetReply(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), raw ?? "", JSON.stringify(after)]]), "the webhook settings' save") === "saved") return { before, after };
   }
   throw new Error("The webhook settings kept changing while being saved.");
+}
+
+/**
+ * The compare-and-set script's reply (SAVE_CRM_PIPELINES v2, modelled by lib/redis-memory.ts), read in its exact
+ * shape: "saved" for 1, "changed" for [-1] (nothing there) or [-1, n] (the length there now, a whole number). Any
+ * other reply, of the pipeline or of the script, is unknown and throws UnknownReplyError (CX-123 rule 24).
+ */
+function compareAndSetReply(replies: unknown, what: string): "saved" | "changed" {
+  const reply = repliesFor(replies, 1);
+  if (reply && reply[0] === 1) return "saved";
+  // The script's own list, read as exactly one or two slots, as a pipeline's replies are (no Proxy, hole or getter).
+  const changed = reply ? (repliesFor(reply[0], 1) ?? repliesFor(reply[0], 2)) : null;
+  if (changed && changed[0] === -1 && (changed.length === 1 || countOf(changed[1]) !== null)) return "changed";
+  throw new UnknownReplyError(what);
 }
 
 /** The source fields of a sale.completed message, read off the order's metadata; null where it carries none. */
@@ -1137,7 +1155,11 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   // Paused like a test while the plan's costs are paused, whoever calls this.
   const paused = integrationPauseWord(store, now / 1000);
   if (paused) return { ok: false, reason: "paused", message: WEBHOOK_TEST_PAUSED_WORDS[paused] };
-  const [raw, ttl] = await redisPipeline([["GET", deliveryKey(deliveryId)], ["PTTL", deliveryKey(deliveryId)]]);
+  // Read exactly (CX-123 rule 24), before anything is marked: the delivery is text or GET null, its time left a whole
+  // number (PTTL -2 gone, -1 none); any other shape could not be read, and nothing is marked, taken or sent.
+  const read = repliesFor(await redisPipeline([["GET", deliveryKey(deliveryId)], ["PTTL", deliveryKey(deliveryId)]]), 2);
+  if (!read || (read[0] !== null && typeof read[0] !== "string") || typeof read[1] !== "number" || !Number.isSafeInteger(read[1])) return { ok: false, reason: "unavailable" };
+  const [raw, ttl] = read as [string | null, number];
   const before = parseDelivery(raw);
   // A line left by a Stripe event that was passed over carries no message to send.
   if (typeof raw !== "string" || !before || before.statsId !== statsId || before.type === "test" || before.givenUp) return { ok: false, reason: "missing" };
@@ -1146,8 +1168,12 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   if (before.resentFrom) return { ok: false, reason: "resent" };
   // Sent again once: while the last resend is delivered or still being tried, not again.
   if (before.resentAs) {
-    const [rawLast] = await redisPipeline([["GET", deliveryKey(before.resentAs)]]);
-    const last = parseDelivery(rawLast);
+    // Only GET null is a last resend that is gone; one in another shape, or text that is not a delivery, is unknown
+    // and never taken as gone, so it is not sent again on it (CX-123 rule 24).
+    const lastRead = repliesFor(await redisPipeline([["GET", deliveryKey(before.resentAs)]]), 1);
+    if (!lastRead || (lastRead[0] !== null && typeof lastRead[0] !== "string")) return { ok: false, reason: "unavailable" };
+    const last = lastRead[0] === null ? null : parseDelivery(lastRead[0]);
+    if (lastRead[0] !== null && !last) return { ok: false, reason: "unavailable" };
     if (last && last.state !== "failed") return { ok: false, reason: "resent" };
   }
   // A message kept before the bound, larger than it, is not kept again by hand.
@@ -1165,11 +1191,19 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   const againId = `dlv_${randomBytes(12).toString("hex")}`;
   // Two presses at once: only the one that marks the original first goes on (COMPARE_AND_SET over the text read).
   // A press refused below (the minute's limit, the month's deliveries) leaves a mark naming nothing, which allows the next.
-  const [marked] = await redisPipeline([["EVAL", COMPARE_AND_SET, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId })]]);
-  if (Number(marked) !== 1) return { ok: false, reason: "resent" };
+  // The mark read exactly (rules 24 and 30): [-1] / [-1, n] is another press first ("resent"); any other reply is
+  // unknown, never marked: nothing is taken or sent, and it could not be sent just now. A mark that did land names a
+  // resend that was never written, which reads as gone and allows the next press.
+  let marked: "saved" | "changed";
+  try {
+    marked = compareAndSetReply(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId })]]), "a webhook resend's mark");
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    return { ok: false, reason: "unavailable" };
+  }
+  if (marked !== "saved") return { ok: false, reason: "resent" };
   // The write cleared the original's expiry; it keeps the time it had left, never more.
-  const left = Number(ttl);
-  await redisPipeline([["PEXPIRE", deliveryKey(deliveryId), Number.isFinite(left) && left > 0 ? left : DELIVERY_SECONDS * 1000]]);
+  await redisPipeline([["PEXPIRE", deliveryKey(deliveryId), ttl > 0 ? ttl : DELIVERY_SECONDS * 1000]]);
   const tests = repliesFor(await redisPipeline([
     ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
     ["INCR", testsKey(statsId)],

@@ -13,7 +13,12 @@
  *     why, so focus on it is never dropped mid-run;
  *   - a draft that comes back with a step not run says that step was not
  *     charged and how many writing jobs were given back;
- *   - a PDF with nothing to write from says so, not "try again".
+ *   - a PDF with nothing to write from says so, not "try again";
+ *   - what is said about a late Stop is true in either order (the Stop can
+ *     reach the server after the step that reads it), never "when you
+ *     pressed Stop";
+ *   - a stop request that fails after the run ended says nothing about a
+ *     Stop button that is no longer there.
  */
 import { AiStepsAssist, AiStepsProgress } from "@/components/ai-steps-assist";
 import { AiOn } from "@/components/ai-assist";
@@ -33,10 +38,13 @@ const page = { activeElement: null as unknown };
 let push: (line: unknown) => void = () => {};
 let close: () => void = () => {};
 const stops: unknown[] = [];
+/** When set, the stop request waits for this answer instead of a plain yes. */
+let stopAnswer: Promise<Response> | null = null;
 globalThis.fetch = (async (_url: string, init: RequestInit) => {
   const body = JSON.parse(String(init.body)) as { kind?: string };
   if (body.kind === "stop") {
     stops.push(body);
+    if (stopAnswer) return stopAnswer;
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
   }
   const encoder = new TextEncoder();
@@ -117,13 +125,14 @@ async function main(): Promise<void> {
     await b.send({ step: "write", state: "started" });
     is(
       "once writing starts after the Stop, the box says the stop came too late",
-      (progress(b.mounted.tree())?.announce ?? "").startsWith("Writing had already started when you pressed Stop"),
+      (progress(b.mounted.tree())?.announce ?? "").startsWith("Your Stop arrived after writing had started, so it will finish and count toward this month."),
       true,
     );
     await b.end({ step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 19 });
     is("the draft does not replace the page by itself", b.used, []);
     const words = said(b.mounted.tree()).join(" ");
-    is("it says writing had started, finished and counts toward the month", /Writing had already started when you pressed Stop, so it finished and counts toward this month/.test(words), true);
+    is("it says writing had started, finished and counts toward the month", /Your Stop arrived after writing had started, so it finished and counts toward this month/.test(words), true);
+    is("it never says when the Stop was pressed", /when you pressed Stop/.test(words), false);
     is("it says the page is unchanged", /Your page is unchanged/.test(words), true);
     is("it asks before replacing the blocks", [Boolean(button(b.mounted.tree(), "Use this draft")), Boolean(button(b.mounted.tree(), "Keep my page"))], [true, true]);
     click(button(b.mounted.tree(), "Keep my page"));
@@ -148,6 +157,66 @@ async function main(): Promise<void> {
     await b.mounted.settle();
     is("the draft goes into the page once", b.used, [DRAFT]);
     is("it says it is drafted", said(b.mounted.tree()).includes(DONE), true);
+    b.mounted.unmount();
+  }
+
+  part("A Stop pressed while the PDF is still being read, read by the server too late: what is said is true in that order");
+  {
+    const b = await box();
+    await b.write();
+    await b.send({ step: "read", state: "started" });
+    progress(b.mounted.tree())?.onStop();
+    await b.mounted.settle();
+    // The server checked for a stop before this one landed, so writing starts.
+    await b.send({ step: "read", state: "done" }, { step: "write", state: "started" });
+    const announce = progress(b.mounted.tree())?.announce ?? "";
+    is("it says the Stop arrived after writing had started", announce.startsWith("Your Stop arrived after writing had started"), true);
+    is("it never claims writing had started when Stop was pressed", /when you pressed Stop/.test(announce), false);
+    await b.end({ step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 19 });
+    is("the draft still waits for the creator", [b.used, Boolean(button(b.mounted.tree(), "Use this draft"))], [[], true]);
+    is("the held draft's words are true in this order too", said(b.mounted.tree()).some((t) => /when you pressed Stop/.test(t)), false);
+    b.mounted.unmount();
+  }
+
+  part("A stop request that fails after the draft arrived: nothing about a Stop that is gone");
+  {
+    let answer: (r: Response) => void = () => {};
+    stopAnswer = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    const b = await box();
+    await b.write();
+    await b.send({ step: "read", state: "started" }, { step: "read", state: "done" });
+    progress(b.mounted.tree())?.onStop();
+    await b.mounted.settle();
+    await b.end({ step: "write", state: "started" }, { step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 19 });
+    is("the draft is held for the creator", [b.used, Boolean(button(b.mounted.tree(), "Use this draft"))], [[], true]);
+    answer(new Response(JSON.stringify({ ok: false }), { status: 503, headers: { "content-type": "application/json" } }));
+    await b.mounted.settle();
+    await b.mounted.settle();
+    stopAnswer = null;
+    const announce = progress(b.mounted.tree())?.announce ?? "";
+    is("it does not ask to press a Stop that is no longer there", /press Stop again/.test(announce), false);
+    is("there is no Stop to press", progress(b.mounted.tree())?.stopShown ?? false, false);
+    is("the question about the held draft stays", [Boolean(button(b.mounted.tree(), "Use this draft")), Boolean(button(b.mounted.tree(), "Keep my page"))], [true, true]);
+    is("and its words stay", said(b.mounted.tree()).some((t) => /Your page is unchanged/.test(t)), true);
+    b.mounted.unmount();
+  }
+
+  part("Control: a stop request that fails while the run goes on says so, and Stop can be pressed again");
+  {
+    stopAnswer = Promise.resolve(new Response(JSON.stringify({ ok: false }), { status: 503, headers: { "content-type": "application/json" } }));
+    const b = await box();
+    await b.write();
+    await b.send({ step: "read", state: "started" });
+    progress(b.mounted.tree())?.onStop();
+    await b.mounted.settle();
+    await b.mounted.settle();
+    stopAnswer = null;
+    is("it says the stop did not go through", /press Stop again/.test(progress(b.mounted.tree())?.announce ?? ""), true);
+    is("Stop can be pressed again", [progress(b.mounted.tree())?.canStop, progress(b.mounted.tree())?.stopping], [true, false]);
+    await b.end({ step: "read", state: "done" }, { step: "write", state: "started" }, { step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 19 });
+    is("the draft goes into the page, since no stop went through", b.used, [DRAFT]);
     b.mounted.unmount();
   }
 

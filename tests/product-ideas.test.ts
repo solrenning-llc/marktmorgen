@@ -205,6 +205,26 @@ async function main(): Promise<void> {
   );
   const fine = ["Ganache Basics", "Weekend Bake Plan", "40 recipes for home bakers", "A 40 day starter plan", "Bake one loaf a day"];
   is("ideas with none of it are still shown", fine.map((t) => keptWith(t).length), fine.map(() => 1));
+  // Focal review of #3441 (Claude 2, LEVE A): earnings wordings that were still shown, and honest product names that were refused.
+  const earnings = [
+    "Make a living from sourdough",
+    "Monetize your sourdough",
+    "Monetise your sourdough",
+    "Five figures from bread",
+    "Seven figures from bread",
+    "Bring in 5000 baking",
+    "Rake in 5000 with bread",
+    "A 5000 month from bread",
+    "Bread that funds your retirement",
+    "Retire early with sourdough",
+    "Turn your hobby into a business",
+    "Get paid to bake bread",
+    "Double your sales with sourdough",
+    "Recipe pack for 40 pesos",
+  ];
+  is("earnings in other words: never shown", earnings.map((t) => [t, keptWith(t).length]), earnings.map((t) => [t, 0]));
+  const honest = ["Pay-what-you-want sourdough guide", "Paid newsletter starter kit", "Sales page templates for bakers", "Treino com pesos livres", "A 40 week bread journal"];
+  is("product names that only name a way to sell or a thing: still shown", honest.map((t) => [t, keptWith(t).length]), honest.map((t) => [t, 1]));
   is(
     "a money figure, a percentage, earnings, a guarantee, urgency, a deal, a link or a number the store never wrote: never shown",
     refused.map((title) => kept([idea(title)]).length),
@@ -213,6 +233,13 @@ async function main(): Promise<void> {
   is("the same words in who it helps or why it fits are caught too", [kept([idea("Starter Guide", "Bakers who want to earn more.")]).length, kept([idea("Starter Guide", undefined, "A guaranteed result.")]).length], [0, 0]);
   is("a number the store wrote may be used", kept([idea("The 40 Recipe Pack Companion")]).map((x) => x.title), ["The 40 Recipe Pack Companion"]);
   is("a product the store already has is never suggested again, in any case", kept([idea("rye basics"), idea("Weekend Bake Plan")], ["Rye Basics"]).map((x) => x.title), ["Weekend Bake Plan"]);
+  // Focal review of #3441 (Claude 2, LEVE B): the model is sent a title's straight quotes as ”, so an echo of what it was sent is the same product.
+  is(
+    "a product the store already has is never suggested again, whatever quote marks it comes back with",
+    kept([idea("The ”Starter” Guide"), idea("The “Starter” Guide"), idea('The "Starter" Guide'), idea("The «Starter» Guide"), idea("Bread ‹Basics› Notes"), idea("Weekend Bake Plan")], ['The "Starter" Guide', "Bread <Basics> Notes"]).map((x) => x.title),
+    ["Weekend Bake Plan"],
+  );
+  is("and the title as sent to the model is the one it would echo", ideaRequest(shape({ head: [{ title: 'The "Starter" Guide', summary: "A guide." }] }), "")?.prompt.includes("The ”Starter” Guide"), true);
   is("the same idea twice is shown once", kept([idea("Weekend Bake Plan"), idea("weekend bake plan")]).length, 1);
   is(
     "an idea longer than its box is not cut: it is left out",

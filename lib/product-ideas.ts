@@ -58,8 +58,14 @@ function clipBytes(text: string, limit: number): string {
   return out;
 }
 
-/** Folded for comparing names: case and spacing do not make two products different. */
-const folded = (text: string) => text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+/** Folded for comparing names: case, spacing, quote marks and angle brackets do not make two products different (a title reaches the model quote-safe, quoteSafe). */
+const folded = (text: string) =>
+  text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/["“”„‟«»'‘’‚‛‹›<>]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
 
 export type IdeaRequest = {
   system: string;

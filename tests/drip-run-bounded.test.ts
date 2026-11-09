@@ -11,6 +11,9 @@
  * Now: sixty seconds and a cutoff; a deadline that leaves the rest for the next run, which starts where this one
  * stopped; a failure that is counted and logged while the other courses go on, and is tried again the next run;
  * every student read, page by page; only a confirmed absence takes a course out; an unknown set says so.
+ * And a run that got no further on the course it began with (a page whose sends are slow and fail, their marks let
+ * go) leaves the next run to begin with the course after it, so one slow page never holds back every course after
+ * it (Claude 2 on #3344); what is sent is never sent twice, and what failed is sent once the sends go again.
  *
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts) and the synthetic SES (tests/ses-mail-fixture.ts).
  */
@@ -22,10 +25,12 @@ import * as coursesRoute from "@/app/api/cron/courses/route";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { store as redis } from "./redis-stub";
-import { installSesMailFixture } from "./ses-mail-fixture";
+import { type SesMailFixtureOptions, installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
 
-const mail = installSesMailFixture();
+/** A test's hand on the synthetic SES: set by a part, cleared after it. */
+const sesHooks: SesMailFixtureOptions = {};
+const mail = installSesMailFixture(sesHooks);
 
 type Cmd = (string | number)[];
 const original = redis.pipeline.bind(redis);
@@ -188,6 +193,67 @@ async function main(): Promise<void> {
     const { value } = await quiet(() => sendDripEmails(async () => store, async (id) => (id === A.id ? A : null), "https://marktmorgen.com", NOW));
     is("the least active student is emailed", to(quietest), 1);
     is("the row that could not be read is counted, never silently left", value === "rejected" ? null : (value as Counts).unreadStudents, 1);
+  }
+
+  part("(f) A page whose sends are slow and fail does not hold back the courses after it (Claude 2 on #3344)");
+  {
+    const store = await setup();
+    await original([["SADD", DRIP, memberOf(store, A, PA), memberOf(store, B, PB)]]);
+    const slow: string[] = [];
+    for (let n = 0; n < 6; n += 1) slow.push(await student(A, `slow-${n}@example.com`));
+    const waiting = await student(B, "waiting-b@example.com");
+    const loaded: string[] = [];
+    const loadCourse = async (id: string) => {
+      loaded.push(id);
+      return id === A.id ? A : id === B.id ? B : null;
+    };
+    // Every send to the first course's students takes fifteen seconds and is refused, so its mark is let go.
+    sesHooks.onSes = (message) => {
+      if (!message.to.some((address) => address.startsWith("slow-"))) return undefined;
+      skew += 15_000;
+      return new Response(JSON.stringify({ message: "synthetic: the provider is slow and refuses" }), { status: 400, headers: { "content-type": "application/json" } });
+    };
+    const runs: Counts[] = [];
+    for (let n = 0; n < 3; n += 1) {
+      skew = 0;
+      const { value } = await quiet(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, realNow() + 40_000));
+      runs.push(value === "rejected" ? {} : (value as Counts));
+    }
+    sesHooks.onSes = undefined;
+    is("every run answers and leaves work for the next", runs.map((run) => typeof run.pending === "number" && run.pending > 0), [true, true, true]);
+    is("within three runs, the course after the slow page is read", loaded.includes(B.id), true);
+    is("and its student is emailed once", to(waiting), 1);
+    is("nobody of the slow page is emailed while its sends fail", slow.map(to), slow.map(() => 0));
+    for (let n = 0; n < 3; n += 1) {
+      skew = 0;
+      await quiet(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, realNow() + 40_000));
+    }
+    is("once the sends go again, each student of the slow page is emailed exactly once, the other course's not again", [...slow.map(to), to(waiting)], [...slow.map(() => 1), 1]);
+  }
+
+  part("(f) Control: a course alone whose page is slow is begun with again, and nothing is sent twice");
+  {
+    const store = await setup();
+    await original([["SADD", DRIP, memberOf(store, A, PA)]]);
+    const alone: string[] = [];
+    for (let n = 0; n < 4; n += 1) alone.push(await student(A, `slow-alone-${n}@example.com`));
+    let tries = 0;
+    sesHooks.onSes = (message) => {
+      if (!message.to.some((address) => address.startsWith("slow-"))) return undefined;
+      tries += 1;
+      skew += 15_000;
+      // The first send of each run goes; the ones after it are refused.
+      return tries % 3 === 1 ? undefined : new Response(JSON.stringify({ message: "synthetic: refused" }), { status: 400, headers: { "content-type": "application/json" } });
+    };
+    for (let n = 0; n < 6; n += 1) {
+      skew = 0;
+      await quiet(() => sendDripEmails(async () => store, async (id) => (id === A.id ? A : null), "https://marktmorgen.com", NOW, realNow() + 40_000));
+    }
+    sesHooks.onSes = undefined;
+    is("each student is emailed at most once", alone.map(to).every((n) => n <= 1), true);
+    skew = 0;
+    await quiet(() => sendDripEmails(async () => store, async (id) => (id === A.id ? A : null), "https://marktmorgen.com", NOW, realNow() + 40_000));
+    is("and once the sends go again, every one of them exactly once", alone.map(to), alone.map(() => 1));
   }
 
   part("(d)(e) Through the route: only a confirmed absence takes a course out; an unknown set is said");

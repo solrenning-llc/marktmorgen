@@ -100,6 +100,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return json({}, 404);
 }) as typeof fetch;
 
+/**
+ * A once-only claim as the store holds it. Since claude5/once-marks-owner each run writes a value only it writes
+ * (lib/claim-mark.ts, claimValue: the time in milliseconds, a point and nine digits), never the fixed "1", so a
+ * refusal lets go of that run's own claim only.
+ */
+const ownClaim = (value: unknown) => (typeof value === "string" && /^\d+\.\d{9}$/.test(value) ? "a run's own claim" : value);
 const approved = (extra: Record<string, unknown> = {}) => ({ ProductionAccessEnabled: true, SendingEnabled: true, EnforcementStatus: "HEALTHY", SendQuota: { Max24HourSend: 50_000, MaxSendRate: 100, SentLast24Hours: 0 }, ...extra });
 /** Amazon is asked again on the next email, as it is once five minutes have passed. */
 const askAgain = () => redis.run(["DEL", "nl:ses:state"]);
@@ -235,7 +241,8 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = originalPipeline;
     }
-    is(`${name}: one claim, no deletion, committed claim retained`, [claims, deletes, redis.run(["GET", claim])], [1, 0, "1"]);
+    // Rule 23: was [1, 0, "1"]; the committed claim is now this run's own value (claimValue), not "1" (once-marks-owner).
+    is(`${name}: one claim, no deletion, committed claim retained`, [claims, deletes, ownClaim(redis.run(["GET", claim]))], [1, 0, "a run's own claim"]);
     is(`${name}: no sender count consumed`, [await sesSentLast24h(), await sentThisMonth()], counted);
   }
   is("malformed members were never read", [getterReads, memberReads], [0, 0]);
@@ -294,7 +301,8 @@ async function main(): Promise<void> {
     const afterSecond = {claim:redis.run(["GET",claim]),consumer:redis.run(["GET",confirmationKey(sessionId)]),amazon:amazon.length,resend:resend.length};
     is(`${loss}: the first unacknowledged operation reports failure`, first, "failed");
     is(`${loss}: no consumer confirmation is committed on unknown acknowledgement`, afterFirst.consumer, null);
-    is(`${loss}: the existing claim remains sticky`, [afterFirst.claim, afterSecond.claim], ["1", "1"]);
+    // Rule 23: was ["1", "1"]; the claim is now the first run's own value (claimValue), and the replay leaves it as it was.
+    is(`${loss}: the existing claim remains sticky`, [ownClaim(afterFirst.claim), afterSecond.claim === afterFirst.claim], ["a run's own claim", true]);
     is(`${loss}: the replay never adds a provider POST`, [afterFirst.amazon, afterFirst.resend, afterSecond.amazon, afterSecond.resend], loss === "claim-ack-before-post" ? [0, 0, 0, 0] : [1, 0, 1, 0]);
     is(`${loss}: a replay cannot manufacture the consumer's sent marker`, afterSecond.consumer, null);
     is(`${loss}: unknown acceptance must not become consumer sent`, second, "failed");
@@ -333,11 +341,37 @@ async function main(): Promise<void> {
       }
       is(`${name}: one possible acceptance, no second SES attempt or Resend fallback`,
         [amazon.length, resend.length, deletes], [1, 0, 0]);
-      is(`${name}: an existing once-only claim is retained`, redis.run(["GET", claim]), keyed ? "1" : null);
+      // Rule 23: was keyed ? "1" : null; the retained claim is now this run's own value (claimValue), not "1".
+      is(`${name}: an existing once-only claim is retained`, ownClaim(redis.run(["GET", claim])), keyed ? "a run's own claim" : null);
       is(`${name}: unknown acceptance is not counted as a known send`,
         [await sesSentLast24h(), await sentThisMonth()], counted);
     }
   }
+  part("A slow refused send lets go only of its own once-only claim");
+  {
+    account = approved();
+    askAgain();
+    clear();
+    const key = "receipt:slow-refusal";
+    const claim = `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
+    // While Amazon thinks over this run's send, its claim runs out and another run of the same email claims it.
+    amazonSays = (to) => {
+      if (to !== "slow-refusal@example.com") return { status: 200 };
+      redis.run(["DEL", claim]);
+      redis.run(["SET", claim, "another-run", "EX", 86_400]);
+      return { status: 400, type: "BadRequestException", message: "Synthetic refusal of this one email" };
+    };
+    try {
+      await sendEmail({ ...letter("slow-refusal@example.com"), idempotencyKey: key });
+    } finally {
+      amazonSays = () => ({ status: 200 });
+    }
+    is("the slow run's refusal leaves the other run's claim in place", redis.run(["GET", claim]), "another-run");
+    const sentBefore = amazon.length;
+    await sendEmail({ ...letter("slow-refusal@example.com"), idempotencyKey: key });
+    is("so the same email is not sent through Amazon a second time", amazon.length - sentBefore, 0);
+  }
+
   // Existing normal sends, confirmed throttling retries and refusal fallback
   // below remain controls; this unit does not certify later unkeyed retries
   // or the separate batch sender's delivery/idempotency behavior.
@@ -1250,6 +1284,31 @@ async function main(): Promise<void> {
   await POST(twice);
   const repeat = new NextRequest("https://marktmorgen.com/api/mail/ses", { method: "POST", headers: { host: "marktmorgen.com", "content-length": String(Buffer.byteLength(body)) }, body });
   is("the same announcement again is acted on once", [await (await POST(repeat)).json(), (await listHealth(healthId(store))).bounced], [{ ok: true }, 2]);
+
+  part("A slow announcement that fails lets go only of its own mark");
+  {
+    const slowLink = `https://sns.${REGION}.amazonaws.com/?Action=ConfirmSubscription&TopicArn=${encodeURIComponent(TOPIC)}&Token=slow`;
+    const seenKey = "nl:sns:seen:sns-slow";
+    const plainFetch = globalThis.fetch;
+    let opened = 0;
+    // While this run opens Amazon's link, its mark runs out and Amazon's retry of the same announcement takes it.
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) !== slowLink) return plainFetch(input, init);
+      opened += 1;
+      if (opened > 1) return new Response("<ok/>");
+      redis.run(["DEL", seenKey]);
+      redis.run(["SET", seenKey, "another-run", "EX", 86_400]);
+      return new Response("busy", { status: 503 });
+    }) as typeof fetch;
+    const slowAsk = () => announce({ MessageId: "sns-slow", Type: "SubscriptionConfirmation", Token: "slow", SubscribeURL: slowLink, Message: "You have chosen to subscribe" });
+    try {
+      is("the slow run fails", (await POST(slowAsk())).status, 500);
+      is("and leaves the other run's mark in place", redis.run(["GET", seenKey]), "another-run");
+      is("so the same announcement is acted on once more by nobody", [await (await POST(slowAsk())).json(), opened], [{ ok: true }, 1]);
+    } finally {
+      globalThis.fetch = plainFetch;
+    }
+  }
 
   part("Amazon asks whether we want the topic's announcements");
   fetched.length = 0;

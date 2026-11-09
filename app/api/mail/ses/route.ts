@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { recordSesEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
 import { isSesConfigured, sesConfig } from "@/lib/ses";
 import { readSesEvent, readSns, snsUrl, verifySns } from "@/lib/sns";
@@ -54,9 +55,12 @@ export async function POST(request: NextRequest) {
   if (verdict !== "ok") return Response.json({ ok: false }, { status: 401 });
 
   const seenKey = `nl:sns:seen:${message.MessageId.replace(/[^A-Za-z0-9-]/g, "").slice(0, 80)}`;
-  const [fresh] = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
+  // A value only this run writes (lib/claim-mark.ts): letting go after a failure deletes this run's own mark only,
+  // never the mark of Amazon's retry that took it after this run's ran out (releaseMark never throws).
+  const mine = claimValue();
+  const [fresh] = await redisPipeline([["SET", seenKey, mine, "NX", "EX", 86_400]]);
   if (fresh === null) return Response.json({ ok: true });
-  const letGo = () => redisPipeline([["DEL", seenKey]]).catch(() => {});
+  const letGo = () => releaseMark(seenKey, mine);
 
   try {
     if (message.Type === "SubscriptionConfirmation") {

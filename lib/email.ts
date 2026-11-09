@@ -19,6 +19,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { currentResendFallbackProofIsMissing, guardedResendPost, type ResendTransportRuntime } from "@/lib/resend-fallback-transport";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { atSiteAddress, creatorDomain, domainOf } from "@/lib/mail-from";
 import { countSesSent, isSesConfigured, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
@@ -319,9 +320,12 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
   if (!config || !(await sesReady())) return false;
   // Amazon keeps no record of a key, so the once-only promise is kept here.
   const once = originalIdempotencyKey ? onceKey(originalIdempotencyKey) : null;
+  // A value only this run writes (lib/claim-mark.ts), so letting go after a refusal deletes this run's own claim
+  // and never another run's that took the key after this one's ran out (Claude 5, once-marks-owner).
+  const mine = claimValue();
   if (once) {
     try {
-      const reply: unknown = await redisPipeline([["SET", once, "1", "NX", "EX", 86_400]]);
+      const reply: unknown = await redisPipeline([["SET", once, mine, "NX", "EX", 86_400]]);
       // Bound the envelope before inspecting its sole own data member.
       if (!Array.isArray(reply)) return null;
       const length = Object.getOwnPropertyDescriptor(reply, "length");
@@ -363,8 +367,9 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
     if (last.outcome !== "busy") break;
     if (attempt < 2) await pause(400 * (attempt + 1));
   }
-  // Not taken. The key is let go of, so that Resend, or a later try, may send it.
-  if (once) await redisPipeline([["DEL", once]]).catch(() => {});
+  // Not taken. This run's own claim is let go of, so that Resend, or a later try, may send it; a claim another run
+  // holds stays (releaseMark compares and deletes in one script, and never throws).
+  if (once) await releaseMark(once, mine);
   if (last.outcome === "account") {
     await sesDown(last.why);
     await tellAmazonIsDown(last.why);

@@ -3,6 +3,7 @@ import { canHearResend, forwardInbound, inboundSigned, isInboundConfigured } fro
 import { HEALTH_ID, LIST_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
 import { MAIL_REPORT_TAG, type MailReportEvent, noteMailReportEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
 
 /** An announcement names a message; it does not carry it. Anything bigger is not one. */
@@ -73,8 +74,11 @@ export async function POST(request: NextRequest) {
   if (!report && !isInboundConfigured()) return new Response("Not found.", { status: 404 });
 
   const seenKey = `nl:inbound:seen:${id}`;
+  // A value only this run writes (lib/claim-mark.ts): letting go after a failure deletes this run's own mark only,
+  // never the mark of Resend's retry that took it after this run's ran out (releaseMark never throws).
+  const mine = claimValue();
   try {
-    const [fresh] = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
+    const [fresh] = await redisPipeline([["SET", seenKey, mine, "NX", "EX", 86_400]]);
     if (fresh === null) return Response.json({ ok: true });
   } catch {
     // Without Redis the sender's idempotency key still keeps a repeat from
@@ -113,7 +117,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       // Not acted on: let go of, so the retry is heard.
       console.error("a delivery report could not be recorded", error);
-      await redisPipeline([["DEL", seenKey]]).catch(() => {});
+      await releaseMark(seenKey, mine);
       return Response.json({ ok: false }, { status: 500 });
     }
   }
@@ -122,7 +126,7 @@ export async function POST(request: NextRequest) {
 
   const result = await forwardInbound(emailId);
   if (result === "retry") {
-    await redisPipeline([["DEL", seenKey]]).catch(() => {});
+    await releaseMark(seenKey, mine);
     return Response.json({ ok: false }, { status: 500 });
   }
   return Response.json({ ok: true, result });

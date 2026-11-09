@@ -10,6 +10,7 @@
  * charge, and says the date, the amount and the one click that stops it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
 import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -240,9 +241,11 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
       counts.seen += 1;
       const due = failedPlan(subscription);
       if (!due) continue;
-      // Claimed before anything is done, so a second run never writes twice.
+      // Claimed before anything is done, so a second run never writes twice. With a value only this run writes
+      // (lib/claim-mark.ts), so a failure below lets go of this run's own claim only, never another run's.
       const key = `nl:remind:failed:${due.invoice}`;
-      const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 90 * DAY]]);
+      const mine = claimValue();
+      const [claimed] = await redisPipeline([["SET", key, mine, "NX", "EX", 90 * DAY]]);
       if (claimed === null) continue;
       try {
         // A renewal's email says what has stopped, so it is written down
@@ -257,8 +260,9 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
       } catch (error) {
         counts.failed += 1;
         console.error("telling a creator their payment failed did not work", error);
-        // Tried again on the next run rather than never.
-        await redisPipeline([["DEL", key]]).catch(() => {});
+        // Tried again on the next run rather than never: this run's own claim goes; one another run took after this
+        // run's ran out stays, so that run's notice is not sent again (releaseMark never throws).
+        await releaseMark(key, mine);
       }
     }
     const last = data[data.length - 1];
@@ -289,15 +293,17 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
         const reminder = dueReminder(subscription, nowSeconds);
         if (!reminder) continue;
         const key = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
-        const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 60 * DAY]]);
+        // A value only this run writes (lib/claim-mark.ts), so a failure lets go of this run's own claim only.
+        const mine = claimValue();
+        const [claimed] = await redisPipeline([["SET", key, mine, "NX", "EX", 60 * DAY]]);
         if (claimed === null) continue;
         const { subject, text } = reminderEmail(reminder);
         const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
         if (ok) counts.sent += 1;
         else {
           counts.failed += 1;
-          // Tried again on the next run rather than never.
-          await redisPipeline([["DEL", key]]).catch(() => {});
+          // Tried again on the next run rather than never: this run's own claim goes, never another run's.
+          await releaseMark(key, mine);
         }
       }
       const last = data[data.length - 1];

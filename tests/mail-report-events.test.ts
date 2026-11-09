@@ -191,7 +191,12 @@ async function main() {
         is(`${provider} ${outcome} still pauses at the existing threshold`, result, "paused");
         is(`${provider} ${outcome} has no report EVAL or four-field report read`, commands.some(command => command[0] === "EVAL" && command[1] === RECORD_MAIL_REPORT || command[0] === "HMGET" && command.slice(2).some(field => String(field).startsWith("r:"))), false);
         is(`${provider} ${outcome} adds no report field`, (redis.run(["HKEYS", dayKey]) as string[]).some(field => field.startsWith("r:")), false);
-        observations.push({ result, commands, health: redis.run(["HGETALL", dayKey]), paused: redis.run(["GET", `nl:mail:paused:${STORE}`]) });
+        // Rule 23: the seen mark's value is now each run's own (lib/claim-mark.ts claimValue, once-marks-owner), so it
+        // differs between the two runs by design; it is compared by its shape, every other command exactly as before.
+        const sameShape = commands.map((command) => command[0] === "SET" && String(command[1]).startsWith("nl:inbound:seen:") && /^\d+\.\d{9}$/.test(String(command[2]))
+          ? [command[0], command[1], "a run's own value", ...command.slice(3)]
+          : command);
+        observations.push({ result, commands: sameShape, health: redis.run(["HGETALL", dayKey]), paused: redis.run(["GET", `nl:mail:paused:${STORE}`]) });
       }
       is(`${provider} ${outcome}: adding the prepared tag preserves every legacy command and result`, observations[1], observations[0]);
     }

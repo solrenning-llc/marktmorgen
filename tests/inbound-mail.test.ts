@@ -46,6 +46,8 @@ let failSending = false;
 let failureStatus = 429;
 let outboundPosts = 0;
 let refuseCreators = false;
+/** Runs once, while the next outbound POST is in flight (a slow run's send). */
+let duringSend: (() => void) | null = null;
 
 const MAILS: Record<string, unknown> = {
   [A]: {
@@ -130,6 +132,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const headers = new Headers(init?.headers);
   if (url.hostname === "api.resend.com" && (init?.method ?? "GET") === "POST" && url.pathname === "/emails") {
     outboundPosts++;
+    const during = duringSend;
+    duringSend = null;
+    during?.();
     if (failSending) return new Response("{}", { status: failureStatus });
     // A key that may not send from the creators' domain.
     if (refuseCreators && /@mail\.marktmorgen\.com/.test(String((JSON.parse(String(init?.body)) as Sent).from))) return new Response("{}", { status: 403 });
@@ -240,6 +245,25 @@ async function main(): Promise<void> {
   failSending = false;
   const retried = await POST(announce(retryId, { id: "msg_retry" }));
   is("and the retry is heard", [retried.status, (await retried.json()).result, sent.length], [200, "sent", 4]);
+
+  part("A slow announcement that fails lets go only of its own mark");
+  {
+    const slowId = newMailLike(A);
+    const seenKey = "nl:inbound:seen:msg_slow";
+    // While this run sends the message on, its mark runs out and Resend's retry of the same announcement takes it.
+    duringSend = () => {
+      redis.run(["DEL", seenKey]);
+      redis.run(["SET", seenKey, "another-run", "EX", 86_400]);
+    };
+    failSending = true;
+    const slow = await POST(announce(slowId, { id: "msg_slow" }));
+    failSending = false;
+    is("the slow run fails", slow.status, 500);
+    is("and leaves the other run's mark in place", redis.run(["GET", seenKey]), "another-run");
+    const sentBefore = sent.length;
+    const again = await POST(announce(slowId, { id: "msg_slow" }));
+    is("so the same announcement is not sent on a second time", [await again.json(), sent.length - sentBefore], [{ ok: true }, 0]);
+  }
 
   part("An answer written to a store's own address");
   await claimHandle("ana@example.org", "harborkitchen", "Harbor Kitchen", "");

@@ -83,6 +83,7 @@ import { keyStates } from "@/lib/api-keys";
 import { SITE_URL } from "@/lib/site-url";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { DELIVERY_MAX_BYTES, DELIVERY_UPDATE_ROOM_BYTES, DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX, shortAddress } from "@/lib/webhook-limits";
+import { type FixedEndSub, stopsBeforeSoldEnd } from "@/lib/fixed-end-rules";
 
 export const WEBHOOK_EVENTS = [
   "sale.completed",
@@ -1535,7 +1536,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       product: await product(meta.product),
       status: ended ? "ended" : "ending",
       ends_at: ended ? iso(object.ended_at) ?? iso(event.created) : iso(endsAt),
-      reason: ended && meta.ends_after ? "completed" : str(details.reason) ?? "cancellation_requested",
+      // Ended at the end that was sold; stopped before it, somebody cancelled it (lib/fixed-end-rules.ts).
+      reason: ended && meta.ends_after && !stopsBeforeSoldEnd(object as FixedEndSub) ? "completed" : str(details.reason) ?? "cancellation_requested",
       buyer: { email, customer },
     }, created);
     return true;
@@ -1633,10 +1635,13 @@ function subscriptionEmits(event: StripeEvent): { changed: { seed: string; from:
   if (!ended) {
     // Only the change that sets an end. A membership with a set number of
     // payments is given its end when it is bought; that is not a cancellation.
+    // Moving that end earlier is (lib/fixed-end-rules.ts).
     const ending = object.cancel_at_period_end === true || num(object.cancel_at) > 0;
     const wasEnding = previous.cancel_at_period_end === true || num(previous.cancel_at) > 0;
     const set = "cancel_at_period_end" in previous || "cancel_at" in previous;
-    cancels = ending && !wasEnding && set && !meta.ends_after;
+    cancels = meta.ends_after
+      ? set && stopsBeforeSoldEnd(object as FixedEndSub) && !stopsBeforeSoldEnd({ ...object, ...previous } as FixedEndSub)
+      : ending && !wasEnding && set;
   }
   return { changed, cancel: cancels ? `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}` : null };
 }

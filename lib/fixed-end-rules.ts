@@ -21,7 +21,8 @@ export type FixedEndSub = {
   billing_cycle_anchor?: unknown;
   current_period_end?: unknown;
   ended_at?: unknown;
-  items?: { data?: { current_period_end?: unknown }[] };
+  // Only the first item's period end is read; the rest of an item is whatever Stripe sent.
+  items?: { data?: { current_period_end?: unknown; [field: string]: unknown }[] | null } | null;
 };
 
 const seconds = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0);

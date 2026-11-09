@@ -56,8 +56,7 @@ export async function POST(request: NextRequest) {
   // What the visit carried, as a Stripe checkout carries it: the channel this
   // sale is credited to (lib/visit-channel.ts) and the affiliate who sent the
   // buyer, if one did (lib/affiliates.ts). A lookup that does not answer never
-  // stops the sale: the click rides on the order as pending, first so the
-  // order's twenty kept keys never leave it out (cleanMeta), and is decided at
+  // stops the sale: the click rides on the order as pending, and is decided at
   // the hand-over (owner's decision 6, creditPayPalSale).
   const host = new URL(origin).hostname;
   const credit = await attributionOrPending(store, product.id, {
@@ -66,12 +65,14 @@ export async function POST(request: NextRequest) {
   });
   const via = credit.known ? credit.via : null;
   const meta = {
-    ...pendingChannel(credit),
     ...channelOfRequest(request, store.handle, host, Date.now() / 1000, store.attributionDays),
     ...(() => {
       const page = cameFrom(request.headers.get("referer"), host);
       return { ...(page.source ? { utm_source: page.source } : {}), ...(page.medium ? { utm_medium: page.medium } : {}), ...(page.campaign ? { utm_campaign: page.campaign } : {}) };
     })(),
+    // Last, after the visit's tags: at most five channel keys, three tags, this one and the consent the order adds
+    // (lib/paypal-sales.ts cleanMeta keeps twenty), so none of them is ever left out.
+    ...pendingChannel(credit),
   };
   const opened = await openOrder(store, product, linkOrigin(request, store), { meta, via: via && via.rate > 0 ? { aff: via.aff, rate: via.rate } : null, digitalConsent });
   if (!opened.ok && opened.reason === "consent") return away(`/@${store.handle}/p/${product.id}?consent=needed#buy`);

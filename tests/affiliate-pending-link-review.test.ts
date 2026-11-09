@@ -127,12 +127,15 @@ async function main(): Promise<void> {
 
   part("P2 / MÉDIO 3: paid more than PENDING_LINK_SECONDS after the checkout opened");
   sends = 0;
-  const pend = `ana.${NOW - 600}~ana.${NOW - 600}~-`;
-  const lateOpen = order("cs_late", "late@example.com", { [VIA_PENDING_META]: pend }, NOW - 3 * 3_600);
+  // Written as the checkout writes it, with the shares of the sale (no renewals, 30% on prod01).
+  const pend = `ana.${NOW - 600}~ana.${NOW - 600}~-~0;prod01=30`;
+  // The click came before the checkout opened, as it always does (the proof's fixture had it after, which no window credits).
+  const before = `ana.${NOW - 4 * 3_600}~ana.${NOW - 4 * 3_600}~-~0;prod01=30`;
+  const lateOpen = order("cs_late", "late@example.com", { [VIA_PENDING_META]: before }, NOW - 3 * 3_600);
   const counts = await notePendingLinks(store, [lateOpen], NOW, undefined, undefined, send);
   is("read at least once after it is seen paid, and credited", [counts.credited, (await sale("cs_late"))?.aff ?? null, sends], [1, ANA, 0]);
   await breakCodes();
-  const lateUnknown = order("cs_late2", "late2@example.com", { [VIA_PENDING_META]: pend }, NOW - 3 * 3_600);
+  const lateUnknown = order("cs_late2", "late2@example.com", { [VIA_PENDING_META]: before }, NOW - 3 * 3_600);
   await notePendingLinks(store, [lateUnknown], NOW, undefined, undefined, send);
   is("still unknown at its first sight: not told yet, read again", [sends, typeof (await mark("cs_late2")) === "string" && String(await mark("cs_late2")).startsWith("seen:")], [0, true]);
   await notePendingLinks(store, [lateUnknown], NOW + 300, undefined, undefined, send);
@@ -182,6 +185,9 @@ async function main(): Promise<void> {
   is("one paid after it is credited when it is noted", (await sale("pi_offer_after"))?.aff, ANA);
   await noteCharge(store, offer("pi_offer_none", "cs_nobody", "cus_offer2"));
   is("an offer on an order nobody brought stays nobody's", await sale("pi_offer_none"), null);
+  const unkept = order("cs_unkept", "uk@example.com", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-~0` }, NOW - 300);
+  await notePendingLinks(store, [unkept], NOW, undefined, undefined, send);
+  is("a sale whose share at the sale was not kept is never credited at today's share", await sale("cs_unkept"), null);
 
   part("MÉDIO 6: a membership confirmed later carries the affiliate on its subscription");
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...store.affiliates, recurring: 12 }));
@@ -225,7 +231,7 @@ async function main(): Promise<void> {
   part("LEVE 8: PayPal keeps the visit's tags");
   const route = readFileSync(join(process.cwd(), "app/api/store/paypal/checkout/route.ts"), "utf8");
   const metaStart = route.indexOf("const meta = {");
-  const metaBlock = route.slice(metaStart, route.indexOf("};", metaStart));
+  const metaBlock = route.slice(metaStart, route.indexOf("\n  };", metaStart));
   is("the pending mark comes after the channel and the tags", metaBlock.indexOf("pendingChannel(") > metaBlock.indexOf("utm_campaign"), true);
 }
 

@@ -491,25 +491,27 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
           }
         }
       }
-      // An order whose affiliate could not be read at checkout carries the click as pending (owner's decision 6):
-      // read again at each pass, credited once it answers, the creator told past PENDING_LINK_SECONDS. Never ends
-      // the store's pass: an order that does not read is counted as failed and waits for the next run.
-      if (sold.some((row) => typeof row.metadata?.[VIA_PENDING_META] === "string")) {
-        const pending = await notePendingLinks(store, sold as Parameters<typeof notePendingLinks>[1], now, owners ?? undefined, partners ?? undefined).catch((error: unknown) => {
-          console.error("reading the pending affiliate links failed; they wait for the next run", store.handle, describe(error));
-          return null;
-        });
-        if (pending === null) for (const row of sold) if (typeof row.metadata?.[VIA_PENDING_META] === "string") failOrder(row.id as string);
-        for (const id of pending?.failed ?? []) failOrder(id);
-        // A creator who could not be told (refused REFUSED_TRIES times) is said in the run's log, by order count only.
-        if (pending?.untold) console.error("creators not told about unconfirmed affiliate links", store.handle, pending.untold);
-      }
     }
     // The store's first sale ever, noted once, with the yearly plan offered
     // at the moment it is most worth keeping (lib/yearly-offer.ts). Not on the
     // demo's account, which canConfirm leaves out.
     if (paid.length && canConfirm(store)) {
       await noteFirstSale(store, paid).catch((error) => console.error("noting a first sale failed", store.handle, error));
+    }
+    // An order whose affiliate could not be read at checkout carries the click as pending (owner's decision 6):
+    // read again at each pass, credited once it answers, the creator told past PENDING_LINK_SECONDS; whether the
+    // program is on now or not, since the sale was made while it was. Never ends the store's pass: an order that does
+    // not read is counted as failed and waits for the next run. A gift or a payment request sold nothing.
+    const pendingRows = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request" && typeof row.metadata?.[VIA_PENDING_META] === "string");
+    if (pendingRows.length) {
+      const pending = await notePendingLinks(store, pendingRows as Parameters<typeof notePendingLinks>[1], now).catch((error: unknown) => {
+        console.error("reading the pending affiliate links failed; they wait for the next run", store.handle, describe(error));
+        return null;
+      });
+      if (pending === null) for (const row of pendingRows) failOrder(row.id as string);
+      for (const id of pending?.failed ?? []) failOrder(id);
+      // A creator who could not be told (refused REFUSED_TRIES times) is said in the run's log, by order count only.
+      if (pending?.untold) console.error("creators not told about unconfirmed affiliate links", store.handle, pending.untold);
     }
     // A sale paid from a page running a test counts for the version its buyer was shown, once (lib/headline-test.ts).
     if (paid.some((row) => row.metadata?.ab)) {

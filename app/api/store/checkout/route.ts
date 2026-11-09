@@ -8,7 +8,7 @@ import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
-import { activePlan } from "@/lib/product-extras";
+import { activePlan, bumpTargets } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
 import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
@@ -239,7 +239,7 @@ export async function POST(request: NextRequest) {
     const credit = await attributionOrPending(store, product.id, {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-    });
+    }, [product.id, ...bumpTargets(product)]);
     const via = credit.known ? credit.via : null;
     // A course opens right away in the browser that paid for it.
     // So does a course in a bundle.

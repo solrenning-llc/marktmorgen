@@ -315,7 +315,7 @@ export async function POST(request: NextRequest) {
     const credit = await attributionOrPending(store, products[0].id, {
       via: request.cookies.get(viaCookieName(store.handle))?.value,
       session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-    });
+    }, products.map((p) => p.id));
     const via = credit.known ? credit.via : null;
     const reminding = remind && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderShown(store);
     // Offers after paying, from the first product in the cart whose funnel is

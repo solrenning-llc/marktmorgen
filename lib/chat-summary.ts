@@ -38,22 +38,32 @@ export function chatBody(kind: ChatKind, text: string): Record<string, unknown> 
   return { content: text.length > 1990 ? `${text.slice(0, 1985)}…` : text, allowed_mentions: { parse: [] } };
 }
 
-/** Posts one message to an address; whether the chat took it. */
-export async function postToChat(url: string, text: string): Promise<boolean> {
+/**
+ * What a post came to: "sent" when the chat took it; "refused" when it surely did not show it (an address of
+ * neither kind, never sent, or a 4xx answer); "unknown" when it may have (a timeout, an abort, a thrown error, a
+ * 5xx or any other answer). Rule 24 (CX-123): a caller that must not post twice never reads "unknown" as "did
+ * not go" (lib/stats-report.ts, sendPart, keeps the part's mark on it).
+ */
+export type ChatPost = "sent" | "refused" | "unknown";
+
+/** Posts one message to an address; what it came to (ChatPost). Never throws. */
+export async function postToChat(url: string, text: string): Promise<ChatPost> {
   const kind = chatKind(url);
-  if (!kind) return false;
+  if (!kind) return "refused";
+  let response: Response;
   try {
-    const response = await fetch(url, {
+    response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(chatBody(kind, text)),
       redirect: "error",
       signal: AbortSignal.timeout(8_000),
     });
-    return response.ok;
   } catch {
-    return false;
+    return "unknown";
   }
+  if (response.ok) return "sent";
+  return response.status >= 400 && response.status < 500 ? "refused" : "unknown";
 }
 
 /** Which chat the store posts to, never the address. */
@@ -83,7 +93,7 @@ export async function setChatAddress(statsId: string, storeName: string, raw: un
     return "removed";
   }
   if (!chatKind(url)) return "invalid";
-  const ok = await postToChat(url, `Marktmorgen will post ${storeName}'s numbers here: the week every Monday, and the month on the 1st.`);
+  const ok = (await postToChat(url, `Marktmorgen will post ${storeName}'s numbers here: the week every Monday, and the month on the 1st.`)) === "sent";
   if (!ok) return "refused";
   await redisPipeline([["SET", key(statsId), seal(url, context(statsId))]]);
   return "saved";

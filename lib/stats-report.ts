@@ -388,17 +388,32 @@ export const SUMMARY_TRIES = 3;
 export type SummaryPart = "emailed" | "posted";
 
 /**
+ * What a part's send came to: true or "sent" went; false or "refused" surely did not; "unknown" may have gone (a
+ * chat post that timed out, was aborted, threw or got a 5xx: lib/chat-summary.ts, ChatPost).
+ */
+export type PartSend = boolean | "sent" | "refused" | "unknown";
+
+/**
  * Sends a part of the period's summary at most once (lib/claim-mark.ts): "sent" now; "earlier" when a previous run
  * of the same period sent it, so a run that tries the period again never sends it twice; "missed" when it did not
  * go, or when its mark answered in an unknown shape (rule 24: never sent on it), and then the mark is let go, while
- * it still holds this run's value, so a later run sends it. A send that throws is a miss. Never throws.
+ * it still holds this run's value, so a later run sends it. A send that throws is a miss. A send whose outcome is
+ * unknown is a miss that keeps its mark (rule 24: it may have gone), so a later try answers "earlier" and never
+ * sends it again. Never throws.
  */
-export async function sendPart(period: SummaryPeriod, part: SummaryPart, send: () => Promise<boolean>): Promise<"sent" | "earlier" | "missed"> {
+export async function sendPart(period: SummaryPeriod, part: SummaryPart, send: () => Promise<PartSend>): Promise<"sent" | "earlier" | "missed"> {
   const key = `${period.key}:${part}`;
   const value = claimValue();
   const got: Claimed = await claimMark(key, period.seconds, value);
   if (got === "taken") return "earlier";
-  if (got === "ours" && (await send().catch(() => false)) === true) return "sent";
+  if (got === "ours") {
+    const answer: PartSend = await send().catch(() => false);
+    if (answer === true || answer === "sent") return "sent";
+    if (answer === "unknown") {
+      console.error(`stats-report: a ${part} part's outcome is unknown; its mark is kept, so it is not sent again this period`);
+      return "missed";
+    }
+  }
   if (got === "unknown") console.error(`stats-report: a ${part} mark answered in an unknown shape; that part is not sent this run`);
   await releaseMark(key, value);
   return "missed";

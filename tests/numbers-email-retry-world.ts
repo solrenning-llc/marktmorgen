@@ -46,9 +46,10 @@ export async function chatAddress(): Promise<string | null> {
   return retry.chat === "channel" ? "https://hooks.slack.test/services/fixture" : null;
 }
 export const forChat = (text: string) => text;
-export async function postToChat(url: string): Promise<boolean | "unknown"> {
+export async function postToChat(url: string): Promise<"sent" | "refused" | "unknown"> {
   retry.posts.push(url);
-  return retry.postUnknown ? "unknown" : retry.postOk;
+  if (retry.postUnknown) return "unknown";
+  return retry.postOk ? "sent" : "refused";
 }
 
 // lib/ad-spend.ts

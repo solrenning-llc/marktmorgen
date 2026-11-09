@@ -118,7 +118,7 @@ try{
    const frameIds=new WeakMap();let frameSequence=0,frameEvents=0;
    const describeFrame=frame=>{try{if(!frameIds.has(frame))frameIds.set(frame,++frameSequence);const u=new URL(frame.url()||"about:blank"),parent=frame.parentFrame();if(parent&&!frameIds.has(parent))frameIds.set(parent,++frameSequence);return {id:frameIds.get(frame),parent:parent?frameIds.get(parent):null,origin:u.origin,path:u.pathname};}catch{return {unavailable:true};}};
    if(engine==="firefox")for(const event of ["frameattached","framedetached","framenavigated"])page.on(event,frame=>{if(frameEvents++<40)console.log("PRODUCT_FRAME_EVENT:"+JSON.stringify({engine,width,mode,event,frame:describeFrame(frame)}));});
-   await context.route("**/*",route=>{const r=route.request(),url=new URL(r.url());if(url.origin===origin&&url.pathname==="/api/store/hit"&&r.method()==="POST"){const raw=r.postData(),input=raw?r.postDataJSON():null;const missingWebkit=engine==="webkit"&&!raw&&new URL(r.frame().url()).pathname==="/@activationonboarding";if(missingWebkit)gaps.push({path,width,mode,reason:"WebKit exposes no beacon body to routing. Only same-origin store-hit POST from the exact synthetic storefront is fulfilled204 without executing stats; payload validation remains unverified."});if(!missingWebkit&&(input?.h!=="activationonboarding"||input?.k!=="v")){writes++;blockedWrites.push({method:r.method(),path:url.pathname,handle:input?.h,kind:input?.k,bodyBytes:r.postData()?.length??0});return route.abort();}interceptedVisits++;return route.fulfill({status:204});}if(!["GET","HEAD"].includes(r.method())){if(url.origin===origin&&url.pathname==="/api/store/product"&&r.method()==="POST"&&["add","visibility"].includes(r.postDataJSON()?.action)){localProductWrites++;return route.continue();}writes++;blockedWrites.push({method:r.method(),path:url.pathname});return route.abort();}if(url.origin!==origin){foreign++;return route.abort();}return route.continue();});
+   await context.route("**/*",route=>{const r=route.request(),url=new URL(r.url());if(url.origin===origin&&url.pathname==="/api/store/hit"&&r.method()==="POST"){const raw=r.postData(),input=raw?r.postDataJSON():null;const missingWebkit=engine==="webkit"&&!raw&&new URL(r.frame().url()).pathname==="/@activationonboarding";if(missingWebkit)gaps.push({path,width,mode,reason:"WebKit exposes no beacon body to routing. Only same-origin store-hit POST from the exact synthetic storefront is fulfilled204 without executing stats; payload validation remains unverified."});if(!missingWebkit&&(input?.h!=="activationonboarding"||input?.k!=="v")){writes++;blockedWrites.push({method:r.method(),path:url.pathname,handle:input?.h,kind:input?.k,bodyBytes:r.postData()?.length??0});return route.abort();}interceptedVisits++;return route.fulfill({status:204});}if(!["GET","HEAD"].includes(r.method())){if(url.origin===origin&&url.pathname==="/api/store/product"&&r.method()==="POST"&&["add","link","visibility"].includes(r.postDataJSON()?.action)){localProductWrites++;return route.continue();}writes++;blockedWrites.push({method:r.method(),path:url.pathname});return route.abort();}if(url.origin!==origin){foreign++;return route.abort();}return route.continue();});
    const response=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});await restoreDarkAfterNavigation();if(response.status()!==200)throw Error("HTTP "+response.status());
    if(new URL(page.url()).pathname.startsWith("/signin"))throw Error("Synthetic authenticated journey redirected to sign-in");
    if(!await page.locator("main").count())throw Error("Authenticated main missing");
@@ -209,6 +209,22 @@ try{
    await embedPreview.waitFor();
    await page.waitForFunction(()=>document.querySelector('#buy-button iframe')?.contentDocument?.querySelector("[data-card-height]"));
 
+   // A product is published only once it hands something over (754 [STN1]): the disposable product gets a link first, through the studio's own form.
+   {
+    const panelButton=row.locator('button[aria-controls="product-panel-'+createdId+'"]').first();
+    if((await panelButton.getAttribute("aria-expanded"))!=="true")await panelButton.click();
+    const panel=page.locator("#product-panel-"+createdId);
+    await panel.getByRole("button",{name:"Use a link instead",exact:true}).click();
+    await page.locator("#link-"+createdId).fill("https://example.com/synthetic-matrix");
+    const linkRefresh=page.waitForResponse(response=>new URL(response.url()).pathname==="/studio"&&response.request().headers()["rsc"]==="1"&&!response.request().headers()["next-router-prefetch"]);linkRefresh.catch(()=>{});
+    const linkReply=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/store/product"&&response.request().method()==="POST"&&response.request().postDataJSON()?.action==="link");
+    await panel.getByRole("button",{name:"Save the link",exact:true}).click();
+    const linked=await linkReply,linkData=await linked.json();
+    if(linked.request().postDataJSON()?.id!==createdId||!linked.ok()||linkData.ok!==true)throw Error("Local link refused "+JSON.stringify({status:linked.status(),data:linkData}));
+    expectedWrites++;
+    const linkedRefresh=await linkRefresh;if(!linkedRefresh.ok()||(await completedResponse(page,linkedRefresh)).error)throw Error("Link RSC refresh failed");
+    await page.waitForLoadState("networkidle");await restoreDarkAfterNavigation();
+   }
    async function visibility(button,hidden){
     const refreshed=page.waitForResponse(response=>new URL(response.url()).pathname==="/studio"&&response.request().headers()["rsc"]==="1"&&!response.request().headers()["next-router-prefetch"]);refreshed.catch(()=>{});
     const reply=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/store/product"&&response.request().method()==="POST"&&response.request().postDataJSON()?.action==="visibility");

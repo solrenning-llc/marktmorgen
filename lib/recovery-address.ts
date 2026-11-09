@@ -28,6 +28,7 @@
  *   nl:auth:rec:link:<hash>   a link sent to the recovery address, 15 minutes, spent once
  *   nl:auth:rec:until:<hash>  until when logins through the recovery address are locked
  */
+import { afterAnswer } from "@/lib/after-answer";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -165,6 +166,13 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return;
   if (!(await withinLimit("lost-email-ip", ip, 10, 60 * 60))) return;
   if (!(await withinLimit("lost-email", email, 3, 60 * 60))) return;
+  // Everything that depends on the account, after the answer (lib/after-answer.ts): the answer is the same for every
+  // address, and so is its time (Claude 5's authentication audit, L1).
+  await afterAnswer(() => sendLostLink(email, origin), "sending a recovery-address link");
+}
+
+/** The link to the recovery address, and the notice to the account, when it has one (sendLostEmailLink). */
+async function sendLostLink(email: string, origin: string): Promise<void> {
   const address = await recoveryAddress(email);
   if (!address) return;
   const token = randomBytes(32).toString("hex");

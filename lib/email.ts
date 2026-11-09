@@ -379,21 +379,41 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
   return false;
 }
 
+/**
+ * What became of one email, for a caller that must not send twice:
+ *
+ *   sent       a sender took it;
+ *   refused    known not taken: not sent at all (no sender, an address
+ *              that is not one, the figure spent) or a sender said no;
+ *   uncertain  it may have gone: a timeout, a server error or an unknown
+ *              claim after the request may have reached a sender. A job
+ *              that writes once keeps its own mark on this.
+ *
+ * sendEmail answers true only for `sent`, exactly as before (added for
+ * 283 [HG2], 7 November 2026; its other callers are unchanged).
+ */
+export type SendOutcome = "sent" | "refused" | "uncertain";
+
 export async function sendEmail(message: OneMessage, runtime: ResendTransportRuntime = {}): Promise<boolean> {
+  return (await sendEmailOutcome(message, runtime)) === "sent";
+}
+
+/** sendEmail, telling a certain refusal from an answer that is not known (SendOutcome). */
+export async function sendEmailOutcome(message: OneMessage, runtime: ResendTransportRuntime = {}): Promise<SendOutcome> {
   const to = oneAddress(message.to);
-  if (!to) return false;
-  if (!isSenderConfigured() || serviceMailKnownUnavailable(runtime)) return false;
+  if (!to) return "refused";
+  if (!isSenderConfigured() || serviceMailKnownUnavailable(runtime)) return "refused";
   // Keep one identity across awaits and both routes. Preserve the original
   // string and the existing structural contract, including inherited keys.
   const originalIdempotencyKey = message.idempotencyKey;
   if (isSesConfigured()) {
-    if (!(await metered(message.meter, 1))) return false;
+    if (!(await metered(message.meter, 1))) return "refused";
     const amazon = await viaAmazon(message, to, originalIdempotencyKey);
-    if (amazon === true) return true;
-    if (amazon === null) return false;
-    return viaResend(message, originalIdempotencyKey, runtime); // The existing SES path already took its allowance.
+    if (amazon === true) return "sent";
+    if (amazon === null) return "uncertain";
+    return resendOutcome(message, originalIdempotencyKey, runtime); // The existing SES path already took its allowance.
   }
-  return viaResend(message, originalIdempotencyKey, runtime, lazyMeter(message.meter, 1));
+  return resendOutcome(message, originalIdempotencyKey, runtime, lazyMeter(message.meter, 1));
 }
 
 /** Durable shipment work owns its lifetime claim in the outbox, not the
@@ -433,13 +453,40 @@ export function queuedShipmentMailSender(runtime: ResendTransportRuntime = {}): 
 }
 export const sendQueuedShipmentMail: ShipmentMailDispatch = queuedShipmentMailSender();
 
-/** One email through Resend: the first sender, and the floor under the other. */
+/** One email through Resend: the first sender, and the floor under the other. True only when it took it. */
 async function viaResend(message: OneMessage, originalIdempotencyKey: string | undefined, runtime: ResendTransportRuntime = {}, authorization?: MeterAuthorization): Promise<boolean> {
+  return (await resendOutcome(message, originalIdempotencyKey, runtime, authorization)) === "sent";
+}
+
+/**
+ * viaResend, telling a certain refusal from an unknown answer: a guarded
+ * post that came back unknown, a server error (5xx) and a throw may follow
+ * acceptance, so they are `uncertain`; a 4xx, a blocked post and a refused
+ * meter (before the post, or at the guard's last step before it, where the
+ * transport makes no request) are `refused`.
+ */
+async function resendOutcome(message: OneMessage, originalIdempotencyKey: string | undefined, runtime: ResendTransportRuntime = {}, metering?: MeterAuthorization): Promise<SendOutcome> {
+  // The guard answers "unknown" also when the meter refused at its last step, though it then made no
+  // request (lib/resend-fallback-transport.ts): that refusal is noted here, so it is told apart.
+  let declined = false;
+  const authorization: MeterAuthorization | undefined = metering && {
+    preflight: metering.preflight,
+    beforePost: async () => {
+      try {
+        const ready = await metering.beforePost();
+        if (ready !== true) declined = true;
+        return ready;
+      } catch (error) {
+        declined = true;
+        throw error;
+      }
+    },
+  };
   const usageCredential = usageKey() ?? "";
   const key = keyFor(message.from);
-  if (!key) return false;
+  if (!key) return "refused";
   const to = oneAddress(message.to);
-  if (!to) return false;
+  if (!to) return "refused";
   const replyTo = oneAddress(message.replyTo);
   const headers = cleanHeaders(message.headers);
 
@@ -465,18 +512,19 @@ async function viaResend(message: OneMessage, originalIdempotencyKey: string | u
   // waits a moment and tries again.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      if (authorization && !(await authorization.preflight())) return false;
+      if (authorization && !(await authorization.preflight())) return "refused";
       const result = await guardedResendPost({
         base: BASE, path: "/emails", credential: auth,
         usageCredential, body: body(),
         ...(under ? { idempotencyKey: under } : {}), recipients: 1, ...(authorization ? { beforePost: authorization.beforePost } : {}),
       }, runtime);
-      if (result.kind === "accepted_receipt") return true;
-      if (result.kind !== "response") return false;
+      if (result.kind === "accepted_receipt") return "sent";
+      if (result.kind === "blocked") return "refused";
+      if (result.kind !== "response") return declined ? "refused" : "uncertain";
       const response = result.response;
       if (response.ok) {
         await countSent(1);
-        return true;
+        return "sent";
       }
       if (response.status === 429 && attempt < 2) {
         await pause(1_000 + attempt * 1_000);
@@ -492,13 +540,13 @@ async function viaResend(message: OneMessage, originalIdempotencyKey: string | u
         continue;
       }
       console.error("email rejected", response.status);
-      return false;
+      return response.status >= 500 ? "uncertain" : "refused";
     } catch (error) {
       console.error("email failed", error);
-      return false;
+      return "uncertain";
     }
   }
-  return false;
+  return "refused";
 }
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

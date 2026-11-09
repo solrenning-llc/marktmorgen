@@ -28,7 +28,12 @@ const NOW = 1_791_700_000;
 const DAY = 86_400;
 const PRICE = { lookup_key: "nimbus_labs_creator_month", unit_amount: 2900, recurring: { interval: "month" } };
 const emails: string[] = [];
-/** While set, the next Resend call fails (500) after running this, once. */
+/**
+ * While set, the next Resend call is refused (422) after running this, once. Changed with sendEmailOutcome (rule 23;
+ * Claude 5, billing-reminders-unknown-send): was a 500, which is now an answer that is not known (the email may have
+ * gone) and keeps the mark (tests/billing-reminders-unknown-send.test.ts); these tests are about a send that did not
+ * go, so they use a known refusal.
+ */
 let emailFails: (() => Promise<void>) | null = null;
 let lists: Record<string, Record<string, unknown>[]> = {};
 
@@ -73,7 +78,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       const before = emailFails;
       emailFails = null;
       await before();
-      return new Response(JSON.stringify({ message: "down" }), { status: 500 });
+      return new Response(JSON.stringify({ message: "synthetic known refusal" }), { status: 422 });
     }
     const body = JSON.parse(String(init?.body ?? "{}"));
     emails.push(Array.isArray(body.to) ? body.to[0] : body.to);

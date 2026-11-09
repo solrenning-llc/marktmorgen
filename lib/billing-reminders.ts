@@ -12,7 +12,7 @@
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { recordUnpaidRenewal } from "@/lib/billing-sync";
 import { RENEWAL_KEPT_WORDS, RENEWAL_PAUSED_WORDS, RENEWAL_RESUME_WORDS } from "@/lib/renewal-unpaid-words";
@@ -240,13 +240,19 @@ export function failedPlanEmail(failed: FailedPlan): { subject: string; text: st
  * next run can send the notice, once; if the release cannot run either, the mark runs out at its own expiry and no
  * run sends twice), and the rest of that pass is given up: Redis is not answering, and each further claim would only
  * wait out its own timeout.
- * The mark is let go only after this run took it and its send failed, and only while it still holds this run's
- * value (releaseMark), never somebody else's.
+ * The mark is let go only after this run took it and its send was refused for certain, and only while it still holds
+ * this run's value (releaseMark), never somebody else's. What the send answered decides (lib/email.ts
+ * sendEmailOutcome): "sent" keeps the mark; "refused" (known not taken: no sender, a 4xx, a refusal Amazon said) lets
+ * this run's own mark go, so the next run sends the notice, once; "uncertain" (a 5xx or no answer after the request
+ * may have reached a sender) keeps the mark, counts the notice as uncertain, never as sent or failed, and logs it:
+ * it may have gone, and sending it again could write to the creator twice. The cost of that choice: a notice that did
+ * not in fact go is not sent by email. The studio still shows a past-due plan, after a trial too, with its pay link
+ * (app/studio/page.tsx, components/renewal-unpaid-notice.tsx); a trial or yearly renewal notice has no second channel.
  */
 
 /** Every plan whose payment failed and that has not been written to about it yet. */
-export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: number; seen: number }> {
-  const counts = { sent: 0, failed: 0, seen: 0 };
+export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: number; uncertain: number; seen: number }> {
+  const counts = { sent: 0, failed: 0, uncertain: 0, seen: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
   let after: string | undefined;
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -276,8 +282,14 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
         // First, so the card that pays is the one the next renewal uses.
         await keepCardThatPays(due.subscription);
         const { subject, text } = failedPlanEmail(due);
-        const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: due.email, subject, text, replyTo: SUPPORT_EMAIL });
-        if (!ok) throw new Error("the email was not sent");
+        const outcome = await sendEmailOutcome({ meter: { by: "company" }, from: NIMBUS_FROM, to: due.email, subject, text, replyTo: SUPPORT_EMAIL });
+        if (outcome === "uncertain") {
+          // It may have gone (rule 24): the mark stays, so no run sends it twice; said, never as sent or failed.
+          counts.uncertain += 1;
+          console.error("a failed payment notice may have gone, and is not sent again", due.invoice);
+          continue;
+        }
+        if (outcome !== "sent") throw new Error("the email was not sent");
         counts.sent += 1;
       } catch (error) {
         counts.failed += 1;
@@ -300,9 +312,10 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
 export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)): Promise<{
   sent: number;
   failed: number;
+  uncertain: number;
   seen: number;
 }> {
-  const counts = { sent: 0, failed: 0, seen: 0 };
+  const counts = { sent: 0, failed: 0, uncertain: 0, seen: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
 
   for (const status of ["trialing", "active"] as const) {
@@ -327,11 +340,16 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
         }
         if (claimed !== "ours") continue;
         const { subject, text } = reminderEmail(reminder);
-        const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
-        if (ok) counts.sent += 1;
-        else {
+        const outcome = await sendEmailOutcome({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
+        if (outcome === "sent") counts.sent += 1;
+        else if (outcome === "uncertain") {
+          // It may have gone (rule 24): the mark stays, so no run sends it twice; said, never as sent or failed.
+          counts.uncertain += 1;
+          console.error(`a billing reminder may have gone, and is not sent again: ${reminder.kind}`, reminder.subscription);
+        } else {
           counts.failed += 1;
-          // Tried again on the next run rather than never, while the mark is still this run's own (never throws).
+          // Refused for certain: tried again on the next run rather than never, while the mark is still this run's own
+          // (never throws).
           await releaseMark(key, mine);
         }
       }

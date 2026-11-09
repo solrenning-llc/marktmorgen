@@ -72,7 +72,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     }
   }
   if (url.hostname === "api.resend.com") {
-    if (!emailWorks) return new Response(JSON.stringify({ message: "down" }), { status: 500 });
+    // Changed with sendEmailOutcome (rule 23; Claude 5, billing-reminders-unknown-send): was a 500, which is now an
+    // answer that is not known (the email may have gone) and keeps the mark (tests/billing-reminders-unknown-send.test.ts).
+    // "Tried again when the email could not go" is about a send that did not go, so it is a known refusal.
+    if (!emailWorks) return new Response(JSON.stringify({ message: "synthetic known refusal" }), { status: 422 });
     const body = JSON.parse(String(init?.body ?? "{}"));
     const to = Array.isArray(body.to) ? body.to[0] : body.to;
     emails.push({ to, subject: body.subject, text: body.text });

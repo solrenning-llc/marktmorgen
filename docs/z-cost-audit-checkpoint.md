@@ -1,3 +1,17 @@
+# Codex Z — r28 STOP: fresh channel bytes remain unavailable
+
+Observed 2026-11-09 11:40:16 UTC (08:40:16 Fortaleza). FIRST SAME canonical checkpoint COMPLETE845358 characters/blob6c3c4c3fa1d0b88fac56c1b31611caa62c1906e1 obtained; latest r27 STOP read. Entire prior content preserved VERBATIM below, including all five own units, heads/candidates, REDs/WIPs and consumed retry/runtime roots. C1 coordination/C4 backup; SERIAL Medium ZERO agents.
+
+Fresh bounded own reads: #2741 FULL20 comments and #2819 FULL8 comments have no created/updated return after prior10:37:52UTC. Main unchanged e9c23c2062a31879b2aa7e067e200a7b8863b4fc. Inbox COMPLETE469783/blobd98930427fa564e9e2614327e02ad0747a31d4f6 unchanged. No fresh PR-head certification, nine-check certificate, closure, source integration or authorization inferred from those observations.
+
+Fresh ROOT messages.md para-claude-1 metadata now points to74953505d5694b372bab065d4a7491864554f45d, content empty/SHA-only. One exact FULL blob read failed Transport closed. New channel bytes UNREAD; this is NOT evidence of no new messages, rate-limit403, zero quota, reset time or active duplicate execution. No further retry this run, endpoint/browser/proxy/credential probing, or blind append against stale prefix. Earlier one-minute retry failures retained as consumed observations, not authority for new source work.
+
+Last positive ROOT remains CXZ-20261109-0508-C1-BLOCK commit763b272ef6f5807e20148e6f1ef3a9a921c2ffb6/blob5458dc309799d3938c206b4c431804fba6fdf263 FULL7771392. No new point published in canal. CODEX50 capacity/foreign-authorship blocker already delivered, not reposted as routine status; TODOS51 private-detail restrictions and all R2/C1 holds unchanged. No sixth unit, new reservation/review/source/proof/test, paid-provider IO, CI query/retry/cancel, PR push/queue/merge, account/payment/terms/key/contact/PII or price/visible-limit/commission/flag/gate change.
+
+No shell/watcher/background execution or agents this run. Transient transport failure, not globally completed work or a permanent total block; ongoing continuation unchanged. Checkpoint-only save with expected blob and immutable full-content readback retains exact stop. NEXT FIRST newest FULL canonical checkpoint; then fresh own returns/main/inbox and FULL channel before nominal disposition, claims or reservations. Cannot publish the required canal stop safely while its current prefix remains unread. Never fabricate a publication receipt, replay consumed roots/retries, infer active execution from checkpoint recency, or use an already-announced review to evade priority.
+
+---
+
 # Codex Z — r27 STOP: channel transport still unavailable; own returns unchanged
 
 Observed 2026-11-09 10:37:52 UTC (07:37:52 Fortaleza). C1 coordination/C4 backup, SERIAL Medium ZERO agents. FIRST fetched SAME canonical newest checkpoint COMPLETE842465 characters, blob eb180e091c0979f0de91dfb40adc26f8a524dc15, latest r26 section read. ALL prior content preserved VERBATIM below; five own heads/candidates/REDs/WIPs and consumed CI/runtime retry ledger remain authoritative, no reset.

@@ -175,41 +175,61 @@ export function parseReview(raw: unknown): Review | null {
   }
 }
 
-function parseSummary(raw: unknown): Summary {
-  if (typeof raw !== "string" || !raw) return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
+/**
+ * A product's kept numbers, only in their exact shape (CX-123 rule 24): each a whole number of at least 0, the spread
+ * five of them, and all of them adding up as summarise() writes them (the spread to the count and the stars, the
+ * shown and hidden to the counted and refunded). Null for anything else, never "no reviews".
+ */
+function exactSummary(raw: string): Summary | null {
+  let value: unknown;
   try {
-    const value = JSON.parse(raw) as Partial<Summary>;
-    const n = (x: unknown) => (typeof x === "number" && Number.isInteger(x) && x >= 0 ? x : 0);
-    const dist = Array.isArray(value.dist) && value.dist.length === 5 ? value.dist.map(n) : [0, 0, 0, 0, 0];
-    return {
-      count: n(value.count),
-      stars: n(value.stars),
-      visible: n(value.visible),
-      hidden: n(value.hidden),
-      refunded: n(value.refunded),
-      dist: dist as Summary["dist"],
-    };
+    value = JSON.parse(raw);
   } catch {
-    return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
+    return null;
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { count, stars, visible, hidden, refunded, dist } = value as Record<string, unknown>;
+  const whole = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+  if (!Array.isArray(dist) || dist.length !== 5 || !dist.every(whole)) return null;
+  if (!whole(count) || !whole(stars) || !whole(visible) || !whole(hidden) || !whole(refunded)) return null;
+  const spread = dist as number[];
+  if (spread.reduce((sum, n) => sum + n, 0) !== count) return null;
+  if (spread.reduce((sum, n, i) => sum + n * (i + 1), 0) !== stars) return null;
+  if (visible + hidden !== count + refunded) return null;
+  return { count, stars, visible, hidden, refunded, dist: [spread[0], spread[1], spread[2], spread[3], spread[4]] };
 }
 
-/** The numbers of every product of a store that has reviews, in one read. */
+/**
+ * The numbers of every product of a store that has reviews, in one read. Throws UnknownReplyError when the reply, a
+ * product's id or its numbers are not in their exact shape: a page says the numbers could not be read, never that
+ * there are none (rule 24; VR item 2). Only an exact empty hash is a store with no numbers.
+ */
 export async function summaries(statsId: string | null): Promise<Map<string, Summary>> {
   const out = new Map<string, Summary>();
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", summaryKey(statsId)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    if (typeof flat[i] === "string") out.set(flat[i] as string, parseSummary(flat[i + 1]));
+  const read = repliesFor(await redisPipeline([["HGETALL", summaryKey(statsId)]]), 1);
+  const flat = read && stringList(read[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's review numbers");
+  for (let i = 0; i < flat.length; i += 2) {
+    const summary = PRODUCT_ID_PATTERN.test(flat[i]) ? exactSummary(flat[i + 1]) : null;
+    if (!summary) throw new UnknownReplyError("a store's review numbers");
+    out.set(flat[i], summary);
   }
   return out;
 }
 
+/**
+ * A product's numbers: none when they are confirmed absent (an exact nil). Throws UnknownReplyError when the reply or
+ * the numbers are not in their exact shape, never "no reviews" (rule 24; VR item 2).
+ */
 export async function summaryOf(statsId: string | null, productId: string): Promise<Summary> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
-  const [raw] = await redisPipeline([["HGET", summaryKey(statsId), productId]]);
-  return parseSummary(raw);
+  const read = repliesFor(await redisPipeline([["HGET", summaryKey(statsId), productId]]), 1);
+  const raw = read?.[0];
+  if (read && raw === null) return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
+  const summary = read && typeof raw === "string" ? exactSummary(raw) : null;
+  if (!summary) throw new UnknownReplyError("a product's review numbers");
+  return summary;
 }
 
 /** The reviews on a product's page, newest first. Throws UnknownReplyError when a reply is not in its exact shape. */
@@ -286,19 +306,45 @@ async function locked<T>(statsId: string, productId: string, work: () => Promise
   }
 }
 
-/** Counts a product's numbers again from its reviews, and keeps them. */
-async function recount(statsId: string, productId: string): Promise<Summary> {
-  const [raw] = await redisPipeline([["HGETALL", productKey(statsId, productId)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
+/**
+ * A product's reviews as HGETALL answers them, only in their exact shape (CX-123 rule 24): a flat list of strings,
+ * each field a review's id and each value that review, readable, of this product. Null for anything else: a reply
+ * lost or cut short, a field without its value, a stored review that does not read or one under another's id.
+ */
+function exactReviews(reply: unknown, productId: string): Review[] | null {
+  const flat = stringList(reply);
+  if (!flat || flat.length % 2 !== 0) return null;
   const reviews: Review[] = [];
-  for (let i = 1; i < flat.length; i += 2) {
-    const review = parseReview(flat[i]);
-    if (review) reviews.push(review);
+  for (let i = 0; i < flat.length; i += 2) {
+    const review = parseReview(flat[i + 1]);
+    if (!review || review.id !== flat[i] || review.productId !== productId) return null;
+    reviews.push(review);
+  }
+  return reviews;
+}
+
+/**
+ * Counts a product's numbers again from its reviews, and keeps them. Read exactly (CX-123 rule 24): only an exact
+ * empty hash is a product with no reviews, whose numbers go. A read lost or in another shape writes nothing: the
+ * numbers kept stay as they were, never deleted and never counted without a review that did not read; the recount
+ * is left for the product's next change ("unsure"), and the log says so. So is a write of the numbers answered in
+ * another shape.
+ */
+async function recount(statsId: string, productId: string): Promise<Summary | "unsure"> {
+  const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1);
+  const reviews = read ? exactReviews(read[0], productId) : null;
+  if (!reviews) {
+    console.error(`reviews: the numbers of product ${productId} were not counted again (its reviews read in an unknown shape); kept as they were until its next change`);
+    return "unsure";
   }
   const summary = summarise(reviews);
-  await redisPipeline([
+  const change: (string | number)[][] = [
     reviews.length ? ["HSET", summaryKey(statsId), productId, JSON.stringify(summary)] : ["HDEL", summaryKey(statsId), productId],
-  ]);
+  ];
+  if (!exactWriteReplies(await redisPipeline(change), change)) {
+    console.error(`reviews: the numbers of product ${productId} were written with an answer in an unknown shape; counted again at its next change`);
+    return "unsure";
+  }
   return summary;
 }
 
@@ -403,8 +449,13 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
 
 /** The reviews a payment paid for, with one more added. */
 async function payEntry(statsId: string, pi: string, member: string): Promise<string> {
-  const [raw] = await redisPipeline([["HGET", payKey(statsId), pi]]);
-  const list = typeof raw === "string" && raw ? raw.split(";").filter(Boolean) : [];
+  // Read exactly (CX-123 rule 24): only an exact nil is a payment with no list yet. A reply lost or in another shape
+  // throws, never an empty list: the list written from it would drop the other reviews this payment paid for, and a
+  // refund of it would never reach them.
+  const read = repliesFor(await redisPipeline([["HGET", payKey(statsId), pi]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a payment's reviews");
+  const list = raw ? raw.split(";").filter(Boolean) : [];
   if (!list.includes(member)) list.push(member);
   return list.slice(-20).join(";");
 }
@@ -495,10 +546,16 @@ async function creatorChange(
   room: DataStore | null,
 ): Promise<Review | "missing" | "busy"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
+  const what = "a review (the creator's change)";
   return locked(statsId, productId, async () => {
-    const [raw] = await redisPipeline([["HGET", productKey(statsId, productId), id]]);
-    const before = parseReview(raw);
+    // Read exactly (CX-123 rule 24): only a confirmed absent field is "missing". A reply in another shape, or a stored
+    // review that does not read or is another's, throws: never "missing", which would let a refund pass take the
+    // refund as marked while the review's stars still count.
+    const read = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+    if (!read) throw new UnknownReplyError(what);
+    const before = storedReview(read[0], what);
     if (!before) return "missing" as const;
+    if (before.id !== id || before.productId !== productId) throw new UnknownReplyError(what);
     const after = change(before);
     // What the creator's answer grows the review by takes room first (DataRoomError when it does not fit);
     // `room` is null for what only flips a mark or swaps a photo's path, which never refuses.
@@ -580,8 +637,12 @@ export function setReply(statsId: string, productId: string, id: string, text: s
  */
 export async function markRefunded(statsId: string, pi: string): Promise<number> {
   if (!STATS_ID_PATTERN.test(statsId) || !pi) return 0;
-  const [raw] = await redisPipeline([["HGET", payKey(statsId), pi]]);
-  const members = typeof raw === "string" && raw ? raw.split(";").filter(Boolean) : [];
+  // Read exactly (CX-123 rule 24): only an exact nil is a payment that paid for no review. A reply lost or in another
+  // shape throws, so the refund is not taken as seen and the next pass tries again.
+  const read = repliesFor(await redisPipeline([["HGET", payKey(statsId), pi]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a refunded payment's reviews");
+  const members = raw ? raw.split(";").filter(Boolean) : [];
   let changed = 0;
   for (const member of members) {
     const [productId, id] = member.split("|");
@@ -725,10 +786,14 @@ export async function reviewsSince(statsId: string | null, since: number): Promi
 export async function dropReviews(statsId: string | null, productId: string, tries = 1): Promise<string[]> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return [];
   // Read once: a deletion that ran but did not answer in time leaves nothing to read again, and its photos would be lost.
-  const [raw, all] = await redisPipeline([["HKEYS", productKey(statsId, productId)], ["HVALS", productKey(statsId, productId)]]);
-  const ids = Array.isArray(raw) ? (raw as string[]) : [];
-  const photos = (Array.isArray(all) ? (all as unknown[]) : []).map((one) => parseReview(one)?.photo?.path).filter((path): path is string => Boolean(path));
-  const members = ids.map((id) => `${productId}|${id}`);
+  // Read exactly (CX-123 rule 24), in one command, before anything is deleted: a reply lost or in another shape, or a
+  // review that does not read, throws and nothing is deleted. Dropped without their ids, the reviews would stay in the
+  // studio's lists; without their records, their photos would stay in the picture folder with nothing to find them by.
+  const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1);
+  const reviews = read ? exactReviews(read[0], productId) : null;
+  if (!reviews) throw new UnknownReplyError("a removed product's reviews");
+  const photos = reviews.map((review) => review.photo?.path).filter((path): path is string => Boolean(path));
+  const members = reviews.map((review) => `${productId}|${review.id}`);
   // Only the deletion is tried again (it can run twice: every command in it is the same the second time).
   for (let attempt = 1; ; attempt += 1) {
     try {

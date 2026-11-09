@@ -253,16 +253,19 @@ async function main(): Promise<void> {
   }
 
   part("A removed product's reviews are never dropped from an unknown read");
+  // Read with one HGETALL (ids and records from one moment), no longer HKEYS then HVALS: the replies below are that
+  // command's (rule 23, see the fix's commit).
   for (const [label, reply] of [
     ["no reply", []],
-    ["nil", [null, null]],
-    ["ids without records", [["a"], []]],
+    ["nil", [null]],
+    ["an id without its record", "odd"],
     ["a stored review that does not read", null],
     ["a record under another id", "swapped"],
   ] as [string, unknown][]) {
     const { ids, rows } = await seed();
-    const answer = reply === null ? [ids, [rows[0], "{not json"]] : reply === "swapped" ? [ids, [rows[1], rows[0]]] : reply;
-    const read = swap("HKEYS", RECORDS, answer);
+    const answer =
+      reply === null ? [[ids[0], rows[0], ids[1], "{not json"]] : reply === "swapped" ? [[ids[0], rows[1], ids[1], rows[0]]] : reply === "odd" ? [[ids[0], rows[0], ids[1]]] : reply;
+    const read = swap("HGETALL", RECORDS, answer);
     is(`${label}: unknown`, (await outcome(() => dropReviews(STATS, PRODUCT))).result, "unknown");
     is(`${label}: read`, read.hit(), true);
     is(`${label}: the reviews are kept`, await raw(["HLEN", RECORDS]), 2);

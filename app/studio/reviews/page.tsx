@@ -63,7 +63,8 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   const now = new Date().getTime();
   const [list, numbers, recent] = await Promise.all([
     studioReviews(store.statsId, { queue, offset: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE }).catch(() => null),
-    summaries(store.statsId),
+    // Totals that could not be read are said, never drawn as none (rule 24; VR item 2).
+    summaries(store.statsId).catch((): null => null),
     reviewsSince(store.statsId, monthStart(now, OVERVIEW_MONTHS - 1)).catch(() => null),
   ]);
   const months = recent ? byMonth(recent.reviews, now) : null;
@@ -71,7 +72,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   const current = list ?? { rows: [], total: 0, unseen: 0 };
   // Only the products that have reviews, or are on this page of them, are
   // read (lib/catalog.ts), in the store's own order.
-  const wanted = new Set([...numbers.keys(), ...current.rows.map((r: StudioRow) => r.productId)]);
+  const wanted = new Set([...(numbers?.keys() ?? []), ...current.rows.map((r: StudioRow) => r.productId)]);
   const named = await readListings(store, productIds(store).filter((id) => wanted.has(id)));
   const titles = new Map(named.map((p) => [p.id, p.title]));
   const rows: StudioReview[] = current.rows.map((r: StudioRow) => ({
@@ -92,12 +93,13 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
     photo: r.photo ? imageUrl(r.photo) : null,
   }));
   const pages = Math.max(1, Math.ceil(current.total / PAGE_SIZE));
-  const reviewed = named.filter((p) => (numbers.get(p.id)?.visible ?? 0) + (numbers.get(p.id)?.hidden ?? 0) > 0);
+  const reviewed = numbers === null ? [] : named.filter((p) => (numbers.get(p.id)?.visible ?? 0) + (numbers.get(p.id)?.hidden ?? 0) > 0);
   // Each reviewed product's AI summary kept this week (636 [GL4](d)): read only, nothing made by opening the page,
   // every product's in one request.
   const summed = reviewed.slice(0, 30);
   const keptSummaries = await readReviewSummaries(store.statsId, summed.map((p) => p.id)).catch(() => null);
-  const aiSummaries = keptSummaries === null ? null : summed.map((p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
+  // Without the totals, which products have reviews is not known: the summaries say they could not be loaded.
+  const aiSummaries = keptSummaries === null || numbers === null ? null : summed.map((p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
   const tab = (view: "new" | "all", label: string) => (
     <Link
       href={studioPath(store, view === "new" ? "" : "view=all", "reviews")}
@@ -161,7 +163,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                     : "When a buyer reviews something, it appears here and on the product's page at the same moment."
                 }
                 // Only when the store has no review at all, on either tab, and only for a role that can switch the requests on.
-                action={current.total === 0 && numbers.size === 0 && can(view.role, "settings") ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined}
+                action={current.total === 0 && numbers !== null && numbers.size === 0 && can(view.role, "settings") ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined}
               />
             ) : (
               <AiOn value={ai}>
@@ -205,7 +207,9 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
 
             <div className="card p-5 sm:p-6">
               <p className="font-semibold text-ink">By product</p>
-              {reviewed.length === 0 ? (
+              {numbers === null ? (
+                <p className="mt-2 text-sm text-ink-soft" role="status">The totals could not be read just now. Reload to try again; this does not mean there are none.</p>
+              ) : reviewed.length === 0 ? (
                 // Not the shared empty state (Codex Q on #2841): the totals' reader cannot tell "none" from "not read",
                 // so this says only that none can be shown here, never that there are none.
                 <p className="mt-2 text-sm text-ink-soft">No product review totals are available in this view.</p>

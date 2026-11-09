@@ -54,7 +54,7 @@ part("The studio reviews: an empty list and no totals yet");
 const reviews = readFileSync("app/studio/reviews/page.tsx", "utf8");
 is("the empty list uses the studio variant, as an h3 under the list's h2, inside its card", /<StudioEmptyState\s+level=\{3\}\s+className="card mt-5 p-6 sm:p-8"/.test(reviews), true);
 is("its three cases keep their true words", ['"No reviews on this page"', '"Nothing new"', '"No reviews yet"', '"Choose an earlier page to see the reviews in this list."', '"Every review has been seen. New ones, and reviews their buyers change, come back here."', "\"When a buyer reviews something, it appears here and on the product's page at the same moment.\""].every((words) => reviews.includes(words)), true);
-is("its one action is the jump to asking for reviews, for a role that can switch it on, while the store has no review at all", reviews.includes('action={current.total === 0 && numbers.size === 0 && can(view.role, "settings") ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined}'), true);
+is("its one action is the jump to asking for reviews, for a role that can switch it on, while the store has no review at all", reviews.includes('action={current.total === 0 && numbers !== null && numbers.size === 0 && can(view.role, "settings") ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined}'), true);
 is("the place it jumps to is still a heading that takes the focus", reviews.includes('<h2 id="asking-for-reviews" tabIndex={-1}'), true);
 // Rule 23 (Codex Q on #2841, review 5806653591): the totals' reader cannot tell "none" from "not read", so the by-product
 // box keeps main's sentence, which only says none can be shown here; the shared empty state would claim there are none.

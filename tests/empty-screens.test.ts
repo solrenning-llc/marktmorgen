@@ -12,7 +12,7 @@ is("no event scheduled says what an event can be and where to start one", events
 const reviews = readFileSync("app/studio/reviews/page.tsx", "utf8");
 is("no review yet offers the way to ask buyers for one, on the same page", reviews.includes('href: "#asking-for-reviews"') && reviews.includes('id="asking-for-reviews"'), true);
 is("the place it leads to is a heading that takes the focus, so a keyboard or screen reader lands there", reviews.includes('<h2 id="asking-for-reviews" tabIndex={-1}'), true);
-is("offered only when the store has no review at all, on either tab, and to a role that can switch it on", reviews.includes('current.total === 0 && numbers.size === 0 && can(view.role, "settings")'), true);
+is("offered only when the store has no review at all, on either tab, and to a role that can switch it on", reviews.includes('current.total === 0 && numbers !== null && numbers.size === 0 && can(view.role, "settings")'), true);
 const deals = readFileSync("components/deals-board.tsx", "utf8");
 is("an empty deals board says what it is for and names its button", deals.includes('title={canChange ? "No deals yet"') && deals.includes("When someone asks about something you sell outside a checkout, press \\u201cNew deal\\u201d") && deals.includes("pipelineDeals.length === 0 && draft === null"), true);
 done();

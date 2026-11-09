@@ -7,7 +7,7 @@ import { productIdFromAddress, readListing } from "@/lib/catalog";
 import { lookStyle } from "@/lib/store-look";
 import { canUseDomain } from "@/lib/domains";
 import { SITE_URL } from "@/lib/site-url";
-import { REVIEWS_PER_PAGE, summaryOf, visibleReviews } from "@/lib/reviews";
+import { EMPTY_SUMMARY, REVIEWS_PER_PAGE, summaryOf, visibleReviews } from "@/lib/reviews";
 import { productPath } from "@/components/store-product";
 import { ReviewsSection } from "@/components/review-list";
 import { speech } from "@/lib/buyer-words";
@@ -52,11 +52,13 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
 
   const query = await searchParams;
   const asked = Number(typeof query.page === "string" ? query.page : "1");
-  const summary = await summaryOf(store.statsId, product.id);
-  const pages = Math.max(1, Math.ceil(summary.visible / REVIEWS_PER_PAGE));
+  // Numbers that could not be read are said, never drawn as none (rule 24): no list is read without them, and the
+  // section says the reviews could not be loaded.
+  const summary = await summaryOf(store.statsId, product.id).catch((): null => null);
+  const pages = Math.max(1, Math.ceil((summary?.visible ?? 0) / REVIEWS_PER_PAGE));
   const page = Number.isInteger(asked) && asked >= 1 ? Math.min(asked, pages) : 1;
   // One that could not be read is said, never drawn as none (rule 24).
-  const reviews = await visibleReviews(store.statsId, product.id, (page - 1) * REVIEWS_PER_PAGE, REVIEWS_PER_PAGE).catch((): null => null);
+  const reviews = summary === null ? null : await visibleReviews(store.statsId, product.id, (page - 1) * REVIEWS_PER_PAGE, REVIEWS_PER_PAGE).catch((): null => null);
   const base = `/@${store.handle}/p/${productSegment(product)}/reviews`;
   const { w } = speech(store);
 
@@ -75,7 +77,7 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
         <div className="mt-8">
           <ReviewsSection
             heading={w.reviewsOf(product.title)}
-            summary={summary}
+            summary={summary ?? { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] }}
             reviews={reviews}
             storeName={store.name}
             productTitle={product.title}
@@ -83,7 +85,7 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
             lang={store.language}
             level={1}
           />
-          {summary.visible === 0 ? <p className="st-note mt-6 text-sm">{w.noReviewsToShow}</p> : null}
+          {summary !== null && summary.visible === 0 ? <p className="st-note mt-6 text-sm">{w.noReviewsToShow}</p> : null}
         </div>
         {pages > 1 ? (
           <nav aria-label={w.pagesOfReviews} className="mt-8 flex items-center justify-between gap-3 text-sm font-semibold">

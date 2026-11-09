@@ -127,11 +127,13 @@ async function main(): Promise<void> {
 
   part("Any unknown reply in deciding the bound: the bound holds, or decline says not done and a retry finishes it");
   {
-    for (const verb of ["SCARD", "ZCARD", "SMEMBERS", "ZADD", "ZREMRANGEBYRANK", "SREM", "ZRANGE"]) {
+    // The old plain set's move is one script (lib/community-dm.ts DECLINED_MOVE), picked by its name.
+    const moveScript = (command: Command) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:dm-declined-move:");
+    for (const verb of ["SCARD", "ZCARD", "SMEMBERS", "ZADD", "ZREMRANGEBYRANK", "SREM", "ZRANGEBYSCORE", "EVAL"]) {
       for (const [label, bad] of UNKNOWN) {
         const who = fresh();
         is(`control (${verb} ${label}): the stranger asks`, (await send(ID, open, who, BIA, "Hi", ROOM)).ok, true);
-        swap = { match: verbIs(verb, ":dm:x"), bad };
+        swap = { match: verb === "EVAL" ? moveScript : verbIs(verb, ":dm:x"), bad };
         const first = await outcome(() => decline(ID, BIA, pairOf(who, BIA), ROOM));
         swap = null;
         const retried = first === true ? true : await outcome(() => decline(ID, BIA, pairOf(who, BIA), ROOM));
@@ -183,6 +185,29 @@ async function main(): Promise<void> {
     const kept = await declinedBy(ID3, DANI);
     is("the list holds exactly MAX_DECLINED", kept.length, MAX_DECLINED);
     is("exactly one old refusal was let go", old.filter((who) => !kept.includes(who)).length, 1);
+  }
+
+  part("send(): whether the sender was declined is read exactly in both places a refusal is kept");
+  {
+    const ID4 = "cmdeclinedsend";
+    const EVA = "e5e5e5e5e5e5";
+    const who = fresh();
+    is("control: Eva declines a stranger", await asksAndIsDeclined(ID4, who, EVA), true);
+    // A score is a number or its text; anything else, or no reply, is unknown.
+    const NOT_A_SCORE: [string, unknown][] = [["undefined", undefined], ["NaN", Number.NaN], ["an empty text", ""], ["a word", "yes"], ["true", true], ["a list [1]", [1]], ["an object", { score: 1 }]];
+    for (const [label, bad] of NOT_A_SCORE) {
+      swap = { match: verbIs("ZSCORE", ":dm:xo:"), bad };
+      const got = await outcome(() => send(ID4, open, who, EVA, `hello (${label})`, ROOM));
+      swap = null;
+      is(`the refusal's score answered ${label}: refused as unknown`, got, "threw UnknownReplyError");
+    }
+    for (const [label, bad] of [["null", null], ["two", 2], ["the text \"1\"", "1"], ["an object", { result: 1 }]] as [string, unknown][]) {
+      swap = { match: verbIs("SISMEMBER", ":dm:x:"), bad };
+      const got = await outcome(() => send(ID4, open, fresh(), EVA, `hello (${label})`, ROOM));
+      swap = null;
+      is(`the old refusal answered ${label}: refused as unknown`, got, "threw UnknownReplyError");
+    }
+    is("control: still declined on exact replies", await isDeclined(ID4, who, EVA), true);
   }
 
   done();

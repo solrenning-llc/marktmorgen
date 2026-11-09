@@ -125,6 +125,16 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/community-dm.ts DECLINED_MOVE: refusals kept as a plain set moved into the sorted set as the oldest, the plain set deleted.
+        if (key.startsWith("-- marktmorgen:dm-declined-move:v1\n") && args[0] === "2" && args.length === 3) {
+          const [, plain, ordered] = args;
+          const held = this.data.get(plain) instanceof Set ? [...(this.data.get(plain) as Set<string>)] : [];
+          if (held.length) {
+            this.run(["ZADD", ordered, "NX", ...held.flatMap((member) => ["0", member])]);
+            this.run(["DEL", plain]);
+          }
+          return held.length;
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;

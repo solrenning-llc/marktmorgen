@@ -110,6 +110,15 @@ const UNKNOWN: [string, unknown][] = [
 ];
 
 const verbIs = (verb: string, part: string) => (command: Command) => command[0] === verb && String(command[1]).includes(part);
+/**
+ * Since 7 November 2026 (tests/community-dm-declined-order.test.ts) a refusal
+ * is written with ZADD to the sorted set ":dm:xo:" rather than SADD to the
+ * plain set ":dm:x:", and lifted from both (ZREM ":dm:xo:", SREM ":dm:x:").
+ * The assertions below that named SADD and SREM name these now; what they
+ * hold is unchanged.
+ */
+const refusalWrite = verbIs("ZADD", ":dm:xo:");
+const refusalLift = (command: Command) => verbIs("ZREM", ":dm:xo:")(command) || verbIs("SREM", ":dm:x:")(command);
 
 /** What a call answered, or the name of what it threw. */
 async function outcome<T>(call: () => Promise<T>): Promise<T | string> {
@@ -143,7 +152,7 @@ async function main(): Promise<void> {
   {
     for (const [label, bad] of UNKNOWN) {
       const { pair } = await stranger();
-      swap = { match: verbIs("SADD", ":dm:x:"), bad };
+      swap = { match: refusalWrite, bad };
       const got = await outcome(() => decline(ID, BIA, pair, ROOM));
       swap = null;
       is(`SADD answered ${label}: not declined, unknown`, got, "threw UnknownReplyError");
@@ -153,7 +162,7 @@ async function main(): Promise<void> {
   part("A refusal that was lost is never said done, and a second try finishes it");
   {
     const { who, pair } = await stranger();
-    swap = { match: verbIs("SADD", ":dm:x:"), bad: undefined, lost: true };
+    swap = { match: refusalWrite, bad: undefined, lost: true };
     const got = await outcome(() => decline(ID, BIA, pair, ROOM));
     swap = null;
     is("lost SADD: not declined, unknown", got, "threw UnknownReplyError");
@@ -181,7 +190,7 @@ async function main(): Promise<void> {
     const { who, pair } = await stranger();
     is("control: Bia declines", await decline(ID, BIA, pair, ROOM), true);
     for (const [label, bad] of UNKNOWN) {
-      swap = { match: verbIs("SREM", ":dm:x:"), bad, lost: true };
+      swap = { match: refusalLift, bad, lost: true };
       const got = await outcome(() => unblock(ID, BIA, who, ROOM));
       swap = null;
       is(`SREM answered ${label}: unknown, not said done`, got, "threw UnknownReplyError");
@@ -230,13 +239,13 @@ async function main(): Promise<void> {
       if (typeof got === "string") return got;
       return { status: got.status, notice: /n=([a-z]+)/.exec(got.headers.get("location") ?? "")?.[1] ?? null, body: got.status === 303 ? "" : await got.text() };
     };
-    swap = { match: verbIs("SADD", ":dm:x:"), bad: undefined, lost: true };
+    swap = { match: refusalWrite, bad: undefined, lost: true };
     is("decline with a lost SADD: 503 'could not confirm', not 'Declined'", await read("decline"), { status: 503, notice: null, body: words.unconfirmed });
     swap = null;
     is("Ana's request still waits on the member", (await inbox(cid, viewer.key, true)).some((c) => c.pair === pair), true);
     is("control: the second try declines", await read("decline"), { status: 303, notice: "dmdeclined", body: "" });
     is("and Ana cannot write again", await send(cid, setting, ANA, viewer.key, "again", ROOM), { ok: false, reason: "declined" });
-    swap = { match: verbIs("SREM", ":dm:x:"), bad: undefined, lost: true };
+    swap = { match: refusalLift, bad: undefined, lost: true };
     is("unblock with a lost SREM: 503 'could not confirm', not 'They can write to you again'", await read("unblock"), { status: 503, notice: null, body: words.unconfirmed });
     swap = null;
     is("Ana is still declined", await send(cid, setting, ANA, viewer.key, "still?", ROOM), { ok: false, reason: "declined" });

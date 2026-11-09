@@ -14,7 +14,7 @@ import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { CODE_LETTERS } from "@/lib/short-link-rules";
 import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
-import { SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_REST_REFUNDS_PER_MINUTE, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNPAID_PER_HOUR } from "@/lib/short-link-open-rules";
+import { SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNPAID_PER_HOUR } from "@/lib/short-link-open-rules";
 import { SHORT_LINK_UNPAID_COMPANY_COST } from "./plan-cost-registry";
 import { calendarWindow } from "@/lib/allowance-window";
 import { answering } from "./security/next-headers";
@@ -115,7 +115,9 @@ async function main(): Promise<void> {
   is("P3: the reads that ended unpaid are counted, and admitted only within the hour's two figures", reads > 0 && hourCount >= SHORT_LINK_UNPAID_PER_HOUR + reads, true);
 
   // Everything below was added with the fix (9 November 2026).
-  part("A resting store's other links are refused from memory, nothing sent; asked again on the instance's minute, later each time");
+  // Rule 23 (9 November 2026, third pre-review): the title said "asked again on the instance's minute"; it is now asked on its
+  // own time, counted in the resting hour.
+  part("A resting store's other links are refused from memory, nothing sent; asked again in the resting hour, later each time");
   reset();
   topOfHour();
   const golf = await make("g@example.com", "golf", "reel");
@@ -130,7 +132,8 @@ async function main(): Promise<void> {
   later(SHORT_LINK_TIRED_MS + 1);
   commands = [];
   await open(golf.code);
-  is("past its time it is asked again on this instance's minute, off the hour", [commands.some((c) => c[0] === "INCR" && c[1].startsWith("nl:slink:open:")), commands.some((c) => c[0] === "INCRBY")], [false, true]);
+  // Rule 23 (9 November 2026, third pre-review): the words said "on this instance's minute"; the checks are unchanged.
+  is("past its time it is asked again in the resting hour, off the shared one", [commands.some((c) => c[0] === "INCR" && c[1].startsWith("nl:slink:open:")), commands.some((c) => c[0] === "INCRBY")], [false, true]);
   later(SHORT_LINK_TIRED_MS + 1);
   commands = [];
   is("still resting, it is kept twice as long: a minute later nothing is sent", [(await open(golf2.code)).status, commands.length], [503, 0]);
@@ -138,9 +141,15 @@ async function main(): Promise<void> {
   inject = null;
   const back = await open(golf.code);
   is("once it can answer again, asked again, it opens", [back.status, back.to?.includes("/@golf")], [302, true]);
-  is("the hour's shared count holds only the first open of its second link, read once to learn its store", Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0]), 1);
+  // Rule 23 (9 November 2026, third pre-review): was 1, "only the first open of its second link, read once to learn its
+  // store"; that open is now moved to the resting hour once its store is known, so the shared hour holds none.
+  is("the hour's shared count holds none of its opens, not even the first of its second link", Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0]), 0);
 
-  part("A store due to be asked again past the instance's minute stays resting until the next minute, nothing sent");
+  // Rule 23 (9 November 2026, third pre-review): was "A store due to be asked again past the instance's minute stays resting
+  // until the next minute, nothing sent". Each store is now asked on its own time (the third pre-review's B: one waiting store
+  // never waits behind another), counted in the resting hour; the resting hour used is held in
+  // tests/short-link-open-prerev3.test.ts.
+  part("Two stores due to be asked again in the same minute are each asked on their own, off the shared hour");
   reset();
   topOfHour();
   const hotel = await make("h@example.com", "hotel");
@@ -151,9 +160,12 @@ async function main(): Promise<void> {
   later(SHORT_LINK_TIRED_MS + 1);
   const minuteStart = Date.now() - (Date.now() % 60_000);
   if (Date.now() - minuteStart > 50_000) later(60_000 - (Date.now() - minuteStart) + 1);
-  for (let i = 0; i < SHORT_LINK_REST_REFUNDS_PER_MINUTE; i += 1) await open(hotel.code);
+  await open(hotel.code);
   commands = [];
-  is("the other store, due too, is refused with nothing sent", [(await open(india.code)).status, commands.length], [503, 0]);
+  // Rule 23 (9 November 2026, third pre-review): was "the other store, due too, is refused with nothing sent" ([503, 0]).
+  is("the other store, due too, is asked on its own, in the resting hour", [
+    (await open(india.code)).status, commands.some((c) => c[0] === "INCR" && c[1].startsWith("nl:slink:tired:")), commands.some((c) => c[0] === "INCR" && c[1].startsWith("nl:slink:open:")),
+  ], [503, true, false]);
   inject = null;
   is("neither went into the shared hour beyond its first open", Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0]) <= 1, true);
 

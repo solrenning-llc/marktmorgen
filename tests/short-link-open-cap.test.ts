@@ -34,7 +34,7 @@ import { calendarWindow } from "@/lib/allowance-window";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import {
   SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS,
-  SHORT_LINK_REST_REFUNDS_PER_MINUTE, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_USED_UP_PAUSE_MS,
+  SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_USED_UP_PAUSE_MS,
 } from "@/lib/short-link-open-rules";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
 import { CURRENT_COMMERCIAL_TERMS } from "@/lib/commercial-margin";
@@ -196,7 +196,11 @@ async function main(): Promise<void> {
   const spare = await addStoreLink("spare@example.com", "spare");
   const free = await addStoreLink("free@example.com", "freeone");
   await redis.pipeline([["SET", `nl:free:n:${calendarWindow(Date.now()).id}`, "1000000000"]]);
-  is("another resting store takes this instance's minute", (await open(spare, fresh())).status, 503);
+  // Rule 23 (9 November 2026, third pre-review): was "another resting store takes this instance's minute"; there is no
+  // such minute now. Another resting store is refused first, then the resting hour is used, so this open is counted
+  // in the resting hour, found past it, and counted in the shared hour again: the heaviest path.
+  is("another resting store is refused first", (await open(spare, fresh())).status, 503);
+  await redis.pipeline([["SET", `nl:slink:tired:${Math.floor(Date.now() / HOUR)}`, String(SHORT_LINK_REST_UNPAID_PER_HOUR)]]);
   commands = [];
   pipelines = 0;
   const heaviest = await open(free, fresh());
@@ -238,7 +242,8 @@ async function main(): Promise<void> {
   is("the heaviest unpaid open waits on at most 7 pipelines and sends at most 12 commands", [unpaidPipelines <= 7, unpaidCommands <= 12], [true, true]);
   // Rule 23 (9 November 2026, second pre-review): was request(7 + 2, 12 + 4), the open whose store count could not be
   // made; the heaviest is the free store without a place measured above (9 pipelines and 17 commands), priced at the
-  // registry's heaviestUnpaid, which holds that room.
+  // registry's heaviestUnpaid, which holds that room. Since the third pre-review it is that open found past the resting
+  // hour and counted in the shared hour again: 10 pipelines and 19 commands, priced at 12 and 23.
   const unpaid = request(SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits, SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands, MAX_STORE_BYTES + 4_096);
   const counted = request(1, SHORT_LINK_COUNT_COMMANDS, 64);
   const MONTH_HOURS = 31 * 24;
@@ -248,20 +253,29 @@ async function main(): Promise<void> {
   // One instance's counts beyond them: one a minute that finds the hour used, and one a minute after a count it could not read.
   // Rule 23 (9 November 2026): the used hour was counted once an hour ((1 + HOUR / SHORT_LINK_UNKNOWN_PAUSE_MS), under $3); it is now
   // counted again a minute later (SHORT_LINK_USED_UP_PAUSE_MS), so a paid link is not refused for the rest of the hour.
-  const instanceMonth = (HOUR / SHORT_LINK_USED_UP_PAUSE_MS + HOUR / SHORT_LINK_UNKNOWN_PAUSE_MS) * MONTH_HOURS * counted;
-  // Added 9 November 2026: a store over its own requests is refused off the shared count at most SHORT_LINK_REST_REFUNDS_PER_MINUTE
-  // times a minute on each instance, each at most the heaviest unpaid open and the SET of its resting mark.
-  const restMonth = SHORT_LINK_REST_REFUNDS_PER_MINUTE * 60 * MONTH_HOURS * (unpaid + request(1, 1, 64));
-  console.log(`  cost  heaviest unpaid open $${unpaid.toFixed(6)} (priced at ${SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits} pipelines and ${SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands} commands; ${heaviestPipelines} and ${heaviestCommands} measured at the heaviest), counted-only $${counted.toFixed(6)}; the shared count's unpaid opens $${readMonth.toFixed(2)} a month; per instance (their number unknown, never zero): counts beyond them $${instanceMonth.toFixed(2)} and store refusals off the count $${restMonth.toFixed(2)} a month`);
+  // Rule 23 (9 November 2026, third pre-review): was the used hour and an unreadable count, two a minute; the resting hour,
+  // once used, is counted again a minute later too (SHORT_LINK_USED_UP_PAUSE_MS), three a minute.
+  const instanceMonth = (2 * HOUR / SHORT_LINK_USED_UP_PAUSE_MS + HOUR / SHORT_LINK_UNKNOWN_PAUSE_MS) * MONTH_HOURS * counted;
+  // Rule 23 (9 November 2026, third pre-review): was SHORT_LINK_REST_REFUNDS_PER_MINUTE * 60 an hour on each instance (one a
+  // minute off the shared count, their number unknown), each the heaviest unpaid open and a SET. Opens of resting stores are now
+  // counted in the resting hour every instance shares, SHORT_LINK_REST_UNPAID_PER_HOUR an hour site-wide, each at the heaviest
+  // unpaid open, which holds the SET of the resting mark.
+  const restMonth = SHORT_LINK_REST_UNPAID_PER_HOUR * MONTH_HOURS * unpaid;
+  console.log(`  cost  heaviest unpaid open $${unpaid.toFixed(6)} (priced at ${SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits} pipelines and ${SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands} commands; ${heaviestPipelines} and ${heaviestCommands} measured at the heaviest), counted-only $${counted.toFixed(6)}; the shared count's unpaid opens $${readMonth.toFixed(2)} a month; the resting hour's opens $${restMonth.toFixed(2)} a month; per instance (their number unknown, never zero): counts beyond them $${instanceMonth.toFixed(2)} a month`);
   // Rule 23 (9 November 2026): was "under $15" ($14.13 measured); the heaviest open is now priced at 9 waits and 16 commands
   // instead of 8 and 12 (an open its store does not pay for is counted in the hour again), $15.80 measured.
   // Rule 23 (9 November 2026, second pre-review): was "under $16" ($15.80, 60 an hour at 9 waits and 16 commands); now 60 + 20
   // an hour at the heaviest measured with its room, 11 waits and 21 commands: $25.17 measured.
-  is("the shared count's unpaid opens stay under $26 a month", readMonth < 26, true);
-  is("one instance's counts beyond them stay under $6 a month", instanceMonth < 6, true);
-  // Rule 23 (9 November 2026, second pre-review): was "under $20" ($18.41 at 9 waits and 16 commands); each is now priced at
-  // the heaviest measured with its room, 11 waits and 21 commands: $21.49 measured.
-  is("one instance's store opens off the count stay under $22 a month", restMonth < 22, true);
+  // Rule 23 (9 November 2026, third pre-review): was "under $26" ($25.17 at 11 waits and 21 commands); a resting store's first
+  // open past the resting hour is counted in the shared hour again, so the heaviest is measured at 10 pipelines and 19 commands,
+  // priced with its room at 12 and 23: $27.16 measured.
+  is("the shared count's unpaid opens stay under $28 a month", readMonth < 28, true);
+  // Rule 23 (9 November 2026, third pre-review): was "under $6" (two counts a minute); three a minute now: $8.09 measured.
+  is("one instance's counts beyond them stay under $9 a month", instanceMonth < 9, true);
+  // Rule 23 (9 November 2026, third pre-review): was "one instance's store opens off the count stay under $22 a month" ($21.49,
+  // per instance, their number unknown). They are now the resting hour every instance shares, a site-wide figure,
+  // SHORT_LINK_REST_UNPAID_PER_HOUR an hour at 12 waits and 23 commands: $40.75 measured, for every instance together.
+  is("the resting hour's opens, for every instance together, stay under $42 a month", restMonth < 42, true);
   // Rule 23 (9 November 2026): was 6 (count 2, reads 3, DECR 1); now the resting mark's GET and the refund's EXPIRE are sent too.
   is("a paid open's own commands, held in the store's unit (tests/plan-cost-registry.test.ts)", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REST_COMMANDS + SHORT_LINK_REFUND_COMMANDS, 8);
   // The company's cost is held in the test registry, unreviewed: priced above zero, its ceiling unknown, never zero.
@@ -271,6 +285,10 @@ async function main(): Promise<void> {
     SHORT_LINK_UNPAID_COMPANY_COST.reviewedMonthlyUsdCents,
     SHORT_LINK_UNPAID_COMPANY_COST.approvedCeiling,
   ], [SHORT_LINK_UNPAID_PER_HOUR, true, null, false]);
+  // Added 9 November 2026 (third pre-review): the resting hour is held beside it, priced above zero, site-wide, the number of instances unknown.
+  is("the resting hour is held in the registry, priced above zero, its instances unknown", [
+    SHORT_LINK_UNPAID_COMPANY_COST.restPerHour, restMonth > 0, SHORT_LINK_UNPAID_COMPANY_COST.instances,
+  ], [SHORT_LINK_REST_UNPAID_PER_HOUR, true, null]);
   // It is not a line of lib/llc-fixed-costs.ts: those lines enter CURRENT_COMMERCIAL_TERMS, which only the owner changes.
   const ids = (list: readonly { id: string }[] | readonly string[]) => list.map((x) => (typeof x === "string" ? x : x.id));
   is("nothing that feeds the commercial terms names it", [

@@ -7,9 +7,10 @@
  *             can answer again stays refused for more than 45 minutes, not the 10 the design gives.
  */
 import { addLink } from "@/lib/short-links";
-import { claimHandle, ensureStatsId, storeForEmail, storeFolder } from "@/lib/store";
+import { claimHandle, ensureStatsId, setSubscription, storeForEmail, storeFolder } from "@/lib/store";
 import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
+import { SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNPAID_PER_HOUR } from "@/lib/short-link-open-rules";
 import { answering } from "./security/next-headers";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -18,8 +19,11 @@ type Command = (string | number)[];
 const HOUR = 3_600_000;
 let tiredFolders = new Set<string>();
 const real = redis.pipeline.bind(redis);
+let connectionOver = false;
 redis.pipeline = (async (batch: Command[]) => {
+  commands.push(...batch.map((c) => c.map(String)));
   const values = await real(batch);
+  if (connectionOver && batch.some((c) => c[0] === "HINCRBY" && String(c[1]).startsWith("nl:traffic:c:"))) return [1_000_000_000, 1];
   return batch.map((c, i) => (c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:") && [...tiredFolders].some((f) => String(c[1]).includes(f)) ? 1_000_000_000 : values[i]));
 }) as typeof redis.pipeline;
 const realNow = Date.now;
@@ -28,23 +32,28 @@ Date.now = () => realNow() + shift;
 const later = (ms: number) => { shift += ms; advance(ms); };
 let n = 0;
 const fresh = () => `198.51.${Math.floor(n / 250)}.${(n++ % 250) + 1}`;
-const open = async (code: string) => {
-  const request = new Request(`https://marktmorgen.com/l/${code}?q=${n}`, { headers: { "x-forwarded-for": fresh() } });
+let commands: string[][] = [];
+const open = async (code: string, address = fresh()) => {
+  const request = new Request(`https://marktmorgen.com/l/${code}?q=${n}`, { headers: { "x-forwarded-for": address } });
   answering(request);
-  try { const r = await GET(request as never, { params: Promise.resolve({ code }) }); return { status: r.status, to: r.headers.get("location"), text: r.status === 302 ? "" : await r.text() }; } finally { answering(null); }
+  try {
+    const r = await GET(request as never, { params: Promise.resolve({ code }) });
+    return { status: r.status, to: r.headers.get("location"), text: r.status === 302 ? "" : await r.text(), retry: Number(r.headers.get("retry-after")), language: r.headers.get("content-language") };
+  } finally { answering(null); }
 };
 async function store(email: string, handle: string) {
   if (!(await storeForEmail(email))) { await claimHandle(email, handle, handle, ""); await ensureStatsId(email); }
   const s = (await storeForEmail(email))!;
   return { s, folder: await storeFolder(email) };
 }
-async function link(s: { sid: string; statsId?: string }, name: string) {
+async function link(s: { sid: string; statsId?: string | null }, name: string) {
   const made = await addLink({ sid: s.sid, statsId: s.statsId! }, { name, place: "instagram", target: { kind: "store" } }, () => false, 1000);
   if (!made.ok) throw new Error("no link " + name);
   return made.link.code;
 }
 const startOfHour = () => later(HOUR - (Date.now() % HOUR) + 1_000);
 const hourCount = async () => Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0]);
+const restCount = async () => Number((await redis.pipeline([["GET", `nl:slink:tired:${Math.floor(Date.now() / HOUR)}`]]))[0]);
 
 async function main() {
   part("A1 one store over its own requests, 93 links, 3 distinct opens a minute, pauses another store's link");
@@ -99,6 +108,87 @@ async function main() {
   }
   console.log(`  B minutes until the store that can answer again opens: ${firstOpen < 0 ? ">45" : firstOpen}`);
   is("B: it opens within the 10 minutes the design gives (SHORT_LINK_TIRED_MAX_MS)", firstOpen > 0 && firstOpen <= 11, true);
+
+  // Everything below was added with the fix (9 November 2026).
+  part("A resting store's opens are counted in the resting hour, within its figure, never in the shared one");
+  redis.clear(); forgetShortLinkOpenMemory(); tiredFolders = new Set();
+  startOfHour();
+  const v = await store("v@example.com", "victor");
+  const vcodes: string[] = [];
+  for (let i = 0; i < 5; i += 1) vcodes.push(await link(v.s, `v${i}`));
+  tiredFolders.add(v.folder);
+  for (const c of vcodes) await open(c);
+  is("five first opens: the resting hour holds them, the shared hour none", [await restCount(), await hourCount()], [5, 0]);
+  is("the figures: the resting hour has its own, larger than the shared one", SHORT_LINK_REST_UNPAID_PER_HOUR > SHORT_LINK_UNPAID_PER_HOUR, true);
+
+  part("Past the resting hour's figure, a resting store's first opens go back to the shared hour, so every read stays counted");
+  await redis.pipeline([["SET", `nl:slink:tired:${Math.floor(Date.now() / HOUR)}`, String(SHORT_LINK_REST_UNPAID_PER_HOUR)]]);
+  const w1 = await link(v.s, "w1");
+  const w2 = await link(v.s, "w2");
+  is("one more first open past it: refused, and counted in the shared hour", [(await open(w1)).status, await hourCount()], [503, 1]);
+  commands = [];
+  is("the next, with the resting hour known used here: left in the shared hour, nothing sent to the resting one", [
+    (await open(w2)).status, await hourCount(), commands.some((c) => c[1]?.startsWith("nl:slink:tired:")),
+  ], [503, 2, false]);
+
+  part("The resting hour used, a store due to be asked again rests here until this instance counts again, nothing sent");
+  later(SHORT_LINK_TIRED_MS + 1);
+  commands = [];
+  const usedRest = await open(vcodes[0]);
+  const after = commands.length;
+  commands = [];
+  const quietRest = await open(vcodes[1]);
+  is("asked once, refused, the resting hour still used", [usedRest.status, after > 0], [503, true]);
+  is("then refused from memory, nothing sent, and told to come back when this instance counts again", [quietRest.status, commands.length, quietRest.retry > 0 && quietRest.retry <= 60], [503, 0, true]);
+
+  part("A refusal's Retry-After is the time it will really last");
+  redis.clear(); forgetShortLinkOpenMemory(); tiredFolders = new Set();
+  startOfHour();
+  const x = await store("x@example.com", "xray");
+  const xcode = await link(x.s, "reel");
+  tiredFolders.add(x.folder);
+  const firstTired = await open(xcode);
+  is("found resting: Retry-After is the minute it is kept", firstTired.retry, SHORT_LINK_TIRED_MS / 1000);
+  later(20_000);
+  is("20 seconds later, from memory: the 40 seconds left", (await open(xcode)).retry, 40);
+  later(41_000);
+  await open(xcode); // asked again, still resting: kept twice as long
+  is("asked again and still resting: two minutes", (await open(xcode)).retry <= 2 * SHORT_LINK_TIRED_MS / 1000 && (await open(xcode)).retry > SHORT_LINK_TIRED_MS / 1000, true);
+  is("never more than the longest it is kept", SHORT_LINK_TIRED_MAX_MS, 600_000);
+
+  part("A refusal names its language, and spells out the time zone (WCAG 3.1.4)");
+  redis.clear(); forgetShortLinkOpenMemory(); tiredFolders = new Set();
+  startOfHour();
+  const yankee = await store("y@example.com", "yankee");
+  const ycode = await link(yankee.s, "reel");
+  const greedy = fresh();
+  connectionOver = true;
+  let told: Awaited<ReturnType<typeof open>> | null = null;
+  for (let i = 0; i < 6 && !told; i += 1) { const r = await open(ycode, greedy); if (r.status === 429) told = r; }
+  connectionOver = false;
+  is("the connection's refusal is in US English, says Coordinated Universal Time, and promises nothing about other people", [
+    told?.language, /UTC \(Coordinated Universal Time\)/.test(told?.text ?? ""), /other people/i.test(told?.text ?? ""),
+  ], ["en-US", true, false]);
+  is("the tired refusal names its language too", (tiredFolders.add(yankee.folder), forgetShortLinkOpenMemory(), (await open(ycode)).language), "en-US");
+
+  part("A connection's refusal is forgotten when the store's window renews before the day ends");
+  redis.clear(); forgetShortLinkOpenMemory(); tiredFolders = new Set();
+  // 01:00 UTC, so the day has 23 hours left; the store's trial window ends in two hours.
+  later(86_400_000 - (Date.now() % 86_400_000) + HOUR);
+  const z = await store("z@example.com", "zulu");
+  await setSubscription("z@example.com", { customerId: "cus_SloZulu00001", subscriptionId: "sub_SloZulu00001", active: true, tier: "pro", cycle: "month", trialEnds: Math.floor(Date.now() / 1000) + 2 * 3600, period: null });
+  const zcode = await link((await storeForEmail("z@example.com"))!, "reel");
+  const zgreedy = fresh();
+  connectionOver = true;
+  let zt: Awaited<ReturnType<typeof open>> | null = null;
+  for (let i = 0; i < 6 && !zt; i += 1) { const r = await open(zcode, zgreedy); if (r.status === 429) zt = r; }
+  connectionOver = false;
+  is("told to come back when the window renews, two hours away, not the day's end", zt !== null && zt.retry <= 2 * 3600 && zt.retry > 3600, true);
+  later(2 * HOUR + 1_000);
+  commands = [];
+  await open(zcode, zgreedy);
+  is("once it renewed, the connection is asked again, not refused from memory", commands.length > 0, true);
+  void z;
   done();
 }
 main();

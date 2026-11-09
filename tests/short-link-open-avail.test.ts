@@ -24,6 +24,7 @@ import { CODE_LETTERS } from "@/lib/short-link-rules";
 import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
 import { NOT_A_COST, SHORT_LINK_UNPAID_COMPANY_COST } from "./plan-cost-registry";
+import { SHORT_LINK_REST_UNPAID_PER_HOUR } from "@/lib/short-link-open-rules";
 import { answering } from "./security/next-headers";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -168,7 +169,10 @@ async function main(): Promise<void> {
   is("503, sent nowhere", [failed.status, failed.to], [503, null]);
   is("never kept by the CDN", failed.cache.includes("no-store"), true);
 
-  part("(vii) Added with the fix: one store refusal a minute per instance stays off the hour; past it, refusals are counted");
+  // Rule 23 (9 November 2026, third pre-review): was "one store refusal a minute per instance stays off the hour; past it,
+  // refusals are counted". A refusal of a store over its own requests is now counted in the resting hour every instance
+  // shares, never the shared one, within SHORT_LINK_REST_UNPAID_PER_HOUR (tests/short-link-open-prerev3.test.ts).
+  part("(vii) Added with the fix: a store over its own requests is refused off the shared hour, in the resting hour");
   reset();
   topOfHour();
   const tiredOne = await make("h@example.com", "hotel");
@@ -179,9 +183,16 @@ async function main(): Promise<void> {
   is("it is off the hour's count", Number((await redis.pipeline([["GET", hourKey]]))[0]), 0);
   is("a second store's refusal in the same minute", (await open(tiredTwo)).status, 503);
   inject = null;
-  is("it is counted in the hour, so the minute's company cost stays one refusal", Number((await redis.pipeline([["GET", hourKey]]))[0]), 1);
-  const hold = SHORT_LINK_UNPAID_COMPANY_COST as unknown as { perInstance: Record<string, number> };
-  is("the per-instance ceiling is registered", [hold.perInstance.restRefusalsPerMinute, hold.perInstance.restRefusalReads, hold.perInstance.restMarkSets, hold.perInstance.restMarkMs], [1, 1, 1, 60_000]);
+  // Rule 23 (9 November 2026, third pre-review): was "it is counted in the hour, so the minute's company cost stays one
+  // refusal" (1); both refusals are now in the resting hour, so the shared hour holds neither.
+  is("it is off the shared hour too, and both are in the resting hour", [
+    Number((await redis.pipeline([["GET", hourKey]]))[0]), Number((await redis.pipeline([["GET", `nl:slink:tired:${Math.floor(Date.now() / HOUR)}`]]))[0]),
+  ], [0, 2]);
+  // Rule 23 (9 November 2026, third pre-review): was perInstance.restRefusalsPerMinute, restRefusalReads, restMarkSets and
+  // restMarkMs ([1, 1, 1, 60_000]); the per-minute refusal is gone, and the resting hour is registered site-wide.
+  is("the resting hour's ceiling is registered", [
+    SHORT_LINK_UNPAID_COMPANY_COST.restPerHour, SHORT_LINK_UNPAID_COMPANY_COST.restRefusalReads, SHORT_LINK_UNPAID_COMPANY_COST.restMarkSets, SHORT_LINK_UNPAID_COMPANY_COST.restMarkMs,
+  ], [SHORT_LINK_REST_UNPAID_PER_HOUR, 1, 1, 60_000]);
 
   part("(vi) The company's share is per instance; the number of instances is unknown, never zero");
   const held = SHORT_LINK_UNPAID_COMPANY_COST as unknown as Record<string, unknown>;

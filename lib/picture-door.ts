@@ -44,10 +44,11 @@ import { essentialLimitState, type LimitState } from "@/lib/request-guard";
  * that list (takePictureDoor), and the course job's sweep (sweepPictureDoors)
  * deletes one only when its own ZREM did, PICTURE_SWEEP_AFTER_SECONDS (30
  * days, owner decision DONO-8 of 9 November 2026) after its door, only while
- * its store's note is still there (the code before this list took a picture
- * off the store's list only, so a picture with no store note was taken, and
- * is kept), and only once the file itself was read and was stored after that
- * door's note.
+ * its store's note is still there at that door's very time (the code before
+ * this list took a picture off the store's list only, so a picture with no
+ * store note was taken, and is kept; and its own late note, at another time,
+ * may have landed after the take, so that picture is kept too), and only once
+ * the file itself was read and was stored after that door's note.
  * One ZREM answers 1 once, so an attach and the sweep never both win a
  * picture: a picture the sweep deleted was never put on a product, a link or
  * a page. A buyer's review photo, an email's picture and a picture put on
@@ -305,6 +306,10 @@ export async function dropTakenPictures(taken: Map<string, number>, paths: strin
  *     picture with no store note was taken there (after a rollback; Claude 2 on #3347 @1eef9e91e1) and is kept,
  *     its file left (storage, never a picture deleted from under a record); a store note read in another shape is
  *     unknown, and the picture is put back for the next run;
+ *   - that store note has the very score of its note on the list of unclaimed pictures: this code's door writes both
+ *     at one time, so a store note at another time was written by the earlier code (a late door for the same name,
+ *     possibly landing after the picture was put on; Claude 2 on #3347 @ca5c7b6214), and the picture is kept and not
+ *     put back (the next run would read the same note);
  *   - its file, read with `look` (the file store's head), was stored strictly after its note, as dropTakenPictures
  *     checks: a file stored before it is not that door's upload, and is kept;
  *   - a file check that fails or answers in another shape is unknown, never "unused": the picture is put back for the
@@ -377,14 +382,25 @@ export async function sweepPictureDoors(
       await putBack(won, "store notes unknown");
       continue;
     }
-    const stillNoted = won.filter((_, i) => notes[i] !== null && scoreOf(notes[i]) !== null);
-    const oddNotes = won.filter((_, i) => notes[i] !== null && scoreOf(notes[i]) === null);
-    const unnoted = won.length - stillNoted.length - oddNotes.length;
+    // Only a store note at the very time of the note on the list of unclaimed pictures is that door's: this code's
+    // door writes both at one time, and a store note at another time is the earlier code's, possibly landing after
+    // the picture was put on (Claude 2 on #3347 @ca5c7b6214). Such a picture is kept and not put back: the next run
+    // would read the same note, and a file kept is storage, never a picture deleted from under a record.
+    const kinds = won.map(([, noted], i) => {
+      if (notes[i] === null) return "none";
+      const at = scoreOf(notes[i]);
+      return at === null ? "odd" : at === noted ? "noted" : "other";
+    });
+    const stillNoted = won.filter((_, i) => kinds[i] === "noted");
+    const oddNotes = won.filter((_, i) => kinds[i] === "odd");
+    const otherTime = kinds.filter((kind) => kind === "other").length;
+    const unnoted = kinds.filter((kind) => kind === "none").length;
     if (oddNotes.length) {
       console.error(`${oddNotes.length} unclaimed pictures: their store notes came back in another shape, so they are kept and put back for the next run`);
       await putBack(oddNotes, "store note unknown");
     }
     if (unnoted) console.error(`${unnoted} unclaimed pictures: no longer on their store's list (taken there), so they are kept`);
+    if (otherTime) console.error(`${otherTime} unclaimed pictures: their store notes were written at another time than their door's, so they are kept`);
     if (stillNoted.length === 0) continue;
     // Each file read before anything is deleted: stored after its note is the door's own upload, never taken.
     const read = await Promise.all(stillNoted.map(([path, noted]) => look(path).then(

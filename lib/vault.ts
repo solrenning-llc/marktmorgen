@@ -46,6 +46,7 @@ import {
   PIECE_BYTES,
   PIECE_SECONDS,
   UPLOAD_SECONDS,
+  VAULT_LIST_PAGES,
   isVaultPath,
   pieceCount,
   pieceSize,
@@ -500,7 +501,7 @@ export async function vaultHeld(folder: string): Promise<number | null> {
   let cursor: string | undefined;
   const seen = new Set<string>();
   const paths = new Set<string>();
-  for (let page = 0; page < 20; page += 1) {
+  for (let page = 0; page < VAULT_LIST_PAGES; page += 1) {
     const answer = await listVault(`vault/${folder}/`, cursor);
     if (!answer) return null;
     for (const file of answer.files) {

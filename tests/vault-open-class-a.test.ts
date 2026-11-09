@@ -29,7 +29,7 @@ import { store } from "./redis-stub";
 import { abortReservedVault, closeReservedVault, openReservedVault } from "@/lib/vault-storage";
 import { storageBrakeFor } from "@/lib/storage-quota";
 import { UPLOAD_OPEN_CLASS_A_OPS, UPLOAD_OPEN_CLASS_B_OPS } from "@/lib/spend-cost-table";
-import { UPLOAD_SECONDS } from "@/lib/vault-rules";
+import { UPLOAD_SECONDS, VAULT_LIST_PAGES } from "@/lib/vault-rules";
 
 // The atomic scripts of lib/storage-reservations.ts, as tests/storage-reservations.test.ts stands them in.
 const original = store.run.bind(store);
@@ -50,7 +50,7 @@ const BUCKET = "sold-files";
 const ORIGIN = `https://${ACCOUNT}.r2.cloudflarestorage.com`;
 const FOLDER = "abcdef0123456789abcdef0123456789";
 const OLD_PATH = `vault/${FOLDER}/oldproduct/0011223344556677-old.zip`;
-const LIST_PAGES = 20;
+const LIST_PAGES = VAULT_LIST_PAGES;
 
 process.env.R2_ACCOUNT_ID = ACCOUNT;
 process.env.R2_ACCESS_KEY_ID = "a-stand-in-access-key-id";

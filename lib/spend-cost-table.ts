@@ -18,6 +18,7 @@
  *   https://developers.cloudflare.com/r2/pricing/
  *   https://upstash.com/pricing/redis (the Upstash transfer and storage rates)
  */
+import { VAULT_LIST_PAGES, VAULT_MEASURE_REQUESTS } from '@/lib/vault-rules';
 export const COST_TABLE_VERSION = 'cost-table-2026-10-17';
 
 type RateTier = { readonly upToInputTokens: number; readonly inputMicroUsdPerMTok: number; readonly outputMicroUsdPerMTok: number };
@@ -92,17 +93,23 @@ export const R2_CLASS_B_MICRO_USD_PER_MILLION = 360_000;
 
 /** Upload doors (lib/upload-budget.ts): each request is a function call held
  * at 2 GB for up to 10 seconds with one CPU-second and twenty database
- * commands. An upload start is allowed twenty Class A operations (create,
- * complete, abort and the storage listing pages that admission reads) and two
- * Class B; each signed piece is one Class A part upload. */
+ * commands. An upload start is priced at the R2 operations its own path makes
+ * at most (app/api/store/vault: open, done, abort; held by
+ * tests/vault-open-class-a.test.ts). Class A: every page of the vault listing
+ * that admission reads (VAULT_LIST_PAGES), CreateMultipartUpload and
+ * CompleteMultipartUpload; AbortMultipartUpload and DeleteObject are free.
+ * Class B: three file measurements (VAULT_MEASURE_REQUESTS each, a HEAD and a
+ * ranged GET): the expired session admission retires, the completion, and a
+ * cancellation after a completion whose measurement could not be read. Each
+ * signed piece is one Class A part upload. */
 export const UPLOAD_REQUEST_WAIT_SECONDS = 10;
 export const UPLOAD_REQUEST_INFRA_MICRO_USD = Number(
   ceilDiv(BigInt(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR * VERCEL_FUNCTION_GB * UPLOAD_REQUEST_WAIT_SECONDS), BigInt(3600))
   + ceilDiv(BigInt(VERCEL_CALL_MICRO_USD_PER_MILLION), BigInt(1_000_000))
   + ceilDiv(BigInt(VERCEL_CPU_MICRO_USD_PER_HOUR), BigInt(3600))
   + ceilDiv(BigInt(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS * 20), BigInt(1_000_000)));
-export const UPLOAD_OPEN_CLASS_A_OPS = 20;
-export const UPLOAD_OPEN_CLASS_B_OPS = 2;
+export const UPLOAD_OPEN_CLASS_A_OPS = VAULT_LIST_PAGES + 2;
+export const UPLOAD_OPEN_CLASS_B_OPS = 3 * VAULT_MEASURE_REQUESTS;
 /** Requests an upload start brings besides itself: completing and canceling it. */
 export const UPLOAD_REQUESTS_PER_OPEN = 3;
 

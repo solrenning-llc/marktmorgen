@@ -1002,8 +1002,11 @@ export const COST_LINES: CostLine[] = [
     id: "uploads",
     feature: "Upload operations",
     monthlyUsd: (tier) => micro(uploadWorstCostMicroUsd(tier)),
-    sources: [{ file: "lib/upload-budget-policy.ts", names: ["uploadWorstCostMicroUsd", "PAID_UPLOAD_OPENS"] }],
-    basis: "Every upload operation the automatic upload allowance can start.",
+    sources: [
+      { file: "lib/upload-budget-policy.ts", names: ["uploadWorstCostMicroUsd", "PAID_UPLOAD_OPENS"] },
+      { file: "lib/spend-cost-table.ts", names: ["UPLOAD_OPEN_CLASS_A_OPS", "UPLOAD_OPEN_CLASS_B_OPS", "VAULT_LIST_PAGES", "VAULT_MEASURE_REQUESTS"] },
+    ],
+    basis: "Every upload operation the automatic upload allowance can start, each start priced at the most R2 operations its own path makes: every page of the vault listing admission reads, the multipart create and complete, and three file measurements (tests/vault-open-class-a.test.ts).",
   },
   {
     id: "workflows",

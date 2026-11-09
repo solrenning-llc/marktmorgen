@@ -108,6 +108,19 @@ export const PIECES_PER_ASK = 8;
 export const PIECE_SECONDS = 60 * 60;
 /** How long an upload may take from its first piece to its last. */
 export const UPLOAD_SECONDS = 24 * 60 * 60;
+/**
+ * How many pages of a store's vault listing a measurement of what it keeps
+ * reads at most (lib/vault.ts, vaultHeld), a thousand names to a page. Each
+ * page is one ListObjectsV2, a Class A operation on R2; the cost table
+ * prices an upload start from this (lib/spend-cost-table.ts).
+ */
+export const VAULT_LIST_PAGES = 20;
+/**
+ * Requests one measurement of a file makes at most (lib/vault.ts, headVault):
+ * a HEAD, and a one-byte ranged GET when the answer states no plain length.
+ * Both are Class B operations on R2.
+ */
+export const VAULT_MEASURE_REQUESTS = 2;
 
 /** How many pieces a file of this size goes up in. A file of one piece or less goes up whole. */
 export function pieceCount(bytes: number): number {

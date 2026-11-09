@@ -12,14 +12,16 @@
  *     send (reserveMoved): nothing else can use them first, what the import does not send is given back when it ends,
  *     is canceled or does not start, and a plan whose month can send nothing (a funded period not reserved) refuses;
  *   - that count is read exactly (CX-123 rule 24): any other reply refuses the start, with nothing started;
+ *   - an upload left before its last batch gives its hold back once it is given up (the five-minute job, past
+ *     RECEIVING_MS), exactly once, and takes no more rows near that time, so what it held is never used twice;
  *   - a reminder refused by a full month is tried once more when the month opens again, while that is still before
  *     the renewal date, and is never sent twice.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { addRows, cancelImport, finishUpload, reserveMoved, runImport, sendMoveReminders, startImport, storeImports } from "@/lib/imports";
+import { addRows, advanceImports, cancelImport, finishUpload, reserveMoved, runImport, sendMoveReminders, startImport, storeImports } from "@/lib/imports";
 import { moveCounts } from "@/lib/move-members";
 import { allowanceWindow } from "@/lib/allowance-window";
-import { monthlyAllowance } from "@/lib/mail";
+import { monthlyAllowance, takeFromMonth } from "@/lib/mail";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -42,6 +44,20 @@ const realNow = Date.now;
 const setClock = (ms: number) => {
   Date.now = () => ms;
 };
+
+/** Answers the command `match` picks with `reply` while `fn` runs: the command still runs, only its reply is replaced. */
+async function withReply<T>(match: (command: (string | number)[]) => boolean, reply: unknown, fn: () => Promise<T>): Promise<T> {
+  const pipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = (await pipeline(commands)) as unknown[];
+    return commands.map((c, i) => (match(c) ? reply : replies[i]));
+  }) as typeof redis.pipeline;
+  try {
+    return await fn();
+  } finally {
+    redis.pipeline = pipeline;
+  }
+}
 
 /**
  * Answers every read or count of a key starting with `prefix` (GET, INCRBY) with `reply` while `fn` runs, whichever
@@ -209,6 +225,73 @@ async function main(): Promise<void> {
     [false, "emails_month", 0],
   );
   is("nothing is invited, emailed or listed", [(await moveCounts((await storeForEmail(FUNDED))!)).invited, emails.length - sentBefore, (await storeImports((await storeForEmail(FUNDED))!)).length], [0, 0, 0]);
+
+  part("An upload left before its last batch gives its hold back (review on #3384, next unit)");
+  const LEFT = "r46e-left@example.com";
+  const leftStore = await creatorStore(LEFT, "r46left", { tier: "pro", period: paidPeriod() });
+  const leftAllowance = monthlyAllowance(leftStore);
+  const leftWindow = allowanceWindow(leftStore)!;
+  const leftList = (await ensureListId(LEFT))!.listId!;
+  const leftUsed = `nl:mail:used:${leftList}:${leftWindow.id}`;
+  await redis.pipeline([["SET", leftUsed, String(leftAllowance - 10)]]);
+  const usedNow = async () => (await redis.pipeline([["GET", leftUsed]]))[0];
+  const startedAt = Date.now();
+  const leftStart = await startImport((await storeForEmail(LEFT))!, LEFT, "members", { expected: 10, file: "patrons.csv", stopped: true });
+  is("Studio: 10 members with 10 monthly emails left starts", leftStart.ok, true);
+  const leftId = leftStart.ok ? leftStart.job.id : "";
+  await addRows((await storeForEmail(LEFT))!, leftId, memberRows(4, in10, "left"));
+  is("while its upload is under way, a newsletter cannot take one of the 10", await takeFromMonth((await storeForEmail(LEFT))!, 1), 0);
+  setClock(startedAt + 60 * 60_000);
+  await advanceImports(Date.now() + 30_000);
+  is("an hour on, the five-minute job keeps the hold of an upload still under way", [await usedNow(), (await storeImports((await storeForEmail(LEFT))!))[0]?.state], [String(leftAllowance), "receiving"]);
+  const goesOn = await addRows((await storeForEmail(LEFT))!, leftId, memberRows(2, in10, "later"));
+  is("and the upload goes on", goesOn.ok, true);
+  setClock(startedAt + 5 * 60 * 60_000);
+  is("five hours on, before the five-minute job, a newsletter still cannot send", await takeFromMonth((await storeForEmail(LEFT))!, 1), 0);
+  await advanceImports(Date.now() + 30_000);
+  is("five hours on, the five-minute job has given up the upload", (await storeImports((await storeForEmail(LEFT))!))[0]?.state, "canceled");
+  is("and given back all 10 it held", await usedNow(), String(leftAllowance - 10));
+  is("so a newsletter can send again", await takeFromMonth((await storeForEmail(LEFT))!, 1), 1);
+  await advanceImports(Date.now() + 30_000);
+  is("a second pass gives nothing back twice", await usedNow(), String(leftAllowance - 9));
+  const lateRows = await addRows((await storeForEmail(LEFT))!, leftId, memberRows(1, in10, "after"));
+  const lateFinish = await finishUpload((await storeForEmail(LEFT))!, leftId);
+  is("the page coming back can neither add rows nor finish it", [lateRows.ok, lateFinish.ok], [false, false]);
+  is("nobody was invited or emailed", [(await moveCounts((await storeForEmail(LEFT))!)).invited, emails.filter((e) => /^(left|later|after)\d/.test(to(e))).length], [0, 0]);
+  const again = await startImport((await storeForEmail(LEFT))!, LEFT, "members", { expected: 9, file: "patrons.csv", stopped: true });
+  is("the store's slot is free: a 9-member file starts on the 9 left", again.ok, true);
+  if (again.ok) await cancelImport((await storeForEmail(LEFT))!, again.job.id);
+
+  const LEFTSTORE = "r46e-leftstore@example.com";
+  await creatorStore(LEFTSTORE, "r46lefts", { period: paidPeriod() });
+  const storeLeftAt = Date.now();
+  const storeLeft = await startImport((await storeForEmail(LEFTSTORE))!, LEFTSTORE, "members", { expected: 20, file: "patrons.csv", stopped: true });
+  is("Store: 20 members start and hold all 20", [storeLeft.ok, await reserveMoved((await storeForEmail(LEFTSTORE))!, 1)], [true, 0]);
+  setClock(storeLeftAt + 3 * 60 * 60_000);
+  // The job's SET answered in another shape: the step is logged as failed (runImport), and what the upload held is
+  // not given back, since the job may still hold it.
+  await withReply((c) => String(c[0]).toUpperCase() === "SET" && storeLeft.ok && String(c[1]) === `nl:import:${storeLeft.job.id}`, "QUEUED", () => advanceImports(Date.now() + 30_000)).catch(() => undefined);
+  is("Store: the give-up's save answering in another shape gives nothing back (rule 24)", await reserveMoved((await storeForEmail(LEFTSTORE))!, 1), 0);
+  const sweptLeft = (await storeImports((await storeForEmail(LEFTSTORE))!))[0];
+  is("Store: and the five-minute job did reach it", sweptLeft?.state, "canceled");
+
+  const LEFTOK = "r46e-leftok@example.com";
+  await creatorStore(LEFTOK, "r46leftok", { period: paidPeriod() });
+  const okAt = Date.now();
+  const okLeft = await startImport((await storeForEmail(LEFTOK))!, LEFTOK, "members", { expected: 20, file: "patrons.csv", stopped: true });
+  const okId = okLeft.ok ? okLeft.job.id : "";
+  await addRows((await storeForEmail(LEFTOK))!, okId, memberRows(3, in10, "near"));
+  setClock(okAt + 2 * 60 * 60_000 - 5 * 60_000);
+  const nearEnd = await addRows((await storeForEmail(LEFTOK))!, okId, memberRows(1, in10, "nearer"));
+  is("Store: near the time an upload is given up, it takes no more rows", [nearEnd.ok, (nearEnd as { reason?: string }).reason], [false, "state"]);
+  const nearFinish = await finishUpload((await storeForEmail(LEFTOK))!, okId);
+  is("and is not finished, so what it held is never sent after it is given back", [nearFinish.ok, (nearFinish as { reason?: string }).reason], [false, "state"]);
+  setClock(okAt + 3 * 60 * 60_000);
+  await advanceImports(Date.now() + 30_000);
+  is("Store control: given up with its save confirmed, all 20 come back", [okLeft.ok, await reserveMoved((await storeForEmail(LEFTOK))!, 20)], [true, 20]);
+  is("and none of its members was invited or emailed", [(await moveCounts((await storeForEmail(LEFTOK))!)).invited, emails.filter((e) => /^near/.test(to(e))).length], [0, 0]);
+  // The clock runs on again from where it was, so the reminders below read the same day.
+  Date.now = () => fixedStart + (realNow() - realStart);
 
   part("A reminder refused by a full month waits for the month to open again");
   const RE = "r46e-remind@example.com";

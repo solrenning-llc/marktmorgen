@@ -33,6 +33,14 @@
  * needs more is refused whole (CalendarTooComplex), never read in part: a
  * reading cut short would show times as free that the calendar holds busy.
  *
+ * Each unit is bounded too, so the budget bounds time (Claude 2's review of
+ * #3339): the file may hold at most ICS_MAX_LINES lines, blocks nest at most
+ * MAX_DEPTH deep, a property we read is at most MAX_PROPERTY_CHARS long and a
+ * rule at most MAX_RULE_CHARS with MAX_RULE_ITEMS in each BYxxx list, a zone's
+ * yearly rules are read once into numbers, and every zone name looked up is
+ * charged by the formatters it builds. As a backstop, a reading still going
+ * after ICS_MAX_MS is refused the same way.
+ *
  * The busy stretches kept are capped too (maxIntervals, 2,000), and that cut is
  * by time, never by the order of the file: every stretch before a cutoff is
  * kept exactly, and everything from the cutoff to the end of the window is
@@ -72,11 +80,36 @@ const MAX_STEPS = 5000;
  * The work one whole file may cost, in units: one for each event with a start,
  * each step of a repeat, each date listed in EXDATE, RDATE or RECURRENCE-ID and
  * each conversion of a local time to an instant (one more for each rule of a
- * zone the file defines itself), and four for each zone name looked up. A
+ * zone the file defines itself), and ten for each formatter built to look up a
+ * zone name (one for a real name, up to four for one that names no zone). A
  * history of 6,000 single events costs about 12,000; at one formatter per zone
  * (lib/call-setup.ts partsIn) the whole budget is well under two seconds of CPU.
  */
 export const ICS_MAX_WORK = 100_000;
+
+/**
+ * The lines one file may hold, folded ones included: the first pass's budget.
+ * A 2 MB file of real events has 30,000 to 70,000 (FEED_MAX_BYTES in
+ * lib/calendar-sync.ts); a file of 2 MB of two-byte lines has 670,000.
+ */
+export const ICS_MAX_LINES = 200_000;
+
+/**
+ * The longest a reading may take, in milliseconds, whatever its units count:
+ * the backstop, well under the 20-second lock lib/calendar-sync.ts holds
+ * while it fetches (8 s at most) and reads a file.
+ */
+export const ICS_MAX_MS = 4_000;
+
+/** How deep blocks may nest: a real file nests three or four levels. */
+const MAX_DEPTH = 16;
+/** The longest property we read, unfolded, in characters (an EXDATE list of about 7,000 dates). */
+const MAX_PROPERTY_CHARS = 131_072;
+/** The longest repeat rule (RRULE), and the most items one of its BYxxx lists may hold. */
+const MAX_RULE_CHARS = 2048;
+const MAX_RULE_ITEMS = 400;
+/** Units for each formatter built to look up a zone name (lib/call-setup.ts isTimeZone). */
+const ZONE_LOOKUP_UNITS = 10;
 
 /**
  * A calendar file that needs more work than ICS_MAX_WORK, or a repeat that
@@ -225,49 +258,98 @@ const WINDOWS_ZONES: Record<string, string> = {
 
 // ---- Lines and properties ---------------------------------------------------
 
-/** Joins folded lines and splits each into its name, parameters and value. */
-function readProps(text: string): Prop[] {
-  const raw = text.replace(/^\uFEFF/, "").split(/\r\n|\n|\r/);
-  const lines: string[] = [];
-  for (const line of raw) {
-    if ((line.startsWith(" ") || line.startsWith("\t")) && lines.length) lines[lines.length - 1] += line.slice(1);
-    else if (line) lines.push(line);
-  }
+/** The properties the reading uses; every other line is passed over unparsed. */
+const READ_NAMES = new Set([
+  "BEGIN", "END", "X-WR-TIMEZONE", "TZID", "DTSTART", "DTEND", "DURATION", "TZOFFSETFROM", "TZOFFSETTO",
+  "RRULE", "UID", "RDATE", "EXDATE", "RECURRENCE-ID", "STATUS", "TRANSP",
+]);
+
+/**
+ * Joins folded lines and splits each the reading uses into its name,
+ * parameters and value, in one pass over the text: at most ICS_MAX_LINES
+ * lines, a property we read at most MAX_PROPERTY_CHARS long, and `overdue`
+ * asked every 1,024 lines.
+ */
+function readProps(text: string, overdue: () => void): Prop[] {
+  const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const props: Prop[] = [];
-  for (const line of lines) {
-    // The value starts after the first colon that is not inside quotes.
-    let quoted = false;
-    let colon = -1;
-    for (let i = 0; i < line.length; i += 1) {
-      const ch = line[i];
-      if (ch === '"') quoted = !quoted;
-      else if (ch === ":" && !quoted) {
-        colon = i;
-        break;
+  // The pieces of the line being unfolded.
+  let pieces: string[] = [];
+  const flush = () => {
+    if (!pieces.length) return;
+    const prop = readProp(pieces.length === 1 ? pieces[0] : pieces.join(""));
+    pieces = [];
+    if (prop) props.push(prop);
+  };
+  let lines = 0;
+  for (let i = 0; i <= body.length; ) {
+    let j = i;
+    while (j < body.length) {
+      const c = body.charCodeAt(j);
+      if (c === 10 || c === 13) break;
+      j += 1;
+    }
+    lines += 1;
+    if (lines > ICS_MAX_LINES) throw new CalendarTooComplex();
+    if ((lines & 1023) === 0) overdue();
+    if (j > i) {
+      const first = body.charCodeAt(i);
+      // A line that starts with a space or a tab continues the one before.
+      if ((first === 32 || first === 9) && pieces.length) pieces.push(body.slice(i + 1, j));
+      else {
+        flush();
+        pieces.push(body.slice(i, j));
       }
     }
-    if (colon <= 0) continue;
-    const head = line.slice(0, colon);
-    const value = line.slice(colon + 1);
-    const parts: string[] = [];
-    let current = "";
-    quoted = false;
-    for (const ch of head) {
-      if (ch === '"') quoted = !quoted;
-      if (ch === ";" && !quoted) {
-        parts.push(current);
-        current = "";
-      } else current += ch;
-    }
-    parts.push(current);
-    const params: Record<string, string> = {};
-    for (const part of parts.slice(1)) {
-      const eq = part.indexOf("=");
-      if (eq > 0) params[part.slice(0, eq).toUpperCase()] = part.slice(eq + 1).replace(/^"|"$/g, "");
-    }
-    props.push({ name: parts[0].toUpperCase(), params, value });
+    // CRLF, LF and CR each end a line.
+    i = j < body.length && body.charCodeAt(j) === 13 && body.charCodeAt(j + 1) === 10 ? j + 2 : j + 1;
   }
+  flush();
   return props;
+}
+
+/** One unfolded line as a property, or null when it is not one the reading uses. */
+function readProp(line: string): Prop | null {
+  // The name ends at the first ";" or ":"; a quote before either is in no name we read.
+  let end = 0;
+  while (end < line.length) {
+    const c = line.charCodeAt(end);
+    if (c === 59 || c === 58 || c === 34) break;
+    end += 1;
+  }
+  if (end >= line.length || line.charCodeAt(end) === 34 || !READ_NAMES.has(line.slice(0, end).toUpperCase())) return null;
+  if (line.length > MAX_PROPERTY_CHARS) throw new CalendarTooComplex();
+  // The value starts after the first colon that is not inside quotes.
+  let quoted = false;
+  let colon = -1;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') quoted = !quoted;
+    else if (ch === ":" && !quoted) {
+      colon = i;
+      break;
+    }
+  }
+  if (colon <= 0) return null;
+  const head = line.slice(0, colon);
+  const value = line.slice(colon + 1);
+  const parts: string[] = [];
+  let current = "";
+  quoted = false;
+  for (const ch of head) {
+    if (ch === '"') quoted = !quoted;
+    if (ch === ";" && !quoted) {
+      parts.push(current);
+      current = "";
+    } else current += ch;
+  }
+  parts.push(current);
+  const params: Record<string, string> = {};
+  for (const part of parts.slice(1)) {
+    const eq = part.indexOf("=");
+    if (eq > 0) params[part.slice(0, eq).toUpperCase()] = part.slice(eq + 1).replace(/^"|"$/g, "");
+  }
+  return { name: parts[0].toUpperCase(), params, value };
 }
 
 // ---- Time zones -------------------------------------------------------------
@@ -280,20 +362,33 @@ type ZoneRule = {
   minute: number;
   from: number;
   to: number;
-  rule: Record<string, string> | null;
+  /** Its yearly rule, read once into numbers; null when it happens once, at its start. */
+  yearly: YearlyRule | null;
 };
+
+/**
+ * Where a yearly zone rule lands: a day of a month ("day", e.g. 15 April), the
+ * nth weekday of a month ("nth"; e.g. the second Sunday of March, or with a
+ * negative nth the last Sunday of October), or nowhere ("never").
+ */
+type YearlyRule = { kind: "day"; month: number; day: number } | { kind: "nth"; month: number; nth: number; weekday: number } | { kind: "never" };
 
 type Zone = { kind: "iana"; tz: string } | { kind: "rules"; rules: ZoneRule[] } | { kind: "utc" };
 
-function ianaFrom(name: string): string | null {
+/** The IANA zone a name means, or null; `build` is told of each formatter built to check one (up to four). */
+function ianaFrom(name: string, build: () => void): string | null {
+  const known = (tz: string) => {
+    build();
+    return isTimeZone(tz);
+  };
   const clean = name.replace(/^"|"$/g, "").trim();
-  if (clean && isTimeZone(clean)) return clean;
+  if (clean && known(clean)) return clean;
   if (WINDOWS_ZONES[clean]) return WINDOWS_ZONES[clean];
   // "(UTC-05:00) Eastern Time (US & Canada)" and "/mozilla.org/.../America/New_York".
   const segments = clean.split("/").filter(Boolean);
   for (let take = Math.min(3, segments.length); take >= 2; take -= 1) {
     const guess = segments.slice(-take).join("/");
-    if (isTimeZone(guess)) return guess;
+    if (known(guess)) return guess;
   }
   return null;
 }
@@ -313,9 +408,9 @@ function offsetAt(zone: Zone, ms: number): number {
   let earliest: { at: number; from: number } | null = null;
   for (const rule of zone.rules) {
     const starts: number[] = [];
-    if (rule.rule && rule.rule.FREQ === "YEARLY") {
+    if (rule.yearly) {
       for (let y = Math.max(rule.y, year - 1); y <= year + 1; y += 1) {
-        const date = yearlyDate(rule.rule, y, rule.mo, rule.d);
+        const date = yearlyDate(rule.yearly, y);
         if (date) starts.push(Date.UTC(y, date.mo - 1, date.d, 0, rule.minute) - rule.from * 60000);
       }
     } else {
@@ -332,19 +427,26 @@ function offsetAt(zone: Zone, ms: number): number {
 
 const DAY_CODES = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 
-/** The month and day a yearly zone rule lands on in year `y`, e.g. the second Sunday of March. */
-function yearlyDate(rule: Record<string, string>, y: number, mo: number, d: number): { mo: number; d: number } | null {
+/**
+ * A zone rule's RRULE read once, at the end of its STANDARD or DAYLIGHT part,
+ * into numbers: its first BYMONTH (or the month it starts in), and its first
+ * BYDAY or else its first BYMONTHDAY (or the day it starts on).
+ */
+function yearlyOf(rule: Record<string, string>, mo: number, d: number): YearlyRule {
   const month = rule.BYMONTH ? Number(rule.BYMONTH.split(",")[0]) : mo;
-  if (!(month >= 1 && month <= 12)) return null;
+  if (!(month >= 1 && month <= 12)) return { kind: "never" };
   const byday = rule.BYDAY?.split(",")[0];
-  if (!byday) {
-    const day = rule.BYMONTHDAY ? Number(rule.BYMONTHDAY.split(",")[0]) : d;
-    return { mo: month, d: day };
-  }
+  if (!byday) return { kind: "day", month, day: rule.BYMONTHDAY ? Number(rule.BYMONTHDAY.split(",")[0]) : d };
   const match = byday.match(/^([+-]?\d{1,2})?(SU|MO|TU|WE|TH|FR|SA)$/);
-  if (!match) return null;
-  const nth = match[1] ? Number(match[1]) : 1;
-  const weekday = DAY_CODES.indexOf(match[2]);
+  if (!match) return { kind: "never" };
+  return { kind: "nth", month, nth: match[1] ? Number(match[1]) : 1, weekday: DAY_CODES.indexOf(match[2]) };
+}
+
+/** The month and day a yearly zone rule lands on in year `y`, e.g. the second Sunday of March. */
+function yearlyDate(rule: YearlyRule, y: number): { mo: number; d: number } | null {
+  if (rule.kind === "never") return null;
+  if (rule.kind === "day") return { mo: rule.month, d: rule.day };
+  const { month, nth, weekday } = rule;
   const days = new Date(Date.UTC(y, month, 0)).getUTCDate();
   if (nth > 0) {
     const first = new Date(Date.UTC(y, month - 1, 1)).getUTCDay();
@@ -411,11 +513,17 @@ function readDuration(value: string): number | null {
   return m[1] === "-" ? null : ms;
 }
 
+/** A repeat rule's parts; one longer than MAX_RULE_CHARS, or with a BYxxx list of more than MAX_RULE_ITEMS, is refused. */
 function readRule(value: string): Record<string, string> {
+  if (value.length > MAX_RULE_CHARS) throw new CalendarTooComplex();
   const rule: Record<string, string> = {};
   for (const part of value.split(";")) {
     const eq = part.indexOf("=");
-    if (eq > 0) rule[part.slice(0, eq).toUpperCase()] = part.slice(eq + 1).toUpperCase();
+    if (eq <= 0) continue;
+    const key = part.slice(0, eq).toUpperCase();
+    const item = part.slice(eq + 1).toUpperCase();
+    if (key.startsWith("BY") && item.split(",").length > MAX_RULE_ITEMS) throw new CalendarTooComplex();
+    rule[key] = item;
   }
   return rule;
 }
@@ -442,24 +550,40 @@ type EventProps = {
  */
 export function parseIcs(
   text: string,
-  options: { from: number; to: number; fallbackTz: string; maxIntervals?: number },
+  options: { from: number; to: number; fallbackTz: string; maxIntervals?: number; maxMs?: number },
 ): ParsedCalendar {
-  const props = readProps(text);
   const maxIntervals = options.maxIntervals ?? 2000;
 
-  // The whole file's work, counted as it is spent (ICS_MAX_WORK).
+  // The backstop: a reading still going at its deadline is refused (ICS_MAX_MS).
+  const deadline = Date.now() + Math.min(options.maxMs ?? ICS_MAX_MS, ICS_MAX_MS);
+  const overdue = () => {
+    if (Date.now() >= deadline) throw new CalendarTooComplex();
+  };
+  // The whole file's work, counted as it is spent (ICS_MAX_WORK), with the clock read every 256 units.
   let work = 0;
+  let nextClock = 0;
   const spend = (units: number) => {
     work += units;
     if (work > ICS_MAX_WORK) throw new CalendarTooComplex();
+    if (work >= nextClock) {
+      nextClock = work + 256;
+      overdue();
+    }
   };
+  const lookUp = () => spend(ZONE_LOOKUP_UNITS);
   const toUtc = (zone: Zone, y: number, mo: number, d: number, minute: number, second = 0) => {
     spend(zone.kind === "rules" ? 1 + zone.rules.length : 1);
+    // A date past what Date holds (an INTERVAL or a length too large) is not a time.
+    if (!Number.isFinite(Date.UTC(y, mo - 1, d, 0, minute, second))) throw new CalendarTooComplex();
     return localToUtc(zone, y, mo, d, minute, second);
   };
 
+  const props = readProps(text, overdue);
+
   // First pass: the calendar's zone, the zones it defines, and its events.
-  let calendarZone: string | null = null;
+  // Each property costs a few steps: the stack is at most MAX_DEPTH deep, and
+  // the calendar's zone name is looked up once, after the pass.
+  let calendarZoneName: string | null = null;
   const defined = new Map<string, ZoneRule[]>();
   const events: EventProps[] = [];
   const stack: string[] = [];
@@ -476,6 +600,7 @@ export function parseIcs(
   for (const prop of props) {
     if (prop.name === "BEGIN") {
       const what = prop.value.trim().toUpperCase();
+      if (stack.length >= MAX_DEPTH) throw new CalendarTooComplex();
       stack.push(what);
       if (what === "VTIMEZONE") {
         tzid = "";
@@ -494,7 +619,9 @@ export function parseIcs(
       if (at !== -1) stack.length = at;
       if ((what === "STANDARD" || what === "DAYLIGHT") && rulePart) {
         if (rulePart.start) {
-          rules.push({ y: rulePart.start.y, mo: rulePart.start.mo, d: rulePart.start.d, minute: rulePart.start.minute, from: rulePart.from, to: rulePart.to, rule: rulePart.rule });
+          const { y, mo, d, minute } = rulePart.start;
+          const yearly = rulePart.rule && rulePart.rule.FREQ === "YEARLY" ? yearlyOf(rulePart.rule, mo, d) : null;
+          rules.push({ y, mo, d, minute, from: rulePart.from, to: rulePart.to, yearly });
         }
         rulePart = null;
       } else if (what === "VTIMEZONE") {
@@ -506,7 +633,7 @@ export function parseIcs(
       continue;
     }
     const inside = stack[stack.length - 1];
-    if (inside === "VCALENDAR" && prop.name === "X-WR-TIMEZONE") calendarZone = ianaFrom(prop.value);
+    if (inside === "VCALENDAR" && prop.name === "X-WR-TIMEZONE") calendarZoneName = prop.value;
     else if (inside === "VTIMEZONE" && prop.name === "TZID") tzid = prop.value.trim();
     else if ((inside === "STANDARD" || inside === "DAYLIGHT") && rulePart) {
       if (prop.name === "DTSTART") rulePart.start = readStamp(prop.value, {});
@@ -549,6 +676,8 @@ export function parseIcs(
     }
   }
 
+  // The last X-WR-TIMEZONE names the calendar's zone, as when each was looked up in turn.
+  const calendarZone = calendarZoneName === null ? null : ianaFrom(calendarZoneName, lookUp);
   const home: Zone = (() => {
     const tz = calendarZone ?? (isTimeZone(options.fallbackTz) ? options.fallbackTz : "UTC");
     return tz === "UTC" ? { kind: "utc" } : { kind: "iana", tz };
@@ -559,8 +688,7 @@ export function parseIcs(
     if (stamp.date || !stamp.tzid) return home;
     const cached = zoneCache.get(stamp.tzid);
     if (cached) return cached;
-    spend(4);
-    const iana = ianaFrom(stamp.tzid);
+    const iana = ianaFrom(stamp.tzid, lookUp);
     const found = defined.get(stamp.tzid);
     const zone: Zone = iana ? (iana === "UTC" ? { kind: "utc" } : { kind: "iana", tz: iana }) : found ? { kind: "rules", rules: found } : home;
     zoneCache.set(stamp.tzid, zone);
@@ -595,6 +723,8 @@ export function parseIcs(
   let unsupported = 0;
   let counted = 0;
   const add = (start: number, end: number) => {
+    // A time past what Date holds (a length of 400 digits) is not a time: never kept as a null end.
+    if (!Number.isFinite(start) || !Number.isFinite(end)) throw new CalendarTooComplex();
     if (end <= options.from || start >= options.to || end <= start) return;
     busy.push({ start, end });
   };
@@ -665,6 +795,8 @@ export function parseIcs(
     const freq = rule.FREQ;
     // A whole number, as the standard has it (a fraction used to step into the middle of a day).
     const interval = Math.max(1, Math.floor(Number(rule.INTERVAL ?? "1")) || 1);
+    // Beyond a million, its second time would leave the dates Date holds (LOW 4): unreadable.
+    if (interval > 1e6) throw new CalendarTooComplex();
     const count = rule.COUNT ? Math.max(0, Number(rule.COUNT) || 0) : Infinity;
     let untilInstant = Infinity;
     let untilDate = Infinity;
@@ -721,11 +853,10 @@ export function parseIcs(
     // end before the window: its day is earlier than `before`.
     const DAY = 86400000;
     const before = options.from - (start.date ? days * DAY : length) - 11 * DAY;
-    const jumps = interval <= 1e6;
 
     if (freq === "DAILY") {
       const span = interval * DAY;
-      const skipped = jumps && before > startDay ? Math.ceil((before - startDay) / span) : 0;
+      const skipped = before > startDay ? Math.ceil((before - startDay) / span) : 0;
       // With chosen weekdays, which days of the grid land on one repeats every seven.
       const firstWeekday = new Date(startDay).getUTCDay();
       const lands = (k: number) => !wanted.size || wanted.has((firstWeekday + (k % 7) * (interval % 7)) % 7);
@@ -748,7 +879,7 @@ export function parseIcs(
       // A week is skipped when its last day is earlier than `before`; the
       // first week holds only its days from the first date on.
       const lastOfFirst = weekOf + 6 * DAY;
-      const skipped = jumps && before > lastOfFirst ? Math.ceil((before - lastOfFirst) / (7 * interval * DAY)) : 0;
+      const skipped = before > lastOfFirst ? Math.ceil((before - lastOfFirst) / (7 * interval * DAY)) : 0;
       if (skipped) made = order.filter((weekday) => weekOf + ((weekday - weekStart + 7) % 7) * DAY >= startDay).length + (skipped - 1) * order.length;
       for (let w = skipped * interval; !finished && steps < MAX_STEPS; w += interval) {
         for (const weekday of order) {
@@ -766,7 +897,7 @@ export function parseIcs(
       const first = new Date(Date.UTC(start.y, start.mo - 1, 1));
       const startMonth = first.getUTCFullYear() * 12 + first.getUTCMonth();
       // Month indexes from year 100 on: Date reads years 0-99 as 1900-1999.
-      const counts = jumps && startMonth >= 1200;
+      const counts = startMonth >= 1200;
       // A day no month of the grid has (the 30th of every February) never lands.
       if (counts && monthsWithDay(startMonth, interval, 4800 / greatestDivisor(4800, interval), start.d) === 0) finished = true;
       const limit = new Date(before);
@@ -783,7 +914,7 @@ export function parseIcs(
       }
     } else {
       const leapDay = start.mo === 2 && start.d === 29;
-      const counts = jumps && start.y >= 100;
+      const counts = start.y >= 100;
       if (counts && leapDay && leapYearsIn(start.y, interval, 400) === 0) finished = true;
       // A month or day past the end of the year moves the date on, by under nine years.
       const lastSkipped = new Date(before).getUTCFullYear() - 10;

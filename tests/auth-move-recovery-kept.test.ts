@@ -149,14 +149,17 @@ async function main() {
 
   part("the studio has words for both");
   const studio = readFileSync("app/studio/page.tsx", "utf8");
+  // Changed (rule 23, review of claude5/move-keeps-recovery, finding 4): both statuses are now made by movedNotice, a
+  // notice that asks for action (a status with its own heading and a link to the recovery address), and they say to
+  // check it, as a carry whose answer was lost may have written it (finding 3).
   is(
-    "each status is a notice, and both say to add the recovery address again",
+    "each status is a notice, and both say to check the recovery address and add one again",
     [
-      studio.includes('"moved-no-recovery": {'),
-      studio.includes('"moved-sessions-open-no-recovery": {'),
-      (studio.match(/We could not carry your recovery address over/g) ?? []).length,
+      studio.includes("const flags = /^moved(-sessions-open)?(-no-recovery)?$/.exec(key);"),
+      studio.includes('{ href: "#account-recovery", label: "Check your recovery address" }'),
+      (studio.match(/We could not confirm that your recovery address came along\. Check it, and add one again if none is shown\./g) ?? []).length,
     ],
-    [true, true, 2],
+    [true, true, 1],
   );
   done();
 }

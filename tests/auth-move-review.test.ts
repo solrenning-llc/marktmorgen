@@ -148,6 +148,27 @@ async function main() {
   );
   const stuck = await move(RECOVERY, (from, to) => [refuseCarry(to), (commands) => (commands.some((c) => c[0] === "DEL" && c[1] === addressKey(from)) ? Promise.reject(new Error("refused")) : null)]);
   is("with the old record's delete refused too, the move still stands and is said, and the old address is still told", [stuck.location, stuck.all.includes(stuck.from)], ["https://marktmorgen.com/studio?address=moved-no-recovery", true]);
+
+  part("the studio's notices that ask for action: a status, a heading, a link that says where it goes");
+  const studio = readFileSync("app/studio/page.tsx", "utf8");
+  const shown = studio.slice(studio.indexOf("{actionNotice ? ("), studio.indexOf(") : notice ? (", studio.indexOf("{actionNotice ? (")));
+  is(
+    "announced, named by its own heading, each action a link to its place",
+    [
+      shown.includes('role="status" aria-labelledby="action-notice-title"'),
+      shown.includes('<h2 id="action-notice-title"'),
+      shown.includes("<a href={action.href}") && shown.includes("min-h-11"),
+      studio.includes('{ href: "#account-recovery", label: "Check your recovery address" }'),
+      studio.includes('id="account-recovery"') || readFileSync("components/recovery-address-manager.tsx", "utf8").includes('id="account-recovery"'),
+      studio.includes('<form id="log-out-everywhere" action="/api/auth/signout-all"'),
+    ],
+    [true, true, true, true, true, true],
+  );
+  is(
+    "the notices from before keep their pattern",
+    studio.includes(') : notice ? (\n          <div className="notice notice-warn mt-6">\n            <p className="font-bold text-ink">{notice.title}</p>'),
+    true,
+  );
   done();
 }
 void main();

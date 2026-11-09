@@ -631,6 +631,33 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
   },
 };
 
+/** A notice that asks for something to be done: said as a status, under its own heading, with a link to each place. */
+type ActionNotice = { title: string; body: string; actions: { href: string; label: string }[] };
+
+/**
+ * Where a move lands when something did not come along (app/api/auth/move): "moved", then "-sessions-open" and
+ * "-no-recovery", each only when it applies; "moved" and "moved-sessions-open" alone are ADDRESS_NOTICES below.
+ * Both sign-in addresses are emailed too, but this is the notice that cannot be lost, so it says what to do and links
+ * straight to where it is done (WCAG 2.4.9, 3.3.5: each link says its purpose by its own words).
+ */
+function movedNotice(key: string): ActionNotice | undefined {
+  const flags = /^moved(-sessions-open)?(-no-recovery)?$/.exec(key);
+  if (!flags || !flags[2]) return undefined;
+  const sessionsOpen = Boolean(flags[1]);
+  const actions: ActionNotice["actions"] = [{ href: "#account-recovery", label: "Check your recovery address" }];
+  if (sessionsOpen) actions.push({ href: "#log-out-everywhere", label: "Go to “Log out of all devices”" });
+  return {
+    title: sessionsOpen ? "Your account moved, but two things need you" : "Your account moved: check its recovery address",
+    body: [
+      "This address logs you in from now on.",
+      sessionsOpen ? "We could not close every session that was open before the move, so log out of all devices." : "Every session the old one had open is closed.",
+      // Not "may have none": a carry whose answer was lost may still have written it, and the section below shows it.
+      "We could not confirm that your recovery address came along. Check it, and add one again if none is shown.",
+    ].join(" "),
+    actions,
+  };
+}
+
 const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
   sent: {
     title: "Check the new address",
@@ -644,16 +671,6 @@ const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
   "moved-sessions-open": {
     title: "Your account moved, but other sessions may still be open",
     body: "This address logs you in from now on. We could not close every session that was open before the move. Choose “Log out of all devices” at the bottom of your studio.",
-  },
-  // The move stands, but the recovery address could not be carried over, or whether it was is not known
-  // (app/api/auth/move; review of #2883). Both sign-in addresses are emailed too.
-  "moved-no-recovery": {
-    title: "Your account moved, but its recovery address did not",
-    body: "This address logs you in from now on. Every session the old one had open is closed. We could not carry your recovery address over, so your account may have none now. Add one again under Recovery address in your studio.",
-  },
-  "moved-sessions-open-no-recovery": {
-    title: "Your account moved, but two things need you",
-    body: "This address logs you in from now on. We could not close every session that was open before the move: choose “Log out of all devices” at the bottom of your studio. We could not carry your recovery address over, so your account may have none now. Add one again under Recovery address in your studio.",
   },
   same: {
     title: "That is the address you already use",
@@ -897,7 +914,10 @@ export default async function StudioPage({
   const pin = store?.sid ? `?store=${store.sid}` : "";
   // The writing help, and what is left of it this month: read once for the whole studio page.
   const ai = store && aiAvailableFor(store) ? { on: true, left: firstReads.aiLeft ? await firstReads.aiLeft : 0 } : { on: false, left: 0 };
+  // A notice that asks for something to be done is drawn on its own (movedNotice); it stands in for any other.
+  const actionNotice = movedNotice(typeof params.address === "string" ? params.address : "");
   const notice =
+    actionNotice ??
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
     STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
     // A call to PayPal or Meta refused for the store's calls to connected services (lib/metered-limits.ts).
@@ -1374,7 +1394,22 @@ export default async function StudioPage({
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
 
-        {notice ? (
+        {actionNotice ? (
+          // Asks for something to be done: announced, named by its own heading, a link to each place (movedNotice).
+          <div className="notice notice-warn mt-6" role="status" aria-labelledby="action-notice-title">
+            <h2 id="action-notice-title" className="font-bold text-ink">{actionNotice.title}</h2>
+            <p className="mt-1 max-w-[80ch] text-sm text-ink-soft">{actionNotice.body}</p>
+            <ul className="mt-2 flex flex-wrap gap-x-6">
+              {actionNotice.actions.map((action) => (
+                <li key={action.href}>
+                  <a href={action.href} className="inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
+                    {action.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : notice ? (
           <div className="notice notice-warn mt-6">
             <p className="font-bold text-ink">{notice.title}</p>
             <p className="mt-1 text-sm text-ink-soft">{notice.body}</p>
@@ -3635,7 +3670,7 @@ export default async function StudioPage({
               Log out
             </button>
           </form>
-          <form action="/api/auth/signout-all" method="post">
+          <form id="log-out-everywhere" action="/api/auth/signout-all" method="post" className="scroll-mt-32">
             <button
               type="submit"
               className="btn btn-ghost"

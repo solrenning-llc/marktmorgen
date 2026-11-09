@@ -172,6 +172,8 @@ async function main(): Promise<void> {
     is("the order is marked refund owed", await owed(store, order), true);
     is("the creator is emailed once to refund it in PayPal", told(order), 1);
     const mail = sent.find((m) => m.to === OWNER && m.text.includes(`4D679366HH9088${order.slice(-2)}`));
+    // Pre-review LEVE 5: the email said the buyer's page says "we asked you", which holds only once "sent" is written.
+    is("the email claims nothing about the page that the page may not say", Boolean(mail && !mail.text.includes("that we asked you")), true);
     is("the email says what to do: refund the payment in PayPal, in full", [Boolean(mail && /refund/i.test(mail.subject)), Boolean(mail && /PayPal/.test(mail.text) && /in full/.test(mail.text))], [true, true]);
     is("no receipt goes to the buyer", sent.some((m) => m.to === "gone@example.com"), false);
     is("it leaves the hand-over list", await onList(store, order), false);
@@ -202,8 +204,10 @@ async function main(): Promise<void> {
     is("nobody is emailed", told(order), 0);
     // PayPal completes it: the sweep settles it, and only then is it marked and the creator told.
     orders.set(order, body(order, "COMPLETED"));
-    await sweep();
+    const swept = await sweep();
     is("once PayPal completes it, the sweep marks it", await owed(store, order), true);
+    // Pre-review LEVE 6: the watch counted it as cleared (handed over) although nothing was handed over.
+    is("it is not counted as handed over", swept.cleared, 0);
     is("and the creator is emailed once", told(order), 1);
     await dueNow(store, order);
     await sweep();

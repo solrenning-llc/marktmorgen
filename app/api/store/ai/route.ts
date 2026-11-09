@@ -125,12 +125,18 @@ export async function POST(request: NextRequest) {
     const stats = await readStats(store).catch(() => null);
     const views = stats?.windows.d30.viewsByProduct[product.id] ?? 0;
     const started = stats?.windows.d30.checkoutsByProduct[product.id] ?? 0;
-    const asked = (await missedQuestions(store, 100).catch(() => []))
+    // An unread list is unknown, never "no questions" (rule 24): the model is told it could not be read.
+    const missed = await missedQuestions(store, 100).catch((error) => {
+      console.error("reading a store's unanswered questions failed", error);
+      return null;
+    });
+    const asked = (missed ?? [])
       .filter((row) => row.productId === product.id)
       .map((row) => row.question)
       .filter((q, i, all) => all.indexOf(q) === i)
       .slice(0, 8);
-    if (asked.length) missing.push(`Answers to what visitors asked this page and it could not answer: ${asked.map((q) => `"${q}"`).join("; ")}`);
+    if (missed === null) missing.push("Answers to what visitors asked this page and it could not answer: that list could not be read just now, so it is not known whether there are any");
+    else if (asked.length) missing.push(`Answers to what visitors asked this page and it could not answer: ${asked.map((q) => `"${q}"`).join("; ")}`);
     const traffic = views >= 30 ? ` In the last 30 days, this page was opened ${views} times and ${started} checkouts were started.` : "";
     return answer(
       reviewPage(store, {

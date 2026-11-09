@@ -181,18 +181,16 @@ export type StepState = {
 /**
  * Every step of a funnel as the store stands, read with one look at the
  * catalog for the products it names: what the studio shows, and what a page
- * needs to know where "next" is.
+ * needs to know where "next" is. Always read strictly (rule 24): a product the
+ * store still lists whose listing could not be read throws, never "a deleted
+ * product" that a visitor would be sent past.
  */
-export async function stepStates(store: Store, funnel: Pick<PageFunnel, "steps">, options: { strictProducts?: boolean; includeReviewProduct?: boolean } = {}): Promise<StepState[]> {
+export async function stepStates(store: Store, funnel: Pick<PageFunnel, "steps">, options: { includeReviewProduct?: boolean } = {}): Promise<StepState[]> {
   const productIds = funnel.steps.filter((s) => s.kind === "product").map((s) => s.id);
-  const listings: Listing[] = productIds.length
-    ? options.strictProducts ? await readListings(store, productIds) : await readListings(store, productIds).catch(() => [])
-    : [];
-  if (options.strictProducts) {
-    const existing = new Set(store.catalog.items.map(item => item.id));
-    const loaded = new Set(listings.map(product => product.id));
-    if (productIds.some(id => existing.has(id) && !loaded.has(id))) throw new Error("Funnel product availability could not be checked");
-  }
+  const listings: Listing[] = productIds.length ? await readListings(store, productIds) : [];
+  const existing = new Set(store.catalog.items.map(item => item.id));
+  const loaded = new Set(listings.map(product => product.id));
+  if (productIds.some(id => existing.has(id) && !loaded.has(id))) throw new Error("Funnel product availability could not be checked");
   const now = Math.floor(Date.now() / 1000);
   return funnel.steps.map((step) => {
     if (step.kind === "page") {
@@ -238,7 +236,8 @@ export async function funnelHere(
   if (!funnel || !funnel.on) return null;
   const index = funnel.steps.findIndex((step) => step.kind === kind && step.id === id);
   if (index < 0) return null;
-  // Only what comes after this step is looked at.
+  // Only what comes after this step is looked at. An unread product throws, and the page is shown on its own (its
+  // callers catch), never with a "next" past a step that is still there.
   const states = await stepStates(store, { steps: funnel.steps.slice(index + 1) });
   const offset = index + 1;
   const at = nextOpen({ steps: funnel.steps.slice(offset) }, -1, (step) => states.find((s) => s.step === step)?.open ?? false);

@@ -35,7 +35,7 @@ import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
@@ -284,20 +284,37 @@ export async function daysCounts(statsId: string, from: string, to: string): Pro
   return out;
 }
 
-/** The store page's views on each of the `days` days before today, oldest first: one read a day. */
+/** A field's count from HGET or HMGET: null is a field never counted (0), a whole number in text is the count; anything else throws (rule 24). */
+function fieldCount(reply: unknown, what: string): number {
+  if (reply === null) return 0;
+  const count = typeof reply === "string" && /^\d{1,15}$/.test(reply) ? Number(reply) : NaN;
+  if (!Number.isSafeInteger(count)) throw new UnknownReplyError(what);
+  return count;
+}
+
+/** A PFCOUNT reply read exactly: a whole number from zero up, or UnknownReplyError (rule 24), never 0. */
+function peopleCount(reply: unknown, what: string): number {
+  const count = countOf(reply);
+  if (count === null) throw new UnknownReplyError(what);
+  return count;
+}
+
+/** The store page's views on each of the `days` days before today, oldest first: one read a day. Throws when a day could not be read (rule 24). */
 export async function viewsBefore(store: Store, days: number, now = Date.now()): Promise<number[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
   const dates = lastDays(now - 86400_000, days);
-  const replies = await redisPipeline(dates.map((d) => ["HGET", countsKey(store.statsId as string, d), "v"]));
-  return replies.map((r) => Number(r) || 0);
+  const replies = repliesFor(await redisPipeline(dates.map((d) => ["HGET", countsKey(store.statsId as string, d), "v"])), dates.length);
+  if (!replies) throw new UnknownReplyError("the views of the days before today");
+  return replies.map((r) => fieldCount(r, "a day's views"));
 }
 
-/** Today's channels by views so far, biggest first. */
+/** Today's channels by views so far, biggest first. Throws when today's counts could not be read (rule 24). */
 export async function sourcesToday(store: Store, now = Date.now()): Promise<Ranked> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGETALL", countsKey(store.statsId, dayKey(now))]]);
+  const replies = repliesFor(await redisPipeline([["HGETALL", countsKey(store.statsId, dayKey(now))]]), 1);
+  if (!replies) throw new UnknownReplyError("today's counts");
   const tally = new Tally();
-  for (const [field, count] of pairs(raw)) if (field.startsWith("r:")) tally.add(field, count);
+  for (const [field, count] of exactPairs(replies[0])) if (field.startsWith("r:")) tally.add(field, count);
   return tally.window(0).sources;
 }
 
@@ -321,27 +338,44 @@ export type Today = {
 const todaySalesKey = (statsId: string, day: string) => `nl:stats:${statsId}:today:${day}`;
 const TODAY_SALES_SECONDS = 120;
 
+/** Today's sales as kept for TODAY_SALES_SECONDS, only in the shape written below: whole numbers from zero up; null otherwise. */
+function keptTodaySales(raw: string): Today["sales"] {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { sales, cents } = value as { sales?: unknown; cents?: unknown };
+  const whole = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  return whole(sales) && whole(cents) ? { sales, cents } : null;
+}
+
 export async function readToday(store: Store, now = Date.now()): Promise<Today> {
   const date = dayKey(now);
   const empty: Today = { date, visitors: 0, views: 0, checkouts: 0, sources: [], sales: null };
   if (!store.statsId || !isRedisConfigured()) return empty;
   const statsId = store.statsId;
-  const [raw, people, cached] = await redisPipeline([
-    ["HGETALL", countsKey(statsId, date)],
-    ["PFCOUNT", visitorsKey(statsId, date)],
-    ["GET", todaySalesKey(statsId, date)],
-  ]);
+  // Read exactly (rule 24): a day's counts or people out of shape throw (the live route shows today as unread),
+  // never zeros; a kept sales figure out of shape is not shown.
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HGETALL", countsKey(statsId, date)],
+      ["PFCOUNT", visitorsKey(statsId, date)],
+      ["GET", todaySalesKey(statsId, date)],
+    ]),
+    3,
+  );
+  if (!replies) throw new UnknownReplyError("today's counts");
+  const [raw, people, cached] = replies;
   const tally = new Tally();
-  for (const [field, count] of pairs(raw)) tally.add(field, count);
-  const window = tally.window(Number(people) || 0);
+  for (const [field, count] of exactPairs(raw)) tally.add(field, count);
+  const window = tally.window(peopleCount(people, "today's visitors"));
   let sales: Today["sales"] = null;
   if (typeof cached === "string") {
-    try {
-      sales = JSON.parse(cached) as Today["sales"];
-    } catch {
-      sales = null;
-    }
-  } else if (readsSales(store)) {
+    sales = keptTodaySales(cached);
+  } else if (cached === null && readsSales(store)) {
     const start = Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000);
     sales = await readPaidSales(store, start, 1)
       .then(({ sales: rows }) => {
@@ -528,25 +562,23 @@ class Tally {
   }
 }
 
-function pairs(reply: unknown): [string, number][] {
-  const flat = Array.isArray(reply) ? (reply as unknown[]).map(String) : [];
-  const out: [string, number][] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) out.push([flat[i], Number(flat[i + 1]) || 0]);
-  return out;
-}
-
 /**
- * A day's HGETALL read exactly, for the all-time fill: field and count strings, an even number of them ([] for a day
- * with nothing kept), each count a whole number. Anything else throws (CX-123 rule 24).
+ * A day's HGETALL read exactly: field and count strings, an even number of them ([] for a day with nothing kept),
+ * each count a whole number. Anything else throws (CX-123 rule 24), never a day of zeros. readStats and readRange
+ * check their replies first (lib/range-traffic-coverage.ts); today's numbers, the visits file and the all-time fill
+ * rely on this alone.
  */
 function exactPairs(reply: unknown): [string, number][] {
-  const flat = stringList(reply);
+  const flat = listSlots(reply);
   if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a kept day's counts");
   const out: [string, number][] = [];
   for (let i = 0; i < flat.length; i += 2) {
-    const count = /^-?\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
-    if (!Number.isSafeInteger(count)) throw new UnknownReplyError("a kept day's counts");
-    out.push([flat[i], count]);
+    const field = flat[i];
+    const raw = flat[i + 1];
+    // A count in text, as Upstash answers it, or a whole number, as lib/range-traffic-coverage.ts also accepts.
+    const count = typeof raw === "number" ? raw : typeof raw === "string" && /^-?\d{1,15}$/.test(raw) ? Number(raw) : NaN;
+    if (typeof field !== "string" || !Number.isSafeInteger(count)) throw new UnknownReplyError("a kept day's counts");
+    out.push([field, count]);
   }
   return out;
 }
@@ -588,7 +620,7 @@ export async function readStats(store: Store, now = Date.now()): Promise<Stats |
     const age = dates.length - 1 - index;
     let views = 0;
     let checkouts = 0;
-    for (const [field, count] of pairs(results[index])) {
+    for (const [field, count] of exactPairs(results[index])) {
       if (field === "v") views = count;
       else if (field === "c") checkouts = count;
       tallies.d90.add(field, count);
@@ -1881,7 +1913,7 @@ export async function readRange(store: Store, from: string, to: string, now = Da
   const days: RangeData["days"] = dates.map((date, i) => {
     let views = 0;
     let checkouts = 0;
-    for (const [field, n] of pairs(results[i])) {
+    for (const [field, n] of exactPairs(results[i])) {
       if (field === "v") views = n;
       else if (field === "c") checkouts = n;
       tally.add(field, n);
@@ -2507,22 +2539,28 @@ export async function visitsCsv(store: Store, now = Date.now()): Promise<string>
   const statsId = store.statsId;
   const created = /^\d{4}-\d{2}-\d{2}/.test(store.createdAt) ? store.createdAt.slice(0, 10) : "";
   const dates = lastDays(now, KEPT_DAYS).filter((d) => !created || d >= created);
-  const replies = await redisPipeline([
-    ...dates.map((d) => ["HGETALL", countsKey(statsId, d)]),
-    ...dates.map((d) => ["PFCOUNT", visitorsKey(statsId, d)]),
-  ]);
+  // Read exactly (rule 24): a day that could not be read throws (the export route answers "try again"), never a row
+  // of zeros in the file.
+  const replies = repliesFor(
+    await redisPipeline([
+      ...dates.map((d) => ["HGETALL", countsKey(statsId, d)]),
+      ...dates.map((d) => ["PFCOUNT", visitorsKey(statsId, d)]),
+    ]),
+    dates.length * 2,
+  );
+  if (!replies) throw new UnknownReplyError("the kept days of visits");
   for (let i = dates.length - 1; i >= 0; i -= 1) {
     let views = 0;
     let checkouts = 0;
     let links = 0;
     let top = ["", 0] as [string, number];
-    for (const [field, count] of pairs(replies[i])) {
+    for (const [field, count] of exactPairs(replies[i])) {
       if (field === "v") views = count;
       else if (field === "c") checkouts = count;
       else if (field.startsWith("l:")) links += count;
       else if (field.startsWith("r:") && count > top[1]) top = [field.slice(2), count];
     }
-    lines.push(csvRow([dates[i], Number(replies[dates.length + i]) || 0, views, checkouts, links, top[0]]));
+    lines.push(csvRow([dates[i], peopleCount(replies[dates.length + i], "a day's visitors"), views, checkouts, links, top[0]]));
   }
   return `${lines.join("\r\n")}\r\n`;
 }

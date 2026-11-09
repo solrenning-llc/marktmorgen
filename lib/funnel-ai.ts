@@ -88,8 +88,11 @@ export type FunnelFacts = {
   products: ProductFact[];
   /** Other products of the store that could be offered at checkout or after paying. */
   candidates: { id: string; title: string; price: string; link: string }[];
-  /** What visitors asked these products' pages and the pages could not answer, newest first. */
-  unanswered: { productId: string; question: string; at: number }[];
+  /**
+   * What visitors asked these products' pages and the pages could not answer, newest first; null when the list could
+   * not be read, which is unknown, never "no questions" (rule 24): the prompt and the research's limits say so.
+   */
+  unanswered: { productId: string; question: string; at: number }[] | null;
   storeLink: string;
   creator: string;
   storeName: string;
@@ -154,14 +157,18 @@ export async function readFunnelFacts(
     readListings(store, ids),
     readListings(store, candidateIds),
     readStats(store, now).catch(() => null),
-    missedQuestions(store, 100).catch(() => []),
+    missedQuestions(store, 100).catch((error) => {
+      console.error("reading a store's unanswered questions failed", error);
+      return null;
+    }),
   ]);
   const products: ProductFact[] = [];
   for (const slot of choicesOf(type)) {
     const product = listings.find((p) => p.id === picked[slot.key]);
     if (!product) return { ok: false, error: "slot_missing", slot: slot.key };
     const [about, summary] = await Promise.all([
-      product.about ? readAbout(store.statsId, product.id).catch(() => "") : Promise.resolve(""),
+      // An unread description throws (rule 24): taken as empty, the draft would be told the product says nothing.
+      product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
       summaryOf(store.statsId, product.id).catch(() => null),
     ]);
     const d30 = stats?.windows.d30;
@@ -190,7 +197,7 @@ export async function readFunnelFacts(
       picked,
       products,
       candidates: candidates.map((p) => ({ id: p.id, title: p.title, price: priceWords(p, store.currency, store.tiers), link: productLink(store, p.id) })),
-      unanswered: missed.filter((row) => ids.includes(row.productId)).filter((row, i, all) => all.findIndex((r) => r.question === row.question) === i).slice(0, MAX_UNANSWERED),
+      unanswered: missed && missed.filter((row) => ids.includes(row.productId)).filter((row, i, all) => all.findIndex((r) => r.question === row.question) === i).slice(0, MAX_UNANSWERED),
       storeLink: storeBase(store),
       creator: clip(store.mail?.fromName || store.name, 60),
       storeName: clip(store.name, 80),
@@ -203,7 +210,7 @@ export function diagnosticsFor(facts: FunnelFacts, ask: FunnelAsk): FunnelDiagno
   return funnelDiagnostics({
     proof: ask.proof,
     products: facts.products.map((p) => ({ title: p.title, described: Boolean(p.summary.trim() || p.about.trim()), draft: p.draft, free: p.free, views: p.views, checkouts: p.checkouts })),
-    unanswered: facts.unanswered.length,
+    unanswered: facts.unanswered?.length ?? 0,
   });
 }
 
@@ -279,7 +286,11 @@ function pagesRequest(facts: FunnelFacts, ask: FunnelAsk): { system: string; pro
     pages.length ? `Pages it makes:\n${pages.map((page) => `- "${page.key}": titled "${page.title}", blocks in order: ${page.blocks.join(", ")}`).join("\n")}` : "",
     facts.products.length ? `The products of its steps:\n${productLines(facts)}` : "",
     facts.candidates.length ? `Other products (may be offered):\n${facts.candidates.map((p) => `- id ${p.id}: ${clip(p.title, 120)} (${clip(p.price, 120)})`).join("\n")}` : "Other products: none.",
-    facts.unanswered.length ? `Questions visitors asked these pages that the pages could not answer:\n${facts.unanswered.map((row) => `- ${clip(row.question, 200)}`).join("\n")}` : "",
+    facts.unanswered === null
+      ? "Questions visitors asked these pages that the pages could not answer: they could not be read just now, so it is not known whether there are any. Do not write as if there were none."
+      : facts.unanswered.length
+        ? `Questions visitors asked these pages that the pages could not answer:\n${facts.unanswered.map((row) => `- ${clip(row.question, 200)}`).join("\n")}`
+        : "",
     askLines(ask),
   ]
     .filter(Boolean)
@@ -327,7 +338,7 @@ export function readPagesAnswer(json: Record<string, unknown> | null, facts: Fun
     facts.creator,
     ...facts.products.flatMap((p) => [p.title, p.price, p.delivery, p.summary, p.about]),
     ...facts.candidates.flatMap((p) => [p.title, p.price]),
-    ...facts.unanswered.map((row) => row.question),
+    ...(facts.unanswered ?? []).map((row) => row.question),
     ask.audience,
     ask.offer,
     ask.proof,
@@ -494,7 +505,7 @@ export function researchSources(facts: FunnelFacts, ask: FunnelAsk, now = Date.n
     if (p.reviews) sources.push({ id: `R${i + 1}`, label: `Verified reviews of “${p.title}”`, date: today, detail: `${p.reviews.count} verified ${p.reviews.count === 1 ? "review" : "reviews"}, average ${p.reviews.average.toFixed(1)} of 5 stars.` });
     if (p.views !== null) sources.push({ id: `T${i + 1}`, label: `Visits to “${p.title}”, last 30 days`, date: today, detail: `Opened ${p.views} times${p.free ? "" : `; ${p.checkouts ?? 0} checkouts started`}.` });
   });
-  facts.unanswered.forEach((row, i) => {
+  (facts.unanswered ?? []).forEach((row, i) => {
     const product = facts.products.find((p) => p.id === row.productId);
     sources.push({ id: `Q${i + 1}`, label: `A visitor's question the page of “${product?.title ?? "a product"}” could not answer`, date: row.at > 0 ? day(row.at) : today, detail: row.question });
   });
@@ -508,6 +519,7 @@ export function researchLimits(facts: FunnelFacts): string[] {
     "Only your store's own records and what you typed were read. Nothing was searched on the web, so nothing here describes your market, competitors or trends.",
     views === null ? "Visit counts could not be read, so nothing here is based on traffic." : views < SAMPLE_VIEWS ? `These pages were opened ${views} times in the last 30 days in total: too few to say what visitors want.` : "Visits show what people opened, not why they bought or left.",
     "Reviews and questions come from people who already found your store, not from everyone you could reach.",
+    ...(facts.unanswered === null ? ["The questions visitors asked these pages could not be read just now, so none are listed here, and nothing here says there were none."] : []),
   ];
 }
 

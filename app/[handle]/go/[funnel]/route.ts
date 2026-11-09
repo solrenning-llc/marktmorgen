@@ -38,7 +38,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!funnel) return away(`/@${store.handle}`);
   if (!funnel.on) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   // A product the store still lists whose listing cannot be read is unknown, never "a deleted product".
-  const states = await stepStates(store, funnel, { strictProducts: true }).catch(() => null);
+  const states = await stepStates(store, funnel).catch(() => null);
   if (states === null) return later();
   const first = nextOpen(funnel, -1, (step) => states.find((s) => s.step === step)?.open ?? false);
   const path = first >= 0 ? states[first].path : null;

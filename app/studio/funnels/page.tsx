@@ -133,7 +133,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
   const formReviews = readFunnelFormReviews(store, inventory ?? [], { reviewOffers: true });
   const savedFunnels: SavedFunnel[] = await Promise.all(
     (inventory ?? []).map(async (funnel) => {
-      const [states, counts, pageReviews] = await Promise.all([stepStates(store, funnel, { strictProducts: true, includeReviewProduct: true }).catch(() => null), readFunnelCountsStrict(store.statsId, funnel).catch(() => null), formReviews]);
+      const [states, counts, pageReviews] = await Promise.all([stepStates(store, funnel, { includeReviewProduct: true }).catch(() => null), readFunnelCountsStrict(store.statsId, funnel).catch(() => null), formReviews]);
       const offerRecords = cachedOfferListings(store, (states ?? []).flatMap(state => state.reviewProduct ? [state.reviewProduct] : []));
       return {
         funnel,

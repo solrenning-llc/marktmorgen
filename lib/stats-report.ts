@@ -617,7 +617,13 @@ export async function maybeBusyAlert(store: Store, today: number, now = Date.now
   const day = new Date(now).toISOString().slice(0, 10);
   if (!(await ownClaim(busyKey(store.handle, day), 2 * 86400))) return false;
 
-  const top = (await sourcesToday(store, now)).filter((s) => s.name !== "direct")[0];
+  // Today's channels unread: the email goes without naming one, never one it could not read (rule 24). The views
+  // before today are read strictly above, before the day's claim, so an unread history sends nothing.
+  const sources = await sourcesToday(store, now).catch((error) => {
+    console.error("reading today's channels for the busy-day email failed", error);
+    return null;
+  });
+  const top = sources?.filter((s) => s.name !== "direct")[0];
   const token = weeklyToken(store.handle);
   const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
   const lines = [

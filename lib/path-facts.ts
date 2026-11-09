@@ -19,13 +19,18 @@
  * is complete and paid, in live mode for a real sale and test mode for the
  * test purchase, never a page that said "thanks". A refund in full takes a
  * sale off; refunds are taken off the money; what Stripe could not be asked
- * about leaves the money unknown (null), so no level moves on it. PayPal's
- * sales carry no test mode and are not counted here (docs/marktmorgen-path.md).
+ * about leaves the money unknown (null), so no level moves on it.
+ *
+ * PayPal's sales (lib/paypal-sales.ts) are the store's own server's record of
+ * an order it captured: real only when taken through PayPal's live API, never
+ * a test purchase (PayPal's sandbox has no store-level test mode here), and
+ * judged by the refunds PayPal confirmed, matched by the capture (12 [D9]).
  */
 import { KIND } from "@/lib/catalog";
 import {saleHandles,type Store} from "@/lib/store";
 import {pathGrowthMoney,type PathGrowthMoney} from "@/lib/path-growth-money";
-import { readLifeRecord, readPaidSales, readStoreRefunds } from "@/lib/stats";
+import { readLifeRecord, readPaidSales, readStoreRefunds, readsSales } from "@/lib/stats";
+import { paypalLiveApi, paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
 import { countLinks } from "@/lib/short-links";
 import { sellsInTestMode } from "@/lib/stripe-connect";
 import { type PathFacts, SOCIAL_SOURCES } from "@/lib/path-rules";
@@ -53,6 +58,16 @@ export type PathMoney = {
 };
 
 type Sold = { cents: number; currency: string; intent: string; live: boolean | null };
+
+/**
+ * A sale read, as the path counts it. A Stripe sale carries its own livemode; a
+ * PayPal order is real only when the store took it through PayPal's live API,
+ * and otherwise is neither real nor a test purchase (null). Pure, for the tests.
+ */
+export function soldOf(sale: { cents: number; currency: string; paymentIntent: string; row: Record<string, unknown> }, paypalLive: boolean): Sold {
+  const live = sale.row.object === "paypal.order" ? (paypalLive ? true : null) : typeof sale.row.livemode === "boolean" ? sale.row.livemode : null;
+  return { cents: sale.cents, currency: sale.currency, intent: sale.paymentIntent, live };
+}
 
 /** What the path counts from the sales and refunds read. Pure, for the tests. */
 export function moneyFrom(sold: Sold[], refunds: { cents: number; currency: string; paymentIntent: string }[] | null, currency: string, at: number): PathMoney {
@@ -91,8 +106,10 @@ export function moneyFrom(sold: Sold[], refunds: { cents: number; currency: stri
  * Stripe could not be asked at all: the path then shows the last reading it
  * kept, never a guess.
  */
-export async function readPathMoney(store: Store, now = Date.now()): Promise<PathMoney | null> {
-  if (!store.stripeAccountId) return { at: now, test: false, real: 0, cents: 0, currency: store.currency };
+export async function readPathMoney(store: Store, now = Date.now(), options: { paypalLive?: boolean } = {}): Promise<PathMoney | null> {
+  // Neither Stripe nor PayPal connected: nothing can have been sold. A store that sells through PayPal alone is read.
+  if (!readsSales(store)) return { at: now, test: false, real: 0, cents: 0, currency: store.currency };
+  const paypalLive = options.paypalLive ?? paypalLiveApi();
   let sales;let partial=false;
   try {
     ({ sales,partial } = await readPaidSales(store, 0, PATH_SALE_PAGES));
@@ -100,23 +117,34 @@ export async function readPathMoney(store: Store, now = Date.now()): Promise<Pat
     console.error("reading a store's sales for its path failed", store.handle, error);
     return null;
   }
-  const sold: Sold[] = sales
-    .filter((s) => {
-      const meta = (s.row.metadata ?? {}) as Record<string, unknown>;
-      // A gift through "Support my work" sold nothing, and a payment request is a bill, not an order from the store.
-      return s.cents > 0 && meta.kind !== "tip" && meta.kind !== "request";
-    })
-    .map((s) => ({ cents: s.cents, currency: s.currency, intent: s.paymentIntent, live: typeof s.row.livemode === "boolean" ? s.row.livemode : null }));
-  const realOnes = sold.filter((s) => s.live === true);
+  const orders = sales.filter((s) => {
+    const meta = (s.row.metadata ?? {}) as Record<string, unknown>;
+    // A gift through "Support my work" sold nothing, and a payment request is a bill, not an order from the store.
+    return s.cents > 0 && meta.kind !== "tip" && meta.kind !== "request";
+  });
+  const sold: Sold[] = orders.map((s) => soldOf(s, paypalLive));
+  const liveSales = orders.filter((s) => soldOf(s, paypalLive).live === true);
+  const liveStripe = liveSales.filter((s) => s.row.object !== "paypal.order");
+  const livePayPal = liveSales.filter((s) => s.row.object === "paypal.order");
   let refunds: { cents: number; currency: string; paymentIntent: string }[] | null = [];
-  if (realOnes.length) {
-    const since = Math.floor(Math.min(...sales.filter((s) => s.row.livemode === true).map((s) => s.created)) / 1000);
+  const since = (list: typeof sales) => Math.floor(Math.min(...list.map((s) => s.created)) / 1000);
+  if (liveStripe.length && store.stripeAccountId) {
     try {
-      const read = await readStoreRefunds(store, since, PATH_REFUND_PAGES);
+      const read = await readStoreRefunds(store, since(liveStripe), PATH_REFUND_PAGES);
       // Refunds not all read: the money is not known, and no level moves on it.
       refunds = read.partial ? null : read.rows;
     } catch (error) {
       console.error("reading a store's refunds for its path failed", store.handle, error);
+      refunds = null;
+    }
+  }
+  if (refunds !== null && livePayPal.length) {
+    try {
+      // PayPal's refunds in full, as its refund watch wrote them down; any it could not all read leaves the money unknown.
+      const read = await readPayPalRefundsWithCoverage(store.statsId, since(livePayPal));
+      refunds = read.partial ? null : [...refunds, ...read.rows.map((r) => ({ cents: r.cents, currency: r.currency, paymentIntent: paypalPaymentId(r.capture) }))];
+    } catch (error) {
+      console.error("reading a store's PayPal refunds for its path failed", store.handle, error);
       refunds = null;
     }
   }

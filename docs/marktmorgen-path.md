@@ -151,8 +151,10 @@ policy says so (`/privacy#path`).
    store sends its confirmation email (`fs:`), so an import never counts. The
    stricter reading, an address that used its confirmation link, would need
    either a walk of the list or a new counter on the confirmation; not built.
-2. **PayPal sales** carry no test mode and are not counted toward Day 7 or a
-   level yet.
+2. **PayPal sales** count toward Day 7 and the levels only when the store's own
+   server captured them through PayPal's live API, less the refunds PayPal
+   confirmed in full (12 [D9] unit 1). A sandbox order is neither a real sale nor
+   a test purchase, and refunds that cannot all be read leave the money unknown.
 
 ## 7. What it will not do
 
@@ -234,7 +236,7 @@ The second mission is named "Prepare your first digital product" because its
 completion fact is a listed deliverable, not a paid order. The sale mission is
 explicitly a real Stripe sale. Its promotion step waits for live checkout;
 writing to a list is conditional on marketing consent. The studio also says
-that PayPal sales are not counted by Path yet, matching section 6.
+that Path counts Stripe sales and live PayPal sales, less refunds, matching section 6.
 
 No additional provider read, data record, quota or price is introduced.
 The notice is checked with the Path page's existing mobile/desktop accessibility
@@ -294,7 +296,7 @@ inline error and focus correction; existing parser and bounds are unchanged.
 6. **Private, accessible level certificates with money opt-in — implementation and verification below.**
 7. **Imported products/pages recognised without imported leads/sales — pending.**
 8. **Creator-local weekly factual studio summary — pending.**
-9. **Server-confirmed live PayPal sales with refunds — pending.**
+9. **Server-confirmed live PayPal sales with refunds — counted (12 [D9] unit 1).**
 10. **Leads counted after confirmation-link use — pending.**
 11. **Creator-controlled store badge, off by default — pending.**
 12. **Private aggregate activation/time-to-first-sale owner panel — pending.**

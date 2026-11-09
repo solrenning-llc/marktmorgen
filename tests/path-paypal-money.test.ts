@@ -9,6 +9,7 @@
  * no level moves on it. A store that sells through PayPal without Stripe is
  * read, not taken for zero. Synthetic store and orders, in-memory Redis.
  */
+import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, ensureStoreId, setPayPalSeller, setSubscription, storeForEmail } from "@/lib/store";
 import { moneyFrom, readPathMoney, soldOf } from "@/lib/path-facts";
 import { payPalSale } from "@/lib/stats";
@@ -61,6 +62,10 @@ async function main(): Promise<void> {
   for (let i = 0; i < 501; i++) redis.run(["ZADD", `nl:ppsell:refunded:${statsId}`, String(now - 40 + i / 1000), `REFUND${String(i).padStart(10, "0")}`]);
   const partial = await readPathMoney(store, now * 1000, { paypalLive: true });
   is("money null: no level moves on it", partial?.cents, null);
+
+  part("The studio says so");
+  const notice = readFileSync("components/path-checkout-notice.tsx", "utf8");
+  is("no longer says PayPal sales do not count", [notice.includes("PayPal sales do not update"), notice.includes("Path counts your Stripe sales and your live PayPal sales, less refunds.")], [false, true]);
 
   done();
 }

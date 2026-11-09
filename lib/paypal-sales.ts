@@ -62,6 +62,12 @@ const API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? ""
   : process.env.PAYPAL_ENV === "sandbox"
     ? "https://api-m.sandbox.paypal.com"
     : "https://api-m.paypal.com";
+
+/**
+ * Whether orders are taken through PayPal's live API, so a captured order is a real sale (12 [D9]): never in
+ * PayPal's sandbox or against a local stand-in, whose orders are neither real sales nor test purchases.
+ */
+export const paypalLiveApi = (): boolean => API === "https://api-m.paypal.com";
 const TIMEOUT_MS = 20_000;
 const ORDER_ID = /^[A-Z0-9]{10,36}$/;
 /** The refunded mark's score as this file writes it (ZADD with String(now)): whole seconds, nothing else. */

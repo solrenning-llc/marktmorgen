@@ -80,6 +80,7 @@ import { MAX_INTRO_COUNT, activeIntro, introLineEnglish } from "@/lib/intro-pric
 import { activeYearly } from "@/lib/yearly-price";
 import { MAX_ABOUT_LENGTH, aboutBlocks } from "@/lib/product-about";
 import { ProductAbout } from "@/components/product-about-view";
+import { DraftPreviewLink } from "@/components/draft-preview-link";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { imageUrl } from "@/lib/product-image";
 import { StoreField, useStudioHref, useStudioStore } from "@/components/studio-store-pin";
@@ -2481,6 +2482,8 @@ export function ProductEditor({
 
                 {open ? (
                 <div id={panel}>
+                {/* A draft can be shown to someone before it is published (754 [STN1]). */}
+                {product.hidden ? <DraftPreviewLink productId={product.id} handle={handle} /> : null}
                 <ProductImageEditor product={product} folder={imageFolder} cover={cover} />
 
                 {/*

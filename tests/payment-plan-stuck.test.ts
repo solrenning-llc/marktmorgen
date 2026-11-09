@@ -49,20 +49,21 @@
  * is tried once a week from day 30, its creator emailed once, nothing written
  * to nl:plans:given-up (the family is gone: nothing read it), and that it is
  * settled once the account answers. The run's counts name `stuck` and `told`
- * instead of `givenUp`.
+ * instead of `givenUp`, and "the registry's figures" also holds
+ * tellCommandsPerPlan, the once-per-plan telling's commands.
  */
 import { readFileSync } from "node:fs";
 import * as plans from "@/lib/plans";
 import { addPeriods, rememberPlan, settlePlans } from "@/lib/plans";
 import { StripeError } from "@/lib/stripe-account";
-import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import * as registry from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_prerev";
-process.env.RESEND_API_KEY = "re_test_plans_stuck_stand_in";
+// A synthetic credential the Resend fixture knows (tests/resend-fixture-credentials.ts).
+process.env.RESEND_API_KEY = "re_test_store_alerts_stand_in";
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 const OWNER = "plans-stuck-owner@example.com";
 const ACCOUNT = "acct_1TestPlans0001";
@@ -137,7 +138,6 @@ async function planStore(account: string): Promise<{ sid: string; product: strin
   await claimHandle(OWNER, "plansstuck", "Harbor Plans", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, account, true);
-  await setSubscription(OWNER, { customerId: "cus_PlansStuck01", subscriptionId: "sub_PlansStuck01", active: true, period: paidPeriod(Date.now(), { behind: 10, ahead: 400 }) });
   const made = await addProduct(OWNER, "Twelve-week coaching", "", "300", null);
   const store = (await storeForEmail(OWNER))!;
   return { sid: store.sid, product: made.ok ? made.product.id : "" };
@@ -277,7 +277,7 @@ async function main(): Promise<void> {
   ], [true, true, true, true]);
   is("and nothing about the buyer: no address in it at all", /@/.test(told?.text ?? ""), false);
   is("nothing is written to nl:plans:given-up", await givenUpKey(), 0);
-  is("the log says so, once", logged.filter((line) => line.includes("tried once a week")).length, 1);
+  is("the log says so, once", logged.filter((line) => line.includes("tried once a week from now on, its creator emailed")).length, 1);
   sessions.cs_test_dead00000001 = checkout("cs_test_dead00000001", { kind: "plan", plan_payments: "12", plan_interval: "month" });
   subscriptions.sub_dead00000001 = { id: "sub_dead00000001", status: "active", billing_cycle_anchor: ANCHOR + 400 * DAY };
   const back = updates.length;
@@ -438,7 +438,21 @@ async function main(): Promise<void> {
   is("all six were tried", tried, 6);
   is("Redis commands within readCommandsPerRun + tried x ownCommandsPerPlanTried", commands <= (declared?.readCommandsPerRun ?? 0) + tried * (declared?.ownCommandsPerPlanTried ?? 0), true);
   is("Stripe calls within tried x stripeCallsPerPlanTried", stripeCalls <= tried * (declared?.stripeCallsPerPlanTried ?? 0), true);
-  is("the registry's figures", declared && [declared.readCommandsPerRun, declared.ownCommandsPerPlanTried, declared.stripeCallsPerPlanTried, declared.runMs], [2, 4, 3, 25_000]);
+  is("the registry's figures", declared && [declared.readCommandsPerRun, declared.ownCommandsPerPlanTried, declared.stripeCallsPerPlanTried, declared.runMs, declared.tellCommandsPerPlan], [2, 4, 3, 25_000, 15]);
+  redis.clear();
+  emails.length = 0;
+  setClock(Math.floor(realNow() / 1000));
+  const owned = await planStore(STUCK);
+  await redis.pipeline([["ZADD", "nl:plans:retry", Math.floor(clock / 1000) - DAY, `${STUCK}|cs_test_cost00000006|${Math.floor(clock / 1000) - 31 * DAY}|${owned.sid}|${owned.product}`]]);
+  let tellCommands = 0;
+  swapPipeline(async (sent) => {
+    tellCommands += sent.length;
+    return real(sent);
+  });
+  stripeCalls = 0;
+  const telling = await settlePlans();
+  swapPipeline(real);
+  is("a stuck plan whose creator is told: one email, within readCommandsPerRun + ownCommandsPerPlanTried + tellCommandsPerPlan", [telling.told, emails.length, tellCommands <= (declared?.readCommandsPerRun ?? 0) + (declared?.ownCommandsPerPlanTried ?? 0) + (declared?.tellCommandsPerPlan ?? 0), stripeCalls], [1, 1, true, 1]);
   is("the route's budget is the registry's", new RegExp(`const PLANS_MS = ${(declared?.runMs ?? 0).toLocaleString("en-US").replace(",", "_")};`).test(route), true);
 
   Date.now = realNow;

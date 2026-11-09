@@ -311,7 +311,7 @@ export async function POST(request: NextRequest) {
     // ends after a set number of payments — is given its end whether or not
     // they come back from paying.
     const ends = inPlan || (product.recurring !== null && product.recurring.payments > 0);
-    if (ends && store.stripeAccountId) await rememberPlan(store.stripeAccountId, held.value.id);
+    if (ends && store.stripeAccountId) await rememberPlan(store.stripeAccountId, held.value.id, { sid: store.sid, product: product.id });
     // The buyer's yes, kept with the sentence, its version and the time, before they leave for Stripe.
     if (reminding) await keepAssistReminder({ store, session: held.value.id, email: remindEmail, version: remindVersion });
     // Counted once the buyer is on their way, so the count never slows them.

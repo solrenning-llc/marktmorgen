@@ -79,11 +79,15 @@ async function run(request: NextRequest): Promise<Response> {
   // Leaves time to answer inside maxDuration, whatever the jobs find.
   const deadline = Date.now() + 45_000;
   try {
+    // Without the platform's key no call to Stripe can be made: the plans are not tried at all, so no failure of
+    // ours is counted against them (lib/plans.ts, isAccountRefusal), and no plan can have been opened.
     let plans = null;
-    try {
-      plans = await settlePlans(PLANS_PER_RUN, Math.min(deadline, Date.now() + PLANS_MS));
-    } catch (error) {
-      console.error("settling payment plans failed", error);
+    if (isBillingConfigured()) {
+      try {
+        plans = await settlePlans(PLANS_PER_RUN, Math.min(deadline, Date.now() + PLANS_MS));
+      } catch (error) {
+        console.error("settling payment plans failed", error);
+      }
     }
     // A creator who disputed a payment for their plan has what costs us to
     // run paused, as for an unpaid renewal (232 [CA1] unit 5). At most eight
@@ -174,7 +178,7 @@ async function run(request: NextRequest): Promise<Response> {
       return null;
     });
     if (demo && demo.pending.length) console.error("the demo store is missing something", demo.pending);
-    const ok = plans !== null && ((billing !== null && disputes !== null) || !isBillingConfigured());
+    const ok = (plans !== null && billing !== null && disputes !== null) || !isBillingConfigured();
     return Response.json({ ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
   } finally {
     await redisPipeline([["DEL", "nl:plans:lock"]]).catch(() => {});

@@ -272,6 +272,13 @@ export type Referral = {
   how: Credit;
   /** Optional campaign labels recorded at checkout; absent on older records. */
   promotion?: AffiliatePromotion | null;
+  /**
+   * A one-way mark of who bought it, for this store only (buyerMark), never the
+   * address: what keeps the second tier off the inviting affiliate's own
+   * purchase (tierLines). Sales written down before 9 November 2026 have none,
+   * and their buyer is not known. Never carried out of readBook.
+   */
+  buyerMark?: string;
 };
 
 /**
@@ -619,6 +626,8 @@ function parseReferral(raw: unknown): Referral | null {
       rate: n(value.rate),
       self: value.self === true,
       ...(readAffiliatePromotion(value.promotion) ? { promotion: readAffiliatePromotion(value.promotion) } : {}),
+      // A mark that does not read is not known, as on a sale written down before there was one.
+      ...(typeof value.buyerMark === "string" && BUYER_MARK.test(value.buyerMark) ? { buyerMark: value.buyerMark } : {}),
       // Sales written down before a code or a bond could credit anybody have
       // neither field, and every one of those came from a click. `byCode` is
       // read for the ones written in between.
@@ -3141,7 +3150,7 @@ async function settlePayPalPending(store: Store, paid: Paid, title: string, now:
   const rate = share;
   if (outcome.kind === "credit" && rate > 0) {
     const sale = { ref, pi: paypalPaymentId(paid.capture), at: paid.at, product: paid.product, title: title.slice(0, 200), base: paid.cents, total: paid.cents, currency: readCurrencyCode(paid.currency) };
-    await writeReferral(store, { ...sale, aff: outcome.affiliate.id, rate, self: await isSelf(store, outcome.affiliate.id, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
+    await writeReferral(store, { ...sale, aff: outcome.affiliate.id, rate, self: await isSelf(store, outcome.affiliate.id, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" }, paid.email);
     await rememberBuyer(store, paid.email, outcome.affiliate.id, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
   await writePendingMark(statsId, ref, outcome.kind === "credit" && rate > 0 ? `credited:${outcome.affiliate.id}` : "none");
@@ -3187,11 +3196,13 @@ export async function funnelRate(store: Store, affId: string, productId: string)
   return commissionRate(store.affiliates, productId, affiliate.rate);
 }
 
-async function writeReferral(store: Store, referral: Referral): Promise<void> {
+async function writeReferral(store: Store, referral: Referral, buyer: string): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
+  // With the buyer's one-way mark (buyerMark), never their address; none when the order named nobody.
+  const mark = buyerMark(store.statsId, buyer);
   // Once per sale, whichever of the thanks page and the five-minute job is
   // first, counted in the store's room at what it really adds (lib/order-data.ts).
-  await orderWrite(store, [["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify(referral)]]);
+  await orderWrite(store, [["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify(mark ? { ...referral, buyerMark: mark } : referral)]]);
 }
 
 /**
@@ -3260,7 +3271,7 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string, 
     currency: readCurrencyCode(paid.currency),
   };
   if (paid.via && affiliatesOn(store) && paid.via.rate > 0) {
-    await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
+    await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" }, paid.email);
     await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
   await notePartners(store, { ...sale, buyer: paid.email });
@@ -3443,7 +3454,7 @@ export async function noteSession(
     self: await isSelf(store, aff, buyer),
     promotion: affiliatePromotionFrom(meta) ?? undefined,
     how,
-  });
+  }, buyer);
 
   // And the buyer stays with them, where the creator asked for that. Written
   // after the sale, so a bond that fails costs a future commission rather than
@@ -3499,7 +3510,7 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
     // An offer taken after paying follows the order it rides on, and that
     // order is only ever reached through a link.
     how: "click",
-  });
+  }, buyer);
 }
 
 // ---- The book ------------------------------------------------------------
@@ -3921,8 +3932,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // A goal reached in a month adds its bonus, and a sale by somebody an
   // affiliate brought adds their second tier, both worked out from the sales
   // as they stand after refunds. Then only the one affiliate's, when it is one.
-  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf), ...leadLines]
+  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf, store.statsId as string), ...leadLines]
     .filter((l) => !only || l.aff === only)
+    .map(unmarked)
     .sort((a, b) => b.at - a.at);
 
   // A sale made less than the creator's wait ago is not payable yet, so their
@@ -4056,6 +4068,8 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
       self: Boolean(affiliate && buyer) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer),
       how: "recurring",
       promotion: affiliatePromotionFrom(meta) ?? undefined,
+      // Read with the invoice, never written down: the second tier is kept off the inviter's own payment the same way.
+      ...(buyer ? { buyerMark: buyerMark(store.statsId as string, buyer) } : {}),
     });
   }
   return { lines, complete };
@@ -4108,6 +4122,26 @@ export function bonusLines(store: Pick<Store, "affiliates" | "currency">, lines:
 /** What a line credited this way is: a sale somebody brought, as opposed to a share, a bonus or a second tier. */
 const BROUGHT: readonly Credit[] = ["click", "code", "buyer", "contact", "recurring"];
 
+const BUYER_MARK = /^[0-9a-f]{32}$/;
+
+/**
+ * A one-way mark of a buyer's address for one store: sha256 of the store's id
+ * and the address as canonicalEmail reads it, so one inbox however it is written
+ * is one mark, and two stores never share one. It cannot be turned back into the
+ * address (lib/person-data.ts). "" when there is no address.
+ */
+export function buyerMark(statsId: string, email: string): string {
+  return email ? sha(`nimbus-aff-buyer:${statsId}:${canonicalEmail(email)}`).slice(0, 32) : "";
+}
+
+/** A line as it leaves readBook: without its buyer's mark, which only the second tier reads. */
+function unmarked<T extends Referral>(line: T): T {
+  if (line.buyerMark === undefined) return line;
+  const copy = { ...line };
+  delete copy.buyerMark;
+  return copy;
+}
+
 /**
  * The second tier: for each sale an affiliate brought that earns them
  * something, the affiliate who invited them earns the percent fixed when they
@@ -4120,9 +4154,12 @@ const BROUGHT: readonly Credit[] = ["click", "code", "buyer", "contact", "recurr
  *     never passes the programme's cap;
  *   - nothing is earned on a recruit's sales while that recruit is held for
  *     the creator to look at, nor on sales made after the inviting affiliate
- *     was declined or removed.
+ *     was declined or removed;
+ *   - nothing on what the inviting affiliate bought themselves through their
+ *     recruit's link (the sale's buyerMark), which would hand back to the two
+ *     of them a share of their own money (Claude 5's audit, 9 November 2026).
  */
-export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<string, HoldFlag[]>): Line[] {
+export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<string, HoldFlag[]>, statsId: string): Line[] {
   const byId = new Map(everyone.map((a) => [a.id, a]));
   // What partners take of each sale (written "<sale>:<partner>"), so all the shares of one sale stay under the cap together.
   const partners = new Map<string, number>();
@@ -4139,6 +4176,10 @@ export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<strin
     const up = byId.get(recruit.by.id);
     if (!up || up.id === recruit.id) continue;
     if (up.status !== "approved" && (up.status !== "removed" || line.at * 1000 > up.decidedAt)) continue;
+    // Never on a purchase of the inviting affiliate's own through their recruit's link, nor of the recruit's own with
+    // their payout address: either one's inbox, written any way, or payout address (as isOwn in lib/affiliate-leads.ts).
+    // A sale with no mark (written down before 9 November 2026) is not known, and is read as it always was.
+    if (line.buyerMark && [up, recruit].some((a) => line.buyerMark === buyerMark(statsId, a.email) || line.buyerMark === buyerMark(statsId, payAddress(a)))) continue;
     const percent = Math.min(recruit.by.percent, MAX_COMMISSION - line.rate - (partners.get(line.ref) ?? 0));
     if (percent <= 0) continue;
     out.push(settleLine({ ref: `tier2:${line.ref}`, pi: line.pi, aff: up.id, at: line.at, product: line.product, title: line.title, base: line.base, total: line.total, currency: line.currency, rate: percent, self: false, how: "tier2" }, line.refunded));

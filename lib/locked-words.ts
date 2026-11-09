@@ -7,7 +7,7 @@
  * (tests/locked-deletes.test.ts).
  */
 export const LOCKED_LIST =
-  "payments, your plan, your team, exports, imports, settings, sending email to your list or your members, canceling or moving events, sending a purchase email again, deleting anything for good (people, products, lessons, files, forms, posts), putting a new file or picture over an old one, your sign-in address, passkeys and two-step login";
+  "payments, your plan, your team, exports, imports, settings, sending email to your list or your members, canceling or moving events, sending a purchase email again, turning on notifications on a new phone, deleting anything for good (people, products, lessons, files, forms, posts), putting a new file or picture over an old one, your sign-in address, passkeys and two-step login";
 
 /** The sentence a refused request answers with, for the studio to show. */
 export const LOCKED_MESSAGE =

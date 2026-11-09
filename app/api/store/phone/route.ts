@@ -20,8 +20,10 @@ const MAX_BODY_BYTES = 8_000;
  * role may hear.
  */
 export async function POST(request: NextRequest) {
-  // Anyone on the store, for their own devices (lib/studio-route.ts, "member").
-  const guarded = await guardStoreWrite(request, "member", MAX_BODY_BYTES);
+  // Anyone on the store, for their own devices (lib/studio-route.ts, "member"). A new device is "phone-add" to the
+  // guard: a session let in without its second step may not add one (lib/two-step.ts LOCKED_ACTIONS, M3), since
+  // it is told every sale and stays on after that session is logged out.
+  const guarded = await guardStoreWrite(request, "member", MAX_BODY_BYTES, (body) => (body.action === "add" ? "phone-add" : String(body.action ?? "")));
   if (!guarded.ok) return guarded.response;
   const { email: who, role } = guarded;
 

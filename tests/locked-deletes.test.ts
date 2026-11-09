@@ -461,7 +461,8 @@ async function main(): Promise<void> {
     "payment-requests": ["need:send"],
     "person": ["act:orders:unnote", "need:erase"],
     "person-tasks": ["act:orders:remove"],
-    "phone": ["not:a team member's own phone, added again at will"],
+    // A new phone waits for a locked session (M3, Claude 5's authentication audit); removing one's own stays open.
+    "phone": ["act:member:phone-add", "not:a team member's own phone, added again at will"],
     "photo": ["act:page:remove", "lockedFor"],
     "podcast": ["act:products:remove"],
     "product": ["act:products:remove", "lockedFor"],
@@ -592,7 +593,8 @@ async function main(): Promise<void> {
     "payment-requests": "need:send",
     "person": { erase: "need:erase", find: "open:reads", note: "open:adds", unnote: "act:orders" },
     "person-tasks": { add: "open:adds", done: "open:reversible", edit: "open:edits", remove: "act:orders" },
-    "phone": "not:a team member's own phone, added again at will",
+    // Was the string "not:a team member's own phone, added again at will" for the whole route; "add" now waits (M3).
+    "phone": { add: "act:member:phone-add", events: "open:edits", find: "open:reads", remove: "not:a team member's own phone, added again at will", renew: "open:the same phone's subscription, replaced by the browser itself", test: "open:a test sent to one's own phone" },
     "podcast": { add: "open:adds", disable: "open:only a podcast with no episode turns back into a product", edit: "open:edits", enable: "open:adds", remove: "act:products" },
     "product": { add: "open:adds", edit: "open:edits", link: "lockedFor", remove: "act:products", unlink: "open:the link typed on a product taken off; typed again at will", visibility: "open:reversible" },
     "review": "not:a buyer deleting their own review, proved by their order",

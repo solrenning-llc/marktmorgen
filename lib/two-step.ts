@@ -359,7 +359,10 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     every buyer listed);
  *     stats: "remove" (a note or a spend on the numbers);
  *     draft: "drop" (an outreach pitch), "segment-remove", "draft-remove";
- *     reviews: "photo" (a buyer's photo taken off a review).
+ *     reviews: "photo" (a buyer's photo taken off a review);
+ *   - member (what every person on the team may do for themselves):
+ *     "phone-add" (a new phone for sale notifications, app/api/store/phone),
+ *     which is told every sale and outlives the session that added it.
  *
  * A route whose action is not its body's `action` names it to
  * guardStoreWrite (lib/store-request.ts); one that learns only from what is
@@ -375,6 +378,9 @@ export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
   stats: ["remove"],
   draft: ["drop", "segment-remove", "draft-remove"],
   reviews: ["photo"],
+  // A new phone for sale notifications (app/api/store/phone, Claude 5's authentication audit, M3): it is told every sale,
+  // booking, report and affiliate, and it is the person's, not the session's, so logging out does not take it off.
+  member: ["phone-add"],
 };
 
 /** Whether a locked session may not do `need` (with `action`, when the route names one). */

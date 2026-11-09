@@ -32,7 +32,10 @@ part("Sources and the callers left out are said");
 const sources = (line?.sources ?? []).map((source) => source.file);
 for (const file of ["lib/file-store.ts", "lib/storage-quota.ts", "lib/vault-storage.ts", "app/api/store/vault/route.ts", "lib/upload-budget-policy.ts", "lib/upload-budget.ts"]) is(`source ${file}`, sources.includes(file), true);
 const basis = line?.basis ?? "";
-is("official page and date", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(basis) && /6 November 2026/.test(basis), true);
+// The basis is text, never a URL that is followed or routed: it is checked to cite each page with a plain substring, not a
+// regular expression over a URL (CodeQL js/regex/missing-regexp-anchor, 2 high on fedab2fad2).
+const cites = (page: string) => basis.includes(page);
+is("official page and date", cites("vercel.com/docs/vercel-blob/usage-and-pricing") && basis.includes("6 November 2026"), true);
 is("closed doors, ended stores and stamped copies named", /closed/.test(basis) && /ended/.test(basis) && /dropStamped/.test(basis), true);
 
 part("The dearest official regional rate, while the Blob store's region is unreviewed (Claude 1, comment 6708241908)");
@@ -44,5 +47,5 @@ is("a Simple Operation at the dearest regional rate, US$ 0.56 a million", BLOB_S
 for (const tier of ["creator", "pro", "scale"] as const) {
   is(`${tier}: the line at the dearest regional rate`, (line?.monthlyUsd(tier) ?? Number.NaN) >= PAID_UPLOAD_OPENS[tier] * 20 * BLOB_PUT_TRIES * 7 / 1e6 - 1e-12, true);
 }
-is("the basis names the regional page and the dearest region", /vercel\.com\/docs\/pricing\/regional-pricing/.test(basis) && /gru1/.test(basis) && /US\$ 7\.00/.test(basis), true);
+is("the basis names the regional page and the dearest region", cites("vercel.com/docs/pricing/regional-pricing") && basis.includes("gru1") && basis.includes("US$ 7.00"), true);
 done();

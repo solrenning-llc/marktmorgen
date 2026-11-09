@@ -34,7 +34,9 @@
  * What the service delivered is read only from its answer in its own shape
  * (inventory of money calls, finding 9, rule 24): any other answer is unknown,
  * never "nothing delivered", and nothing is refunded on it (deliveredIn,
- * unknownLook).
+ * unknownLook). The same holds for its answer to the request to write them:
+ * only a 4xx or a 2xx saying `success: false` is a refusal, refunded at once;
+ * any other answer keeps the request for the sweep (finding R32).
  *
  * A request kept for a person (what was delivered still unknown after every
  * automatic look) is marked `kept`: never shown as being written, never a
@@ -204,7 +206,10 @@ export async function autoQuote(pathname: string): Promise<{ minutes: number; se
 /**
  * Charges for captions in the languages asked, and asks the service to write
  * them. Nothing is charged unless all of it can be asked for; a request the
- * service refuses is refunded at once.
+ * service refuses (a 4xx, or a 2xx saying `success: false`) is refunded at
+ * once. Any other answer is unknown, never a refusal: the request is kept,
+ * charged and queued, and the sweep uses it or gives it back on a known
+ * answer.
  */
 export async function requestAutoCaptions(store: Store, pathname: string, spoken: unknown, also: unknown, now = Date.now()): Promise<AutoAnswer> {
   if (!streamConfig() || !isRedisConfigured() || !isBillingConfigured()) return { ok: false, reason: "off" };
@@ -289,7 +294,17 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     generateMoments: false,
   });
   const success = (answer.data as { success?: unknown } | null)?.success;
-  if (answer.status !== 200 || success === false) {
+  // Only a stated refusal gives the charge back here (finding R32, Claude 5 on #3286, #3345 and #3346; rule 24): a
+  // 4xx, or a 2xx saying `success: false`. Any other answer that is not a plain 200 (no answer, a request cut off, a
+  // 5xx whatever its body says) is unknown: the service may be writing them, so nothing is given back on it and the
+  // request stays as written above, charged and queued. The sweep settles it on an answer that says what was
+  // delivered: used, or given back once after GIVE_UP_HOURS; a retry meanwhile is told they are being written and
+  // charges nothing more.
+  const refused = (answer.status >= 400 && answer.status < 500) || (answer.status >= 200 && answer.status < 300 && success === false);
+  if (!refused && answer.status !== 200) {
+    console.error("the video service's answer to writing captions is unknown; the request is kept and looked at, nothing given back on it", record.id, answer.status);
+  }
+  if (refused) {
     console.error("the video service would not write captions", answer.status, answer.data);
     const refundKey = `nl-${sign}:refund`;
     if (await giveBack(pending, null, refundKey)) {

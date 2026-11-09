@@ -29,6 +29,17 @@ export const MIN_DEFER_SECONDS = 50 * 3_600;
 export const MAX_AHEAD_DAYS = 400;
 /** The one reminder goes this many days before the first charge date, to those who have not kept it yet. */
 export const REMIND_DAYS_BEFORE = 3;
+/**
+ * Hours, from when it was due, that the reminder is tried again for while
+ * whether the member kept their membership cannot be read (lib/imports.ts,
+ * sendMoveReminders). A Stripe outage is most often over within a few hours;
+ * an answer still unknown after that is taken as one that stays unknown (an
+ * address with more customers than lib/move-members.ts reads, a customer with
+ * more than a page of subscriptions), and the reminder is dropped, never sent:
+ * at most REMIND_RETRY_HOURS + 1 tries, each at most two customer lists and
+ * KEPT_CUSTOMERS_MAX subscription lists at Stripe.
+ */
+export const REMIND_RETRY_HOURS = 6;
 /** A member's link works until this long after their renewal date, and never less than this long after it was sent. */
 export const LINK_DAYS = 30;
 
@@ -194,6 +205,17 @@ export function firstChargeAt(renews: number, now = Date.now()): number | null {
 export function reminderAt(renews: number, now = Date.now()): number | null {
   const when = renews - REMIND_DAYS_BEFORE * 86_400;
   return when - Math.floor(now / 1000) >= 86_400 ? when : null;
+}
+
+/**
+ * When a reminder that could not be sent is tried again, in seconds: an hour
+ * from now, while that is within REMIND_RETRY_HOURS of when it was due and
+ * before the renewal date. Null when it is given up.
+ */
+export function remindAgainAt(renews: number, now = Date.now()): number | null {
+  const next = Math.floor(now / 1000) + 3_600;
+  const due = renews - REMIND_DAYS_BEFORE * 86_400;
+  return next <= due + REMIND_RETRY_HOURS * 3_600 && next < renews ? next : null;
 }
 
 /** How long a member's link is kept, in seconds from now. */

@@ -91,8 +91,8 @@ import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
-import { inviteEmail, inviteMembers, keptAlready, noteKept, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
-import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, readRenewal } from "@/lib/move-rules";
+import { type Invite, inviteEmail, inviteMembers, keptAlready, noteKept, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
+import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, firstChargeAt, readRenewal, remindAgainAt } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
 
 export type ImportKind = "contacts" | "products" | "purchases" | "members";
@@ -1499,6 +1499,12 @@ export async function reportCsv(job: ImportJob): Promise<string> {
  * hears nothing. Sent under the same limits as the first emails: the
  * company's day, the store's month (reserveMoved), and nothing to a store whose
  * moved addresses have bounced too often.
+ *
+ * A reminder whose renewal date has passed leaves the line before Stripe is
+ * asked anything. One whose answer cannot be read (keptAlready throws) is
+ * never sent: it is tried again an hour later, within REMIND_RETRY_HOURS of
+ * when it was due and before the renewal date (remindAgainAt), then dropped
+ * with a log line naming the store and the membership, never the address.
  */
 export async function sendMoveReminders(deadline: number, now = Date.now()): Promise<{ sent: number; kept: number }> {
   const counts = { sent: 0, kept: 0 };
@@ -1508,11 +1514,15 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       await remindLater(sid, field, now - 3_600 * 1000);
       continue;
     }
+    let invite: Invite | null = null;
     try {
       const store = await storeForId(sid);
       if (!store?.statsId || !isPaidUp(store) || (await pausedFor(sid))) continue;
-      const invite = await readInvite(store.statsId, field);
+      invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      // Past its renewal date there is nothing left to remind of (reminderEmail says the same): it leaves the line
+      // here, before Stripe is asked anything.
+      if (!firstChargeAt(invite.r, now)) continue;
       if (await keptAlready(store, invite.e, invite.p)) {
         await noteKept(store, invite.e, invite.p, now);
         counts.kept += 1;
@@ -1555,7 +1565,14 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
     } catch (error) {
       console.error("sending a moved member's reminder failed", error);
-      await remindLater(sid, field, now);
+      // Whether they kept it could not be read (or something else failed): tried again for a few hours at most,
+      // never past the renewal date, then dropped unsent. Before the invitation was read there is no date to
+      // bound it by, and nothing has been asked of Stripe yet: it is tried again.
+      if (invite && remindAgainAt(invite.r, now) === null) {
+        console.warn("a moved member's reminder was not sent: whether they kept their membership could not be read in time", { store: sid, product: invite.p, job: invite.job });
+      } else {
+        await remindLater(sid, field, now);
+      }
     }
   }
   return counts;

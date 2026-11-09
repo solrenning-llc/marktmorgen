@@ -13,8 +13,8 @@
  * Synthetic only: Stripe and the email sender are a stand-in for `fetch`.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import * as moveRules from "@/lib/move-rules";
-import { REMIND_DAYS_BEFORE } from "@/lib/move-rules";
+// Rule 23: imported by name now that it exists; the RED commit read it off the module so the file built without it.
+import { REMIND_DAYS_BEFORE, REMIND_RETRY_HOURS } from "@/lib/move-rules";
 import { KEPT_CUSTOMERS_MAX } from "@/lib/move-members";
 import { addRows, finishUpload, runImport, sendMoveReminders, startImport } from "@/lib/imports";
 import { store as redis } from "./redis-stub";
@@ -22,8 +22,6 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const DAY = 86_400;
-/** Read off the module so this file builds before the constant exists (it fails then, as it should). */
-const REMIND_RETRY_HOURS = Number((moveRules as Record<string, unknown>).REMIND_RETRY_HOURS);
 const nowS = Math.floor(Date.now() / 1000);
 const noon = (s: number) => {
   const d = new Date(s * 1000);

@@ -242,7 +242,8 @@ const legibleSub = (row: Record<string, unknown>): boolean => typeof ownField(ro
  * every row readable; anything else (a row of another address or none, the
  * ceiling passed, more pages, a row or page that does not read) throws
  * KeptUnknown or StripeListUnreadable, and sendMoveReminders puts the
- * reminder back instead of asking somebody who pays to pay again.
+ * reminder back instead of asking somebody who pays to pay again, for
+ * REMIND_RETRY_HOURS at most (lib/move-rules.ts), then drops it unsent.
  */
 export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
   const account = store.stripeAccountId;

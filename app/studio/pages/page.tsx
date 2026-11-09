@@ -5,6 +5,7 @@ import Link from "next/link";
 import { readableFile } from "@/lib/product-file";
 import { ThanksNoteEditor } from "@/components/thanks-note-editor";
 import { readThanksNote } from "@/lib/thanks-note-store";
+import { NOTE_UNREAD } from "@/lib/thanks-note";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { imageFolder, isFree } from "@/lib/store";
@@ -268,15 +269,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
             </AiOn>
             )}
             {/* What a buyer reads after paying (lib/thanks-note.ts). Something free has its own page after a sign-up. */}
-            {!isFree(selected) ? (
-              <ThanksNoteEditor
-                key={`note-${selected.id}`}
-                productId={selected.id}
-                productTitle={selected.title}
-                storeName={store.name}
-                initial={selected.note ? await readThanksNote(store.statsId, selected.id).catch(() => null) : null}
-              />
-            ) : null}
+            {!isFree(selected) ? await afterPaying(store.statsId, selected, store.name) : null}
             </div>
           </div>
         )}
@@ -284,4 +277,22 @@ export default async function StudioPagesPage({ searchParams }: Params) {
       </StudioStorePin>
     </div>
   );
+}
+
+/**
+ * The note after paying (lib/thanks-note.ts) in its editor; or, when its read did not come back in a known shape
+ * (readThanksNote throws), the words that say so and no editor, so nothing typed can be saved over the note that is
+ * kept (CX-123 rule 24; C4-20261106-2610-C6-153, unit B). No note marked on the product is no note, as before.
+ */
+async function afterPaying(statsId: string | null, product: { id: string; title: string; note?: boolean }, storeName: string) {
+  const note = product.note ? await readThanksNote(statsId, product.id).catch(() => "unread" as const) : null;
+  if (note === "unread") {
+    return (
+      <section id="after-paying" aria-labelledby="after-paying-title" className="card mt-6 scroll-mt-32 p-6 sm:p-8">
+        <h2 id="after-paying-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">After paying: a note from you</h2>
+        <p role="status" className="notice notice-warn mt-4">{NOTE_UNREAD}</p>
+      </section>
+    );
+  }
+  return <ThanksNoteEditor key={`note-${product.id}`} productId={product.id} productTitle={product.title} storeName={storeName} initial={note} />;
 }

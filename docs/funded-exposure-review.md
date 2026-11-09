@@ -9,6 +9,13 @@ This is an explicit exception to the historical closing-day deletion statements
 below. Unknown billing coverage (`has_more`, malformed/failed evidence or an
 unreadable independent refund queue) never advances a store to `removed`.
 There is no deletion deadline for uncertainty and no new customer limit.
+**DONO-3 (owner, 9 November2026), replacing that sentence for a store at or past its
+closing day:** Stripe silence holds it only until `STRIPE_SILENT_DAYS` (ERASE_WITHIN_DAYS
+less ERASE_EVERY_DAYS) after that day, within the deletion time already published; then
+the closing goes on without Stripe, its personal records go by the existing walk, only the
+dated closing record stays (`lapsed`, counted by the daily job). An answer, even after the
+deadline, is still followed. A store held before its closing day (members not yet held,
+buyers not yet read) is not covered by this decision and still waits.
 
 `lib/held-stores.ts` retains each unresolved obligation in the private shared
 `nl:held:stores` index. The daily closing job revisits oldest due entries. **CX-69,4 November2026:**

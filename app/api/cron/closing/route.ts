@@ -69,9 +69,11 @@ async function run(request: NextRequest): Promise<Response> {
     if (forgets && (forgets.failed || forgets.gaveUp || forgets.left)) console.error(`store-forget: ${forgets.done} done, ${forgets.failed} failed again, ${forgets.gaveUp} given up, ${forgets.left} left for the next run`);
     const looked = await closeEnded(start + 52_000);
     const count = (state: string) => looked.filter((row) => row.state === state).length;
-    const counts = { looked: looked.length, told: count("told"), waiting: count("waiting"), removed: count("removed"), held: count("held"), running: count("running") };
+    // Closed without Stripe at their deadline, Stripe never having answered (lib/plan-closing.ts, STRIPE_SILENT_DAYS, DONO-3).
+    const counts = { looked: looked.length, told: count("told"), waiting: count("waiting"), removed: count("removed"), held: count("held"), running: count("running"), lapsed: looked.filter((row) => row.lapsed).length };
     if (counts.told || counts.removed || counts.held) {
       console.log(`plan-closing: ${counts.looked} stores with an ended plan; ${counts.told} written to, ${counts.removed} had what they kept removed, ${counts.held} left for tomorrow`);
+      if (counts.lapsed) console.error(`plan-closing: ${counts.lapsed} closed stores were closed without Stripe at their deadline, Stripe never having answered; their records go with the next walk, only their dates are kept`);
       for (const row of looked) if (row.state === "held") console.error(`plan-closing: left for tomorrow: ${row.note ?? "no reason given"}`);
     }
     return Response.json({ ok: true, ...counts }, { headers: { "Cache-Control": "no-store" } });

@@ -70,7 +70,7 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
   const reminder = param(query, "r");
   if (reminder) return <StopReminders token={reminder} />;
   const review = param(query, "v");
-  if (review) return <StopReviewRequests token={review} />;
+  if (review) return <StopReviewRequests token={review} notSaved={param(query, "done") === "0"} />;
   const update = param(query, "u");
   if (update) return <StopUpdates token={update} />;
   const community = param(query, "c");
@@ -230,7 +230,11 @@ async function StopReminders({ token }: { token: string }) {
 }
 
 /** The same one button, for a store's emails asking for a review. */
-async function StopReviewRequests({ token }: { token: string }) {
+/**
+ * `notSaved`: the route answered done=0, so the last press was not saved (its write was unknown). Said only while the
+ * link is still found and not stopped, with the button offered again (Claude 5's LOW on #3010).
+ */
+async function StopReviewRequests({ token, notSaved }: { token: string; notSaved: boolean }) {
   const found = REVIEW_STOP.test(token) ? await readReviewStop(token) : null;
   const store = found?.handle ? await storeForPage(found.handle) : null;
   const who = found?.storeName || "";
@@ -252,6 +256,7 @@ async function StopReviewRequests({ token }: { token: string }) {
           <>
             <h1 className="t-h3">{a.reviewsAsk(who)}</h1>
             <p className="mt-3 text-ink-soft">{a.reviewsFor(found.email)}</p>
+            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
             <form action={`/api/mail/unsubscribe?v=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.stopReviews}</button>

@@ -68,6 +68,7 @@ import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
 // On its own line, so open pull requests that change the refunds import above still merge cleanly.
 import { keepRefunds, readHeldRefunds, releaseHeld } from "@/lib/held-refunds";
+import { refundRowKnown } from "@/lib/refunds";
 import {
   MAX_PREFIX_LENGTH,
   MIN_GROUPS,
@@ -573,6 +574,10 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
     const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // A page or a row not in Stripe's shape (refundRowKnown, as the reviews' pass reads it: its id, time, status,
+    // payment and charge.refunded) is unknown, never "not given back": it is neither handled nor kept for a later
+    // look, so the anchor stays where it was (rule 24; the sibling of Codex P on #2774).
+    if (!Array.isArray(listed.data) || refunds.some((row) => !refundRowKnown(row))) unsure = true;
     // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
     const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : null;
     if (lost) lostRead = lost;

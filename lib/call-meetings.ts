@@ -36,6 +36,7 @@ import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
 import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { keepRefunds, readHeldRefunds, releaseHeld } from "@/lib/held-refunds";
+import { refundRowKnown } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
 import { markBookingsChanged, readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
@@ -194,6 +195,10 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
     const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // A page or a row not in Stripe's shape (refundRowKnown, as the reviews' pass reads it: its id, time, status,
+    // payment and charge.refunded) is unknown, never "not given back": it is neither handled nor kept for a later
+    // look, so the anchor stays where it was (rule 24; the sibling of Codex P on #2774).
+    if (!Array.isArray(listed.data) || refunds.some((row) => !refundRowKnown(row))) unsure = true;
     // A dispute closed as lost ends the booking's meeting
     // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
     // with the first page, from Stripe's closing events (kept thirty days).

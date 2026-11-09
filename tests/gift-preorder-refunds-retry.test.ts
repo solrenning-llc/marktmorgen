@@ -7,18 +7,26 @@
  *      week since the real anchor were never read. Now a run with an anchor in
  *      another shape does nothing, asks nothing of Stripe and leaves the anchor
  *      as it is (as lib/group-buy.ts does); a confirmed absent anchor still
- *      starts the first pass from a week back.
+ *      starts the first pass from a week back. The list below is still tried
+ *      in that run: it does not depend on the anchor (review of #3302,
+ *      Claude 5 LEVE 2).
  *   2. A row that can never be handled (a record that does not read, a course
- *      removal that always fails) kept the pass on its page forever, so no
- *      refund behind it was ever taken back. Now, once the same page failed
- *      three runs, the rows still failing on it move to a short list of
- *      refunds to try again (nl:<job>:<store>:refunds:retry, refund id to
- *      payment, at most 100, kept as long as the records it could take back),
- *      the pass goes on, and the list is tried again first on every run; a row
- *      is let go only once handled. With the list full, or a write to it left
- *      unknown, the pass stays on its page: never dropped in silence. A
- *      refund not final yet read on an earlier page still holds the anchor
- *      when the pass ends (the pass kept on a failing page carries its time).
+ *      removal that always fails) would hold the anchor forever. A refund
+ *      Stripe finished (succeeded) whose work could not be done goes on a
+ *      short list of refunds to try again (nl:<job>:<store>:refunds:retry,
+ *      refund id to payment, at most 100, kept as long as the records it could
+ *      take back), the pass goes on in the same run, and the list is tried
+ *      again first on every run; a row is let go only once handled. With the
+ *      list full, or a write to it left unknown, the row holds the anchor at
+ *      its time instead (lib's #3301 rule), read again by the next pass: never
+ *      dropped in silence, and never holding the refunds behind it (review of
+ *      #3302, Claude 5 MEDIUM 1; the rows not readable are in
+ *      gift-preorder-refunds-cursor.test.ts). A refund not final yet is never
+ *      put on the list (reviews of #3302, Claude 6 and Claude 5 LEVE 1; the
+ *      owner's decision 18 of 9 November 2026): it holds the anchor and is
+ *      read again with its status then, so one Stripe fails is never taken
+ *      back. A refund not final yet read on an earlier page still holds the
+ *      anchor when the pass ends.
  *
  * Checked through the real gift and pre-order journeys against a stand-in for
  * the creator's Stripe account that pages as Stripe does.
@@ -33,8 +41,6 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const NOW = Math.floor(Date.now() / 1000);
-/** Runs a page may fail before its failing rows move to the list to try again (REFUND_TRIES in both files). */
-const TRIES = 3;
 
 /** The store's refunds, newest first, as Stripe lists them. */
 let refunds: Record<string, unknown>[] = [];
@@ -109,6 +115,17 @@ async function anchors(job: Job, base: number): Promise<void> {
     is(`${job.name}, ${label}: still held, for the run that reads the anchor`, await far.holds(), true);
   }
 
+  part(`${job.name}: an anchor in another shape still tries the list again, which does not depend on it`);
+  const listed = await job.make(11);
+  const listedId = `re_${job.name}listed0001`;
+  await original.call(redis, [["HSET", job.retry, listedId, listed.pi], ["SET", job.anchor, "not a time"]]);
+  refundCalls.length = 0;
+  is(`${job.name}: the refund on the list is taken back`, await job.run(), 1);
+  is(`${job.name}: no longer held`, await listed.holds(), false);
+  is(`${job.name}: and let go of the list`, await waiting(job.retry), {});
+  is(`${job.name}: still nothing asked of Stripe`, refundCalls.length, 0);
+  is(`${job.name}: and the anchor left as it is`, await read(job.anchor), "not a time");
+
   part(`${job.name}: an anchor read as something other than text does nothing this run`);
   await original.call(redis, [["SET", job.anchor, tenDays]]);
   redis.pipeline = async (commands) => {
@@ -140,6 +157,9 @@ async function anchors(job: Job, base: number): Promise<void> {
 }
 
 async function stuck(job: Job, base: number): Promise<void> {
+  const row = (tag: string, i: number) => `re_${job.name}${tag}${String(i).padStart(6, "0")}`;
+  const ttlOf = async () => (await original.call(redis, [["TTL", job.retry]]))[0] as number;
+
   part(`${job.name}: a row that can never be handled does not hold back the refunds behind it`);
   const blocked = await job.make(2);
   const behind = await job.make(3);
@@ -148,20 +168,13 @@ async function stuck(job: Job, base: number): Promise<void> {
   const refusing = async (email: string) => {
     if (email === blocked.email) throw new Error("the ledger never answers for this one");
   };
-  const anchorBefore = await read(job.anchor);
-  for (let run = 1; run < TRIES; run += 1) {
-    is(`${job.name}: run ${run}, nothing taken back while the page is tried again`, await job.run(refusing), 0);
-    is(`${job.name}: run ${run}, the refund behind it is still held`, await behind.holds(), true);
-    is(`${job.name}: run ${run}, the anchor stays`, await read(job.anchor), anchorBefore);
-    is(`${job.name}: run ${run}, nothing on the list yet`, await waiting(job.retry), {});
-  }
-  is(`${job.name}: run ${TRIES}, the page failed ${TRIES} runs: the pass goes on and takes the one behind back`, await job.run(refusing), 1);
+  is(`${job.name}: run 1 goes on past the row not handled and takes the one behind back`, await job.run(refusing), 1);
   is(`${job.name}: the refund behind it is no longer held`, await behind.holds(), false);
   is(`${job.name}: the row that could not be handled is still held`, await blocked.holds(), true);
-  is(`${job.name}: and kept on the list to try again, refund to payment`, await waiting(job.retry), { [`re_${job.name}s${String(50).padStart(6, "0")}`]: blocked.pi });
-  const ttl = (await original.call(redis, [["TTL", job.retry]]))[0] as number;
+  is(`${job.name}: and kept on the list to try again, refund to payment`, await waiting(job.retry), { [row("s", 50)]: blocked.pi });
+  const ttl = await ttlOf();
   is(`${job.name}: the list is kept 400 days, as the records it could take back`, ttl > 399 * 86_400 && ttl <= 400 * 86_400, true);
-  is(`${job.name}: read to its end, the anchor moves`, await read(job.anchor), String(base));
+  is(`${job.name}: read to its end, the anchor moves: the row on the list does not hold it`, await read(job.anchor), String(base));
   is(`${job.name}: and the pass is let go`, await read(job.pass), null);
 
   part(`${job.name}: the list is tried again first on every run, and a row is let go only once handled`);
@@ -172,7 +185,7 @@ async function stuck(job: Job, base: number): Promise<void> {
   is(`${job.name}: no longer held`, await blocked.holds(), false);
   is(`${job.name}: and let go of the list`, await waiting(job.retry), {});
 
-  part(`${job.name}: with the list full, the pass stays on its page: never dropped`);
+  part(`${job.name}: with the list full, the row holds the anchor, never the refunds behind it`);
   const again = await job.make(4);
   const later = await job.make(5);
   refunds = list(`${job.name}f`, 250, base + 900, { 50: again.pi, 230: later.pi });
@@ -184,20 +197,20 @@ async function stuck(job: Job, base: number): Promise<void> {
     return commands.length === 1 && commands[0][0] === "HLEN" && commands[0][1] === job.retry ? [100] : replies;
   };
   try {
-    for (let run = 1; run <= TRIES + 1; run += 1) await job.run(refusingAgain);
+    is(`${job.name}: the list full: the refund behind is taken back in the same run`, await job.run(refusingAgain), 1);
   } finally {
     redis.pipeline = original;
   }
-  is(`${job.name}: the list full: the refund behind is still held`, await later.holds(), true);
+  is(`${job.name}: the refund behind is no longer held`, await later.holds(), false);
   is(`${job.name}: nothing put on the list`, await waiting(job.retry), {});
-  is(`${job.name}: the anchor stays`, await read(job.anchor), String(base));
-  is(`${job.name}: room on the list again: the next run moves the row and goes on`, await job.run(refusingAgain), 1);
-  is(`${job.name}: the refund behind is taken back`, await later.holds(), false);
-  is(`${job.name}: the failing row kept`, Object.keys(await waiting(job.retry)), [`re_${job.name}f${String(50).padStart(6, "0")}`]);
-  is(`${job.name}: taken back once it can be`, await job.run(), 1);
-  is(`${job.name}: the list is empty again`, await waiting(job.retry), {});
+  is(`${job.name}: the anchor waits at the row that could not be kept`, await read(job.anchor), String(base + 900 - 50));
+  is(`${job.name}: still held`, await again.holds(), true);
+  is(`${job.name}: the next pass reads it again and takes it back once it can be`, await job.run(), 1);
+  is(`${job.name}: no longer held once handled`, await again.holds(), false);
+  is(`${job.name}: the list is empty`, await waiting(job.retry), {});
+  is(`${job.name}: the anchor moves to the newest refund`, await read(job.anchor), String(base + 900));
 
-  part(`${job.name}: a write to the list left unknown keeps the pass on its page`);
+  part(`${job.name}: a write to the list left unknown holds the anchor at the row`);
   const third = await job.make(6);
   const last = await job.make(7);
   refunds = list(`${job.name}u`, 250, base + 1800, { 50: third.pi, 230: last.pi });
@@ -209,18 +222,19 @@ async function stuck(job: Job, base: number): Promise<void> {
     return commands[0]?.[0] === "HSET" && commands[0][1] === job.retry ? replies.map(() => "OK?") : replies;
   };
   try {
-    for (let run = 1; run <= TRIES + 1; run += 1) await job.run(refusingThird);
+    is(`${job.name}: unknown write: the refund behind is taken back in the same run`, await job.run(refusingThird), 1);
   } finally {
     redis.pipeline = original;
   }
-  is(`${job.name}: unknown write: the refund behind is still held`, await last.holds(), true);
-  is(`${job.name}: unknown write: the anchor stays`, await read(job.anchor), String(base + 900));
-  is(`${job.name}: then the pass goes on`, await job.run(refusingThird), 1);
-  is(`${job.name}: the refund behind is taken back`, await last.holds(), false);
+  is(`${job.name}: the refund behind is no longer held`, await last.holds(), false);
+  is(`${job.name}: unknown write: the anchor waits at the row`, await read(job.anchor), String(base + 1800 - 50));
+  is(`${job.name}: the next pass, the write confirmed: nothing more to take back yet`, await job.run(refusingThird), 0);
+  is(`${job.name}: the row is on the list for sure`, Object.keys(await waiting(job.retry)), [row("u", 50)]);
+  is(`${job.name}: and the anchor moves past it`, await read(job.anchor), String(base + 1800));
   is(`${job.name}: handled at last`, await job.run(), 1);
   is(`${job.name}: and let go of the list`, await waiting(job.retry), {});
 
-  part(`${job.name}: a refund not final yet holds the anchor through a page tried again`);
+  part(`${job.name}: a refund not final yet holds the anchor while a row behind it goes on the list`);
   const slow = await job.make(8);
   const fourth = await job.make(9);
   refunds = list(`${job.name}h`, 250, base + 2700, { 20: slow.pi, 120: fourth.pi });
@@ -230,10 +244,7 @@ async function stuck(job: Job, base: number): Promise<void> {
     if (email === fourth.email) throw new Error("the ledger never answers for this one");
   };
   is(`${job.name}: run 1, nothing taken back`, await job.run(refusingFourth), 0);
-  const kept = JSON.parse(String(await read(job.pass))) as { tries?: number; waiting?: number };
-  is(`${job.name}: the pass kept on the failing page carries the time of the refund not final yet`, [kept.tries, kept.waiting], [1, base + 2700 - 20]);
-  for (let run = 2; run <= TRIES; run += 1) await job.run(refusingFourth);
-  is(`${job.name}: the failing row moved to the list`, Object.keys(await waiting(job.retry)), [`re_${job.name}h${String(120).padStart(6, "0")}`]);
+  is(`${job.name}: the failing row moved to the list`, Object.keys(await waiting(job.retry)), [row("h", 120)]);
   is(`${job.name}: the pass ended, the anchor waits at the refund not final yet`, await read(job.anchor), String(base + 2700 - 20));
   is(`${job.name}: still held while it is pending`, await slow.holds(), true);
   refunds[20] = { ...refunds[20], status: "succeeded", charge: { object: "charge", refunded: true } };
@@ -241,6 +252,23 @@ async function stuck(job: Job, base: number): Promise<void> {
   is(`${job.name}: neither is held`, [await slow.holds(), await fourth.holds()], [false, false]);
   is(`${job.name}: the list is empty again`, await waiting(job.retry), {});
   is(`${job.name}: the anchor moves to the newest refund`, await read(job.anchor), String(base + 2700));
+
+  part(`${job.name}: a full refund not final yet whose work fails never goes on the list, and is never taken back once Stripe fails it`);
+  const pend = await job.make(10);
+  refunds = list(`${job.name}p`, 250, base + 3600, { 30: pend.pi });
+  // A full refund still pending (rowGivesBack takes it as giving back): its work is tried, and fails.
+  refunds[30] = { ...refunds[30], status: "pending" };
+  const refusingPend = async (email: string) => {
+    if (email === pend.email) throw new Error("the ledger never answers for this one");
+  };
+  for (let run = 1; run <= 3; run += 1) is(`${job.name}: run ${run}, nothing taken back`, await job.run(refusingPend), 0);
+  is(`${job.name}: never put on the list, which would take it back as finished`, await waiting(job.retry), {});
+  is(`${job.name}: the anchor waits at it, so it is read again with its status then`, await read(job.anchor), String(base + 3600 - 30));
+  // Stripe fails the refund: no money went back.
+  refunds[30] = { ...refunds[30], status: "failed", charge: { object: "charge", refunded: false } };
+  is(`${job.name}: the work could be done now, but nothing is taken back: the refund failed`, await job.run(), 0);
+  is(`${job.name}: still held: the buyer did not get the money back`, await pend.holds(), true);
+  is(`${job.name}: and the anchor moves to the newest refund`, await read(job.anchor), String(base + 3600));
 }
 
 async function main(): Promise<void> {

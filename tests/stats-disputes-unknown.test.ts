@@ -62,6 +62,10 @@ const UNKNOWN: [string, Record<string, unknown>][] = [
   ["a lost dispute with an amount in text", { status: "lost", amount: "700" }],
   ["a lost dispute with a negative amount", { status: "lost", amount: -700 }],
   ["a lost dispute with a fraction of a cent", { status: "lost", amount: 700.5 }],
+  // A decision under appeal (stripe-node 23.1.0): known to Stripe, but DISPUTE_TAKES (lib/retained-revenue.ts, #3321's)
+  // does not say yet whether its money is held, so it is never read as nothing taken.
+  ["a dispute under appeal, waiting for an answer", { status: "appeal_needs_response", amount: 700 }],
+  ["a dispute under appeal, with the bank", { status: "appeal_under_review", amount: 700 }],
 ];
 
 async function main() {

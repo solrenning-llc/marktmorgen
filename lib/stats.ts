@@ -28,7 +28,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
  */
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
 import { DISPUTE_TAKES, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
-import { disputeStatusKnown } from "@/lib/dispute-statuses";
+import { DISPUTE_APPEAL_STAGES, disputeStatusKnown } from "@/lib/dispute-statuses";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
 import { type DiscountRow, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
@@ -1455,7 +1455,9 @@ const DISPUTE_PAGES = 3;
  * `partial`, so the page shows disputes as not read and what was kept has no
  * figure (CX-123 rule 24: unknown is never zero). Which known statuses take
  * the money is DISPUTE_TAKES (lib/retained-revenue.ts; `prevented` joins it
- * in #3321).
+ * in #3321). A dispute under appeal (DISPUTE_APPEAL_STAGES) is a status
+ * Stripe gives, but DISPUTE_TAKES does not place it yet: it makes the
+ * reading `partial` too, never read as nothing taken.
  */
 async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES): Promise<{ rows: DisputeRow[]; partial: boolean }> {
   const out: DisputeRow[] = [];
@@ -1472,6 +1474,8 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
     for (const row of rows) {
       // A status Stripe does not give: the dispute may hold money, so the reading is incomplete, never short of it.
       if (!disputeStatusKnown(row.status)) { partial = true; continue; }
+      // A decision under appeal: whether its money is held is not placed yet (DISPUTE_TAKES), so not read, never nothing.
+      if (DISPUTE_APPEAL_STAGES.has(row.status)) { partial = true; continue; }
       if (!DISPUTE_TAKES.has(row.status)) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";

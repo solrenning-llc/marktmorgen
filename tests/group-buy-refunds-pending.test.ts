@@ -94,7 +94,7 @@ async function main(): Promise<void> {
   const OWNER = "grouppend@example.com";
   await claimHandle(OWNER, "grouppend", "Group Pending", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1GroupPending001", true);
+  await setStripeAccount(OWNER, "acct_1GroupPend001", true);
   await setSubscription(OWNER, { customerId: "cus_GroupPend001", subscriptionId: "sub_GroupPend001", active: true, period: paidPeriod() });
   const made = await addProduct(OWNER, "Sourdough Course", "", "49", null);
   if (!made.ok) throw new Error("no product");

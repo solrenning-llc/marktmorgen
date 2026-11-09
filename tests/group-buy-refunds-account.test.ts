@@ -31,8 +31,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
-const ACCOUNT_A = "acct_1GroupCursorA001";
-const ACCOUNT_B = "acct_1GroupCursorB001";
+const ACCOUNT_A = "acct_1GrpCursorA01";
+const ACCOUNT_B = "acct_1GrpCursorB01";
 /** Each account's refunds, newest first, as Stripe keeps them. */
 const lists = new Map<string, unknown[]>();
 const reads: { account: string; after: string | null; status: number }[] = [];
@@ -226,7 +226,7 @@ async function main(): Promise<void> {
   is("and A's anchor is A's own newest refund", await anchor(), String(now - 2 * 86_400));
 
   part("Many accounts: the marks of the accounts left stay bounded, and a mark let go never loses a refund");
-  const many = Array.from({ length: 20 }, (_, i) => `acct_1GroupCursorM${String(i).padStart(3, "0")}`);
+  const many = Array.from({ length: 20 }, (_, i) => `acct_1GrpCursorM${String(i).padStart(3, "0")}`);
   for (const other of many) {
     await setStripeAccount(OWNER, other, true);
     lists.set(other, []);

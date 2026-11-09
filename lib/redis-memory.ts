@@ -787,16 +787,20 @@ export class MemoryRedis {
           this.run(["DECRBY", args[1], back]);
           return back;
         }
-        // lib/imports.ts JOB_WRITE_IF: an import written only over the text it was read as, with an upload's batch when it carries one.
-        if (key.startsWith("-- marktmorgen:import-job-write-if:v1\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
+        // lib/imports.ts JOB_WRITE_IF: an import written only over the text it was read as, with what ARGV[4] names in the
+        // same step: "rows", an upload's batch onto its rows; "active", the import onto the active set; "", nothing more.
+        if (
+          key.startsWith("-- marktmorgen:import-job-write-if:v2\n") &&
+          ((args[0] === "1" && args.length === 6 && args[5] === "") || (args[0] === "2" && args.length === 9 && args[6] === "rows") || (args[0] === "2" && args.length === 8 && args[6] === "active"))
+        ) {
           const two = args[0] === "2";
-          const [expected, text, seconds, batch, rowSeconds] = args.slice(two ? 3 : 2);
+          const [expected, text, seconds, what, value, rowSeconds] = args.slice(two ? 3 : 2);
           if (this.run(["GET", args[1]]) !== expected) return 0;
-          this.run(["SET", args[1], text, "EX", seconds]);
-          if (two) {
-            this.run(["RPUSH", args[2], batch]);
+          if (what === "rows") {
+            this.run(["RPUSH", args[2], value]);
             this.run(["EXPIRE", args[2], rowSeconds]);
-          }
+          } else if (what === "active") this.run(["SADD", args[2], value]);
+          this.run(["SET", args[1], text, "EX", seconds]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {

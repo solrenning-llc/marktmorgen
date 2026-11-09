@@ -219,6 +219,7 @@ const likesKey = (id: string, post: string) => `${base(id)}:l:${post}`;
 const commentLikesKey = (id: string, post: string, comment: string) => `${base(id)}:lc:${post}:${comment}`;
 const membersKey = (id: string) => `${base(id)}:m`;
 const dirKey = (id: string) => `${base(id)}:dir`;
+const handlesKey = (id: string) => `${base(id)}:h`;
 const reportsKey = (id: string) => `${base(id)}:rep`;
 const reportersKey = (id: string, target: string) => `${base(id)}:rep:${target}`;
 const rateKey = (id: string, who: string, kind: string) => `nl:cm:rl:${id}:${who}:${kind}`;
@@ -323,11 +324,25 @@ export async function readConfig(id: string): Promise<CommunityConfig | null> {
 }
 
 /**
+ * A setup that Redis did answer, as text, but that is not settings: stored
+ * damaged, so asking again gives the same answer. Still an unknown reply to
+ * anyone who catches UnknownReplyError; only a caller that knows what such a
+ * setup means for it may tell the two apart (lib/community-erasure.ts).
+ */
+export class DamagedConfigError extends UnknownReplyError {
+  constructor() {
+    super("a community setup stored damaged");
+    this.name = "DamagedConfigError";
+  }
+}
+
+/**
  * The settings, read before anything is written over them: null only when
  * the GET answered exactly nil, so there is no setup yet. A lost reply, one
  * in another shape or a value that does not parse throws, and the caller
  * writes nothing; a fresh setup over the creator's spaces and access would
- * lock every paying member out.
+ * lock every paying member out. A text value that does not parse throws
+ * DamagedConfigError.
  */
 export async function readConfigExact(id: string): Promise<CommunityConfig | null> {
   if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
@@ -335,7 +350,7 @@ export async function readConfigExact(id: string): Promise<CommunityConfig | nul
   if (!replies) throw new UnknownReplyError("a community setup");
   if (replies[0] === null) return null;
   const config = parseConfig(replies[0]);
-  if (!config) throw new UnknownReplyError("a community setup");
+  if (!config) throw typeof replies[0] === "string" ? new DamagedConfigError() : new UnknownReplyError("a community setup");
   return config;
 }
 
@@ -410,9 +425,43 @@ export async function lastSeenIn(id: string, emails: string[]): Promise<Map<stri
   return out;
 }
 
+/**
+ * A member's record, or null only when Redis said there is none. A reply in
+ * any other shape (missing, cut short, not a record, a record without its own
+ * yes or no on a mute and a removal, or somebody else's) is thrown (CX-123
+ * rule 24): read as "no record", it let a member the creator took out past
+ * the removal and back in as somebody new (lib/community-access.ts
+ * communityViewer, touchMember's re-read).
+ */
 export async function readMember(id: string, key: string): Promise<Member | null> {
-  const [raw] = await redisPipeline([["HGET", membersKey(id), key]]);
-  return parseMember(raw);
+  return (await readMemberExact(id, key))?.member ?? null;
+}
+
+/** The record as readMember reads it, with the exact text it was kept as (what a compare-and-set writes over). */
+async function readMemberExact(id: string, key: string): Promise<{ raw: string; member: Member } | null> {
+  const replies = repliesFor(await redisPipeline([["HGET", membersKey(id), key]]), 1);
+  if (!replies) throw new UnknownReplyError("a community member record");
+  const raw = replies[0];
+  if (raw === null) return null;
+  const member = exactMember(raw, key);
+  if (!member || typeof raw !== "string") throw new UnknownReplyError("a community member record");
+  return { raw, member };
+}
+
+/** The record kept under `key`, when it is one: its own key, and a mute and a removal each a yes or a no. */
+function exactMember(raw: unknown, key: string): Member | null {
+  if (typeof raw !== "string") return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const fields = value as Record<string, unknown>;
+  if (typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return null;
+  const member = parseMember(raw);
+  return member && member.k === key ? member : null;
 }
 
 export async function readMembers(id: string, keys: string[]): Promise<Map<string, Member>> {
@@ -424,6 +473,28 @@ export async function readMembers(id: string, keys: string[]): Promise<Map<strin
   unique.forEach((key, i) => {
     const member = parseMember(list[i]);
     if (member) out.set(key, member);
+  });
+  return out;
+}
+
+/**
+ * The members of `keys`, read exactly (rules 24 and 30), for deciding who an email goes to: one left out of the map
+ * only when its row answered exactly nil, so it is gone. A reply lost, cut short or in another shape, or a row that is
+ * not that member's record, throws UnknownReplyError: a member who did not read is not one who is gone, and an email
+ * meant for them is not counted as sent (lib/community-event-mail.ts).
+ */
+export async function readMembersExact(id: string, keys: string[]): Promise<Map<string, Member>> {
+  const out = new Map<string, Member>();
+  const unique = [...new Set(keys)].filter((k) => k !== CREATOR);
+  if (!unique.length) return out;
+  const replies = repliesFor(await redisPipeline([["HMGET", membersKey(id), ...unique]]), 1);
+  const rows = replies && repliesFor(replies[0], unique.length);
+  if (!rows) throw new UnknownReplyError("community members");
+  unique.forEach((key, i) => {
+    if (rows[i] === null) return;
+    const member = parseMember(rows[i]);
+    if (!member || member.k !== key) throw new UnknownReplyError("a community member record");
+    out.set(key, member);
   });
   return out;
 }
@@ -441,19 +512,26 @@ const CAS_MEMBER = [
 /**
  * Changes some of a member's fields on the record as it is now, so a change
  * the member makes never writes back a mute or a removal the creator just
- * undid, or undoes one they just made. Null when there is no record.
+ * undid, or undoes one they just made. Null only when Redis said there is no
+ * record. A read or a write answered in any other shape throws
+ * UnknownReplyError (CX-123 rule 24): read as "no record", it let a stop
+ * link say "Unsubscribed." with the emails still on, and a mute say done
+ * with nothing written.
  */
 async function patchMember(id: string, key: string, change: (member: Member) => Partial<Member>): Promise<Member | null> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const [raw] = await redisPipeline([["HGET", membersKey(id), key]]);
-    const member = parseMember(raw);
-    if (!member || typeof raw !== "string") return null;
+    const read = await readMemberExact(id, key);
+    if (!read) return null;
+    const { raw, member } = read;
     const next: Member = { ...member, ...change(member), k: member.k };
     const listed = next.dir && next.n && !next.removed ? "1" : "0";
-    const [written] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
-    ]);
-    if (Number(written) !== 1) continue;
+    ]), 1);
+    // 1 written, 0 changed since it was read (read again); anything else is not known to be either.
+    const written = replies?.[0];
+    if (written === 0) continue;
+    if (written !== 1) throw new UnknownReplyError("a change to a community member record");
     // The search index follows the very same switch the directory does, from
     // the very same place, so the two can never come to disagree about who is
     // findable. Somebody who took themselves off the list is taken out of the
@@ -476,7 +554,10 @@ export async function touchMember(id: string, email: string, existing: Member | 
     if (at - existing.seen < 3_600) return existing;
     return (await patchMember(id, key, () => ({ seen: at }))) ?? existing;
   }
-  const [size] = await redisPipeline([["HLEN", membersKey(id)]]);
+  // The head count in its exact shape (CX-123 rule 24): read with Number(...), a missing or off-shape
+  // HLEN was NaN, never at the ceiling, and a new record was written whatever the count was.
+  const size = countOf(repliesFor(await redisPipeline([["HLEN", membersKey(id)]]), 1)?.[0]);
+  if (size === null) throw new UnknownReplyError("a community's head count");
   if (Number(size) >= MAX_MEMBERS) return null;
   const member: Member = { k: key, e: normaliseEmail(email), n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
   // HSETNX: two first visits at once make one record, not two. Counted in
@@ -508,17 +589,90 @@ export async function setProfile(
   else if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
   // The handle is taken before the name is written, so a member is never left
   // named but unmentionable. Claiming gives back what they ended up with,
-  // which may carry a number when somebody already held the plain one.
+  // which may carry a number when somebody already held the plain one. It
+  // only reserves: the handle they had stays theirs until the record is known
+  // not to carry it any more (rule 30 on Codex G's review 5815632734 of #3123),
+  // so a change that did not go in never lets the name they are still shown
+  // under resolve to nobody, or to somebody else.
   const handle = await claimHandle(id, member.k, name, member.h);
-  return (
-    (await patchMember(id, member.k, (now) => ({
-      n: name,
-      h: handle,
-      dir: change.dir && Boolean(name),
-      mail: change.mail,
-      ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
-    }))) ?? member
-  );
+  const had = member.h && member.h !== handle ? member.h : "";
+  let replaced = "";
+  let saved: Member | null;
+  try {
+    saved = await patchMember(id, member.k, (now) => {
+      replaced = now.h;
+      return {
+        n: name,
+        h: handle,
+        dir: change.dir && Boolean(name),
+        mail: change.mail,
+        ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
+      };
+    });
+  } catch (error) {
+    // The read or the write after the claim answered in no known shape, so
+    // whether the record took the new handle is not known: a lost answer may
+    // hide a write that went in. Each of the two handles is given back only
+    // when the record, read in the same step, does not carry it (rule 30 on
+    // Codex G's reviews 5815559331 and 5815632734 of #3123): a record still
+    // on the old one keeps the old one and lets the new one go, a record on
+    // the new one keeps the new one and lets the old one go. When an answer
+    // is not known, nothing more is given back, so both stay reserved: a
+    // handle held too long is safe, one that stops resolving to the person
+    // still shown under it is not. Either way the original failure is what
+    // the caller sees.
+    await giveBackUnlessCarried(id, member.k, [handle, had]).catch(() => 0);
+    throw error;
+  }
+  // The erasure deletes only the handle the record holds (lib/community-erasure.ts),
+  // so a handle the record does not carry is given back here, never left tied to
+  // the member: the one this change claimed when the record went in between (an
+  // erasure), the one the member had once the record no longer carries it, and
+  // one a change made at the same time wrote and this one replaced (rule 30 on
+  // Codex G's reviews 5815472405 and 5815632734 of #3123).
+  if (!saved) {
+    await giveBackUnlessCarried(id, member.k, [handle, had]);
+    return member;
+  }
+  await giveBackUnlessCarried(id, member.k, [had, replaced && replaced !== handle ? replaced : ""]);
+  return saved;
+}
+
+/**
+ * Gives back each of these handles, one GIVE_BACK_HANDLE each, so each is let
+ * go only while it still points at this member and the record, read in the
+ * same step, does not carry it. Stops at the first answer that is not known,
+ * keeping every handle not yet given back.
+ */
+async function giveBackUnlessCarried(id: string, who: string, handles: string[]): Promise<void> {
+  for (const handle of [...new Set(handles)]) if (handle) await giveBackHandle(id, handle, who);
+}
+
+/**
+ * Gives a handle back only while it still points at this member and the
+ * member's record, read in the same step, does not carry it: a record that
+ * names it keeps it, and one gone or naming another lets it go. 1 deleted,
+ * 0 kept; -1 (a record that cannot be read) and any other answer are not
+ * known to be either.
+ */
+const GIVE_BACK_HANDLE = [
+  "-- marktmorgen:community-handle-give-back:v1",
+  'if redis.call("HGET", KEYS[2], ARGV[1]) ~= ARGV[2] then return 0 end',
+  'local raw = redis.call("HGET", KEYS[1], ARGV[2])',
+  "if raw then",
+  "  local ok, record = pcall(cjson.decode, raw)",
+  '  if not ok or type(record) ~= "table" then return -1 end',
+  "  if record.h == ARGV[1] then return 0 end",
+  "end",
+  'return redis.call("HDEL", KEYS[2], ARGV[1])',
+].join("\n");
+
+/** Runs GIVE_BACK_HANDLE; throws UnknownReplyError unless Redis answered 1 or 0 exactly. */
+async function giveBackHandle(id: string, handle: string, who: string): Promise<number> {
+  const replies = repliesFor(await redisPipeline([["EVAL", GIVE_BACK_HANDLE, 2, membersKey(id), handlesKey(id), handle, who]]), 1);
+  const gone = replies?.[0];
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("giving back a community handle");
+  return gone;
 }
 
 /**
@@ -543,9 +697,20 @@ export async function setMail(id: string, member: Member, mail: boolean): Promis
   return (await patchMember(id, member.k, () => ({ mail }))) ?? member;
 }
 
-/** Keeps the unsubscribe token a member's emails carry. */
-export async function setMemberToken(id: string, member: Member, token: string): Promise<void> {
-  await patchMember(id, member.k, () => ({ t: token }));
+/**
+ * Keeps the unsubscribe token a member's emails carry, made once and never
+ * replaced: the token is written only while the record holds none, so two
+ * sends that read the member before either wrote (or one holding an old
+ * snapshot) never undo a link already put in an email (Codex G on #3123).
+ * Answers the token the record holds afterwards, which is `token` or the one
+ * kept before it; null only when Redis said there is no record. Any other
+ * answer throws (CX-123 rule 24).
+ */
+export async function setMemberToken(id: string, member: Member, token: string): Promise<string | null> {
+  const kept = await patchMember(id, member.k, (now) => (now.t ? {} : { t: token }));
+  if (!kept) return null;
+  if (!/^[0-9a-f]{40}$/.test(kept.t)) throw new UnknownReplyError("a community member's stop link");
+  return kept.t;
 }
 
 /** The creator mutes or unmutes, removes or lets back. */

@@ -159,6 +159,8 @@ async function writeOrder(aligned: boolean): Promise<void> {
     return reply;
   };
   const stripePeriod = { current_period_start: startS + 60, current_period_end: startS + 60 + 30 * 86_400 };
+  // The plan line and stop fields Stripe always sends with a subscription (CX-123 rule 24, lib/billing.ts stateOf).
+  const creatorMonth = { lookup_key: "nimbus_labs_creator_month", unit_amount: 6900, recurring: { interval: "month" } };
   const keptFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -168,8 +170,8 @@ async function writeOrder(aligned: boolean): Promise<void> {
     if (method === "GET" && url.pathname === "/v1/subscriptions/sub_TodayOrder01")
       return Response.json(
         shifted
-          ? { id: "sub_TodayOrder01", status: "active", cancel_at_period_end: false, items: { data: [stripePeriod] } }
-          : { id: "sub_TodayOrder01", status: "trialing", trial_end: startS + 60, cancel_at_period_end: false, items: { data: [{ current_period_start: startS - 86_400, current_period_end: startS + 60 }] } },
+          ? { id: "sub_TodayOrder01", status: "active", cancel_at: null, cancel_at_period_end: false, items: { data: [{ ...stripePeriod, price: creatorMonth }] } }
+          : { id: "sub_TodayOrder01", status: "trialing", trial_end: startS + 60, cancel_at: null, cancel_at_period_end: false, items: { data: [{ current_period_start: startS - 86_400, current_period_end: startS + 60, price: creatorMonth }] } },
       );
     if (method === "GET" && url.pathname === "/v1/subscriptions/sub_TodayAssist01") return Response.json({ id: "sub_TodayAssist01", status: "active", cancel_at_period_end: false, items: { data: [stripePeriod] } });
     if (method === "GET") return Response.json({ object: "list", data: [], has_more: false });

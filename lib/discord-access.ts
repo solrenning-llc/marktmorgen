@@ -111,7 +111,10 @@ export type Checked = "kept" | "changed" | "ended" | "gone" | "later";
 
 /** Checks one person again, and gives or takes back roles to match what they hold now. */
 export async function checkMember(sid: string, userId: string, now = Date.now()): Promise<Checked> {
-  const store = await storeForId(sid).catch(() => null);
+  // A store read that fails is unknown, never "gone" (CX-123 rule 24): the person was already taken off the line
+  // (dueMembers), so "gone" on an error would drop them for good and a later cancellation or refund would never take
+  // their paid roles back. The error goes up to sweepDiscord, which puts them back in line for the next run.
+  const store = await storeForId(sid);
   if (!store) return "gone";
   const room = storeKey(store);
   // Read exactly: an unknown server, member or roles read throws (sweepDiscord keeps the person in line), never read

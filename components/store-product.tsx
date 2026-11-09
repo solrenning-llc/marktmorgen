@@ -560,6 +560,7 @@ export function BuyBox({
   selling,
   related,
   ready = true,
+  unread = false,
   soon = false,
   preorder = null,
   bundleItems = null,
@@ -581,6 +582,12 @@ export function BuyBox({
   selling: boolean;
   /** For a bundle: whether it holds enough to hand over right now. */
   ready?: boolean;
+  /**
+   * Whether it can be bought could not be read just now: its license keys left (lib/licence-keys.ts outOfKeys). Unknown
+   * is never "keys left" (CX-123 rule 24): no way to buy is drawn, and the box says buying is not available just now,
+   * as the card on the creator's own site does.
+   */
+  unread?: boolean;
   /** Coming soon: a waitlist instead of a way to pay (lib/waitlist.ts). */
   soon?: boolean;
   /** Coming soon and taking pre-orders: the day it is expected (lib/preorders.ts, preorderDay). */
@@ -615,6 +622,7 @@ export function BuyBox({
       <span className="sr-only">{`: ${product.title}`}</span>
     </Link>
   );
+  if (unread) return <p className="st-muted mt-4 text-sm">{speech(store).w.cardBuyUnread}</p>;
   if (soon && !isFree(product) && preorder && stepped) return toStep("#preorder");
   if (soon && !isFree(product)) return preorder ? <PreorderForm store={store} product={product} day={preorder} writes={writes} consentAgain={consentAgain} /> : <WaitlistForm store={store} product={product} writes={writes} />;
   const { w, money } = speech(store);
@@ -1116,6 +1124,12 @@ export function pageAction(
  * Every style carries the same facts and the same buy box. The title, and the
  * picture, lead to the product's own page, where the long description is.
  */
+/**
+ * A product's title on its card: a 44 × 44 px target (WCAG 2.5.5 AAA), wide enough even for a title of one letter.
+ * The padding keeps the hover line under the words, drawn in the content box, not at the foot of the taller box.
+ */
+const TITLE_LINK = "st-title-link inline-flex min-h-11 min-w-11 items-center py-2.5 [background-clip:content-box] [background-origin:content-box]";
+
 export function ProductCard({
   store,
   product,
@@ -1133,6 +1147,7 @@ export function ProductCard({
   cart = false,
   sold = null,
   grid = false,
+  unread = false,
 }: {
   store: Store;
   product: Listing;
@@ -1164,6 +1179,8 @@ export function ProductCard({
   sold?: string | null;
   /** It stands in the store page's grid, two to a row on a computer (Encanto 3): its cover is described at that width. */
   grid?: boolean;
+  /** Its license keys left could not be read just now (CX-123 rule 24): no way to buy it, and no count, is drawn. */
+  unread?: boolean;
 }) {
   const href = productPath(store, product);
   const { w, num } = speech(store);
@@ -1194,10 +1211,19 @@ export function ProductCard({
     />
   ) : null;
 
+  // "Read more" says, to a screen reader, which product it is for (WCAG 2.4.9), its visible words first (2.5.3); a
+  // 44 px target like the title (2.5.5). The title's own words, not new ones, so every buyer language reads it.
+  const readMore = (
+    <Link prefetch={false} href={href} className="inline-flex min-h-11 items-center underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+      {w.readMore}
+      <span className="sr-only">{`: ${product.title}`}</span>
+    </Link>
+  );
+
   const heading = (
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
       <h2 className="font-display min-w-0 text-lg font-semibold leading-snug">
-        <Link prefetch={false} href={href} className="st-title-link">
+        <Link prefetch={false} href={href} className={TITLE_LINK}>
           {product.title}
         </Link>
       </h2>
@@ -1213,22 +1239,16 @@ export function ProductCard({
       {sold ? <p className="st-sold mt-1 text-sm font-semibold">{sold}</p> : null}
       <ProductFacts store={store} product={product} bundleItems={bundleItems} />
       {summary}
-      {product.about || product.page ? (
-        <p className="mt-2 text-sm font-semibold">
-          <Link prefetch={false} href={href} className="underline underline-offset-4" style={{ color: "var(--st-text)" }}>
-            {w.readMore}
-          </Link>
-        </p>
-      ) : null}
+      {product.about || product.page ? <p className="mt-2 text-sm font-semibold">{readMore}</p> : null}
     </>
   );
 
   const rest = (
     <>
-      {plan && canSellProduct(store, product) && !soon ? (
+      {plan && canSellProduct(store, product) && !soon && !unread ? (
         <p className="st-muted mt-1 text-sm font-semibold">{w.orPlan(planLine(store, plan))}</p>
       ) : null}
-      {remaining !== null && !soon ? (
+      {remaining !== null && !soon && !unread ? (
         <p className="mt-2 text-sm font-bold" style={{ color: "var(--st-accent-text)" }}>
           {soldOut ? w.soldOut : w.left(remaining, num(remaining))}
         </p>
@@ -1244,8 +1264,9 @@ export function ProductCard({
         soon={soon}
         preorder={preorder}
         stepped
+        unread={unread}
       />
-      {cart ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {cart && !unread ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {product.recurring && manageable ? (
         <p className="mt-3 text-center text-sm">
           <Link href={`/@${store.handle}/manage`} className="st-footer-link font-semibold">
@@ -1280,7 +1301,7 @@ export function ProductCard({
           </Link>
           <div className="min-w-0 flex-1">
             <h2 className="font-display text-lg font-semibold leading-snug">
-              <Link prefetch={false} href={href} className="st-title-link">
+              <Link prefetch={false} href={href} className={TITLE_LINK}>
                 {product.title}
               </Link>
             </h2>
@@ -1292,13 +1313,7 @@ export function ProductCard({
           </div>
         </div>
         <div className="sm:hidden">{summary}</div>
-        {product.about || product.page ? (
-          <p className="mt-2 text-sm font-semibold">
-            <Link prefetch={false} href={href} className="underline underline-offset-4" style={{ color: "var(--st-text)" }}>
-              {w.readMore}
-            </Link>
-          </p>
-        ) : null}
+        {product.about || product.page ? <p className="mt-2 text-sm font-semibold">{readMore}</p> : null}
         {rest}
       </li>
     );

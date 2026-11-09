@@ -40,7 +40,8 @@ export default async function StudioBlogPage({ searchParams }: Params) {
   const [posts, open, left] = await Promise.all([
     allPosts(store.statsId).catch(() => null),
     editing && editing !== "new" ? readPost(store.statsId, editing).catch(() => undefined) : Promise.resolve(null),
-    aiAvailableFor(store) ? aiLeft(store).catch(() => 0) : Promise.resolve(0),
+    // An allowance that could not be read is null, said in words by the AI boxes, never shown as 0 (rule 24, VR item 2).
+    aiAvailableFor(store) ? aiLeft(store).catch(() => null) : Promise.resolve(0),
   ]);
   const back = studioPath(store, "", "blog");
   const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ id: p.id, title: p.title }));
@@ -97,7 +98,7 @@ export default async function StudioBlogPage({ searchParams }: Params) {
               {open === undefined ? (
                 <p role="status" className="text-ink-soft">This post couldn&apos;t be loaded. Reload to try again.</p>
               ) : writing ? (
-                <AiOn value={aiAvailableFor(store) ? { on: true, left } : { on: false, left: 0 }}>
+                <AiOn value={!aiAvailableFor(store) ? { on: false, left: 0 } : left === null ? { on: true, left: 0, known: false } : { on: true, left }}>
                   <BlogEditor
                     key={open?.id ?? "new"}
                     post={open ? { id: open.id, title: open.title, body: open.body, product: open.product, draft: open.draft, href: open.draft ? null : live(open.id, open.title) } : { id: null, title: "", body: "", product: null, draft: true, href: null }}

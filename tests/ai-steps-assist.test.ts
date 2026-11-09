@@ -1,7 +1,7 @@
 /**
  * What the creator sees while the writing help drafts a page step by step
  * (758 [STN5] unit 1; components/ai-steps-assist.tsx, lib/ai-steps.ts),
- * held to AX274: each step's state is said in words, never by colour alone;
+ * held to AX274: each step's state is said in words, never by color alone;
  * only a change of step and the result are announced, politely, and the
  * clock that counts up is outside that region so a screen reader is not
  * talked over every second; Stop is a native button at least 44 by 44
@@ -61,7 +61,7 @@ function main(): void {
   is("the clock reads in minutes and seconds", [elapsedWords(0), elapsedWords(9), elapsedWords(75), elapsedWords(3_600)], ["0:00", "0:09", "1:15", "60:00"]);
   const source = readFileSync("components/ai-steps-assist.tsx", "utf8");
   is("nothing animates unless motion is allowed", (source.match(/\banimate-/g) ?? []).length === (source.match(/motion-safe:animate-/g) ?? []).length, true);
-  is("no state is told by colour alone: every state has its word", ["Not started", "Running", "Done", "Not run, not charged"].every((w) => source.includes(w)), true);
+  is("no state is told by color alone: every state has its word", ["Not started", "Running", "Done", "Not run, not charged"].every((w) => source.includes(w)), true);
 
   done();
 }

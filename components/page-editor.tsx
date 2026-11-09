@@ -17,7 +17,9 @@ import { IMAGE_ACCEPT, MAX_ALT_LENGTH, MAX_SOURCE_BYTES, imagePath, imageUrl } f
 import { Icon } from "@/components/icons";
 import { KIND_ICONS } from "@/lib/sales-page-icons";
 import { toast } from "@/components/toast";
-import { AiAssist, AiOn } from "@/components/ai-assist";
+import { AiOn } from "@/components/ai-assist";
+import { AiStepsAssist } from "@/components/ai-steps-assist";
+import { pageSteps } from "@/lib/ai-steps";
 import { TranslatePage } from "@/components/translate-page";
 import { AiPosts } from "@/components/ai-posts";
 import { PageCoach } from "@/components/page-coach";
@@ -2338,12 +2340,13 @@ export function PageEditor({
           */}
           {site ? null : (
           <div className="mt-6">
-            <AiAssist<DraftCopy>
+            <AiStepsAssist<DraftCopy>
               title="Write the whole page with AI"
               hint={`A full draft — headline, what the buyer gets, what is inside, questions and buttons — from ${product.title}'s name, price and description. Add anything else it should know below, or leave the box empty. It replaces the blocks here; nothing is saved until you press Save.`}
               placeholder="Who it is for, what makes it different, what buyers ask you most. Your refund promise, if you have one."
               allowEmpty
               payload={() => ({ kind: "page", product: product.id, readFile: product.pdf === true && readFile })}
+              steps={pageSteps(product.pdf === true && readFile)}
               extra={
                 product.pdf ? (
                   <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-ink">

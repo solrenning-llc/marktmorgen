@@ -20,7 +20,6 @@ import { PDFDocument } from "pdf-lib";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import * as ai from "@/lib/ai";
 import { AI_MONTHLY, READ_PDF_JOBS } from "@/lib/ai-rules";
-import { reservations as spent } from "@/lib/ai-spend";
 import { PDF_READ_MICRO_USD, WRITING_JOB_MICRO_USD } from "@/lib/spend-cost-table";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { firstPages } from "@/lib/pdf-preview";
@@ -28,6 +27,8 @@ import { COST_LINES } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+// The same module lib/ai.ts reads as @/lib/ai-spend (tests/aliases/ai-steps.test.ts.json), so its count is the reservations made.
+import { reservations as spent } from "./ai-steps-spend-stub";
 
 type Step = { step: string; state: string };
 type Steps = { run: string; onStep: (step: "read" | "write", state: "started" | "done") => void };
@@ -90,9 +91,9 @@ async function main(): Promise<void> {
   const monthKey = ai.aiMonthKey(store, new Date())!;
   const stopKey = (run: string) => `nl:ai:stop:${store.statsId}:${run}`;
   let spentBefore = 0;
-  const reservations = () => (spent as { count: number }).count - spentBefore;
+  const reservations = () => spent.count - spentBefore;
   const fresh = () => {
-    spentBefore = (spent as { count: number }).count;
+    spentBefore = spent.count;
     calls = 0;
     onCall = () => {};
     sent.length = 0;

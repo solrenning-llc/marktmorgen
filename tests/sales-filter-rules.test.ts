@@ -89,7 +89,7 @@ const ink = filterSales(SALES, { ...EMPTY_FILTER, product: "ink" });
 is("the total of a filter matches its sales exactly", salesTotals(ink), [{ currency: "USD", orders: 2, charged: 1, totalCents: 9_900, averageCents: 9_900 }]);
 is("only trials: orders, nothing charged, no average (never 0)", salesTotals(filterSales(SALES, { ...EMPTY_FILTER, kind: "trials" })), [{ currency: "USD", orders: 1, charged: 0, totalCents: 0, averageCents: null }]);
 is("nothing kept: no totals, never a total of 0", salesTotals([]), []);
-is("an average is rounded to the nearest cent, half up", salesTotals([sale({ amount: 1 }), sale({ amount: 2 })])[0].averageCents, 2);
+is("an average is rounded to the nearest cent, half up", salesTotals([sale({ amount: 1 }), sale({ amount: 2 })])?.[0].averageCents, 2);
 for (const [label, amount] of [["a fraction of a cent", 10.5], ["a negative amount", -100], ["not a number", Number.NaN], ["past the safe integers", 2 ** 53]] as const) {
   is(`an amount that is ${label} is unknown: no totals at all, never one that counts it as zero`, salesTotals([sale({}), sale({ amount })]), null);
 }

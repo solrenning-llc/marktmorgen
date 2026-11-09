@@ -18,10 +18,24 @@
  * And paidCallsRead (lib/calls.ts), read the same way into null: there "Upcoming calls" already says the calls could
  * not be read from Stripe (calls === null), so it is held here as a guard, green before the fix.
  *
+ * The same holds for the counts and states on Today that a failed read turned into "none" (VR, item 2), held in the
+ * parts after the money ones:
+ *  - closingOf (lib/plan-closing.ts) failed into null, the same as "your store does not close", so the closing card
+ *    and its day were not shown to a creator whose plan had ended;
+ *  - readListings for the numbers (lib/catalog.ts) failed into null, so the whole Numbers panel (and the warning that
+ *    buyers could not pay, which sits in it) was gone with no word;
+ *  - readSalesGoal failed into { cents: 0 }, "no goal" (it catches its own failures into the unknown goal today, so
+ *    the page's own fallback is held on the source as well);
+ *  - answersUsed, welcomesOffered, nudgesThisMonth, yearlyAsksThisMonth and winbacksSent failed into 0, so a
+ *    creator read "0 of 300 AI attempts used" or "Sent this month: 0" when the count was not known.
+ *
  * Synthetic only: the Redis stand-in, a stubbed Stripe and stores made here.
  */
 import { NextRequest } from "next/server";
-import { isValidElement } from "react";
+import { cloneElement, isValidElement, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
@@ -31,9 +45,13 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { savePaidPeriod } from "@/lib/closing-holds";
+import { UNKNOWN_SALES_GOAL_CENTS } from "@/lib/sales-goal";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.STRIPE_SECRET_KEY = "sk_test_studio_money_reads_only";
+
+/** The client components the page hands its figures to, by name, as the last page walked drew them. */
+let drawn: ReactElement<Record<string, unknown>>[] = [];
 
 /** Every string shown anywhere in the page's tree, its parts waited for as React waits for them. */
 async function words(node: unknown, found: string[] = [], seen = new Set<unknown>()): Promise<string[]> {
@@ -51,9 +69,22 @@ async function words(node: unknown, found: string[] = [], seen = new Set<unknown
   if (isValidElement(node)) {
     const { type, props } = node as { type: unknown; props: Record<string, unknown> };
     if (typeof type === "function" && type.constructor.name === "AsyncFunction") return words(await (type as (p: unknown) => Promise<unknown>)(props), found, seen);
+    if (typeof type === "function") drawn.push(node as ReactElement<Record<string, unknown>>);
     await words(props.children, found, seen);
   }
   return found;
+}
+
+/** The element of the client component `name` the last page walked drew (esbuild may add a number to the name). */
+function element(name: string): ReactElement<Record<string, unknown>> | null {
+  const pattern = new RegExp(`^${name}\\d*$`);
+  return drawn.find((one) => pattern.test((one.type as { name?: string }).name ?? "")) ?? null;
+}
+
+/** That component, drawn with `props` over what the page gave it, as the text a person reads. */
+function drawnText(found: ReactElement<Record<string, unknown>> | null, props: Record<string, unknown> = {}): string {
+  if (!found) return "";
+  return renderToStaticMarkup(cloneElement(found, props)).replace(/<[^>]+>/g, " ").replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ");
 }
 
 /** Stripe answers an empty list to every read, or an error to the checkout sessions read when `callsDown`. */
@@ -71,14 +102,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
  * The page as its owner sees it, as one text, with every Redis command `fails` picks answered by a throw, as a read
  * that did not reach Redis. Null when the page itself did not render.
  */
-async function shown(email: string, fails: (command: unknown[]) => boolean = () => false): Promise<string | null> {
+async function shown(email: string, fails: (command: unknown[], pipeline: unknown[][]) => boolean = () => false): Promise<string | null> {
   const session = await openSession(email);
   const kept = redis.pipeline;
   redis.pipeline = async (commands) => {
-    if (commands.some((command) => fails(command as unknown[]))) throw new Error("synthetic Redis outage");
+    if (commands.some((command) => fails(command as unknown[], commands as unknown[][]))) throw new Error("synthetic Redis outage");
     return kept.call(redis, commands);
   };
   answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${session}` } }));
+  drawn = [];
   try {
     return (await words(await StudioPage({ searchParams: Promise.resolve({}) }))).join(" ").replace(/\s+/g, " ");
   } catch (error) {
@@ -97,6 +129,10 @@ const TROUBLE_SHOWN = "Stripe would not open a checkout";
 const HOLDS_UNREAD = "We could not check just now whether every membership's payments are paused.";
 const UNUSED_UNREAD = "We could not check just now which members paid for time after";
 const RELOAD = "Reload this page in a moment to check again.";
+const CLOSES_ON = "Your plan has ended, and your store closes on";
+const CLOSING_UNREAD = "We could not check just now when your store closes";
+const NUMBERS_UNREAD = "We could not read your numbers just now";
+const COUNT_UNREAD = "We could not check just now how many";
 
 async function main(): Promise<void> {
   console.error = () => {};
@@ -179,6 +215,84 @@ async function main(): Promise<void> {
   callsDown = false;
   is("calls Stripe could not give are said so, with the section still there", [has(callsUnread, "Upcoming calls"), has(callsUnread, "Your calls could not be read from Stripe just now.")], [true, true]);
   is("never as nothing booked", has(callsUnread, "Nothing booked yet."), false);
+
+  part("A closing store whose closing day could not be read");
+  // closingOf reads the store's closing record (lib/plan-closing.ts, stateKey) in every case.
+  const closingKey = `nl:plan:closing:${createHash("sha256").update(storeRef(closer)).digest("hex").slice(0, 40)}`;
+  const closingDown = await shown(CLOSER, (command) => command[0] === "GET" && command[1] === closingKey);
+  is("the page still renders when the closing day cannot be read", closingDown !== null, true);
+  is("a failed read of the closing day is said, never taken for a store that does not close", has(closingDown, CLOSING_UNREAD), true);
+  is("and it tells how to check again", has(closingDown, RELOAD), true);
+  is("no closing day is shown as if it were known", has(closingDown, CLOSES_ON), false);
+  const closingRead = await shown(CLOSER);
+  is("control: read, the closing card is shown with no could-not-check notice", [has(closingRead, CLOSES_ON), has(closingRead, CLOSING_UNREAD)], [true, false]);
+
+  part("Numbers whose products could not be read");
+  const COUNTER = "money-reads-counts@example.com";
+  await claimHandle(COUNTER, "moneyreadscounts", "Money reads counts", "");
+  const countsStats = (await ensureStatsId(COUNTER))?.statsId;
+  if (!countsStats) throw new Error("setup: statsId");
+  await setSubscription(COUNTER, { customerId: "cus_MoneyReads03", subscriptionId: "sub_MoneyReads03", active: true, tier: "pro", period: paidPeriod() });
+  const free = await addProduct(COUNTER, "Free guide", "", "0", null);
+  const club = await addProduct(COUNTER, "Club", "", "10", { interval: "month", trialDays: 0, payments: 0 } as never);
+  if (!free.ok || !club.ok) throw new Error("setup: products");
+  const ids: string[] = [];
+  for (let i = 0; i < 30; i += 1) {
+    const added = await addProduct(COUNTER, `Product ${i}`, "", "9", null);
+    if (!added.ok) throw new Error(`setup: product ${i}`);
+    ids.push(added.product.id);
+  }
+  const counter = await storeForEmail(COUNTER);
+  if (!counter || counter.catalog.inline || !counter.catalog.id) throw new Error("setup: no catalog of records");
+  const head = new Set(counter.catalog.head.map((listing) => listing.id));
+  const off = ids.find((id) => !head.has(id));
+  if (!off) throw new Error("setup: no product past the catalog head");
+  const offKey = `nl:catalog:${counter.catalog.id}:l:${off}`;
+  await shown(COUNTER);
+  const numbersCalm = await shown(COUNTER);
+  is("control: the numbers are shown, with no could-not-read notice", [has(numbersCalm, NUMBERS_UNREAD), element("StatsPanel") !== null], [false, true]);
+  await redis.pipeline([["HINCRBY", `nl:cotrouble:${countsStats}`, new Date().toISOString().slice(0, 10), 1], ["HSET", `nl:cotrouble:${countsStats}`, "last", JSON.stringify({ at: Date.now() - 60_000, code: "x", message: "Your account cannot currently make live charges." })]]);
+  // Only the reads of product records alone (the numbers' and the chart marks'): the shelf, which reads each record
+  // with its extra part, has its own way of saying it could not be read.
+  const numbersDown = await shown(COUNTER, (command, pipeline) => command.includes(offKey) && !pipeline.some((one) => String(one[1]).includes(":x:")));
+  is("the page still renders when the numbers' products cannot be read", numbersDown !== null, true);
+  is("numbers that could not be read are said so, never left out with no word", has(numbersDown, NUMBERS_UNREAD), true);
+  is("and it tells how to check again", has(numbersDown, RELOAD), true);
+  is("no numbers panel is drawn from a part of the products", element("StatsPanel"), null);
+  is("buyers who could not pay are still warned of, numbers or not", has(numbersDown, `${TROUBLE_SHOWN} once in the last 7 days`), true);
+
+  part("The month's sales goal that could not be read");
+  const page = readFileSync("app/studio/page.tsx", "utf8");
+  is("the page never takes a goal it could not read for no goal", /readSalesGoal\([^)]*\)\.catch\(\(\) => \(\{ cents: 0 \}\)\)/.test(page), false);
+  await shown(COUNTER, (command) => command[0] === "GET" && command[1] === `nl:goal:${countsStats}`);
+  is("guard: a goal that could not be read reaches the panel as unknown", element("StatsPanel")?.props.goal, UNKNOWN_SALES_GOAL_CENTS);
+
+  part("Counts that could not be read: AI attempts, welcome offers, nudges, yearly asks, come-back offers");
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test-only-a-stand-in-0123456789";
+  const counts: { label: string; editor: string; prop: string; key: (command: unknown[]) => boolean; on: (props: Record<string, unknown>) => Record<string, unknown>; known: string }[] = [
+    { label: "AI attempts used this month", editor: "AnswersEditor", prop: "used", key: (c) => c[0] === "GET" && String(c[1]).startsWith(`nl:ask:${countsStats}:`), on: () => ({}), known: "3 of " },
+    { label: "people offered the welcome offer", editor: "WelcomeOfferEditor", prop: "offered", key: (c) => c[0] === "GET" && c[1] === `nl:wo:n:${countsStats}`, on: (p) => ({ offer: { ...(p.offer as object), percent: 10, coupon: "coupon_MoneyReads" } }), known: "Offered so far: 3." },
+    { label: "nudges sent this month", editor: "NudgeEditor", prop: "sent", key: (c) => c[0] === "GET" && String(c[1]).startsWith(`nl:nudge:count:${countsStats}:`), on: (p) => ({ nudge: { ...(p.nudge as object), on: true } }), known: "Sent this month: 3" },
+    { label: "yearly asks sent this month", editor: "YearlyAskEditor", prop: "sent", key: (c) => c[0] === "GET" && String(c[1]).startsWith(`nl:yearask:count:${countsStats}:`), on: (p) => ({ ask: { ...(p.ask as object), on: true } }), known: "Sent this month: 3" },
+    { label: "come-back offers sent", editor: "WinBackEditor", prop: "sent", key: (c) => c[0] === "GET" && c[1] === `nl:wb:n:${countsStats}`, on: (p) => ({ winback: { ...(p.winback as object), percent: 10, coupon: "coupon_MoneyReads" } }), known: "Sent so far: 3." },
+  ];
+  await shown(COUNTER);
+  for (const count of counts) {
+    const read = element(count.editor);
+    if (!read) throw new Error(`setup: ${count.editor} is not on the page`);
+    is(`control: ${count.label}, read, reach the editor as a number`, typeof read.props[count.prop], "number");
+    is(`control: ${count.label}, read, are shown as they are`, has(drawnText(read, { ...count.on(read.props), [count.prop]: 3 }), count.known), true);
+  }
+  for (const count of counts) {
+    const down = await shown(COUNTER, (command) => count.key(command));
+    is(`the page still renders when the ${count.label} cannot be read`, down !== null, true);
+    const unread = element(count.editor);
+    is(`${count.label} that could not be read reach the editor as unknown, never 0`, unread?.props[count.prop], null);
+    const text = drawnText(unread, unread ? count.on(unread.props) : {});
+    is(`${count.label} that could not be read are said so`, [has(text, COUNT_UNREAD), has(text, RELOAD)], [true, true]);
+    is(`${count.label} that could not be read are never shown as 0`, /\b0 of |: 0\b/.test(text), false);
+  }
+  delete process.env.ANTHROPIC_API_KEY;
 
   done();
 }

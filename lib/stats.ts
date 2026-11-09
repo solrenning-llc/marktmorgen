@@ -227,6 +227,21 @@ export async function countReach(statsId: string, field: string, now = Date.now(
   await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }]);
 }
 
+/**
+ * One address that used its confirmation link (13 [D10]): joining the store's
+ * list as an address new to it, a waitlist spot's first press, or a free
+ * product's emailed link on its first use. Counted on the all-time record as
+ * "lc", which Marktmorgen Path reads its leads from (lib/path-facts.ts); the
+ * addresses asked for (fs:<channel>) stay as the store's numbers show them.
+ * One command, on a request already counted as a public one.
+ */
+export async function countConfirmedLead(statsId: string | null | undefined): Promise<void> {
+  if (!statsId || !isRedisConfigured()) return;
+  await cappedCount(lifeKey(statsId), LIFE_WRITE_MAX, [{ field: CONFIRMED_LEAD_FIELD, by: 1 }]);
+}
+/** The all-time record's field for confirmed leads (countConfirmedLead). */
+export const CONFIRMED_LEAD_FIELD = "lc";
+
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */
 export type Heard = { buyers: number; cents: number; unknownBuyers?: number; unknownCents?: number };
 

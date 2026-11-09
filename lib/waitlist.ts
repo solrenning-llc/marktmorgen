@@ -174,7 +174,8 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
 }
 
 /** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
-export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
+/** Confirms a waitlist spot; `first` is true on the press that confirmed it, false on any press after. */
+export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string; first: boolean } | { ok: false }> {
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
   const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
@@ -188,7 +189,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
       console.error("could not add a waitlist address to a list", error),
     );
   }
-  return { ok: true, productId: grant.p };
+  return { ok: true, productId: grant.p, first: !entry.ok };
 }
 
 /** Takes an address off a waitlist. */

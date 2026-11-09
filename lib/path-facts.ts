@@ -144,7 +144,7 @@ export type PathCounts = {
   visitors: number;
   /** Short links made. */
   links: number;
-  /** Addresses left on the store, all time. */
+  /** Addresses that used their confirmation link on the store, all time (13 [D10]). */
   leads: number;
 };
 
@@ -155,7 +155,9 @@ export function countsFrom(life: Map<string, number>, links: number, at: number)
   for (const [field, count] of life) {
     const n = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
     if (field.startsWith("r:") && SOCIAL_SOURCES.includes(field.slice(2))) social += n;
-    if (field.startsWith("fs:")) leads += n;
+    // Only addresses that used their confirmation link (lib/stats.ts countConfirmedLead, 13 [D10]), never the ones
+    // only asked for (fs:<channel>), which the store's numbers keep.
+    if (field === "lc") leads += n;
   }
   const visitors = Number(life.get("u") ?? 0);
   return { at, social, visitors: Number.isFinite(visitors) ? Math.max(0, Math.floor(visitors)) : 0, links: Math.max(0, Math.floor(links)), leads };

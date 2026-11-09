@@ -1,0 +1,117 @@
+
+FILE z-3321-controls.proof.ts
+✔ block and reinstatement preserve the fee and retained revenue (7.277379ms)
+✔ resolution uses amount rather than net and keeps refund idempotency (2.693022ms)
+✔ unreadable own movement is partial revenue and cannot refund (4.137892ms)
+✔ a healthy resolution survives an unreadable sibling without a complete claim (0.39153ms)
+✔ a refund and a no-withdrawal prevented row count once (0.637822ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20.826601
+Z_VOLUME {"runs":0,"mocks":27,"over":false}
+
+Z_STATUS 0 null
+
+FILE prevented-dispute-siblings.test.ts
+✔ a prevented dispute takes the money only when its own balance transactions withdrew it (1.563268ms)
+✔ the status-only list still holds prevented, so a reader of the status alone never pays on it (0.248595ms)
+✔ the store's numbers take off a resolution's money, never a block's (5.073735ms)
+✔ a prevented dispute whose money cannot be read is not counted, and the numbers say they are partial (5.834563ms)
+✔ a resolution that also made a Refund is counted once: the refund reading has it, the dispute reading does not (1.001481ms)
+✔ the affiliate book still reads the status alone: every prevented dispute holds the commission (0.726336ms)
+✔ a lost dispute, or a prevented one that withdrew the money, gives the platform share back once (3.872603ms)
+✔ a blocked prevented dispute keeps the share, as a won one does (3.105876ms)
+✔ a prevented dispute whose money cannot be read gives nothing back and keeps the fee for the next run (10.625502ms)
+✔ a prevented dispute on a payment refunded in full gives the share back once, for the refund (2.66451ms)
+✔ a status the pinned version cannot send, or one unknown, still gives nothing back (1.516488ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.68102
+Z_VOLUME {"runs":0,"mocks":97,"over":false}
+
+Z_STATUS 0 null
+
+FILE retained-revenue.test.ts
+
+The rule, on what it is handed
+  ok    the store's own currency comes first
+  ok    orders, renewals, refunds and disputes reconcile in dollars
+  ok    and in euros on their own line, never converted
+  ok    a sale before the window is left out
+  ok    kept by channel, store currency only, biggest first
+  ok    money with no channel is visible: direct net zero, unrecorded renewals
+  ok    an incomplete refunds reading shows no kept figure and names itself
+  ok    an incomplete disputes reading shows no kept figure and names itself
+  ok    an incomplete renewals reading shows no kept figure and names itself
+  ok    an incomplete sales reading shows no kept figure and names itself
+  ok    disputes that could not be read are missing, not zero
+  ok    a store with no Stripe account has no renewals to read, and is not held back by them
+  ok    a store paid nothing still shows its currency
+  ok    windows start 6, 29 and 89 days back
+  ok    a refund bigger than the window's sales gives a negative kept figure, not a hidden one
+  ok    the dispute states are the affiliate book's
+  ok    every window at once
+
+Read from Stripe, reconciled per currency
+  ok    dollars: paid, renewals, refunded, disputed (lost only; won and an inquiry take nothing)
+  ok    euros on their own line with their own dispute, never added to dollars
+  ok    disputes by the channel of the sale disputed
+  ok    a complete dispute reading says so
+  ok    money with no channel recorded is shown, not folded away
+  ok    kept by channel
+  ok    the panel's data carries the figures, nothing about a buyer
+
+What the page says
+  ok    one line per currency, in its own money
+  ok    says nothing is converted
+  ok    says a channel is not a cause
+  ok    says what disputed means
+  ok    makes no lift or profit claim
+
+A dispute outage is unknown, not zero
+  ok    no kept figure and the reason
+  ok    the page says which reading is missing
+  ok    other figures still show
+  ok    the page limit stops a complete claim after three pages
+
+33 checks, all passing.
+Z_VOLUME {"runs":308,"mocks":17,"over":false}
+reading disputes failed Error: dispute service unavailable
+    at globalThis.fetch ([stdin]:40435:41)
+    at f ([stdin]:1:418)
+    at [stdin]:34152:29
+    at timed ([stdin]:34091:19)
+    at onAccount ([stdin]:34151:43)
+    at readDisputes ([stdin]:39775:24)
+    at readSales ([stdin]:39862:30)
+    at main ([stdin]:40475:24)
+
+Z_STATUS 0 null
+
+FILE share-lost-dispute.test.ts
+✔ a lost dispute without the removed charge.dispute field reverses the actual fee once (8.573276ms)
+✔ ordinary charges keep their one-read path; non-lost disputes keep their fee (7.623813ms)
+✔ incomplete, foreign or unknown dispute evidence cannot issue a refund (9.426974ms)
+✔ a complete multi-row result uses the matching lost outcome and accepts expanded charge IDs (0.386844ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 31.703294
+Z_VOLUME {"runs":0,"mocks":48,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3321-M0LstX

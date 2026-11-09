@@ -1,0 +1,253 @@
+
+FILE z-3321-controls.proof.ts
+✖ block and reinstatement preserve the fee and retained revenue (10.171624ms)
+✔ resolution uses amount rather than net and keeps refund idempotency (4.76031ms)
+✖ unreadable own movement is partial revenue and cannot refund (2.224923ms)
+✖ a healthy resolution survives an unreadable sibling without a complete claim (2.667212ms)
+✖ a refund and a no-withdrawal prevented row count once (2.42842ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 1
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.810379
+
+✖ failing tests:
+
+test at [stdin]:11613:30
+✖ block and reinstatement preserve the fee and retained revenue (10.171624ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  625 !== 0
+
+      at TestContext.<anonymous> ([stdin]:11616:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 625,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:11636:30
+✖ unreadable own movement is partial revenue and cannot refund (2.224923ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:11639:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:11646:30
+✖ a healthy resolution survives an unreadable sibling without a complete claim (2.667212ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  2 !== 1
+
+      at TestContext.<anonymous> ([stdin]:11649:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:11654:30
+✖ a refund and a no-withdrawal prevented row count once (2.42842ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  -10000 !== 0
+
+      at TestContext.<anonymous> ([stdin]:11659:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: -10000,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":0,"mocks":15,"over":false}
+
+Z_STATUS 1 null
+
+FILE prevented-dispute-siblings.test.ts
+✖ a prevented dispute takes the money only when its own balance transactions withdrew it (1.867618ms)
+✔ the status-only list still holds prevented, so a reader of the status alone never pays on it (0.262869ms)
+✖ the store's numbers take off a resolution's money, never a block's (4.909463ms)
+✖ a prevented dispute whose money cannot be read is not counted, and the numbers say they are partial (0.876014ms)
+✖ a resolution that also made a Refund is counted once: the refund reading has it, the dispute reading does not (1.14348ms)
+✔ the affiliate book still reads the status alone: every prevented dispute holds the commission (0.842141ms)
+✔ a lost dispute, or a prevented one that withdrew the money, gives the platform share back once (4.930245ms)
+✖ a blocked prevented dispute keeps the share, as a won one does (1.5417ms)
+✖ a prevented dispute whose money cannot be read gives nothing back and keeps the fee for the next run (1.005686ms)
+✔ a prevented dispute on a payment refunded in full gives the share back once, for the refund (2.437013ms)
+✔ a status the pinned version cannot send, or one unknown, still gives nothing back (1.669289ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 5
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.522521
+
+✖ failing tests:
+
+test at [stdin]:45293:30
+✖ a prevented dispute takes the money only when its own balance transactions withdrew it (1.867618ms)
+  AssertionError [ERR_ASSERTION]: lib/retained-revenue.ts exports disputeTakes
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at disputeTakes2 ([stdin]:45289:25)
+      at TestContext.<anonymous> ([stdin]:45294:31)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:45309:30
+✖ the store's numbers take off a resolution's money, never a block's (4.909463ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  ... Skipped lines
+
+    [
+      [
+  +     'pi_block',
+  +     2500
+  +   ],
+  +   [
+        'pi_lost',
+        4000
+      ],
+      [
+        'pi_needsresponse',
+  ...
+      [
+  +     'pi_reinstated',
+  +     2200
+  +   ],
+  +   [
+        'pi_resolution',
+        3000
+      ],
+      [
+        'pi_underreview',
+
+      at TestContext.<anonymous> ([stdin]:45313:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:45320:30
+✖ a prevented dispute whose money cannot be read is not counted, and the numbers say they are partial (0.876014ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> ([stdin]:45324:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:45330:30
+✖ a resolution that also made a Refund is counted once: the refund reading has it, the dispute reading does not (1.14348ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      2500,
+  +   2500
+    ]
+
+      at TestContext.<anonymous> ([stdin]:45335:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:45362:30
+✖ a blocked prevented dispute keeps the share, as a won one does (1.5417ms)
+  AssertionError [ERR_ASSERTION]: {"status":"prevented","balance_transactions":[]}
+
+  0 !== 625
+
+      at TestContext.<anonymous> ([stdin]:45367:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 625,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:45372:30
+✖ a prevented dispute whose money cannot be read gives nothing back and keeps the fee for the next run (1.005686ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:45377:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /Dispute status is unknown/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":0,"mocks":39,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3321-HQn9SB

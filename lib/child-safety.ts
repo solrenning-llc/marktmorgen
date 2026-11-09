@@ -17,6 +17,13 @@
  * forwards or describes the content.
  *
  *   nl:csa:held:<store>:<YYYY-MM-DD>   counter  automatic holds that day, 2 days
+ *   nl:csa:keep:<store>:<product>      "1"      preservation hold, 400 days (unit 2)
+ *
+ * Unit 2: the hold also marks the product for KEEP_SECONDS, before it is
+ * taken off, and while the mark is there the product route refuses to remove,
+ * edit or publish it (isHeldForReport): the law asks for what was reported to
+ * be kept for a year from the report (18 U.S.C. § 2258A(h), as the REPORT Act
+ * amended it), and a creator could otherwise delete it from the studio.
  */
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
@@ -31,10 +38,23 @@ export const CHILD_SAFETY_HOLDS_PER_DAY = 3;
 /** The time the TAKE IT DOWN Act gives to remove an intimate image once a valid request is received. */
 export const TAKE_IT_DOWN_HOURS = 48;
 const COUNT_SECONDS = 2 * 86_400;
+/** How long a reported product is kept from removal, editing and publishing: a year from the report and a margin. */
+export const KEEP_SECONDS = 400 * 86_400;
 
 export type HoldOutcome = "held" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
 
-const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${store.statsId || `h:${store.handle}`}:${day}`;
+const storeTag = (store: Pick<Store, "statsId" | "handle">) => store.statsId || `h:${store.handle}`;
+const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${storeTag(store)}:${day}`;
+const keepKey = (store: Pick<Store, "statsId" | "handle">, productId: string) => `nl:csa:keep:${storeTag(store)}:${productId}`;
+
+/** Whether the product is kept for a report; a reply that cannot be read throws, so the caller refuses the change. */
+export async function isHeldForReport(store: Pick<Store, "statsId" | "handle">, productId: string): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["GET", keepKey(store, productId)]]), 1);
+  const value = replies?.[0];
+  if (value === null) return false;
+  if (value === "1") return true;
+  throw new Error("A preservation hold could not be read");
+}
 
 /**
  * Takes the product a child-safety report points at off the store, without
@@ -56,6 +76,9 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
     const count = replies?.[0];
     if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
     if (count > CHILD_SAFETY_HOLDS_PER_DAY) return "capped";
+    // Kept before it is taken off: a creator who acts in between can still not remove or change it.
+    const kept = repliesFor(await redisPipeline([["SET", keepKey(store, product.id), "1", "EX", KEEP_SECONDS]]), 1);
+    if (kept?.[0] !== "OK") return "unknown";
     const done = await setProductHidden(storeRef(store), product.id, true);
     return done.ok ? "held" : done.reason === "unknown" ? "unknown" : "failed";
   } catch (error) {
@@ -65,7 +88,7 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
-  held: "The product it points at was taken off the store at once (unpublished). Nothing was deleted: its files and records are kept as they are.",
+  held: "The product it points at was taken off the store at once (unpublished). Nothing was deleted: its files and records are kept as they are, and the creator cannot remove, edit or publish it for 400 days.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it from the notice email.",
   not_held: "Nothing was taken off automatically. Act on it from the notice email.",
   capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it from the notice email.`,

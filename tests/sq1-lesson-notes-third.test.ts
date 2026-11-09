@@ -14,6 +14,8 @@
  *       course (ended), never to a signed-in visitor who never had it.
  *   L1a the "deleted since the save started" window is measured on Redis's
  *       clock, not on each instance's.
+ *   N2b the erased person's print is written on Redis's clock too
+ *       (Claude 6, comment 6732128148).
  *   L3  the policy and the help say what is true about the creator's room.
  *   L4  Dutch says "cursist" throughout.
  */
@@ -28,7 +30,7 @@ import { NOTE_DOWNLOAD_BYTES_PER_UNIT } from "@/lib/lesson-notes-rules";
 import { LESSON_NOTES_WORDS, lessonNotesWords } from "@/lib/buyer-words/lesson-notes";
 import { emailKey } from "@/lib/learn";
 import { dataUsed } from "@/lib/store-data";
-import { suppressCommand } from "@/lib/suppression";
+import { suppressCommand, suppressionPrint } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -88,6 +90,60 @@ async function clockSkew() {
   is("the save script reads Redis's own clock", /redis\.call\('TIME'\)/.test(notes.NOTE_SAVE), true);
   const late = await saveNote({ statsId: STATS, learner: emailKey("late@example.com"), courseId: COURSE, lessonId: lessonId(1), text: "A first note.", was: "", room: ROOM, erasure: { listId: LIST, email: "late@example.com" }, now: (t - 3600) * 1000 });
   is("control: a student never deleted saves, whatever the instance's clock says", late.ok, true);
+}
+
+/**
+ * N2b (Claude 6, comment 6732128148): the print the erasure writes is compared with Redis's own clock (TIME), so it
+ * must be written on that clock too, never on the erasing instance's wall clock. The stand-in's clock (redis.now) is
+ * Redis's; Date.now() is the instance's. The print is written as lib/person-erasure.ts writes it: suppressCommand with
+ * no time given.
+ */
+async function printClock() {
+  part("N2b: the erased person's print is on Redis's clock, whatever the erasing instance's clock says");
+  const redisClock = (skewMs: number) => {
+    redis.now = () => Date.now() + skewMs;
+  };
+  try {
+    // The erasing instance runs 30 s behind Redis.
+    redisClock(30_000);
+    const PROBE = "prevNlist", probe = "probe@example.com";
+    await real([suppressCommand(PROBE, probe)]);
+    const [kept] = await real([["HGET", `nl:erased:${PROBE}`, suppressionPrint(PROBE, probe)]]);
+    const redisNow = Math.floor(redis.now() / 1000);
+    is("the print's time is Redis's second (within one), not the instance's", Math.abs(Number(kept) - redisNow) <= 1, true);
+
+    const STATS = "prevN3031", LIST = "prevNlist2", email = "n@example.com", who = emailKey(email);
+    const key = `nl:lnote:${STATS}:${who}`;
+    let erased = false;
+    redis.pipeline = (async (commands: Command[]) => {
+      if (!erased && commands.some((c) => c[0] === "EVAL" && c.includes(key))) {
+        erased = true;
+        redis.pipeline = real;
+        await real([suppressCommand(LIST, email)]);
+        await forgetLessonNotesPerson(STATS, who, ROOM);
+      }
+      return real(commands);
+    }) as Pipeline;
+    try {
+      await saveNote({ statsId: STATS, learner: who, courseId: COURSE, lessonId: lessonId(1), text: "Started before the erasure.", was: "", room: ROOM, erasure: { listId: LIST, email } });
+    } finally {
+      redis.pipeline = real;
+    }
+    is("setup: the erasure ran between the save's read and its script", erased, true);
+    is("an erasing instance 30 s behind Redis: the first note started before the erasure is not kept", (await readNote(STATS, who, COURSE, lessonId(1))).state, "none");
+
+    // The erasing instance runs 60 s ahead of Redis; the person comes back 20 s (on Redis's clock) after the erasure.
+    redisClock(-60_000);
+    const BACK = "prevNback3031", LIST3 = "prevNlist3", again = "again@example.com", whoAgain = emailKey(again);
+    await real([suppressCommand(LIST3, again)]);
+    await forgetLessonNotesPerson(BACK, whoAgain, ROOM);
+    redisClock(-40_000);
+    const later = await saveNote({ statsId: BACK, learner: whoAgain, courseId: COURSE, lessonId: lessonId(1), text: "Written after the erasure.", was: "", room: ROOM, erasure: { listId: LIST3, email: again } });
+    is("an erasing instance 60 s ahead: a note started 20 s after the erasure is not refused as 'changed'", later.ok, true);
+  } finally {
+    redis.now = () => Date.now();
+  }
+  is("the erasure writes the print with no instance time (Redis's clock)", /suppressCommand\(scope\.listId as string, email\)/.test(read("lib/person-erasure.ts")), true);
 }
 
 /** Whether the pipeline now being answered was asked for in base64 (lib/redis.ts redisPipelineBase64). */
@@ -210,6 +266,7 @@ function truthful() {
 void (async () => {
   await corruptTally();
   await clockSkew();
+  await printClock();
   await escaping();
   pageLink();
   await emptyWithoutAccess();

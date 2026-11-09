@@ -625,6 +625,11 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/suppression.ts ERASED_PRINT: a deleted person's print, at the second on Redis's clock (this stand-in's).
+        if (key.startsWith("-- marktmorgen:erased-print:v1\n") && args[0] === "1" && args.length === 3) {
+          this.scriptCalls += 2;
+          return this.run(["HSET", args[1], args[2], String(Math.floor(this.now() / 1000))]);
+        }
         // lib/store-readings.ts, READING_COPY: a reading kept only when nobody it names was deleted from the store;
         // the places of those who were answered, and the copy gone.
         if (key.startsWith("-- marktmorgen:reading-copy:v1\n") && args[0] === "2" && args.length >= 6) {

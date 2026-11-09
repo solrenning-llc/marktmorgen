@@ -35,9 +35,23 @@ export function suppressionPrint(listId: string, email: string): string {
   return createHash("sha256").update(`nimbus-erased:${listId}:${normaliseEmail(email)}`).digest("hex").slice(0, 32);
 }
 
-/** Notes that this address was deleted from this store. */
-export function suppressCommand(listId: string, email: string, nowSeconds = Math.floor(Date.now() / 1000)): Command {
-  return ["HSET", suppressedKey(listId), suppressionPrint(listId, email), nowSeconds];
+/**
+ * Writes a print with the second on Redis's own clock (TIME), in one step: KEYS[1] the store's prints, ARGV[1] the
+ * print. Answers HSET's reply. A script that checks a print against TIME (lib/lesson-notes.ts NOTE_SAVE) then compares
+ * two times from one clock, never an erasing instance's wall clock with Redis's (Claude 6's N2b on #3031, comment
+ * 6732128148). Billed 1 + 2; lib/redis-memory.ts runs it the same way.
+ */
+export const ERASED_PRINT = `-- marktmorgen:erased-print:v1
+local now = redis.call('TIME')
+return redis.call('HSET', KEYS[1], ARGV[1], now[1])`;
+
+/**
+ * Notes that this address was deleted from this store, when Redis's clock says (ERASED_PRINT). A test may give the
+ * second itself, which is then written as given.
+ */
+export function suppressCommand(listId: string, email: string, nowSeconds?: number): Command {
+  if (nowSeconds !== undefined) return ["HSET", suppressedKey(listId), suppressionPrint(listId, email), nowSeconds];
+  return ["EVAL", ERASED_PRINT, 1, suppressedKey(listId), suppressionPrint(listId, email)];
 }
 
 /** Lifts it: the person's own yes, given again. */

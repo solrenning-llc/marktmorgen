@@ -110,7 +110,8 @@ end`;
  * for none) and the whole seconds since the save began reading. The second
  * the save started is taken on Redis's own clock (TIME, less those seconds,
  * measured on the instance's monotonic clock), never on an instance's wall
- * clock, which may run ahead (third review of #3031, L1a). Answers {1, total}
+ * clock, which may run ahead (third review of #3031, L1a); the print's own
+ * second is on that clock too (lib/suppression.ts ERASED_PRINT, N2b). Answers {1, total}
  * written; {0, total} the room is full; {2, 0} changed, or the person deleted
  * since a second before the save started; {3, 0} one note too many;
  * {4, 0} the student's own weight passed; {5, 0} the notes' share of the room

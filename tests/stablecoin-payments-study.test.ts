@@ -7,6 +7,9 @@ import test from "node:test";
 // Stripe claim stays subject to a full re-read of the live page before any build.
 const readStudy = () => readFileSync("docs/stablecoin-payments-study.md", "utf8");
 const linesWith = (text: string, needle: string) => text.split("\n").filter((line) => line.includes(needle));
+/** Every https address the study cites, parsed, so a source is matched by its host and path, never as a piece of text. */
+const citedUrls = (text: string): URL[] => [...text.matchAll(/https:\/\/[^\s|)\]>"'`]+/g)].flatMap((m) => (URL.canParse(m[0]) ? [new URL(m[0])] : []));
+const cites = (text: string, host: string, path: string) => citedUrls(text).some((url) => url.protocol === "https:" && url.hostname === host && url.pathname === path);
 
 test("geography separates general availability, private preview and account approval (finding 1)", () => {
   const text = readStudy();
@@ -37,7 +40,9 @@ test("the fee is labeled by product, region and date, with Link stablecoins list
 
 test("a creator-paid processing fee does not make Marktmorgen's other costs zero (finding 3)", () => {
   const text = readStudy();
-  assert.ok(text.includes("https://docs.stripe.com/connect/direct-charges-fee-payer-behavior"));
+  // Changed (rule 23, Claude 5 on #2922): the cited source is matched as a parsed URL (host docs.stripe.com, exact path),
+  // not as a substring of the study, which CodeQL flagged as incomplete URL sanitization; it holds the same citation.
+  assert.ok(cites(text, "docs.stripe.com", "/connect/direct-charges-fee-payer-behavior"), "S21: Stripe's fee payer behavior for direct charges is cited");
   assert.match(text, /fee payer[\s\S]{0,400}does not prove/i);
   assert.match(text, /unimplemented hypothes[ie]s/i);
   assert.ok(text.includes("not an MR admission"), "not an MR admission");

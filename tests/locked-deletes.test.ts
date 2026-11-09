@@ -548,7 +548,7 @@ async function main(): Promise<void> {
     },
     "community/push": "not:a member's own device, signed up for notifications again at will",
     "course": {
-      block: "open:reversible", body: "open:edits", cert: "open:reversible", "cert-months": "open:edits", "cm-delete": "act:products",
+      "access-end": "open:edits", block: "open:reversible", body: "open:edits", cert: "open:reversible", "cert-months": "open:edits", "cm-delete": "act:products",
       "cm-hide": "open:reversible", "cm-on": "open:reversible", "cm-reply": "open:adds", disable: "open:only a course with nothing in it turns back into a product",
       edit: "open:edits", enable: "open:adds", "lesson-add": "open:adds", "lesson-edit": "open:edits", "lesson-move": "open:edits",
       "lesson-remove": "act:products", media: "lockedFor", "media-remove": "act:products", "module-add": "open:adds", "module-edit": "open:edits",

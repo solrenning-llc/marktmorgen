@@ -41,8 +41,8 @@ export async function POST(request: NextRequest) {
   const base = `${origin}/@${store.handle}/course/${product.id}`;
   const away = (path: string) => new Response(null, { status: 303, headers: { Location: path, "Cache-Control": "no-store" } });
 
-  const access = await courseAccess(store, product, await cookies());
   const course = await readCourse(product.course.id);
+  const access = await courseAccess(store, product, await cookies(), course);
   if (access.state !== "open" || access.learner.owner || !course?.certificate) return away(base);
   // A certificate asked for is one of the store's buyer actions (lib/buyer-actions.ts).
   if (!(await takeBuyerAction(store))) return restingAway(origin, store);

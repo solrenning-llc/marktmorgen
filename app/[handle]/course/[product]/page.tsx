@@ -17,7 +17,8 @@ import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { activePwyw } from "@/lib/pay-what-you-want";
-import { beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
+import { accessEndAhead, beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
+import { accessEndWhen } from "@/lib/course-access-end";
 import { courseAccess, doneLessonsOrUnknown, emailKey, touchStudent } from "@/lib/learn";
 import { heldBack, passedForGate, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
@@ -76,10 +77,15 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const query = await searchParams;
   const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
   const jar = await cookies();
-  const access = await courseAccess(store, product, jar);
+  const access = await courseAccess(store, product, jar, course);
   // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
-  const forgetKey = access.state !== "open" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
+  // Not on a check that could not be made (24 [E7]): a reply that did not read takes nothing from the device.
+  const forgetKey = access.state !== "open" && access.state !== "unchecked" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
   const open = access.state === "open";
+  // When access ends (24 [E7]): this student's own end, or, to whoever has not joined, the date still ahead.
+  const endsAt = open ? access.endsAt : accessEndAhead(course);
+  // A student whose end has passed, or whose access could not be checked, already bought: no buy form for them.
+  const settled = access.state === "expired" || access.state === "unchecked";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's
   // owner and team, signed in, never for whoever only knows its id (MM-SA-30).
@@ -166,6 +172,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
               w.outline(total, course.modules.length),
               facts.videoSeconds !== null ? videoTotalLine(facts.videoSeconds, store.language) : null,
               course.certificate ? w.withCertificate : null,
+              !open && !settled && endsAt !== null ? w.accessEndsFact.replace("{when}", accessEndWhen(endsAt, store.language)) : null,
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -206,6 +213,24 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </p>
               ) : null}
             </div>
+          ) : null}
+
+          {access.state === "expired" ? (
+            <div className="st-note mt-6" role="status">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.accessEndedTitle}</p>
+              <p className="mt-1 text-sm">{w.accessEndedBody.replace("{when}", accessEndWhen(access.endedAt, store.language))}</p>
+            </div>
+          ) : access.state === "unchecked" ? (
+            <div className="st-note mt-6" role="status">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.accessUncheckedTitle}</p>
+              <p className="mt-1 text-sm">{w.accessUncheckedBody}</p>
+            </div>
+          ) : null}
+
+          {open && studying && endsAt !== null ? (
+            <p className="mt-6 text-sm font-semibold" style={{ color: "var(--st-text)" }}>
+              {w.accessEndsOn.replace("{when}", accessEndWhen(endsAt, store.language))}
+            </p>
           ) : null}
 
           {open ? (
@@ -282,7 +307,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </div>
               ) : null}
             </div>
-          ) : (
+          ) : settled ? null : (
             <div className="mt-6 space-y-6">
               {selling ? (
                 <form action="/api/store/checkout" method="post" target="_top" data-checkout="">

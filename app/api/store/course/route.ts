@@ -329,6 +329,19 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: true, course: result.course });
       }
 
+      /*
+        When access to the course ends (24 [E7]), or null to take it off: a moment the studio worked out as the close
+        of the day the creator picked, in their own zone. The clock is the server's, never the browser's, so "after now"
+        and "never earlier" (lib/course.ts) are judged the same way for every creator.
+      */
+      if (action === "access-end") {
+        const at = body.at === null ? null : Number(body.at);
+        const result = editCourse(course, { op: "access-end", at, now: Math.floor(Date.now() / 1000) });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
       // A ready structure (540 [CU1]): only its id comes from the browser, and it
       // is applied to the course as kept, under this lock, in one write. A course
       // the creator has touched, or one a structure was already given, is refused.

@@ -174,6 +174,7 @@ export function ProductFacts({
   linkCourse = true,
   bundleItems = null,
   videoLine = null,
+  accessEndLine = null,
 }: {
   store: Store;
   product: Listing;
@@ -186,6 +187,11 @@ export function ProductFacts({
    * and null when any video's length is unknown.
    */
   videoLine?: string | null;
+  /**
+   * For a course: when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays;
+   * only the page that read the course passes it.
+   */
+  accessEndLine?: string | null;
 }) {
   const pwyw = activePwyw(product);
   const options = sellableOptions(product);
@@ -245,6 +251,7 @@ export function ProductFacts({
           ) : null}
         </p>
       ) : null}
+      {course && accessEndLine ? <p className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>{accessEndLine}</p> : null}
     </>
   );
 }

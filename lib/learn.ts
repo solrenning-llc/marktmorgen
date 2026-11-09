@@ -51,7 +51,8 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
 import { readKind, readListing } from "@/lib/catalog";
-import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
+import { type Course, type CourseModule, accessEndFor, accessEndState, lessonsInOrder, opensAt, readCourse, readCourseExact } from "@/lib/course";
+import { UnknownReply } from "@/lib/redis-exact";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { importedFrom, importedRead } from "@/lib/imported-purchases";
@@ -407,22 +408,47 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
 }
 
 export type CourseAccess =
-  | { state: "open"; learner: Learner; start: number }
+  /** `endsAt`: when this learner's access ends (24 [E7]), or null for never; the page says it. */
+  | { state: "open"; learner: Learner; start: number; endsAt: number | null }
   | { state: "preview"; learner: Learner | null }
   | { state: "closed"; learner: Learner | null }
   /** A membership that gave this course has ended: said as such, with the way back. */
-  | { state: "ended"; learner: Learner };
+  | { state: "ended"; learner: Learner }
+  /** The date the creator set for access to end has passed for this learner (24 [E7]): said with when it ended. */
+  | { state: "expired"; learner: Learner; endedAt: number }
+  /** Whether the course's end date applies could not be read just now: said as a check not made, never as open (rule 24). */
+  | { state: "unchecked"; learner: Learner };
 
-/** Whether this browser may take this course, and from when. */
-export async function courseAccess(store: Store, product: Listing, cookies: CookieJar): Promise<CourseAccess> {
+/**
+ * Whether this browser may take this course, and from when. `course` is the course record when the caller has it
+ * already; without it (or with null), it is read here, so every gate holds the course's end date (24 [E7]) whoever
+ * calls it.
+ */
+export async function courseAccess(store: Store, product: Listing, cookies: CookieJar, course?: Course | null): Promise<CourseAccess> {
   const learner = await learnerFrom(store, cookies);
   if (!learner || !product.course) return { state: "closed", learner };
-  if (learner.owner) return { state: "open", learner, start: Math.floor(Date.now() / 1000) - 400 * 86_400 };
+  if (learner.owner) return { state: "open", learner, start: Math.floor(Date.now() / 1000) - 400 * 86_400, endsAt: null };
   if (learner.scope !== "all" && !learner.scope.includes(product.course.id)) return { state: "closed", learner };
   const { paid, ended } = await courseLedger(store, learner.email);
   const start = paid.get(product.id);
-  if (start !== undefined) return { state: "open", learner, start };
-  return ended.has(product.id) ? { state: "ended", learner } : { state: "closed", learner };
+  if (start === undefined) return ended.has(product.id) ? { state: "ended", learner } : { state: "closed", learner };
+  // The course's end date, from the record itself: an unreadable one is a check not made, never a lesson given or
+  // refused on a guess. A course with no record left has no end date to hold.
+  let record: Course | null;
+  try {
+    // A null from a caller's lenient read may be an unreadable reply, so it is read again here, exactly.
+    record = course ?? (await readCourseExact(product.course.id));
+  } catch (error) {
+    if (error instanceof UnknownReply) return { state: "unchecked", learner };
+    throw error;
+  }
+  if (!record) return { state: "open", learner, start, endsAt: null };
+  const now = Date.now() / 1000;
+  const state = accessEndState(record, start, now);
+  if (state === "unknown") return { state: "unchecked", learner };
+  const endsAt = accessEndFor(record, start);
+  if (state === "ended") return { state: "expired", learner, endedAt: endsAt! };
+  return { state: "open", learner, start, endsAt };
 }
 
 // ------------------------------------------------------------ progress

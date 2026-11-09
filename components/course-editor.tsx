@@ -6,6 +6,7 @@ import { UrlField } from "@/components/url-field";
 import { LessonText } from "@/components/lesson-text";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
+import { accessEndWhen } from "@/lib/course-access-end";
 import { useRouter } from "next/navigation";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
@@ -1574,6 +1575,106 @@ export function CourseStart({ productId, startsAt }: { productId: string; starts
           {busy ? "Saving…" : startsAt === null ? "Make it a cohort" : "Change the date"}
         </button>
         {startsAt !== null ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            onClick={() => {
+              setDay("");
+              void send(null);
+            }}
+          >
+            Remove the date
+          </button>
+        ) : null}
+      </div>
+      {error ? (
+        <p className="notice notice-error mt-2" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * When access to the course ends (24 [E7]). Fair to whoever already joined: the date applies only to people who join
+ * from the moment it is set until the date itself, it can move later or come off, never earlier (lib/course.ts).
+ *
+ * Not drawn in the studio yet: the product's own page (app/[handle]/p/[product]/page.tsx, reserved by another lane)
+ * must say the date before anyone pays there first, through ProductFacts' `accessEndLine`. Until then a creator
+ * cannot set a date a buyer could pay without seeing.
+ */
+export function CourseAccessEnd({ productId, endsAt, passed }: { productId: string; endsAt: number | null; passed: boolean }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // A date input wants "YYYY-MM-DD" in the viewer's own zone; the end is the close of that day, there.
+  const asDay = (seconds: number) => {
+    const d = new Date(seconds * 1000 - 1000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const [day, setDay] = useState(endsAt === null ? "" : asDay(endsAt));
+
+  async function send(at: number | null) {
+    setBusy(true);
+    setError(null);
+    const answer = await post({ id: productId, action: "access-end", at });
+    setBusy(false);
+    if (!answer.ok) {
+      setError(
+        answer.error === "access_end_earlier"
+          ? "The date can only move later. People who joined were told the current date. To end sooner, remove the date and set a new one: it will apply only to people who join after that."
+          : answer.error === "access_end"
+            ? "Pick a day after today and at most ten years ahead."
+            : problem(answer),
+      );
+      return;
+    }
+    toast(at === null ? "Access to this course no longer ends." : "The end date is set.");
+    router.refresh();
+  }
+
+  return (
+    <div>
+      <label className="field-label" htmlFor={`access-end-${productId}`}>
+        The day access ends
+      </label>
+      <p className="field-hint mt-1">
+        Leave it empty and students keep this course with no end, which is how it works now. Set a day and access closes
+        at the end of that day. The course&apos;s page and its sales page say the date and time before anyone pays. It applies only to people who join
+        from now until that day. People who joined before keep the course with no end. You can move the date later or
+        remove it, but not earlier.
+      </p>
+      {endsAt !== null ? (
+        <p className="mt-2 text-sm" role="status">
+          {passed ? "Access ended on " : "Students see: access ends on "}
+          <strong>{accessEndWhen(endsAt, "en")}</strong>.
+        </p>
+      ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <input
+          id={`access-end-${productId}`}
+          type="date"
+          value={day}
+          disabled={busy}
+          className="field w-auto"
+          onChange={(event) => setDay(event.target.value)}
+        />
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy || !day}
+          onClick={() => {
+            // The close of the chosen day, in this browser's own zone: midnight at the start of the next one.
+            const [y, m, d] = day.split("-").map(Number);
+            if (!y || !m || !d) return;
+            void send(Math.floor(new Date(y, m - 1, d + 1, 0, 0, 0, 0).getTime() / 1000));
+          }}
+        >
+          {busy ? "Saving…" : endsAt === null ? "Set the end date" : "Move the date later"}
+        </button>
+        {endsAt !== null ? (
           <button
             type="button"
             className="btn btn-ghost btn-sm"

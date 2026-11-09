@@ -41,8 +41,8 @@ export async function POST(request: NextRequest) {
   const base = `${origin}/@${store.handle}/course/${product.id}`;
   const away = (path: string) => new Response(null, { status: 303, headers: { Location: path, "Cache-Control": "no-store" } });
 
-  const access = await courseAccess(store, product, await cookies());
   const course = await readCourse(product.course.id);
+  const access = await courseAccess(store, product, await cookies(), course);
   const found = course ? findLesson(course, lessonId) : null;
   if (access.state !== "open" || !course || !found || !isOpen(course, found.unit, access.start)) return away(base);
   if (access.learner.owner) return away(`${base}/${lessonId}#quiz`);

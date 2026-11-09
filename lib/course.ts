@@ -24,6 +24,7 @@ import { type QuizSetup, parseSetup as parseQuizSetup } from "@/lib/quiz";
 import { type TaskSetup, parseTaskSetup } from "@/lib/assignment-rules";
 import { randomLetters } from "@/lib/random-letters";
 import { UnknownReply, exactReplies } from "@/lib/redis-exact";
+import { courseAccessExpiryState } from "@/lib/course-access-expiry-rules";
 
 export const MAX_MODULES = 30;
 export const MAX_LESSONS = 200;
@@ -140,7 +141,57 @@ export type Course = {
    * already running, taking late joiners.
    */
   startsAt: number | null;
+  /**
+   * When access to the course ends, in seconds (24 [E7]): the learner's gate closes the course from this moment
+   * (lib/learn.ts courseAccess), and the store states it before anyone pays. Absent is no end, as for every course
+   * before it. Kept only with `accessEndsSetAt`.
+   *
+   * Fairness: the date applies only to people who join while it is set and shown, that is, whose joining is at or
+   * after `accessEndsSetAt` and before the date itself (accessEndFor). Whoever joined before it was set was promised the course with no end
+   * and keeps it. Once set it may move later or come off, never earlier ("access-end" in editCourse): an earlier end
+   * would shorten what people who already joined were shown. To end sooner, the creator takes it off and sets it
+   * again, and then it applies only to people who join from that moment. Once the date has passed the store no
+   * longer says it, so whoever joins after has no end, and a later date set then counts from that moment too.
+   */
+  accessEndsAt?: number;
+  /** When the end date was first set, in seconds: it applies to people who join from then on (accessEndFor). */
+  accessEndsSetAt?: number;
 };
+
+/** The furthest ahead an access end may be set: ten years. */
+export const MAX_ACCESS_END_SECONDS = 3_650 * 86_400;
+
+/**
+ * The end of a learner's access to this course, in seconds, or null for none: the course's end date when they
+ * joined while it was set and still ahead (their joining at or after `accessEndsSetAt` and before the date), the
+ * only time the store showed it to them. Whoever joined before it was set, or after it passed (when the store no
+ * longer says any end), was shown none and has none.
+ */
+export function accessEndFor(course: Pick<Course, "accessEndsAt" | "accessEndsSetAt">, joinedSeconds: number): number | null {
+  if (course.accessEndsAt === undefined || course.accessEndsSetAt === undefined) return null;
+  return joinedSeconds >= course.accessEndsSetAt && joinedSeconds < course.accessEndsAt ? course.accessEndsAt : null;
+}
+
+/** The end date to say to somebody who has not joined yet, or null: only one still ahead applies to them. */
+export function accessEndAhead(course: Pick<Course, "accessEndsAt" | "accessEndsSetAt">, nowSeconds = Date.now() / 1000): number | null {
+  return accessEndFor(course, Math.floor(nowSeconds));
+}
+
+/**
+ * Whether a learner who joined at `joinedSeconds` may still take the course at `nowSeconds`: "open", "ended" once
+ * their end has passed (lib/course-access-expiry-rules.ts), or "unknown" when a time does not read, which the gate
+ * says as a check it could not make, never as ended and never as open.
+ */
+export function accessEndState(
+  course: Pick<Course, "accessEndsAt" | "accessEndsSetAt">,
+  joinedSeconds: number,
+  nowSeconds: number,
+): "open" | "ended" | "unknown" {
+  if (!Number.isFinite(joinedSeconds) || !Number.isFinite(nowSeconds)) return "unknown";
+  const end = accessEndFor(course, joinedSeconds);
+  const state = courseAccessExpiryState(end, Math.floor(nowSeconds));
+  return state === "expired" ? "ended" : state === "invalid" ? "unknown" : "open";
+}
 
 export function newCourseId(): string {
   return crypto.randomUUID().replace(/-/g, "");
@@ -213,7 +264,12 @@ export function parseCourse(raw: unknown): Course | null {
       typeof value.startsAt === "number" && Number.isFinite(value.startsAt) ? Math.floor(value.startsAt) : null;
     const shelf = readShelf(value.shelf);
     const months = readCertificateMonths(value.certificateMonths);
-    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}) };
+    // Both or neither (24 [E7]): an end without when it was set cannot say whom it applies to, so it is no end, the
+    // side that never takes a course away from somebody it was promised to.
+    const ends = Number.isSafeInteger(value.accessEndsAt) && Number.isSafeInteger(value.accessEndsSetAt)
+      ? { accessEndsAt: value.accessEndsAt as number, accessEndsSetAt: value.accessEndsSetAt as number }
+      : {};
+    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}), ...ends };
   } catch {
     return null;
   }
@@ -311,12 +367,14 @@ export type CourseEdit =
   /** How long certificates issued from now on stay valid: 1 to 120 months, or null for good. */
   | { op: "certificate-months"; months: unknown }
   | { op: "start"; at: unknown }
+  /** When access ends (24 [E7]): a moment in seconds after `now` and at most ten years ahead, or null to take it off. */
+  | { op: "access-end"; at: unknown; now: number }
   /** Several modules at once, each with its lessons by title: an outline taken from the writing help (lib/ai.ts). */
   | { op: "outline"; modules: { title: unknown; lessons: unknown[] }[] };
 
 export type EditResult =
   | { ok: true; course: Course; removed: ProductFile[]; addedId?: string }
-  | { ok: false; reason: "unknown" | "too_many" | "not_empty" | "drip" | "files" | "video_type" | "start" | "months" };
+  | { ok: false; reason: "unknown" | "too_many" | "not_empty" | "drip" | "files" | "video_type" | "start" | "months" | "access_end" | "access_end_earlier" };
 
 function mapLesson(course: Course, lessonId: string, change: (lesson: Lesson) => Lesson): Course | null {
   let found = false;
@@ -529,6 +587,24 @@ export function editCourse(course: Course, edit: CourseEdit): EditResult {
         return { ok: false, reason: "start" };
       }
       return { ok: true, course: { ...course, startsAt: at }, removed: [] };
+    }
+    case "access-end": {
+      const now = Math.floor(edit.now);
+      if (edit.at === null) {
+        const rest = { ...course };
+        delete rest.accessEndsAt;
+        delete rest.accessEndsSetAt;
+        return { ok: true, course: rest, removed: [] };
+      }
+      if (typeof edit.at !== "number" || !Number.isSafeInteger(edit.at) || edit.at <= now || edit.at > now + MAX_ACCESS_END_SECONDS) {
+        return { ok: false, reason: "access_end" };
+      }
+      // Never earlier than an end already shown: it would shorten what people who joined were promised.
+      if (course.accessEndsAt !== undefined && edit.at < course.accessEndsAt) return { ok: false, reason: "access_end_earlier" };
+      // A date that has already passed was no longer said to anybody who joined since, and they have no end: a new
+      // date applies from now, as a new one, so it never reaches them.
+      const ahead = course.accessEndsAt !== undefined && course.accessEndsSetAt !== undefined && course.accessEndsAt > now;
+      return { ok: true, course: { ...course, accessEndsAt: edit.at, accessEndsSetAt: ahead ? course.accessEndsSetAt! : now }, removed: [] };
     }
   }
 }

@@ -20,6 +20,13 @@ const S = " ";
 type Notice = { title: string; body: string };
 
 const en = {
+  /** 24 [E7]: when a course's access ends; `{when}` is the date and time in UTC (lib/course-access-end.ts). */
+  accessEndsOn: "Your access ends on {when}.",
+  accessEndedTitle: "Your access to this course has ended",
+  accessEndedBody: "Access to this course ended on {when}, as stated when you joined. Your progress is kept.",
+  accessEndsFact: "Access to the course ends on {when}.",
+  accessUncheckedTitle: "We could not check your access",
+  accessUncheckedBody: "We could not check your access to this course just now. Nothing has changed. Please try again in a moment.",
   // ---- The tab's title ----------------------------------------------------------
   metaCourse: "Course — Marktmorgen",
   metaLesson: "Lesson — Marktmorgen",
@@ -359,6 +366,12 @@ export type CoursesWords = typeof en;
 
 // ------------------------------------------------------------------------- Spanish
 const es: CoursesWords = {
+  accessEndsOn: "Tu acceso termina el {when}.",
+  accessEndedTitle: "Tu acceso a este curso terminó",
+  accessEndedBody: "El acceso a este curso terminó el {when}, como se indicaba cuando te inscribiste. Tu progreso se conserva.",
+  accessEndsFact: "El acceso al curso termina el {when}.",
+  accessUncheckedTitle: "No pudimos comprobar tu acceso",
+  accessUncheckedBody: "No pudimos comprobar tu acceso a este curso en este momento. No ha cambiado nada. Vuelve a intentarlo en un momento.",
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Lección — Marktmorgen",
   codeBlock: "Código",
@@ -664,6 +677,12 @@ const es: CoursesWords = {
 const frPlural = (n: number, one: string, many: string) => (n < 2 ? one : many);
 
 const fr: CoursesWords = {
+  accessEndsOn: "Votre accès prend fin le {when}.",
+  accessEndedTitle: "Votre accès à ce cours a pris fin",
+  accessEndedBody: "L'accès à ce cours a pris fin le {when}, comme indiqué lors de votre inscription. Votre progression est conservée.",
+  accessEndsFact: "L'accès au cours prend fin le {when}.",
+  accessUncheckedTitle: "Nous n'avons pas pu vérifier votre accès",
+  accessUncheckedBody: "Nous n'avons pas pu vérifier votre accès à ce cours pour le moment. Rien n'a changé. Réessayez dans un instant.",
   metaCourse: "Formation — Marktmorgen",
   metaLesson: "Leçon — Marktmorgen",
   codeBlock: "Code",
@@ -963,6 +982,12 @@ const fr: CoursesWords = {
 
 // ------------------------------------------------------------------------- German
 const de: CoursesWords = {
+  accessEndsOn: "Ihr Zugang endet am {when}.",
+  accessEndedTitle: "Ihr Zugang zu diesem Kurs ist beendet",
+  accessEndedBody: "Der Zugang zu diesem Kurs endete am {when}, wie bei Ihrer Anmeldung angegeben. Ihr Fortschritt bleibt erhalten.",
+  accessEndsFact: "Der Zugang zum Kurs endet am {when}.",
+  accessUncheckedTitle: "Wir konnten Ihren Zugang nicht prüfen",
+  accessUncheckedBody: "Wir konnten Ihren Zugang zu diesem Kurs gerade nicht prüfen. Nichts hat sich geändert. Bitte versuchen Sie es gleich noch einmal.",
   metaCourse: "Kurs — Marktmorgen",
   metaLesson: "Lektion — Marktmorgen",
   codeBlock: "Code",
@@ -1267,6 +1292,12 @@ const de: CoursesWords = {
 
 // ------------------------------------------------------------------------- Italian
 const it: CoursesWords = {
+  accessEndsOn: "Il tuo accesso termina il {when}.",
+  accessEndedTitle: "Il tuo accesso a questo corso è terminato",
+  accessEndedBody: "L'accesso a questo corso è terminato il {when}, come indicato quando ti sei iscritto. I tuoi progressi sono conservati.",
+  accessEndsFact: "L'accesso al corso termina il {when}.",
+  accessUncheckedTitle: "Non siamo riusciti a verificare il tuo accesso",
+  accessUncheckedBody: "Non siamo riusciti a verificare il tuo accesso a questo corso in questo momento. Non è cambiato nulla. Riprova tra un momento.",
   metaCourse: "Corso — Marktmorgen",
   metaLesson: "Lezione — Marktmorgen",
   codeBlock: "Codice",
@@ -1569,6 +1600,12 @@ const it: CoursesWords = {
 
 // ------------------------------------------------------------------------- Dutch
 const nl: CoursesWords = {
+  accessEndsOn: "Je toegang eindigt op {when}.",
+  accessEndedTitle: "Je toegang tot deze cursus is afgelopen",
+  accessEndedBody: "De toegang tot deze cursus is geëindigd op {when}, zoals vermeld toen je je aanmeldde. Je voortgang blijft bewaard.",
+  accessEndsFact: "De toegang tot de cursus eindigt op {when}.",
+  accessUncheckedTitle: "We konden je toegang niet controleren",
+  accessUncheckedBody: "We konden je toegang tot deze cursus nu niet controleren. Er is niets veranderd. Probeer het zo meteen opnieuw.",
   metaCourse: "Cursus — Marktmorgen",
   metaLesson: "Les — Marktmorgen",
   codeBlock: "Code",
@@ -1872,6 +1909,12 @@ const nl: CoursesWords = {
 
 // ------------------------------------------------------------------------- Portuguese (Portugal)
 const pt: CoursesWords = {
+  accessEndsOn: "O seu acesso termina a {when}.",
+  accessEndedTitle: "O seu acesso a este curso terminou",
+  accessEndedBody: "O acesso a este curso terminou a {when}, como indicado quando se inscreveu. O seu progresso fica guardado.",
+  accessEndsFact: "O acesso ao curso termina a {when}.",
+  accessUncheckedTitle: "Não foi possível verificar o seu acesso",
+  accessUncheckedBody: "Não foi possível verificar o seu acesso a este curso neste momento. Nada mudou. Tente novamente daqui a pouco.",
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Aula — Marktmorgen",
   codeBlock: "Código",

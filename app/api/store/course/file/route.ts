@@ -37,7 +37,9 @@ export async function GET(request: NextRequest) {
   if (!found.lesson.preview) {
     // Said to the student in the store's language (lib/buyer-words/courses.ts).
     const w = coursesWords(store.language);
-    const access = await courseAccess(store, product, await cookies());
+    const access = await courseAccess(store, product, await cookies(), course);
+    // Whether the course's end date applies could not be read: said as a check not made (rule 24, 24 [E7]).
+    if (access.state === "unchecked") return plain(503, w.accessUncheckedBody);
     if (!course || access.state !== "open" || !isOpen(course, found.unit, access.start)) {
       return plain(403, w.notOpenForYou);
     }

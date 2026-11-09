@@ -14,13 +14,14 @@
  *
  * This Stripe keeps and replays its reply per Idempotency-Key, as Stripe does (with the reply as first written).
  */
+import { readFileSync } from "node:fs";
 import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
 import { NextRequest } from "next/server";
 import { afterTasks } from "./next-server-after-world";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { createCheckout } from "@/lib/store-checkout";
-import { PwywPriceHeld, REFUSED_MOST, pwywPriceId } from "@/lib/pay-what-you-want";
+import { HELD_MOST_HOURS, PwywPriceHeld, REFUSED_MOST, pwywPriceId } from "@/lib/pay-what-you-want";
 import { stockLeft, withStockHold } from "@/lib/stock";
 import { readTrouble } from "@/lib/checkout-trouble";
 import { checkoutCheck } from "@/lib/checkup-rules";
@@ -211,6 +212,24 @@ async function main(): Promise<void> {
     title: "This product can't be bought right now",
     body: "Nothing was charged. Buying it is paused for up to 25 hours, because its price had to be set up again too many times. Please try again later.",
   });
+  // The buyer's words carry the count's own term in every language: a change to it fails here, not in a buyer's eyes.
+  is("the buyer's words say the count's own term", HELD_MOST_HOURS, 25);
+
+  part("L1-L3: the hours come from the count, the Italian says the same, and what helps is true for every creator");
+  // L1: the checkup typed "25 hours" by hand; it now reads HELD_MOST_HOURS, so the two can never differ.
+  is("the checkup types no hour count of its own", /\b[0-9]+ hours\b/.test(readFileSync("lib/checkup-rules.ts", "utf8")), false);
+  const helps = checkoutCheck({ week: 1, last: { message: "held", code: "pwyw_price_held" } }).fix;
+  const where = helps && "where" in helps ? String(helps.where) : "";
+  is("the checkup's hours are the count's own", where.includes(`within ${HELD_MOST_HOURS} hours`), true);
+  // L2: "è stato reimpostato" said "was reset"; the English says it had to be set up again too many times.
+  is("the Italian says the price had to be set up again, as every other language does",
+    wordsIn("it").notices["price-held"]?.body, "Non è stato addebitato nulla. L'acquisto è in pausa per un massimo di 25 ore, perché il suo prezzo ha dovuto essere configurato di nuovo troppe volte. Riprova più tardi.");
+  // L3: the email says a creator who did not archive it has nothing to do; the checkup and the studio's notice now say so too.
+  const nothing = "If you did not archive it, there is nothing for you to do.";
+  is("the checkup says a creator who did not archive it has nothing to do", where.includes(nothing), true);
+  const studio = readFileSync("app/studio/page.tsx", "utf8");
+  const heldNotice = studio.slice(studio.indexOf("trouble.last.code === PRICE_HELD_CODE"), studio.indexOf(", Stripe said:"));
+  is("the studio's notice says it too", [heldNotice.includes("Leave the product's price active"), heldNotice.includes(nothing)], [true, true]);
 }
 
 main().then(done);

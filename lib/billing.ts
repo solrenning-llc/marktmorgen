@@ -430,12 +430,15 @@ export type StartedSubscription = {
  * ownedBy's rule: the store may have changed its address since the checkout
  * opened (renaming does not rewrite Stripe's metadata). Its current and
  * earlier addresses lead only here; one it let go may be another creator's
- * now, so it counts only with this store's own customer.
+ * now, so it counts only with this store's own customer. Its current address
+ * counts first, as it always did: one it let go of and took back stays on the
+ * released list, and a first plan's checkout makes a new customer.
  */
 function sessionOwnedBy(store: Store, named: unknown, customerId: string): boolean {
   if (typeof named !== "string" || !named) return false;
+  if (named === store.handle) return true;
   if ((store.releasedHandles ?? []).includes(named)) return Boolean(store.stripeCustomerId) && customerId === store.stripeCustomerId;
-  return named === store.handle || (store.previousHandles ?? []).includes(named);
+  return (store.previousHandles ?? []).includes(named);
 }
 
 /**

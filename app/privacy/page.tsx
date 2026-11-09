@@ -1523,9 +1523,12 @@ export default function PrivacyPage() {
           it, its ID, link, title and time and, on Google, its guest list,
           until 60 days after the meeting. We keep a short log of problems with a
           connection for 30 days, and each consent in progress for ten
-          minutes. When a creator disconnects from the studio, we give the
-          token back to Google or Zoom so that access ends on their side too,
-          and delete the connection and its tokens; meetings already made
+          minutes. When a creator disconnects from the studio, we ask Google
+          or Zoom to cancel the token, so that access ends on their side too,
+          and delete the connection and its tokens. If Google or Zoom does not
+          confirm that our access ended, we say so on the screen and tell the
+          creator how to remove our app in their Google or Zoom account
+          themselves. Meetings already made
           stay on the creator&apos;s calendar or Zoom account. If the creator
           removes our app from their Zoom account, Zoom tells us and we delete
           every connection that user made, with its tokens, at once. If the

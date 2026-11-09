@@ -19,6 +19,8 @@ const S = " ";
 
 const en = {
   pageTitle: "Your order",
+  /** Beside the drawn mark once Stripe confirmed the payment (components/payment-received.tsx, 654 [WG14]). */
+  paymentReceived: "Payment received",
   /** What a page that found no paid order says, by what was found instead. */
   notices: {
     unpaid: {
@@ -236,6 +238,7 @@ export type ThanksWords = typeof en;
 
 const es: ThanksWords = {
   pageTitle: "Tu pedido",
+  paymentReceived: "Pago recibido",
   notices: {
     unpaid: {
       title: "Este pedido no se ha pagado",
@@ -438,6 +441,7 @@ const es: ThanksWords = {
 
 const fr: ThanksWords = {
   pageTitle: "Votre commande",
+  paymentReceived: "Paiement reçu",
   notices: {
     unpaid: {
       title: "Cette commande n'a pas été payée",
@@ -641,6 +645,7 @@ const fr: ThanksWords = {
 
 const de: ThanksWords = {
   pageTitle: "Ihre Bestellung",
+  paymentReceived: "Zahlung erhalten",
   notices: {
     unpaid: {
       title: "Diese Bestellung wurde nicht bezahlt",
@@ -844,6 +849,7 @@ const de: ThanksWords = {
 
 const it: ThanksWords = {
   pageTitle: "Il tuo ordine",
+  paymentReceived: "Pagamento ricevuto",
   notices: {
     unpaid: {
       title: "Questo ordine non è stato pagato",
@@ -1047,6 +1053,7 @@ const it: ThanksWords = {
 
 const nl: ThanksWords = {
   pageTitle: "Je bestelling",
+  paymentReceived: "Betaling ontvangen",
   notices: {
     unpaid: {
       title: "Deze bestelling is niet betaald",
@@ -1250,6 +1257,7 @@ const nl: ThanksWords = {
 
 const pt: ThanksWords = {
   pageTitle: "A sua encomenda",
+  paymentReceived: "Pagamento recebido",
   notices: {
     unpaid: {
       title: "Esta encomenda não foi paga",

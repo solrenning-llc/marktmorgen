@@ -45,7 +45,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -99,10 +99,16 @@ const paidKey = (order: string) => `nl:ppsell:paid:${order}`;
 const watchKey = (statsId: string) => `nl:ppsell:watch:${statsId}`;
 /** Orders whose payment PayPal holds as pending, scored by when they were taken. */
 const pendingKey = (statsId: string) => `nl:ppsell:pending:${statsId}`;
+/**
+ * Paid orders still owed their hand-over (lib/paypal-delivery.ts), scored by when they were written down or last
+ * tried: settle adds each one with the writes that take it off pending, a hand-over takes it out.
+ */
+export const handOverKey = (statsId: string) => `nl:ppsell:handover:${statsId}`;
 /** Issues PayPal answers a capture with when it takes nothing (Orders v2 errors). */
 const DECLINED = new Set(["INSTRUMENT_DECLINED", "PAYER_ACTION_REQUIRED", "ORDER_NOT_APPROVED", "PAYEE_ACCOUNT_RESTRICTED", "PAYER_ACCOUNT_RESTRICTED"]);
 /** Every PayPal order one address paid for one product, so a refund of one leaves the others standing. */
-const ownKey = (statsId: string, email: string, productId: string) => `nl:ppsell:own:${statsId}:${addressHash(email)}:${productId}`;
+/** The paid orders behind one address's product (also read by lib/paypal-handed.ts). */
+export const ownKey = (statsId: string, email: string, productId: string) => `nl:ppsell:own:${statsId}:${addressHash(email)}:${productId}`;
 /** Every paid order, scored by when it was paid, and those refunded in full: what the store's numbers read. */
 const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
 /** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */
@@ -448,6 +454,17 @@ export async function stillPending(store: Store, order: string): Promise<boolean
   return score !== null && score !== undefined;
 }
 
+/**
+ * Whether PayPal was seen refunding this order in full (its mark in refundedKey, written by the refund watch), read
+ * exactly (CX-123 rule 24): null is not seen; a score of whole seconds, as the watch writes it, is seen; anything else
+ * throws UnknownReplyError.
+ */
+export async function refundSeen(statsId: string, order: string): Promise<boolean> {
+  const read = repliesFor(await redisPipeline([["ZSCORE", refundedKey(statsId), order]]), 1);
+  if (!read || (read[0] !== null && (typeof read[0] !== "string" || !REDIS_SCORE.test(read[0])))) throw new UnknownReplyError("a PayPal order's refund mark");
+  return read[0] !== null;
+}
+
 export async function readPaid(order: string): Promise<Paid | null> {
   if (!ORDER_ID.test(order) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", paidKey(order)]]);
@@ -463,7 +480,7 @@ export async function readPaid(order: string): Promise<Paid | null> {
  * answered that there is no record; a reply in another envelope, text that is not JSON, or a record without its own
  * order, email, product, capture and time is "unknown", never "no record".
  */
-async function readPaidExact(order: string): Promise<Paid | null | "unknown"> {
+export async function readPaidExact(order: string): Promise<Paid | null | "unknown"> {
   if (!ORDER_ID.test(order)) return null;
   const read = repliesFor(await redisPipeline([["GET", paidKey(order)]]), 1);
   if (!read) return "unknown";
@@ -579,6 +596,10 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
   const [fresh] = await redisPipeline([["SET", paidKey(order), JSON.stringify(paid), "NX", "EX", PAID_KEPT_SECONDS]]);
   if (fresh === null) return { paid: (await readPaid(order)) ?? paid, fresh: false };
   await redisPipeline([
+    // Owed a hand-over from here, first and in the same pipeline that takes it off pending, so a paid order is never
+    // in neither list (Claude 5 on #2909): lib/paypal-delivery.ts takes it out once it is handed over, and the sweep
+    // hands over what is still in it after the return's own hand-over has had its time.
+    ["ZADD", handOverKey(opened.s), String(paid.at), order],
     ["ZADD", watchKey(opened.s), String(nextLook(paid.at, paid.at) ?? paid.at), order],
     ["SADD", ownKey(opened.s, email, opened.p), order],
     ["EXPIRE", ownKey(opened.s, email, opened.p), PAID_KEPT_SECONDS],
@@ -807,10 +828,22 @@ export async function watchPayPal(
       continue;
     }
     // Refunded in full: counted as a refund in the store's numbers and the affiliate book, whatever is handed back below.
-    await redisPipeline([
-      ["ZADD", refundedKey(statsId), String(now), order],
-      ["EXPIRE", refundedKey(statsId), SALES_KEPT_SECONDS],
-    ]);
+    // The mark is also what stops the hand-over retry (handOverAgain), so it must be known written before the order can
+    // leave this watch: both replies read exactly, each 0 or 1 (one member added or already there; the key's expiry
+    // set). Anything else is unknown, never "written": the order stays watched and is looked at again in an hour,
+    // before anything is told or taken off a list (Claude 6 on #2909; CX-123 rules 24 and 30).
+    const marked = repliesFor(
+      await redisPipeline([
+        ["ZADD", refundedKey(statsId), String(now), order],
+        ["EXPIRE", refundedKey(statsId), SALES_KEPT_SECONDS],
+      ]),
+      2,
+    );
+    if (!marked || !marked.every((reply) => reply === 0 || reply === 1)) {
+      console.error("a PayPal refund could not be marked; looked at again in an hour", order);
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      continue;
+    }
     if (on.refunded) await on.refunded(paid).catch((error) => console.error("telling of a PayPal refund failed", error));
     // The record read in its exact envelope (Codex G on #2791; CX-123 rule 24): one reply, null or text. Anything else
     // is unknown, looked at again in an hour, never "no record".

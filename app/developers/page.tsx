@@ -448,7 +448,9 @@ export default function DevelopersPage() {
           the header <code className="font-mono">Authorization: Bearer nl_live_…</code> and one of your keys.
         </p>
         <p>
-          It has nineteen tools, all reading only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
+          It has twenty tools. One prepares a change: a new description for a product, kept as a proposal you read beside the
+          current one and confirm under What the AI proposes in your studio, with undo; nothing changes until you confirm, and it
+          needs a key you allowed to prepare changes. The other nineteen read only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
           your products, revenue by channel read three ways, the funnel from visit to sale, each product&apos;s numbers and
           what buyers buy next, your buyers in numbers, what is worth knowing, your memberships (MRR, churn, why members
           left, month by month), your emails and sequences with what they sold, your affiliates by their codes, a product&apos;s description
@@ -460,7 +462,7 @@ export default function DevelopersPage() {
           and the people on your list did not agree to that. The endpoints above are where your own tools read them.
         </p>
         <p>
-          {`Each tool counts as many of your API requests as the address that reads the same: your numbers and the tools about a stretch of days as /api/v1/stats, read anew or from the copy kept an hour (the tools about a stretch of days keep their own copy, with the products they name, and count those products when read anew), each answer with its asOf; each product's numbers also count what buyers bought next, by its size; your products as /api/v1/products and your affiliates as /api/v1/affiliates. Your memberships count as about ${n(MEMBERSHIPS_COUNT)}, or ${n(MEMBERSHIPS_COUNT_COLD)} when they were not read in the last ten minutes, and more for the names of the products they name; your emails count by how many emails and sequences you have, and more when what they sold was not read in the last ten minutes. A product's description, its sales page, a course's outline or one lesson, a page test and how far a page is read each count as a few, by the most they could read; a page's earlier versions and your saved sections count more as more are kept. Which store the key belongs to counts as one.`}
+          {`Each tool counts as many of your API requests as the address that reads the same: your numbers and the tools about a stretch of days as /api/v1/stats, read anew or from the copy kept an hour (the tools about a stretch of days keep their own copy, with the products they name, and count those products when read anew), each answer with its asOf; each product's numbers also count what buyers bought next, by its size; your products as /api/v1/products and your affiliates as /api/v1/affiliates. Your memberships count as about ${n(MEMBERSHIPS_COUNT)}, or ${n(MEMBERSHIPS_COUNT_COLD)} when they were not read in the last ten minutes, and more for the names of the products they name; your emails count by how many emails and sequences you have, and more when what they sold was not read in the last ten minutes. A product's description, its sales page, a course's outline or one lesson, a page test and how far a page is read each count as a few, by the most they could read; a page's earlier versions and your saved sections count more as more are kept. Preparing a description counts as a few, more as more proposals wait or are kept. Which store the key belongs to counts as one.`}
         </p>
       </LegalSection>
 

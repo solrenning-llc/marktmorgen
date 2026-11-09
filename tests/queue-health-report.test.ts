@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { is, part, done } from "./check";
 import {
   LABEL, TITLE, REQUIRED_FILES, NO_RUN_MINUTES, FLAKY_HOURS, FLAKY_SHARE, FLAKY_MIN_RUNS, QUEUE_SIZE, MERGES_PER_HOUR,
-  MERGE_HOURS, CODEQL_SHARE, HEAD_LOOKUP_HOURS, FULL_SWEEP_HOUR, MAX_PAGES,
+  MERGE_HOURS, CODEQL_SHARE, HEAD_LOOKUP_HOURS, FULL_SWEEP_HOUR, MAX_PAGES, QUEUE_SEEN_HOURS,
   staleHeads, unknownHeads, flakyChecks, queuedCount, slowQueue, p90, codeqlSlow, codeqlTimeout, healthReport, type Api,
 } from "../scripts/queue_health_report.mjs";
 import { REQUIRED } from "../scripts/main_red_alarm.mjs";
@@ -76,6 +76,7 @@ part("a long queue that does not move (H2: a PR in the merge queue has auto_merg
 const seen = (n: number, minutes = 30) => qrun(PC, "success", minutes, n);
 is("distinct open PRs seen in merge_group runs, plus open PRs with auto-merge on, counted once each",
   queuedCount([seen(1), seen(1), seen(2), seen(3, 400)], new Set([1, 2, 3, 4]), new Set([2, 4]), NOW), 3);
+is("L7: the queue is read from the last hour of merge_group runs, so a PR removed from the queue hours ago is not counted", [QUEUE_SEEN_HOURS, queuedCount([seen(9, 90)], new Set([9]), new Set(), NOW)], [1, 0]);
 is("a PR seen in the queue but no longer open is not counted", queuedCount([seen(7)], new Set([1]), new Set(), NOW), 0);
 is("a head_branch of another shape is not a queue entry", queuedCount([{ ...seen(8), head_branch: "claude3/x" }], new Set([8]), new Set(), NOW), 0);
 is("21 queued, 5 merged in 3 h: warned", slowQueue(21, [ago(10), ago(40), ago(70), ago(100), ago(170)], NOW)?.merged, 5);
@@ -176,6 +177,34 @@ async function endToEnd() {
     const sweep = github({ pulls: [listed(1), old], codeqlRuns, ...noRun(3) });
     await healthReport({ api: sweep.api, now: new Date("2026-11-10T00:43:00Z"), timeout: 30, log: quiet });
     is("M3: at 00 UTC every head is looked up, so one never updated is still caught", writes(sweep.calls).map((c) => `${c.method} ${c.path}`), ["POST labels", "POST issues"]);
+  }
+  {
+    // M4 (Claude 6's focal on #3426): a head still with no run stays looked up after HEAD_LOOKUP_HOURS, because the
+    // latest issue names it; the issue never closes as "all well" while it has no run. Same PR at 60 and 240 min.
+    const pull = listed(1, { created_at: ago(600), updated_at: ago(60) });
+    const first = github({ pulls: [pull], codeqlRuns, ...noRun(1, "clean", 60) });
+    await healthReport({ api: first.api, now: NOW, timeout: 30, log: quiet });
+    const body = String((writes(first.calls).find((c) => c.path === "issues")?.body as { body?: string } | undefined)?.body ?? "");
+    const later = new Date(NOW.getTime() + 180 * 60_000);
+    const second = github({ pulls: [pull], codeqlRuns, ...noRun(1, "clean", 60), latest: [{ number: 77, state: "open", body }] });
+    await healthReport({ api: second.api, now: later, timeout: 30, log: quiet });
+    const patch = writes(second.calls).find((c) => c.method === "PATCH")?.body as { body?: string, state?: string } | undefined;
+    is("M4: at 60 min the head is warned", /`#1`/.test(body), true);
+    is("M4: at 240 min, not updated for 4 h, it is still looked up (the issue names it) and still warned, the issue kept open",
+      [second.calls.some((c) => c.path.includes(SHA(1))), patch?.state, /`#1`/.test(patch?.body ?? ""), /Nada a avisar/.test(patch?.body ?? "")], [true, "open", true, false]);
+    const fixed = github({ pulls: [pull], codeqlRuns, runsOf: { [SHA(1)]: 1 }, latest: [{ number: 77, state: "open", body }] });
+    await healthReport({ api: fixed.api, now: later, timeout: 30, log: quiet });
+    is("M4: once it has a run, the issue says so and closes", (writes(fixed.calls).find((c) => c.method === "PATCH")?.body as { state?: string } | undefined)?.state, "closed");
+    const unread = github({ pulls: [pull], codeqlRuns, latest: [{ number: 77, state: "open", body: 7 }] });
+    let threw = false;
+    try { await healthReport({ api: unread.api, now: later, timeout: 30, log: quiet }); } catch { threw = true; }
+    is("M4: an issue body that does not read fails the run, never \"nothing to look up\"", [threw, writes(unread.calls)], [true, []]);
+  }
+  {
+    // L8: the daily sweep runs at 00 or 01 UTC, so one scheduled run delayed past the hour does not lose the day.
+    const sweep = github({ pulls: [listed(1), listed(3, { updated_at: ago(5 * 60) })], codeqlRuns, ...noRun(3) });
+    await healthReport({ api: sweep.api, now: new Date("2026-11-10T01:05:00Z"), timeout: 30, log: quiet });
+    is("L8: a sweep delayed to 01:05 UTC still looks up every head", writes(sweep.calls).map((c) => `${c.method} ${c.path}`), ["POST labels", "POST issues"]);
   }
   {
     // H2: 25 PRs in the merge queue, as GitHub shows them (auto_merge null), seen in product-checks' merge_group runs.

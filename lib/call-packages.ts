@@ -242,14 +242,21 @@ type Session = {
 /**
  * Writes a paid package down, once, and emails its buyer the link that books
  * its sessions. Returns the package, or null when this checkout is not one.
+ *
+ * The record is written first (SET NX), then its token and the store's list
+ * in one write with the token's SET NX: a package found without its token
+ * (that write failed, or never answered) is finished by the next call, and
+ * the call whose SET NX made the token is the one that sends the email, once
+ * (audit of the checkout, 9 November 2026). A call that cannot tell whether
+ * the token is there throws, so the thanks page and the sweep try again.
  */
 export async function recordPackage(input: { store: Store; session: Session; product: Listing; base: string; from: string }): Promise<Bought | null> {
-  const { store, session, product, base } = input;
+  const { store, session, product } = input;
   const meta = session.metadata ?? {};
   const checkout = typeof session.id === "string" ? session.id : "";
   if (meta.kind !== "package" || !SESSION_ID.test(checkout) || !isSettled(session) || !store.statsId) return null;
   const existing = await readBought(checkout);
-  if (existing) return existing;
+  if (existing) return finishPackage(input, checkout, existing, false);
   const email = typeof session.customer_details?.email === "string" ? normaliseEmail(session.customer_details.email) : "";
   if (!email) return null;
   const at = typeof session.created === "number" ? session.created : now();
@@ -259,9 +266,31 @@ export async function recordPackage(input: { store: Store; session: Session; pro
   const bought: Bought = { s: store.statsId, h: store.handle, p: product.id, e: email, total, at, until: days ? at + days * 86_400 : 0, token, holds: [] };
   // Counted in the store's room at what they really add (lib/order-data.ts).
   const [fresh] = await orderWrite(store, [["SET", pkgKey(checkout), JSON.stringify(bought), "NX", ...keep(bought)]]);
-  if (fresh === null) return readBought(checkout);
-  await orderWrite(store, [["SADD", packagesKey(store.statsId), checkout]]);
-  await orderWrite(store, [["SET", tokenKey(token), checkout, ...keep(bought)]]);
+  if (fresh === null) {
+    const other = await readBought(checkout);
+    return other ? finishPackage(input, checkout, other, false) : null;
+  }
+  return finishPackage(input, checkout, bought, true);
+}
+
+/**
+ * Writes a recorded package's token and its place in the store's list when
+ * they are not there yet, and then emails the booking link. `made` is a
+ * record this call has just written, whose token cannot be there yet.
+ */
+async function finishPackage(input: { store: Store; session: Session; product: Listing; base: string; from: string }, checkout: string, bought: Bought, made: boolean): Promise<Bought> {
+  const { store, session, product, base } = input;
+  if (!made) {
+    const [has] = await redisPipeline([["EXISTS", tokenKey(bought.token)]]);
+    if (has === 1) return bought;
+    if (has !== 0) throw new Error("reading a package's token gave no clear answer; finished on a later call");
+  }
+  // One write, so the store's list never has a package its token is missing from.
+  const [, set] = await orderWrite(store, [["SADD", packagesKey(bought.s), checkout], ["SET", tokenKey(bought.token), checkout, "NX", ...keep(bought)]]);
+  // Another call made the token first, and sends the email.
+  if (set === null) return bought;
+  if (set !== "OK") throw new Error("writing a package's token gave no clear answer; finished on a later call");
+  const { e: email, total, token } = bought;
   const amount = typeof session.amount_total === "number" ? session.amount_total : 0;
   const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
   // In the store's language (lib/buyer-words/booking.ts), with the amount and

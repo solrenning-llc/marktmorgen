@@ -275,6 +275,48 @@ async function main(): Promise<void> {
   const memberPart = readFileSync("components/community-challenges.tsx", "utf8");
   is("the days' summary is a 44 px target", /<summary className="[^"]*min-h-11[^"]*"/.test(memberPart), true);
 
+  part("A delete takes the challenge off the list before its keys (Claude 6's focal on #3452, A)");
+  const eve = "evekey00000000000000000000000005";
+  const ch4 = await createChallenge(again, { ...ok, start: first, end: first + 7 * DAY }, t);
+  if (!ch4.ok) throw new Error("not made for the delete-order check");
+  const key4 = `nl:cm:${cid}:ch:${ch4.challenge.id}`;
+  let gapArmed = true;
+  let joinedInGap: string | null = null;
+  // Upstash runs a pipeline's commands one after another, not as one step:
+  // a join lands between the delete's first command and its second.
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const letGo = commands.some((cmd) => cmd[0] === "DEL" && String(cmd[1]) === key4) && commands.some((cmd) => cmd[0] === "ZREM");
+    if (!gapArmed || !letGo) return real(commands);
+    gapArmed = false;
+    const out: unknown[] = [];
+    for (let i = 0; i < commands.length; i++) {
+      out.push((await real([commands[i]]))[0]);
+      if (i === 0) joinedInGap = await joinChallenge(cid, ch4.challenge, eve, again, inside);
+    }
+    return out;
+  }) as typeof redis.pipeline;
+  await deleteChallenge(again, ch4.challenge.id);
+  redis.pipeline = real;
+  is("a join between the delete's two steps: gone", joinedInGap, "gone");
+  is("no place left behind", redis.run(["EXISTS", `${key4}:in`]), 0);
+  is("its slot stays empty", Number(redis.run(["HGET", dataKey(again)!, `cm:ch:${ch4.challenge.id}`])) || 0, 0);
+
+  part("A delete reads whether the challenge is listed exactly (Claude 6's focal on #3452, B)");
+  const ch5 = await createChallenge(again, { ...ok, start: first, end: first + 7 * DAY }, t);
+  if (!ch5.ok) throw new Error("not made for the exact-read check");
+  const key5 = `nl:cm:${cid}:ch:${ch5.challenge.id}`;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await real(commands);
+    return commands.map((cmd, i) => (cmd[0] === "ZSCORE" && String(cmd[2]) === ch5.challenge.id ? ["?"] : replies[i]));
+  }) as typeof redis.pipeline;
+  is("a list read of an unknown shape: unknown, never deleted", await failed(() => deleteChallenge(again, ch5.challenge.id)), "unknown");
+  redis.pipeline = real;
+  is("the challenge is still there", redis.run(["EXISTS", key5]), 1);
+
+  part("After a delete the focus goes somewhere that stays (Claude 6's focal on #3452, C; 2.4.3)");
+  is("the list's heading can take the focus", /<h3[^>]*ref=\{listHeadRef\}[^>]*tabIndex=\{-1\}|<h3[^>]*tabIndex=\{-1\}[^>]*ref=\{listHeadRef\}/.test(studioPart), true);
+  is("a delete that worked sends the focus there, not to the Delete button that goes", /asked\.current = null;[\s\S]{0,200}listHeadRef\.current\?\.focus\(\)/.test(studioPart), true);
+
   done();
 }
 

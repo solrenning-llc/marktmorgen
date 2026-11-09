@@ -11,7 +11,10 @@
  *     store list and the rotation;
  *   - a store whose turn waited more than a day is said in the log, once a day;
  *   - a booking with an earlier end never lowers its store's place in the list, so a store does not leave it while a
- *     later meeting is still to come (lib/meet-links.ts, keepMeetStore).
+ *     later meeting is still to come (lib/meet-links.ts, keepMeetStore);
+ *   - a store with no anchor whose first turn fails, or does not read, still has its refunds read back to a day before
+ *     that turn at its next one (pre-review of d0f4513887);
+ *   - stores never read take their turns in the order they came in, and one that waited more than a day is said.
  */
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import * as meetings from "@/lib/call-meetings";
@@ -27,11 +30,20 @@ const TURNS = "nl:meet:refund-turns";
 
 /** The accounts whose refunds were asked for, one entry a request. */
 let asked: string[] = [];
+/** Each account's `created[gte]` asked, in order. */
+const windows = new Map<string, number[]>();
+/** Accounts whose refunds Stripe answers with a 500. */
+const failing = new Set<string>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
   const headers = new Headers(init?.headers);
-  if (path === "/refunds" && !url.searchParams.get("charge")) asked.push(headers.get("Stripe-Account") ?? "");
+  const who = headers.get("Stripe-Account") ?? "";
+  if (path === "/refunds" && !url.searchParams.get("charge")) {
+    asked.push(who);
+    windows.set(who, [...(windows.get(who) ?? []), Number(url.searchParams.get("created[gte]"))]);
+    if (failing.has(who)) return new Response(JSON.stringify({ error: { type: "api_error", message: "boom" } }), { status: 500 });
+  }
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
 }) as typeof fetch;
 
@@ -63,7 +75,19 @@ async function main(): Promise<void> {
     stores.set(handle, { ...base, handle, previousHandles: [], callsId, stripeAccountId: account(n) });
     await redis.pipeline([["ZADD", MEET_STORES, end, `${callsId}|${handle}`]]);
   };
-  const run = () => meetings.syncMeetings(async (handle) => stores.get(handle) ?? null, Date.now() + 10_000, "https://marktmorgen.com");
+  /** Handles whose store does not read this run (a passing failure of findStore). */
+  const unread = new Set<string>();
+  const run = () => meetings.syncMeetings(async (handle) => (unread.has(handle) ? null : (stores.get(handle) ?? null)), Date.now() + 10_000, "https://marktmorgen.com");
+  /** A run with the clock `ms` ahead. */
+  const runAt = async (ms: number) => {
+    const realNow = Date.now;
+    Date.now = () => realNow() + ms;
+    try {
+      await run();
+    } finally {
+      Date.now = realNow;
+    }
+  };
   const day = 86_400_000;
 
   part("More stores with meetings to come than one run reads");
@@ -128,6 +152,79 @@ async function main(): Promise<void> {
       const [score] = await redis.pipeline([["ZSCORE", MEET_STORES, `${one.callsId}|${one.handle}`]]);
       is("never lowers its store's place: the later meeting keeps it in the list", Number(score), later);
     }
+  }
+
+  part("A store with no anchor whose first turn fails (pre-review of d0f4513887)");
+  {
+    // Stripe fails, then the store's next turn comes three days later (a rotation longer than a day).
+    await add(40, Date.now() + 60 * day);
+    const member = `${(40).toString(16).padStart(16, "c")}|kiln040`;
+    await redis.pipeline([["ZADD", TURNS, 0, member], ["DEL", `nl:meet:rf:${(40).toString(16).padStart(16, "c")}:since`]]);
+    failing.add(account(40));
+    const firstAt = Math.floor(Date.now() / 1000);
+    await run();
+    failing.delete(account(40));
+    await redis.pipeline([["ZADD", TURNS, "XX", 1, member]]);
+    await runAt(3 * day);
+    const asked40 = windows.get(account(40)) ?? [];
+    is("its first turn asked Stripe", asked40.length >= 2, true);
+    is("the next turn still reads back to where the failed one would have", (asked40.at(-1) ?? Number.POSITIVE_INFINITY) <= firstAt - 86_400, true);
+  }
+
+  part("A store that does not read at its first turn (findStore fails for a moment)");
+  {
+    await add(41, Date.now() + 60 * day);
+    const callsId = (41).toString(16).padStart(16, "c");
+    const member = `${callsId}|kiln041`;
+    await redis.pipeline([["ZADD", TURNS, 0, member], ["DEL", `nl:meet:rf:${callsId}:since`]]);
+    unread.add("kiln041");
+    const firstAt = Math.floor(Date.now() / 1000);
+    await run();
+    unread.delete("kiln041");
+    await redis.pipeline([["ZADD", TURNS, "XX", 1, member]]);
+    await runAt(3 * day);
+    const asked41 = windows.get(account(41)) ?? [];
+    is("the next turn reads back to a day before the turn it missed", (asked41.at(-1) ?? Number.POSITIVE_INFINITY) <= firstAt - 86_400, true);
+  }
+
+  part("Stores never read take their turns in the order they came in");
+  {
+    redis.clear();
+    stores.clear();
+    asked = [];
+    // Twenty-five stores come in; one run reads twenty of them.
+    for (let n = 101; n <= 125; n += 1) await add(n, Date.now() + 30 * day);
+    await run();
+    const first = new Set(asked);
+    const left = Array.from({ length: 25 }, (_, i) => account(101 + i)).filter((one) => !first.has(one));
+    is("five are left for the next run", left.length, 5);
+    // Twenty more come in, each named before every one of the first (they sort first among the never read).
+    for (let n = 1; n <= 20; n += 1) {
+      const handle = `aaa${String(n).padStart(3, "0")}`;
+      const callsId = (200 + n).toString(16).padStart(16, "a");
+      stores.set(handle, { ...base, handle, previousHandles: [], callsId, stripeAccountId: `acct_1TestCallNewer${String(n).padStart(3, "0")}` });
+      await redis.pipeline([["ZADD", MEET_STORES, Date.now() + 30 * day, `${callsId}|${handle}`]]);
+    }
+    asked = [];
+    await run();
+    is("the five that came in first are read before those that came in after", left.filter((one) => !asked.includes(one)), []);
+  }
+
+  part("A store never read that waited more than a day for its turn");
+  {
+    redis.clear();
+    stores.clear();
+    for (let n = 301; n <= 325; n += 1) await add(n, Date.now() + 30 * day);
+    await run();
+    const said: unknown[][] = [];
+    const error = console.error;
+    console.error = (...args: unknown[]) => void said.push(args);
+    try {
+      await runAt(2 * day);
+    } finally {
+      console.error = error;
+    }
+    is("is said in the log", said.filter((args) => String(args[0]).includes("waited more than a day")).length, 1);
   }
 
   done();

@@ -7,9 +7,9 @@
  * HINCRBY on an absent field, went negative, gave the calls back and answered false: holdOne answered "over", and
  * every member of the closing store was left past the budget, its charges never held after the plan ended (EC1).
  *
- * Now the DEL must answer 0 or 1 (no earlier budget, or one cleared) and the HSET exactly 1 (one new field after the
- * DEL). Any other shape (null, undefined, 0 or 2 from the HSET, text, a missing reply, an extra reply, a reply that is
- * not a list) throws UnknownReplyError. closeOne lets it through, so holdFrom is not written, the daily job holds the
+ * Now the budget is set by one script, once per ending (Codex S on #3309, tests/closing-call-budget-once.test.ts), and
+ * its reply must be exactly 1 (set now) or 0 (set for this ending already). Any other shape (-1 for a key that is not a
+ * hash, null, undefined, 2, text, a missing reply, an extra reply, a reply that is not a list) throws UnknownReplyError. closeOne lets it through, so holdFrom is not written, the daily job holds the
  * store ("failed"), and the next day sets the budget again.
  *
  * The healthy path is unchanged: the budget is set to the cap's calls, holdFrom is written, and each call takes from it.
@@ -43,29 +43,25 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 // Stripe and the email sender: nothing is reached, every call is refused.
 globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 })) as typeof fetch;
 
-/** The pipeline startCallBudget sends: DEL of the closing's work hash, then HSET of its "calls". */
+/** The pipeline startCallBudget sends: the once-per-ending script on the closing's work hash. */
 const budgetSet = (commands: (string | number)[][]) =>
-  commands.length === 2 && commands[0]?.[0] === "DEL" && String(commands[0]?.[1]).startsWith("nl:closing:work:") && commands[1]?.[0] === "HSET" && commands[1]?.[2] === "calls";
+  commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:closing-call-budget:v1\n") && String(commands[0]?.[3]).startsWith("nl:closing:work:");
 
-/** Replies the DEL + HSET must never be read as done from. */
+/** Replies the script must never be read as done from. */
 const BAD_REPLIES: [string, unknown][] = [
-  ["HSET answered null", [0, null]],
-  ["HSET answered undefined", [0, undefined]],
-  ["HSET answered 0 (no new field)", [0, 0]],
-  ["HSET answered 2", [0, 2]],
-  ["HSET answered \"OK\"", [0, "OK"]],
-  ["HSET answered \"1\"", [0, "1"]],
-  ["HSET answered true", [1, true]],
-  ["HSET answered an object", [1, { result: 1 }]],
-  ["HSET's reply missing", [0]],
+  ["the script answered null", [null]],
+  ["the script answered undefined", [undefined]],
+  ["the script answered -1 (not a hash)", [-1]],
+  ["the script answered 2", [2]],
+  ["the script answered \"OK\"", ["OK"]],
+  ["the script answered \"1\"", ["1"]],
+  ["the script answered true", [true]],
+  ["the script answered an object", [{ result: 1 }]],
   ["no reply at all", []],
-  ["an extra, unasked-for reply", [0, 1, 1]],
-  ["a reply that is not a list", { result: [0, 1] }],
-  ["DEL answered null", [null, 1]],
-  ["DEL answered \"1\"", ["1", 1]],
-  ["DEL answered 2 (one key cannot clear two)", [2, 1]],
-  ["DEL answered -1", [-1, 1]],
+  ["an extra, unasked-for reply", [1, 1]],
+  ["a reply that is not a list", { result: [1] }],
 ];
+const ENDING = Date.UTC(2026, 10, 1, 12);
 
 /** "UnknownReplyError" or "rejected" when the promise rejects, otherwise what it resolved to. */
 async function outcome<T>(run: () => Promise<T>): Promise<T | "UnknownReplyError" | "rejected"> {
@@ -108,32 +104,32 @@ async function endedStore(handle: string): Promise<{ email: string; folder: stri
 async function main(): Promise<void> {
   redis.clear();
 
-  part("startCallBudget: the budget is set only on DEL's 0 or 1 and HSET's exact 1");
+  part("startCallBudget: the budget is set only on the script's exact 1 or 0");
   for (const [label, reply] of BAD_REPLIES) {
     for (const run of [false, true]) {
       const folder = `cb-shape-${run ? "landed" : "lost"}`;
       await redis.pipeline([["DEL", workKey(folder)]]);
       rule = { when: budgetSet, reply, run };
-      is(`startCallBudget, ${label} (${run ? "the write landed" : "the write did not land"}): refused as unknown`, await outcome(() => startCallBudget(folder, 10)), "UnknownReplyError");
+      is(`startCallBudget, ${label} (${run ? "the write landed" : "the write did not land"}): refused as unknown`, await outcome(() => startCallBudget(folder, 10, ENDING)), "UnknownReplyError");
       rule = null;
     }
   }
   rule = { when: budgetSet, reply: "throw", run: false };
-  is("startCallBudget, a Redis that cannot be asked: refused, as before", await outcome(() => startCallBudget("cb-down", 10)), "rejected");
+  is("startCallBudget, a Redis that cannot be asked: refused, as before", await outcome(() => startCallBudget("cb-down", 10, ENDING)), "rejected");
   rule = null;
 
   part("startCallBudget: the healthy path is unchanged");
-  is("startCallBudget, no earlier budget (DEL answers 0): resolves", await outcome(() => startCallBudget("cb-real", 4)), undefined);
+  is("startCallBudget, no earlier budget: resolves", await outcome(() => startCallBudget("cb-real", 4, ENDING)), undefined);
   is("startCallBudget, no earlier budget: the budget is the calls asked for", await calls("cb-real"), "4");
   is("startCallBudget: each call takes from it, all or none", [await takeCalls("cb-real", 2), await takeCalls("cb-real", 3), await takeCalls("cb-real", 2)], [true, false, true]);
   await redis.pipeline([["HSET", workKey("cb-real"), "f:sub_old", "1"]]);
-  is("startCallBudget, an earlier ending's work there (DEL answers 1): resolves", await outcome(() => startCallBudget("cb-real", 6)), undefined);
+  is("startCallBudget, an earlier ending's work there: resolves", await outcome(() => startCallBudget("cb-real", 6, ENDING + DAY)), undefined);
   is("startCallBudget, an earlier ending's work there: the budget starts again", await calls("cb-real"), "6");
   const [old] = await redis.pipeline([["HGET", workKey("cb-real"), "f:sub_old"]]);
   is("startCallBudget, an earlier ending's work there: cleared, as before", old, null);
-  is("startCallBudget, 0 calls: resolves", await outcome(() => startCallBudget("cb-zero", 0)), undefined);
+  is("startCallBudget, 0 calls: resolves", await outcome(() => startCallBudget("cb-zero", 0, ENDING)), undefined);
   is("startCallBudget, 0 calls: the budget is 0, never absent", await calls("cb-zero"), "0");
-  is("startCallBudget, a fraction or a negative: floored at 0, as before", [await outcome(() => startCallBudget("cb-neg", -3.5)), await calls("cb-neg")], [undefined, "0"]);
+  is("startCallBudget, a fraction or a negative: floored at 0, as before", [await outcome(() => startCallBudget("cb-neg", -3.5, ENDING)), await calls("cb-neg")], [undefined, "0"]);
   is("takeCalls, a budget of 0: refused", await takeCalls("cb-zero", 1), false);
 
   part("closeOne: holdFrom is never written on a budget that was not set");
@@ -141,11 +137,11 @@ async function main(): Promise<void> {
     const { email, folder, endedAt, cap } = await endedStore("cbone");
     const at = endedAt + 60_000;
     Date.now = () => at;
-    rule = { when: budgetSet, reply: [0, null], run: false };
-    is("closeOne, HSET answered null: the day fails as unknown", await outcome(() => closeOne(email, at, hands, Number.POSITIVE_INFINITY)), "UnknownReplyError");
+    rule = { when: budgetSet, reply: [null], run: false };
+    is("closeOne, the script answered null: the day fails as unknown", await outcome(() => closeOne(email, at, hands, Number.POSITIVE_INFINITY)), "UnknownReplyError");
     rule = null;
-    is("closeOne, HSET answered null: holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
-    is("closeOne, HSET answered null: the budget is not there", await calls(folder), null);
+    is("closeOne, the script answered null: holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
+    is("closeOne, the script answered null: the budget is not there", await calls(folder), null);
 
     const next = at + DAY;
     Date.now = () => next;
@@ -171,11 +167,11 @@ async function main(): Promise<void> {
     }
     for (const [index, ref] of hidden) await redis.pipeline([["ZREM", index, ref]]);
     try {
-      rule = { when: budgetSet, reply: [0, "1"], run: true };
+      rule = { when: budgetSet, reply: ["1"], run: true };
       const row = (await closeEnded(Number.POSITIVE_INFINITY, at, hands)).find((r) => r.key === email);
       rule = null;
-      is("closeEnded, HSET answered \"1\" (the write landed): the store is held as failed", row && { state: row.state, note: row.note }, { state: "held", note: "failed" });
-      is("closeEnded, HSET answered \"1\": holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
+      is("closeEnded, the script answered \"1\" (the write landed): the store is held as failed", row && { state: row.state, note: row.note }, { state: "held", note: "failed" });
+      is("closeEnded, the script answered \"1\": holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
 
       const next = at + DAY;
       Date.now = () => next;

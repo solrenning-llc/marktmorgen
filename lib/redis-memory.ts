@@ -1137,6 +1137,19 @@ export class MemoryRedis {
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
           return 1;
         }
+        // lib/closing-holds.ts CALL_BUDGET_ONCE: a closing's call budget, set once per ending, step for step (Codex S on #3309).
+        if (key.startsWith("-- marktmorgen:closing-call-budget:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, work, calls, ending] = args;
+          this.live(work);
+          const held = this.data.get(work);
+          if (held instanceof Map && held.size === 0) this.data.delete(work);
+          const type = this.run(["TYPE", work]);
+          if (type !== "hash" && type !== "none") return -1;
+          if (this.run(["HGET", work, "of"]) === ending) return 0;
+          this.run(["DEL", work]);
+          this.run(["HSET", work, "calls", calls, "of", ending]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
         if (key.startsWith("-- marktmorgen:recount-page:v1\n") && args[0] === "2") {

@@ -176,7 +176,7 @@ test("a request from another site is refused before anything is read", async () 
 
 // ---- The page that asks first ------------------------------------------------------------------------------------
 
-const read = (path: string) => readFileSync(join(__dirname, "..", path), "utf8");
+const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 
 test("the studio links to the page, and the page asks before it closes anything (AX274 3.3.6), with no time limit", () => {
   const studio = read("app/studio/page.tsx");

@@ -3633,6 +3633,11 @@ export default async function StudioPage({
               Log out of all devices
             </button>
           </form>
+          {store ? (
+            <Link href={studioPath(store, "", "devices")} className="btn btn-ghost">
+              Log out of other devices
+            </Link>
+          ) : null}
         </div>
       </main>
       </StudioStorePin>

@@ -1037,6 +1037,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/devices/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/devices",
+      "parameters": []
+    },
+    {
       "source": "app/studio/discord/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/discord",
@@ -1651,6 +1657,7 @@
     "app/api/auth/request/route.ts",
     "app/api/auth/rescue/route.ts",
     "app/api/auth/signout-all/route.ts",
+    "app/api/auth/signout-others/route.ts",
     "app/api/auth/signout/route.ts",
     "app/api/auth/two-step/route.ts",
     "app/api/billing/assistant/route.ts",
@@ -2057,6 +2064,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 141
+    "pageTemplates": 142
   }
 }

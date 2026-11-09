@@ -135,6 +135,33 @@ async function main(): Promise<void> {
   twist = null;
   is("a counter that cannot be read: refused, nothing read", [unknownCount.status, unknownCount.body.error, seen.some((c) => c[0] === "HMGET")], [503, "unknown", false]);
 
+  part("A refused search takes none of the store's studio requests");
+  await resetLimits();
+  const usedFirst = (await allowanceUsedExact(a, "studio"))!;
+  const statuses: number[] = [];
+  for (let i = 0; i < SEARCHES_PER_MINUTE + 10; i += 1) statuses.push((await ask(ownerA, "planner", { store: a.sid })).status);
+  is(`${SEARCHES_PER_MINUTE} answered, 10 refused for the minute`, [statuses.filter((s) => s === 200).length, statuses.filter((s) => s === 429).length], [SEARCHES_PER_MINUTE, 10]);
+  is(`${SEARCHES_PER_MINUTE + 10} searches use exactly ${SEARCHES_PER_MINUTE} × ${STUDIO_SEARCH_UNITS}`, (await allowanceUsedExact(a, "studio"))! - usedFirst, SEARCHES_PER_MINUTE * STUDIO_SEARCH_UNITS);
+  await resetLimits();
+  await realPipeline([["SET", limiterKey("studio-search-day", a.sid), String(SEARCHES_PER_DAY), "EX", 86_400]]);
+  const usedDay = (await allowanceUsedExact(a, "studio"))!;
+  const pastDay = await ask(ownerA, "planner", { store: a.sid });
+  is("past the day's searches: refused, nothing taken", [pastDay.status, pastDay.body.error, (await allowanceUsedExact(a, "studio"))! - usedDay], [429, "day", 0]);
+  await resetLimits();
+  const usedUnknown = (await allowanceUsedExact(a, "studio"))!;
+  twist = (command) => (command[0] === "INCR" && String(command[1]).startsWith("nl:rl:studio-search") ? "many" : undefined);
+  const unreadCounter = await ask(ownerA, "planner", { store: a.sid });
+  twist = null;
+  is("a counter that cannot be read: refused, nothing taken", [unreadCounter.status, unreadCounter.body.error, (await allowanceUsedExact(a, "studio"))! - usedUnknown], [503, "unknown", 0]);
+
+  part("The studio's own refusal, with its reason");
+  await resetLimits();
+  twist = (command) => (command[0] === "INCRBY" ? "many" : undefined);
+  seen.length = 0;
+  const uncounted = await ask(ownerA, "planner", { store: a.sid });
+  twist = null;
+  is("studio requests that cannot be counted: 503 'unknown', never 'used', nothing read", [uncounted.status, uncounted.body.error, seen.some((c) => c[0] === "HMGET")], [503, "unknown", false]);
+
   part("A store whose studio requests are used");
   await resetLimits();
   const ownerC = "search-c@example.com";

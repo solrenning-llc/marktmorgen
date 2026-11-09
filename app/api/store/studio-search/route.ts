@@ -22,10 +22,12 @@ const refuse = (error: string, status: number, message?: string) =>
  * buyer is opened by the studio's own look-up, app/api/store/person, never
  * here) are refused with no read. Then who and which store, as every studio
  * page settles it (lib/studio-route.ts), with no permission asked: what each
- * role sees is decided per group. Then STUDIO_SEARCH_UNITS of the store's
- * studio requests are taken before anything is read, and the store's minute
- * and day ceilings are counted, each refused when full and when its count
- * cannot be read. Only then the one exact read of the product names.
+ * role sees is decided per group. Then the store's minute and day ceilings
+ * are counted, each refused when full and when its count cannot be read, so a
+ * refused search takes none of the store's studio requests. Then
+ * STUDIO_SEARCH_UNITS of them are taken before anything is read, refused with
+ * the allowance's own reason when they cannot be. Only then the one exact
+ * read of the product names.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return refuse("forbidden", 403);
@@ -46,16 +48,20 @@ export async function POST(request: NextRequest) {
   if (!resolved.ok) return refusedJson(resolved.reason);
   const { access } = resolved;
 
-  const counted = await countStudio(access.store, null, STUDIO_SEARCH_UNITS);
-  if (!counted.ok) return refusedJson("used", counted.message);
-  const store = counted.store ?? access.store;
-  const who = store.sid || store.handle;
+  const who = access.store.sid || access.store.handle;
   const minute = await essentialLimitState("studio-search", who, SEARCHES_PER_MINUTE, 60);
   if (minute === "exceeded") return refuse("slow", 429, "That is a lot of searches in one minute. Wait a minute, then search again.");
   if (minute === "unknown") return refuse("unknown", 503, "We could not search just now. Try again in a moment.");
   const day = await essentialLimitState("studio-search-day", who, SEARCHES_PER_DAY, 86_400);
   if (day === "exceeded") return refuse("day", 429, "Your store has used today's searches. You can search again tomorrow.");
   if (day === "unknown") return refuse("unknown", 503, "We could not search just now. Try again in a moment.");
+
+  const counted = await countStudio(access.store, null, STUDIO_SEARCH_UNITS);
+  if (!counted.ok) {
+    if (counted.reason === "used") return refusedJson("used", counted.message);
+    return refuse(counted.reason, counted.reason === "unknown" ? 503 : 429, counted.message);
+  }
+  const store = counted.store ?? access.store;
 
   try {
     const answer = await studioSearch(store, access.role, query);

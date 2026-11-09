@@ -27,7 +27,7 @@ const MESSAGES: Record<string, string> = {
   slow: "Too many tries for now. Try again in an hour.",
   error: "PayPal could not be reached. Nothing was sent. Try again in a moment.",
   unknown: "We sent the batch to PayPal, but its answer did not reach us, so we do not know whether it was paid. Nobody in it will be sent again: they show as on their way. Look at your PayPal activity to see whether it went.",
-  pending: "We could not confirm that this batch was saved, so we did not send it now. If it was saved, our daily check sends it within a day. Until then, its people show as on their way. Do not pay them another way, or they could be paid twice.",
+  pending: "Nobody was paid just now. But we could not confirm that this payment was cleared from our records, so our daily check may still send it from your PayPal, to the same people for the same amounts. Until then, they show as on their way. Do not pay them another way, or they could be paid twice.",
 };
 
 async function send(payload: Record<string, unknown>): Promise<Record<string, unknown>> {

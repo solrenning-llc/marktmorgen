@@ -273,8 +273,9 @@ export type PayResult =
   | { ok: true; batch: string; people: number; cents: number }
   /**
    * "unknown": the batch was sent and PayPal's answer is not known, so it may have been paid; nobody in it is sent again.
-   * "pending": nothing was sent now, but the batch's "?" entry could be confirmed neither written nor removed, so the
-   * settling may still send it (settleUnknown); its people stay on their way. "error" says nothing will be sent.
+   * "pending": nothing was paid now (not sent, or refused by PayPal), but the batch's "?" entry could not be confirmed
+   * removed, so the settling may still send it (settleUnknown); its people stay on their way. "error" and PayPal's own
+   * refusals ("funds", "refused") are said only once nothing will be sent.
    */
   | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "funds" | "refused" | "busy" | "error" | "unknown" | "pending" };
 
@@ -451,8 +452,13 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
           await countUnknown("unknown");
           return { ok: false, reason: "unknown" };
         }
-        // PayPal refused it: nothing was made, so its people are owed again.
-        await redisPipeline([["HDEL", openKey(statsId), unknownField]]);
+        // PayPal refused it: nothing was made, so its people are owed again, but only once Redis confirms the "?" entry
+        // gone (rule 24). While it may still be there, the settling sends the same request again (settleUnknown), which
+        // PayPal may pay, so the creator is never told nothing will go (pre-review of 09/11/2026).
+        if (!(await removedExactly(statsId, unknownField))) {
+          console.error("PayPal refused a batch, but its '?' entry could not be confirmed removed; the settling may still send it");
+          return { ok: false, reason: "pending" };
+        }
         if (error instanceof PayPalError && error.code === "INSUFFICIENT_FUNDS") return { ok: false, reason: "funds" };
         if (error instanceof PayPalError && (error.status === 401 || error.status === 403)) return { ok: false, reason: "refused" };
         throw error;

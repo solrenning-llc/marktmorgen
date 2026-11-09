@@ -158,7 +158,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
       text: [
         "Hello,",
         "",
-        "It is your affiliate payday, and you asked us to pay by ourselves. We could not confirm that the batch was saved, so we did not send it now. If it was saved, our daily check sends it within a day, from your PayPal, to the same people for the same amounts.",
+        "It is your affiliate payday, and you asked us to pay by ourselves. Nobody was paid just now. But we could not confirm that this payment was cleared from our records, so our daily check may still send it from your PayPal, to the same people for the same amounts.",
         "",
         "Until then, they show as on their way on your affiliate page. Do not pay them another way, or they could be paid twice.",
         studio,

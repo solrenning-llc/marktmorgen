@@ -140,7 +140,6 @@ const WRITTEN = ["played", "quarter", "half", "threeQuarters", "end", "sales", "
 
 test(
   "page-depth: a visitor's block id \"constructor\" is its own block and writes nothing onto the Object function",
-  { todo: "lib/page-depth.ts is held by #2571 (Claude 3, claude3/gl7-time-on-page), which rewrites readDepth" },
   async () => {
     redis.clear();
     const statsId = "0".repeat(32);

@@ -112,6 +112,10 @@ jobs:
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_crm_pipelines_redis.py
+      - name: Actual Redis CRM deals import checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_crm_import_redis.py
       - name: Actual Redis funnel capacity and address checks
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"

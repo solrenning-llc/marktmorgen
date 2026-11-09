@@ -210,7 +210,7 @@ async function endToEnd() {
     // H2: 25 PRs in the merge queue, as GitHub shows them (auto_merge null), seen in product-checks' merge_group runs.
     const pulls = Array.from({ length: 25 }, (_, i) => listed(100 + i));
     const queue = { "product-checks.yml": pulls.map((p) => seen(p.number)) };
-    const gh = github({ pulls, queue, codeqlRuns, latest: [{ number: 77, state: "open" }] });
+    const gh = github({ pulls, queue, codeqlRuns, latest: [{ number: 77, state: "open", body: "Nada a avisar nesta hora." }] });
     await healthReport({ api: gh.api, now: NOW, timeout: 30, log: quiet });
     const patch = writes(gh.calls).find((c) => c.method === "PATCH")?.body as { body?: string } | undefined;
     is("H2: 25 PRs in the merge queue with none merged: warned", /25 PRs[^\n]*0 incorporad/.test(patch?.body ?? ""), true);
@@ -225,7 +225,7 @@ async function endToEnd() {
   {
     const jobs = { 500: { total_count: 2, jobs: [job("javascript-typescript", 25), { name: "All checks (codeql)", conclusion: "success", started_at: ago(2), completed_at: ago(1) }] } };
     const queue = { "codeql.yml": many(CQ, 4, 6) };
-    const gh = github({ pulls: [listed(1)], queue, codeqlRuns, jobs, latest: [{ number: 77, state: "open" }] });
+    const gh = github({ pulls: [listed(1)], queue, codeqlRuns, jobs, latest: [{ number: 77, state: "open", body: "Nada a avisar nesta hora." }] });
     await healthReport({ api: gh.api, now: NOW, timeout: 30, log: quiet });
     const patch = writes(gh.calls).find((c) => c.method === "PATCH")?.body as { body?: string, state?: string } | undefined;
     is("two warnings at once: the open issue's body is replaced, nothing else written", writes(gh.calls).map((c) => `${c.method} ${c.path}`), ["PATCH issues/77"]);
@@ -234,20 +234,20 @@ async function endToEnd() {
     is("and it stays open", patch?.state, "open");
   }
   {
-    const gh = github({ pulls: [listed(1)], codeqlRuns, ...noRun(1), latest: [{ number: 77, state: "closed" }] });
+    const gh = github({ pulls: [listed(1)], codeqlRuns, ...noRun(1), latest: [{ number: 77, state: "closed", body: "Nada a avisar nesta hora." }] });
     await healthReport({ api: gh.api, now: NOW, timeout: 30, log: quiet });
     const patch = writes(gh.calls).find((c) => c.method === "PATCH")?.body as { body?: string, state?: string } | undefined;
     is("M2: a warning after a closed one reopens that issue, never a new one", [writes(gh.calls).map((c) => `${c.method} ${c.path}`), patch?.state], [["PATCH issues/77"], "open"]);
   }
   {
-    const gh = github({ pulls: [listed(1)], codeqlRuns, latest: [{ number: 77, state: "open" }] });
+    const gh = github({ pulls: [listed(1)], codeqlRuns, latest: [{ number: 77, state: "open", body: "Nada a avisar nesta hora." }] });
     await healthReport({ api: gh.api, now: NOW, timeout: 30, log: quiet });
     const patch = writes(gh.calls).find((c) => c.method === "PATCH")?.body as { body?: string, state?: string } | undefined;
     is("all well again: the open issue says so and is closed", [writes(gh.calls).map((c) => `${c.method} ${c.path}`), patch?.state, /Nada a avisar/.test(patch?.body ?? "")],
       [["PATCH issues/77"], "closed", true]);
   }
   {
-    const gh = github({ pulls: [listed(1)], codeqlRuns, latest: [{ number: 77, state: "closed" }] });
+    const gh = github({ pulls: [listed(1)], codeqlRuns, latest: [{ number: 77, state: "closed", body: "Nada a avisar nesta hora." }] });
     await healthReport({ api: gh.api, now: NOW, timeout: 30, log: quiet });
     is("all well with the issue already closed: nothing written", writes(gh.calls), []);
   }

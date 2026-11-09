@@ -10,18 +10,22 @@
  *      long before its PR was opened is not old for this). Only a mergeable state known to have no
  *      conflict (clean, blocked, behind, unstable, has_hooks) gets the close-and-reopen instruction; a
  *      state not computed yet (unknown) or any other is listed apart, and a conflict (dirty) is left to
- *      the daily report. Heads are looked up hourly only for pull requests updated in the last
- *      HEAD_LOOKUP_HOURS (a push updates it), and every head once a day at FULL_SWEEP_HOUR UTC, so one
- *      never updated is still caught within a day;
+ *      the daily report. Heads are looked up hourly for pull requests updated in the last
+ *      HEAD_LOOKUP_HOURS (a push updates it) and for every pull request the latest fila-doente issue names
+ *      in its two head sections, so a head flagged once stays looked up until it gets a run, closes or
+ *      conflicts (Claude 6's focal on #3426, M4); and every head at FULL_SWEEP_HOUR or the hour after,
+ *      UTC, so one never updated is still caught within a day, even when a scheduled run is late (L8);
  *   2. one of the nine required workflows that failed, timed out, failed to start or was canceled in
  *      FLAKY_SHARE or more of its completed merge_group runs in the last FLAKY_HOURS, with at least
  *      FLAKY_MIN_RUNS of them, named. Each workflow is listed on its own: one listing for all of them
  *      passes GitHub's cap of 1,000 results for a filtered listing (Claude 6 on #3426, H1);
  *   3. a queue of more than QUEUE_SIZE pull requests with fewer than MERGES_PER_HOUR merged an hour
  *      over the last MERGE_HOURS. A PR in the merge queue has auto_merge null in the REST API, so the
- *      queue is the open pull requests seen in those merge_group runs (their head_branch,
+ *      queue is the open pull requests seen in the merge_group runs of the last QUEUE_SEEN_HOURS (their head_branch,
  *      gh-readonly-queue/main/pr-<N>-<sha>) plus the open ones with auto-merge on (Claude 6, H2). The
- *      merge queue's own entries are not in REST; this is the closest reading it gives;
+ *      merge queue's own entries are not in REST; this is the closest reading it gives. A short window
+ *      keeps a PR removed from the queue hours ago out of the count (L7); a PR waiting deep in the queue
+ *      with no group run yet is missed, so the count leans low rather than high;
  *   4. the CodeQL analyze job's p90 duration, each language on its own, above CODEQL_SHARE of its own
  *      timeout-minutes, read from .github/workflows/codeql.yml, over the last CODEQL_RUNS completed
  *      CodeQL runs; skipped jobs are left out and canceled ones kept (a time-out ends canceled).
@@ -37,10 +41,11 @@
  * Budget: GITHUB_TOKEN allows 1,000 requests an hour per repository, shared by every workflow of the
  * repository (github/docs, data/reusables/rest-api/primary-rate-limit-github-token-in-actions.md, as
  * Claude 6 read it on 9 November 2026), so the daily report's hour being skipped does not keep the two
- * apart: what keeps this small is its reads. An ordinary hour reads the open PR listing, one run lookup
- * per PR updated in the last HEAD_LOOKUP_HOURS (three more for a head with no run), nine merge_group
+ * apart: what keeps this small is its reads. An ordinary hour reads the latest issue, the open PR listing, one run
+ * lookup per PR updated in the last HEAD_LOOKUP_HOURS (three more for a head with no run), nine merge_group
  * listings of about two pages, the merges of the last hours and CODEQL_RUNS + 1 for CodeQL: some tens
- * of calls. The daily sweep at FULL_SWEEP_HOUR reads every open head once, about one call per open PR.
+ * of calls, plus one lookup per PR the latest issue names. The sweep at FULL_SWEEP_HOUR and the hour after reads
+ * every open head, about one call per open PR, twice a day in two different hours.
  *
  * Pull request numbers are written inside backticks, so the issue never adds an event to their
  * timelines. tests/queue-health-report.test.ts holds the checks and whole runs against a synthetic
@@ -62,8 +67,10 @@ export const CODEQL_SHARE = 0.75;
 export const CODEQL_RUNS = 20;
 /** Hourly, heads are looked up only for pull requests updated within these hours. */
 export const HEAD_LOOKUP_HOURS = 3;
-/** The UTC hour at which every open head is looked up. */
+/** The UTC hour at which every open head is looked up, and the hour after it too, in case that run is late. */
 export const FULL_SWEEP_HOUR = 0;
+/** The merge_group runs of these last hours say which open pull requests are in the queue. */
+export const QUEUE_SEEN_HOURS = 1;
 /** Pages of 100 per listing before the script gives up and fails, visibly (also GitHub's 1,000 cap). */
 export const MAX_PAGES = 10;
 /** Calls per run before the script fails, visibly. */
@@ -161,11 +168,11 @@ export function flakyChecks(runs, now) {
 
 /**
  * The pull requests in or waiting for the merge queue: the open ones seen in the merge_group runs read
- * in the last FLAKY_HOURS (their head_branch names the PR), and the open ones with auto-merge on, each once.
+ * in the last QUEUE_SEEN_HOURS (their head_branch names the PR), and the open ones with auto-merge on, each once.
  * @param {unknown[]} runs @param {Set<number>} open @param {Set<number>} autoMerge @param {Date} now
  */
 export function queuedCount(runs, open, autoMerge, now) {
-  const since = now.getTime() - FLAKY_HOURS * 60 * MINUTE;
+  const since = now.getTime() - QUEUE_SEEN_HOURS * 60 * MINUTE;
   const queued = new Set([...autoMerge].filter((n) => open.has(n)));
   for (const r of runs.map(queueRun)) {
     if (Date.parse(r.created_at) < since) continue;
@@ -211,6 +218,22 @@ export function codeqlSlow(jobs, timeout) {
 }
 
 /**
+ * The pull requests the issue's two head sections name (the backticked `#N` of their lines), and only those: the
+ * other sections' numbers are not heads. Lines this script writes; anything else in the body is ignored.
+ * @param {string} body @returns {Set<number>}
+ */
+export function namedHeads(body) {
+  const numbers = new Set();
+  let inHeads = false;
+  for (const line of String(body).split("\n")) {
+    if (line.startsWith("## ")) inHeads = line.startsWith("## Head sem execução");
+    const n = inHeads ? /^- `#(\d+)` head `/.exec(line)?.[1] : undefined;
+    if (n) numbers.add(Number(n));
+  }
+  return numbers;
+}
+
+/**
  * @param {{ heads: Head[], unknown: Head[], flaky: any[], slow: any, codeql: any[], now: Date, drafts: number, sweep: boolean }} r
  */
 function bodyOf({ heads, unknown, flaky, slow, codeql, now, drafts, sweep }) {
@@ -231,7 +254,7 @@ function bodyOf({ heads, unknown, flaky, slow, codeql, now, drafts, sweep }) {
     for (const f of flaky) lines.push(`- ${f.name}: ${f.bad} de ${f.total} execuções de merge_group com falha, estouro ou cancelamento (${Math.round((100 * f.bad) / f.total)}%). Causa comum: vai ao coordenador (regra CV, e).`);
     lines.push("");
   }
-  if (slow) lines.push(`## Fila parada`, "", `- ${slow.queued} PRs na fila (vistos na fila de merge nas últimas ${FLAKY_HOURS} h, ou com incorporação automática ligada) e ${slow.merged} incorporado(s) nas últimas ${MERGE_HOURS} h, menos de ${MERGES_PER_HOUR} por hora.`, "");
+  if (slow) lines.push(`## Fila parada`, "", `- ${slow.queued} PRs na fila (aproximado: vistos na fila de merge na última hora, ou com incorporação automática ligada) e ${slow.merged} incorporado(s) nas últimas ${MERGE_HOURS} h, menos de ${MERGES_PER_HOUR} por hora.`, "");
   if (codeql.length) {
     lines.push(`## CodeQL perto do limite`, "");
     for (const c of codeql) lines.push(`- p90 do job de análise ${c.language}: ${c.p90} min em ${c.jobs} jobs, acima de ${Math.round(CODEQL_SHARE * 100)}% do limite de ${c.timeout} min.`);
@@ -272,13 +295,23 @@ export async function healthReport({ api: raw, now, timeout, log = console.log }
     time(p.updated_at, `#${p.number} update time`);
   }
   const open = pulls.filter((p) => !p.draft);
-  const sweep = now.getUTCHours() === FULL_SWEEP_HOUR;
+  const sweep = now.getUTCHours() === FULL_SWEEP_HOUR || now.getUTCHours() === (FULL_SWEEP_HOUR + 1) % 24;
   const recent = now.getTime() - HEAD_LOOKUP_HOURS * 60 * MINUTE;
+
+  // The latest fila-doente issue in any state, read first: the heads it names stay looked up (M4), and it is the one
+  // reopened when warned again, so a flap never opens a new issue. Its body is read exactly; another shape throws.
+  const latest = list(await api("GET", `issues?labels=${LABEL}&state=all&sort=created&direction=desc&per_page=1`), "issue listing")
+    .filter((i) => !i?.pull_request);
+  const issue = latest[0];
+  if (issue && (!Number.isSafeInteger(issue.number) || (issue.state !== "open" && issue.state !== "closed") || !(issue.body === null || typeof issue.body === "string"))) {
+    throw new Error("unreadable issue");
+  }
+  const named = namedHeads(issue?.body ?? "");
 
   /** @type {Head[]} */
   const heads = [];
   for (const p of open) {
-    if (!sweep && Date.parse(p.updated_at) < recent) continue;
+    if (!sweep && Date.parse(p.updated_at) < recent && !named.has(p.number)) continue;
     const listing = await api("GET", `actions/runs?head_sha=${p.head.sha}&per_page=1`);
     if (!Number.isSafeInteger(listing?.total_count) || listing.total_count < 0) throw new Error(`#${p.number}: unreadable run listing`);
     if (listing.total_count > 0) continue;
@@ -349,11 +382,6 @@ export async function healthReport({ api: raw, now, timeout, log = console.log }
   const warn = stale.length > 0 || unknown.length > 0 || flaky.length > 0 || slow !== null || codeql.length > 0;
   const body = bodyOf({ heads: stale, unknown, flaky, slow, codeql, now, drafts: pulls.length - open.length, sweep });
 
-  // The latest fila-doente issue in any state: reopened when warned again, so a flap never opens a new one.
-  const latest = list(await api("GET", `issues?labels=${LABEL}&state=all&sort=created&direction=desc&per_page=1`), "issue listing")
-    .filter((i) => !i?.pull_request);
-  const issue = latest[0];
-  if (issue && (!Number.isSafeInteger(issue.number) || (issue.state !== "open" && issue.state !== "closed"))) throw new Error("unreadable issue");
   if (warn && !issue) {
     if (!(await api("GET", `labels/${LABEL}`, undefined, true))) {
       await api("POST", "labels", { name: LABEL, color: "d93f0b", description: "Fila de merge ou CI doente (C1-TODOS-60)" });

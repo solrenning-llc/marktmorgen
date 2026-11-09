@@ -486,11 +486,8 @@ export default function PrivacyPage() {
           When you send a gift form, your own browser tab keeps what you typed
           in it (the option, their address, your name and your message), under{" "}
           <code>mm:gift-typed:</code> followed by the store and the product, so
-          that if we send you back to fix something you do not have to type it
-          again. It is never sent to us, and never used after 30 minutes. It is
-          removed as soon as the form is filled again, the next time that
-          product&apos;s page opens without a problem, and when you close the
-          tab.
+          that if we send you back to fix something you do not have to type it again.
+          It is kept only in this browser tab, never sent to us, never used after 30 minutes, and cleared when the order goes through.
         </p>
         <p id="instant-access" className="scroll-mt-24">
           <strong className="text-black">Starting before the 14 days end.</strong>{" "}

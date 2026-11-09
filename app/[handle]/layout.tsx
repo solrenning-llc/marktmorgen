@@ -16,6 +16,7 @@ import { SkipLink } from "@/components/skip-link";
 import { chatOpen } from "@/lib/inbox";
 import { assistantShown } from "@/lib/store-assistant";
 import { lookStyle } from "@/lib/store-look";
+import { GiftTypedSweeper } from "@/components/gift-typed-sweeper";
 
 /**
  * Around every page of a creator's store: the store's own manifest, icon and
@@ -87,6 +88,8 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[h
       {store && isHouseStore(store) ? <DemoStrip /> : null}
       {children}
       <StoreApp />
+      {/* What a gift form kept in this browser tab, removed once too old to be used (lib/gift-typed.ts, Privacy #gift-typed). */}
+      {store ? <GiftTypedSweeper /> : null}
       {/* A link from a sequence's email, used by somebody who allowed it to be seen (lib/mail-clicks.ts). */}
       {store ? <MailClick /> : null}
       {/* The Store assistant, where it is on and paid for (lib/store-assistant.ts), or else the chat, where the creator turned it on (lib/inbox.ts): drawn from the store already read, nothing more asked of the server. */}

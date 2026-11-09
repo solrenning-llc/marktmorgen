@@ -13,13 +13,19 @@ import { GIFT_TYPED_FIELDS, giftTypedKey, packGiftTyped, unpackGiftTyped } from 
  *   - when the page opens with that refusal (`problem`), puts it back into
  *     each field that is still empty (never over what was typed since), then
  *     removes it;
- *   - moves the focus to the field in error (`focusId`) or, when no field can
- *     fix it, to the reason (`reasonId`), so it is read at once; a refused
- *     consent box focuses itself (components/digital-consent-box.tsx);
+ *   - moves the focus to the field in error (`focusId`), which reads its
+ *     reason through aria-describedby, or, when no field can fix it, to the
+ *     reason (`reasonId`), which is then the alert; only while the focus is
+ *     still on the page itself (<body>), never away from where the buyer
+ *     already is; a refused consent box focuses itself
+ *     (components/digital-consent-box.tsx);
  *   - unmarks the field in error (aria-invalid) once it is changed.
  *
  * With scripts off the fields come back empty, as before, but the field in
- * error is still marked and tied to its reason by the server's markup.
+ * error is still marked and tied to its reason by the server's markup
+ * (docs/accessibility-programme.md, "Gift form sent back with scripts off").
+ * What is kept is cleared from every page of the store once too old, and all
+ * of it back from paying (components/gift-typed-sweeper.tsx).
  */
 export function GiftTypedKeeper({
   handle,
@@ -64,7 +70,8 @@ export function GiftTypedKeeper({
         }
       }
       const target = (focusId ? document.getElementById(focusId) : null) ?? (problem !== "consent" && reasonId ? document.getElementById(reasonId) : null);
-      target?.focus();
+      // Only while nothing holds the focus yet (the page itself): a buyer already somewhere on the page is not moved.
+      if (document.activeElement === document.body || document.activeElement === null) target?.focus();
     } else {
       // Nothing to answer: whatever an earlier send kept is not needed any more.
       try {

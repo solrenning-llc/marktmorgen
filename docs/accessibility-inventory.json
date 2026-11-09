@@ -1395,6 +1395,7 @@
     "components/funnel-starter-gallery.tsx",
     "components/funnel-type-picker.tsx",
     "components/gift-typed-keeper.tsx",
+    "components/gift-typed-sweeper.tsx",
     "components/google-searches.tsx",
     "components/google-signin.tsx",
     "components/group-link-box.tsx",
@@ -2033,6 +2034,10 @@
     {
       "source": "app/[handle]/layout.tsx",
       "status": "not yet reviewed for this programme"
+    },
+    {
+      "source": "app/[handle]/thanks/layout.tsx",
+      "status": "AAA review not completed"
     },
     {
       "source": "app/help/layout.tsx",

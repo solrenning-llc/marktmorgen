@@ -174,6 +174,16 @@ The same cap holds the rest of the buyer's side of a store. On a store's product
 - **The equivalent we offer:** the cap is in `ch`, so a line is the narrower of the cap and the window. Narrowing the window, or zooming in, narrows every line in the same proportion (WCAG technique C20). At 320 CSS px (400% zoom), the store front audit counted no line over 80 in any state. Reader views and the visitor's own style sheet also work, because the words are live text with no fixed width. The creator's words are never edited to fit.
 - **Not checked:** other store fonts (Nunito, Fraunces, Playfair Display, Bricolage Grotesque, Instrument Serif) as actually served, Firefox and WebKit, real devices, people; the product page at 34ch in a browser.
 
+## Gift form sent back with scripts off (9 November 2026)
+
+WCAG 2.2 3.3.7 (Redundant Entry, A) asks that what a person already entered in the same process is filled in for them or selectable. The gift form on a product page (`GiftBox`, `components/store-product.tsx`) posts to `app/api/store/checkout/route.ts`. When the server refuses it (an address that is not one, an option, a busy unit, paused orders, a payment page Stripe would not open), it sends the buyer back to `?gift=<reason>#gift`, and the page is drawn anew.
+
+- **What works with scripts on:** `components/gift-typed-keeper.tsx` keeps the option, the recipient's address, the buyer's name and the message in the tab's own storage as the form is sent (`lib/gift-typed.ts`), puts them back into the fields that are still empty, then removes them. Nothing is sent to us. `tests/gift-error-a11y.test.ts` holds the rules.
+- **The case:** with scripts off, the fields come back empty. The buyer types them again.
+- **Not demonstrated impossible.** The route could answer the form with the page itself, filled from what was sent, instead of sending the buyer back to the product's address. It is not built: the route only redirects, and the product page is drawn from its address. The other ways were refused for privacy: the recipient's address and the message in the address bar would stay in the history and in logs, and keeping them on our server would send them to us.
+- **The alternative we offer:** with scripts off the reason is still drawn by the server in the gift form, which opens by itself. A reason about one field marks that field `aria-invalid` and points to the words with `aria-describedby`; any other reason is the alert. The words say what to fix and that nothing was charged. The form is short: one required address, an option where there are several, the box to start access at once where the gift opens right away, and two optional fields.
+- **Not checked:** a real screen reader, browsers other than through rendering tests, people.
+
 ## Resource-page interface captures (6 November 2026)
 
 Encanto 9 adds dated captures to `/platform/store-page` and

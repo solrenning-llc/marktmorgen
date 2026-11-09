@@ -6,11 +6,15 @@
  * the buyer back with `?gift=<reason>#gift`; the page is then drawn anew, so
  * without this every field came back empty.
  *
- * Kept in the tab's sessionStorage only (gone when the tab closes), under one
- * key per store and product, at most GIFT_TYPED_KEEP_MS, removed as soon as it
- * is read back and whenever the page opens with no refusal to answer. Never
- * sent to us. Privacy policy: #gift-typed. Browser-safe; no storage here, only
- * the rules (components/gift-typed-keeper.tsx reads and writes).
+ * Kept in the tab's sessionStorage only, under one key per store and product,
+ * never used after GIFT_TYPED_KEEP_MS, removed as soon as it is read back and
+ * whenever the page opens with no refusal to answer. A browser may give a
+ * reopened tab its storage back, so closing the tab is not counted on: every
+ * store page removes what is too old (sweepGiftTyped), and the thank-you page
+ * and the store's front page, where the checkout comes back, remove all of it
+ * (components/gift-typed-sweeper.tsx). Never sent to us. Privacy policy:
+ * #gift-typed. Browser-safe; no storage here, only the rules
+ * (components/gift-typed-keeper.tsx reads and writes).
  */
 
 /** The gift form's own fields, in the order they are on the form. */
@@ -40,6 +44,20 @@ export function giftProblemField(problem: string): GiftTypedField | null {
   if (problem === "email") return "gift_to";
   if (problem === "option") return "option";
   return null;
+}
+
+/**
+ * The store's own notices (buyer words `notices`) a checkout refused after the
+ * gift was written down sends back to the gift form (app/api/store/checkout/
+ * route.ts): someone else holding the last unit, the store's orders paused,
+ * and a payment page Stripe would not open. A sold-out product goes to the
+ * store's front page instead, since its page no longer draws the gift form.
+ */
+export const GIFT_RETURN_NOTICES = ["busy", "paused", "error"] as const;
+export type GiftReturnNotice = (typeof GIFT_RETURN_NOTICES)[number];
+
+export function isGiftReturnNotice(problem: string): problem is GiftReturnNotice {
+  return (GIFT_RETURN_NOTICES as readonly string[]).includes(problem);
 }
 
 /** The four fields only, each a string capped at what the form takes, with the time it was kept. */
@@ -74,8 +92,36 @@ export function unpackGiftTyped(raw: string | null, now: number): GiftTyped | nu
   return out;
 }
 
-// RED stubs, replaced by the fix in the next commit.
-export const GIFT_RETURN_NOTICES: readonly string[] = [];
-export function sweepGiftTyped(_storage: unknown, _now: number, _all = false): number {
-  return 0;
+
+/** The part of the tab's storage the sweep uses. */
+export type GiftTypedStorage = Pick<Storage, "length" | "key" | "getItem" | "removeItem">;
+
+/**
+ * Removes the kept gift forms that can no longer be used (too old, from the
+ * future, or not ours), or, with `all`, every one of them: back from paying
+ * (the thank-you page) or from the checkout (the store's front page), nothing
+ * kept is needed any more. Other keys are never touched. A storage that
+ * refuses is left as it is: the page goes on. Returns how many were removed.
+ */
+export function sweepGiftTyped(storage: GiftTypedStorage, now: number, all = false): number {
+  let keys: string[] = [];
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (key !== null && key.startsWith(GIFT_TYPED_PREFIX)) keys.push(key);
+    }
+  } catch {
+    keys = [];
+  }
+  let removed = 0;
+  for (const key of keys) {
+    try {
+      if (!all && unpackGiftTyped(storage.getItem(key), now) !== null) continue;
+      storage.removeItem(key);
+      removed++;
+    } catch {
+      // Refused for this key: the next store page tries again.
+    }
+  }
+  return removed;
 }

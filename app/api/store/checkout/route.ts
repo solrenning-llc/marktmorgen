@@ -1,4 +1,5 @@
 import { startGift } from "@/lib/gifts";
+import type { GiftReturnNotice } from "@/lib/gift-typed";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { startGroup } from "@/lib/group-buy";
 import { preorderDay, soonOne } from "@/lib/preorders";
@@ -207,6 +208,11 @@ export async function POST(request: NextRequest) {
     if (!started.ok) return away(`/@${store.handle}/p/${product.id}?gift=${started.reason}#gift`);
     gift = started.gift.id;
   }
+  // A gift refused from here on (a unit someone else holds, paused orders, a payment page Stripe would not open)
+  // goes back to the gift form with the store's own words for it, where what was typed is put back (GiftTypedKeeper,
+  // 3.3.7), never to the store's front page, where nothing came back. A sold-out product still goes to the front page:
+  // its page no longer draws the gift form.
+  const giftBack = (notice: GiftReturnNotice) => `/@${store.handle}/p/${product.id}?gift=${notice}#gift`;
 
   // For several people: written down before its checkout opens, like a gift.
   // The number typed is checked here and never corrected: a buyer who typed
@@ -308,7 +314,7 @@ export async function POST(request: NextRequest) {
         digitalConsent,
       }),
     );
-    if (!held.ok) return away(`/@${store.handle}?status=${held.reason}`);
+    if (!held.ok) return away(gift && held.reason === "busy" ? giftBack("busy") : `/@${store.handle}?status=${held.reason}`);
     // Written down before the buyer leaves, so the plan — or a membership that
     // ends after a set number of payments — is given its end whether or not
     // they come back from paying.
@@ -333,7 +339,8 @@ export async function POST(request: NextRequest) {
     return new Response(null, { status: 303, headers });
   } catch (error) {
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.
-    if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
+    if (error instanceof OrdersPausedError)
+      return away(gift ? giftBack(error.reason === "paused" ? "paused" : "error") : `/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked, or the page was from before its words
     // changed: back to the form it belongs to, said beside the box. Refused
     // before Stripe is reached, so nothing is charged and no unit is held.
@@ -341,6 +348,6 @@ export async function POST(request: NextRequest) {
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
-    return away(`/@${store.handle}?status=error`);
+    return away(gift ? giftBack("error") : `/@${store.handle}?status=error`);
   }
 }

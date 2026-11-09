@@ -79,6 +79,7 @@ import { readAllTimeSales } from "@/lib/stats";
 import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { NewTab } from "@/components/new-tab";
+import { GiftTypedSweeper } from "@/components/gift-typed-sweeper";
 
 /** What a try at "Support my work" may come back with (app/api/store/tip). */
 const TIP_PROBLEMS = new Set(["amount", "limited", "closed", "error"]);
@@ -307,6 +308,8 @@ export default async function StorePage({ params, searchParams }: Params) {
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
+      {/* Where the checkout comes back when the buyer leaves it: what a gift form kept in this tab is cleared (Privacy #gift-typed). */}
+      <GiftTypedSweeper all />
       <main id="content" className="relative">
         {news ? (
           <p className="st-announce">

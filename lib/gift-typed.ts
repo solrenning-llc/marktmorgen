@@ -125,3 +125,15 @@ export function sweepGiftTyped(storage: GiftTypedStorage, now: number, all = fal
   }
   return removed;
 }
+
+// RED stubs for tests/group-error-a11y.test.ts; the fix replaces them.
+export const GROUP_TYPED_FIELDS = [] as readonly string[];
+export function groupTypedKey(_handle: string, _productId: string): string {
+  return "";
+}
+export function packGroupTyped(_values: Partial<Record<string, unknown>>, _now: number): string {
+  return JSON.stringify({ at: _now, v: {} });
+}
+export function unpackGroupTyped(_raw: string | null, _now: number): Record<string, string> | null {
+  return null;
+}

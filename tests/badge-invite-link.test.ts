@@ -67,6 +67,13 @@ async function main(): Promise<void> {
   is("and nothing was written for it", redis.run(["GET", myCodeKey("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]), null);
   is("a store id of another shape reads nothing", await existingInviteCode("not-a-sid"), null);
 
+  const asked = redis.pipeline;
+  redis.pipeline = async () => [5] as never;
+  is("on: a number reply gives the plain link with no error", badgeHref(await badgeInviteCode(SID, true), true), BADGE_HOME);
+  redis.pipeline = () => Promise.reject(new Error("database down"));
+  is("on: a rejected pipeline gives the plain link with no error", badgeHref(await badgeInviteCode(SID, true), true), BADGE_HOME);
+  redis.pipeline = asked;
+
   part("4. Opening the store writes nothing in the visitor's browser for it");
   const page = readFileSync("app/[handle]/page.tsx", "utf8");
   const badge = page.slice(page.indexOf("Our name at the foot of the page"), page.indexOf("<StoreTracking"));
@@ -79,7 +86,7 @@ async function main(): Promise<void> {
 
   part("6. A store that may take the badge off and did shows nothing");
   is("the badge is shown only when kept on or when the plan does not allow it off", /\{showBadge \? \(/.test(badge), true);
-  is("and the code is read only when the badge is shown", /const showBadge = store\.look\.badge \|\| !canUse\(store, "branding"\);/.test(page) && /showBadge \? await badgeInviteCode\(store\.sid\) : null/.test(page), true);
+  is("and the code is read only when the badge is shown", /const showBadge = store\.look\.badge \|\| !canUse\(store, "branding"\);/.test(page) && /showBadge \? badgeInviteCode\(store\.sid\) : null/.test(page), true);
 
   part("Cost: one command more on the front page only while the link is on");
   is("the front page's commands", COMMANDS.frontPage, 4 + (INVITE_BADGE_LINK_ON ? 1 : 0));

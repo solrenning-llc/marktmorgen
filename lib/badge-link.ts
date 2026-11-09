@@ -14,7 +14,7 @@
  * The reward, its hold and its checks stay exactly as lib/creator-invite-rules.ts
  * and lib/creator-invites.ts have them: this only says where the link goes.
  */
-import { INVITE_CODE_PATTERN, INVITE_PROGRAM_OPEN } from "@/lib/creator-invite-rules";
+import { INVITE_CODE_PATTERN, INVITE_PROGRAM_OPEN, invitePath } from "@/lib/creator-invite-rules";
 import { existingInviteCode } from "@/lib/creator-invites";
 import { PLANS_ON_SALE } from "@/lib/opening";
 
@@ -26,7 +26,7 @@ export const INVITE_BADGE_LINK_ON: boolean = INVITE_PROGRAM_OPEN && PLANS_ON_SAL
 
 /** The badge's link: the invite page with the creator's code while the link is on and the code is valid, else the plain one. */
 export function badgeHref(code: string | null, on: boolean = INVITE_BADGE_LINK_ON): string {
-  return on && typeof code === "string" && INVITE_CODE_PATTERN.test(code) ? `/invite/${code}` : BADGE_HOME;
+  return on && typeof code === "string" && INVITE_CODE_PATTERN.test(code) ? invitePath(code) : BADGE_HOME;
 }
 
 /**

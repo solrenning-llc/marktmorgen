@@ -27,6 +27,7 @@ import { offeredItems } from "@/lib/bundles";
 import { readListings, readPage } from "@/lib/catalog";
 import { monthKey } from "@/lib/delivery";
 import { outOfKeys } from "@/lib/licence-keys";
+import { badgeInviteCode } from "@/lib/badge-link";
 import { PLAN_PRICES } from "@/lib/plan";
 import { readAbout } from "@/lib/product-about";
 import { withinLimit } from "@/lib/request-guard";
@@ -302,6 +303,7 @@ async function main(): Promise<void> {
     await ratings;
     await bundles;
     await soonProducts(store).catch(() => new Set());
+    await badgeInviteCode(store.sid);
     return listings;
   };
   const listings = await drawFront();

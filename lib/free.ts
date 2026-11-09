@@ -258,7 +258,8 @@ export async function requestCopy(input: {
     ].join("\n"),
   });
   // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts. A count not confirmed keeps
-  // the room it was admitted with until its hours end, never given back as if counted.
+  // the room it was admitted with until its hours end, never given back as if counted. A free copy has no recount:
+  // past those hours that one copy is in neither the count nor the room (one per copy whose every try failed).
   const tally = sent ? await countOrder(store, `free:${token}`, 0) : false;
   if (tally !== "unknown") await settleAdmitted(store, admitted.hour);
   return sent ? "sent" : "error";

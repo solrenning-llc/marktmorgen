@@ -44,6 +44,7 @@
  * not the buyer ever comes back to the thanks page.
  */
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
+import { countOrder } from "@/lib/orders";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -416,8 +417,9 @@ export async function takeUpsell(input: {
     if (pi.status === "succeeded") {
       await writeUpsell(session, slot, { state: "paid", product: target.id, ...extra, pi: id, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
-      await afterPaid(store, session, target, pi, email);
-      await settleAdmitted(store, admitted.hour);
+      // Its place is given back only once the offer is counted (or covered by its share): a count not confirmed
+      // keeps it held until its hours end, never given back as if counted (lib/orders.ts, countOrder).
+      if ((await afterPaid(store, session, target, pi, email)) !== "unknown") await settleAdmitted(store, admitted.hour);
       return { kind: "done" };
     }
     const next = pi.next_action as { redirect_to_url?: { url?: unknown } } | null;
@@ -447,11 +449,12 @@ export async function takeUpsell(input: {
 
 /**
  * What follows an offer being paid, wherever that is learned: the affiliate
- * the order came through is credited, the buyer gets its confirmation, and
- * the creator's phone hears of the sale (lib/sale-events.ts). None can undo
- * the payment, so none failing is passed on.
+ * the order came through is credited, the buyer gets its confirmation, it is
+ * one of the month's orders, and the creator's phone hears of the sale
+ * (lib/sale-events.ts). None can undo the payment, so none failing is passed
+ * on. Answers what counting it answered (lib/orders.ts, countOrder).
  */
-async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<void> {
+async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<boolean | "unknown"> {
   await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
   const reference = typeof pi.id === "string" ? pi.id : "";
   const amountCents = typeof pi.amount === "number" ? pi.amount : 0;
@@ -460,10 +463,15 @@ async function afterPaid(store: Store, session: string, target: Listing, pi: Rec
   const listed = bundleFromMeta(pi.metadata as Record<string, string> | null, "bundle");
   const items = listed.length ? (await contentsOf(store, listed).catch(() => null))?.items : undefined;
   const metadata = (pi.metadata as Record<string, string> | null) ?? null;
-  await confirmOffer(store, { reference, parent: session, product: target, email, amountCents, currency, items, metadata }).catch((error) =>
-    console.error("sending an offer's confirmation failed", error),
-  );
+  const sent = await confirmOffer(store, { reference, parent: session, product: target, email, amountCents, currency, items, metadata }).catch((error) => {
+    console.error("sending an offer's confirmation failed", error);
+    return "failed" as const;
+  });
+  // One of the month's orders, by its own payment, whether or not its email went: it was paid. Only an offer this
+  // store does not confirm by email ("skip") is left as before.
+  const counted = sent === "skip" ? false : await countOrder(store, `offer:${reference}`, amountCents);
   await noteOfferSale(store, target, pi).catch((error) => console.error("telling about an offer's sale failed", error));
+  return counted;
 }
 
 /**

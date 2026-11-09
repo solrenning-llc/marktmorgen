@@ -30,7 +30,7 @@
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
-import { pushMembers, stillMembers } from "@/lib/community-push";
+import { type StillIn, pushMembers, stillMembers } from "@/lib/community-push";
 import { communityWords } from "@/lib/buyer-words/community";
 import { type DataStore, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -104,11 +104,15 @@ export async function tell(
   const named = [...new Set(to)].filter((one) => one && one !== notice.by);
   if (!named.length) return;
   // Only the creator, or a member still in (lib/community-push.ts stillMembers): somebody taken out, never in or
-  // erased is told nothing, and a record that does not read tells nobody (CX-123 rule 24).
-  const who = await stillMembers(id, named).catch((error: unknown) => {
+  // erased is told nothing, and a record that does not read tells nobody (CX-123 rule 24). Asked once: the push
+  // below takes this very answer.
+  let who: StillIn;
+  try {
+    who = await stillMembers(id, named);
+  } catch (error) {
     console.error("reading who a community notification reaches failed", error);
-    return [] as string[];
-  });
+    return;
+  }
   if (!who.length) return;
   const row = JSON.stringify({ ...notice, words: notice.words.slice(0, SNIP), at: now() } satisfies Notice);
   try {

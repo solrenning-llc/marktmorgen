@@ -1,6 +1,6 @@
 /**
  * Who a community notice and a member's push reach (lib/community-notify.ts
- * tell, lib/community-push.ts pushMembers), and who may turn push off
+ * tell, lib/community-push.ts stillMembers and pushMembers), and who may turn push off
  * (app/api/store/community/push).
  *
  * The push route says "A device belongs to a member of this community, and
@@ -26,7 +26,7 @@ import { NextRequest } from "next/server";
 import { POST as pushPost } from "@/app/api/store/community/push/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { CREATOR, freshConfig, memberKey, moderateMember, readMember, saveConfig, touchMember } from "@/lib/community";
-import { deviceCount, pushMembers, rememberDevice } from "@/lib/community-push";
+import { deviceCount, pushMembers, rememberDevice, stillMembers } from "@/lib/community-push";
 import { noticesFor, tell } from "@/lib/community-notify";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   is("the creator, who has no member record, is pushed", looked.length, 1);
   is("and filed", await rows(CREATOR), 1);
   looked.length = 0;
-  await pushMembers(ID, [anaKey, CREATOR], { title: "t", body: "b", url: "/" });
+  await pushMembers(ID, await stillMembers(ID, [anaKey, CREATOR]), { title: "t", body: "b", url: "/" });
   is("pushMembers reaches both", looked.length, 2);
 
   part("A member the creator took out");
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   await reply(anaKey);
   is("no push goes to them", looked.length, 0);
   is("no new row is filed for them", await rows(anaKey), 1);
-  await pushMembers(ID, [anaKey], { title: "t", body: "b", url: "/" });
+  await pushMembers(ID, await stillMembers(ID, [anaKey]), { title: "t", body: "b", url: "/" });
   is("pushMembers sends them nothing", looked.length, 0);
   await moderateMember(ID, anaKey, { removed: false });
   const filed = await rows(anaKey);
@@ -128,26 +128,47 @@ async function main(): Promise<void> {
   is("control: and filed again", (await rows(anaKey)) - filed, 1);
 
   part("A member's record that does not read (rule 24): nobody is reached on a guess");
-  const memberRead = (commands: Command[]) => commands.length === 1 && commands[0][0] === "HMGET" && commands[0][1] === members;
+  // lib/community-push.ts stillMembers asks Redis for one mark per key (its STILL_IN script); a reply of another shape.
+  const memberRead = (commands: Command[]) =>
+    commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:community-still-in:v1\n") && commands[0][3] === members;
   const held = await rows(anaKey);
-  for (const [what, shape] of [
-    ["no reply at all", []],
-    ["a hole", [undefined]],
-    ["a number for the rows", [42]],
-    ["one row too few", [[]]],
-    ["a row that is not a record", [["{bad"]]],
-    ["somebody else's record", [[JSON.stringify({ k: "x".repeat(32), e: "x@pushreach.example", removed: false, muted: false })]]],
-  ] as [string, unknown][]) {
+  const unreached = async (what: string) => {
     looked.length = 0;
-    odd = { match: memberRead, reply: shape };
     try {
       await reply(anaKey);
-      await pushMembers(ID, [anaKey], { title: "t", body: "b", url: "/" });
+      let thrown = false;
+      await stillMembers(ID, [anaKey]).catch(() => { thrown = true; });
+      is(`${what}: who is still in is refused, not guessed`, thrown, true);
     } finally {
       odd = null;
     }
     is(`${what}: no push`, looked.length, 0);
     is(`${what}: no row filed`, await rows(anaKey), held);
+  };
+  for (const [what, shape] of [
+    ["no reply at all", []],
+    ["a hole", [undefined]],
+    ["a number for the marks", [42]],
+    ["one mark too few", [""]],
+    ["a mark that is not one of the three", ["?"]],
+    ["a list instead of the marks", [["y"]]],
+  ] as [string, unknown][]) {
+    odd = { match: memberRead, reply: shape };
+    await unreached(what);
+  }
+  // A record Redis holds in another shape is decided inside the script (lib/redis-memory.ts models it as Redis runs it).
+  const [kept] = await redis.pipeline([["HGET", members, anaKey]]);
+  for (const [what, record] of [
+    ["a row that is not a record", "{bad"],
+    ["somebody else's record", JSON.stringify({ k: "x".repeat(32), e: "x@pushreach.example", removed: false, muted: false })],
+    ["a record without its removal", JSON.stringify({ ...JSON.parse(String(kept)), removed: undefined })],
+  ] as [string, string][]) {
+    await redis.pipeline([["HSET", members, anaKey, record]]);
+    try {
+      await unreached(what);
+    } finally {
+      await redis.pipeline([["HSET", members, anaKey, String(kept)]]);
+    }
   }
 
   part("Turning push off is taken from the signed-in person, whatever their membership");

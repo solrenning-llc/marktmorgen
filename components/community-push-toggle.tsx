@@ -30,8 +30,8 @@ export function CommunityPushToggle({
   handle: string;
   /** Our VAPID public key. Empty when push is not set up on this deployment. */
   publicKey: string;
-  /** How many devices this person already has listening. */
-  devices: number;
+  /** How many devices this person already has listening; null when that could not be read. */
+  devices: number | null;
   words: PushWords;
 }) {
   const [state, setState] = useState<"unknown" | "off" | "on" | "denied" | "unsupported" | "homescreen">("unknown");
@@ -106,7 +106,7 @@ export function CommunityPushToggle({
         setState("off");
         return;
       }
-      setCount(data.devices ?? count + 1);
+      setCount(typeof data.devices === "number" ? data.devices : count === null ? null : count + 1);
       setState("on");
     } catch {
       setError(t.failed);
@@ -146,9 +146,9 @@ export function CommunityPushToggle({
         if (!response.ok || data?.ok !== true) throw new Error("the device was not forgotten");
         const drop = () => Promise.resolve().then(() => subscription.unsubscribe()).then((gone) => gone === true, () => false);
         if (!(await drop())) await drop();
-        setCount(typeof data?.devices === "number" ? data.devices : Math.max(0, count - 1));
+        setCount(typeof data?.devices === "number" ? data.devices : count === null ? null : Math.max(0, count - 1));
       } else {
-        setCount(Math.max(0, count - 1));
+        setCount(count === null ? null : Math.max(0, count - 1));
       }
       setState("off");
     } catch {
@@ -184,7 +184,8 @@ export function CommunityPushToggle({
             {t.turnOff}
           </button>
           <span className="st-muted text-xs font-semibold">
-            {count === 1 ? t.onHere : t.onMany.replace("{n}", String(count))}
+            {/* An unknown count says only what is sure: this browser is on. */}
+            {count === null || count === 1 ? t.onHere : t.onMany.replace("{n}", String(count))}
           </span>
         </div>
       ) : (

@@ -4,7 +4,7 @@ import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { communityViewer } from "@/lib/community-access";
 import { memberKey } from "@/lib/community";
-import { deviceCount, forgetDevice, rememberDevice, renewDevice } from "@/lib/community-push";
+import { devicesShown, forgetDevice, rememberDevice, renewDevice } from "@/lib/community-push";
 import { restingJson, takeBuyerAction } from "@/lib/buyer-actions";
 
 /**
@@ -33,9 +33,9 @@ export async function POST(request: NextRequest) {
   const viewer = await communityViewer(store, request.cookies);
   const id = store.community.id;
   const action = text(body.action, 20);
-  // How many devices are left, when that reads (lib/community-push.ts deviceCount is exact); left out when it does
-  // not, and the switch counts by itself.
-  const left = (who: string) => deviceCount(id, who).catch(() => undefined);
+  // How many devices are left, when that reads (lib/community-push.ts devicesShown); left out when it does not, and
+  // the switch counts by itself.
+  const left = async (who: string) => (await devicesShown(id, who)) ?? undefined;
   // Turning push off only deletes the signed-in person's own device, so it is taken whatever their membership:
   // somebody taken out by the creator, or whose ticket ended, can still stop their own device here.
   if (action === "off" && (viewer.state === "removed" || viewer.state === "closed")) {
@@ -47,6 +47,11 @@ export async function POST(request: NextRequest) {
   // member of this community, and stops belonging the moment they stop being one.
   if (viewer.state !== "in") return Response.json({ ok: false, error: "out" }, { status: 403 });
   const who = viewer.key;
+  // Let in while the community is full, a member has no record, and a notice reaches only the creator or a member
+  // with one (lib/community-push.ts stillMembers): a device kept for them would never be told anything.
+  if ((action === "on" || action === "renew") && !viewer.owner && !viewer.member) {
+    return Response.json({ ok: false, error: "norecord" }, { status: 409 });
+  }
   // A device added is one of the store's buyer actions, or the creator's studio requests (lib/buyer-actions.ts); one taken off is not.
   if ((action === "on" || action === "renew") && !(await takeBuyerAction(store, viewer.owner ? "owner" : "buyer"))) return restingJson();
 

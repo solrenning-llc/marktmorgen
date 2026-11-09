@@ -159,6 +159,25 @@ export class MemoryRedis {
           }
           return this.run(["HDEL", handles, handle]);
         }
+        // lib/community-push.ts STILL_IN: one mark per member key, "y" in, "r" taken out, "n" no record, "?" any other shape.
+        if (key.startsWith("-- marktmorgen:community-still-in:v1\n") && args[0] === "1" && args.length >= 3) {
+          const [, members, ...keys] = args;
+          const rows = this.run(["HMGET", members, ...keys]) as (string | null)[];
+          return keys.map((who, i) => {
+            const raw = rows[i];
+            if (raw === null) return "n";
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return "?";
+            }
+            if (!record || typeof record !== "object") return "?";
+            const fields = record as { k?: unknown; removed?: unknown; muted?: unknown };
+            if (fields.k !== who || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
+            return fields.removed ? "r" : "y";
+          }).join("");
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;

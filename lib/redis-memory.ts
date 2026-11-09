@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
+import { personInResponse } from "@/lib/form-respondent";
+import type { Answers } from "@/lib/forms";
 /**
  * A Redis that lives in memory, for testing the parts of this codebase whose
  * behaviour only shows up across several commands.
@@ -978,27 +980,51 @@ export class MemoryRedis {
           while (list.length > Number(args[3])) out.push(list.pop()!);
           return out;
         }
-        if (key.startsWith("-- marktmorgen:form-forget:v2\n")) {
+        // lib/form-store.ts FORGET_FORM_PERSON, by the rule of lib/form-respondent.ts as its Lua says it.
+        if (key.startsWith("-- marktmorgen:form-forget:v3\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const address = args[1 + count];
           const out: (string | number)[] = [];
           keys.forEach((listKey, k) => {
+            const questions = JSON.parse(args[2 + count + k]) as string[];
             this.live(listKey);
             if (!this.data.has(listKey)) return;
-            const counts = new Map<string, number>();
-            const kept = this.list(listKey).filter((raw) => {
+            const list = this.list(listKey);
+            const dropped: string[] = [];
+            const rewrite: [number, string, string][] = [];
+            list.forEach((raw, i) => {
+              let whole = false;
+              let value: unknown;
               try {
-                const value = JSON.parse(raw) as { answers?: Record<string, unknown> };
-                const hit = value && typeof value.answers === "object" && value.answers !== null && Object.values(value.answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === address);
-                if (hit) counts.set(raw, (counts.get(raw) ?? 0) + 1);
-                return !hit;
+                value = JSON.parse(raw);
               } catch {
-                return true;
+                value = undefined;
               }
+              const readable = value && typeof value === "object" && typeof (value as { at?: unknown }).at === "number" && (value as { answers?: unknown }).answers && typeof (value as { answers?: unknown }).answers === "object";
+              if (readable) {
+                const response = value as { answers: Answers };
+                const { role, named } = personInResponse(questions, response.answers, address);
+                if (role === "sent" || role === "unknown") whole = true;
+                else if (role === "named") {
+                  for (const id of named) delete response.answers[id];
+                  rewrite.push([i, raw, JSON.stringify(response)]);
+                }
+              } else if (raw.replace(/[A-Z]+/g, (letters) => letters.toLowerCase()).includes(address)) whole = true;
+              if (whole && !dropped.includes(raw)) dropped.push(raw);
             });
-            this.data.set(listKey, kept);
-            for (const [raw, n] of counts) out.push(k + 1, raw, n);
+            for (const [i, raw, text] of rewrite) {
+              list[i] = text;
+              out.push(k + 1, raw, 1, text);
+            }
+            for (const raw of dropped) {
+              const n = list.filter((item) => item === raw).length;
+              if (!n) continue;
+              const left = list.filter((item) => item !== raw);
+              list.length = 0;
+              list.push(...left);
+              out.push(k + 1, raw, n, "");
+            }
           });
           return out;
         }

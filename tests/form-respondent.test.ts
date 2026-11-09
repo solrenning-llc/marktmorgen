@@ -12,6 +12,8 @@
 import { parseForm, type FormResponse } from "@/lib/forms";
 import { addResponse, forgetFormsPerson, readResponses, writeForm } from "@/lib/form-store";
 import { COPIERS } from "@/lib/person-copy";
+import { formDealDraft } from "@/lib/form-deal";
+import { emailQuestionIds, respondentOf } from "@/lib/form-respondent";
 import type { ErasureScope } from "@/lib/erasure-rules";
 import { type DataStore, dataUsed, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -118,6 +120,42 @@ async function main(): Promise<void> {
   is("both of his", await forgetFormsPerson(STATS, OLLY, ROOM), 2);
   is("nothing kept", [(await kept(join.id)).length, (await kept(optional.id)).length], [0, 0]);
   is("all the room given back", await used(), base);
+
+  part("The deal drafted from a response names the same sender");
+  const twoEmails = parseForm({ id: "twomailfrm", name: "Two emails", fields: [{ id: "email1", type: "email", label: "Friend's email", required: false }, { id: "email2", type: "email", label: "Your email", required: true }, { id: "refby1", type: "short", label: "Note", required: false }], offerList: false })!;
+  const sender = (answers: FormResponse["answers"]) => formDealDraft(twoEmails, response(1, answers)).email;
+  is("the first email question that holds an address", sender({ email1: "Ana@Example.com", email2: OLLY }), "ana@example.com");
+  is("an empty or broken first one is passed over", [sender({ email1: "", email2: OLLY }), sender({ email1: "not an address", email2: OLLY })], [OLLY, OLLY]);
+  is("an address in another question never is", sender({ refby1: TESS }), "");
+  is("the same as the copy and the erasure read", respondentOf(emailQuestionIds(twoEmails), { email1: "not an address", email2: OLLY, refby1: TESS }), OLLY);
+
+  part("A response that does not read and holds her address is deleted, never taken for somebody else's");
+  const key = `nl:form:r:${STATS}:${join.id}`;
+  await redis.pipeline([["RPUSH", key, `{"at":"later","answers":{"email1":"${TESS}"}}`, "not a response at all"]]);
+  is("the one with her address goes", await forgetFormsPerson(STATS, TESS), 1);
+  is("the one without it stays", (await redis.pipeline([["LRANGE", key, 0, -1]]))[0], ["not a response at all"]);
+  await redis.pipeline([["DEL", key]]);
+
+  part("A reply from the script in any other shape is unknown: nothing given back");
+  await addResponse(STATS, join.id, response(60, { email1: OLLY, refby1: TESS }), ROOM);
+  const before = await used();
+  const raw = JSON.stringify(response(60, { email1: OLLY, refby1: TESS }));
+  const keptRaw = JSON.stringify(response(60, { email1: OLLY }));
+  const real = redis.pipeline.bind(redis) as typeof redis.pipeline;
+  for (const bad of [[[1, raw, 1]], [[1, raw, 2, keptRaw]], [[1, raw, 1, "not a response"]], [[1, raw, 1, raw]], [[1, raw, 1, 5]], [[1, raw, 0, ""]], [[9, raw, 1, ""]], [[1, raw, 1, ""], 0]]) {
+    redis.pipeline = (async (commands: (string | number)[][]) => (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:form-forget:")) ? bad : real(commands))) as typeof redis.pipeline;
+    let refused = false;
+    try {
+      await forgetFormsPerson(STATS, TESS, ROOM);
+    } catch {
+      refused = true;
+    } finally {
+      redis.pipeline = real;
+    }
+    is(`refused on ${JSON.stringify(bad).slice(0, 60)}`, [refused, await used()], [true, before]);
+  }
+  is("then her address goes out of it for real", await forgetFormsPerson(STATS, TESS, ROOM), 1);
+  is("and Olly's response stays", (await kept(join.id)).map((r) => r.answers), [{ email1: OLLY }]);
   done();
 }
 

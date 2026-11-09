@@ -32,6 +32,7 @@ import { leadsKey, parseContact } from "@/lib/contacts";
 import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
+import { emailQuestionIds, personAddress, personInResponse } from "@/lib/form-respondent";
 import { listRequests } from "@/lib/payment-request-store";
 import { listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
@@ -93,7 +94,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/payment-request-store.ts": { how: "copied", what: "Payment requests the store sent you" },
   "lib/agreement-store.ts": { how: "copied", what: "Proposals and agreements the store sent you, each version's text, and your signature" },
   "lib/buyer-profile.ts": { how: "copied", what: "Notes the store's team wrote about you" },
-  "lib/form-store.ts": { how: "copied", what: "Your answers to the store's forms" },
+  "lib/form-store.ts": { how: "copied", what: "Your answers to the store's forms, and other answers that give your address" },
   "lib/learn.ts": { how: "copied", what: "Your progress in the store's courses: when you began and came back, and the lessons you finished. The browsers let in with your address and the drip emails already sent are kept as marks" },
   "lib/course-finish.ts": { how: "marks", what: "Marks that you opened and finished a course; the lessons you finished are in your course progress" },
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
@@ -204,13 +205,23 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/buyer-profile.ts": async (s) => (await readPersonNotes(s.statsId, s.person)).map((n) => ({ note: n.text, at: iso(n.at) })),
   "lib/form-store.ts": async (s) => {
     const out: unknown[] = [];
+    const address = personAddress(s.email);
     for (const form of await readForms(s.statsId)) {
+      const emailIds = emailQuestionIds(form);
       const { responses } = await readResponses(s.statsId, form.id);
       for (const r of responses) {
-        // The same rule the erasure deletes by: an answer that is the address (lib/form-store.ts, FORGET_FORM_PERSON).
-        if (!Object.values(r.answers).some((a) => typeof a === "string" && same(a, s.email))) continue;
-        const answers = Object.fromEntries(form.fields.map((f) => [f.label, r.answers[f.id] ?? ""]));
-        out.push({ form: form.name, sent: iso(r.at), answers, ...(r.outcome ? { result: r.outcome } : {}), ...(typeof r.score === "number" ? { score: r.score } : {}) });
+        // The same rule the erasure deletes by (lib/form-respondent.ts, FORGET_FORM_PERSON): a response is theirs when
+        // the form's first email question holding an address holds theirs. Another sender's response, or one whose
+        // sender is not known, gives only the answers that are their address, never anybody else's words.
+        const { role, named } = personInResponse(emailIds, r.answers, address);
+        if (role === "none") continue;
+        if (role === "sent") {
+          const answers = Object.fromEntries(form.fields.map((f) => [f.label, r.answers[f.id] ?? ""]));
+          out.push({ form: form.name, sent: iso(r.at), answers, ...(r.outcome ? { result: r.outcome } : {}), ...(typeof r.score === "number" ? { score: r.score } : {}) });
+          continue;
+        }
+        const label = (id: string) => form.fields.find((f) => f.id === id)?.label ?? "A question no longer on the form";
+        out.push({ form: form.name, sent: iso(r.at), from: role === "named" ? "another person" : "not known", answers: Object.fromEntries(named.map((id) => [label(id), r.answers[id]])) });
       }
     }
     return out;

@@ -20,6 +20,7 @@ import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { type FormDef, type FormResponse, FORM_RESPONSE_ID, FORM_ID, KEPT_RESPONSES, MAX_FORMS, parseForm } from "@/lib/forms";
+import { emailQuestionIds, personAddress, personInResponse } from "@/lib/form-respondent";
 
 const formsKey = (statsId: string) => `nl:forms:${statsId}`;
 const responsesKey = (statsId: string, formId: string) => `nl:form:r:${statsId}:${formId}`;
@@ -166,40 +167,109 @@ export async function responseCounts(statsId: string | null, ids: string[]): Pro
 }
 
 /**
- * Removes, from every list of responses given, each response one of whose
- * answers is this address (ARGV[1], lower case), on the Redis side so no
- * response travels. Answers how many went.
+ * One person out of every list of responses given (KEYS, one a form), on the
+ * Redis side so no response travels, by the rule of lib/form-respondent.ts,
+ * line for line: ARGV[1] is the person's address (personAddress), ARGV[1 + k]
+ * the ids of form k's email questions in its order (emailQuestionIds), as JSON.
+ *
+ *   - a response they sent (its first email question holding an address holds
+ *     theirs), or whose sender is not known (none holds one) and one of whose
+ *     answers is their address, is deleted whole;
+ *   - a response somebody else sent with their address in some answers keeps
+ *     the sender's answers, written back in its place without those;
+ *   - a response that does not read as one (lib/form-store.ts parseResponse)
+ *     but holds their address in its text is deleted whole, since nothing
+ *     else could take their address out of it.
+ *
+ * Answers, for each, {form's place, the response as it was, times, what is
+ * kept in its place or "" when it went}: a deleted one once, with how many
+ * times it was there; one written back once for each place it was in.
  */
-export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v2
+export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v3
+local function fold(text)
+  return string.lower(string.match(text, "^%s*(.-)%s*$"))
+end
+local function address(text)
+  if type(text) ~= "string" then return nil end
+  local t = fold(text)
+  if #t > 254 or string.find(t, "%s") then return nil end
+  local at = string.find(t, "@", 1, true)
+  if not at or string.find(t, "@", at + 1, true) then return nil end
+  if at - 1 < 1 or at - 1 > 64 then return nil end
+  local domain = string.sub(t, at + 1)
+  local dot = string.find(domain, ".", 1, true)
+  while dot do
+    if dot - 1 > 255 then return nil end
+    if dot - 1 >= 1 and #domain - dot >= 2 then return t end
+    dot = string.find(domain, ".", dot + 1, true)
+  end
+  return nil
+end
 local out = {}
 for k = 1, #KEYS do
+  local questions = cjson.decode(ARGV[k + 1])
   local items = redis.call("LRANGE", KEYS[k], 0, -1)
-  for _, raw in ipairs(items) do
+  local drop, dropped, rewrite = {}, {}, {}
+  for i, raw in ipairs(items) do
     local ok, value = pcall(cjson.decode, raw)
-    local hit = false
-    if ok and type(value) == "table" and type(value.answers) == "table" then
-      for _, answer in pairs(value.answers) do
-        if type(answer) == "string" and string.lower(string.match(answer, "^%s*(.-)%s*$")) == ARGV[1] then hit = true end
+    local whole = false
+    if ok and type(value) == "table" and type(value.answers) == "table" and type(value.at) == "number" then
+      local named = {}
+      for key, answer in pairs(value.answers) do
+        if type(answer) == "string" and fold(answer) == ARGV[1] then table.insert(named, key) end
       end
+      local sender = nil
+      for _, id in ipairs(questions) do
+        sender = address(value.answers[id])
+        if sender then break end
+      end
+      if sender == ARGV[1] or (sender == nil and #named > 0) then
+        whole = true
+      elseif #named > 0 then
+        for _, key in ipairs(named) do value.answers[key] = nil end
+        local fine, text = pcall(cjson.encode, value)
+        if fine then
+          table.insert(rewrite, {i, raw, (string.gsub(text, "\\\\/", "/"))})
+        else
+          whole = true
+        end
+      end
+    elseif string.find(string.lower(raw), ARGV[1], 1, true) then
+      whole = true
     end
-    if hit then
-      local n = redis.call("LREM", KEYS[k], 0, raw)
-      if n > 0 then
-        table.insert(out, k)
-        table.insert(out, raw)
-        table.insert(out, n)
-      end
+    if whole and not drop[raw] then
+      drop[raw] = true
+      table.insert(dropped, raw)
+    end
+  end
+  for _, change in ipairs(rewrite) do
+    redis.call("LSET", KEYS[k], change[1] - 1, change[3])
+    table.insert(out, k)
+    table.insert(out, change[2])
+    table.insert(out, 1)
+    table.insert(out, change[3])
+  end
+  for _, raw in ipairs(dropped) do
+    local n = redis.call("LREM", KEYS[k], 0, raw)
+    if n > 0 then
+      table.insert(out, k)
+      table.insert(out, raw)
+      table.insert(out, n)
+      table.insert(out, "")
     end
   end
 end
 return out`;
 
 /**
- * Deletes every response one person gave to any of the store's forms
- * (lib/person-erasure.ts), and gives back to `room` exactly what each one
- * took when it was kept (addResponse): the script answers each response it
- * removed, by form, with how many times it was there. A reply that is not
- * exactly that throws UnknownReply (lib/redis-exact.ts).
+ * Takes one person out of every response to any of the store's forms
+ * (lib/person-erasure.ts), by the rule of lib/form-respondent.ts: what they
+ * sent, or what nobody can be told to have sent with their address in it,
+ * goes whole; their address goes out of a response somebody else sent. It
+ * gives back to `room` exactly what each response took when it was kept
+ * (addResponse), less what one written back still takes. A reply that is not
+ * exactly that throws UnknownReply (lib/redis-exact.ts). Answers how many
+ * responses were deleted or changed.
  */
 export async function forgetFormsPerson(statsId: string | null, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
@@ -221,22 +291,35 @@ export async function forgetFormsPerson(statsId: string | null, email: string, r
     throw new UnknownReply(`${what} (its forms)`);
   });
   if (!forms.length) return 0;
-  const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]), 1, what);
-  // Exactly {form's place, response, times removed} for each: any other shape
-  // leaves the deletion unknown (UnknownReply), and nothing is given back.
+  const address = personAddress(email);
+  const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), address, ...forms.map((f) => JSON.stringify(emailQuestionIds(f)))]]), 1, what);
+  // Exactly {form's place, response, times, what is kept in its place} for each: any other shape leaves the
+  // deletion unknown (UnknownReply), and nothing is given back. A response written back must read as one and hold
+  // nothing of the person's any more.
   const list = plainList(reply);
-  if (!list || list.length % 3 !== 0) throw new UnknownReply(what);
-  let removed = 0;
+  if (!list || list.length % 4 !== 0) throw new UnknownReply(what);
+  let changed = 0;
   const freed = new Map<string, number>();
-  for (let i = 0; i < list.length; i += 3) {
-    const [at, raw, n] = [list[i], list[i + 1], list[i + 2]];
+  for (let i = 0; i < list.length; i += 4) {
+    const [at, raw, n, kept] = [list[i], list[i + 1], list[i + 2], list[i + 3]];
     const form = typeof at === "number" && Number.isInteger(at) ? forms[at - 1] : undefined;
-    if (!form || typeof raw !== "string" || typeof n !== "number" || !Number.isSafeInteger(n) || n < 1) throw new UnknownReply(what);
-    removed += n;
-    freed.set(form.id, (freed.get(form.id) ?? 0) + dataBytes([raw], 1) * n);
+    if (!form || typeof raw !== "string" || typeof n !== "number" || !Number.isSafeInteger(n) || n < 1 || typeof kept !== "string") throw new UnknownReply(what);
+    let back = 0;
+    if (kept) {
+      const written = parseResponse(kept);
+      if (n !== 1 || !written || personInResponse(emailQuestionIds(form), written.answers, address).role !== "none") throw new UnknownReply(what);
+      back = dataBytes([kept], 1);
+    }
+    changed += n;
+    freed.set(form.id, (freed.get(form.id) ?? 0) + dataBytes([raw], 1) * n - back);
   }
-  if (room && freed.size) await giveData(room, [...freed].map(([id, bytes]) => ({ slot: ANSWERS_SLOT(id), bytes })));
-  return removed;
+  if (room) {
+    const given = [...freed].filter(([, bytes]) => bytes > 0);
+    const taken = [...freed].filter(([, bytes]) => bytes < 0);
+    if (given.length) await giveData(room, given.map(([id, bytes]) => ({ slot: ANSWERS_SLOT(id), bytes })));
+    if (taken.length) await noteData(room, taken.map(([id, bytes]) => ({ slot: ANSWERS_SLOT(id), bytes: -bytes })));
+  }
+  return changed;
 }
 
 /**

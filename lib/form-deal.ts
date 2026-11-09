@@ -1,9 +1,11 @@
 import { answerText, type FormDef, type FormResponse } from "@/lib/forms";
 import { CRM_ID, MAX_DEAL_NOTE, MAX_DEAL_TITLE } from "@/lib/crm-rules";
+import { emailQuestionIds, respondentOf } from "@/lib/form-respondent";
 
 /** Reviewable CRM copy, not a marketing subscription or a message. */
 export function formDealDraft(form: FormDef, response: FormResponse) {
-  const email = form.fields.filter(field => field.type === "email").map(field => response.answers[field.id]).find(value => typeof value === "string" && value.length <= 254 && /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/.test(value));
+  // Who sent it, by the one rule the copy and the erasure of a person's data read (lib/form-respondent.ts).
+  const email = respondentOf(emailQuestionIds(form), response.answers) ?? "";
   const date = new Date(response.at * 1000);
   const source = "Form: " + form.name + (Number.isFinite(date.getTime()) ? "\nSubmitted: " + date.toISOString() : "");
   const details = form.fields.flatMap(field => {
@@ -11,7 +13,7 @@ export function formDealDraft(form: FormDef, response: FormResponse) {
     return answer ? [field.label + ": " + answer] : [];
   });
   const fullNote = [source, ...details].join("\n");
-  return { title: form.name.slice(0, MAX_DEAL_TITLE), email: typeof email === "string" ? email.trim().toLowerCase() : "", note: fullNote.slice(0, MAX_DEAL_NOTE), truncated: fullNote.length > MAX_DEAL_NOTE };
+  return { title: form.name.slice(0, MAX_DEAL_TITLE), email, note: fullNote.slice(0, MAX_DEAL_NOTE), truncated: fullNote.length > MAX_DEAL_NOTE };
 }
 
 export type FormDealMatch = { formResponseRef?: string; id: string; title: string; email: string; stage: string };

@@ -55,6 +55,13 @@ import { type Store, storeForEmail, storeRef, storesAfter } from "@/lib/store";
 
 /** Changed to count every store again from the start. */
 export const RECOUNT_VERSION = "2026-10-18";
+/**
+ * Runs of the count a UTC day at the most: one an hour (vercel.json, /api/cron/recount, "35 * * * *"), one at a
+ * time under nl:recount:lock (app/api/cron/recount/route.ts). A count asked again (lib/store-data.ts) starts only
+ * once the one running is done, however many asks there were, so it adds no run: its worst month is these runs,
+ * every one of them working (NOT_A_COST.RECOUNT_RUNS_PER_DAY in tests/plan-cost-registry.ts, a company cost).
+ */
+export const RECOUNT_RUNS_PER_DAY = 24;
 /** The most pages of the database one run reads. */
 export const RECOUNT_PAGES = 40;
 /** Keys asked for in one page of the database. */

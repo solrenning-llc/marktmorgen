@@ -330,7 +330,8 @@ export async function readVersions(statsId: string | null, productId: string): P
 
 /**
  * A page was dropped, but not all it held could be confirmed gone (its campaigns' landings): what is left stays
- * counted in the store's room. `pictures` are still the files the page was the one showing, released and to delete.
+ * counted in the store's room; or its test's counts, kept until they expire, could not be counted nor the count
+ * asked again (DataCountUnconfirmed). `pictures` are still the files the page was the one showing, released and to delete.
  */
 export class PageDropIncomplete extends Error {
   constructor(readonly pictures: string[], readonly kept: unknown) {
@@ -369,9 +370,12 @@ export async function dropPage(statsId: string | null, productId: string, room: 
   // given back only by the step that drops them, so one not confirmed stays counted.
   const landings = await dropLandings(statsId, productId, room).then(() => null, (error: unknown) => ({ error }));
   if (pageFailed) throw new PageDropIncomplete([], pageFailed.error);
-  // A test's counts stay until they expire, counted on their own.
-  if (held.test) await noteData(room, [endedTest(Date.now())]);
+  // A test's counts stay until they expire, counted on their own. Counted after the page is gone: when not even
+  // the ask to count them again can be written (DataCountUnconfirmed), the pictures are still let go and the
+  // failure is said after them, as the landings' is, never their files left kept for good.
+  const unconfirmed = held.test ? await noteData(room, [endedTest(Date.now())]).then(() => null, (error: unknown) => ({ error })) : null;
   const pictures = await releasePictures(statsId, productId, shown);
   if (landings) throw new PageDropIncomplete(pictures, landings.error);
+  if (unconfirmed) throw new PageDropIncomplete(pictures, unconfirmed.error);
   return pictures;
 }

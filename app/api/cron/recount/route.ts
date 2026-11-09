@@ -11,8 +11,10 @@ export const maxDuration = 60;
  * every store already kept in the database before its data room counted it
  * (lib/data-recount.ts). Each run reads as much as its minute allows and
  * writes down where it stopped; once every store is counted each run is one
- * read and nothing more, until the count's version changes. One run at a
- * time.
+ * read and nothing more, until the count's version changes or a count of a
+ * store's data could not be confirmed (lib/store-data.ts), which starts it
+ * again. One run at a time; its worst month, every run working, is the
+ * company's (RECOUNT_RUNS_PER_DAY, NOT_A_COST in tests/plan-cost-registry.ts).
  */
 export async function GET(request: NextRequest) {
   return withCutoff(Date.now() + 57_000, () => run(request));

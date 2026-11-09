@@ -291,6 +291,27 @@ async function askRecount(): Promise<boolean> {
 }
 
 /**
+ * A count made as written (giveData, noteData): what run() answered, or null
+ * when it failed before Redis was asked (a store it cannot name), which is
+ * the same count not confirmed, never thrown at the caller.
+ */
+async function counted(store: DataStore, changes: DataChange[], now: number): Promise<DataTaken | null> {
+  return run(store, changes, true, now / 1000).catch((error: unknown) => {
+    console.error("could not count a store's data", error);
+    return null;
+  });
+}
+
+/** The room's key for a log line, or null when the store cannot be named (never a throw). */
+function keyForLog(store: DataStore): string | null {
+  try {
+    return dataKey(store);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Gives back what a deletion freed, or puts right what a write that was
  * taken and then failed took. Never refuses and never throws: answers true
  * when the room took it, false when it could not be confirmed. Not given
@@ -301,11 +322,11 @@ async function askRecount(): Promise<boolean> {
 export async function giveData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<boolean> {
   // What expires by itself is never given back early: it comes off with its month.
   const shrinking = changes.flatMap((change) => ("until" in change ? [] : [change.set ? change : { ...change, bytes: -Math.abs(change.bytes) }]));
-  const taken = await run(store, shrinking, true, now / 1000);
-  if (taken.ok) return true;
+  const taken = await counted(store, shrinking, now);
+  if (taken?.ok) return true;
   const mayGrow = shrinking.some((change) => "slot" in change && change.set && change.bytes > 0);
   const asked = mayGrow ? await askRecount() : false;
-  console.error("a store's data could not be given back; its room stays fuller than it is", { store: dataKey(store), reason: taken.reason, recountAsked: asked });
+  console.error("a store's data could not be given back; its room stays fuller than it is", { store: keyForLog(store), reason: taken?.reason ?? "unknown", recountAsked: asked });
   return false;
 }
 
@@ -317,10 +338,10 @@ export async function giveData(store: DataStore, changes: DataChange[], now = Da
  * when not even that ask can be written, throws DataCountUnconfirmed.
  */
 export async function noteData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
-  const taken = await run(store, changes, true, now / 1000);
-  if (taken.ok) return;
+  const taken = await counted(store, changes, now);
+  if (taken?.ok) return;
   const asked = await askRecount();
-  console.error("a store's data could not be counted", { store: dataKey(store), reason: taken.reason, recountAsked: asked });
+  console.error("a store's data could not be counted", { store: keyForLog(store), reason: taken?.reason ?? "unknown", recountAsked: asked });
   if (!asked) throw new DataCountUnconfirmed();
 }
 

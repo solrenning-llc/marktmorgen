@@ -38,7 +38,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lock:", "nl:2fa:lockedset:", "nl:2fa:keptstar:", "nl:2fa:once:", "nl:2fa:rescue:",
   "nl:2fa:setup:", "nl:ab:paid:", "nl:account:stores:", "nl:adsrv:", "nl:adsrv:last:", "nl:adsrv:sub:",
   "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:", "nl:agent:book:lock:",
-  "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:ai:stop:", "nl:alert:",
+  "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:ai:file:", "nl:ai:stop:", "nl:alert:",
   "nl:alert:seen:", "nl:allow:", "nl:amem:lock:", "nl:api:hold:", "nl:api:k:", "nl:api:keys:", "nl:api:used:", "nl:ask:", "nl:ask:a:", "nl:ask:missed:",
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
   "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:moving:", "nl:auth:rec:",
@@ -202,7 +202,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:agree:s:": E, "nl:agree:p:": E, "nl:agree:r:": T("nl:agree:s:", 400), "nl:agree:v:": T("nl:agree:s:", 400), "nl:agree:lock:": X(1),
   // The creator's own notes for their assistant (lib/assistant-memory-store.ts): go with the store.
   "nl:amem:": E, "nl:amem:lock:": X(1),
-  "nl:ai-spend:v2:{": C, "nl:ai-spend:v2:{YYYY-MM}": C, "nl:ai:": E, "nl:ai:stop:": X(1),
+  "nl:ai-spend:v2:{": C, "nl:ai-spend:v2:{YYYY-MM}": C, "nl:ai:": E, "nl:ai:file:": X(1), "nl:ai:stop:": X(1),
   "nl:alert:": E, "nl:alert:seen:": Cr(2), "nl:allow:": E,
   "nl:api:hold:": E, "nl:api:k:": T("prepare"), "nl:api:keys:": E, "nl:api:used:": E,
   "nl:ask:": E, "nl:ask:a:": X(1), "nl:ask:missed:": E,

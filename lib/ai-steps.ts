@@ -13,12 +13,16 @@
  * is sent (lib/ai.ts, askModel).
  */
 import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
+import { MAX_FILE_SECTIONS } from "@/lib/ai-file-rules";
 
-export type AiStepId = "read" | "write";
+/** A step's name: reading a PDF, writing a page, or writing one part of a file (758 [STN5] unit 3, lib/ai-file-rules.ts). */
+export type AiStepId = "read" | "write" | `section-${number}`;
 
-/** RED stub (758 [STN5] unit 3): a file's parts as steps come in the next commit. */
-export function isStepId(_value: unknown): boolean {
-  return false;
+/** Whether a name is a step's: a part of a file only from 1 to MAX_FILE_SECTIONS, written plainly. */
+export function isStepId(value: unknown): value is AiStepId {
+  if (value === "read" || value === "write") return true;
+  const part = typeof value === "string" ? /^section-([1-9][0-9]?)$/.exec(value) : null;
+  return part !== null && Number(part[1]) <= MAX_FILE_SECTIONS;
 }
 export type AiStep = { id: AiStepId; label: string; jobs: number };
 export type AiStepState = "started" | "done";
@@ -56,8 +60,9 @@ export const AI_STEP_EXTRA_BYTES = 1_536;
 export type AiStepLine =
   | { step: AiStepId; state: AiStepState }
   | { done: true; ok: true; value: unknown; left: number }
-  // A step that never reached the model, given back: "stopped" when the creator asked, "failed" otherwise.
-  | { done: true; ok: false; error: "stopped" | "failed"; returned: number | null; left: number | null }
+  // A step that never reached the model, given back: "stopped" when the creator asked, "failed" otherwise;
+  // with `value`, what the steps that ran wrote (a file's parts already written, 758 [STN5] unit 3).
+  | { done: true; ok: false; error: "stopped" | "failed"; returned: number | null; left: number | null; value?: unknown }
   | { done: true; ok: false; error: string };
 
 const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -79,16 +84,20 @@ export function readStepLine(text: string): AiStepLine | "pad" | null {
   const keys = Object.keys(line).sort().join(",");
   if (keys === "pad") return typeof line.pad === "string" ? "pad" : null;
   if (keys === "state,step") {
-    return (line.step === "read" || line.step === "write") && (line.state === "started" || line.state === "done") ? { step: line.step, state: line.state } : null;
+    return isStepId(line.step) && (line.state === "started" || line.state === "done") ? { step: line.step, state: line.state } : null;
   }
   if (line.done !== true) return null;
   if (keys === "done,left,ok,value" && line.ok === true && count(line.left) && line.value !== undefined && line.value !== null) {
     return { done: true, ok: true, value: line.value, left: line.left as number };
   }
-  if (keys === "done,error,left,ok,returned" && line.ok === false && (line.error === "stopped" || line.error === "failed")) {
+  const partial = keys === "done,error,left,ok,returned,value";
+  if ((keys === "done,error,left,ok,returned" || partial) && line.ok === false && (line.error === "stopped" || line.error === "failed")) {
     const known = count(line.returned) && (line.returned as number) > 0 && count(line.left);
     const unknown = line.returned === null && line.left === null;
-    return known || unknown ? { done: true, ok: false, error: line.error, returned: line.returned as number | null, left: line.left as number | null } : null;
+    if (partial && (line.value === undefined || line.value === null)) return null;
+    if (!known && !unknown) return null;
+    const read: Extract<AiStepLine, { returned: number | null }> = { done: true, ok: false, error: line.error as "stopped" | "failed", returned: line.returned as number | null, left: line.left as number | null };
+    return partial ? { ...read, value: line.value } : read;
   }
   if (keys === "done,error,ok" && line.ok === false && typeof line.error === "string" && line.error && line.error !== "stopped") {
     return { done: true, ok: false, error: line.error };

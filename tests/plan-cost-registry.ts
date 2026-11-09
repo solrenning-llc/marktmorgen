@@ -63,6 +63,8 @@ import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { AI_MONTHLY } from "@/lib/ai-rules";
 import { AI_STEP_EXTRA_BYTES, AI_STOP_COMMANDS } from "@/lib/ai-steps";
+import { AI_FILE_REDIS_BYTES, AI_FILE_REDIS_COMMANDS, AI_FILE_RENDER_SECONDS, AI_FILE_REPLY_BYTES, AI_FILE_SAVE_BYTES } from "@/lib/ai-file-rules";
+import { protocolInfrastructureMicroUsd } from "@/lib/spend-cost-table";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
@@ -876,6 +878,27 @@ const ALL_TIERS_SAME = (usd: number) => () => usd;
 /** What a writing job told in steps adds at the most to the AI line: its database commands and the bytes its answer adds (lib/ai-steps.ts). */
 export const AI_STEP_JOB_USD = AI_STOP_COMMANDS * COMMAND + AI_STEP_EXTRA_BYTES * ORIGIN_PER_BYTE;
 
+/**
+ * What the file written with AI (758 [STN5] unit 3, lib/ai-file.ts) adds at the most to the AI line for each writing job
+ * of the month, though a file takes at least two (its plan and one part) and its PDF is made at most once for each run of
+ * parts: the function that makes and keeps the PDF, held at 2 GB with a CPU busy for AI_FILE_RENDER_SECONDS, its
+ * AI_FILE_REDIS_COMMANDS database commands and AI_FILE_REDIS_BYTES moved, with the provider allowance; the bytes of a part
+ * sent to the browser and of a save sent back. The PDF itself is kept in the plan's storage (line storage) and written as
+ * one of the plan's uploads (line uploads).
+ */
+const AI_FILE_RENDER = protocolInfrastructureMicroUsd({
+  functionCalls: 1,
+  memoryGbMilliseconds: 2 * AI_FILE_RENDER_SECONDS * 1_000,
+  cpuMilliseconds: AI_FILE_RENDER_SECONDS * 1_000,
+  redisCommands: AI_FILE_REDIS_COMMANDS,
+  transferBytes: AI_FILE_REDIS_BYTES,
+  retainedBytes: 0,
+  retentionMonths: 0,
+  storageCopies: 1,
+});
+if (!AI_FILE_RENDER) throw new Error("the AI file's work could not be priced");
+export const AI_FILE_JOB_USD = micro(AI_FILE_RENDER.totalMicroUsd) + (AI_FILE_REPLY_BYTES + AI_FILE_SAVE_BYTES) * ORIGIN_PER_BYTE;
+
 export const COST_LINES: CostLine[] = [
   {
     id: "platform-subscription-search",
@@ -993,17 +1016,19 @@ export const COST_LINES: CostLine[] = [
   {
     id: "ai",
     feature: "AI: writing jobs and visitor answers, AI funnel drafts (#517) and every other AI route",
-    monthlyUsd: (tier) => micro(AUTOMATIC_AI_STORE_MICRO_USD[tier]) + AI_MONTHLY[tier] * AI_STEP_JOB_USD,
+    monthlyUsd: (tier) => micro(AUTOMATIC_AI_STORE_MICRO_USD[tier]) + AI_MONTHLY[tier] * (AI_STEP_JOB_USD + AI_FILE_JOB_USD),
     sources: [
       { file: "lib/ai-spend-policy.ts", names: ["AUTOMATIC_AI_STORE_MICRO_USD"] },
       { file: "lib/ai-steps.ts", names: ["AI_STOP_COMMANDS", "AI_STEP_EXTRA_BYTES"] },
+      { file: "lib/ai-file-rules.ts", names: ["AI_FILE_RENDER_SECONDS", "AI_FILE_REDIS_COMMANDS", "AI_FILE_REDIS_BYTES", "AI_FILE_REPLY_BYTES", "AI_FILE_SAVE_BYTES", "MAX_AI_FILE_BYTES", "FILE_SECTION_OUTPUT_TOKENS"] },
+      { file: "lib/ai-file.ts", names: ["askModel", "grantFileSave", "takeFileSave"] },
       { file: "lib/ai-rules.ts", names: ["AI_MONTHLY", "AI_PER_MINUTE"] },
       { file: "lib/answers-rules.ts", names: ["ANSWERS_MONTHLY", "ASKS_PER_DAY"] },
       { file: "lib/ai-request-rules.ts", names: ["AI_REQUEST_LIMITS"] },
       { file: "lib/funnel-ai.ts", names: ["askModel"] },
       { file: "lib/product-ideas.ts", names: ["askModel", "IDEAS_OUTPUT_TOKENS"] },
     ],
-    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other. A page drafted step by step (758 [STN5], lib/ai-steps.ts) adds, at the most and counted for every writing job of the month though a stepped page takes at least two: AI_STOP_COMMANDS database commands (the stop's mark read between the steps, written by a stop, the jobs of the step not run given back) and AI_STEP_EXTRA_BYTES sent to the browser (the kilobyte of padding some browsers wait for, the step lines and the result's own fields). No model call is added; a stop only leaves one out. Product ideas (758 [STN5] unit 2, lib/product-ideas.ts) take one writing job each, one request on the cheapest model at IDEAS_SYSTEM_BYTES + IDEAS_PROMPT_BYTES in and IDEAS_OUTPUT_TOKENS out, whose most expensive reservation on every model a deployment may pick is at most the priced writing job (tests/product-ideas.test.ts), so the line does not move.",
+    basis: "The automatic monthly AI ceiling, reserved before every call; a funnel draft takes writing jobs from it like any other. A page drafted step by step (758 [STN5], lib/ai-steps.ts) adds, at the most and counted for every writing job of the month though a stepped page takes at least two: AI_STOP_COMMANDS database commands (the stop's mark read between the steps, written by a stop, the jobs of the step not run given back) and AI_STEP_EXTRA_BYTES sent to the browser (the kilobyte of padding some browsers wait for, the step lines and the result's own fields). No model call is added; a stop only leaves one out. Product ideas (758 [STN5] unit 2, lib/product-ideas.ts) take one writing job each, one request on the cheapest model at IDEAS_SYSTEM_BYTES + IDEAS_PROMPT_BYTES in and IDEAS_OUTPUT_TOKENS out, whose most expensive reservation on every model a deployment may pick is at most the priced writing job (tests/product-ideas.test.ts), so the line does not move. A file written with AI (758 [STN5] unit 3, lib/ai-file.ts) takes one writing job for its plan and one for each part, each one request whose most expensive reservation on every model a deployment may pick is at most the priced writing job (tests/ai-file-rules.test.ts), so the ceiling does not move; its PDF is made at most once for each run of parts and adds AI_FILE_JOB_USD, counted for every writing job of the month. The PDF is kept under the plan's storage limit (line storage) and written as one of the plan's uploads (line uploads).",
   },
   {
     id: "uploads",

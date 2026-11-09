@@ -377,7 +377,7 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
  * otherwise. `returned` is the jobs of those steps given back, and `left`
  * the month's after it; both null when the give-back could not be confirmed.
  */
-export type AiStopped = { ok: false; reason: "stopped" | "failed"; returned: number | null; left: number | null };
+export type AiStopped = { ok: false; reason: "stopped" | "failed"; returned: number | null; left: number | null; value?: unknown };
 
 /**
  * What a job told in steps leaves undone: the jobs of the steps whose call
@@ -385,9 +385,15 @@ export type AiStopped = { ok: false; reason: "stopped" | "failed"; returned: num
  * refused), and whether the creator asked for the stop (false when the
  * stop's mark could not be read, which starts no further step either).
  */
-type Unrun = { jobs: number; asked: boolean };
+export type Unrun = { jobs: number; asked: boolean; partial?: boolean };
 
-async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun): Promise<AiResult<T> | AiStopped> {
+/**
+ * A job of `jobs` writing jobs, all taken before the first call; `unrun` says
+ * what the job left undone, given back once (lib/ai-file.ts tells a file's
+ * parts with it). With `unrun.partial`, what the steps that ran wrote comes
+ * back with the stop, so parts already paid for are never thrown away.
+ */
+export async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun): Promise<AiResult<T> | AiStopped> {
   if (!isAiConfigured() || !store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   if (!Number.isSafeInteger(jobs) || jobs <= 0) return { ok: false, reason: "notes" };
   const allowance = aiAllowance(store, now);
@@ -437,6 +443,7 @@ async function countedRun<T>(store: Store, now: number, run: () => Promise<T | n
     if (after === null) console.error("the jobs of steps not run could not be confirmed given back");
   }
   if (value === null) return give > 0 ? settled(unrun?.asked ? "stopped" : "failed", give, after) : { ok: false, reason: "failed" };
+  if (give > 0 && unrun?.partial === true) return { ...settled(unrun.asked ? "stopped" : "failed", give, after), value };
   return { ok: true, value, left: Math.max(0, allowance - (give > 0 && after !== null ? after : count)) };
 
   function settled(reason: "stopped" | "failed", returned: number, now: number | null): AiStopped {
@@ -454,7 +461,7 @@ export async function markAiStop(store: Store, run: string): Promise<boolean> {
 }
 
 /** Whether the creator asked to stop this run: true, false only for a confirmed absent mark, null when the reply cannot be read. */
-async function stopAsked(store: Store, run: string): Promise<boolean | null> {
+export async function stopAsked(store: Store, run: string): Promise<boolean | null> {
   if (!store.statsId) return null;
   const replies = repliesFor(await redisPipeline([["GET", stopKey(store.statsId, run)]]).catch(() => null), 1);
   if (!replies) return null;

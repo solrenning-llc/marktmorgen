@@ -279,6 +279,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ai-spend:v2:{YYYY-MM}@lib/ai-spend-policy.ts": company("The ledger's name, as the policy states it", "The same ledger."),
   "nl:ai:@lib/ai.ts": short("Writing jobs counted in the window", "day", 40, 128),
   // One a stop: each stop is a studio request, and the mark goes by itself after AI_STOP_KEEP_SECONDS (five minutes), held here at a day.
+  // One a run of a file's parts (758 [STN5] unit 3), each run at least one writing job: the one save it allows, gone by itself after AI_FILE_KEEP_SECONDS (a day).
+  "nl:ai:file:@lib/ai-file.ts": short("The one save of a file written with AI that a run of its parts allows (lib/ai-file-rules.ts)", "ai", 1),
   "nl:ai:stop:@lib/ai.ts": short("A stop asked for one run of a page drafted step by step (lib/ai-steps.ts)", "studio", 1),
   "nl:assist:pool:@lib/store-assistant.ts": { what: "The Store assistant's pool of replies for one month of the add-on", line: "store-assistant" },
   "nl:assist:c:@lib/store-assistant.ts": { what: "A conversation with the Store assistant, a day after its last message", line: "store-assistant" },

@@ -10,7 +10,7 @@ import { paidFiguresComplete } from "@/lib/paid-coverage";
 import { formatMoney } from "@/lib/money";
 import { channelName, sourceName } from "@/lib/channel-names";
 import type { StatsNote } from "@/lib/stats-notes";
-import { type AdSpend, paybackOf, spendBy } from "@/lib/ad-spend-rules";
+import { type AdSpend, SPEND_FIGURES_UNREAD, type SpendUnread, paybackOf, spendBy } from "@/lib/ad-spend-rules";
 import { channelCashflows, cashflowStatus } from "@/lib/channel-cashflow";
 import { creativeResultsReport } from "@/lib/channel-reports";
 import { ReportDownload } from "@/components/report-download";
@@ -463,6 +463,7 @@ export function StatsPanel({
   canExport = true,
   notes: notesGiven = [],
   spends: spendsGiven = [],
+  spendsUnread: spendsUnreadGiven = null,
   askHeard = true,
   canSetHeard = false,
   canSetAttribution = false,
@@ -488,6 +489,8 @@ export function StatsPanel({
   canExport?: boolean;
   notes?: StatsNote[];
   spends?: AdSpend[];
+  /** Which part of the spend could not be read (lib/ad-spend-rules.ts): every figure that uses ad spend is left out then. */
+  spendsUnread?: SpendUnread;
   /** Whether buyers are asked where they heard of the store (lib/heard.ts). */
   askHeard?: boolean;
   /** Whether this person may switch that question on or off. */
@@ -527,6 +530,9 @@ export function StatsPanel({
   const [pickDates, setPickDates] = useState(false);
   const [notes, setNotes] = useState(notesGiven);
   const [spends, setSpends] = useState(spendsGiven);
+  const [spendsUnread, setSpendsUnread] = useState<SpendUnread>(spendsUnreadGiven);
+  // The spend the figures use: none while a part is unread, and those figures are left out (Claude 5 on #2924).
+  const spendsKnown = spendsUnread ? null : spends;
   const [all, setAll] = useState<{ state: "idle" | "loading" | "error" } | { state: "ok"; sales: AllTimeSales }>({ state: "idle" });
   const salesKnown = data.sales === "ok";
 
@@ -615,7 +621,7 @@ export function StatsPanel({
   const disputes90 = new Map((data.disputesComplete ? data.disputes?.d90 ?? [] : []).map((row) => [row.source || "direct", row]));
   const withDisputeColumn = disputes90.size > 0;
   // The few things worth acting on, in words (lib/insights.ts).
-  const insights = range === "all" ? [] : insightsFrom(data, range, spends, 4, insightContext);
+  const insights = range === "all" ? [] : insightsFrom(data, range, spendsKnown ?? [], 4, insightContext);
   const sid = useStudioStore();
   // A studio screen for the store being looked at, when the person runs several.
   const studioHref = (href: string) => {
@@ -630,7 +636,7 @@ export function StatsPanel({
   const marksOn = new Map<string, AutoMark[]>();
   for (const mark of marks) marksOn.set(mark.day, [...(marksOn.get(mark.day) ?? []), mark]);
   // What was spent on ads inside the days shown (lib/ad-spend-rules.ts); none for "all".
-  const spent = range === "all" || !days.length ? null : spendBy(spends, days[0].date, days[days.length - 1].date);
+  const spent = range === "all" || !days.length || !spendsKnown ? null : spendBy(spendsKnown, days[0].date, days[days.length - 1].date);
   const withSpend = Boolean(spent && spent.total > 0);
   const cashflows = range === "all" || !days.length ? [] : channelCashflows(data, range, data.channels?.[range] ?? [], spent?.channels ?? new Map(), days[0].date, days[days.length - 1].date);
   // Each channel for the range chosen; "all" has none, because sales are read for 90 days.
@@ -1096,7 +1102,7 @@ export function StatsPanel({
                       const cost = spent?.channels.get(row.source) ?? 0;
                       const left = row.cents - cost;
                       const cash = cashflows.find((c) => c.source === row.source);
-                      const payback = salesHere && ledgerPaymentsComplete(data) && cost ? paybackOf(spends, row.source, data.channelDays?.[row.source], days[0].date, days[days.length - 1].date) : null;
+                      const payback = salesHere && ledgerPaymentsComplete(data) && cost ? paybackOf(spendsKnown ?? [], row.source, data.channelDays?.[row.source], days[0].date, days[days.length - 1].date) : null;
                       return (
                         <>
                           <td className="py-1 pl-3 text-right tabular-nums">{cost ? money(cost) : "—"}</td>
@@ -1134,12 +1140,17 @@ export function StatsPanel({
           </p>
         </div>
       ) : null}
-      {range !== "all" ? (
-        <RevenueQuality data={data} range={range} spends={spends} />
+      {range !== "all" && spendsUnread ? (
+        <p className="mt-6 text-sm text-ink" role="status" data-spend-unread>
+          {SPEND_FIGURES_UNREAD}
+        </p>
+      ) : null}
+      {range !== "all" && spendsKnown ? (
+        <RevenueQuality data={data} range={range} spends={spendsKnown} />
       ) : null}
       {range !== "all" ? <PaymentMixPanel data={data} range={range} /> : null}
       {range !== "all" ? <PaymentComparisonPanel data={data} range={range} /> : null}
-      {range !== "all" ? <DailyCashflowPanel data={data} range={range} spends={spends} /> : null}
+      {range !== "all" && spendsKnown ? <DailyCashflowPanel data={data} range={range} spends={spendsKnown} /> : null}
       {range !== "all" ? <KeptByCurrency data={data} range={range} /> : null}
       {data.sales !== "none" && range !== "all" ? <TaxCollected data={data} range={range} /> : null}
       {range !== "all" ? <RefundActivityPanel data={data} range={range} /> : null}
@@ -1147,10 +1158,14 @@ export function StatsPanel({
         <BuyerChannelsPanel window={data.buyerChannels[range]} currency={data.currency} historyPartial={data.buyerChannels.historyPartial} period={{ from: days[0].date, to: days[days.length - 1].date }} />
       ) : null}
       {salesHere && data.buyerChannels?.weekly ? <WeeklyCohortsPanel cohorts={data.buyerChannels.weekly} historyPartial={data.buyerChannels.historyPartial} /> : null}
-      {range !== "all" ? (
+      {range !== "all" && spendsUnread !== "typed" ? (
         <AdSpendEditor
           spends={spends}
-          onChange={setSpends}
+          spendsUnread={spendsUnread === "meta"}
+          onChange={(next, metaUnread) => {
+            setSpends(next);
+            setSpendsUnread(metaUnread ? "meta" : null);
+          }}
           channels={spendChannels}
           meta={meta}
           canConnectMeta={canConnectMeta}
@@ -1160,7 +1175,7 @@ export function StatsPanel({
         />
       ) : null}
 
-      {range !== "all" ? <CampaignResultsPanel data={data} range={range} spends={spends} /> : null}
+      {range !== "all" && spendsKnown ? <CampaignResultsPanel data={data} range={range} spends={spendsKnown} /> : null}
 
       {ads.length && salesHere && !data.partial ? (
         <div className="mt-6 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="numbers-ads">

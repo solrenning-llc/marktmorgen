@@ -18,7 +18,7 @@
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
-import { type AdSpend, MAX_SPEND_ENTRIES, readSpend } from "@/lib/ad-spend-rules";
+import { type AdSpend, MAX_SPEND_ENTRIES, readSpend, type SpendUnread } from "@/lib/ad-spend-rules";
 import { metaLines } from "@/lib/meta-ads";
 
 const key = (statsId: string) => `nl:stats:${statsId}:spend`;
@@ -77,7 +77,7 @@ async function keptSpends(statsId: string): Promise<AdSpend[]> {
 export type SpendRead = { spends: AdSpend[]; metaUnread: boolean };
 
 /** What every page or answer says when Meta's lines could not be read: the figures that use spend are incomplete. */
-export const META_SPEND_UNREAD = "Ad spend from your Meta ad account could not be read just now, so the figures that use ad spend leave it out. Reload to try again.";
+export const META_SPEND_UNREAD = "Ad spend from your Meta ad account could not be read just now, so the figures that use ad spend are not shown. Reload to try again.";
 
 /**
  * Every line: the typed ones, then those read from Meta while the store is
@@ -98,12 +98,27 @@ export async function readSpendLines(statsId: string | null): Promise<SpendRead>
 }
 
 /**
- * The lines alone, for a caller that cannot yet say a part is missing
- * (app/studio/page.tsx, held by other work): Meta's unread lines are left out
- * there. New callers use readSpendLines and say META_SPEND_UNREAD.
+ * The lines alone, Meta's unread ones left out; typed lines that cannot be read throw. No page reads spend this
+ * way: callers that show figures use readSpendLines, spendsForStudio or spendsForReport, which say what is unread.
  */
 export async function readSpends(statsId: string | null): Promise<AdSpend[]> {
   return (await readSpendLines(statsId)).spends;
+}
+
+/**
+ * The spend for the studio's numbers (app/studio/page.tsx): every line with nothing unread; the typed lines with
+ * `unread: "meta"` when Meta's could not be read; none with `unread: "typed"` when the typed ones could not be (any
+ * failure of that read, so the page still loads). The numbers panel leaves out every figure that uses ad spend while
+ * a part is unread, never one part as all of it or everything as $0 (Claude 5 on #2924).
+ */
+export async function spendsForStudio(statsId: string | null): Promise<{ spends: AdSpend[]; unread: SpendUnread }> {
+  try {
+    const read = await readSpendLines(statsId);
+    return { spends: read.spends, unread: read.metaUnread ? "meta" : null };
+  } catch (error) {
+    console.error("reading ad spend for the studio failed", error);
+    return { spends: [], unread: "typed" };
+  }
 }
 
 /**

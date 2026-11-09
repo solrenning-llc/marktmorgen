@@ -38,7 +38,7 @@ export function addOperation(before: { op: string; body: string } | null, body: 
 }
 
 /** The same as META_SPEND_UNREAD in lib/ad-spend.ts, written here so this browser file stays free of server code. */
-const META_UNREAD = "Ad spend from your Meta ad account could not be read just now, so the figures that use ad spend leave it out. Reload to try again.";
+const META_UNREAD = "Ad spend from your Meta ad account could not be read just now, so the figures that use ad spend are not shown. Reload to try again.";
 
 const REASONS: Record<string, string> = {
   unread: "That could not be confirmed just now. Try again without changing anything: nothing is ever added twice.",
@@ -227,7 +227,8 @@ export function AdSpendEditor({
   spends: AdSpend[];
   /** Meta's lines could not be read when `spends` was: they are left out, and the editor says so. */
   spendsUnread?: boolean;
-  onChange: (spends: AdSpend[]) => void;
+  /** Every line as the server answered it, and whether Meta's were unread then (the panel leaves out the figures). */
+  onChange: (spends: AdSpend[], metaUnread: boolean) => void;
   /** The channels the numbers know, offered first. */
   channels: { value: string; label: string }[];
   currency: string;
@@ -260,7 +261,7 @@ export function AdSpendEditor({
       const response = await fetch("/api/store/spend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; spends?: AdSpend[]; spendsUnread?: boolean; error?: string };
       if (answer.ok && answer.spends) {
-        onChange(answer.spends);
+        onChange(answer.spends, answer.spendsUnread === true);
         setMetaUnread(answer.spendsUnread === true);
         toast(done);
         return true;
@@ -294,7 +295,7 @@ export function AdSpendEditor({
           money={money}
           onChosen={(next, all, unread) => {
             setMeta(next);
-            onChange(all);
+            onChange(all, unread);
             setMetaUnread(unread);
           }}
         />

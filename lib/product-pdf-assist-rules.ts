@@ -58,6 +58,7 @@ export const PDF_ASSIST_COPY = {
   placeholder: "Anything else it should know: who it is for, what makes it different. You can leave this empty.",
   done: "The name, the short description and the benefits are filled in below. Read them, change anything, then save.",
   file: "This product's PDF could not be read just now. Upload the PDF again, then try again.",
+  empty: "We found nothing to suggest from in this PDF's first pages, so nothing was suggested. Nothing was changed here. Write the name and descriptions yourself, or upload a PDF whose first pages say what it is.",
   undo: "Put back what was there",
   undone: "The name and both descriptions are back as they were.",
   keptTitle: "The name was not changed: the suggested one did not stick to what the PDF says.",

@@ -104,8 +104,8 @@ export async function POST(request: NextRequest) {
     // The product's own PDF, its first pages only, when the creator asked for it to be read (lib/ai.ts, readPdfFacts).
     let pdf: Uint8Array | null = null;
     if (body.readFile === true) {
-      // Nothing is read from storage for a job that could not be admitted (read only, nothing reserved).
-      const refused = aiJobRefusal(store, 1 + READ_PDF_JOBS);
+      // Nothing is read from storage for a job that could not be admitted, this month's balance included (read only, nothing reserved).
+      const refused = await aiJobRefusal(store, 1 + READ_PDF_JOBS);
       if (refused) return fail(refused);
       pdf = await pdfPagesOf(product);
       if (!pdf) return fail("file");
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
     // store's own record, never taken from the browser.
     const product = await readListing(store, text(body.product, 40));
     if (!product) return fail("unknown", 404);
-    const refused = aiJobRefusal(store, 1 + READ_PDF_JOBS);
+    const refused = await aiJobRefusal(store, 1 + READ_PDF_JOBS);
     if (refused) return fail(refused);
     const pdf = await pdfPagesOf(product);
     if (!pdf) return fail("file");

@@ -136,14 +136,20 @@ export function aiAllowance(store: Store, now = Date.now()): number {
  * Whether a job of `jobs` could be admitted at all, read only: nothing is
  * reserved or counted. Checked before work that costs time and transfer
  * ahead of the job's own admission (a product's PDF read from storage), so
- * a plan without enough writing jobs, or a deployment without the writing
- * help, never pays for it. Null when it may go on to counted's own check.
+ * a plan without enough writing jobs, a month with fewer left, or a
+ * deployment without the writing help, never pays for it. The month's
+ * balance is one exact read (aiLeft): a reply that is not one known, or no
+ * reply, refuses ("off"), never counts as a full month. Null when it may go
+ * on to counted's own check.
  */
-export function aiJobRefusal(store: Store, jobs: number, now = Date.now()): "off" | "used" | null {
+export async function aiJobRefusal(store: Store, jobs: number, now = Date.now()): Promise<"off" | "used" | null> {
   if (!isAiConfigured() || !store.statsId || !isRedisConfigured()) return "off";
   const allowance = aiAllowance(store, now);
   if (!Number.isSafeInteger(allowance) || allowance < 0) return "off";
-  return jobs > allowance ? "used" : null;
+  if (jobs > allowance) return "used";
+  const left = await aiLeft(store, now).catch(() => null);
+  if (left === null || !Number.isSafeInteger(left)) return "off";
+  return jobs > left ? "used" : null;
 }
 
 /** What is left of this month's writing jobs. */
@@ -1435,8 +1441,9 @@ async function readPdfFacts(store: Store, pdf: Uint8Array): Promise<string | nul
  * writing call on the cheapest model, made from what they show. Both steps'
  * jobs, READ_PDF_JOBS + 1, are taken before the first call; each call
  * reserves its own money right before it is sent (askModel). A stop between
- * the steps, a reading with nothing in it or a request that cannot be made
- * leaves the writing step out, and its job is given back; a step that ran
+ * the steps, a reading with nothing in it (said as "empty" in a run told in
+ * steps) or a request that cannot be made leaves the writing step out, and
+ * its job is given back; a step that ran
  * stays counted, even when what it wrote is refused by `keep`.
  */
 export async function readPdfThenWrite<T>(
@@ -1457,10 +1464,13 @@ export async function readPdfThenWrite<T>(
   const unrun: Unrun = { jobs: 0, asked: false };
   const flow = stepsOf(store, steps, unrun);
   return countedRun(store, now, async () => {
-    const fileFacts = (await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf))).value;
+    const read = await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf));
+    const fileFacts = read.value;
     const request = fileFacts ? write.request(fileFacts) : null;
     if (!request) {
       flow.skip(1);
+      // The PDF, read, gave nothing to work from: a run told in steps says so, so the box does not ask for a retry that would read the same pages.
+      unrun.empty = !fileFacts && read.reached && steps !== undefined;
       return null;
     }
     if (!(await flow.goOn(1))) return null;

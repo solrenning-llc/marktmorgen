@@ -90,7 +90,7 @@ export function ProductPdfAssist({
         payload={() => ({ kind: "product-pdf", product: productId })}
         steps={pdfAssistSteps()}
         validateResult={isProposal}
-        messages={{ file: PDF_ASSIST_COPY.file }}
+        messages={{ file: PDF_ASSIST_COPY.file, empty: PDF_ASSIST_COPY.empty }}
         onResult={fill}
         done={PDF_ASSIST_COPY.done}
       />

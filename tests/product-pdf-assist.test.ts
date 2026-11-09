@@ -332,7 +332,7 @@ async function main(): Promise<void> {
   const box = source("components/product-pdf-assist.tsx");
   const boxFlat = flat(box);
   is("a client component that uses the step-by-step box for its kind", [box.startsWith('"use client"'), boxFlat.includes("<AiStepsAssist"), boxFlat.includes('kind: "product-pdf"')], [true, true, true]);
-  is("it says the PDF's own problem in its own words", /messages=\{\{ file: PDF_ASSIST_COPY\.file \}\}/.test(boxFlat), true);
+  is("it says the PDF's own problems in its own words: a file not read, and a reading with nothing to suggest from", /messages=\{\{ file: PDF_ASSIST_COPY\.file, empty: PDF_ASSIST_COPY\.empty \}\}/.test(boxFlat), true);
   is("it saves nothing and submits no form", /onSubmit|method: "PUT"|\/api\/store\/product/.test(box), false);
   is("an undo puts back what the boxes had", boxFlat.includes("{PDF_ASSIST_COPY.undo}") && /Put back/.test(PDF_ASSIST_COPY.undo), true);
   const buttons = box.match(/<button\b[^>]*>/g) ?? [];

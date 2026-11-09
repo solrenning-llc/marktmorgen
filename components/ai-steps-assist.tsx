@@ -46,6 +46,8 @@ const MESSAGES: Record<string, string> = {
   off: "The writing help is not available right now.",
   forbidden: "Your role on this store cannot do this.",
   file: "The product's PDF could not be read. Draft the page without it, or upload the PDF again.",
+  // A box whose notes do not change what an empty reading gives passes its own words (messages.empty).
+  empty: "We found nothing to write from in your PDF's first pages, so nothing was written. Nothing was changed here. Add a few words about the product above, then try again.",
 };
 const REFUSED_BEFORE_START = new Set(["long", "invalid", "unknown"]);
 // True whenever writing started after a Stop: pressed before or after it began, the server read it too late.
@@ -242,9 +244,7 @@ export function AiStepsAssist<T>({
       setAnnounce("");
       const stopped = line.error === "stopped";
       const empty = line.error === "empty";
-      const opening = empty
-        ? "We found nothing to write from in your PDF's first pages, so the page was not written. Nothing was changed here. Add a few words about the product above, then try again."
-        : "The writing help could not finish just now. Nothing was changed here.";
+      const opening = empty ? words.empty : "The writing help could not finish just now. Nothing was changed here.";
       if (line.returned === null || line.left === null) {
         setAllowanceKnown(false);
         const words = "We could not confirm the writing jobs given back: reload to check your allowance.";

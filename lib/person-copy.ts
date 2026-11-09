@@ -19,7 +19,10 @@
  *             law asks for (tests/person-copy.test.ts).
  *
  * Only reading: every reader here is one that changes nothing the person or
- * the store would see (no "read" mark, no token made, no cache written).
+ * the store would see (no "read" mark, no token made, no cache written). The
+ * one count it makes is what a read the store's records do not bound costs
+ * (a student's lesson comments), taken from the store's studio figure before
+ * it is read, as the erasure's own (payCopyRead).
  * What other people wrote is left out where it is theirs and not about the
  * person: a teammate's address on a note or a deal, who a conversation is
  * given to. What the store wrote to or about the person (a note, a reply,
@@ -27,7 +30,8 @@
  */
 import { type Store } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
-import { type ErasureScope } from "@/lib/erasure-rules";
+import { type ErasureScope, workUnits } from "@/lib/erasure-rules";
+import { takeAllowance } from "@/lib/store-allowance";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
@@ -38,7 +42,7 @@ import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
 import { certificatesOf } from "@/lib/certificate";
-import { lessonComments } from "@/lib/lesson-comments";
+import { studentComments } from "@/lib/lesson-comments";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
@@ -175,6 +179,17 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
   return read;
 }
 
+/**
+ * Takes a read whose size the record it reads does not bound (a student's lesson comments) from the store's studio
+ * figure before it is sent, as the erasure takes its own (lib/person-erasure.ts, erasureUnits): one studio unit is
+ * twenty commands or fifty kilobytes (lib/erasure-rules.ts, workUnits). A figure used or not counted throws, so the
+ * copy fails and says so, never handed over without what it could not pay to read.
+ */
+async function payCopyRead(s: ErasureScope, work: { commands: number; bytes: number }): Promise<void> {
+  const taken = await takeAllowance(s.store, "studio", workUnits(work));
+  if (!taken.ok) throw new Error(`the copy could not be counted from the store's studio requests: ${taken.message}`);
+}
+
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]);
 
@@ -271,10 +286,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/lesson-comments.ts": async (s) => {
     const out: unknown[] = [];
     for (const c of s.courses) {
-      for (const lessonId of c.lessonIds) {
-        // Only their own: the replies under them are other people's words.
-        for (const comment of await lessonComments(c.courseId, lessonId)) if (comment.by === s.learner) out.push({ course: c.productId, lesson: lessonId, name: comment.name, text: comment.text, at: iso(comment.at) });
-      }
+      // Every one they wrote in the course, where the erasure finds them (R19 MEDIUM 3: a lesson's newest 2,000 left
+      // older ones out), each read paid from the studio figure before it is sent. Only their own: the replies under
+      // them are other people's words. By the course's lessons in order, then any lesson it no longer lists, newest first.
+      const place = new Map(c.lessonIds.map((lessonId, i) => [lessonId, i]));
+      const comments = await studentComments(c.courseId, s.learner, (work) => payCopyRead(s, work));
+      comments.sort((a, b) => (place.get(a.lesson) ?? place.size) - (place.get(b.lesson) ?? place.size) || (a.lesson < b.lesson ? -1 : a.lesson > b.lesson ? 1 : 0) || b.at - a.at || (a.id < b.id ? 1 : -1));
+      for (const comment of comments) out.push({ course: c.productId, lesson: comment.lesson, name: comment.name, text: comment.text, at: iso(comment.at) });
     }
     return out;
   },

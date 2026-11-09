@@ -887,6 +887,26 @@ export class MemoryRedis {
           this.hash(names).delete(who);
           return [name, gone];
         }
+        // lib/lesson-comments.ts LESSON_COMMENTS_OF: one student's comments in the course's whole record, only read.
+        if (key.startsWith("-- marktmorgen:lesson-comments-of:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, comments, who, mostRaw] = args;
+          const most = Number(mostRaw);
+          if (mostRaw.trim() === "" || !Number.isFinite(most) || most < 0) return [2];
+          this.live(comments);
+          const held = this.data.get(comments);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const mine: string[] = [];
+          let bytes = 0;
+          for (const raw of held instanceof Map ? held.values() : []) {
+            let c: unknown;
+            try { c = JSON.parse(raw); } catch { return [2]; }
+            if (!c || typeof c !== "object" || typeof (c as { b?: unknown }).b !== "string") return [2];
+            if ((c as { b: string }).b !== who) continue;
+            mine.push(raw);
+            bytes += new TextEncoder().encode(raw).length;
+          }
+          return bytes > most ? [1, bytes] : [0, ...mine];
+        }
         if (key.startsWith("-- marktmorgen:lesson-comments-hide:v1\n") && args[0] === "1" && args.length === 4) {
           if (this.run(["HEXISTS", args[1], args[2]]) !== 1) return 0;
           this.run(["HSET", args[1], args[2], args[3]]);

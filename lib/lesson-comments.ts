@@ -620,6 +620,97 @@ redis.call("HDEL", KEYS[4], who)
 return {name or "", gone}`;
 
 /**
+ * Finds every comment one student wrote in a course where the erasure finds
+ * them (FORGET_LESSON_COMMENTS): the course's whole record of comments,
+ * whatever their lesson or age, not a lesson's newest LESSON_KEPT, which the
+ * answers under its threads can outgrow. Only reads, and answers only theirs.
+ * KEYS: the comments; ARGV: the student's key, the most stored bytes of theirs
+ * it may answer. Answers {0, each of theirs} when they fit, {1, their stored
+ * bytes} when they do not (none of them sent), and {2} when a record does not
+ * read as a comment, since whose it is cannot be known.
+ */
+export const LESSON_COMMENTS_OF = `-- marktmorgen:lesson-comments-of:v1
+local who = ARGV[1]
+local most = tonumber(ARGV[2])
+if not most or most < 0 then return {2} end
+local flat = redis.call("HGETALL", KEYS[1])
+local mine = {}
+local bytes = 0
+for i = 1, #flat, 2 do
+  local ok, c = pcall(cjson.decode, flat[i + 1])
+  if not ok or type(c) ~= "table" or type(c.b) ~= "string" then return {2} end
+  if c.b == who then
+    table.insert(mine, flat[i + 1])
+    bytes = bytes + string.len(flat[i + 1])
+  end
+end
+if bytes > most then return {1, bytes} end
+local out = {0}
+for _, raw in ipairs(mine) do table.insert(out, raw) end
+return out`;
+
+/** The stored bytes of a student's comments the first read of a copy may answer: a few long ones, at one studio unit's bytes. */
+export const COPY_FIRST_BYTES = 16_000;
+
+/**
+ * The most one read of LESSON_COMMENTS_OF moves, for `most` stored bytes:
+ * one command; the script, the key and the student's key sent; and the
+ * answer, each comment's JSON written again as a string (every quote and
+ * backslash doubled, so at most twice its bytes) with its quotes and comma
+ * (a comment is far longer than those three bytes, so three times `most`
+ * holds them all).
+ */
+export function copyReadWork(courseId: string, who: string, most: number): { commands: number; bytes: number } {
+  return { commands: 1, bytes: LESSON_COMMENTS_OF.length + commentsKey(courseId).length + who.length + 64 + 3 * most };
+}
+
+/**
+ * Every comment one student (`who`, lib/learn.ts emailKey) wrote in a course,
+ * for the copy of what a store keeps about them (lib/person-copy.ts): read
+ * whole, or not at all. `pay` is given what a read may move before it is
+ * sent and throws when it cannot be paid, so nothing is read unpaid. A first
+ * read is paid at COPY_FIRST_BYTES; when theirs are more, the answer says how
+ * many bytes, and one more read is paid at that size. A record that does not
+ * read, an answer of another shape, or theirs grown past what was paid
+ * between the two throws: the copy fails and says so, never leaves them out.
+ */
+export async function studentComments(
+  courseId: string,
+  who: string,
+  pay: (work: { commands: number; bytes: number }) => Promise<void>,
+): Promise<LessonComment[]> {
+  if (!isRedisConfigured()) return [];
+  let most = COPY_FIRST_BYTES;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await pay(copyReadWork(courseId, who, most));
+    const reply = oneReply(await redisPipeline([["EVAL", LESSON_COMMENTS_OF, 1, commentsKey(courseId), who, most]]));
+    if (!Array.isArray(reply) || reply.length < 1) throw unreadableComments();
+    const code = dataSlot(reply, 0);
+    if (code === 1 && attempt === 0 && reply.length === 2) {
+      const bytes = dataSlot(reply, 1);
+      if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes <= most) throw unreadableComments();
+      most = bytes;
+      continue;
+    }
+    if (code !== 0) throw unreadableComments();
+    const comments: LessonComment[] = [];
+    const seen = new Set<string>();
+    let bytes = 0;
+    for (let index = 1; index < reply.length; index += 1) {
+      const raw = dataSlot(reply, index);
+      const comment = parseComment(raw);
+      if (typeof raw !== "string" || !comment || comment.by !== who || seen.has(comment.id)) throw unreadableComments();
+      seen.add(comment.id);
+      bytes += new TextEncoder().encode(raw).length;
+      comments.push(comment);
+    }
+    if (bytes > most) throw unreadableComments();
+    return comments;
+  }
+  throw unreadableComments();
+}
+
+/**
  * Deletes one student's comments in a course (and the answers under their
  * own comments) and the name they chose (lib/person-erasure.ts). `who` is
  * lib/learn.ts emailKey. What they took goes back to `room` as the other

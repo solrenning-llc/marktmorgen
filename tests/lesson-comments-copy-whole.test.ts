@@ -18,7 +18,7 @@
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { COPIERS } from "@/lib/person-copy";
 import { emailKey } from "@/lib/learn";
-import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
+import { LESSON_COMMENTS_OF, forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { MAX_LESSON_THREADS, MAX_REPLIES, serializeComment, type LessonComment } from "@/lib/lesson-comments-rules";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
@@ -131,9 +131,14 @@ async function main(): Promise<void> {
   is("all of them, with the four before", all.length, 44);
   const reads = log.flatMap((l, i) => (l.startsWith("EVAL -- marktmorgen:lesson-comments-of:") ? [i] : []));
   const charges = log.flatMap((l, i) => (l.startsWith("INCRBY nl:allow:studio:") ? [i] : []));
+  is("two reads: the first at its small size, then one at the size its answer said", reads.length, 2);
   is("each read sent has its charge before it", reads.length > 0 && reads.every((r, k) => charges[k] !== undefined && charges[k] < r && (k === 0 || charges[k] > reads[k - 1])), true);
   // One studio unit is twenty commands or fifty kilobytes (lib/erasure-rules.ts): her 80 KB and more cannot be under two.
   is("what was taken covers the bytes read", takenMany >= Math.ceil(many.reduce((s, c) => s + serializeComment(c).length, 0) / 50_000) + 1, true);
+
+  part("The read changes nothing");
+  const calls = [...LESSON_COMMENTS_OF.matchAll(/redis\.call\("([A-Z]+)"/g)].map((m) => m[1]);
+  is("its script only reads the course's record", calls, ["HGETALL"]);
 
   part("A comment record that does not read fails the copy, never leaves it out in silence");
   redis.run(["HSET", `nl:lc:${COURSE}:c`, id("bad", 1), "{not json"]);

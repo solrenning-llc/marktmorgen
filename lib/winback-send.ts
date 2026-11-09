@@ -35,7 +35,8 @@ import { withStockHold } from "@/lib/stock";
 import { fromLine, render } from "@/lib/mail";
 import { tokensFor } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
-import { OFFER_DAYS, ONCE_PER_DAYS, canWinBack, winbackOn } from "@/lib/winback";
+import { OFFER_DAYS, ONCE_PER_DAYS, WINBACK_OPEN_REQUEST_UNITS, WINBACK_OPEN_STRIPE_CALLS, canWinBack, winbackOn } from "@/lib/winback";
+import { takeBuyerRead } from "@/lib/buyer-actions";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
@@ -45,6 +46,13 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
+/**
+ * Before a come-back checkout is opened, every membership that has not ended counts (R43, follow-up to #3371): only
+ * these two statuses have. One still taking its first payment ("incomplete"), paused, unpaid, or in a status not known
+ * here is read as running, so a second membership is never opened beside it.
+ */
+const ENDED = new Set(["canceled", "incomplete_expired"]);
+const NOT_ENDED = { has: (status: string) => !ENDED.has(status) };
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (account: string, sub: string) => `nl:wb:${account}:${sub}`;
@@ -110,7 +118,13 @@ const CAME_BACK_OFFER_PAGES = 10;
  * list. A page that is not one, a membership without an id to go on from, or more pages than are read is unknown,
  * never "has not come back", so no offer goes to somebody who may already be back.
  */
-async function cameBack(account: string, customer: string, product: string, budget: { pages: number }): Promise<boolean | null> {
+async function cameBack(
+  account: string,
+  customer: string,
+  product: string,
+  budget: { pages: number },
+  live: { has(status: string): boolean } = LIVE,
+): Promise<boolean | null> {
   let after = "";
   for (let page = 0; page < CAME_BACK_PAGES; page += 1) {
     if (budget.pages <= 0) return null;
@@ -124,7 +138,7 @@ async function cameBack(account: string, customer: string, product: string, budg
       if (!sub || typeof sub !== "object") return null;
       const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
       if (typeof status !== "string" || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
-      if (LIVE.has(status) && (metadata as Record<string, unknown>).product === product) return true;
+      if (live.has(status) && (metadata as Record<string, unknown>).product === product) return true;
     }
     if (listed.has_more === false) return false;
     const last = (subs as { id?: unknown }[]).at(-1)?.id;
@@ -160,6 +174,37 @@ async function cameBackUnder(account: string, customer: string, email: string, p
     return false;
   } catch (error) {
     console.error("reading whether a member came back failed", error);
+    return null;
+  }
+}
+
+/**
+ * Whether the person a come-back link is for already has a membership of this product that has not ended, under any
+ * customer of the address on the creator's account: true, false, or null when it cannot be said (CX-123 rule 24).
+ * Each store checkout keeps the address as it was typed, and Stripe's list filter matches the text exactly, so the
+ * customers are read twice: listed by the address the link holds, and found by Stripe's customer search, whose rows
+ * count when their address is the same in small letters. At most WINBACK_OPEN_STRIPE_CALLS calls: a list read in
+ * part, in another shape, with a row that cannot be read, or not at all, and more memberships than the calls left
+ * read, are unknown, never "no membership".
+ */
+async function runningFor(account: string, email: string, product: string): Promise<boolean | null> {
+  try {
+    const customers: string[] = [];
+    const listed = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
+    if (listed.hasMore || listed.unreadable > 0) return null;
+    for (const row of listed.rows) if (!customers.includes(row.id)) customers.push(row.id);
+    const query = new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" });
+    const found = readStripePage(await onAccount("GET", account, `/customers/search?${query}`), (row) => typeof row.email === "string", CUSTOMER_PATTERN);
+    if (found.hasMore || found.unreadable > 0) return null;
+    for (const row of found.rows) if (normaliseEmail(row.email as string) === email && !customers.includes(row.id)) customers.push(row.id);
+    const budget = { pages: WINBACK_OPEN_STRIPE_CALLS - 2 };
+    for (const customer of customers) {
+      const running = await cameBack(account, customer, product, budget, NOT_ENDED);
+      if (running !== false) return running;
+    }
+    return false;
+  } catch (error) {
+    console.error("reading whether a come-back link's member has a running membership failed", error);
     return null;
   }
 }
@@ -362,7 +407,7 @@ export async function readWinBack(store: Store, product: string, token: string):
   }
 }
 
-export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" };
+export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "member" | "limited" };
 
 /** The checkout a come-back link opens: this product, this address, the offer applied, no second trial. */
 export async function openWinBack(
@@ -384,6 +429,13 @@ export async function openWinBack(
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, grant.option)) return { ok: false, reason: "unavailable" };
   const option = product.options.length ? grant.option : undefined;
+  // Never a second membership beside one that has not ended (R43, follow-up to #3371): the reading is counted first,
+  // then a running membership under any customer of the address refuses, and so does a reading that cannot be made
+  // whole (CX-123 rule 24). Nothing is opened or charged on either.
+  if (!(await takeBuyerRead(store, WINBACK_OPEN_REQUEST_UNITS))) return { ok: false, reason: "limited" };
+  const running = store.stripeAccountId ? await runningFor(store.stripeAccountId, normaliseEmail(grant.email), product.id) : null;
+  if (running === true) return { ok: false, reason: "member" };
+  if (running === null) return { ok: false, reason: "refused" };
   try {
     // A limited product holds a unit while the checkout is open, as any other checkout does.
     const held = await withStockHold(store, product, (holding) =>

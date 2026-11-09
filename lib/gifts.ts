@@ -77,11 +77,14 @@ const passKey = (sid: string) => `nl:gift:${sid}:refunds:pass`;
 /** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
 const REFUND_PASS_SECONDS = 7 * 86_400;
 /**
- * A pass: the window it reads (created since), the last refund it read whole, the newest refund it read, and the time
- * of the oldest refund it read that Stripe had not finished (heldAt; absent: none), which holds the anchor when the
- * pass ends, so a pass that goes on past that refund never lets the anchor go past it.
+ * A pass: the window it reads (created since), the last refund it read, the newest refund it read, the connected
+ * account it reads (a pass kept from the store's earlier account is started over: its cursor names a refund the
+ * account it has now does not have; review of #3301, Claude 2 M2), the time the anchor waits at when the pass ends
+ * (absent: nothing to wait for), that of the oldest refund it read that Stripe had not finished (heldAt) or that could
+ * not be handled, and whether it read a row that is not readable (then the anchor stays where it was when the pass
+ * ends), so the next pass reads each of those rows again.
  */
-type RefundPass = { since: number; after: string; newest: number; waiting?: number };
+type RefundPass = { since: number; after: string; newest: number; account: string; waiting?: number; unread?: true };
 /** A kept pass in its exact shape; null when there is none or it is in any other shape (then the pass starts over). */
 function readRefundPass(raw: unknown): RefundPass | null {
   if (typeof raw !== "string") return null;
@@ -92,11 +95,25 @@ function readRefundPass(raw: unknown): RefundPass | null {
     return null;
   }
   if (!pass || typeof pass !== "object" || Array.isArray(pass)) return null;
-  const { since, after, newest, waiting } = pass as Record<string, unknown>;
+  const { since, after, newest, account, waiting, unread } = pass as Record<string, unknown>;
   if (!Number.isSafeInteger(since) || (since as number) < 0 || !Number.isSafeInteger(newest) || (newest as number) < 0) return null;
   if (typeof after !== "string" || !/^[A-Za-z0-9_]{3,255}$/.test(after)) return null;
+  if (typeof account !== "string" || !/^acct_[A-Za-z0-9]{1,255}$/.test(account)) return null;
   if (waiting !== undefined && (!Number.isSafeInteger(waiting) || (waiting as number) < 0)) return null;
-  return { since: since as number, after, newest: newest as number, ...(waiting === undefined ? {} : { waiting: waiting as number }) };
+  if (unread !== undefined && unread !== true) return null;
+  // Figures a pass never keeps, each of which would move the anchor wrongly (review of #3301, Claude 2 L1): its newest
+  // refund and the time it waits at lie within its window, from its start to now (with the anchor's 300 s margin).
+  const latest = now() + 300;
+  if ((newest as number) < (since as number) || (newest as number) > latest) return null;
+  if (waiting !== undefined && ((waiting as number) < (since as number) || (waiting as number) > latest)) return null;
+  return {
+    since: since as number,
+    after,
+    newest: newest as number,
+    account,
+    ...(waiting === undefined ? {} : { waiting: waiting as number }),
+    ...(unread === true ? { unread } : {}),
+  };
 }
 /**
  * Whether a row gives back what it paid for, by the one shared rule (lib/refunds.ts rowGivesBack), as the other jobs
@@ -355,14 +372,16 @@ export async function revokeRefundedGifts(
   // text, not the pass's JSON, a cursor that is not an id), or of another anchor's window, is started over from the
   // anchor, which never moved past it: read again, never skipped.
   const keptPass = readRefundPass(passRaw);
-  const pass = keptPass && (anchorRaw === null || keptPass.since === fresh) ? keptPass : null;
+  const pass = keptPass && keptPass.account === account && (anchorRaw === null || keptPass.since === fresh) ? keptPass : null;
   const since = pass ? pass.since : fresh;
   let newest = pass ? pass.newest : Number(anchorRaw) || since;
   let after = pass ? pass.after : "";
   // The oldest refund the pass read that Stripe had not finished (heldAt; Infinity: none), kept with the pass.
   let waiting = pass?.waiting ?? Infinity;
   /** The pass as it is kept between runs. */
-  const passNow = (): RefundPass => ({ since, after, newest, ...(Number.isFinite(waiting) ? { waiting } : {}) });
+  // Whether the pass read a row that is not readable: the anchor then stays where it was when the pass ends.
+  let unread = pass?.unread === true;
+  const passNow = (): RefundPass => ({ since, after, newest, account, ...(Number.isFinite(waiting) ? { waiting } : {}), ...(unread ? { unread } : {}) });
   let revoked = 0;
 
   /** One row read whole and handled: false when something it needed was left unknown, and then it is not marked read. */
@@ -451,9 +470,9 @@ export async function revokeRefundedGifts(
   }
 
   // Every page of the refunds since the anchor (CX-123 rule 24; r24 money inventory, item 1), newest first, read in
-  // its exact shape. The pass moves past a page only once every row on it was read and handled (kept in passKey, a
-  // week); a page in another shape, a row not readable or not handled, or a run out of time leaves the pass on that
-  // page, read again next run, and a full refund on a readable row is still taken back. A run that resumes a pass
+  // its exact shape. The pass moves past a page once every row on it was read and handled as far as it can be (kept in
+  // passKey, a week); a row not readable or not handled holds the anchor, never the pass, and a page in another shape
+  // or a run out of time leaves the pass on that page, read again next run. A run that resumes a pass
   // first reads the newest page, so a refund made meanwhile does not wait for the pass: what it reads there never
   // moves the pass or the anchor, and the next pass reads it again (each handled one stays handled).
   let pages = GIFT_REFUND_PAGES_PER_STORE;
@@ -470,14 +489,20 @@ export async function revokeRefundedGifts(
     if (Date.now() >= deadline) return revoked;
     const read = await readPage(after);
     if (!read) break;
-    let whole = read.unreadable === 0;
+    // One row that cannot be handled, or that is not readable at all, never holds the pages behind it (reviews of
+    // #3301, Claude 2 M1 and Claude 5): the pass goes on, the row is never marked read, and the anchor waits for it.
+    // A row not handled holds the anchor at its time, as a refund Stripe had not finished does; a row not readable,
+    // whose time is not known, keeps the anchor where it was. The next pass reads it again either way:
+    // never taken as refunded, never as not refunded, never passed over.
+    let unhandled = Infinity;
     for (const refund of read.rows) {
       if (Date.now() >= deadline) return revoked;
-      if (!(await handle(refund))) whole = false;
+      if (!(await handle(refund))) unhandled = Math.min(unhandled, typeof refund.created === "number" ? refund.created : since);
     }
-    if (!whole) break;
-    // A page read whole moves the pass, and what it read moves with it: its newest refund, and the oldest one Stripe had
-    // not finished, which holds the anchor however far the pass goes on (the pass skips no page; the anchor waits on it).
+    // The page read and handled as far as it can be moves the pass, and what it read moves with it: its newest refund,
+    // and the time the anchor waits at, however far the pass goes on (the pass skips no page; the anchor waits on it).
+    waiting = Math.min(waiting, unhandled);
+    if (read.unreadable > 0) unread = true;
     for (const refund of read.rows) {
       newest = Math.max(newest, typeof refund.created === "number" ? refund.created : 0);
       const held = heldAt(refund);
@@ -487,9 +512,15 @@ export async function revokeRefundedGifts(
       ended = true;
       break;
     }
-    // More pages, and no readable last row to read them from: not read to its end.
-    if (!read.lastId) break;
-    after = read.lastId;
+    // The next page is read from the last row, or, when that row is not readable, from the last readable one, which
+    // reads the rows after it again (never skipped). A page with no readable row at all has nothing to go on from:
+    // the pass stays on it and the anchor where it was, so nothing behind it is passed over.
+    const from = read.lastId ?? read.rows.at(-1)?.id ?? null;
+    if (!from) {
+      console.error("reading refunds for gifts: a page with no readable row; the pass stays on it");
+      break;
+    }
+    after = from;
     // Either reply leaves a place that skips nothing: this page's last row, or the one kept before it (read again).
     await redisPipeline([["SET", passKey(sid), JSON.stringify(passNow()), "EX", REFUND_PASS_SECONDS]]);
   }
@@ -501,9 +532,10 @@ export async function revokeRefundedGifts(
   // A closing read in this run counts toward it only when this run began the pass: one that resumed it may have
   // passed refunds made since the pass began, which the next pass reads from the anchor.
   if (ended && !unsure) {
-    // Never past a refund the pass read that Stripe had not finished: the next pass reads it again from there.
+    // Never past a refund the pass read that Stripe had not finished, or that could not be handled: the next pass reads
+    // it again from there. A pass that read a row not readable lets the pass go and keeps the anchor where it was.
     const anchor = Math.min(pass || (lost.complete && lost.resumed) ? newest : Math.max(newest, lostNewest), Math.max(waiting, since));
-    const closed = repliesFor(await redisPipeline([["SET", anchorKey(sid), String(anchor)], ["DEL", passKey(sid)]]), 2);
+    const closed = repliesFor(await redisPipeline([...(unread ? [] : [["SET", anchorKey(sid), String(anchor)]]), ["DEL", passKey(sid)]]), unread ? 1 : 2);
     if (!closed) console.error("ending a pass over refunds for gifts was left unknown");
   }
   return revoked;

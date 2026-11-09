@@ -71,6 +71,22 @@ let loseNext: "" | "lost" | "made" = "";
 /** How the next reads of a batch fail: a 503, a success that is not JSON, or no answer at all. */
 let readFault: "" | "503" | "garbage" | "throw" = "";
 const batches = new Map<string, string>();
+/**
+ * How PayPal's read writes each item back (pre-review of b70909c20b): "" as it was sent; "short" and "padded" the same
+ * amount in another plain decimal form (30 for 30.00, 30.000); "upper" and "spaced" the same address in capitals or
+ * with spaces around it; "lower" the address in small letters. `value` and `receiver` replace them outright.
+ */
+let readShape: "" | "short" | "padded" | "upper" | "spaced" | "lower" = "";
+let readValue: ((value: string, sender: string) => string) | null = null;
+/** Runs while PayPal is being read, before its answer comes back (the batch can change in our records meanwhile). */
+let duringRead: (() => Promise<void>) | null = null;
+function shapedItem(item: Item): Item {
+  const value = readValue ? readValue(item.amount.value, item.sender_item_id)
+    : readShape === "short" ? String(Number(item.amount.value)) : readShape === "padded" ? `${item.amount.value}0` : item.amount.value;
+  const receiver = readShape === "upper" ? item.receiver.toUpperCase() : readShape === "spaced" ? ` ${item.receiver} `
+    : readShape === "lower" ? item.receiver.toLowerCase() : item.receiver;
+  return { ...item, receiver, amount: { ...item.amount, value } };
+}
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -102,6 +118,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (readFault === "503") return json({ name: "INTERNAL_SERVICE_ERROR" }, 503);
     if (readFault === "garbage") return new Response("<html>busy</html>", { status: 200 });
     if (readFault === "throw") throw new Error("Synthetic: the line dropped");
+    if (duringRead) await duringRead();
     const id = decodeURIComponent(read[1]);
     const made = account.get(id);
     if (!made) return json({ name: "RESOURCE_NOT_FOUND", message: "The specified resource does not exist." }, 404);
@@ -111,7 +128,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
         payout_item_id: `${id}ITEM${i}`,
         payout_batch_id: id,
         transaction_status: statusOf.get(item.sender_item_id) ?? "PENDING",
-        payout_item: item,
+        payout_item: shapedItem(item),
       })),
       total_items: made.items.length,
       total_pages: 1,
@@ -143,6 +160,9 @@ async function seed(store: Store): Promise<void> {
   gets = 0;
   loseNext = "";
   readFault = "";
+  readShape = "";
+  readValue = null;
+  duringRead = null;
   batches.clear();
   account.clear();
   statusOf.clear();
@@ -413,6 +433,8 @@ async function rest(store: Store): Promise<void> {
   // Rule 23: new assertion, red on main (0): the settling finds the '?' entry without the creator opening the studio.
   is("the store is in the daily job", await inDailyJob(store), 1);
 
+  await forms(store);
+
   part("The panel's words");
   const panel = readFileSync("components/paypal-payouts.tsx", "utf8");
   // Rule 23: new assertion, red on main: a batch never sent, or refused, can be in that count too.
@@ -425,6 +447,64 @@ async function rest(store: Store): Promise<void> {
   // show); the creator's word no longer clears a batch, so the panel says what happens without an ID.
   is("the panel says what happens without an ID", panel.includes("Without that ID"), true);
   is("each refusal has its own words", ['"not-found":', "other:", "mismatch:", "used:", '"own-unknown":'].every((t) => panel.includes(t)), true);
+  // Rule 23: new assertions (pre-review of b70909c20b, VR 2), red on b70909c20b: a save whose answer was lost, or a
+  // request that never got an answer, may have been saved, so the panel never says nothing was.
+  is("a save not confirmed is not said to be unsaved", panel.includes('"own-error": "We could not confirm it was saved. Reload the page to see where it stands."'), true);
+  is("the panel never says 'Nothing was saved'", panel.includes("Nothing was saved"), false);
+  is("a request with no answer at all has its own words", /lost: "/.test(panel) && /catch \(\)|catch \{/.test(panel.slice(panel.indexOf("async function send"), panel.indexOf("export function PayPalPayouts"))), true);
+  // Rule 23: new assertions (pre-review of b70909c20b, AAA 3.3.1/3.3.3/1.3.1), red on b70909c20b: the refusal of an ID
+  // is shown with that payment's own form, tied to its field, and "other" names this payment's reference.
+  is("the refusal is tied to the payout batch ID field", ["aria-invalid={", "-error`"].every((t) => panel.includes(t)), true);
+  is("'other' names the reference instead of pointing below", panel.includes("reference shown below"), false);
+  is("'other' gives this payment's reference", /other: "[^"]*\{reference\}/.test(panel), true);
+  is("a payment that changed while PayPal was read has its own words", /"own-moved": "[^"]*changed[^"]*while we were checking/.test(panel), true);
+}
+
+/** The same amount or address in another plain form is the same; anything else is still refused (pre-review of b70909c20b). */
+async function forms(store: Store): Promise<void> {
+  part("PayPal writes the same amount in another plain decimal form: matched (30 is 30.00)");
+  // Rule 23: new assertions, red on b70909c20b (compared as strings: "30" was a mismatch). PayPal's OpenAPI types
+  // amount.value as a string, an integer or a decimal fraction, without fixing its form.
+  for (const shape of ["short", "padded"] as const) {
+    await seed(store);
+    const left = await leftForOwnCheck(store);
+    readShape = shape;
+    is(`${shape}: saved`, await resolveOwnCheck(store, left.field, left.id), { ok: true, batch: left.id, people: 2 });
+  }
+
+  part("PayPal writes the address in capitals, or with spaces around it: matched (an email address, compared in small letters)");
+  // Rule 23: new assertions, red on b70909c20b (the fingerprint was of the address exactly as written).
+  for (const shape of ["upper", "spaced"] as const) {
+    await seed(store);
+    const left = await leftForOwnCheck(store);
+    readShape = shape;
+    is(`${shape}: saved`, await resolveOwnCheck(store, left.field, left.id), { ok: true, batch: left.id, people: 2 });
+  }
+  await seed(store);
+  await redis.pipeline([["HSET", `nl:aff:${STATS}:people`, SARA, JSON.stringify({ id: SARA, email: "sara@example.com", paypal: "Sara.Lee@Example.COM", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })]]);
+  const mixed = await leftForOwnCheck(store);
+  readShape = "lower";
+  is("an address kept in capitals, that PayPal writes in small letters: saved", await resolveOwnCheck(store, mixed.field, mixed.id), { ok: true, batch: mixed.id, people: 2 });
+
+  part("An amount in any form that is not a plain decimal is still refused");
+  await seed(store);
+  const left = await leftForOwnCheck(store);
+  for (const odd of ["3e1", "+30.00", "-30.00", "30,00", "30.00 ", " 30.00", "0x1E", "30.", ".5", "", "30.01", "300.0"]) {
+    readValue = (value, sender) => (sender === SARA ? odd : value);
+    is(`"${odd}": refused`, await resolveOwnCheck(store, left.field, left.id), { ok: false, reason: "mismatch" });
+  }
+  readValue = null;
+  await untouched(store, left.field, "an amount in another form");
+
+  part("The batch changes in our records while PayPal is read: refused with its own reason, nothing marked");
+  // Rule 23: new assertion, red on b70909c20b ("gone", which said it was already sorted out, untrue here).
+  duringRead = async () => {
+    duringRead = null;
+    const entry = await openEntry(left.field);
+    if (entry) await real([["HSET", OPEN, left.field, JSON.stringify({ ...entry, at: Number(entry.at) + 1 })]]);
+  };
+  is("changed meanwhile: moved", await resolveOwnCheck(store, left.field, left.id), { ok: false, reason: "moved" });
+  await untouched(store, left.field, "a batch that changed meanwhile");
 }
 
 main().catch((error) => {

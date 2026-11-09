@@ -1,0 +1,16 @@
+{
+  "command": [
+    "node",
+    "--max-old-space-size=1024",
+    "node_modules/typescript/bin/tsc",
+    "--noEmit",
+    "--project",
+    "proofs/s/3309-focal/tsconfig.json"
+  ],
+  "roots": 8,
+  "status": 0,
+  "stdout": "",
+  "stderr": "",
+  "seconds": 11.501,
+  "timeout": 120
+}

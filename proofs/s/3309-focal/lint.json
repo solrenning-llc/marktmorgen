@@ -1,0 +1,19 @@
+{
+  "command": [
+    "node",
+    "--max-old-space-size=512",
+    "node_modules/eslint/bin/eslint.js",
+    "lib/closing-holds.ts",
+    "lib/plan-closing.ts",
+    "lib/redis-memory.ts",
+    "tests/closing-call-budget-ack.test.ts",
+    "tests/closing-call-budget-once.test.ts",
+    "tests/g-2554-charge-promise.test.ts",
+    "tests/sg2-l1-counts.test.ts",
+    "tests/store-closing-fair.test.ts"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": "",
+  "seconds": 4.16
+}

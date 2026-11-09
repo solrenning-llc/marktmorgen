@@ -1,0 +1,12 @@
+{
+  "command": [
+    "git",
+    "diff",
+    "--cached",
+    "--check"
+  ],
+  "status": 2,
+  "stdout": "proofs/s/3309-focal/delta.patch:28: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:72: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:131: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:137: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:169: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:175: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:192: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:210: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:225: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:240: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:480: trailing whitespace.\n+ \nproofs/s/3309-focal/delta.patch:496: trailing whitespace.\n+ \n",
+  "stderr": "",
+  "seconds": 0.013
+}

@@ -1,0 +1,20 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/closing-holds.ts",
+    "../../../lib/plan-closing.ts",
+    "../../../lib/redis-memory.ts",
+    "../../../tests/closing-call-budget-once.test.ts",
+    "../../../tests/closing-call-budget-ack.test.ts",
+    "../../../tests/g-2554-charge-promise.test.ts",
+    "../../../tests/sg2-l1-counts.test.ts",
+    "../../../tests/store-closing-fair.test.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

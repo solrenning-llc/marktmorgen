@@ -1,0 +1,11 @@
+{
+  "file": "tests/g-2554-charge-promise.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "494cb6a1284685d567b370a0d23329226479697c",
+  "stdout": "\nA membership still chargeable contradicts an unconditional no-more-charges promise\n  ok    budget 0: real hold finished listing with one unpaused member\n  ok    budget 0: synthetic provider member remains chargeable\n  ok    budget 0: actual news preserves the unpaused count and conditional warning\n  ok    budget 0: the SAME letter must not certify that nobody can be charged\n  ok    budget 100: real hold finished listing with one unpaused member\n  ok    budget 100: synthetic provider member remains chargeable\n  ok    budget 100: actual news preserves the unpaused count and conditional warning\n  ok    budget 100: the SAME letter must not certify that nobody can be charged\n  ok    unknown hold: warning remains explicit\n  ok    unknown hold: no unconditional no-more-charges assurance\n\n10 checks, all passing.\nS_VOLUME {\"runs\":42,\"attempts\":6,\"forwarded\":6}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

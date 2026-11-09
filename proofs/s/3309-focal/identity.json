@@ -1,0 +1,38 @@
+{
+  "subject": "494cb6a1284685d567b370a0d23329226479697c",
+  "old": "20e748dfc15bdb4bce34ad75022cecc20ce003c6",
+  "paths": [
+    {
+      "path": "lib/closing-holds.ts",
+      "sha256": "6eb0f8dac16ac38e9a56c8f3f339c6b4459987155e2e63fcbaff003a0137e2a9"
+    },
+    {
+      "path": "lib/plan-closing.ts",
+      "sha256": "af51c856da7036522d8ef7bedb6ba84c7ee1c850b6781a892223a0f2d6f14d17"
+    },
+    {
+      "path": "lib/redis-memory.ts",
+      "sha256": "5cbe1c57625a2993f3a54385a692d7c565cadaec0c1185485e186f4cc68830e4"
+    },
+    {
+      "path": "tests/closing-call-budget-ack.test.ts",
+      "sha256": "d3e95dc69bcde47d8e7859ebd1d09f50901e9b1fe21ac9cc15fb57087f323cff"
+    },
+    {
+      "path": "tests/closing-call-budget-once.test.ts",
+      "sha256": "fdbad8019e82efb31474934d8e69f84335fe424a6f8e51b9397376ba6b538609"
+    },
+    {
+      "path": "tests/g-2554-charge-promise.test.ts",
+      "sha256": "95306b3271c30d454ffe01a9d4400e01abe28686005ffee41169cdb89f30448b"
+    },
+    {
+      "path": "tests/sg2-l1-counts.test.ts",
+      "sha256": "76c3e439e5d2311b0233fe0dadb1f78beb190538e22d0bdf282ad6a1494706a9"
+    },
+    {
+      "path": "tests/store-closing-fair.test.ts",
+      "sha256": "38302a414a53a35706296be880f66d1ba268ddf069c1b3e868fd1f61b1de3cbc"
+    }
+  ]
+}

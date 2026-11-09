@@ -1,8 +1,8 @@
 "use client";
 
-import { useContext, useState } from "react";
+import { useContext, useId, useState } from "react";
 import { Icon } from "@/components/icons";
-import { AiOn } from "@/components/ai-assist";
+import { AI_ALLOWANCE_UNKNOWN, AiOn, allowanceOf } from "@/components/ai-assist";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { BLOCK_KINDS, type BlockKind, type FactKey, type SalesPage } from "@/lib/sales-page";
 import { BUYER_LENSES, type CoachCheck, coachChecks, coachScore, scoreWord, steepestDrop } from "@/lib/page-coach";
@@ -83,7 +83,8 @@ export function PageCoach({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<Review | null>(null);
-  const [left, setLeft] = useState(ai.left);
+  const [left, setLeft] = useState(allowanceOf(ai));
+  const allowanceId = useId();
   const [used, setUsed] = useState<Set<string>>(new Set());
 
   const checks = coachChecks({ page, productTitle, free, picture, pictureAlt, facts, factsUnread });
@@ -236,10 +237,10 @@ export function PageCoach({
                 />
               </label>
               <div className="mt-3 flex flex-wrap items-center gap-3">
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => void ask()} disabled={busy || left <= 0} aria-busy={busy}>
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => void ask()} disabled={busy || left === null || left <= 0} aria-busy={busy} aria-describedby={allowanceId}>
                   {busy ? "Reading your page…" : review ? "Review it again" : "Review my page"}
                 </button>
-                <span className="text-xs text-ink-soft">{`${left} left this month`}</span>
+                <span id={allowanceId} className="text-xs text-ink-soft">{left === null ? AI_ALLOWANCE_UNKNOWN : `${left} left this month`}</span>
               </div>
               {error ? (
                 <p className="notice notice-error mt-3 text-sm" role="alert">

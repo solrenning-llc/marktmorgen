@@ -30,6 +30,7 @@ import { storeSender } from "@/lib/calls";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isHouseStore } from "@/lib/house-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, monthOf, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { withinLimit } from "@/lib/request-guard";
@@ -37,6 +38,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
 import type { Store } from "@/lib/store";
+import { stringList } from "@/lib/redis-reply";
 import {
   CHAT_TOKEN,
   CONVERSATION_ID,
@@ -341,15 +343,37 @@ async function tellTeam(store: Store, conversation: Kept, text: string): Promise
 
 // ------------------------------------------------------------------ studio
 
+/**
+ * The conversation ids of one ZREVRANGE on the index, read exactly (rule 24):
+ * a reply that is not one list of strings throws, so it is never taken for an
+ * inbox with no conversations.
+ */
+async function indexIds(statsId: string, last: number): Promise<string[]> {
+  const ids = stringList(repliesFor(await redisPipeline([["ZREVRANGE", indexKey(statsId), 0, last]]), 1)?.[0]);
+  if (ids === null) throw new UnknownReplyError("the inbox's index");
+  return ids.filter((id) => CONVERSATION_ID.test(id));
+}
+
+/**
+ * The kept conversations of `ids`, one slot for each, read exactly (rule 24):
+ * a string is what is kept, null is a conversation that has expired; any
+ * other reply, or one of another length, throws, so a conversation is never
+ * taken for gone (or for someone else's) on an answer that does not say so.
+ */
+async function keptSlots(statsId: string, ids: string[]): Promise<(string | null)[]> {
+  const slots = repliesFor(repliesFor(await redisPipeline([["MGET", ...ids.map((id) => convKey(statsId, id))]]), 1)?.[0], ids.length);
+  if (slots === null || !slots.every((v) => v === null || typeof v === "string")) throw new UnknownReplyError("the inbox's conversations");
+  return slots as (string | null)[];
+}
+
 /** The store's conversations, open first, then the newest; what has expired is dropped from the index. */
 export async function readInbox(statsId: string | null): Promise<Conversation[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [rawIds] = await redisPipeline([["ZREVRANGE", indexKey(statsId), 0, MAX_CONVERSATIONS - 1]]);
-  const ids = (Array.isArray(rawIds) ? rawIds : []).filter((id): id is string => typeof id === "string" && CONVERSATION_ID.test(id));
+  const ids = await indexIds(statsId, MAX_CONVERSATIONS - 1);
   if (!ids.length) return [];
-  const [raw] = await redisPipeline([["MGET", ...ids.map((id) => convKey(statsId, id))]]);
-  const values = Array.isArray(raw) ? raw : [];
-  const gone = ids.filter((_, i) => !values[i]);
+  const values = await keptSlots(statsId, ids);
+  // Only a slot that answered exactly null has expired; nothing else leaves the index.
+  const gone = ids.filter((_, i) => values[i] === null);
   if (gone.length) await redisPipeline([["ZREM", indexKey(statsId), ...gone]]).catch(() => {});
   return inboxOrder(values.map(parseKept).filter((c): c is Kept => Boolean(c)).map(shown));
 }
@@ -538,22 +562,35 @@ export async function suggestReply(store: Store, id: string, now = Date.now()): 
 export async function forgetInboxPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const [rawIds] = await redisPipeline([["ZREVRANGE", indexKey(statsId), 0, -1]]);
-  const ids = (Array.isArray(rawIds) ? rawIds : []).filter((id): id is string => typeof id === "string" && CONVERSATION_ID.test(id));
+  // Every read is exact (rule 24): an unknown index, conversations or deletion answer throws, so the
+  // erasure is said as not done and tried again (lib/person-erasure.ts), never answered as finished.
+  const ids = await indexIds(statsId, -1);
   const theirs: Kept[] = [];
+  // Index entries whose conversation answered exactly null: nothing is kept behind them any more
+  // (expired, or deleted by an earlier erasure whose index removal did not finish).
+  const gone: string[] = [];
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
-    const [raw] = await redisPipeline([["MGET", ...chunk.map((id) => convKey(statsId, id))]]);
-    for (const value of Array.isArray(raw) ? raw : []) {
+    const slots = await keptSlots(statsId, chunk);
+    slots.forEach((value, at) => {
+      if (value === null) gone.push(chunk[at]);
       const kept = parseKept(value);
       if (kept && normaliseEmail(kept.email) === address) theirs.push(kept);
-    }
+    });
   }
-  if (!theirs.length) return 0;
-  await redisPipeline([
-    ["DEL", ...theirs.flatMap((c) => [convKey(statsId, c.id), msgKey(statsId, c.id), ...(c.token ? [tokenKey(c.token)] : [])])],
-    ["ZREM", indexKey(statsId), ...theirs.map((c) => c.id)],
-  ]);
+  // Two steps, in this order, so a failure part-way is always found again by the retry (Codex J on #3113):
+  // a Redis pipeline is not a transaction, and an index entry removed while its records stayed would leave
+  // them kept with nothing pointing to them. First the records, their deletion confirmed; only then the index.
+  if (theirs.length) {
+    const keys = theirs.flatMap((c) => [convKey(statsId, c.id), msgKey(statsId, c.id), ...(c.token ? [tokenKey(c.token)] : [])]);
+    const deleted = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+    if (deleted === null || deleted > keys.length) throw new UnknownReplyError("the deletion of a person's conversations");
+  }
+  const unindex = [...theirs.map((c) => c.id), ...gone];
+  if (unindex.length) {
+    const removed = countOf(repliesFor(await redisPipeline([["ZREM", indexKey(statsId), ...unindex]]), 1)?.[0]);
+    if (removed === null || removed > unindex.length) throw new UnknownReplyError("the removal of a person's conversations from the inbox's index");
+  }
   return theirs.length;
 }
 

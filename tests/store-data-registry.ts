@@ -366,7 +366,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cal:tok:@lib/calendar-sync.ts": { what: "The store's calendar file's token", parts: [capped(KEY, "One a store.")] },
   "nl:meet:rf:@lib/call-meetings.ts": short("Refunds already handled for meetings, kept sixty-one days after the last one read", "order", 61, MARK),
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },
-  "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token", parts: [item(KEY, "One per package, kept with it.", "call")] },
+  "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token, and the sessions it spent for good", parts: [
+    item(KEY, "One per package, kept with it.", "call"),
+    // C6 R40 (9 November 2026): <token key>:used, a set of at most the package's total (MAX_PACKAGE_SESSIONS, 20) short ids of 16 characters, never more (spent in lib/call-packages.ts), kept exactly as long as the package.
+    item(512, "Its spent sessions: at most 20 ids of 16 characters, kept as long as the package.", "call"),
+  ] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept 200 days by the booking", "call", 200, KB),
   "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts)."),

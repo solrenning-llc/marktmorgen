@@ -16,6 +16,14 @@
  * leaves Stripe's page without finishing, it comes back once the hold is
  * over. A package refunded in full books nothing more. A package with a last
  * day to book is kept a year past it, then dropped.
+ *
+ *   nl:pkg:t:<sha(token)>:used  the sessions it spent for good, kept exactly as long as the package
+ *
+ * A booked session's own mark (nl:call:confirmed, lib/calls.ts) lives
+ * CONFIRMED_SECONDS, while a package with no last day lives for good (Claude 6,
+ * R40): each confirmed session is written down with the package the first time
+ * it is seen, and a session whose mark may have expired unseen, or whose mark
+ * is not read for sure, counts as spent. Unknown never frees a session.
  */
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
@@ -23,7 +31,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { isConfirmed } from "@/lib/calls";
+import { CONFIRMED_SECONDS, confirmedKey } from "@/lib/calls";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
 import { purchaseRefunded } from "@/lib/refunds";
 import { sendEmail } from "@/lib/email";
@@ -62,6 +70,10 @@ export type Bought = {
 const sha = (v: string) => createHash("sha256").update(v).digest("hex");
 const pkgKey = (checkout: string) => `nl:pkg:${checkout}`;
 const tokenKey = (token: string) => `nl:pkg:t:${sha(token)}`;
+/** The sessions a package spent for good, a short id of each (spentId): at most its `total`, kept as long as the package. */
+const usedKey = (token: string) => `${tokenKey(token)}:used`;
+/** A session's short id in usedKey: 16 hex characters, so a package's set stays under SPENT_SET_BYTES. */
+const spentId = (session: string) => sha(session).slice(0, 16);
 /**
  * The packages a store sold (added 18 October 2026): a package with no last
  * day is kept for as long as it can be used, and is named by its checkout,
@@ -69,7 +81,7 @@ const tokenKey = (token: string) => `nl:pkg:t:${sha(token)}`;
  * (lib/closed-store-data.ts). Kept with the store: a checkout's id a package.
  */
 export const packagesKey = (statsId: string) => `nl:pkg:s:${statsId}`;
-export const packageKeys = (checkout: string, token: string): string[] => [pkgKey(checkout), `${pkgKey(checkout)}:lock`, ...(token ? [tokenKey(token)] : [])];
+export const packageKeys = (checkout: string, token: string): string[] => [pkgKey(checkout), `${pkgKey(checkout)}:lock`, ...(token ? [tokenKey(token), usedKey(token)] : [])];
 const now = () => Math.floor(Date.now() / 1000);
 /** Kept a year past its last day to book; a package with no limit is kept as long as it can be used. */
 const KEEP_AFTER_SECONDS = 365 * 86_400;
@@ -94,11 +106,53 @@ export async function boughtByToken(token: string): Promise<{ checkout: string; 
   return bought && bought.token === token ? { checkout, bought } : null;
 }
 
-/** Sessions spent: booked, or held now. */
+/**
+ * How long after a hold's end a missing confirmation mark still means "never
+ * confirmed": the mark is written after the hold began and lives
+ * CONFIRMED_SECONDS, so it is there until then for sure (two days spare for
+ * the hold itself). Past that, a missing mark may have expired: spent.
+ */
+const MARK_SURE_SECONDS = CONFIRMED_SECONDS - 2 * 86_400;
+
+/**
+ * Sessions spent: held now, written down as spent with the package, or
+ * confirmed. A hold past its time comes back only when Redis answers, for
+ * sure, that its mark is not there while the mark could not yet have
+ * expired; any other answer, or none, counts it spent (rule 24). A
+ * confirmation seen for the first time is written down with the package, so
+ * it outlives its mark.
+ */
 export async function spent(bought: Bought, at = now()): Promise<number> {
-  let n = 0;
-  for (const hold of bought.holds) {
-    if (hold.until + HOLD_GRACE_SECONDS > at || (await isConfirmed(hold.session))) n += 1;
+  const past = bought.holds.filter((hold) => hold.until + HOLD_GRACE_SECONDS <= at);
+  let n = bought.holds.length - past.length;
+  if (!past.length) return n;
+  let answers: unknown[] | null = null;
+  try {
+    answers = await redisPipeline([["SMEMBERS", usedKey(bought.token)], ...past.map((hold) => ["EXISTS", confirmedKey(hold.session)])]);
+  } catch (error) {
+    console.error("reading a package's spent sessions failed; counted as spent", error);
+  }
+  if (!Array.isArray(answers) || answers.length !== past.length + 1) return bought.holds.length;
+  const listed = answers[0];
+  const kept = Array.isArray(listed) && listed.every((id) => typeof id === "string") ? new Set<string>(listed) : null;
+  const seen: string[] = [];
+  past.forEach((hold, i) => {
+    const id = spentId(hold.session);
+    const mark = answers[i + 1];
+    if (kept?.has(id)) n += 1;
+    else if (mark === 0 && at < hold.until + MARK_SURE_SECONDS) return;
+    else {
+      n += 1;
+      if (mark === 1) seen.push(id);
+    }
+  });
+  // Written down once, while the mark is still there; never more than the package holds.
+  const room = kept ? bought.total - kept.size : 0;
+  if (seen.length && room > 0) {
+    const ttl = keep(bought);
+    await redisPipeline([["SADD", usedKey(bought.token), ...seen.slice(0, room)], ...(ttl.length ? [["EXPIRE", usedKey(bought.token), ttl[1]]] : [])]).catch((error) =>
+      console.error("writing down a package's spent sessions failed; tried again on the next reading", error),
+    );
   }
   return n;
 }

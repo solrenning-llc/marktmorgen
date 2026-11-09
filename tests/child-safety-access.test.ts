@@ -14,6 +14,7 @@
  * shared card's drawer is a stand-in that keeps what it would draw
  * (tests/child-safety-access-og.ts).
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { renderToReadableStream } from "react-dom/server";
 import CoursePage from "@/app/[handle]/course/[product]/page";
@@ -218,9 +219,10 @@ async function main(): Promise<void> {
   is("the team still downloads a product that is not held", (await download("editor", freeId))[0] !== 403, true);
 
   part("Nothing of a held product goes to an AI provider, even for the owner");
-  is("a page drafted from its PDF is refused before the file is read", await ai({ kind: "page", product: pdfId, readFile: true }), [409, "held_for_report"]);
-  is("a quiz drafted from a held course's lesson is refused", await ai({ kind: "quiz", id: courseId, lessonId: "lesson000002", count: 5 }), [409, "held_for_report"]);
-  is("a product that is not held gets past it (it has no readable file here)", (await ai({ kind: "page", product: freeId, readFile: true }))[1] !== "held_for_report", true);
+  is("a page drafted from its PDF is refused before the file is read", await ai({ kind: "page", product: pdfId, readFile: true }), [409, "on_hold"]);
+  is("a quiz drafted from a held course's lesson is refused", await ai({ kind: "quiz", id: courseId, lessonId: "lesson000002", count: 5 }), [409, "on_hold"]);
+  is("a product that is not held gets past it (it has no readable file here)", (await ai({ kind: "page", product: freeId, readFile: true }))[1] !== "on_hold", true);
+  is("the writing box says it is on hold, not that the allowance is unknown", readFileSync("components/ai-assist.tsx", "utf8").includes('on_hold: "This product is on hold'), true);
 
   part("A hold whose taking off the store did not go through: still read by nobody but the owner");
   if (!(await setProductHidden(OWNER, pdfId, false)).ok) throw new Error("not shown again");

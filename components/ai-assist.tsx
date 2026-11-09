@@ -31,6 +31,8 @@ const MESSAGES: Record<string, string> = {
   off: "The writing help is not available right now.",
   forbidden: "Your role on this store cannot do this.",
   file: "The product's PDF could not be read. Draft the page without it, or upload the PDF again.",
+  // A product kept on hold (lib/child-safety.ts heldRefusal): refused before anything is sent, said without naming why.
+  on_hold: "This product is on hold, so the writing help cannot be used on it for now. Write to support@marktmorgen.com if you have a question.",
 };
 
 /**

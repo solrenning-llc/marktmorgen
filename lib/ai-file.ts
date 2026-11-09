@@ -18,7 +18,7 @@
  * show (a draft), and stays a draft until the creator publishes it themselves.
  */
 import { randomBytes } from "node:crypto";
-import { type AiResult, type AiStepsRun, type AiStopped, type Unrun, askModel, counted, countedRun, jsonIn, stopAsked, writingModel, writingRules } from "@/lib/ai";
+import { type AiDraftedGiven, type AiResult, type AiStepsRun, type AiStopped, type Unrun, askModel, counted, countedRun, jsonIn, stopAsked, writingModel, writingRules } from "@/lib/ai";
 import { aiDispatchCount } from "@/lib/ai-call-budget";
 import {
   AI_FILE_KEEP_SECONDS,
@@ -159,7 +159,7 @@ export async function writeFileSections(
   input: { productTitle: string; outline: FileOutline; notes: string },
   steps: AiStepsRun,
   now = Date.now(),
-): Promise<AiResult<FileDraft> | AiStopped> {
+): Promise<AiResult<FileDraft> | AiStopped | AiDraftedGiven<FileDraft>> {
   if (!AI_RUN_ID.test(steps.run)) return { ok: false, reason: "off" };
   const requests = sectionRequests(store, input);
   if (!requests) return { ok: false, reason: "notes" };

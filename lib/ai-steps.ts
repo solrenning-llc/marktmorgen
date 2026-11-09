@@ -59,11 +59,16 @@ export const AI_STEP_EXTRA_BYTES = 1_536;
 
 export type AiStepLine =
   | { step: AiStepId; state: AiStepState }
-  | { done: true; ok: true; value: unknown; left: number }
-  // A step that never reached the model, given back: "stopped" when the creator asked, "failed" otherwise;
+  // `returned`: the jobs of a step that never reached the model, given back while the draft still came (null when not confirmed).
+  | { done: true; ok: true; value: unknown; left: number; returned?: number | null }
+  // A step that never reached the model, given back: "stopped" when the creator asked, "empty" when the PDF gave nothing to write from, "failed" otherwise;
   // with `value`, what the steps that ran wrote (a file's parts already written, 758 [STN5] unit 3).
-  | { done: true; ok: false; error: "stopped" | "failed"; returned: number | null; left: number | null; value?: unknown }
+  | { done: true; ok: false; error: AiGivenBack; returned: number | null; left: number | null; value?: unknown }
   | { done: true; ok: false; error: string };
+
+/** Why a job told in steps ended with a step's jobs given back. */
+export type AiGivenBack = "stopped" | "empty" | "failed";
+const GIVEN_BACK: readonly unknown[] = ["stopped", "empty", "failed"] satisfies AiGivenBack[];
 
 const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
@@ -90,16 +95,20 @@ export function readStepLine(text: string): AiStepLine | "pad" | null {
   if (keys === "done,left,ok,value" && line.ok === true && count(line.left) && line.value !== undefined && line.value !== null) {
     return { done: true, ok: true, value: line.value, left: line.left as number };
   }
+  if (keys === "done,left,ok,returned,value" && line.ok === true && count(line.left) && line.value !== undefined && line.value !== null) {
+    const returned = line.returned === null ? null : count(line.returned) && (line.returned as number) > 0 ? (line.returned as number) : undefined;
+    return returned === undefined ? null : { done: true, ok: true, value: line.value, left: line.left as number, returned };
+  }
   const partial = keys === "done,error,left,ok,returned,value";
-  if ((keys === "done,error,left,ok,returned" || partial) && line.ok === false && (line.error === "stopped" || line.error === "failed")) {
+  if ((keys === "done,error,left,ok,returned" || partial) && line.ok === false && GIVEN_BACK.includes(line.error)) {
     const known = count(line.returned) && (line.returned as number) > 0 && count(line.left);
     const unknown = line.returned === null && line.left === null;
     if (partial && (line.value === undefined || line.value === null)) return null;
     if (!known && !unknown) return null;
-    const read: Extract<AiStepLine, { returned: number | null }> = { done: true, ok: false, error: line.error as "stopped" | "failed", returned: line.returned as number | null, left: line.left as number | null };
+    const read: Extract<AiStepLine, { returned: number | null }> = { done: true, ok: false, error: line.error as AiGivenBack, returned: line.returned as number | null, left: line.left as number | null };
     return partial ? { ...read, value: line.value } : read;
   }
-  if (keys === "done,error,ok" && line.ok === false && typeof line.error === "string" && line.error && line.error !== "stopped") {
+  if (keys === "done,error,ok" && line.ok === false && typeof line.error === "string" && line.error && line.error !== "stopped" && line.error !== "empty") {
     return { done: true, ok: false, error: line.error };
   }
   return null;

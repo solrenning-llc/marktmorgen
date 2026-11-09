@@ -17,8 +17,13 @@ import { type AiStep, type AiStepId, type AiStepLine, readStepLine } from "@/lib
  * Accessibility (AX274): only a change of step and the result are announced,
  * in a polite region; the clock is outside it, so a screen reader is not
  * talked over every second. Stop is a native button at least 44 by 44
- * pixels; once pressed it stays where it is and says it is stopping. Nothing
- * moves on the screen.
+ * pixels; once pressed it stays where it is and says it is stopping, and
+ * once writing has started it stays too, unavailable and saying why, so
+ * focus on it is never dropped mid-run. Nothing moves on the screen.
+ *
+ * A draft that comes back after the creator pressed Stop (writing had
+ * already started, so it finished and counts) never replaces the page on
+ * its own: the box says so and asks "Use this draft" or "Keep my page".
  */
 
 export type StepView = "waiting" | "running" | "done" | "skipped" | "unfinished";
@@ -57,6 +62,7 @@ export function AiStepsProgress({
   announce,
   elapsed,
   canStop,
+  stopShown = false,
   stopping,
   onStop,
   stopRef,
@@ -65,7 +71,10 @@ export function AiStepsProgress({
   states: Partial<Record<AiStepId, StepView>>;
   announce: string;
   elapsed: number;
+  /** Whether a step is left that a stop would leave uncharged. */
   canStop: boolean;
+  /** Whether Stop stays drawn, unavailable, once writing has started, so focus on it is not dropped. */
+  stopShown?: boolean;
   stopping: boolean;
   onStop: () => void;
   stopRef?: React.Ref<HTMLButtonElement>;
@@ -83,22 +92,22 @@ export function AiStepsProgress({
       </ol>
       <p className="text-sm text-ink" role="status" aria-live="polite">{announce}</p>
       <p className="text-xs text-ink-soft">{`Elapsed: ${elapsedWords(elapsed)}`}</p>
-      {canStop ? (
+      {canStop || stopShown ? (
         <div className="space-y-1">
           <button
             ref={stopRef}
             type="button"
             className="btn btn-secondary btn-sm inline-flex min-h-11 min-w-11 items-center justify-center"
-            aria-disabled={stopping}
+            aria-disabled={stopping || !canStop}
             aria-describedby={noteId}
             onClick={() => {
-              if (!stopping) onStop();
+              if (!stopping && canStop) onStop();
             }}
           >
-            {stopping ? "Stopping after this step…" : "Stop"}
+            {stopping && canStop ? "Stopping after this step…" : "Stop"}
           </button>
           <p id={noteId} className="text-xs text-ink-soft">
-            The step already running still counts. Steps not started are not charged.
+            {canStop ? "The step already running still counts. Steps not started are not charged." : "Writing has started; it can no longer be stopped."}
           </p>
         </div>
       ) : null}
@@ -146,7 +155,10 @@ export function AiStepsAssist<T>({
   const [announce, setAnnounce] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [stopping, setStopping] = useState(false);
+  // A draft that came back after Stop was pressed: kept here until the creator says whether to use it.
+  const [late, setLate] = useState<{ value: T } | null>(null);
   const runRef = useRef("");
+  const stopRequested = useRef(false);
   const focusResult = useRef(false);
   const startedAt = useRef(0);
   const stopRef = useRef<HTMLButtonElement>(null);
@@ -170,6 +182,8 @@ export function AiStepsAssist<T>({
 
   const showSteps = busy || Object.keys(states).length > 0;
   const canStop = busy && steps.length > 1 && steps.some((s) => (states[s.id] ?? "waiting") === "waiting") && Object.keys(states).length > 0;
+  // Once the job has started, Stop stays drawn until it ends, unavailable when nothing is left to stop.
+  const stopShown = busy && steps.length > 1 && Object.keys(states).length > 0;
 
   function finish(message: { error?: string; said?: string }) {
     focusResult.current = stopRef.current !== null && document.activeElement === stopRef.current;
@@ -177,30 +191,55 @@ export function AiStepsAssist<T>({
     setSaid(message.said ?? null);
   }
 
+  // Any step not done when the job ended was not run and not charged.
+  function settleSteps() {
+    setStates((now) => Object.fromEntries(steps.map((s) => [s.id, now[s.id] === "done" ? "done" : "skipped"])) as Partial<Record<AiStepId, StepView>>);
+  }
+
   function ended(line: AiStepLine) {
     if (!("done" in line)) return;
     if (line.ok) {
+      settleSteps();
+      setAnnounce("");
+      const unsure = line.returned === null;
       setLeft(line.left);
-      setAllowanceKnown(true);
+      setAllowanceKnown(!unsure);
       setReadOnce(true);
       if (validateResult && !validateResult(line.value)) {
         finish({ error: MESSAGES.unconfirmed });
         return;
       }
+      const given =
+        line.returned === undefined
+          ? ""
+          : line.returned === null
+            ? " A step that did not run is not charged; we could not confirm the writing jobs given back: reload to check your allowance."
+            : ` A step that did not run is not charged: ${plural(line.returned)} given back, ${line.left} left this month.`;
+      if (stopRequested.current) {
+        // The creator asked to stop, but writing had already started: the draft is paid for, so it is kept, never put in the page unasked.
+        setLate({ value: line.value as T });
+        finish({
+          said: `Writing had already started when you pressed Stop, so it finished and counts toward this month.${given} Your page is unchanged. Use this draft, or keep your page as it is?`,
+        });
+        return;
+      }
       onResult(line.value as T);
-      setAnnounce("");
-      finish({ said: done });
+      finish({ said: `${done}${given}` });
       return;
     }
     if ("returned" in line) {
-      // A step that never reached the model, given back: any step not done was not run and not charged.
-      setStates((now) => Object.fromEntries(steps.map((s) => [s.id, now[s.id] === "done" ? "done" : "skipped"])) as Partial<Record<AiStepId, StepView>>);
+      // A step that never reached the model, given back.
+      settleSteps();
       setAnnounce("");
       const stopped = line.error === "stopped";
+      const empty = line.error === "empty";
+      const opening = empty
+        ? "We found nothing to write from in your PDF's first pages, so the page was not written. Nothing was changed here. Add a few words about the product above, then try again."
+        : "The writing help could not finish just now. Nothing was changed here.";
       if (line.returned === null || line.left === null) {
         setAllowanceKnown(false);
-        const words = "Nothing was changed here. We could not confirm the writing jobs given back: reload to check your allowance.";
-        finish(stopped ? { said: `Stopped. ${words}` } : { error: `The writing help could not finish just now. ${words}` });
+        const words = "We could not confirm the writing jobs given back: reload to check your allowance.";
+        finish(stopped ? { said: `Stopped. Nothing was changed here. ${words}` } : { error: `${opening} ${words}` });
         return;
       }
       setLeft(line.left);
@@ -210,7 +249,9 @@ export function AiStepsAssist<T>({
       finish(
         stopped
           ? { said: `Stopped. Nothing was changed here. The step that had started still counts; ${back}` }
-          : { error: `The writing help could not finish just now. Nothing was changed here. A step that ran still counts; a step that did not run is not charged: ${back} Try again in a moment.` },
+          : empty
+            ? { error: `${opening} The reading still counts; ${back}` }
+            : { error: `${opening} A step that ran still counts; a step that did not run is not charged: ${back} Try again in a moment.` },
       );
       return;
     }
@@ -225,7 +266,20 @@ export function AiStepsAssist<T>({
     const index = steps.findIndex((s) => s.id === line.step);
     if (index < 0) return;
     setStates((now) => ({ ...now, [line.step]: line.state === "started" ? "running" : "done" }));
-    if (line.state === "started") setAnnounce(`Step ${index + 1} of ${steps.length}: ${steps[index].label}`);
+    if (line.state !== "started") return;
+    const step = `Step ${index + 1} of ${steps.length}: ${steps[index].label}`;
+    // A step that starts after Stop was pressed: the stop came too late for it, and that is said at once.
+    setAnnounce(stopRequested.current ? `Writing had already started when you pressed Stop, so it will finish and count toward this month. ${step}` : step);
+  }
+
+  /** The creator's answer about a draft that came back after Stop. */
+  function choose(use: boolean) {
+    if (!late) return;
+    focusResult.current = true;
+    if (use) onResult(late.value);
+    setLate(null);
+    setError(null);
+    setSaid(use ? done : "Your page is as it was. The draft was not used; it still counts toward this month.");
   }
 
   async function run() {
@@ -240,6 +294,8 @@ export function AiStepsAssist<T>({
     setElapsed(0);
     setStates({});
     setStopping(false);
+    setLate(null);
+    stopRequested.current = false;
     setAnnounce("");
     setError(null);
     setSaid(null);
@@ -290,6 +346,7 @@ export function AiStepsAssist<T>({
 
   async function stop() {
     if (stopping || !busy) return;
+    stopRequested.current = true;
     setStopping(true);
     setAnnounce("Stopping after this step.");
     try {
@@ -303,6 +360,7 @@ export function AiStepsAssist<T>({
     } catch {
       // Said below.
     }
+    stopRequested.current = false;
     setStopping(false);
     setAnnounce("We could not stop it just now. The draft keeps going; you can press Stop again.");
   }
@@ -329,7 +387,17 @@ export function AiStepsAssist<T>({
           </span>
         </div>
         {showSteps ? (
-          <AiStepsProgress steps={steps} states={states} announce={announce} elapsed={elapsed} canStop={canStop} stopping={stopping} onStop={() => void stop()} stopRef={stopRef} />
+          <AiStepsProgress
+            steps={steps}
+            states={states}
+            announce={announce}
+            elapsed={elapsed}
+            canStop={canStop}
+            stopShown={stopShown}
+            stopping={stopping}
+            onStop={() => void stop()}
+            stopRef={stopRef}
+          />
         ) : null}
         {error ? (
           <p ref={resultRef} tabIndex={-1} className="notice notice-error text-sm" role="alert">
@@ -339,6 +407,16 @@ export function AiStepsAssist<T>({
           <p ref={resultRef} tabIndex={-1} className="text-sm font-semibold text-ink" role="status">
             {said}
           </p>
+        ) : null}
+        {late ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="btn btn-primary btn-sm inline-flex min-h-11 items-center justify-center" onClick={() => choose(true)}>
+              Use this draft
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm inline-flex min-h-11 items-center justify-center" onClick={() => choose(false)}>
+              Keep my page
+            </button>
+          </div>
         ) : null}
         <p className="text-xs text-ink-soft">
           It uses only your own words, here and in your store, never invents reviews, numbers, results or deadlines, and saves nothing until you

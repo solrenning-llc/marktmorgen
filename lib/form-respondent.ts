@@ -8,10 +8,11 @@
  * referred you?" with Tess's address, Tess's copy carried Olly's answers and
  * deleting Tess deleted Olly's response.
  *
- * Who sent a response: the address in the form's first email question that
- * holds one, in the form's order, as readAnswers keeps `email` (lib/forms.ts)
- * for the list offer. An address in any other question does not make the
- * response that person's.
+ * Who sent a response: the address its email questions hold, when every one
+ * of them that holds an address holds the same one. When two hold different
+ * addresses ("Invite a friend (email)" before "Your email"), who sent it
+ * cannot be told, and the response is "unknown" to both. An address in any
+ * other question never makes the response that person's.
  *
  * For one person, a response is:
  *
@@ -22,8 +23,8 @@
  *              the rest of the sender's response.
  *   "unknown"  no email question of the form as it is now holds an address
  *              (a form without one, one left empty, one removed or changed
- *              since) and some answers are this person's address: who sent it
- *              cannot be told. The copy gives those answers alone, so nobody
+ *              since), or two hold different ones, and some answers are this
+ *              person's address: who sent it cannot be told. The copy gives those answers alone, so nobody
  *              else's words go out on a guess; the erasure deletes the whole
  *              response, because taking it for somebody else's would leave
  *              this person's other answers behind if it is theirs.
@@ -34,7 +35,11 @@
  * else. A form keeps what is typed in an email question already lowered
  * (readAnswers); an address typed with capitals outside A to Z in another
  * question ("ÖLAF@...") is not found by either side, the same for both.
- * Lengths are counted in UTF-8 bytes, as Lua counts them.
+ * Lengths are counted as lib/forms.ts counts them when an address is typed
+ * (its EMAIL pattern and the slice to 254): in JavaScript's units, one for a
+ * character up to U+FFFF and two for one above it. The Lua counts the same
+ * from the UTF-8 bytes: one for each byte that does not continue a character,
+ * and one more for each that starts a four-byte one.
  */
 import type { Answers, FormDef } from "@/lib/forms";
 
@@ -53,42 +58,45 @@ export function personAddress(email: string): string {
   return foldAddress(email.trim().toLowerCase());
 }
 
-const bytes = (text: string) => new TextEncoder().encode(text).length;
-
 /**
  * Whether a folded text is an address, the rule lib/forms.ts checks when it is
- * typed (one "@", 1 to 64 before it, then 1 to 255, a dot and 2 or more), in
- * UTF-8 bytes, at most 254 in all.
+ * typed (one "@", 1 to 64 before it, then 1 to 255, a dot and 2 or more), at
+ * most 254 in all, every length in JavaScript's units as the form counts it.
  */
 export function isAddress(text: string): boolean {
-  if (bytes(text) > 254 || SPACE.test(text)) return false;
+  if (text.length > 254 || SPACE.test(text)) return false;
   const at = text.indexOf("@");
   if (at < 0 || text.indexOf("@", at + 1) >= 0) return false;
-  const user = bytes(text.slice(0, at));
-  if (user < 1 || user > 64) return false;
+  if (at < 1 || at > 64) return false;
   const domain = text.slice(at + 1);
   for (let dot = domain.indexOf("."); dot >= 0; dot = domain.indexOf(".", dot + 1)) {
-    const before = bytes(domain.slice(0, dot));
-    if (before > 255) return false;
-    if (before >= 1 && bytes(domain.slice(dot + 1)) >= 2) return true;
+    if (dot > 255) return false;
+    if (dot >= 1 && domain.length - dot - 1 >= 2) return true;
   }
   return false;
 }
 
-/** The form's email questions, in its order: the first that holds an address tells who sent a response. */
+/** The form's email questions, in its order: the address they hold tells who sent a response. */
 export function emailQuestionIds(form: Pick<FormDef, "fields">): string[] {
   return form.fields.filter((field) => field.type === "email").map((field) => field.id);
 }
 
-/** Who sent a response (folded), or null when none of these email questions holds an address. */
+/**
+ * Who sent a response (folded): the address its email questions hold. Null
+ * when none of them holds one, or when two hold different ones, since the
+ * first may be a friend's ("Invite a friend (email)" before "Your email").
+ */
 export function respondentOf(emailIds: readonly string[], answers: Answers): string | null {
+  let sender: string | null = null;
   for (const id of emailIds) {
     const given = Object.hasOwn(answers, id) ? answers[id] : undefined;
     if (typeof given !== "string") continue;
     const address = foldAddress(given);
-    if (isAddress(address)) return address;
+    if (!isAddress(address)) continue;
+    if (sender !== null && sender !== address) return null;
+    sender = address;
   }
-  return null;
+  return sender;
 }
 
 /** The questions (by id, any kept answer, a removed question's included) whose answer is this address. */

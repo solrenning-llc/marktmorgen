@@ -195,6 +195,10 @@ jobs:
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_contact_erasure_redis.py
+      - name: Actual Redis form response erasure checks (Lua against lib/form-respondent.ts)
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_form_forget_redis.py
       - name: Actual Redis closed store deletion checks
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"

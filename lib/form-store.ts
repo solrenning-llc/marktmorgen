@@ -172,9 +172,10 @@ export async function responseCounts(statsId: string | null, ids: string[]): Pro
  * line for line: ARGV[1] is the person's address (personAddress), ARGV[1 + k]
  * the ids of form k's email questions in its order (emailQuestionIds), as JSON.
  *
- *   - a response they sent (its first email question holding an address holds
- *     theirs), or whose sender is not known (none holds one) and one of whose
- *     answers is their address, is deleted whole;
+ *   - a response they sent (every email question holding an address holds
+ *     theirs), or whose sender is not known (none holds one, or two hold
+ *     different ones) and one of whose answers is their address, is deleted
+ *     whole;
  *   - a response somebody else sent with their address in some answers keeps
  *     the sender's answers, written back in its place without those;
  *   - a response that does not read as one (lib/form-store.ts parseResponse)
@@ -189,18 +190,27 @@ export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v3
 local function fold(text)
   return string.lower(string.match(text, "^%s*(.-)%s*$"))
 end
+-- Lengths as lib/forms.ts counts them (JavaScript's units): a byte that does not continue a
+-- character counts one, and one that starts a four-byte character one more.
+local function units(text)
+  local _, n = string.gsub(text, "[^\\128-\\191]", "")
+  local _, wide = string.gsub(text, "[\\240-\\247]", "")
+  return n + wide
+end
 local function address(text)
   if type(text) ~= "string" then return nil end
   local t = fold(text)
-  if #t > 254 or string.find(t, "%s") then return nil end
+  if units(t) > 254 or string.find(t, "%s") then return nil end
   local at = string.find(t, "@", 1, true)
   if not at or string.find(t, "@", at + 1, true) then return nil end
-  if at - 1 < 1 or at - 1 > 64 then return nil end
+  local user = units(string.sub(t, 1, at - 1))
+  if user < 1 or user > 64 then return nil end
   local domain = string.sub(t, at + 1)
   local dot = string.find(domain, ".", 1, true)
   while dot do
-    if dot - 1 > 255 then return nil end
-    if dot - 1 >= 1 and #domain - dot >= 2 then return t end
+    local before = units(string.sub(domain, 1, dot - 1))
+    if before > 255 then return nil end
+    if before >= 1 and units(string.sub(domain, dot + 1)) >= 2 then return t end
     dot = string.find(domain, ".", dot + 1, true)
   end
   return nil
@@ -220,8 +230,12 @@ for k = 1, #KEYS do
       end
       local sender = nil
       for _, id in ipairs(questions) do
-        sender = address(value.answers[id])
-        if sender then break end
+        local found = address(value.answers[id])
+        if found and sender and found ~= sender then
+          sender = nil
+          break
+        end
+        sender = found or sender
       end
       if sender == ARGV[1] or (sender == nil and #named > 0) then
         whole = true

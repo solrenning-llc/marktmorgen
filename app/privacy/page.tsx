@@ -1175,8 +1175,13 @@ export default function PrivacyPage() {
           shown. For a scored quiz we also keep the total and each category&apos;s
           score, worked out from the points the creator gave each answer; nothing
           else goes into it. The newest 2,000 responses of each form are kept, for
-          the creator, and are deleted with the form, or when the person is deleted
-          from the store, found by the email address in their answers. The result
+          the creator, and are deleted with the form. Who sent a response is the
+          email address in the form&apos;s email questions. When a person is
+          deleted from the store, every response they sent is deleted. In a
+          response someone else sent, an answer that is only their email address
+          is taken out, and the rest is kept. A response that gives their email
+          address but whose sender cannot be told (no email question holds an
+          address, or two hold different ones) is deleted whole. The result
           page&apos;s web address names the result and the score, never the
           person&apos;s answers or email address. The creator is the controller of
           these answers.

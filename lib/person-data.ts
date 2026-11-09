@@ -86,7 +86,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/payment-request-store.ts", how: "erased", what: "Every payment request you sent them: their name and address, what it asked for and what became of it. An open one is withdrawn, so its link stops working and no reminder goes. What they paid stays on your Stripe account" },
   { file: "lib/buyer-profile.ts", how: "erased", what: "Your team's notes about them" },
   { file: "lib/buyer-profile.ts", how: "expires", days: 1, what: "A search for their page in the studio works for an hour" },
-  { file: "lib/form-store.ts", how: "erased", what: "Every answer they gave to your forms, with each quiz result and score kept with it, and their address in any answer someone else gave" },
+  { file: "lib/form-store.ts", how: "erased", what: "Every response they sent to your forms, with each quiz result and score kept with it. In a response someone else sent, an answer that is only their address is taken out and the rest is kept. A response that gives their address but whose sender cannot be told (no email question holds an address, or two hold different ones) is deleted whole" },
   { file: "lib/waitlist.ts", how: "erased", what: "Their place on every waitlist, and in any launch email still going out" },
   { file: "lib/affiliate-bond.ts", how: "erased", what: "Which affiliate they belong to" },
   { file: "lib/affiliate-leads.ts", how: "erased", what: "Their address on a lead an affiliate was credited for (a sign-up, a free product claimed or a call booked); the lead stays without it, as the affiliate's money record" },

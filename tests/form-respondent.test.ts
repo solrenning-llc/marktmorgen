@@ -1,11 +1,12 @@
 /**
  * Whose a form response is, for the copy of a person's data (lib/person-copy.ts) and for their erasure
- * (lib/form-store.ts, forgetFormsPerson): the address in the form's first email question that holds one
- * (lib/form-respondent.ts), the same rule both read. Claude 6's audit R19, MEDIUM 1: Olly answers "Who referred
+ * (lib/form-store.ts, forgetFormsPerson): the address the form's email questions hold, when they hold one and the
+ * same one (lib/form-respondent.ts), the same rule both read. Claude 6's audit R19, MEDIUM 1: Olly answers "Who referred
  * you?" with Tess's address; Tess's copy must not carry Olly's answers, and deleting Tess must not delete Olly's
  * response. Tess's address is hers, so her copy shows that answer alone and her erasure takes that answer out.
  *
- * A response no email question of the form tells the sender of (a form without one, one left empty) is "unknown":
+ * A response no email question of the form tells the sender of (a form without one, one left empty, two holding
+ * different addresses) is "unknown":
  * the copy shows only the answers that are the address, and the erasure deletes the whole response, because
  * taking it for somebody else's would leave the person's other answers behind if it is theirs.
  */
@@ -124,8 +125,12 @@ async function main(): Promise<void> {
   part("The deal drafted from a response names the same sender");
   const twoEmails = parseForm({ id: "twomailfrm", name: "Two emails", fields: [{ id: "email1", type: "email", label: "Friend's email", required: false }, { id: "email2", type: "email", label: "Your email", required: true }, { id: "refby1", type: "short", label: "Note", required: false }], offerList: false })!;
   const sender = (answers: FormResponse["answers"]) => formDealDraft(twoEmails, response(1, answers)).email;
-  is("the first email question that holds an address", sender({ email1: "Ana@Example.com", email2: OLLY }), "ana@example.com");
-  is("an empty or broken first one is passed over", [sender({ email1: "", email2: OLLY }), sender({ email1: "not an address", email2: OLLY })], [OLLY, OLLY]);
+  // Rule 23 (Claude 5's pre-review of this branch, HIGH): this used to take the first email question that holds an
+  // address, here a friend's, for the sender. Two email questions with different addresses cannot tell who sent it,
+  // so the draft names nobody (the copy and the erasure read it as "unknown"); the same address in both still tells.
+  is("two email questions with different addresses: nobody", sender({ email1: "Ana@Example.com", email2: OLLY }), "");
+  is("the same address in both: that one", sender({ email1: "Olly@Example.com ", email2: OLLY }), OLLY);
+  is("an empty or broken one is passed over", [sender({ email1: "", email2: OLLY }), sender({ email1: "not an address", email2: OLLY })], [OLLY, OLLY]);
   is("an address in another question never is", sender({ refby1: TESS }), "");
   is("the same as the copy and the erasure read", respondentOf(emailQuestionIds(twoEmails), { email1: "not an address", email2: OLLY, refby1: TESS }), OLLY);
 

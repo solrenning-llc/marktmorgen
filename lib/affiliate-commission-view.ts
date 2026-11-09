@@ -11,6 +11,14 @@ export type AffiliateCommissionLine = {
  * no way in the studio to set a commission by hand, so nothing else is offered.
  */
 export const HELD_PARTLY_REFUNDED = "PayPal refunded part of this payment. The amount refunded is not known here, so no commission is paid on it. It stays held.";
+/**
+ * What a commission line shows as its amount: the word for held (`held`, in the reader's language) for a sale held
+ * because PayPal refunded part of it (lib/affiliates.ts, holdLine), never an amount it does not earn; otherwise its
+ * commission. The creator's list and the affiliate's page both draw it from here.
+ */
+export function commissionShown(line: { status: string; commission: number; currency: string }, money: (cents: number, currency: string) => string, held: string): string {
+  return line.status === "held" ? held : money(line.commission, line.currency);
+}
 /** Displayed commission records, never unique purchases; do not combine currencies. */
 export function affiliateCreditGroups(lines: readonly AffiliateCommissionLine[]) {
   const groups = new Map<string, { how: Credit; currency: string; records: number; commission: number | null }>();

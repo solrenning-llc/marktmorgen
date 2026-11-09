@@ -1,0 +1,16 @@
+{
+  "@/lib/redis": "yearly-ask-incomplete-world.ts",
+  "@/lib/order-data": "yearly-ask-incomplete-world.ts",
+  "@/lib/stripe-account": "yearly-ask-incomplete-world.ts",
+  "@/lib/email": "yearly-ask-incomplete-world.ts",
+  "@/lib/store": "yearly-ask-incomplete-world.ts",
+  "@/lib/membership-manage": "yearly-ask-incomplete-world.ts",
+  "@/lib/mail": "yearly-ask-incomplete-world.ts",
+  "@/lib/contacts": "yearly-ask-incomplete-world.ts",
+  "@/lib/purchase-email": "yearly-ask-incomplete-world.ts",
+  "@/lib/catalog": "yearly-ask-incomplete-world.ts",
+  "@/lib/store-checkout": "yearly-ask-incomplete-world.ts",
+  "@/lib/auth": "yearly-ask-incomplete-world.ts",
+  "@/lib/member-health": "yearly-ask-incomplete-world.ts",
+  "@/lib/yearly-switch": "yearly-ask-incomplete-world.ts"
+}

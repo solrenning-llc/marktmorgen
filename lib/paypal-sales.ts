@@ -4,7 +4,7 @@
  * through Marktmorgen.
  *
  *   nl:ppsell:o:<order>      an order opened: which store, which product, the price asked (3 days)
- *   nl:ppsell:paid:<order>   an order paid: the capture, the buyer's address (kept 400 days)
+ *   nl:ppsell:paid:<order>   an order paid: the capture, the account that took it, the buyer's address (kept 400 days)
  *   nl:ppsell:watch:<stats>  paid orders inside PayPal's refund window, scored by when to ask next
  *   nl:ppsell:pending:<stats> orders whose payment PayPal holds as pending, until it completes or fails
  *   nl:ppsell:own:<stats>:<address hash>:<product>  the paid orders behind one address's product
@@ -444,6 +444,12 @@ export type Paid = {
   via?: { aff: string; rate: number };
   off?: number;
   sale?: number;
+  /**
+   * Added 9 November 2026; absent on orders paid before: the creator's PayPal account that took the payment (the
+   * order's payee). The refund watch asks PayPal about the capture as this account, never as the one connected today,
+   * which PayPal does not show another account's capture (Claude 6's MEDIUM 3 in audit 18).
+   */
+  merchant?: string;
 };
 export type CaptureResult = { ok: true; paid: Paid; fresh: boolean } | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" };
 
@@ -510,7 +516,9 @@ export async function readPaidExact(order: string): Promise<Paid | null | "unkno
     !r.store ||
     !Number.isSafeInteger(r.cents) ||
     (r.cents as number) < 0 ||
-    !matches("currency", /^[A-Za-z]{3}$/)
+    !matches("currency", /^[A-Za-z]{3}$/) ||
+    // The account that took it, when the record has one (older records do not): an account id, or unknown.
+    (r.merchant !== undefined && !matches("merchant", MERCHANT_ID))
   ) {
     return "unknown";
   }
@@ -529,7 +537,11 @@ export async function paypalOrdersOf(statsId: string | null, productIds: string[
   const out: Paid[] = [];
   for (const order of orders) {
     const paid = await readPaid(order);
-    if (paid) out.push(paid);
+    if (!paid) continue;
+    // The creator's PayPal account is the creator's, not this person's: it stays out of their copy.
+    const mine: Partial<Paid> = { ...paid };
+    delete mine.merchant;
+    out.push(mine as Paid);
   }
   return out;
 }
@@ -592,6 +604,8 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
     ...(opened.meta ? { meta: opened.meta } : {}),
     ...(opened.via ? { via: opened.via } : {}),
     ...(opened.off ? { off: opened.off, sale: opened.sale } : {}),
+    // The account the order was opened for and the capture paid into (matches checks the payee against it).
+    ...(MERCHANT_ID.test(opened.m) ? { merchant: opened.m } : {}),
   };
   const [fresh] = await redisPipeline([["SET", paidKey(order), JSON.stringify(paid), "NX", "EX", PAID_KEPT_SECONDS]]);
   if (fresh === null) return { paid: (await readPaid(order)) ?? paid, fresh: false };
@@ -718,6 +732,9 @@ export async function deliverPayPal(input: {
   await countOrder(store, `paypal:${paid.order}`, paid.cents);
 }
 
+/** How long after PayPal's refund window a capture PayPal did not answer about is still asked about, once a day. */
+const UNANSWERED_GRACE_SECONDS = 30 * 86_400;
+
 /**
  * When a paid order is next asked about: often while refunds are likely, then
  * less and less, until PayPal's refund window closes.
@@ -807,19 +824,32 @@ export async function watchPayPal(
       await redisPipeline([["ZREM", watchKey(statsId), order]]);
       continue;
     }
+    // PayPal's answer about the capture is not known (a failed read, or no status): never taken for "not refunded"
+    // nor for "refunded". It is asked again on the watch's own schedule (nextLook: hourly in the first week, then
+    // less), never more often, moved back so it cannot hold the place of the orders behind it. Once PayPal's refund
+    // window has closed, a last look that failed is asked again once a day for UNANSWERED_GRACE_SECONDS, so a passing
+    // fault there does not miss a refund made inside the window; after that it leaves the watch, its purchase kept and
+    // never marked refunded, so a capture PayPal will never answer about (an account that withdrew its grant) is not
+    // asked about for ever (Claude 6's MEDIUM 3 in audit 18): at most the schedule's looks and thirty more an order.
+    const askLater = async (why: string): Promise<void> => {
+      const next = nextLook(paid.at, now) ?? (now - paid.at < WATCH_SECONDS + UNANSWERED_GRACE_SECONDS ? now + 86_400 : null);
+      if (next === null) console.error("PayPal never answered about a capture inside its refund window; no longer watched, purchase kept, refund unknown", statsId, order, why);
+      await redisPipeline([next === null ? ["ZREM", watchKey(statsId), order] : ["ZADD", watchKey(statsId), String(next), order]]).catch(() => undefined);
+    };
     let status = "";
     try {
-      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: store.paypalSeller.merchant });
-      // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
-      // "not refunded", and moved back so it cannot hold the place of the orders behind it.
+      // Asked as the account that took the payment (Paid.merchant), never as the one connected today: after a move
+      // from account A to B, PayPal does not show B a capture A took. An order paid before the account was kept has
+      // only today's account to ask as.
+      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: paid.merchant ?? store.paypalSeller.merchant });
       if (typeof capture.status !== "string" || !capture.status) {
-        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+        await askLater("no status");
         continue;
       }
       status = capture.status;
     } catch (error) {
       console.error("reading a PayPal capture failed", error);
-      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+      await askLater(error instanceof PayPalError ? error.code : "error");
       continue;
     }
     if (status !== "REFUNDED") {

@@ -86,7 +86,7 @@ export function AiStepsProgress({
           <button
             ref={stopRef}
             type="button"
-            className="btn btn-secondary btn-sm min-h-11 min-w-11"
+            className="btn btn-secondary btn-sm inline-flex min-h-11 min-w-11 items-center justify-center"
             aria-disabled={stopping}
             aria-describedby={noteId}
             onClick={() => {

@@ -1281,6 +1281,7 @@
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",
     "components/ai-posts.tsx",
+    "components/ai-steps-assist.tsx",
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",

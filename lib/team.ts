@@ -562,8 +562,14 @@ export async function peekInvite(token: string): Promise<{ store: Store; email: 
   // The store read exactly (Claude 6 on #2969): only one confirmed not there is "no longer works".
   const store = await storeForIdExact(claim.sid);
   if (!store) return null;
-  const team = await readTeam(store.sid);
-  if (!team.invites.some((i) => i.id === claim.id)) return null;
+  // The team read exactly too (Claude 1 on #2969, the team case of K2's MEDIUM): nil is no team, a string is the
+  // record as written, and any other answer is unknown, never an empty team that sends a valid link to "expired".
+  const teamRead = repliesFor(await redisPipeline([["GET", teamKey(store.sid)]]), 1);
+  if (!teamRead) throw new UnknownReplyError("a team");
+  const [teamRaw] = teamRead;
+  if (teamRaw !== null && typeof teamRaw !== "string") throw new UnknownReplyError("a team");
+  const live = parseTeam(teamRaw).invites.filter((i) => i.expiresAt > now());
+  if (!live.some((i) => i.id === claim.id)) return null;
   return { store, email: normaliseEmail(claim.email), role };
 }
 

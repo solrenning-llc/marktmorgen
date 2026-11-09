@@ -14,6 +14,11 @@
  *    "Nothing was sent" while the entry could still be there, and the daily
  *    settling then sent the batch. Now "Nothing was sent" is said only when the
  *    entry is confirmed gone; otherwise the press says the batch may still go.
+ * 3. PayPal refused the batch (its balance, say), and taking the "?" entry away
+ *    was not confirmed (pre-review of 09/11/2026). The press said "nothing was
+ *    sent" and the payday email "Nothing left your PayPal", and the daily
+ *    settling then sent the same request again, which PayPal could pay. The same
+ *    rule now holds there: the press says the batch may still go.
  * Synthetic only: a stand-in for PayPal's API on api-m.paypal.com.
  */
 import { readFileSync } from "node:fs";
@@ -30,6 +35,8 @@ const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
 const SCOPE = "https://uri.paypal.com/payments/payouts openid";
 /** Every money request PayPal received, and the batches it made: one per PayPal-Request-Id, as PayPal does. */
 let posts = 0;
+/** When true, PayPal refuses the next money request for its balance (a 422 that names its error), and makes nothing. */
+let refuseNext = false;
 const batches = new Map<string, string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -40,6 +47,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: SCOPE, expires_in: 32400 });
   if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {
     posts += 1;
+    if (refuseNext) {
+      refuseNext = false;
+      return json({ name: "INSUFFICIENT_FUNDS", message: "Sender does not have sufficient funds." }, 422);
+    }
     const key = String((init.headers as Record<string, string>)["PayPal-Request-Id"] ?? "");
     if (!batches.has(key)) batches.set(key, `BATCH${batches.size + 1}WEX`);
     return json({ batch_header: { payout_batch_id: batches.get(key), batch_status: "PENDING" } }, 201);
@@ -225,6 +236,33 @@ async function main(): Promise<void> {
       is("its people stay on their way", (await onTheirWay(store)).size, 2);
     }
   }
+
+  for (const how of ["throws", "answers in another shape"] as const) {
+    part(`PayPal refuses the batch for its balance, and taking the "?" entry away ${how}: never "nothing was sent"`);
+    await seed(store);
+    refuseNext = true;
+    const { value: refused, hit } = await withFault(isUnknownDelete, async () => {
+      if (how === "throws") throw new Error("Synthetic: the HDEL of the '?' entry failed");
+      return ["QUEUED"];
+    }, () => payWithPayPal(store));
+    is("the HDEL of the '?' entry was the one that failed", hit, true);
+    is("PayPal was asked once, and refused", posts, 1);
+    // Rule 23: new assertion, red on main and on this branch before the fix ("funds" or "error", whose words say nothing
+    // was sent): the "?" entry may still be there, and the settling would send the same request again.
+    is("the press says the batch may still go", refused.ok ? "paid" : refused.reason, "pending");
+    // Rule 23: new assertion, red before the fix (the "funds" email says "Nothing left your PayPal").
+    is("and the payday email never says nothing left the creator's PayPal", autoPayEmail(refused, "usd").text.includes("Nothing left your PayPal"), false);
+    is("its people stay on their way, never put in another batch", (await onTheirWay(store)).size, 2);
+  }
+
+  part("PayPal refuses the batch, and taking the \"?\" entry away is confirmed: its people are owed again");
+  await seed(store);
+  refuseNext = true;
+  const owedAgain = await payWithPayPal(store);
+  is("the press says why", owedAgain.ok ? "paid" : owedAgain.reason, "funds");
+  is("nothing stays open", await openFields(), []);
+  await settlePayPal(store);
+  is("and the settling sends nothing more", posts, 1);
 
   done();
 }

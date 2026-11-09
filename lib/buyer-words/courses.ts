@@ -68,6 +68,11 @@ const en = {
   /** Followed by the link `manageMembership` and a full stop. */
   endedPayment: "Did it end because a payment failed, not because you canceled? Updating the card may bring it back: ",
   manageMembership: "manage your membership",
+  /** Stripe could not be read just now: neither open nor shut (lib/learn.ts, courseAccess "unknown"). */
+  accessUnknownTitle: "We could not check your access just now",
+  accessUnknownBody:
+    "Your purchase could not be confirmed with the payment service at this moment. Nothing was changed, and your progress is kept. Try again in a minute.",
+  accessUnknownAgain: "Check my access to this course again",
   doneOf: (done: number, total: number) => `${done} of ${total} done`,
   yourProgress: "Your progress",
   startFirst: "Start the first lesson",
@@ -392,6 +397,10 @@ const es: CoursesWords = {
     "Este curso venía con tu membresía, que ya no está activa, así que sus lecciones ahora están cerradas. Renuévala y se abre al instante, con tu progreso donde lo dejaste.",
   endedPayment: "¿Terminó porque falló un pago, y no porque la cancelaste? Actualizar la tarjeta puede reactivarla: ",
   manageMembership: "gestiona tu membresía",
+  accessUnknownTitle: "No pudimos comprobar tu acceso ahora mismo",
+  accessUnknownBody:
+    "No se pudo confirmar tu compra con el servicio de pagos en este momento. No se cambió nada y tu progreso se conserva. Inténtalo de nuevo en un minuto.",
+  accessUnknownAgain: "Comprobar de nuevo mi acceso a este curso",
   doneOf: (done, total) => `${done} de ${total} completadas`,
   yourProgress: "Tu progreso",
   startFirst: "Empezar la primera lección",
@@ -694,6 +703,10 @@ const fr: CoursesWords = {
     "Cette formation était incluse dans votre abonnement, qui n'est plus actif. Ses leçons sont donc fermées pour le moment. Renouvelez-le et elle s'ouvre aussitôt, avec votre progression là où vous l'aviez laissée.",
   endedPayment: `A-t-il pris fin parce qu'un paiement a échoué, et non parce que vous l'avez résilié${S}? Mettre à jour la carte peut le rétablir${S}: `,
   manageMembership: "gérer votre abonnement",
+  accessUnknownTitle: "Nous n'avons pas pu vérifier votre accès pour le moment",
+  accessUnknownBody:
+    "Votre achat n'a pas pu être confirmé auprès du service de paiement pour l'instant. Rien n'a été modifié et votre progression est conservée. Réessayez dans une minute.",
+  accessUnknownAgain: "Vérifier à nouveau mon accès à ce cours",
   doneOf: (done, total) => `${done} sur ${total} ${frPlural(done, "terminée", "terminées")}`,
   yourProgress: "Votre progression",
   startFirst: "Commencer la première leçon",
@@ -990,6 +1003,10 @@ const de: CoursesWords = {
     "Dieser Kurs gehörte zu Ihrer Mitgliedschaft, die nicht mehr läuft, deshalb sind seine Lektionen jetzt geschlossen. Verlängern Sie sie, und er öffnet sich sofort wieder, mit Ihrem Fortschritt dort, wo Sie aufgehört haben.",
   endedPayment: "Ist sie beendet, weil eine Zahlung fehlgeschlagen ist, und nicht, weil Sie gekündigt haben? Eine aktualisierte Karte kann sie zurückbringen: ",
   manageMembership: "Mitgliedschaft verwalten",
+  accessUnknownTitle: "Wir konnten Ihren Zugang gerade nicht prüfen",
+  accessUnknownBody:
+    "Ihr Kauf konnte gerade nicht beim Zahlungsdienst bestätigt werden. Es wurde nichts geändert, und Ihr Fortschritt bleibt erhalten. Versuchen Sie es in einer Minute erneut.",
+  accessUnknownAgain: "Meinen Zugang zu diesem Kurs erneut prüfen",
   doneOf: (done, total) => `${done} von ${total} erledigt`,
   yourProgress: "Ihr Fortschritt",
   startFirst: "Erste Lektion beginnen",
@@ -1291,6 +1308,10 @@ const it: CoursesWords = {
     "Questo corso era incluso nella tua iscrizione, che non è più attiva, quindi ora le sue lezioni sono chiuse. Rinnovala e si riapre subito, con i tuoi progressi dove li avevi lasciati.",
   endedPayment: "È terminata perché un pagamento non è andato a buon fine, e non perché l'hai annullata? Aggiornare la carta può riattivarla: ",
   manageMembership: "gestisci la tua iscrizione",
+  accessUnknownTitle: "Non siamo riusciti a verificare il tuo accesso in questo momento",
+  accessUnknownBody:
+    "Non è stato possibile confermare il tuo acquisto con il servizio di pagamento in questo momento. Non è cambiato nulla e i tuoi progressi sono salvati. Riprova tra un minuto.",
+  accessUnknownAgain: "Verifica di nuovo il mio accesso a questo corso",
   doneOf: (done, total) => `${done} di ${total} completate`,
   yourProgress: "I tuoi progressi",
   startFirst: "Inizia la prima lezione",
@@ -1590,6 +1611,10 @@ const nl: CoursesWords = {
     "Deze cursus hoorde bij je lidmaatschap, dat niet meer loopt, dus de lessen zijn nu gesloten. Verleng het en hij gaat meteen weer open, met je voortgang waar je was gebleven.",
   endedPayment: "Is het afgelopen omdat een betaling mislukte, en niet omdat je hebt opgezegd? Je kaart bijwerken kan het terugbrengen: ",
   manageMembership: "beheer je lidmaatschap",
+  accessUnknownTitle: "We konden je toegang nu niet controleren",
+  accessUnknownBody:
+    "Je aankoop kon op dit moment niet worden bevestigd bij de betaaldienst. Er is niets veranderd en je voortgang blijft bewaard. Probeer het over een minuut opnieuw.",
+  accessUnknownAgain: "Mijn toegang tot deze cursus opnieuw controleren",
   doneOf: (done, total) => `${done} van ${total} afgerond`,
   yourProgress: "Je voortgang",
   startFirst: "Begin met de eerste les",
@@ -1890,6 +1915,10 @@ const pt: CoursesWords = {
     "Este curso fazia parte da sua subscrição, que já não está ativa, por isso as aulas estão agora fechadas. Renove-a e o curso abre de imediato, com o seu progresso onde o deixou.",
   endedPayment: "Terminou porque um pagamento falhou, e não porque a cancelou? Atualizar o cartão pode reativá-la: ",
   manageMembership: "gerir a sua subscrição",
+  accessUnknownTitle: "Não foi possível verificar o seu acesso agora",
+  accessUnknownBody:
+    "Não foi possível confirmar a sua compra junto do serviço de pagamentos neste momento. Nada foi alterado e o seu progresso está guardado. Tente novamente dentro de um minuto.",
+  accessUnknownAgain: "Verificar novamente o meu acesso a este curso",
   doneOf: (done, total) => `${done} de ${total} concluídas`,
   yourProgress: "O seu progresso",
   startFirst: "Começar a primeira aula",

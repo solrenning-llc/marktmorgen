@@ -380,7 +380,7 @@ async function main(): Promise<void> {
   };
   const realStart = async (email: string, productId: string, start: number) => {
     const c = productId === product.id ? product : await readListing(store, productId);
-    if (c?.course) await recordEnrollment(store, email, productId, start);
+    if (c?.course) await recordEnrollment(store, email, productId, start, "group");
   };
   const importedKeyOf = (address: string) => importedKey(store.statsId!, address);
   const o = (x: unknown) => (typeof x === "object" && x ? (x as { outcome: string }).outcome : x);

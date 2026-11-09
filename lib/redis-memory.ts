@@ -202,6 +202,13 @@ export class MemoryRedis {
           }
           return out;
         }
+        // lib/certificate.ts CERT_SLOT_SWAP: a student's slot moved to a new certificate only while it still names the one read.
+        if (key.startsWith("-- marktmorgen:cert-slot-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, slots, who, expected, id] = args;
+          if (this.run(["HGET", slots, who]) !== expected) return 0;
+          this.run(["HSET", slots, who, id]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

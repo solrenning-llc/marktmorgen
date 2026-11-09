@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
   const path = `/@${store.handle}/course/${product.id}`;
   if (!order.email) return away(`${path}?link=ask`);
 
-  await recordEnrollment(store, order.email, product.id, order.created);
+  await recordEnrollment(store, order.email, product.id, order.created, "stripe");
   const secret = request.cookies.get(BUYER_COOKIE)?.value ?? "";
   if (secret && order.buyerKey && buyerFingerprint(secret) === order.buyerKey) {
     await touchStudent(course.id, order.email, order.created, store);

@@ -488,7 +488,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // a bundle, or anywhere in a cart, as much as one bought on its own (lib/order-courses.ts).
   if (order.state === "paid" && order.email) {
     for (const course of orderCourses(order)) {
-      await recordEnrollment(store, order.email, course.id, order.created).catch((error) =>
+      await recordEnrollment(store, order.email, course.id, order.created, "stripe").catch((error) =>
         console.error("recording a course purchase failed", error),
       );
     }

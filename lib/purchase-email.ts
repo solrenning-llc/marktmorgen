@@ -581,7 +581,7 @@ async function confirmGift(store: Store, session: SessionRecord, key: string): P
     from: fromStore(store),
     recordStart: async (email, productId, start) => {
       const course = productId === product.id ? product : await readListing(store, productId);
-      if (course?.course) await recordEnrollment(store, email, productId, start);
+      if (course?.course) await recordEnrollment(store, email, productId, start, "gift");
     },
     ordersLink: (email) => ordersLinkFor(store, email, base),
   });
@@ -596,7 +596,7 @@ export function preorderDeps(store: Store): HandOverDeps {
     base,
     from: fromStore(store),
     ordersLink: (email) => ordersLinkFor(store, email, base),
-    recordStart: (email, productId, start) => recordEnrollment(store, email, productId, start),
+    recordStart: (email, productId, start) => recordEnrollment(store, email, productId, start, "preorder"),
   };
 }
 

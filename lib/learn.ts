@@ -42,6 +42,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
+import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { folderFromPathname, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
 import { isStreamPath } from "@/lib/stream-rules";
@@ -171,12 +172,23 @@ const ledgerKey = (store: Store, email: string) => `nl:learn:enr:${storeKey(stor
 const paidCacheKey = (store: Store, email: string) => `nl:learn:paid:${storeKey(store)}:${emailKey(email)}`;
 const blockedKey = (courseId: string) => `nl:course:${courseId}:blocked`;
 
-/** Written when a purchase is confirmed on the thanks page. */
-export async function recordEnrollment(store: Store, email: string, productId: string, startSeconds: number): Promise<void> {
+/**
+ * Where a course written down came from, kept beside its start as one letter ("1760000000:p"). While Stripe cannot be
+ * read, a one-off course from a source of its own (a PayPal sale, a gift, a pre-order or a group place, each taken
+ * back by its own path through dropEnrollment) stays open; one from a Stripe checkout, or written before origins were
+ * kept (no letter), waits on Stripe, which alone says whether it was refunded.
+ */
+export type EnrollmentOrigin = "stripe" | "paypal" | "gift" | "preorder" | "group";
+const ORIGIN_LETTER: Record<EnrollmentOrigin, string> = { stripe: "s", paypal: "p", gift: "g", preorder: "r", group: "l" };
+const ORIGIN_OF = new Map(Object.entries(ORIGIN_LETTER).map(([origin, letter]) => [letter, origin as EnrollmentOrigin]));
+
+/** Written when a purchase is confirmed: on the thanks page, or by the path that hands over a sale of another origin. */
+export async function recordEnrollment(store: Store, email: string, productId: string, startSeconds: number, origin: EnrollmentOrigin): Promise<void> {
   if (!isRedisConfigured()) return;
-  // Counted in the store's room at what it really adds: nothing for a course already there (lib/order-data.ts).
+  // Counted in the store's room at what it really adds: nothing for a course already there (lib/order-data.ts). The
+  // first origin written stays, as the start does (HSETNX).
   await orderWrite(store, [
-    ["HSETNX", ledgerKey(store, email), productId, String(Math.floor(startSeconds))],
+    ["HSETNX", ledgerKey(store, email), productId, `${Math.floor(startSeconds)}:${ORIGIN_LETTER[origin]}`],
     ["DEL", paidCacheKey(store, email)],
   ]);
 }
@@ -205,7 +217,17 @@ export async function dropEnrollment(store: Store, email: string, productId: str
   if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("taking a course off a ledger");
 }
 
-type Listed = { data?: unknown };
+/** How many pages of one address's checkouts are read, 100 to a page: past them, what was not read is unknown. */
+const SESSION_PAGES = 10;
+
+/** A checkout is read only with its metadata as Stripe gives it, a plain object; any other row proves nothing. */
+const sessionLegible = (row: Record<string, unknown>) => plainObject(ownField(row, "metadata"));
+
+/**
+ * Whether one reading of Stripe was whole: every page read to its end, every row readable (lib/stripe-list.ts).
+ * A purchase it shows stands either way; only a whole reading may say "not bought", "refunded" or "ended".
+ */
+type Reading = { whole: boolean };
 
 /** What Stripe says about one address's courses here. */
 type Ledger = {
@@ -220,8 +242,8 @@ type Ledger = {
   refunded: Set<string>;
 };
 
-/** Asks the creator's Stripe account what this address paid for here. */
-async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
+/** Asks the creator's Stripe account what this address paid for here; `reading` says whether the answer was whole. */
+async function paidAtStripe(store: Store, email: string, reading: Reading): Promise<Ledger> {
   const found = new Map<string, number>();
   const ended = new Set<string>();
   const refunded = new Set<string>();
@@ -234,11 +256,30 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   for (const variant of variants) {
-    const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-    query.append("expand[]", "data.subscription");
-    query.append("expand[]", "data.payment_intent.latest_charge");
-    const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // Read in Stripe's exact list shape and to its end (CX-123 rules 24 and 30): a page in another shape throws, so
+    // it is never read as "bought nothing"; a row that does not read, or more pages than are read, leaves the
+    // reading not whole.
+    const rows: Record<string, unknown>[] = [];
+    let after = "";
+    for (let page = 0; ; page += 1) {
+      if (page === SESSION_PAGES) {
+        reading.whole = false;
+        break;
+      }
+      const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
+      query.append("expand[]", "data.subscription");
+      query.append("expand[]", "data.payment_intent.latest_charge");
+      if (after) query.set("starting_after", after);
+      const read = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_LIST_VERSION), sessionLegible);
+      if (read.unreadable > 0) reading.whole = false;
+      rows.push(...read.rows);
+      if (!read.hasMore) break;
+      if (!read.lastId) {
+        reading.whole = false;
+        break;
+      }
+      after = read.lastId;
+    }
     for (const session of rows) {
       // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
       const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
@@ -280,27 +321,51 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   return { paid: found, ended, refunded };
 }
 
-/** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
-function wholeSeconds(value: unknown): number | null {
-  if (typeof value === "number") return countOf(value);
-  return typeof value === "string" && /^\d{1,15}$/.test(value) ? Number(value) : null;
+/** When a course in a kept answer began: whole seconds from zero up; otherwise null. */
+function wholeSeconds(value: number): number | null {
+  return countOf(value);
 }
 
-/** The cached answer, in the shape written before ended memberships were kept too. */
+/**
+ * A course written down, in the exact shape recordEnrollment writes (CX-123 rule 24): its start in whole seconds,
+ * then, since origins are kept, a colon and one known letter. No letter is an entry written before (origin null);
+ * anything else is null, so the caller throws: unknown, never "not written down".
+ */
+function writtenDown(value: unknown): { began: number; origin: EnrollmentOrigin | null } | null {
+  if (typeof value !== "string") return null;
+  const parts = /^(\d{1,15})(?::([a-z]))?$/.exec(value);
+  if (!parts) return null;
+  const origin = parts[2] === undefined ? null : ORIGIN_OF.get(parts[2]);
+  return origin === undefined ? null : { began: Number(parts[1]), origin };
+}
+
+const textList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+
+/**
+ * The kept answer, only in the exact shape courseLedger writes (CX-123 rule 24): each course with when it began in
+ * whole seconds, and the ended and refunded courses as lists of ids. Anything else (an older shape, a list that is
+ * not one, a start that is not seconds) is null, so Stripe is asked again: never read as "nothing ended" or
+ * "nothing refunded".
+ */
 function parseLedger(cached: string): Ledger | null {
+  let value: unknown;
   try {
-    const value = JSON.parse(cached) as Record<string, unknown>;
-    if (value && typeof value.p === "object" && value.p !== null) {
-      return {
-        paid: new Map(Object.entries(value.p as Record<string, number>)),
-        ended: new Set(Array.isArray(value.x) ? (value.x as string[]) : []),
-        refunded: new Set(Array.isArray(value.r) ? (value.r as string[]) : []),
-      };
-    }
-    return { paid: new Map(Object.entries(value as Record<string, number>)), ended: new Set(), refunded: new Set() };
+    value = JSON.parse(cached);
   } catch {
     return null;
   }
+  if (!plainObject(value)) return null;
+  const opens = ownField(value, "p");
+  const ended = ownField(value, "x");
+  const refunded = ownField(value, "r");
+  if (!plainObject(opens) || !textList(ended) || !textList(refunded)) return null;
+  const paid = new Map<string, number>();
+  for (const [id, began] of Object.entries(opens)) {
+    const seconds = typeof began === "number" ? wholeSeconds(began) : null;
+    if (seconds === null) return null;
+    paid.set(id, seconds);
+  }
+  return { paid, ended: new Set(ended), refunded: new Set(refunded) };
 }
 
 /**
@@ -312,10 +377,16 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
   return (await courseLedger(store, email)).paid;
 }
 
+/** What an address may do with each course: Stripe's answer, with the courses it could not settle kept apart. */
+type CourseLedger = Ledger & {
+  /** Courses Stripe alone decides for this address and could not be read for: neither open nor shut. */
+  unknown: Set<string>;
+};
+
 /** The same answer, with the memberships that ended kept apart. */
-async function courseLedger(store: Store, email: string): Promise<Ledger> {
+async function courseLedger(store: Store, email: string): Promise<CourseLedger> {
   const result = new Map<string, number>();
-  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set() };
+  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), unknown: new Set() };
   // A store that brought buyers over from another platform reads theirs in
   // the same round trip (lib/imported-purchases.ts); any other asks nothing more.
   const imported = importedRead(store, email);
@@ -325,14 +396,26 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     ...(imported ? [imported] : []),
   ]);
   let asked: Ledger | null = typeof cached === "string" ? parseLedger(cached) : null;
+  // A kept answer was whole when it was kept: only a whole one ever is.
+  let whole = true;
   if (!asked) {
+    const reading: Reading = { whole: true };
     try {
-      asked = await paidAtStripe(store, email);
-      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
-      await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
+      asked = await paidAtStripe(store, email, reading);
+      whole = reading.whole;
     } catch (error) {
+      // A failed read, or a page in another shape: unknown, never "bought nothing".
       console.error("reading course purchases failed", error);
       asked = { paid: new Map(), ended: new Set(), refunded: new Set() };
+      whole = false;
+    }
+    if (whole) {
+      // Kept only when whole, so an answer that could not be read is asked again next time, not held ten minutes.
+      // Keeping it is a saving only: when it fails, the answer just read still decides.
+      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
+      await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]).catch((error) => {
+        console.error("keeping course purchases failed", error);
+      });
     }
   }
   const fromStripe = asked.paid;
@@ -346,10 +429,13 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   } else if (ledger && typeof ledger === "object") {
     pairs.push(...Object.entries(ledger as Record<string, unknown>));
   }
+  // Written down from a source of its own, not a Stripe checkout: it stands while Stripe cannot be read.
+  const ownSource = new Set<string>();
   for (const [field, value] of pairs) {
-    const began = wholeSeconds(value);
-    if (typeof field !== "string" || began === null) throw new UnknownReplyError("the courses written down for an address");
-    recorded.set(field, began);
+    const entry = writtenDown(value);
+    if (typeof field !== "string" || entry === null) throw new UnknownReplyError("the courses written down for an address");
+    recorded.set(field, entry.began);
+    if (entry.origin !== null && entry.origin !== "stripe") ownSource.add(field);
   }
 
   // Brought over from another platform: the course itself, or a course in a
@@ -372,6 +458,21 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
       : recorded.get(product.id) ?? fromStripe.get(product.id);
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));
     if (opens !== undefined && Number.isFinite(opens)) result.set(product.id, opens);
+  }
+
+  // Stripe could not be read whole: what it alone decides is unknown, never "bought nothing" (a paying member shut
+  // out in silence) nor "not refunded" (a refunded course open again). A purchase it did show stands, and so does a
+  // one-off course brought over from another platform or written down from a source of its own (a PayPal sale, a
+  // gift, a pre-order, a group place: each taken off the ledger by its own refund path); every other course is
+  // neither open nor shut, and is said as such.
+  const unknown = new Set<string>();
+  if (!whole) {
+    for (const product of courses) {
+      if (!product.course || fromStripe.has(product.id)) continue;
+      if (!product.recurring && (given.has(product.id) || ownSource.has(product.id))) continue;
+      result.delete(product.id);
+      unknown.add(product.id);
+    }
   }
 
   // A course the creator hands over at a community level (lib/community-points.ts),
@@ -403,7 +504,7 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
       if (taken[i] === 1) result.delete(p.id);
     });
   }
-  return { paid: result, ended: asked.ended, refunded: asked.refunded };
+  return { paid: result, ended: asked.ended, refunded: asked.refunded, unknown };
 }
 
 export type CourseAccess =
@@ -411,7 +512,9 @@ export type CourseAccess =
   | { state: "preview"; learner: Learner | null }
   | { state: "closed"; learner: Learner | null }
   /** A membership that gave this course has ended: said as such, with the way back. */
-  | { state: "ended"; learner: Learner };
+  | { state: "ended"; learner: Learner }
+  /** Stripe could not be read just now: neither open nor shut, said as such, with a way to try again. */
+  | { state: "unknown"; learner: Learner };
 
 /** Whether this browser may take this course, and from when. */
 export async function courseAccess(store: Store, product: Listing, cookies: CookieJar): Promise<CourseAccess> {
@@ -419,9 +522,10 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
   if (!learner || !product.course) return { state: "closed", learner };
   if (learner.owner) return { state: "open", learner, start: Math.floor(Date.now() / 1000) - 400 * 86_400 };
   if (learner.scope !== "all" && !learner.scope.includes(product.course.id)) return { state: "closed", learner };
-  const { paid, ended } = await courseLedger(store, learner.email);
+  const { paid, ended, unknown } = await courseLedger(store, learner.email);
   const start = paid.get(product.id);
   if (start !== undefined) return { state: "open", learner, start };
+  if (unknown.has(product.id)) return { state: "unknown", learner };
   return ended.has(product.id) ? { state: "ended", learner } : { state: "closed", learner };
 }
 
@@ -840,9 +944,10 @@ export async function requestCourseLink(input: {
   // False is unknown; the original rights and final sender checks still apply.
   if (serviceMailKnownUnavailable()) return "error";
 
-  const paid = await paidCourses(store, raw);
-  if (!paid.has(product.id)) return "sent";
-  return (await sendCourseLink(store, product, raw, origin)) ? "sent" : "error";
+  const ledger = await courseLedger(store, raw);
+  if (ledger.paid.has(product.id)) return (await sendCourseLink(store, product, raw, origin)) ? "sent" : "error";
+  // Not confirmed either way: "try again", never a quiet "sent" with nothing sent to a buyer who paid.
+  return ledger.unknown.has(product.id) ? "error" : "sent";
 }
 
 /** Sends the link itself. Also used when a buyer pays in another browser. */

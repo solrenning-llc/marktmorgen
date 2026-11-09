@@ -790,6 +790,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pause:last:@lib/plan-pause.ts": { what: "When a break was last taken", parts: [capped(KEY, "One a store.")] },
   "nl:plan:ended@lib/plan-standing.ts": company("Stores whose plan ended, by the day", "One sorted set for every store."),
   "nl:plans:pending@lib/plans.ts": company("Plans being started", "One set, minutes."),
+  "nl:plans:retry@lib/plans.ts": company("Plans tried and not settled yet", "One sorted set; a plan leaves it once given its end, or two days after an unpaid checkout."),
   "nl:share:stores@lib/platform-share.ts": company("Stores whose sales pay a share", "One set for every store."),
   "nl:pod:by:@lib/podcast-access.ts": { what: "A listener's access to a private podcast", parts: [item(MARK, "One a buyer.", "membership")] },
   "nl:pod:n:@lib/podcast-access.ts": short("A feed's reads a day", "request", 2, 128, REQ("page")),

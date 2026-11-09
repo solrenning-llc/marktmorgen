@@ -45,6 +45,7 @@ import { type Social, parseSocials } from "@/lib/store-socials";
 import type { CallPackage } from "@/lib/call-package-rules";
 import type { PodcastRef } from "@/lib/podcast-rules";
 import { cache } from "react";
+import { lookUpStore } from "@/lib/store-lookup";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -1217,11 +1218,23 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
 }
 
 /**
+ * The store behind a public address, for a visitor (lib/store-lookup.ts): an
+ * address that leads nowhere is paced by connection, remembered for a short
+ * while and counted against the company's day, so made-up addresses are not
+ * a read each with no ceiling. For a route answering the public outside a
+ * page (an icon, the manifest); pages use storeForPage.
+ */
+export function storeForVisitor(handle: string): Promise<Store | null> {
+  return handleProblem(handle) ? Promise.resolve(null) : lookUpStore(handle, storeForHandle);
+}
+
+/**
  * The store behind a public address, read once per page view: the layout,
  * the page's head and the page itself ask for it, and all three are given
- * the one answer. Only for pages; anything that writes reads afresh.
+ * the one answer (storeForVisitor). Only for pages; anything that writes
+ * reads afresh.
  */
-export const storeForPage = cache(storeForHandle);
+export const storeForPage = cache(storeForVisitor);
 
 /**
  * Whether Redis says, exactly, that no store has this id: the one EXISTS reply is 0. A reply missing, cut short or of

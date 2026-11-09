@@ -83,6 +83,42 @@ The first runtime integration is now the persistent exposure reservation before 
 
 Since 17 October 2026, under the owner's decision "Teto mínimo pago pela empresa" (AGENTS.md), every store that pays nothing (a free trial, no plan, an ended plan) must hold one of the calendar month's shared places before its studio, its public pages and requests, its orders and free copies or its emails cost anything (lib/free-pool.ts). The places are `FREE_POOL_BASE_STORES` (10) plus one for every `PAID_STORES_PER_FREE_STORE` (40) paying stores (lib/free-pool-rules.ts). Each such store has small figures of its own: a free trial counts its figures for the trial as a whole (1,000 visits, 100 orders paid and free together, 300 list emails on a trial of a plan with them, and the studio, API and email figures of `NON_PAYING_ALLOWANCES`), and a store with no plan or an ended one counts smaller ones by calendar month. tests/plan-cost-registry.ts works out the worst window one of them can cost (`nonPayingWorst`, about $1.36 at today's rates) and puts 1/40 of it into every paying plan's worst month (line free-share), held with the rest to the owner's 60%. The ten base places are a company fixed cost of at most ten times that worst window a month, covered by the minimum paid base. Files an ended store keeps were, until 18 October 2026, kept up to a store with no plan's room with no date: storage with no use behind it, for ever. Since that day a plan that ends keeps nothing past its closing day (`lib/plan-closing-rules.ts`, `keptRoomFor`; the same notices and checks as before), and what it keeps until then is priced once per payment in the payment's own worst case (`tests/plan-cost-registry.ts`, `PER_PAYMENT_LINES`, `retained-files`), so it is no longer an open exposure. A plan that ended before that day keeps the old rule; plans could not yet be bought then (lib/commercial-margin.ts is closed), so this legacy exposure is at most the owner's own test stores, and any such store must still be counted here before release. This does not implement the remaining enrollment, reserve migration, other-provider or annual-term controls.
 
+## Store addresses that lead nowhere: a company fixed cost (9 November 2026)
+
+Traffic audit of 9 November 2026, MÉDIO 2. Every page and route under
+`app/[handle]` first asks the database which store an address belongs to. A
+real store's pages are then counted in its own window; an address with no
+store had nothing to count it in, so a loop over made-up addresses was a read
+each time with no ceiling. `lib/store-lookup.ts` now bounds it:
+
+- an address a server has not lately found a store behind is paced in that
+  server's memory, `UNSEEN_STORE_LOOKUPS_PER_MINUTE` (30) a connection a
+  minute, before any read, at no cost;
+- "nothing here" is remembered for 30 seconds, so the same made-up address
+  asked again reads nothing;
+- each miss is counted for the UTC day (`nl:store-lookup:miss:<day>`, three
+  commands in one pipeline); past `STORE_MISSES_PER_DAY` (10,000) misses, or
+  past `STORE_MISSES_PER_CONNECTION_PER_DAY` (100) for one connection, a
+  server reads nothing more for unseen addresses (for that connection only,
+  in the second case) until the day turns, and the visitor meets the plain
+  not-found page. A count that cannot be read stops those reads for a minute.
+
+**Maximum per month, a company fixed cost covered from the minimum base:
+US$ 56.01**, at 10,000 misses a day for 31 days, each at its worst (the
+address's GET and a record's GET at `MAX_STORE_BYTES`, the count, three
+pipelines waited at their timeout, the CDN request, two calls, a second of
+CPU and the page out), plus at most US$ 0.0056 a month for each server's one
+miss in flight past the ceiling (`tests/unknown-store-ceiling.test.ts`, at the
+rates of `lib/spend-cost-table.ts` and `tests/traffic-cost.ts`). Unknown,
+never zero: the number of servers the host runs at once.
+
+What it does not bound: each request is still a function call, refused or
+not; a flood from many machines is the host firewall's to stop (MM-SA-11,
+FW1, the owner's step still pending). Past the day's ceiling, a real store's
+address that a server has not seen in the last hour is not found by that
+server until the day turns: the per-connection share means one machine alone
+cannot cause it, and it takes at least 100 networks.
+
 ## What a store keeps in the database after its closing day
 
 Since 18 October 2026 every store has a data room in the database (`lib/store-data-rules.ts`, `DATA_ROOM_BYTES`): what it keeps and what its orders leave is counted where it is written (an order at what each of its writes really adds, `lib/order-data.ts`, docs/order-data.md) and refused past the room, and every record kept outside the room is bounded in `tests/store-data-registry.ts`, which fails for a new key family that does not say how. `tests/plan-cost-registry.ts` prices the room full and the records outside it in every paying plan's worst month (line `database-storage`), and once more for the closing days after a plan ends (`PER_PAYMENT_LINES`, `retained-data`). A store that pays nothing has a small room of its own (`NON_PAYING_DATA_ROOM_BYTES`), priced in its worst window (`nonPayingWorst`).

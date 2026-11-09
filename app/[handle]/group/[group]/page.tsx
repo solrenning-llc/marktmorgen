@@ -1,7 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { readListing } from "@/lib/catalog";
@@ -9,6 +9,7 @@ import { GROUP_ID, PLACE_TOKEN, placesWords } from "@/lib/group-rules";
 import { type Taken, groupTitle, placeNotice, placesTaken, readGroup, takePlace } from "@/lib/group-buy";
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { recordEnrollment } from "@/lib/learn";
+import { isResting } from "@/lib/traffic";
 import { storeBase } from "@/lib/purchase-email";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -54,6 +55,9 @@ export default async function GroupPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@") || !GROUP_ID.test(id)) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Counted in the store's window before the group is read (lib/traffic.ts), as a buyer's page: a made-up id is the
+  // store's request, not a read nobody counts; past the window, the page that says the store is resting.
+  if (await isResting(store, undefined, "buyer")) redirect(`/@${store.handle}/resting`);
   const group = await readGroup(id);
   // Not this store's, or never paid for: there is nothing here to describe.
   if (!group || !store.statsId || group.s !== store.statsId || !group.paid) notFound();

@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { normaliseHandle, storeForVisitor } from "@/lib/store";
 import { readPhoto } from "@/lib/store-photo";
 import { lookColours } from "@/lib/store-look";
 import { connectionRefusal, readRefusal } from "@/lib/picture-pace";
@@ -32,7 +32,7 @@ export async function GET(
   if (refused) return refused;
 
   try {
-    const store = await storeForHandle(normaliseHandle(decoded));
+    const store = await storeForVisitor(normaliseHandle(decoded));
     if (!store) return missing();
     // Drawn only at the address with today's fingerprint and nothing else, which
     // may be kept for good; any other is sent there, briefly, before anything

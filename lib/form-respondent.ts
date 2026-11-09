@@ -99,6 +99,17 @@ export function respondentOf(emailIds: readonly string[], answers: Answers): str
   return sender;
 }
 
+/**
+ * Whether any of the email questions holds an address: when none does and the sender cannot be told, it is
+ * because no address was given, not because two disagree (respondentOf is null for both).
+ */
+export function anyAddressGiven(emailIds: readonly string[], answers: Answers): boolean {
+  return emailIds.some((id) => {
+    const given = Object.hasOwn(answers, id) ? answers[id] : undefined;
+    return typeof given === "string" && isAddress(foldAddress(given));
+  });
+}
+
 /** The questions (by id, any kept answer, a removed question's included) whose answer is this address. */
 export function answersNaming(answers: Answers, address: string): string[] {
   return Object.keys(answers).filter((id) => {

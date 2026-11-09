@@ -13,6 +13,7 @@ import { leadAffiliate, visitCookies } from "@/lib/affiliate-leads";
 import { funnelMark } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
 import { isStorePeople } from "@/lib/visit";
+import { anyAddressGiven, emailQuestionIds } from "@/lib/form-respondent";
 
 /** A form's answers, with room to spare: twelve questions, two of them long. */
 const MAX_BODY_BYTES = 40_000;
@@ -63,9 +64,10 @@ export async function POST(request: NextRequest) {
   if (formOpen(def, Math.floor(Date.now() / 1000)) !== "open") return back("closed");
   const statsId = store.statsId;
   // A scored quiz's total rides along in the address, as the result does: numbers the page checks, never anybody's answers.
-  // `j`: 1 when the list's email is on its way; "unknown" when the box was checked but no one address is the sender's.
-  const done = (outcome: string, joined: boolean | "unknown", scored = "") =>
-    `/@${store.handle}/form/${def.id}?p=${page?.id ?? ""}${outcome ? `&r=${outcome}${scored}` : ""}${joined === "unknown" ? "&j=unknown" : joined ? "&j=1" : ""}${mark ? `&f=${mark}` : ""}`;
+  // `j`: 1 when the list's email is on its way; when the box was checked but nobody was asked, "none" when no address
+  // was given and "unknown" when the email questions hold addresses that disagree.
+  const done = (outcome: string, joined: boolean | "unknown" | "none", scored = "") =>
+    `/@${store.handle}/form/${def.id}?p=${page?.id ?? ""}${outcome ? `&r=${outcome}${scored}` : ""}${joined === "unknown" ? "&j=unknown" : joined === "none" ? "&j=none" : joined ? "&j=1" : ""}${mark ? `&f=${mark}` : ""}`;
 
   // A field no person can see: whatever filled it in is told it worked, and nothing is kept.
   if (one("website").trim()) return go(done("", false));
@@ -84,8 +86,10 @@ export async function POST(request: NextRequest) {
     // The list, only when they checked the box: the email that asks them to confirm, never the list itself.
     let joined = false;
     // The box checked, but the email questions did not show one address as the sender's: nobody is asked, and the
-    // page after the form says so (VR 2), rather than saying nothing about the box they checked.
+    // page after the form says so (VR 2), rather than saying nothing about the box they checked. It says which: no
+    // address given (an optional email question left blank), or addresses that disagree.
     const unknownSender = def.offerList && one("consent") === "yes" && !read.email;
+    const noSender = anyAddressGiven(emailQuestionIds(def), read.answers) ? "unknown" : "none";
     if (def.offerList && one("consent") === "yes" && read.email) {
       const lead = await leadAffiliate(store, "signup", visitCookies(request, store.handle), read.email);
       const asked = await askToJoin({ store, email: read.email, ip, origin: linkOrigin(request, store), fromForm: true, formId: def.id, formOutcome: outcome?.id, lead }).catch(() => "error" as const);
@@ -102,7 +106,7 @@ export async function POST(request: NextRequest) {
     }
     // A result, or the box's email, is said on a page of its own first; otherwise straight on.
     if (here?.next && !outcome && !joined && !unknownSender) return go(here.next);
-    return go(done(outcome?.id ?? "", unknownSender ? "unknown" : joined, measured ? scoreQuery(measured) : ""));
+    return go(done(outcome?.id ?? "", unknownSender ? noSender : joined, measured ? scoreQuery(measured) : ""));
   } catch (error) {
     // No room in the store's data room: the answers were not kept (lib/store-data.ts).
     if (error instanceof DataRoomError) return back("noroom");

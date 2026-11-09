@@ -10,6 +10,9 @@ import { emailQuestionIds, foldAddress, isAddress, respondentOf } from "@/lib/fo
  * person is deleted from the CRM by the deals that name them as the contact
  * (lib/crm.ts, forgetCrmPerson), so their address in somebody else's note would
  * stay. The sender's own address is the deal's contact and goes with the deal.
+ * When the sender cannot be told, the deal has no contact, so each line that
+ * held an address stays as "(address not copied)": the creator can see one was
+ * given, never what it was.
  */
 export function formDealDraft(form: FormDef, response: FormResponse) {
   // Who sent it, by the one rule the copy and the erasure of a person's data read (lib/form-respondent.ts).
@@ -18,7 +21,7 @@ export function formDealDraft(form: FormDef, response: FormResponse) {
   const source = "Form: " + form.name + (Number.isFinite(date.getTime()) ? "\nSubmitted: " + date.toISOString() : "");
   const details = form.fields.flatMap(field => {
     const given = response.answers[field.id];
-    if (typeof given === "string" && isAddress(foldAddress(given)) && foldAddress(given) !== email) return [];
+    if (typeof given === "string" && isAddress(foldAddress(given)) && foldAddress(given) !== email) return email ? [] : [field.label + ": (address not copied)"];
     const answer = answerText(field, given);
     return answer ? [field.label + ": " + answer] : [];
   });

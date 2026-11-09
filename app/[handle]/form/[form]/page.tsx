@@ -100,7 +100,8 @@ export default async function FormDonePage({ params, searchParams }: Params) {
             </>
           )}
           {pick(query.j) === "1" ? <p className="notice notice-success mt-6 text-sm">{w.confirmSent}</p> : null}
-          {pick(query.j) === "unknown" ? <p className="notice notice-info mt-6 text-sm" role="status">{w.listUnknown}</p> : null}
+          {pick(query.j) === "unknown" ? <p className="notice notice-info mt-6 text-sm">{w.listUnknown}</p> : null}
+          {pick(query.j) === "none" ? <p className="notice notice-info mt-6 text-sm">{w.listNoAddress}</p> : null}
           <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
             {here?.next ? (
               <Link href={here.next} className="btn st-btn btn-lg">

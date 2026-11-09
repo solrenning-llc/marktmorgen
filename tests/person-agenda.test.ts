@@ -235,7 +235,11 @@ async function main() {
   is("a named section, waited for without holding the page", page.includes('<Suspense fallback={<TasksAgendaWaiting />}>') && page.includes('aria-labelledby="agenda-title"') && page.includes('aria-busy="true"'), true);
   is("each group under its own heading with its count", list.includes("<h3 className=\"text-base font-semibold text-ink\">{`${group.title} (${group.rows.length + group.more})`}</h3>"), true);
   is("a row opens the person's page by their key", readFileSync("lib/person-agenda-read.ts", "utf8").includes("studioPath(store, `who=${row.person}`, \"people\")"), true);
-  is("the page reads that key again among the buyers, and says when it is not there", page.includes("addressForPerson(store, who, lookupLedger.count, included)") && page.includes("That person is not among the buyers read from your Stripe account just now."), true);
+  is("the page reads that key again among the buyers, and says when it is not there", page.includes("addressForPerson(store, who, lookupLedger.count, included)") && page.includes("That person is not among your buyers as last read from your Stripe account, which can be up to an hour ago."), true);
+  // The buyers' copy is kept an hour (lib/segments.ts LEDGER_SECONDS; Claude 1 on #3226): never "read just now".
+  is("the page never says the buyers were read just now", page.includes("buyers read from your Stripe account just now"), false);
+  const privacy = readFileSync("app/privacy/page.tsx", "utf8");
+  is("the privacy policy names every reader of the buyers' copy: an email narrowed, the task agenda and a buyer looked up", privacy.includes("When a creator narrows an email to some of their buyers, opens their task agenda or looks a buyer up, we read their sales once and keep that copy of who bought what for one hour"), true);
   is("someone not found is said to be so", list.includes("About a person we could not find among your Stripe buyers"), true);
   is("the agenda says what a person's page lets you do: mark done or remove, not change", page.includes("Open a person to mark one done or remove it.") && !page.includes("mark one done or change it"), true);
   // A task may be about a list subscriber, not only a buyer (C3-112 (2), light).

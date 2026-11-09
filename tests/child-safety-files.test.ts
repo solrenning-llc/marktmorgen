@@ -21,6 +21,8 @@ import { parsePage } from "@/lib/sales-page";
 import { writePage } from "@/lib/sales-page-store";
 import { POST as aiRoute } from "@/app/api/store/ai/route";
 import { ROOM } from "./data-room";
+import { copyKey, stampedCopy } from "@/lib/pdf-stamp";
+import { previewCopy, previewKey } from "@/lib/pdf-preview";
 import { holdReported } from "@/lib/child-safety";
 import { HELD_FILE_SECONDS, holdFiles, isFileHeld } from "@/lib/held-files";
 import { del } from "@/lib/blob";
@@ -108,6 +110,14 @@ async function main(): Promise<void> {
   const words = readFileSync("lib/child-safety.ts", "utf8") + readFileSync("docs/incident-response.md", "utf8");
   is("the owner is told what the site cannot take back: cached pictures for up to a year, issued addresses for up to 4 hours", [words.includes("for up to a year"), words.includes("Purge CDN cache"), words.includes("up to 4 hours")], [true, true, true]);
   is("the privacy policy says reported material is kept, unserved", readFileSync("app/privacy/page.tsx", "utf8").includes('id="child-safety-kept"'), true);
+
+  // A stamped or previewed copy of a held file is handed to nobody, a copy kept from an earlier delivery included.
+  const heldPdf = { pathname: `stores/placeholder/${held.product.id}/held.pdf`, name: "held.pdf", bytes: 1, contentType: "application/pdf", addedAt: "2026-11-09T00:00:00.000Z" };
+  await holdFiles([heldPdf.pathname]);
+  const keptCopy = { ...heldPdf, pathname: "stores/placeholder/stamped/abc/held.pdf" };
+  await redis.pipeline([["SET", copyKey("pi_placeholder", heldPdf), JSON.stringify(keptCopy)], ["SET", previewKey(heldPdf, 2), JSON.stringify(keptCopy)]]);
+  is("no stamped copy of a held file, not even one kept from before", await stampedCopy(heldPdf, { reference: "pi_placeholder", email: "buyer@example.com", paidAt: 1 }, ROOM), null);
+  is("no preview copy either", await previewCopy(heldPdf, 2, ROOM), null);
 
   part("A mark that cannot be read keeps the file and hands nothing out");
   const real = redis.pipeline.bind(redis);

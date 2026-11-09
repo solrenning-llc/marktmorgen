@@ -15,7 +15,7 @@ const MESSAGES: Record<string, string> = {
 };
 
 /** The come-back email to members who stopped coming (lib/member-health-rules.ts, lib/member-nudge.ts). */
-export function NudgeEditor({ nudge, suggestedAddress, sent }: { nudge: Nudge; suggestedAddress: string; sent: number }) {
+export function NudgeEditor({ nudge, suggestedAddress, sent }: { nudge: Nudge; suggestedAddress: string; sent: number | null }) {
   const router = useRouter();
   const [on, setOn] = useState(nudge.on);
   const [address, setAddress] = useState(nudge.address || suggestedAddress);
@@ -68,7 +68,13 @@ export function NudgeEditor({ nudge, suggestedAddress, sent }: { nudge: Nudge; s
           </li>
         ))}
       </ul>
-      {nudge.on ? <p className="mt-3 text-sm text-ink">{`Sent this month: ${sent}`}</p> : null}
+      {nudge.on ? (
+        sent === null ? (
+          <p className="mt-3 text-sm text-ink-soft" role="status">{"We could not check just now how many were sent this month. Reload this page in a moment to check again."}</p>
+        ) : (
+          <p className="mt-3 text-sm text-ink">{`Sent this month: ${sent}`}</p>
+        )
+      ) : null}
       <form
         className="mt-5 space-y-4"
         onSubmit={(event) => {

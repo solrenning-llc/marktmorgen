@@ -48,8 +48,8 @@ export function WinBackEditor({
   winback: WinBack;
   connected: boolean;
   suggestedAddress: string;
-  /** How many have been sent so far. */
-  sent: number;
+  /** How many have been sent so far, or null when that could not be read just now (said so, never 0). */
+  sent: number | null;
 }) {
   const router = useRouter();
   const on = winback.percent > 0 && winback.coupon !== "";
@@ -101,7 +101,13 @@ export function WinBackEditor({
         {bullet(`The link works for ${OFFER_DAYS} days, only for the address it was sent to, with no second free trial.`)}
         {bullet("An offer of more than one payment is sent only for memberships charged every month. Payment plans, and memberships sold to end after a set number of payments, get none.")}
       </ul>
-      {on ? <p className="mt-4 text-sm font-semibold text-ink">{`Sent so far: ${sent}.`}</p> : null}
+      {on ? (
+        sent === null ? (
+          <p className="mt-4 text-sm text-ink-soft" role="status">{"We could not check just now how many were sent so far. Reload this page in a moment to check again."}</p>
+        ) : (
+          <p className="mt-4 text-sm font-semibold text-ink">{`Sent so far: ${sent}.`}</p>
+        )
+      ) : null}
 
       {!connected ? (
         <p className="mt-5 text-sm text-ink-soft">Connect your Stripe account first, and this can be switched on.</p>

@@ -81,7 +81,7 @@ import { canBeBumped, isOneOff } from "@/lib/product-extras";
 import { whyNotInBundle } from "@/lib/bundle-rules";
 import { hasPixels } from "@/lib/pixels";
 import { readTrouble } from "@/lib/checkout-trouble";
-import { readSalesGoal } from "@/lib/sales-goal";
+import { UNKNOWN_SALES_GOAL_CENTS, readSalesGoal } from "@/lib/sales-goal";
 import { chatSetup } from "@/lib/chat-summary";
 import { NO_COUNT_COOKIE, isMarkedDevice } from "@/lib/no-count";
 import { isOperator, searchConsoleStatus, storeSearches } from "@/lib/search-console";
@@ -970,7 +970,8 @@ export default async function StudioPage({
     ordered: store && may("settings") ? early(ordersIn(folder, usageId)) : null,
     figures: current && may("settings") ? early(Promise.all(ALLOWANCE_KINDS.map(async (kind) => ({ kind, used: await allowanceUsed(current, kind), limit: allowanceFor(current, kind) })))) : null,
     data: current && may("settings") ? early(dataUsed(current).catch(() => null)) : null,
-    closingAt: store && standing === "ended" && may("settings") ? early(closingOf(store).catch(() => null)) : null,
+    // "unread" when it could not be read: said in the closing card's place, never taken for a store that does not close (VR 2).
+    closingAt: store && standing === "ended" && may("settings") ? early(closingOf(store).catch(() => "unread" as const)) : null,
     apiKeys: current && may("export") ? early(shownKeys(current, email, role).catch(() => "unread" as const)) : null,
     // The creator's calendars: the private subscription address is made the
     // first time there is a call to put in it, before the calendar is read.
@@ -1101,7 +1102,9 @@ export default async function StudioPage({
   // A store whose plan has ended and that keeps more than a store with no
   // plan may: the day what it keeps is removed, counted the way the daily
   // job counts it (lib/plan-closing.ts). Measured only for such a store.
-  const closingAt = planReads.closingAt ? await planReads.closingAt : null;
+  const closingRead = planReads.closingAt ? await planReads.closingAt : null;
+  const closingUnread = closingRead === "unread";
+  const closingAt = closingUnread ? null : closingRead;
   const keptNow = closingAt ? (await storageUsed(folder, SETUP_STORAGE_BYTES)).bytes : 0;
   // What it may keep with no date: none for a plan ended from 18 October 2026 (lib/plan-closing-rules.ts).
   const keptRoom = closingAt ? keptRoomFor(closingAt.endedAt) : 0;
@@ -1188,10 +1191,30 @@ export default async function StudioPage({
   // could not be read (one outside the catalog's head is read from its own record), the numbers wait, as when they
   // could not be read, rather than end the page or name a product "no longer in your store" (Claude 5 on #2835).
   const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]).catch(() => null) : [];
+  // Those products not read just now: the panel says so in its place, never leaves out the numbers with no word (VR 2).
+  const numbersUnread = Boolean(current && visits && salesRead && statListings === null);
   const counted =
     current && visits && salesRead && statListings
       ? studioStats(current, visits, salesRead.value, salesRead.state, statListings)
       : null;
+  // Stripe's refusals to open a checkout this week, or that they could not be checked: shown over the numbers, and
+  // over the notice that says the numbers could not be read, so a buyer who could not pay is never hidden with them.
+  const troubleNotice =
+    trouble === null ? (
+      <div className="notice notice-warn mt-8" role="status">
+        <p className="font-bold text-ink">We could not check just now whether Stripe opened every checkout</p>
+        <p className="mt-1 text-sm text-ink-soft">So this page cannot tell whether a buyer could not pay in the last 7 days. Nothing was changed. Reload this page in a moment to check again.</p>
+      </div>
+    ) : trouble.week > 0 && trouble.last ? (
+      <div className="notice notice-warn mt-8" role="status">
+        <p className="font-bold text-ink">
+          {`Stripe would not open a checkout ${trouble.week === 1 ? "once" : `${trouble.week} times`} in the last 7 days`}
+        </p>
+        <p className="mt-1 text-sm text-ink-soft">
+          {`Those buyers could not pay. The last time, ${new Date(trouble.last.at).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })}, Stripe said: “${trouble.last.message}” If it mentions your account, open your Stripe dashboard; if it mentions a price, save the product again.`}
+        </p>
+      </div>
+    ) : null;
   // Its rates beside those of stores its size (lib/benchmarks.ts): this page's numbers are kept as the
   // week's sample after it is sent, and the ranges, worked out once a day, are one read.
   if (current && counted) after(() => recordSample(current, counted));
@@ -1381,7 +1404,7 @@ export default async function StudioPage({
             <StudioNav
               items={[
                 { href: "#details", label: "Store" },
-                ...(numbers ? [{ href: "#numbers", label: "Numbers" }] : []),
+                ...(numbers || numbersUnread ? [{ href: "#numbers", label: "Numbers" }] : []),
                 ...(may("page") ? [{ href: "#look", label: "Look" }] : []),
                 ...(may("products") ? [{ href: "#products", label: "Products" }] : []),
                 ...(calendar ? [{ href: "#calendar", label: "Calendar" }] : []),
@@ -1603,26 +1626,13 @@ export default async function StudioPage({
             {may("stats") ? <SalesLevers store={store} reading={salesRead?.state === "ok" ? salesRead.value?.levers ?? null : null} canConfigure={may("products") && may("settings")} /> : null}
             {numbers ? (
               <div id="numbers" className="scroll-mt-32">
-                {trouble === null ? (
-                  <div className="notice notice-warn mt-8" role="status">
-                    <p className="font-bold text-ink">We could not check just now whether Stripe opened every checkout</p>
-                    <p className="mt-1 text-sm text-ink-soft">So this page cannot tell whether a buyer could not pay in the last 7 days. Nothing was changed. Reload this page in a moment to check again.</p>
-                  </div>
-                ) : trouble.week > 0 && trouble.last ? (
-                  <div className="notice notice-warn mt-8" role="status">
-                    <p className="font-bold text-ink">
-                      {`Stripe would not open a checkout ${trouble.week === 1 ? "once" : `${trouble.week} times`} in the last 7 days`}
-                    </p>
-                    <p className="mt-1 text-sm text-ink-soft">
-                      {`Those buyers could not pay. The last time, ${new Date(trouble.last.at).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })}, Stripe said: “${trouble.last.message}” If it mentions your account, open your Stripe dashboard; if it mentions a price, save the product again.`}
-                    </p>
-                  </div>
-                ) : null}
+                {troubleNotice}
                 {(async () => {
                   const meta = metaView(store.statsId, store.currency).then((view) => (view ? { ...view, readPaused: costsPaused(store) } : view)).catch(() => null);
                   const voice = store ? readVoice(store).catch(() => null) : undefined;
                   const chosen = team && store ? weeklyTeam(store.handle).catch(() => []) : null;
-                  const goal = readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0 }));
+                  // A goal not read just now is the unknown goal, which the card says it could not check, never "no goal".
+                  const goal = readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS }));
                   const chat = may("settings") ? chatSetup(store.statsId).catch(() => null) : undefined;
                   return (
                     <StatsPanel
@@ -1710,6 +1720,14 @@ export default async function StudioPage({
                     />
                   );
                 })()}
+              </div>
+            ) : numbersUnread ? (
+              <div id="numbers" className="scroll-mt-32">
+                {troubleNotice}
+                <div className="notice notice-warn mt-8" role="status">
+                  <p className="font-bold text-ink">We could not read your numbers just now</p>
+                  <p className="mt-1 text-sm text-ink-soft">Your visits and sales are shown with your products&rsquo; names, and those could not be read. Nothing was changed. Reload this page in a moment to check again.</p>
+                </div>
               </div>
             ) : null}
 
@@ -2079,7 +2097,7 @@ export default async function StudioPage({
                   const cardsRead = storeCards(store);
                   // The answers' month and the assistant's need only the store: they are sent with the cards, and each
                   // is still shown where it was, under the same condition.
-                  const answers = may("page") && aiAvailableFor(store) ? { used: answersUsed(store).catch(() => 0), missed: missedQuestions(store).catch(() => []) } : null;
+                  const answers = may("page") && aiAvailableFor(store) ? { used: answersUsed(store).catch(() => null), missed: missedQuestions(store).catch(() => []) } : null;
                   const assistant = may("page")
                     ? early((async () => {
                         // The add-on's month as Stripe has it, read again when the snapshot has run out (lib/assistant-billing.ts).
@@ -2163,7 +2181,8 @@ export default async function StudioPage({
                 {may("settings") ? <StoreLanguageEditor language={store.language} handle={store.handle} /> : null}
 
                 {givesAway && may("settings") ? (async () => {
-                  const offered = welcomesOffered(store).catch(() => 0);
+                  // Null when it could not be read: the editors below say so, never "0" (VR 2).
+                  const offered = welcomesOffered(store).catch(() => null);
                   return (
                     <WelcomeOfferEditor
                       offer={store.welcomeOffer}
@@ -2192,7 +2211,7 @@ export default async function StudioPage({
                       <NudgeEditor
                         nudge={store.nudge}
                         suggestedAddress={store.mail?.address || store.winback.address || store.recovery.address || ""}
-                        sent={await nudgesThisMonth(store).catch(() => 0)}
+                        sent={await nudgesThisMonth(store).catch(() => null)}
                       />
                     ))()}
                     {(async () => {
@@ -2201,7 +2220,7 @@ export default async function StudioPage({
                         <YearlyAskEditor
                           ask={store.yearlyAsk}
                           suggestedAddress={store.nudge.address || store.mail?.address || store.winback.address || store.recovery.address || ""}
-                          sent={await yearlyAsksThisMonth(store).catch(() => 0)}
+                          sent={await yearlyAsksThisMonth(store).catch(() => null)}
                           offersYearly={(await recurring).some((p) => activeYearly(p, store.tiers) !== null)}
                         />
                       );
@@ -2213,7 +2232,7 @@ export default async function StudioPage({
                         winback={store.winback}
                         connected={Boolean(current?.stripeAccountId)}
                         suggestedAddress={store.recovery.address || store.mail?.address || ""}
-                        sent={await winbacksSent(store).catch(() => 0)}
+                        sent={await winbacksSent(store).catch(() => null)}
                       />
                     ))()}
                   </>
@@ -2667,6 +2686,14 @@ export default async function StudioPage({
                 <p className="mt-3 text-sm text-ink-soft">
                   {`We email you ${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it, and nothing is removed sooner than a week after the last of those emails.`}
                 </p>
+              </div>
+            ) : closingUnread ? (
+              <div id="closing" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
+                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your plan has ended</p>
+                <div className="mt-4 notice notice-warn" role="status">
+                  <p className="font-bold text-ink">We could not check just now when your store closes</p>
+                  <p className="mt-1 text-sm text-ink-soft">So this page cannot show the day, or what your store keeps until then. Nothing was changed. Reload this page in a moment to check again.</p>
+                </div>
               </div>
             ) : null}
 

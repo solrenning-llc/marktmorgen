@@ -20,7 +20,8 @@ export function AnswersEditor({
   missed,
 }: {
   setting: AnswersSetting;
-  used: number;
+  /** This month's attempts used, or null when they could not be read just now: then said so, never shown as 0. */
+  used: number | null;
   allowance: number;
   /** The newest questions a page did not answer: what was asked, of which product, on which day. */
   missed: { title: string; question: string; at: number }[];
@@ -98,7 +99,11 @@ export function AnswersEditor({
         <button type="button" className="btn btn-primary" onClick={() => void post({ on, facts: facts.trim() }, "save", on ? "Saved. The box is on your product pages." : "Saved. The box is off.")} disabled={busy !== null || !changed} aria-busy={busy === "save"}>
           {busy === "save" ? "Saving…" : "Save"}
         </button>
-        <p className="text-sm text-ink-soft">{`${used.toLocaleString("en-US")} of ${allowance.toLocaleString("en-US")} AI attempts used this month. Failed or timed-out requests count; cached replies do not. At the limit, new requests pause until next month. No per-answer overage is charged.`}</p>
+        {used === null ? (
+          <p className="text-sm text-ink-soft" role="status">{`We could not check just now how many of your ${allowance.toLocaleString("en-US")} AI attempts were used this month. Failed or timed-out requests count; cached replies do not. At the limit, new requests pause until next month. No per-answer overage is charged. Reload this page in a moment to check again.`}</p>
+        ) : (
+          <p className="text-sm text-ink-soft">{`${used.toLocaleString("en-US")} of ${allowance.toLocaleString("en-US")} AI attempts used this month. Failed or timed-out requests count; cached replies do not. At the limit, new requests pause until next month. No per-answer overage is charged.`}</p>
+        )}
       </div>
       {error ? (
         <p className="notice notice-error mt-3" role="alert">

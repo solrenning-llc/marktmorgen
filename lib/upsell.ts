@@ -46,7 +46,6 @@
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import {
   type FunnelStep,
@@ -187,9 +186,7 @@ export type TakeResult =
   | { kind: "checking" }
   | { kind: "unavailable" }
   /** A yes without the box to start access at once checked on this offer's own button (lib/digital-consent.ts): nothing written, nothing charged. */
-  | { kind: "consent" }
-  /** The yes could not be written down as this press's own (lib/claim-mark.ts): nothing admitted, written or charged; the buyer can press again. */
-  | { kind: "retry" };
+  | { kind: "consent" };
 
 type SessionView = {
   status?: unknown;
@@ -322,20 +319,11 @@ export async function takeUpsell(input: {
   const digital = deliversDigitally(target);
   if (digital && !validConsent(input.consent)) return { kind: "consent" };
 
-  // Once, however many times the button is pressed: the answer is this
-  // press's only on Redis's own "OK", or on its own value read back (CX-123
-  // rule 24, lib/claim-mark.ts; `claim` makes the value this press's alone).
-  // A reply of any other shape is unknown: nothing is admitted, written or
-  // charged, and the buyer is told so and can press again. This press's own
-  // claim is let go if it landed (compare and delete), so the next press is
-  // not answered "done" on a yes nobody charges (Claude 6 LOW 1 on #3275).
-  const pending = JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now(), claim: claimValue() });
-  const claimed = await claimMark(recordKey(session, slot), RECORD_SECONDS, pending);
-  if (claimed === "unknown") {
-    await releaseMark(recordKey(session, slot), pending);
-    return { kind: "retry" };
-  }
-  if (claimed === "taken") {
+  // Once, however many times the button is pressed.
+  const [claimed] = await redisPipeline([
+    ["SET", recordKey(session, slot), JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now() }), "NX", "EX", RECORD_SECONDS],
+  ]);
+  if (claimed === null) {
     const existing = await readUpsell(session, slot);
     return existing?.state === "failed" ? { kind: "failed" } : existing?.state === "declined" ? { kind: "declined" } : { kind: "done" };
   }

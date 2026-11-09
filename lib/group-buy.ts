@@ -45,7 +45,6 @@ import { allowanceUsed } from "@/lib/store-allowance";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
@@ -228,24 +227,8 @@ export async function settleGroup(input: {
   const group = await readGroup(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
   if (group.paid) return "already";
-  // Settled by one run only: the mark is this run's only on Redis's own "OK",
-  // or on its own value read back (CX-123 rule 24, lib/claim-mark.ts). Any
-  // other shape is unknown: nothing is marked paid or sent, this run's own
-  // mark is let go if it landed, and the confirmation is tried again.
-  const settling = `${groupKey(id)}:settling`;
-  const mine = claimValue();
-  const claimed = await claimMark(settling, 300, mine);
-  if (claimed === "unknown") {
-    await releaseMark(settling, mine);
-    throw new UnknownReplyError("a purchase's settling");
-  }
-  // Taken means another run holds the mark, not that the group is paid (Claude 2 and Claude 6 on #3275): "already"
-  // only when the group reads as paid. Otherwise thrown, so the confirmation keeps no "sent" mark on a group still
-  // to settle, and a run after the holder's mark runs out settles it.
-  if (claimed === "taken") {
-    if ((await readGroup(id))?.paid) return "already";
-    throw new UnknownReplyError("a purchase another run is settling");
-  }
+  const [claimed] = await redisPipeline([["SET", `${groupKey(id)}:settling`, "1", "NX", "EX", 300]]);
+  if (claimed === null) return "already";
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   // Stripe gives the payment as its id, or whole when the caller asked for it.
@@ -260,9 +243,8 @@ export async function settleGroup(input: {
   await redisPipeline([
     ...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS] as (string | number)[]] : []),
     ["SET", anyKey(group.s), "1"],
+    ["DEL", `${groupKey(id)}:settling`],
   ]);
-  // Compare and delete (Claude 2 LOW 2 on #3275): a run slower than the mark's 300 seconds never lets go of another's.
-  await releaseMark(settling, mine);
 
   await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),

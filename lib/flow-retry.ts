@@ -5,8 +5,13 @@
  * A wait whose end is known is tried once, at that end: the month's emails
  * at the turn of the store's allowance window, the company's daily room at
  * the next UTC day, a pause on the store's email at the pause's end.
- * A store switched off after notices about its content (lib/takedown.ts) is
- * tried again a day later, each time.
+ * A store switched off after notices about its content (lib/takedown.ts) has
+ * no known end: its looks are spread evenly over what is left of the
+ * MAX_WAIT_DAYS_PER_STEP days the step may wait, given the waits the run has
+ * left, so a run still waits after weeks and its last look is on the last of
+ * those days (a look a day would end it in about four). Same number of tries,
+ * same commands per try; once the store is back on, the step goes on at its
+ * next look.
  * Anything else (the sender's ceiling, a portion of a new list, a read that
  * did not answer, the deals board) is tried again after a delay that grows
  * threefold each time: 10 minutes, 30, 90, 4.5 hours, 13.5, then a day.
@@ -37,14 +42,20 @@ export function backoffSeconds(n: number): number {
 
 /**
  * When to try a waiting step again, in seconds. `n` is this wait's number in
- * the run (1 for the first). `windowEnd` and `pauseUntil` are in seconds,
- * when known.
+ * the run (1 for the first). `windowEnd`, `pauseUntil` and `since` (when this
+ * step began to wait, lib/flow-runs.ts countWaits) are in seconds, when known.
  */
-export function nextTry(reason: WaitReason, n: number, nowSeconds: number, known: { windowEnd?: number | null; pauseUntil?: number | null } = {}): number {
+export function nextTry(reason: WaitReason, n: number, nowSeconds: number, known: { windowEnd?: number | null; pauseUntil?: number | null; since?: number | null } = {}): number {
   const soonest = nowSeconds + FIRST_DELAY_SECONDS;
   if (reason === "allowance" && known.windowEnd && known.windowEnd > nowSeconds) return Math.max(soonest, known.windowEnd + AFTER_END_SECONDS);
   if (reason === "paused" && known.pauseUntil && known.pauseUntil > nowSeconds) return Math.max(soonest, known.pauseUntil + AFTER_END_SECONDS);
-  if (reason === "switched_off") return nowSeconds + LONGEST_DELAY_SECONDS;
+  if (reason === "switched_off") {
+    // What is left of the step's days, shared by the looks the run has left (this one's included): the last is on
+    // the step's last day. A start in the future, or none, counts from now.
+    const since = known.since && known.since > 0 && known.since <= nowSeconds ? known.since : nowSeconds;
+    const looksLeft = Math.max(1, MAX_WAITS_PER_RUN - Math.max(1, Math.floor(n)) + 1);
+    return Math.max(soonest, nowSeconds + Math.floor((since + MAX_WAIT_DAYS_PER_STEP * 86_400 - nowSeconds) / looksLeft));
+  }
   if (reason === "day") return Math.max(soonest, (Math.floor(nowSeconds / 86_400) + 1) * 86_400 + 5 * AFTER_END_SECONDS);
   const delay = backoffSeconds(n);
   return nowSeconds + (reason === "portion" ? Math.max(900, delay) : delay);

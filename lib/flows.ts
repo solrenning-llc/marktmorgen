@@ -1,7 +1,7 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
-import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
+import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
@@ -983,8 +983,8 @@ async function actOnDeals(
   return out;
 }
 
-/** What a step waiting on a store switched off after notices says (sendDueSteps). */
-const SWITCHED_OFF_WAIT = "Waiting: your store is switched off after notices about its content. It goes on by itself once your store is back on.";
+/** What a step waiting on a store switched off after notices says (sendDueSteps; when it is looked at again: lib/flow-retry.ts). */
+const SWITCHED_OFF_WAIT = `Waiting: your store is switched off after notices about its content. This step is checked again by itself and goes on at the first check after your store is back on. If your store is still switched off ${MAX_WAIT_DAYS_PER_STEP} days after this step began to wait, the run stops here, with nothing done at this step.`;
 
 /**
  * People at a step that has to wait: each wait is counted on their run, and
@@ -1011,7 +1011,7 @@ async function waitOrStop(
       outcomes.push({ email: p.email, state: "failed", note: stop ?? "Stopped here.", to: -1, status: "ended" });
       continue;
     }
-    queue.push(["ZADD", QUEUE, nextTry(p.reason, count.waits, nowSeconds, known), `${group}|${p.email}`]);
+    queue.push(["ZADD", QUEUE, nextTry(p.reason, count.waits, nowSeconds, { ...known, since: count.since }), `${group}|${p.email}`]);
     outcomes.push({ email: p.email, state: "deferred", note: p.note, to: index });
   }
   return { queue, outcomes };
@@ -1173,7 +1173,8 @@ export async function sendDueSteps(
     }
     // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule
     // 24): no step is done, an email or an action. Each waits as every other wait does (waitOrStop: counted on the
-    // run, tried again a day later, MAX_WAITS_PER_RUN times at the most, then the run stops, saying why), queued only
+    // run, its looks spread over MAX_WAIT_DAYS_PER_STEP (lib/flow-retry.ts), MAX_WAITS_PER_RUN times at the most, then
+    // the run stops, saying why), queued only
     // while its lease entry is still there. Nothing is claimed, so an attempt an earlier try left open stays open.
     if (store.suspended) {
       const waiting = await waitOrStop(flow.id, group, index, emails.map((email) => ({ email, reason: "switched_off" as const, note: SWITCHED_OFF_WAIT })), now);

@@ -935,8 +935,8 @@ function dripCursor(reply: unknown): { m: string; h: string } | null {
  * course that gains a drip module does not email about months gone by.
  *
  * Bounded and fair: nothing new starts after `deadline`, and the next run starts at the course (and the page of its
- * students) this one stopped at. One course that throws is counted and logged and the rest go on; it is tried again
- * the next run. `load` and `loadCourse` answer null only for a store or a course confirmed absent, and throw when
+ * students) this one stopped at, or at the course after it when this run got no further on the course it began with.
+ * One course that throws is counted and logged and the rest go on; it is tried again the next run. `load` and `loadCourse` answer null only for a store or a course confirmed absent, and throw when
  * they cannot tell (the route passes the exact readers): only then, or when the product is confirmed gone or no
  * longer holds this course, is the course taken out of the drip set.
  */
@@ -968,7 +968,11 @@ export async function sendDripEmails(
     try {
       const left = await dripCourse(member, from, { load, loadCourse, origin, nowSeconds, deadline, counts });
       if (left !== null) {
-        stopped = { m: member, h: left };
+        // No further on the course this run began with than where it began (a page whose sends are slow and fail,
+        // their marks let go): the next run begins with the course after it, and this one comes in its turn, from its
+        // first page (what was sent is marked, never sent twice), so one slow page never holds back every course
+        // after it (Claude 2 on #3344).
+        stopped = i === 0 && left === from && members.length > 1 ? { m: members[(first + 1) % members.length], h: "0" } : { m: member, h: left };
         counts.pending = members.length - i;
         break;
       }

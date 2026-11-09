@@ -4,8 +4,10 @@
  * membership.canceled; rule 30). The deletion is the store's own print (lib/suppression.ts, nl:erased:), written
  * by every deletion, the team's or the person's own (lib/person-erasure.ts), before anything is deleted. A print
  * written at or after the payment sends the event with no address and no name; a person deleted before they paid
- * again is named as before; and a print that cannot be read in its exact shape (CX-123 rule 24) sends no address
- * either, the event itself still sent. The PayPal sibling is lib/paypal-delivery.ts (#3449). Synthetic Stripe
+ * again is named as before; a print that is there but not in its exact shape (CX-123 rule 24) sends no address
+ * either, the event itself still sent; and a read with no answer sends nothing yet: the event is read again next
+ * run and named from what that read says (review of #3491). Only a store whose endpoints hear the event pays the
+ * read. The PayPal sibling is lib/paypal-delivery.ts (#3449). Synthetic Stripe
  * answers only; the endpoint's name resolves to a private address, so nothing leaves this machine.
  */
 import { addEndpoint, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
@@ -116,27 +118,44 @@ async function main() {
 
   part("refund.issued: a deletion print that does not read exactly sends no address (rule 24)");
   // At most RECENT_MESSAGES_MAX messages are read back, so the shapes are sent in two runs of a few each.
-  const shapes: [string, unknown][] = [["number", PAID + 5], ["words", "soon"], ["empty", ""], ["list", ["1"]], ["object", { at: 1 }], ["undefined", undefined], ["negative", "-5"], ["decimal", "1.5"], ["long", "1".repeat(13)]];
-  for (const [half, from, to] of [[0, 0, 5], [1, 5, shapes.length]] as const) {
+  const shapes: [string, unknown][] = [["number", PAID + 5], ["words", "soon"], ["empty", ""], ["list", ["1"]], ["object", { at: 1 }], ["negative", "-5"], ["decimal", "1.5"], ["long", "1".repeat(13)]];
+  for (const [half, from, to] of [[0, 0, 4], [1, 4, shapes.length]] as const) {
     await setup(["refund.issued"]);
     timeline = shapes.slice(from, to).map(([name, reply], j) => {
       const email = `odd-${name}@example.com`;
       oddReplies.set(suppressionPrint(listId, email), reply);
       return evt(`evt_RfOdd${from + j}`, "charge.refunded", PAID + 300 + from + j, refund(`ch_odd${from + j}`, email));
     });
-    if (half === 0) {
-      failingPrints.add(suppressionPrint(listId, "odd-throws@example.com"));
-      timeline.push(evt("evt_RfThrows", "charge.refunded", PAID + 400, refund("ch_throws", "odd-throws@example.com")));
-    } else {
-      timeline.push(evt("evt_RfHealthy", "charge.refunded", PAID + 410, refund("ch_healthy", "healthy@example.com")));
-    }
+    timeline.push(evt(`evt_RfHealthy${half}`, "charge.refunded", PAID + 410 + half, refund(`ch_healthy${half}`, `healthy${half}@example.com`)));
     await watchStripe(Date.now() + 10_000);
     for (let i = from; i < to; i += 1) {
       is(`a print read as ${shapes[i][0]}: sent, with no address and no name`, await buyerOf("refund.issued", "charge", `ch_odd${i}`), { email: null, name: null });
     }
-    if (half === 0) is("a read with no answer: sent, with no address and no name", await buyerOf("refund.issued", "charge", "ch_throws"), { email: null, name: null });
-    else is("a healthy read in the same run, nobody deleted: named as before", await buyerOf("refund.issued", "charge", "ch_healthy"), { email: "healthy@example.com", name: "Name of healthy@example.com" });
+    is("a healthy read in the same run, nobody deleted: named as before", await buyerOf("refund.issued", "charge", `ch_healthy${half}`), { email: `healthy${half}@example.com`, name: `Name of healthy${half}@example.com` });
   }
+
+  part("A read with no answer sends nothing yet: the next run reads it again and names the buyer (review of #3491)");
+  for (const [name, broken] of [["the pipeline throws", (print: string) => failingPrints.add(print)], ["no reply in the slot", (print: string) => oddReplies.set(print, undefined)]] as const) {
+    await setup(["refund.issued"]);
+    const email = `flaky-${name.replace(/\W+/g, "-")}@example.com`;
+    broken(suppressionPrint(listId, email));
+    timeline = [evt("evt_RfFlaky", "charge.refunded", PAID + 450, refund("ch_flaky", email))];
+    await watchStripe(Date.now() + 10_000);
+    is(`${name}: not sent in this run, so nothing goes out without a known read`, await buyerOf("refund.issued", "charge", "ch_flaky"), "not sent");
+    failingPrints.clear();
+    oddReplies.clear();
+    await watchStripe(Date.now() + 10_000);
+    is(`${name}, then a healthy read next run, never deleted: named`, await buyerOf("refund.issued", "charge", "ch_flaky"), { email, name: `Name of ${email}` });
+    is(`${name}: sent once`, (await recentMessages((await storeForEmail(OWNER))!, "refund.issued", 50)).length, 1);
+  }
+  await setup(["refund.issued"]);
+  await erase("flaky-gone@example.com", PAID + 100);
+  failingPrints.add(suppressionPrint(listId, "flaky-gone@example.com"));
+  timeline = [evt("evt_RfFlakyGone", "charge.refunded", PAID + 460, refund("ch_flaky_gone", "flaky-gone@example.com"))];
+  await watchStripe(Date.now() + 10_000);
+  failingPrints.clear();
+  await watchStripe(Date.now() + 10_000);
+  is("a read with no answer, then a healthy read of a deletion: no address and no name", await buyerOf("refund.issued", "charge", "ch_flaky_gone"), { email: null, name: null });
 
   part("The other Stripe events that name a buyer (rule 30)");
   await setup(["sale.completed", "membership.started", "membership.canceled"]);
@@ -183,6 +202,24 @@ async function main() {
   redis.pipeline = counting;
   is("one HGET of this address's print, nothing written", reads, [["HGET", suppressedKey(listId), suppressionPrint(listId, "one@example.com")]]);
   is("as many as the webhook unit counts (tests/plan-cost-registry.ts)", reads.length, WEBHOOK_ERASED_READ_COMMANDS);
+
+  part("No read when no endpoint hears the event (rule 26, review of #3491)");
+  await setup(["refund.issued"]);
+  reads.length = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const c of commands) if (String(c[1] ?? "").startsWith("nl:erased:")) reads.push(c);
+    return counting(commands);
+  }) as typeof redis.pipeline;
+  timeline = [
+    evt("evt_UnheardSale", "checkout.session.completed", PAID + 600, session("cs_Unheard01", "unheard@example.com")),
+    evt("evt_UnheardSub", "checkout.session.completed", PAID + 610, session("cs_UnheardSub01", "unheard-sub@example.com", "subscription", { subscription: "sub_Unheard01" })),
+    evt("evt_UnheardOffer", "payment_intent.succeeded", PAID + 620, offer("pi_UnheardOffer", "unheard-offer@example.com")),
+    evt("evt_UnheardEnd", "customer.subscription.updated", PAID + 630, ending("sub_UnheardEnd", "cus_MemberKept"), { cancel_at_period_end: false }),
+  ];
+  await watchStripe(Date.now() + 10_000);
+  redis.pipeline = counting;
+  is("a store that hears only refunds: no read for a sale, a membership, an offer or a cancellation", reads, []);
+  is("and nothing sent for them", (await recentMessages((await storeForEmail(OWNER))!, "sale.completed", 50)).length, 0);
 
   console.error = logged;
   done();

@@ -1,11 +1,12 @@
 import type { NextRequest } from "next/server";
-import { AD_CONTEXT_UNITS, adContext } from "@/lib/ad-context";
+import { AD_CONTEXT_UNITS, adContext, pageReadUnits } from "@/lib/ad-context";
 import { checkAdText } from "@/lib/ad-creative-check";
 import { CAMPAIGN_TAG, LANDING_REFUSALS, landingFrom, landingPage } from "@/lib/campaign-landing";
 import { LandingIdInvalid, LandingsGone, LandingsUnreadable, LandingsWriteUnconfirmed, MAX_LANDINGS, readLandings, removeLanding, saveLanding } from "@/lib/campaign-landing-store";
 import { studioRefusal } from "@/lib/person-tasks";
 import { readListing } from "@/lib/catalog";
-import { readPage } from "@/lib/sales-page-store";
+import { PageGrown, keptPageBytes, readPageWithin } from "@/lib/sales-page-store";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio, jsonAccess } from "@/lib/studio-route";
@@ -38,10 +39,19 @@ export async function GET(request: NextRequest) {
   try {
     const product = await readListing(store, id);
     if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-    const [landings, page] = await Promise.all([readLandings(store.statsId, product.id), readPage(store.statsId, product.id)]);
+    // The page is measured first and its reading counted, past the request's own unit (Claude 5 on #1950).
+    const bytes = await keptPageBytes(store.statsId, product.id);
+    const counted = pageReadUnits(bytes) > 0 ? await countStudio(store, null, pageReadUnits(bytes)) : ({ ok: true } as const);
+    if (!counted.ok) {
+      const refused = studioRefusal(counted.reason, counted.message);
+      return Response.json(refused.body, { status: refused.status, headers: NO_STORE });
+    }
+    const [landings, page] = await Promise.all([readLandings(store.statsId, product.id), readPageWithin(store.statsId, product.id, bytes)]);
     const hasHero = page.blocks.some((block) => block.kind === "hero");
     return Response.json({ ok: true, landings, most: MAX_LANDINGS, hasHero }, { headers: NO_STORE });
   } catch (error) {
+    if (error instanceof PageGrown) return Response.json({ ok: false, error: "changed", message: error.message }, { status: 409 });
+    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable", message: "This could not be read just now. Try again in a moment." }, { status: 503 });
     console.error("reading campaign landings failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
@@ -65,8 +75,10 @@ export async function POST(request: NextRequest) {
       await removeLanding(statsId, product.id, campaign, store);
       return Response.json({ ok: true, landings: await readLandings(store.statsId, product.id) }, { headers: NO_STORE });
     }
-    // The check reads the product's reviews: they are counted first, at their heaviest (AD_CONTEXT_UNITS).
-    const counted = await countStudio(store, null, AD_CONTEXT_UNITS);
+    // The check reads the product's reviews, counted first at their heaviest (AD_CONTEXT_UNITS), and the save reads
+    // its page, measured and counted first too (pageReadUnits; Claude 5 on #1950).
+    const bytes = await keptPageBytes(store.statsId, product.id);
+    const counted = await countStudio(store, null, AD_CONTEXT_UNITS + pageReadUnits(bytes));
     if (!counted.ok) {
       const refused = studioRefusal(counted.reason, counted.message);
       return Response.json(refused.body, { status: refused.status, headers: NO_STORE });
@@ -78,7 +90,7 @@ export async function POST(request: NextRequest) {
     const made = landingFrom(ad, check, campaign);
     if (!made.ok) return Response.json({ ok: false, error: made.error, message: LANDING_REFUSALS[made.error] }, { status: 400 });
     // The page must have a top block to put the words in, now; serving checks again.
-    const shown = landingPage(await readPage(store.statsId, product.id), made.landing, now);
+    const shown = landingPage(await readPageWithin(store.statsId, product.id, bytes), made.landing, now);
     if (!shown.ok) return Response.json({ ok: false, error: shown.error, message: LANDING_REFUSALS[shown.error] }, { status: 409 });
     const saved = await saveLanding(statsId, product.id, made.landing, store);
     if (saved === "full") {
@@ -87,6 +99,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, landing: made.landing, warnings: check.warnings, landings: await readLandings(store.statsId, product.id) }, { headers: NO_STORE });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
+    if (error instanceof PageGrown) return Response.json({ ok: false, error: "changed", message: error.message }, { status: 409 });
+    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable", message: "This could not be read just now. Nothing was saved. Try again in a moment." }, { status: 503 });
     // Not read exactly: nothing was saved (Codex G and J, #1947/#1950). Its answer lost: it may have been, so the page is read again.
     if (error instanceof LandingsUnreadable) return Response.json({ ok: false, error: "unavailable", message: error.message }, { status: 503 });
     if (error instanceof LandingsWriteUnconfirmed) return Response.json({ ok: false, error: "unconfirmed", message: error.message }, { status: 503 });

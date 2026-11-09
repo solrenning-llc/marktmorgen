@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/campaign-landing/route";
-import { AD_CONTEXT_UNITS, AD_REVIEWS, AD_REVIEW_BYTES, STUDIO_REQUEST_BYTES } from "@/lib/ad-context";
+import { AD_CONTEXT_UNITS, AD_REVIEWS, AD_REVIEW_BYTES, STUDIO_REQUEST_BYTES, pageReadUnits } from "@/lib/ad-context";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { dropLandings } from "@/lib/campaign-landing-store";
 import { MAX_REPLY_TEXT, MAX_REVIEW_NAME, MAX_REVIEW_TEXT } from "@/lib/review-summary";
@@ -97,8 +97,10 @@ async function main(): Promise<void> {
     redis.pipeline = pipe;
   }
   is("saved", saved.status, 200);
-  is("the save and the check's reads were counted first", (await allowanceUsed(store, "studio")) - before, 1 + AD_CONTEXT_UNITS);
-  is("what it moved fits the requests it was counted at", moved <= (1 + AD_CONTEXT_UNITS) * STUDIO_REQUEST_BYTES, true);
+  const [pageKept] = (await pipe([["STRLEN", `nl:product:page:${store.statsId}:${product}`]])) as number[];
+  const units = 1 + AD_CONTEXT_UNITS + pageReadUnits(pageKept);
+  is("the save and the check's reads were counted first (its page's too, Claude 5's return on #1950)", (await allowanceUsed(store, "studio")) - before, units);
+  is("what it moved fits the requests it was counted at", moved <= units * STUDIO_REQUEST_BYTES, true);
 
   part("The page is deleted while a save runs");
   await dropLandings(store.statsId!, product, store);

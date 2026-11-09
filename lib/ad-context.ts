@@ -42,6 +42,11 @@ export const STUDIO_REQUEST_BYTES = 50_000;
  */
 export const AD_CONTEXT_UNITS = Math.ceil((AD_REVIEWS * AD_REVIEW_BYTES) / STUDIO_REQUEST_BYTES);
 
+/** The studio requests reading a product's page of `bytes` takes, besides the request that asks for it (Claude 5 on #1950). */
+export function pageReadUnits(bytes: number): number {
+  return bytes > 0 ? Math.ceil(bytes / STUDIO_REQUEST_BYTES) : 0;
+}
+
 type Facts = Pick<Store, "currency" | "domain" | "sale" | "subscriptionActive" | "tier">;
 
 /** The price a buyer pays today, sale included, or null when there is no single one. Pure. */

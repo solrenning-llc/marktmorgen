@@ -32,7 +32,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { dropLandings } from "@/lib/campaign-landing-store";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
@@ -148,6 +148,42 @@ export async function releasePictures(statsId: string, productId: string, paths:
 export async function readPage(statsId: string | null, productId: string): Promise<SalesPage> {
   if (!statsId || !isRedisConfigured()) return { ...EMPTY_PAGE, blocks: [] };
   const [raw] = await redisPipeline([["GET", pageKey(statsId, productId)]]);
+  return pageOf(raw);
+}
+
+/**
+ * How many bytes a product's page takes as kept, read exactly (STRLEN): 0 when there is none. Any other answer is
+ * UnknownReplyError, never 0. What a route counts before it reads the page (Claude 5 on #1950).
+ */
+export async function keptPageBytes(statsId: string | null, productId: string): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const bytes = countOf(repliesFor(await redisPipeline([["STRLEN", pageKey(statsId, productId)]]), 1)?.[0]);
+  if (bytes === null) throw new UnknownReplyError("a page's size");
+  return bytes;
+}
+
+/** A page that grew past what was counted for reading it: nothing was read whole, and nothing is decided from it. */
+export class PageGrown extends Error {
+  constructor() {
+    super("The page changed while it was being read. Try again in a moment.");
+    this.name = "PageGrown";
+  }
+}
+
+/**
+ * A product's page, read no further than `most` bytes (what keptPageBytes measured and the caller counted): a page grown
+ * since is read cut, cannot be read, and throws PageGrown, so never more is read than was paid for.
+ */
+export async function readPageWithin(statsId: string | null, productId: string, most: number): Promise<SalesPage> {
+  if (!statsId || !isRedisConfigured() || most <= 0) return { ...EMPTY_PAGE, blocks: [] };
+  const [raw] = repliesFor(await redisPipeline([["GETRANGE", pageKey(statsId, productId), 0, most - 1]]), 1) ?? [undefined];
+  if (typeof raw !== "string") throw new UnknownReplyError("a page");
+  if (!raw) return { ...EMPTY_PAGE, blocks: [] };
+  try {
+    JSON.parse(raw);
+  } catch {
+    throw new PageGrown();
+  }
   return pageOf(raw);
 }
 

@@ -15,6 +15,8 @@ const REASONS: Record<string, string> = {
   taken: "Another link already has that name. Each post's link needs its own, so its results are its own.",
   target: "Choose where the link goes.",
   full: `A store can have ${MAX_LINKS} links. End one you no longer use to make another.`,
+  unavailable: "Your links could not be checked just now, so this link was not made. Try again in a moment.",
+  unread: "Your links could not be read just now. Reload the page to see them before you change one again.",
 };
 
 const placeName = (place: string) => POST_PLACES.find((p) => p.place === place)?.label ?? "Somewhere else";

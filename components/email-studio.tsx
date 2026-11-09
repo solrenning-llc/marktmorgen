@@ -106,6 +106,8 @@ const MESSAGES: Record<string, string> = {
   segment_empty: "Choose who the group is first: a kind of reader, a product, someone to leave out, a label, or one of the five ways below.",
   segment_product: "That product is not in your store anymore.",
   segment_full: "A store keeps 20 saved groups at most. Remove one first.",
+  segment_unavailable: "Your saved groups could not be checked just now, so this group was not saved. Try again in a moment.",
+  segment_unread: "Your saved groups could not be read just now. Reload the page to see them before you change one again.",
   keep_already: "This email is already going to new people by itself. It is under Sequences.",
   keep_full: `That sequence already holds ${MAX_STEPS} steps. Remove one under Sequences first.`,
   too_many_flows: `A store keeps ${MAX_FLOWS} sequences at most. Remove one under Sequences first.`,

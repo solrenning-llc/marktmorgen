@@ -26,6 +26,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { courseProgress } from "@/lib/learn";
 import { idsOfKind } from "@/lib/catalog";
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { DraftRemovalConflict, DraftRemovalUnconfirmed, DraftReadUnavailable, DraftWriteUnconfirmed, finishBroadcastDraft, removeDraft, saveDraft } from "@/lib/mail-drafts";
 import { copyOf, keepSending } from "@/lib/mail-reuse";
 import { setUpStarters } from "@/lib/mail-starters";
@@ -189,12 +190,19 @@ export async function POST(request: NextRequest) {
 
     if (action === "segment-save") {
       const saved = await saveSegment(store, body);
-      if (!saved.ok) return Response.json({ ok: false, error: `segment_${saved.reason}` }, { status: 400 });
+      // Groups that could not be read are a moment's trouble, not the creator's: 503, and nothing was saved.
+      if (!saved.ok) return Response.json({ ok: false, error: `segment_${saved.reason}` }, { status: saved.reason === "unavailable" ? 503 : 400 });
       return Response.json({ ok: true, segments: saved.segments });
     }
 
     if (action === "segment-remove") {
-      return Response.json({ ok: true, segments: await removeSegment(store, body.id) });
+      // Removed, but the groups left could not be read: never shown as none (CX-123 rule 24).
+      const segments = await removeSegment(store, body.id).catch((error: unknown) => {
+        if (error instanceof UnknownReplyError) return null;
+        throw error;
+      });
+      if (!segments) return fail("segment_unread", 503);
+      return Response.json({ ok: true, segments });
     }
 
     if (action === "test") {

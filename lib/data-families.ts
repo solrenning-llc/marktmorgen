@@ -118,6 +118,8 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
+  // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3).
+  "nl:tip:co:",
 ];
 
 /** Whether a key belongs to a family the room counts: the longest family name it starts with is one of COUNTED_FAMILIES. */
@@ -435,6 +437,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:yearly-offer:": C, "nl:yearly:link:": X(30), "nl:yearly:price:": E,
   // A failed yearly renewal moved to monthly (lib/yearly-fallback.ts): its tries lapse; the daily job takes each entry out of its list.
   "nl:yearly:fallback:both": I, "nl:yearly:fallback:check": I, "nl:yearly:fallback:try:": X(2), "nl:yearly:fallback:void": I,
+  // A gift's checkout mark (lib/store-tip-checkout.ts, R20 finding 3): a hash names it, never the store; gone by itself in two days.
+  "nl:tip:co:": X(2),
 };
 
 /**

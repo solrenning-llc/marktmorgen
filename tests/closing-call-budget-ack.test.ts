@@ -47,6 +47,9 @@ globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: 
 const budgetSet = (commands: (string | number)[][]) =>
   commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:closing-call-budget:v1\n") && String(commands[0]?.[3]).startsWith("nl:closing:work:");
 
+/** closeOne's start of a closing (lib/plan-closing.ts CLOSING_START), which now sets the told marks, credit and budget in one script. */
+const closingStart = (commands: (string | number)[][]) => commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:closing-start:v1\n");
+
 /** Replies the script must never be read as done from. */
 const BAD_REPLIES: [string, unknown][] = [
   ["the script answered null", [null]],
@@ -132,16 +135,16 @@ async function main(): Promise<void> {
   is("startCallBudget, a fraction or a negative: floored at 0, as before", [await outcome(() => startCallBudget("cb-neg", -3.5, ENDING)), await calls("cb-neg")], [undefined, "0"]);
   is("takeCalls, a budget of 0: refused", await takeCalls("cb-zero", 1), false);
 
-  part("closeOne: holdFrom is never written on a budget that was not set");
+  part("closeOne: holdFrom is never written on a budget that was not set (the closing's start, one script)");
   {
     const { email, folder, endedAt, cap } = await endedStore("cbone");
     const at = endedAt + 60_000;
     Date.now = () => at;
-    rule = { when: budgetSet, reply: [null], run: false };
-    is("closeOne, the script answered null: the day fails as unknown", await outcome(() => closeOne(email, at, hands, Number.POSITIVE_INFINITY)), "UnknownReplyError");
+    rule = { when: closingStart, reply: [null], run: false };
+    is("closeOne, the closing's start answered null: the day fails as unknown", await outcome(() => closeOne(email, at, hands, Number.POSITIVE_INFINITY)), "UnknownReplyError");
     rule = null;
-    is("closeOne, the script answered null: holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
-    is("closeOne, the script answered null: the budget is not there", await calls(folder), null);
+    is("closeOne, the closing's start answered null: holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
+    is("closeOne, the closing's start answered null: the budget is not there", await calls(folder), null);
 
     const next = at + DAY;
     Date.now = () => next;
@@ -167,11 +170,11 @@ async function main(): Promise<void> {
     }
     for (const [index, ref] of hidden) await redis.pipeline([["ZREM", index, ref]]);
     try {
-      rule = { when: budgetSet, reply: ["1"], run: true };
+      rule = { when: closingStart, reply: ["1"], run: true };
       const row = (await closeEnded(Number.POSITIVE_INFINITY, at, hands)).find((r) => r.key === email);
       rule = null;
-      is("closeEnded, the script answered \"1\" (the write landed): the store is held as failed", row && { state: row.state, note: row.note }, { state: "held", note: "failed" });
-      is("closeEnded, the script answered \"1\": holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
+      is("closeEnded, the closing's start answered \"1\" (the write landed): the store is held as failed", row && { state: row.state, note: row.note }, { state: "held", note: "failed" });
+      is("closeEnded, the closing's start answered \"1\": holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
 
       const next = at + DAY;
       Date.now = () => next;

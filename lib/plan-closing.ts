@@ -87,9 +87,10 @@ import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { BUYER_NOTICE_DAYS, BUYER_NOTICE_FROM, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, afterBuyersTold, buyerNoticeCap, buyersStartOn, paidBefore } from "@/lib/closing-buyers-rules";
-import { forgetCredit, startClosingCredit } from "@/lib/closing-credit";
-import { FINAL_INDEX, HELD_INDEX, forgetHeld, holdCharges, holdCounts, paidPeriods, retryHolds, savePaidPeriod, startCallBudget } from "@/lib/closing-holds";
-import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort } from "@/lib/closing-buyers";
+import { creditKey, forgetCredit } from "@/lib/closing-credit";
+import { FINAL_INDEX, HELD_INDEX, forgetHeld, holdCharges, holdCounts, paidPeriods, retryHolds, savePaidPeriod, workKey } from "@/lib/closing-holds";
+import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort, toldKey } from "@/lib/closing-buyers";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { giveBackUnused, unusedRows, unusedSummary } from "@/lib/closing-refunds";
 import { stillToGive, unusedOf, type PaidPeriod } from "@/lib/closing-buyers-rules";
 import { formatMoney } from "@/lib/money";
@@ -684,6 +685,47 @@ function unusedOfRow(row: PaidPeriod, day: number): number {
   return row.want ?? stillToGive(unusedOf(row, day), row.back ?? 0);
 }
 
+/**
+ * KEYS[1] the addresses told (hash), KEYS[2] the email credit (string),
+ * KEYS[3] the closing's work (hash); ARGV[1] the emails, ARGV[2] the calls,
+ * ARGV[3] the ending (its plan's end, in ms). Starts a closing once an ending:
+ * 1 when started now (the earlier ending's marks, credit, budget and cursors
+ * replaced), 0 when started for this ending already (everything kept), -1
+ * when a key is of another type (nothing written). lib/redis-memory.ts runs
+ * it the same way.
+ */
+export const CLOSING_START = `-- marktmorgen:closing-start:v1
+local t = redis.call("TYPE", KEYS[1]).ok
+local c = redis.call("TYPE", KEYS[2]).ok
+local w = redis.call("TYPE", KEYS[3]).ok
+if (t ~= "hash" and t ~= "none") or (c ~= "string" and c ~= "none") or (w ~= "hash" and w ~= "none") then return -1 end
+if redis.call("HGET", KEYS[3], "of") == ARGV[3] then return 0 end
+redis.call("DEL", KEYS[1])
+redis.call("SET", KEYS[2], ARGV[1])
+redis.call("DEL", KEYS[3])
+redis.call("HSET", KEYS[3], "calls", ARGV[2], "of", ARGV[3])
+return 1`;
+
+/**
+ * Starts the closing of an ending, before any email or call to Stripe: the
+ * addresses told about an earlier ending forgotten, this one's email credit
+ * and call budget set (lib/closing-credit.ts, lib/closing-holds.ts), in one
+ * script owned by the ending (Codex S on #3309, Codex G on #3299). Two
+ * overlapping closeOne runs that both read no holdFrom start it once: a late
+ * start never puts back credit or calls already spent, nor forgets a buyer
+ * already told. Resolves on the exact 1 or 0; anything else (-1 for a key of
+ * another type, text, null, a missing or an extra reply) throws
+ * UnknownReplyError (CX-123 rule 24), and closeOne writes no holdFrom, so it
+ * is started the next day.
+ */
+export async function startClosing(folder: string, emails: number, calls: number, ending: number): Promise<void> {
+  if (!Number.isSafeInteger(ending) || ending < 0) throw new Error("a closing's start needs the ending it is for");
+  const whole = (n: number) => Math.max(0, Math.floor(n));
+  const replies = repliesFor(await redisPipeline([["EVAL", CLOSING_START, 3, toldKey(folder), creditKey(folder), workKey(folder), whole(emails), whole(calls), String(ending)]]), 1);
+  const started = replies?.[0];
+  if (started !== 1 && started !== 0) throw new UnknownReplyError("a closing's start");
+}
+
 export type Closing = {
   key: string;
   /**
@@ -803,9 +845,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // this one's emails and calls to Stripe are capped before any is spent
     // (lib/closing-credit.ts, lib/closing-holds.ts).
     const cap = buyerNoticeCap(store.tier, paidBefore(store));
-    await forgetTold(folder);
-    await startClosingCredit(folder, cap * EMAILS_PER_BUYER_PER_ENDING);
-    await startCallBudget(folder, cap * STRIPE_CALLS_PER_MEMBER, endedAt);
+    await startClosing(folder, cap * EMAILS_PER_BUYER_PER_ENDING, cap * STRIPE_CALLS_PER_MEMBER, endedAt);
     Object.assign(state, { holdFrom: now });
     await save(state);
   }

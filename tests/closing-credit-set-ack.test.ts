@@ -44,6 +44,8 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 })) as typeof fetch;
 
 const creditSet = (commands: (string | number)[][]) => commands[0]?.[0] === "SET" && String(commands[0]?.[1]).startsWith("nl:closing:credit:");
+/** closeOne's start of a closing (lib/plan-closing.ts CLOSING_START), which now sets the told marks, credit and budget in one script. */
+const closingStart = (commands: (string | number)[][]) => commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:closing-start:v1\n");
 
 /** Replies a SET must never be read as done from. */
 const BAD_REPLIES: [string, unknown][] = [
@@ -124,16 +126,16 @@ async function main(): Promise<void> {
   is("startClosingCredit, a fraction or a negative: floored at 0, as before", [await outcome(() => startClosingCredit("ack-neg", -3)), await credit("ack-neg")], [undefined, "0"]);
   is("startClosingCredit, no folder: nothing is written, as before", [await outcome(() => startClosingCredit("", 5)), await credit("")], [undefined, null]);
 
-  part("closeOne: holdFrom is never written on a credit that was not set");
+  part("closeOne: holdFrom is never written on a credit that was not set (the closing's start, one script)");
   {
     const { email, folder, endedAt, cap } = await endedStore("ackone");
     const at = endedAt + 60_000;
     Date.now = () => at;
-    rule = { when: creditSet, reply: [], run: false };
-    is("closeOne, SET answered with nothing: the day fails as unknown", await outcome(() => closeOne(email, at, hands, Number.POSITIVE_INFINITY)), "UnknownReplyError");
+    rule = { when: closingStart, reply: [], run: false };
+    is("closeOne, the closing's start answered with nothing: the day fails as unknown", await outcome(() => closeOne(email, at, hands, Number.POSITIVE_INFINITY)), "UnknownReplyError");
     rule = null;
-    is("closeOne, SET answered with nothing: holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
-    is("closeOne, SET answered with nothing: the credit is not there", await credit(folder), null);
+    is("closeOne, the closing's start answered with nothing: holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
+    is("closeOne, the closing's start answered with nothing: the credit is not there", await credit(folder), null);
 
     const next = at + DAY;
     Date.now = () => next;
@@ -158,11 +160,11 @@ async function main(): Promise<void> {
     }
     for (const [index, ref] of hidden) await redis.pipeline([["ZREM", index, ref]]);
     try {
-      rule = { when: creditSet, reply: ["1"], run: true };
+      rule = { when: closingStart, reply: ["1"], run: true };
       const row = (await closeEnded(Number.POSITIVE_INFINITY, at, hands)).find((r) => r.key === email);
       rule = null;
-      is("closeEnded, SET answered \"1\" (the write landed): the store is held as failed", row && { state: row.state, note: row.note }, { state: "held", note: "failed" });
-      is("closeEnded, SET answered \"1\": holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
+      is("closeEnded, the closing's start answered \"1\" (the write landed): the store is held as failed", row && { state: row.state, note: row.note }, { state: "held", note: "failed" });
+      is("closeEnded, the closing's start answered \"1\": holdFrom is not written", (await stateOf(email)).holdFrom, undefined);
 
       const next = at + DAY;
       Date.now = () => next;

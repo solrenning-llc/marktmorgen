@@ -63,8 +63,11 @@ export function ReportForm({ url: given }: { url: string }) {
       <div role="status" className="card p-6 sm:p-8">
         <p className="text-lg font-semibold text-ink">Your notice was sent</p>
         <p className="mt-2 text-ink-soft">
-          We read it and act on it as our Copyright and Takedown Policy says. If we need anything else, we write to the
-          email address you gave. No copy is emailed to you.
+          {kind === "child_safety"
+            ? "We got it. A reported product usually comes off the store at once; when it does not, we act on it by hand. If we need anything else, we write to the email address you gave. No copy is emailed to you."
+            : kind === "intimate_image"
+              ? "We got it. We remove the image within 48 hours of a complete request. If we need anything else, we write to the email address you gave. No copy is emailed to you."
+              : "We read it and act on it as our Copyright and Takedown Policy says. If we need anything else, we write to the email address you gave. No copy is emailed to you."}
         </p>
       </div>
     );
@@ -100,7 +103,7 @@ export function ReportForm({ url: given }: { url: string }) {
           <p className="font-semibold">Do not upload, attach or describe the images. Tell us only where they are.</p>
           {child ? (
             <p className="mt-2">
-              We take the product off the store at once, keep what we need to report it, and report child sexual abuse material to the National Center
+              A reported product usually comes off the store at once (when it does not, we act on it by hand). We keep what we need to report it, and report child sexual abuse material to the National Center
               for Missing &amp; Exploited Children (NCMEC). You can also report it to NCMEC yourself at{" "}
               <a href="https://report.cybertip.org" className="underline underline-offset-2">report.cybertip.org</a>.
             </p>
@@ -115,8 +118,8 @@ export function ReportForm({ url: given }: { url: string }) {
         <p id="report-url-help" className="mt-1 text-sm text-ink-soft">The store page or the product page, and in what you write below, which part of it.</p>
       </div>
       <div>
-        <label htmlFor="report-work" className="field-label">{copyright ? "The work that was copied, and what on the page copies it" : child ? "Where on the page it is, in a few words (never describe the images)" : intimate ? "Which image it is, and that it is of you and shared without your consent" : "What the content is, and why it is illegal"}</label>
-        <textarea id="report-work" required rows={5} maxLength={MAX_REPORT_TEXT} value={fields.work} onChange={set("work")} className={field} />
+        <label htmlFor="report-work" className="field-label">{copyright ? "The work that was copied, and what on the page copies it" : child ? "Anything that helps us find it on the page, if you want (optional; never describe the images)" : intimate ? "Which image it is, and that it is of you and shared without your consent" : "What the content is, and why it is illegal"}</label>
+        <textarea id="report-work" required={!child} rows={5} maxLength={MAX_REPORT_TEXT} value={fields.work} onChange={set("work")} className={field} />
       </div>
       {copyright ? (
         <div>

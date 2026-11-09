@@ -6,6 +6,7 @@ import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { heldInSale } from "@/lib/child-safety";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
 import { activePlan } from "@/lib/product-extras";
@@ -167,6 +168,12 @@ export async function POST(request: NextRequest) {
   // Refused here rather than at Stripe, so a buyer never reaches a card form
   // for something that could not have been delivered anyway.
   if (!preorder && !canSellProduct(store, product)) return away(`/@${store.handle}`);
+  // Nothing kept for a child-safety report is handed over through this one: not as a product of its bundle, nor as a
+  // ticked box's product or a product of that box's bundle (lib/child-safety.ts). A hold that cannot be read refuses.
+  const kept = await heldInSale(store, product, bumps);
+  if (kept === "unavailable") return away(`/@${store.handle}?status=error`);
+  if (kept === "bundle") return away(`/@${store.handle}`);
+  if (kept === "box") return away(`/@${store.handle}/p/${product.id}#buy`);
   // A bundle that holds too little that can be handed over right now is not sold.
   if (product.bundle) {
     const pool = deliverableItems(product, await readListings(store, product.bundle));

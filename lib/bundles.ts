@@ -7,7 +7,8 @@
  *
  *   - What a bundle offers a buyer who has not paid yet is its list as the
  *     creator saved it, each product as it is now, leaving out anything that
- *     can no longer be handed over whole (deliverableItems).
+ *     can no longer be handed over whole (deliverableItems), and nothing at
+ *     all while one of its products is kept for a child-safety report.
  *   - What a buyer who paid gets is the list written on their order when
  *     they paid (lib/bundle-rules.ts, bundleFromMeta), each product as it is
  *     now — its current file, link or lessons, exactly as a buyer of that
@@ -18,6 +19,7 @@
 import type { Listing, Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { MIN_BUNDLE_ITEMS, deliverableItems } from "@/lib/bundle-rules";
+import { heldOrUnreadable } from "@/lib/child-safety-holds";
 
 /** What an order's bundle hands over now, and how many of its products are gone. */
 export type BundleContents = { items: Listing[]; missing: number };
@@ -52,7 +54,13 @@ export async function offeredItems(store: Store, listings: Listing[]): Promise<M
   const missing = bundleItemsToRead(listings);
   const read = missing.length ? await readListings(store, missing) : [];
   const all = [...listings, ...read];
-  for (const bundle of bundles) out.set(bundle.id, deliverableItems(bundle, all));
+  // A product kept for a child-safety report is always off the store (hidden), so only a bundle's hidden products
+  // are read for a hold, and a page whose bundles hold none reads nothing more; a hold that cannot be read counts
+  // as held (lib/child-safety-holds.ts).
+  const inside = new Set(bundles.flatMap((p) => p.bundle ?? []));
+  const hidden = all.filter((p) => p.hidden && inside.has(p.id)).map((p) => p.id);
+  const held = hidden.length ? await heldOrUnreadable(store, hidden) : undefined;
+  for (const bundle of bundles) out.set(bundle.id, deliverableItems(bundle, all, held));
   return out;
 }
 

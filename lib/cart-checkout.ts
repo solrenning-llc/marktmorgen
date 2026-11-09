@@ -23,6 +23,7 @@ import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admi
 import type { Product, Store } from "@/lib/store";
 import { KIND, readListings } from "@/lib/catalog";
 import { BUMP_KEYS, MIN_BUNDLE_ITEMS, bundleMeta, deliverableItems } from "@/lib/bundle-rules";
+import { heldIdsAmong } from "@/lib/child-safety-holds";
 import { type SaleCandidate, saleOff, salePrice } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
 import { commissionRate } from "@/lib/affiliate-setting";
@@ -160,11 +161,15 @@ export async function createCartCheckout(
   if (deal > 0) body.set("metadata[cart_deal]", String(deal));
   let discounted = deal > 0;
   const lines: { key: string | null; cents: number; id: string }[] = [];
+  // A bundle holding a product kept for a child-safety report is not sold (lib/child-safety-holds.ts): one read for
+  // every bundle in the cart; a hold that cannot be read throws, so nothing reaches Stripe.
+  const inBundles = products.flatMap((product) => product.bundle ?? []);
+  const held = inBundles.length ? await heldIdsAmong(store, inBundles) : undefined;
   for (const [i, product] of products.entries()) {
     const key = i === 0 ? null : BUMP_KEYS[i - 1];
     // A bundle's list is written onto the order as it is now, as for any bundle sold.
     if (product.bundle) {
-      const items = deliverableItems(product, await readListings(store, product.bundle));
+      const items = deliverableItems(product, await readListings(store, product.bundle), held);
       if (items.length < MIN_BUNDLE_ITEMS) throw new Error("A bundle in the cart holds too little right now");
       for (const [name, value] of Object.entries(bundleMeta(key ? `${key}_bundle` : "bundle", items.map((p) => p.id)))) body.set(`metadata[${name}]`, value);
     }

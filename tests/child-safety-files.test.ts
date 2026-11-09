@@ -18,7 +18,7 @@ import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductFile, setProductImage, setProductPage, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { parsePage } from "@/lib/sales-page";
-import { writePage } from "@/lib/sales-page-store";
+import { readPageExact, writePage } from "@/lib/sales-page-store";
 import { POST as aiRoute } from "@/app/api/store/ai/route";
 import { ROOM } from "./data-room";
 import { copyKey, stampedCopy } from "@/lib/pdf-stamp";
@@ -64,17 +64,25 @@ async function main(): Promise<void> {
   const PAGE_PICTURE = "cccccccccccccccccccccccccccccccc.webp";
   await setProductPage(owner, held.product.id, true);
   const statsId = (await storeForEmail(owner))!.statsId!;
-  await writePage(statsId, held.product.id, { ...parsePage({}), blocks: [{ id: "blk001", kind: "pictures", heading: "", items: [{ path: `images/${FOLDER}/${PAGE_PICTURE}`, width: 10, height: 10, alt: "", caption: "" }] }] } as never, ROOM);
+  // Its second version (the page test, page.variant) shows another picture, only there (Claude 6, review 5831985513).
+  const VARIANT_PICTURE = "dddddddddddddddddddddddddddddddd.webp";
+  await writePage(statsId, held.product.id, parsePage({
+    blocks: [{ id: "blk001", kind: "pictures", heading: "", items: [{ path: `images/${FOLDER}/${PAGE_PICTURE}`, width: 10, height: 10, alt: "", caption: "" }] }],
+    variant: { blocks: [{ id: "blk002", kind: "pictures", heading: "", items: [{ path: `images/${FOLDER}/${VARIANT_PICTURE}`, width: 10, height: 10, alt: "", caption: "" }] }] },
+  }), ROOM);
+  const saved = (await readPageExact(statsId, held.product.id)).page;
+  is("the page's second version shows its own picture", saved?.variant?.blocks.some((block) => block.kind === "pictures" && block.items.some((item) => item.path === `images/${FOLDER}/${VARIANT_PICTURE}`)), true);
 
   part("The hold marks every file the product hands over");
   is("held", await holdReported({ kind: "child_safety", url: `https://marktmorgen.com/@filesshop/p/${held.product.id}` }, (await storeForEmail(owner))!), "held");
   is("its file and its picture are marked; another product's file is not", [await isFileHeld(heldPath), await isFileHeld(`images/${FOLDER}/${HELD_PICTURE}`), await isFileHeld(freePath)], [true, true, false]);
   is("so are the pictures on its sales page", await isFileHeld(`images/${FOLDER}/${PAGE_PICTURE}`), true);
+  is("and those shown only on the page's second version", await isFileHeld(`images/${FOLDER}/${VARIANT_PICTURE}`), true);
   const lists = redis.keys().filter((key) => key.startsWith("nl:csa:files:"));
   const list = lists.length === 1 ? (JSON.parse(String(redis.run(["GET", lists[0]]))) as { paths: string[]; more: number }) : null;
-  is("where its files are is kept for the owner to find them", [lists.length, list?.paths.includes(heldPath), list?.more], [1, true, 0]);
+  is("where its files are is kept for the owner to find them", [lists.length, list?.paths.includes(heldPath), list?.paths.includes(`images/${FOLDER}/${VARIANT_PICTURE}`), list?.more], [1, true, true, 0]);
   const marks = redis.keys().filter((key) => key.startsWith("nl:csa:file:"));
-  is("the marks name no path or store", marks.every((key) => /^nl:csa:file:[0-9a-f]{64}$/.test(key)) && marks.length === 3, true);
+  is("the marks name no path or store", marks.every((key) => /^nl:csa:file:[0-9a-f]{64}$/.test(key)) && marks.length === 4, true);
   const ttl = Number(redis.run(["TTL", marks[0] ?? ""]));
   is("and they end by themselves after 400 days", ttl > 399 * 86_400 && ttl <= HELD_FILE_SECONDS, true);
 
@@ -101,6 +109,8 @@ async function main(): Promise<void> {
   is("a download is refused, without saying why", [served.status, await served.text(), served.headers.get("cache-control")], [404, "This file is not available.", "no-store"]);
   const pic = await imageRoute(picture(HELD_PICTURE), { params: Promise.resolve({ folder: FOLDER, file: HELD_PICTURE }) });
   is("the public picture is not found, and not cached", [pic.status, pic.headers.get("cache-control")], [404, "no-store"]);
+  const second = await imageRoute(picture(VARIANT_PICTURE), { params: Promise.resolve({ folder: FOLDER, file: VARIANT_PICTURE }) });
+  is("nor is a picture shown only on its page's second version", [second.status, second.headers.get("cache-control")], [404, "no-store"]);
   const other = await imageRoute(picture(FREE_PICTURE), { params: Promise.resolve({ folder: FOLDER, file: FREE_PICTURE }) });
   is("another picture is still asked for (no token here, so it fails to fetch)", other.status, 502);
 

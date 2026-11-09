@@ -36,6 +36,7 @@ import { cache } from "react";
 import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from "@/lib/store";
 import { moneyField } from "@/lib/money";
 import { productIdFromAddress, readListing, readListings } from "@/lib/catalog";
+import { offerableTargets } from "@/lib/child-safety-holds";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
@@ -313,7 +314,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
     pageOf(store, product),
     summaryOf(store.statsId, product.id).catch(() => null),
     // What its order bump offers, drawn in the same box as on the store page.
-    product.bumps.length ? readListings(store, bumpTargets(product)) : Promise.resolve([]),
+    // A product kept for a child-safety report is never drawn as a box (lib/child-safety-holds.ts).
+    product.bumps.length ? readListings(store, bumpTargets(product)).then((found) => offerableTargets(store, found)) : Promise.resolve([]),
     // What a bundle holds now, each product as it is today (lib/bundles.ts).
     product.bundle ? offeredItems(store, [product]).then((m) => m.get(product.id) ?? []).catch(() => []) : Promise.resolve(null),
     // How many times it was bought, when the creator chose to say so (lib/sold-count.ts).

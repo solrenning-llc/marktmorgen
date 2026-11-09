@@ -26,7 +26,10 @@
  * publishes it or changes or deletes any of its files, options, picture,
  * page, episodes, lessons, lesson captions, license keys, bundle list,
  * waitlist or buyers' reviews, and no bundle takes it in (heldRefusal,
- * heldRefusalAmong): the law asks for what was reported to
+ * heldRefusalAmong). Nor is it sold through another product: a bundle
+ * holding it is not offered or sold, and a checkout box offering it, or a
+ * bundle holding it, is not shown or charged (lib/child-safety-holds.ts,
+ * heldInSale): the law asks for what was reported to
  * be kept for a year from the report (18 U.S.C. § 2258A(h), as the REPORT Act
  * amended it), and a creator could otherwise delete it from the studio.
  *
@@ -37,18 +40,21 @@
  * of it goes to an AI provider). A mark that cannot be read refuses the same
  * way (holdState, contentOpenTo).
  */
+import { createHash } from "node:crypto";
 import { emailForSession, normaliseEmail } from "@/lib/auth";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeRef } from "@/lib/store";
-import { type Report, reportedProduct } from "@/lib/takedown";
+import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
 import { holdFiles } from "@/lib/held-files";
 import { productFilePaths } from "@/lib/held-product-files";
 import { withReminders } from "@/lib/child-safety-alerts";
-import { productIdFor } from "@/lib/catalog";
+import { type Listing, productIdFor, readListings } from "@/lib/catalog";
+import { heldIdsAmong, isHeldForReport, keepKey, touchesHeld } from "@/lib/child-safety-holds";
+import { activeBumps, bumpTargets } from "@/lib/product-extras";
 
 /** Automatic holds a store takes from child-safety reports in one UTC day; past them the owner decides. */
 export const CHILD_SAFETY_HOLDS_PER_DAY = 3;
@@ -77,16 +83,7 @@ export type HoldOutcome = "held" | "files_unconfirmed" | "no_product" | "not_hel
 
 const storeTag = (store: Pick<Store, "statsId" | "handle">) => store.statsId || `h:${store.handle}`;
 const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${storeTag(store)}:${day}`;
-const keepKey = (store: Pick<Store, "statsId" | "handle">, productId: string) => `nl:csa:keep:${storeTag(store)}:${productId}`;
-
-/** Whether the product is kept for a report; a reply that cannot be read throws, so the caller refuses the change. */
-export async function isHeldForReport(store: Pick<Store, "statsId" | "handle">, productId: string): Promise<boolean> {
-  const replies = repliesFor(await redisPipeline([["GET", keepKey(store, productId)]]), 1);
-  const value = replies?.[0];
-  if (value === null) return false;
-  if (value === "1") return true;
-  throw new Error("A preservation hold could not be read");
-}
+export { isHeldForReport } from "@/lib/child-safety-holds";
 
 /** A product's hold as a reader sees it; "unknown" is a mark that could not be read, refused like "held". */
 export type HoldState = "held" | "free" | "unknown";
@@ -154,17 +151,41 @@ export async function heldRefusalAmong(store: Store, ids: readonly string[]): Pr
   const productIds = [...new Set(ids.map((id) => productIdFor(store, id)).filter((id): id is string => id !== null))];
   if (productIds.length === 0) return null;
   try {
-    const replies = repliesFor(await redisPipeline(productIds.map((id) => ["GET", keepKey(store, id)])), productIds.length);
-    if (!replies) throw new Error("A preservation hold could not be read");
-    let held = false;
-    for (const value of replies) {
-      if (value === "1") held = true;
-      else if (value !== null) throw new Error("A preservation hold could not be read");
-    }
+    const held = (await heldIdsAmong(store, productIds)).size > 0;
     return held ? Response.json({ ok: false, error: "on_hold" }, { status: 409 }) : null;
   } catch (error) {
     console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  }
+}
+
+/**
+ * Whether a checkout for this product would hand over a product kept for a
+ * report, read by app/api/store/checkout/route.ts before the checkout is built
+ * (lib/store-checkout.ts writes a bundle's list and the ticked boxes onto the
+ * order as they stand): "bundle" when the product is a bundle holding one,
+ * "box" when a ticked box's product is held or is a bundle holding one,
+ * "unavailable" when a hold cannot be read, null to go on. `bumps` is what the
+ * form sent: the ticked boxes' product ids, or "yes" for the first box shown.
+ * One read of the boxes' products, only when one is ticked, and one of holds.
+ */
+export async function heldInSale(store: Store, product: Listing, bumps: readonly string[]): Promise<"bundle" | "box" | "unavailable" | null> {
+  try {
+    const inBundle = product.bundle ?? [];
+    let ticked: Listing[] = [];
+    if (bumps.length > 0 && product.bumps.length > 0) {
+      const shown = activeBumps(await readListings(store, bumpTargets(product)), product);
+      ticked = shown.filter((offer, at) => bumps.includes(offer.target.id) || (at === 0 && bumps.includes("yes"))).map((offer) => offer.target);
+    }
+    const asked = [...inBundle, ...ticked.flatMap((target) => [target.id, ...(target.bundle ?? [])])];
+    if (asked.length === 0) return null;
+    const held = await heldIdsAmong(store, asked);
+    if (inBundle.some((id) => held.has(id))) return "bundle";
+    if (ticked.some((target) => touchesHeld(target, held))) return "box";
+    return null;
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return "unavailable";
   }
 }
 
@@ -176,7 +197,12 @@ export async function heldRefusalAmong(store: Store, ids: readonly string[]): Pr
 export async function holdReported(report: { kind: ReportKind; url: string }, store: Store, now = Date.now()): Promise<HoldOutcome> {
   if (report.kind !== "child_safety") return "not_held";
   try {
-    const product = await reportedProduct({ url: report.url } as Report, store);
+    // Read exactly (rule 24): an address that names no product of this store is no_product; a read that fails or
+    // answers off its shape is unknown, never "names nothing" (lib/takedown.ts reportedProduct swallows it).
+    const id = productIdIn(report.url, store);
+    if (!id) return "no_product";
+    const product = await readListingExactly(store, id);
+    if (product === "unknown") return "unknown";
     if (!product) return "no_product";
     const key = countKey(store, new Date(now).toISOString().slice(0, 10));
     // The day's cap is counted in products: a second report of the same product, or a retry, adds nothing.
@@ -213,7 +239,7 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
-  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist or buyers' reviews, from the studio, and it goes into no bundle. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. Its files are kept from deletion, whoever asks, and handed to nobody, buyers included. Two things the site cannot take back: a download address issued before the report works until it expires (up to 4 hours), and a picture of it fetched before may still be served from the CDN's and browsers' caches for up to a year; purge the CDN cache in the hosting dashboard now, as docs/incident-response.md section 8 says.",
+  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist or buyers' reviews, from the studio, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. Its files are kept from deletion, whoever asks, and handed to nobody, buyers included. Two things the site cannot take back: a download address issued before the report works until it expires (up to 4 hours), and a picture of it fetched before may still be served from the CDN's and browsers' caches for up to a year; purge the CDN cache in the hosting dashboard now, as docs/incident-response.md section 8 says.",
   files_unconfirmed: "The product it points at was taken off the store at once (unpublished), but keeping its files from deletion and download could not be confirmed. Suspend the store now, as docs/incident-response.md section 8 says.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
@@ -221,6 +247,20 @@ const WHAT_HAPPENED: Record<HoldOutcome, string> = {
   unknown: "Taking it off the store could not be confirmed. Act on it now by hand, as docs/incident-response.md section 8 says.",
   failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 8 says.",
 };
+
+const NOTICE_NOT_KEPT = "The notice itself could not be confirmed as kept, and the person was told to try again: if no notice email with this address reaches the support inbox, act on this email alone.";
+
+/** The product id a store address names (/@handle/p/<product>), or null. */
+function productIdIn(url: string, store: Store): string | null {
+  try {
+    const parts = new URL(url).pathname.split("/").filter(Boolean);
+    const at = parts.indexOf("p");
+    const segment = at >= 0 ? decodeURIComponent(parts[at + 1] ?? "") : "";
+    return segment ? productIdFromAddress(store, segment) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Only a Marktmorgen address is shown in the urgent email; anything else is named, not quoted. */
 function where(url: string): string {
@@ -245,7 +285,12 @@ function deadline(ms: number): string {
  * itself. It names where and what was done; it never quotes the reporter's
  * words, since those may describe the content. False when it was not sent.
  */
-export async function alertOwner(report: { kind: ReportKind; url: string; work?: string }, outcome: HoldOutcome, now = Date.now()): Promise<boolean> {
+export async function alertOwner(
+  report: { kind: ReportKind; url: string; work?: string; email?: string },
+  outcome: HoldOutcome,
+  now = Date.now(),
+  noticeKept = true,
+): Promise<boolean> {
   if (report.kind !== "child_safety" && report.kind !== "intimate_image") return false;
   const handle = handleIn(report.url);
   const child = report.kind === "child_safety";
@@ -260,6 +305,7 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
         "Do not open, download, forward or describe the reported content, and do not ask any AI agent to look at it.",
         "If you have actual knowledge of apparent child sexual abuse material, report it to NCMEC's CyberTipline (report.cybertip.org) as soon as reasonably possible, and keep the content preserved.",
         "The steps, with the law, are in docs/incident-response.md.",
+        ...(noticeKept ? [] : ["", NOTICE_NOT_KEPT]),
       ]
     : [
         "A request to remove an intimate image shared without consent was sent from /report (TAKE IT DOWN Act).",
@@ -268,7 +314,9 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
         `Remove it within ${TAKE_IT_DOWN_HOURS} hours: by ${deadline(now + TAKE_IT_DOWN_HOURS * 3_600_000)}, and make reasonable efforts to remove any identical copies on the site.`,
         "",
         "Do not forward or describe the image, and do not ask any AI agent to look at it.",
-        "The steps are in docs/incident-response.md. The request itself, with the person's signature, is in the notice email.",
+        noticeKept
+          ? "The steps are in docs/incident-response.md. The request itself, with the person's signature, is in the notice email."
+          : `The steps are in docs/incident-response.md. ${NOTICE_NOT_KEPT}`,
       ];
   // Repeated every 24 hours until it is marked handled, with the link that does so (lib/child-safety-alerts.ts).
   return withReminders({ kind: report.kind, url: report.url, handle: handle || "", outcome }, now, (more) =>
@@ -278,7 +326,9 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
       to: SUPPORT_EMAIL,
       subject: subject.slice(0, 200),
       text: [...lines, ...more].join("\n"),
-      idempotencyKey: `report-urgent-${report.kind}-${now}-${handle || "none"}`,
+      // One urgent email per request a day: a retry of the same request (address, sender, words) does not send it twice,
+      // and a new request on the same address, by another person or about another image, still does.
+      idempotencyKey: `report-urgent-${report.kind}-${createHash("sha256").update(`${report.url}\n${report.email ?? ""}\n${report.work ?? ""}`).digest("hex").slice(0, 24)}-${new Date(now).toISOString().slice(0, 10)}`,
     }),
   )
     .catch(() => false)

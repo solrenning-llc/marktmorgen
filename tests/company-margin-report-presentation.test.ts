@@ -57,6 +57,8 @@ test("a complete reconciled month has one deterministic private owner presentati
       // Rule 23 (DONO-3, M3 of the pre-review of claude5/closed-store-deadline): the month's lapses now have their own
       // line; this observation does not say them, so they are unknown, never zero.
       "Lojas fechadas no prazo sem resposta do Stripe: desconhecido (não zero).",
+      // Rule 23 (second pre-review): stores kept past the published time, by reason, unknown here.
+      "Lojas retidas além do prazo publicado: desconhecido (não zero).",
       "Somente informativo: este relatório não abre vendas nem altera preço, limite, comissão, sinalizador ou trava.",
     ].join("\n"),
   });

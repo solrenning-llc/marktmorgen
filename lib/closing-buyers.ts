@@ -49,7 +49,7 @@ import {
   type BuyerLetter,
   buyerNotice,
   letterHtml,
-  refundShortLetter, refundUnmadeLetter,
+  refundLapsedLetter, refundShortLetter, refundUnmadeLetter,
   staysOpenLetter,
   unusedOf,
 } from "@/lib/closing-buyers-rules";
@@ -319,9 +319,17 @@ export async function toldOf(store: Store, email: string): Promise<{ toldAt: num
  * takes it from the store's credit now. True when every one went or was
  * counted as not coverable.
  */
-export async function tellRefundShort(store: Store, short: { email: string; amount: number; cur: string }[], endedAt: number, why: "balance" | "limit" = "balance"): Promise<{ sent: number; untold: number; ok: boolean }> {
+export async function tellRefundShort(
+  store: Store,
+  short: { email: string; amount: number; cur: string }[],
+  endedAt: number,
+  why: "balance" | "limit" | "lapse" = "balance",
+  /** The closing day, for "lapse": the letter says it (DONO-3). */
+  closedOn = 0,
+): Promise<{ sent: number; untold: number; uncredited: number; ok: boolean }> {
   const postal = companyPostal();
-  const out = { sent: 0, untold: 0, ok: true };
+  // `uncredited`: of `untold`, those left out because the closing's email credit ran out (not a bad address).
+  const out = { sent: 0, untold: 0, uncredited: 0, ok: true };
   if (!short.length) return out;
   if (!postal) return { ...out, ok: false };
   const folder = await storeFolder(storeRef(store));
@@ -346,16 +354,18 @@ export async function tellRefundShort(store: Store, short: { email: string; amou
     if (!told) {
       if (!(await takeCreditOrGiveBack(folder, 1, taken))) {
         out.untold += 1;
+        out.uncredited += 1;
         continue;
       }
       taken += 1;
     }
     addresses.push(email);
-    const letter = why === "limit" ? refundUnmadeLetter : refundShortLetter;
-    going.push(message(store, email, letter({ store: store.name, amount: formatMoney(row.amount, row.cur), contact: contactOf(store) }), postal));
+    const input = { store: store.name, amount: formatMoney(row.amount, row.cur), contact: contactOf(store) };
+    const letter = why === "lapse" ? refundLapsedLetter({ ...input, closedOn }) : why === "limit" ? refundUnmadeLetter(input) : refundShortLetter(input);
+    going.push(message(store, email, letter, postal));
   }
   for (let i = 0; i < going.length; i += 100) {
-    if (!(await send(going.slice(i, i + 100), batchKey(why === "limit" ? "unmade" : "short", folder, endedAt, addresses.slice(i, i + 100))))) return { ...out, ok: false };
+    if (!(await send(going.slice(i, i + 100), batchKey(why === "lapse" ? "lapsed" : why === "limit" ? "unmade" : "short", folder, endedAt, addresses.slice(i, i + 100))))) return { ...out, ok: false };
     out.sent += Math.min(100, going.length - i);
   }
   return out;

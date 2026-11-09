@@ -10,14 +10,18 @@ below. Unknown billing coverage (`has_more`, malformed/failed evidence or an
 unreadable independent refund queue) never advances a store to `removed`.
 There is no deletion deadline for uncertainty and no new customer limit.
 **DONO-3 (owner, 9 November2026), replacing that sentence for a store at or past its
-closing day:** Stripe giving no answer at all (network failure, timeout, 5xx/429:
-`lib/stripe-silence.ts`) holds it only until `STRIPE_SILENT_DAYS` (ERASE_WITHIN_DAYS less
+closing day:** Stripe giving no answer at all (network failure, a timeout of Stripe's
+but never our run's own cutoff, 5xx/429 also as an HTML page, or the creator's connected
+account refused for good with 403 account_invalid/permission_error: `lib/stripe-silence.ts`)
+holds it only until `STRIPE_SILENT_DAYS` (ERASE_WITHIN_DAYS less
 ERASE_EVERY_DAYS) after that day; then members whose paid time was not given back are
 told, the closing goes on without Stripe, its personal records go by the existing walk,
 and only the dated closing record stays (`lapsed`, `unstopped`), counted in the month's
 `nl:held:month:` hash and in the owner's monthly report. An answer, even after the
-deadline, is followed; an unreadable answer, Stripe not configured or a failure of ours
-still holds with no deadline. The deadline is the earliest moment, not a guaranteed
+deadline, is followed; our own key refused (401), an unreadable answer, Stripe not
+configured, a member's notice that cannot go out (or no email credit for it) or a failure
+of ours still holds with no deadline, and each such store past the published time is
+counted once a month by reason in the owner's report ("retidas além do prazo publicado"). The deadline is the earliest moment, not a guaranteed
 latest: a store already in the held recheck line waits its turn among the50 rechecks a
 day, and the walk then runs at most every WALK_GAP_MS, so deletion within
 ERASE_WITHIN_DAYS of the closing day is not guaranteed in the worst case. A store held

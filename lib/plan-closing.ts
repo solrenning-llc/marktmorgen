@@ -1,5 +1,5 @@
-import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recordHeldMonth, recordLapsed, type HeldFunding } from "@/lib/held-stores";
-import { stripeSilent } from "@/lib/stripe-silence";
+import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recordHeldMonth, recordLapsed, recordOverdue, type HeldFunding, type OverdueReason } from "@/lib/held-stores";
+import { type StripeFailure, stripeFailure } from "@/lib/stripe-silence";
 /**
  * A store whose plan has ended, and what it still keeps.
  *
@@ -177,11 +177,15 @@ export function removalDay(endedAt: number): number {
  * The owner's decision DONO-3 (9 November 2026): a closed store whose Stripe never answers is not kept for ever.
  * Its deadline is ERASE_WITHIN_DAYS after its closing day (the privacy policy, "When a store closes", and the terms,
  * section 8) less one walk's room (ERASE_EVERY_DAYS) for the deletion itself. Until then a Stripe that cannot be
- * asked holds the day, as before; from then Stripe giving no answer at all (lib/stripe-silence.ts) no longer does:
- * members whose paid time was not given back are told, the closing goes on without Stripe, its personal records go
- * by the deletion that already exists (lib/closed-store-data.ts), and only the dated closing record stays, with the
- * case on it (`lapsed`, `unstopped`), counted in its month for the owner's report. An answer, even after the
- * deadline, is followed; an answer that cannot be read, or a failure of ours, holds as before.
+ * asked holds the day, as before; from then Stripe giving no answer at all (lib/stripe-silence.ts: no network, a
+ * timeout of Stripe's, 5xx/429 even as HTML, or the creator's connected account refused for good, 403
+ * account_invalid) no longer does: members whose paid time was not given back are told first, with the day it
+ * closed, the closing goes on without Stripe, its personal records go by the deletion that already exists
+ * (lib/closed-store-data.ts), and only the dated closing record stays, with the case on it (`lapsed`, `unstopped`),
+ * counted once in its month for the owner's report. An answer, even after the deadline, is followed. Our own key
+ * refused (401), Stripe not configured, an answer that cannot be read, a notice that cannot go out (or no email
+ * credit left for it) or a failure of ours holds as before, with no deadline; past the published time each such
+ * store is counted once a month by reason (`overdue`), so the owner sees it.
  *
  * What this guarantees is the earliest moment, not the latest: the lapse happens on the first daily run at or after
  * the deadline in which the store is actually asked and Stripe is silent. A store at its day is looked at every
@@ -203,6 +207,26 @@ async function silenceLapsed(state: State, now: number, save: (next: State) => P
     return false;
   }
   return now >= from + STRIPE_SILENT_DAYS * DAY_MS;
+}
+
+/** The failures of one step, put together: silence only when every one was Stripe giving no answer. */
+function failureOf(kinds: StripeFailure[]): StripeFailure | null {
+  if (!kinds.length) return null;
+  if (kinds.every((kind) => kind === "silent")) return "silent";
+  return (["key", "answer", "other"] as const).find((kind) => kinds.includes(kind)) ?? "other";
+}
+const reasonOf = (kind: StripeFailure | null): OverdueReason => (kind === "key" || kind === "answer" ? kind : "other");
+
+/**
+ * A held closing store past the published time (ERASE_WITHIN_DAYS after its closing day, `base`) says why, for the
+ * owner's report (closeOne counts it once a month); before that time, or when the day is not known, it says nothing.
+ */
+function overdueAt(result: Closing, base: number | undefined, now: number): Closing {
+  if (result.state !== "held" || base === undefined || now < base + ERASE_WITHIN_DAYS * DAY_MS) {
+    if (result.overdue) delete result.overdue;
+    return result;
+  }
+  return { ...result, overdue: result.overdue ?? "other" };
 }
 
 /**
@@ -740,12 +764,22 @@ export type Closing = {
   note?: string;
   /** Closed without Stripe at its deadline, Stripe never having answered (STRIPE_SILENT_DAYS, DONO-3). */
   lapsed?: true;
+  /** Held past the published time (ERASE_WITHIN_DAYS after its closing day), and why: counted for the owner's report. */
+  overdue?: OverdueReason;
   /** Only unknown platform billing coverage enters the funded retry index. */
   coverage?: "unknown";
 };
 
 /** One store whose plan has ended, looked at for today. */
 export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY, mayObserve?: () => Promise<boolean>): Promise<Closing> {
+  const result = await lookAt(key, now, hands, until, mayObserve);
+  // Kept past the published time: counted once a month by reason (DONO-3, the owner's report). A count that fails is
+  // said in the log; it never holds or moves the closing.
+  if (result.overdue) await recordOverdue(key, result.overdue, now).catch((error) => console.error("counting a closing store kept past its published time failed", error));
+  return result;
+}
+
+async function lookAt(key: string, now: number, hands: Hands, until: number, mayObserve?: () => Promise<boolean>): Promise<Closing> {
   const store = await storeForEmail(key);
   if (!store) {
     await redisPipeline([["ZREM", ENDED_INDEX, key], ["ZREM", FINAL_INDEX, key], ["DEL", stateKey(key)]]);
@@ -766,15 +800,17 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // The durable final index survives a late active snapshot, which clears
     // planEndedAt. Keep the original closing proof for the refund guard.
     const closingStore = store.planEndedAt ? store : { ...store, planEndedAt: new Date(was).toISOString() };
-    if (mayObserve && !(await mayObserve())) return { key, state: "held", coverage: "unknown", note: "daily-recheck-budget" };
-    const latePlansChecked = await refuseLatePlans(closingStore).catch((error): false => {
+    if (mayObserve && !(await mayObserve())) return overdueAt({ key, state: "held", coverage: "unknown", note: "daily-recheck-budget" }, final.day ?? final.lapseFrom, now);
+    const latePlansChecked = await refuseLatePlans(closingStore).catch((error): StripeFailure => {
       console.error("checking a closing store platform coverage failed", error);
-      return false;
+      return stripeFailure(error);
     });
     const saveFinal = (next: State) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]);
     // Stripe giving no answer past its deadline (DONO-3): the day goes on without it, written down. Anything else holds.
     const silent = latePlansChecked === "silent";
-    if (latePlansChecked !== true && !(silent && (await silenceLapsed(final, now, saveFinal)))) return { key, state: "held", coverage: "unknown", note: "its plan subscriptions could not all be checked" };
+    if (latePlansChecked !== true && !(silent && (await silenceLapsed(final, now, saveFinal)))) {
+      return overdueAt({ key, state: "held", coverage: "unknown", note: "its plan subscriptions could not all be checked", overdue: reasonOf(latePlansChecked) }, final.day ?? final.lapseFrom, now);
+    }
     if (final.removed) {
       if (!final.due) {
         await markDue(key, now);
@@ -908,23 +944,21 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   // The day has come. Stripe is asked, today, before anything is touched:
   // about the subscription this store has written down, and then for any
   // other in good standing that names it.
-  if (mayObserve && !(await mayObserve())) return { key, state: "held", coverage: "unknown", note: "daily-recheck-budget" };
-  if (!isBillingConfigured()) return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
+  if (mayObserve && !(await mayObserve())) return overdueAt({ key, state: "held", coverage: "unknown", note: "daily-recheck-budget" }, closes ? day : undefined, now);
+  if (!isBillingConfigured()) return overdueAt({ key, state: "held", coverage: "unknown", note: "Stripe could not be asked", overdue: "key" }, closes ? day : undefined, now);
   // DONO-3: only Stripe giving no answer at all (lib/stripe-silence.ts) lets the deadline pass without it. A reply in
   // a shape or a funding this code cannot read, Stripe not configured, or a failure of ours holds the day as before.
   let own: SubscriptionState | null = null;
   let live: StartedSubscription | null | undefined;
-  let known = true;
-  let silentOnly = true;
-  const missed = (error: unknown) => {
-    known = false;
-    if (!stripeSilent(error)) silentOnly = false;
-  };
+  const failures: StripeFailure[] = [];
+  const missed = (error: unknown) => failures.push(stripeFailure(error));
   try {
     if (store.subscriptionId) {
       let failure: unknown = null;
-      own = await readSubscription(store.subscriptionId, store, (error) => { failure = error; });
-      if (own.state === "unknown") missed(failure);
+      let failed = false;
+      own = await readSubscription(store.subscriptionId, store, (error) => { failed = true; failure = error; });
+      // Unknown with no failure is an answer this code cannot read (a shape, a funding).
+      if (own.state === "unknown") failures.push(failed ? stripeFailure(failure) : "answer");
     }
     // Stripe's search can lag about a minute; its list by the store's customer does not, so a plan paid just
     // before this check still keeps the store (the owner's decision: a plan started in time saves it). Read even
@@ -943,15 +977,14 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
       if (!live) {
         try { live = await observation.customerLive(); }
         catch (error) {
-          if (searchKnown) missed(error);
-          else if (!stripeSilent(error)) silentOnly = false;
+          // With the search failed this is mostly the same failure again; it is counted either way.
+          if (searchKnown || stripeFailure(error) !== "silent") missed(error);
         }
       }
     }
   } catch (error) {
     console.error("asking Stripe about an ended plan failed", error);
-    known = false;
-    silentOnly = false;
+    failures.push("other");
   }
   if (own?.state === "active" || live) {
     // Stripe says a plan runs: written down here, outside what can lapse; a write of ours that fails holds the day.
@@ -966,10 +999,11 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     }
     return { key, state: "running", note: "Stripe says the plan runs" };
   }
-  if (!known) {
-    return silentOnly && closes && now >= day + STRIPE_SILENT_DAYS * DAY_MS
+  const failure = failureOf(failures);
+  if (failure !== null) {
+    return failure === "silent" && closes && now >= day + STRIPE_SILENT_DAYS * DAY_MS
       ? closingDay(store, key, state, endedAt, day, folder, now, hands, until, save, true)
-      : { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
+      : overdueAt({ key, state: "held", coverage: "unknown", note: "Stripe could not be asked", overdue: reasonOf(failure) }, closes ? day : undefined, now);
   }
 
   if (closes) return closingDay(store, key, state, endedAt, day, folder, now, hands, until, save);
@@ -993,6 +1027,11 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
  * deletes its records.
  */
 async function closingDay(store: Store, key: string, state: State, endedAt: number, day: number, folder: string, now: number, hands: Hands, until: number, save: (next: State) => Promise<unknown>, silentBefore = false): Promise<Closing> {
+  const result = await closingSteps(store, key, state, endedAt, day, folder, now, hands, until, save, silentBefore);
+  return overdueAt(result, state.day ?? state.lapseFrom ?? day, now);
+}
+
+async function closingSteps(store: Store, key: string, state: State, endedAt: number, day: number, folder: string, now: number, hands: Hands, until: number, save: (next: State) => Promise<unknown>, silentBefore: boolean): Promise<Closing> {
   let next: State = state;
   // DONO-3: Stripe silent past the deadline on a step (or before this day began, `silentBefore`); the step is passed
   // over on this run only, never written down as done, so a run that stops later asks Stripe again.
@@ -1031,10 +1070,11 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       if (!stopped.done) return { key, state: "held", note: "the renewals it sold are not all stopped yet" };
     } catch (error) {
       console.error("stopping a closing store's renewals failed", error);
-      if (!(stripeSilent(error) && (await lapses()))) return { key, state: "held", note: "Stripe could not be asked to stop its renewals" };
+      const kind = stripeFailure(error);
+      if (!(kind === "silent" && (await lapses()))) return { key, state: "held", note: "Stripe could not be asked to stop its renewals", overdue: reasonOf(kind) };
       renewalsSilent = true;
     }
-    if (!checkoutsRead && !(stripeSilent(checkoutsError) && (await lapses()))) return { key, state: "held", note: "its open plan checkouts could not all be read" };
+    if (!checkoutsRead && !(stripeFailure(checkoutsError) === "silent" && (await lapses()))) return { key, state: "held", note: "its open plan checkouts could not all be read", overdue: reasonOf(stripeFailure(checkoutsError)) };
     if (checkoutsRead && !renewalsSilent) {
       next = { ...next, renewals: now };
       await save(next);
@@ -1052,23 +1092,22 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       return null;
     });
     // Another run's lock, or a failure of ours, is never silence; only Stripe giving no answer lapses (DONO-3).
-    if (settled === "busy" || (settled === null && !(stripeSilent(thrown) && (await lapses())))) return { key, state: "held", note: "its members' unused time is not settled yet" };
+    if (settled === "busy" || (settled === null && !(stripeFailure(thrown) === "silent" && (await lapses())))) return { key, state: "held", note: "its members' unused time is not settled yet", ...(settled === null ? { overdue: reasonOf(stripeFailure(thrown)) } : {}) };
     // Told for what happened: the balance did not cover it, or the closing's limit of calls did not reach it.
     const tellUnmade = async (): Promise<Closing | null> => {
       for (const [why, r] of [["balance", "short"], ["limit", "over"]] as const) {
         const left = [...(await paidPeriods(store))].filter(([, row]) => row.r === r && row.f === 1 && !row.m);
         if (!left.length) continue;
         const told = await tellRefundShort(store, left.map(([, row]) => ({ email: row.e, amount: unusedOfRow(row, next.day ?? day), cur: row.cur })), endedAt, why);
-        if (!told.ok) return { key, state: "held", note: "its members whose refund could not be made are not all told yet" };
+        if (!told.ok) return { key, state: "held", note: "its members whose refund could not be made are not all told yet", overdue: "notice" };
         for (const [sub, row] of left) await savePaidPeriod(store, sub, { ...row, m: 1 });
         if (told.untold) console.error(`plan-closing: ${told.untold} members whose refund could not be made were not covered by the store's closing emails`);
       }
       return null;
     };
-    if (settled !== null) {
-      const stop = await tellUnmade();
-      if (stop) return stop;
-    }
+    // Those told before (balance short, limit reached) are told first, also when the step lapses (A1).
+    const stop = await tellUnmade();
+    if (stop) return stop;
     let unpaid = settled === null;
     if (settled !== null && settled !== "changed" && settled !== "unavailable") {
       const left = (await unusedRows(store, next.day ?? day)).filter((row) => row.paid.r !== "pending");
@@ -1080,15 +1119,16 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       }
     }
     if (unpaid) {
-      // A1 of the pre-review: closed without Stripe, a member's paid time not given back goes the way of a refund not
-      // made on the closing day (lib/closing-refunds.ts, "over", final), and the member is told, with the creator's
-      // contact, before anything is deleted ("If it cannot be, we will email you", lib/closing-buyers-rules.ts).
-      for (const row of await unusedRows(store, next.day ?? day)) {
-        if (row.paid.r === "pending") continue;
-        await savePaidPeriod(store, row.sub, { ...row.paid, r: "over", f: 1, want: stillToGive(row.unused, row.paid.back ?? 0) });
-      }
-      const stop = await tellUnmade();
-      if (stop) return stop;
+      // A1 of the pre-reviews: closed without Stripe, each member whose paid time was not given back is told, with the
+      // day the store closed, that the refund may not have been made and how to reach the creator ("If it cannot be,
+      // we will email you", lib/closing-buyers-rules.ts), before anything is deleted. Their rows are given up (a
+      // refund not made on the closing day: "over", final) only once that notice went out, so a Stripe that answers
+      // again before it is still asked for the refund. A notice that cannot go out, or a closing out of email
+      // credit, holds the store: nobody's paid time is deleted untold.
+      const owed = (await unusedRows(store, next.day ?? day)).filter((row) => row.paid.r !== "pending").map((row) => ({ row, want: stillToGive(row.unused, row.paid.back ?? 0) }));
+      const told = await tellRefundShort(store, owed.map(({ row, want }) => ({ email: row.paid.e, amount: want, cur: row.paid.cur })), endedAt, "lapse", next.day ?? day);
+      if (!told.ok || told.uncredited > 0) return { key, state: "held", note: "its members whose refund may not have been made are not all told yet", overdue: "notice" };
+      for (const { row, want } of owed) await savePaidPeriod(store, row.sub, { ...row.paid, r: "over", f: 1, want, m: 1 });
     } else {
       next = { ...next, refunds: now };
       await save(next);
@@ -1104,10 +1144,17 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
   if (!done.clean) return { key, state: "held", note: `removed ${done.files}, and something could not be removed` };
   const after = (await hands.measure(folder)) + (store.community && hands.pictures ? await hands.pictures(store.community.id) : 0);
   if (after > keptRoomFor(endedAt)) return { key, state: "held", note: `removed ${done.files} and it still keeps ${bytesWords(after)}` };
-  // M2 of the pre-review: closed without Stripe before its renewals were stopped, the members' subscriptions known
-  // here (their last payments) may still renew at Stripe. Only their number is kept, on the dated record: their ids
-  // and the account's are not kept past the closing (the privacy policy keeps only the dates).
-  const unstopped = lapsed && !next.renewals ? (await paidPeriods(store)).size : 0;
+  if (lapsed) {
+    // The case, written down before anything else goes (MÉDIO-2 of the second pre-review): on its dated record (kept
+    // ERASED_KEPT_DAYS after the walk) with when it lapsed and, closed before its renewals were stopped, how many of
+    // its members' subscriptions were known here (M2: only their number; their ids and the account's are not kept
+    // past the closing, which keeps only dates). Then counted once, in the month it lapsed, under a mark of its own
+    // (lib/held-stores.ts, HELD_ONCE): a run tried again, in that month or another, never counts it twice.
+    const unstopped = !next.renewals ? (await paidPeriods(store)).size : 0;
+    next = { ...next, lapsed: next.lapsed ?? now, ...(unstopped ? { unstopped } : {}) };
+    await save(next);
+    await recordLapsed(key, next.lapsed ?? now);
+  }
   // Its members' last payments and the addresses told, kept only for the closing.
   await forgetHeld(store, folder);
   await forgetTold(folder);
@@ -1116,12 +1163,8 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
   // Kept in FINAL_INDEX until its records are gone (closeOne, "gone"), so a
   // plan checkout is refused, and a plan paid for it returned, until then.
   if (lapsed) {
-    // The case: counted in its month for the owner's report (M3), once, before its dated record says so (a count that
-    // fails is tried again with the day; one whose reply is lost may count twice, never none); then written down on
-    // that record (kept ERASED_KEPT_DAYS after the walk), and counted by the daily job.
-    if (next.lapsed === undefined) await recordLapsed(now);
-    await save({ ...next, removed: now, due: now, lapsed: next.lapsed ?? now, ...(unstopped ? { unstopped } : {}) });
-    console.error(`plan-closing: Stripe never answered about a closed store by its deadline; it was closed without it, ${unstopped} known member renewals not confirmed stopped at Stripe, and its records are deleted by the next walk`);
+    await save({ ...next, removed: now, due: now });
+    console.error(`plan-closing: Stripe never answered about a closed store by its deadline; it was closed without it, ${next.unstopped ?? 0} known member renewals not confirmed stopped at Stripe, and its records are deleted by the next walk`);
     return { key, state: "removed", lapsed: true, note: `closed without Stripe at its deadline, ${done.files} files: its records are deleted by the next walk` };
   }
   await save({ ...next, removed: now, due: now });
@@ -1134,14 +1177,14 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
  * began returned (lib/closing-plan-guard.ts). Stripe not answering is tried
  * again on the next run; the daily sync and the way back check it too.
  */
-async function refuseLatePlans(store: Store): Promise<boolean | "silent"> {
-  if (!isBillingConfigured()) return false;
+async function refuseLatePlans(store: Store): Promise<true | StripeFailure> {
+  if (!isBillingConfigured()) return "key";
   let complete = true;
-  // "silent" only when every read that failed gave no answer at all (lib/stripe-silence.ts, DONO-3).
-  let silentOnly = true;
+  // What failed, put together: "silent" only when every read that failed gave no answer (lib/stripe-silence.ts).
+  const failures: StripeFailure[] = [];
   const missed = (error: unknown) => {
     complete = false;
-    if (!stripeSilent(error)) silentOnly = false;
+    failures.push(stripeFailure(error));
   };
   const ids = new Map<string, string>();
   const observation = await observeStoreSubscriptions(store);
@@ -1173,14 +1216,14 @@ async function refuseLatePlans(store: Store): Promise<boolean | "silent"> {
       // returning "returning" can also mean an unreadable queue or live plan.
       if (result !== "returned" && result !== "returned-early" && !(result === "returning" && stopped)) {
         complete = false;
-        silentOnly = false;
+        failures.push("other");
       }
     } catch (error) {
       missed(error);
       console.error("refusing a plan paid for a closing store failed", error);
     }
   }
-  return complete ? true : silentOnly ? "silent" : false;
+  return complete ? true : failureOf(failures) ?? "other";
 }
 
 /**

@@ -64,6 +64,7 @@
  *   nl:hooks:anchor:<statsId>   the last Stripe event read for this store
  *   nl:hooks:wait:<statsId>     the event its reading waits on, and for how many runs
  */
+import { StripeUnreadableReply } from "@/lib/stripe-http-error";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -1321,6 +1322,8 @@ function waitsOn(error: unknown): Waits {
   // or an answer that is not JSON at all (an error page in front of Stripe), which onAccount cannot read.
   if (error instanceof TypeError && error.message === "fetch failed") return "passing";
   if (error instanceof SyntaxError) return "passing";
+  // The same error page, now read with its status (lib/stripe-http-error.ts): a 4xx page is still Stripe's answer.
+  if (error instanceof StripeUnreadableReply) return error.status >= 400 && error.status < 500 && error.status !== 429 && error.status !== 409 ? "refused" : "passing";
   return "ours";
 }
 

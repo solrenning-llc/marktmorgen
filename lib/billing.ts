@@ -1,4 +1,5 @@
 import {activateRestartContract,type RestartContractActivation} from "@/lib/contract-restart-activation";
+import { stripeJson } from "@/lib/stripe-http-error";
 import {publishRestartStore} from "@/lib/contract-restart-publication";
 import {createHash,randomUUID} from 'node:crypto';
 import {canonicalFinancialSnapshot,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
@@ -130,7 +131,8 @@ export async function onPlatform(
       cache: "no-store",
       signal,
     });
-    return { response, data: (await response.json()) as Record<string, unknown> };
+    // A status that is not OK with a body that is not JSON keeps its status (lib/stripe-http-error.ts).
+    return { response, data: await stripeJson(response) };
   });
   if (!response.ok) {
     const error = data.error as

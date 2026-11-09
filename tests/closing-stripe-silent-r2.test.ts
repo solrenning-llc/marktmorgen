@@ -50,13 +50,16 @@ const stateKey = (key: string) => `nl:plan:closing:${sha(key).slice(0, 40)}`;
 
 /** The file store, by path. */
 const objects = new Map<string, number>();
-const fileStore: "up" | "down" = "up";
+// Never down here; kept as the other tests have it.
+const fileStore = "up" as "up" | "down";
 /** Stripe, as the platform (plans) and as the creators' connected accounts (what they sold). */
 let platform: "up" | "down" | "html502" | "key401" | "slow" = "up";
 const resendDown = false;
 let connected: "up" | "down" | "revoked" = "up";
 const running = new Map<string, Record<string, unknown>>();
 const posted: string[] = [];
+/** What the creators' connected accounts were asked, by path. */
+const asked: string[] = [];
 const sent: { to: string[]; subject: string }[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -76,6 +79,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (!onAccount && platform === "key401") return json({ error: { type: "invalid_request_error", message: "Invalid API Key provided: sk_live_****" } }, 401);
     if (!onAccount && platform === "slow") await new Promise((r) => setTimeout(r, 1000));
     if (method !== "GET") posted.push(`${method} ${url.pathname}`);
+    if (onAccount) asked.push(url.pathname);
     const path = url.pathname.replace(/^\/v1/, "");
     if (path === "/subscriptions/search") {
       const query = url.searchParams.get("query") ?? "";
@@ -224,12 +228,16 @@ async function main(): Promise<void> {
   await quietly(() => closeOne(c.email, c.ended + (C + 1) * DAY, hands));
   breakLapsedSave = stateKey(c.email);
   const lapseDay = c.ended + (C + SILENT + 1) * DAY;
+  const monthOf = new Date(lapseDay).toISOString().slice(0, 7);
+  const [cntBefore] = await redis.pipeline([["HGET", "nl:held:month:" + monthOf, "lapsed"]]);
   const c1 = await quietly(() => closeOne(c.email, lapseDay, hands).catch((e) => ({ state: "threw", note: String(e) })));
   const c2 = await quietly(() => closeOne(c.email, lapseDay + 3_600_000, hands));
   connected = "up";
   const month = new Date(lapseDay).toISOString().slice(0, 7);
   const [cnt] = await redis.pipeline([["HGET", "nl:held:month:" + month, "lapsed"]]);
-  is("one store that lapsed once is counted once", [c1.state, c2.state, Number(cnt)], ["threw", "removed", 1]);
+  // Rule 23: the proof read the month's whole count; R4's store lapsed in the same month, so this store's own share
+  // is the count's change across its two runs.
+  is("one store that lapsed once is counted once", [c1.state, c2.state, Number(cnt) - Number(cntBefore ?? 0)], ["threw", "removed", 1]);
 
   part("R6: A1 notice cannot go out on the lapse run (company postal address missing); next day Stripe and the address are back");
   const POSTAL = process.env.COMPANY_POSTAL_ADDRESS;
@@ -249,10 +257,13 @@ async function main(): Promise<void> {
   connected = "up";
   process.env.COMPANY_POSTAL_ADDRESS = POSTAL;
   const before = sent.length;
-  const postedBefore = posted.length;
-  const m2 = await quietly(() => closeOne(m.email, m.ended + (C + SILENT + 2) * DAY, hands));
-  const unmade = sent.slice(before).filter((x) => x.to.includes("refund-member@example.com") && /not made automatically/.test(x.subject));
-  is("Stripe answering again: the member is not told 'not made' without a refund being tried", [m2.state, unmade.length, posted.slice(postedBefore).filter((x) => x.includes("/refunds")).length > 0], [m2.state, 0, true]);
+  const askedBefore = asked.length;
+  await quietly(() => closeOne(m.email, m.ended + (C + SILENT + 2) * DAY, hands));
+  const unmade = sent.slice(before).filter((x) => x.to.includes("refund-member@example.com") && /not made automatically|may not have been made/.test(x.subject));
+  // Rule 23: the proof counted a POST /refunds, which its stand-in can never reach (no balance answer, so no refund is
+  // made in any version); a refund tried is the connected account asked for its balance, and the row not given up.
+  const after = (await paidPeriods(ms)).get("sub_refund0000001");
+  is("Stripe answering again: the member is not told 'not made' without a refund being tried", [unmade.length, asked.slice(askedBefore).some((x) => x.endsWith("/balance")), after?.r === "over"], [0, true, false]);
 
   part("R7: the company postal address never comes back: any exit before 400 days?");
   const n = await closingStore("mailstore");

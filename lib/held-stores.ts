@@ -131,31 +131,63 @@ export async function recordHeldMonth(now: number, complete: boolean): Promise<v
   if (!ack(reply)) throw new Error("held store count is unknown");
 }
 /**
- * DONO-3: a closed store closed without Stripe at its deadline (lib/plan-closing.ts, STRIPE_SILENT_DAYS) is counted
- * in its month, in the same monthly hash as the held count (field `lapsed`), so the owner's report says why held
- * stores left the line. A count that is not confirmed throws: the closing day is then tried again with it.
+ * DONO-3: counted once per store in a month, in the same monthly hash as the held count: a mark under the store's
+ * hashed identity and its count, in one script, so a run tried again never counts it twice.
  */
-export async function recordLapsed(now: number): Promise<void> {
-  const day = dayOf(now);
-  if (day === null) throw new Error("lapsed closing clock is unknown");
-  const key = "nl:held:month:" + day.slice(0, 7);
-  const values = exactArray(await redisPipeline([["HINCRBY", key, "lapsed", 1], ["EXPIRE", key, HELD_MONTH_COUNT_SECONDS]]));
-  if (!values || values.length !== 2 || number(values[0]) === null || (values[0] as number | string) === 0 || values[1] !== 1) throw new Error("lapsed closing count is unknown");
+export const HELD_ONCE = `-- marktmorgen:held-once:v1
+local t=redis.call('TYPE',KEYS[1]).ok
+if t~='none' and t~='hash' then return -1 end
+local raw=redis.call('HGET',KEYS[1],ARGV[2])
+if raw and (not string.match(raw,'^%d+$') or (raw~='0' and string.sub(raw,1,1)=='0')) then return -1 end
+if redis.call('HSETNX',KEYS[1],ARGV[1],'1')==1 then redis.call('HINCRBY',KEYS[1],ARGV[2],1) end
+redis.call('EXPIRE',KEYS[1],ARGV[3])
+return 1
+`;
+async function countOnce(ref: string, at: number, field: string): Promise<void> {
+  const day = dayOf(at);
+  if (!refValid(ref) || day === null) throw new Error("held store identity or clock is unknown");
+  const reply = await redisPipeline([["EVAL", HELD_ONCE, 1, "nl:held:month:" + day.slice(0, 7), field + ":" + identity(ref), field, HELD_MONTH_COUNT_SECONDS]]);
+  if (!ack(reply)) throw new Error("held store count is unknown");
 }
-/** The month's lapses, known only once its last day was observed (as readHeldMonth): none recorded then is zero; otherwise unknown, never zero. */
-export async function readLapsedMonth(month: string): Promise<number | null> {
+/**
+ * A closed store closed without Stripe at its deadline (lib/plan-closing.ts, STRIPE_SILENT_DAYS), counted once in
+ * the month of `at`, the moment its record says it lapsed, so a run tried again in another month counts it there
+ * too never. Throws when not confirmed: the closing is then tried again, and counts it once.
+ */
+export async function recordLapsed(ref: string, at: number): Promise<void> {
+  await countOnce(ref, at, "lapsed");
+}
+/** Why a closing store is kept past the published time (ERASE_WITHIN_DAYS after its closing day). */
+export const OVERDUE_REASONS = ["key", "answer", "notice", "other"] as const;
+export type OverdueReason = (typeof OVERDUE_REASONS)[number];
+/** A closing store kept past the published time, counted once a month by reason, for the owner's report. */
+export async function recordOverdue(ref: string, reason: OverdueReason, now: number): Promise<void> {
+  await countOnce(ref, now, "over:" + reason);
+}
+/** The month's figures, known only once its last day was observed (as readHeldMonth); otherwise unknown, never zero. */
+async function monthFields(month: string, fields: string[]): Promise<(number | null)[] | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
   try {
-    const reply = exactArray(await redisPipeline([["HMGET", "nl:held:month:" + month, "day", "lapsed"]]));
+    const reply = exactArray(await redisPipeline([["HMGET", "nl:held:month:" + month, "day", ...fields]]));
     const values = reply?.length === 1 ? exactArray(reply[0]) : null;
-    if (!values || values.length !== 2) return null;
+    if (!values || values.length !== fields.length + 1) return null;
     const [year, m] = month.split("-").map(Number);
     const last = new Date(0);
     last.setUTCFullYear(year, m, 0);
     if (values[0] !== last.toISOString().slice(0, 10)) return null;
-    if (values[1] === null) return 0;
-    return number(values[1]);
+    return values.slice(1).map((value) => (value === null ? 0 : number(value)));
   } catch { return null; }
+}
+/** The month's lapses (DONO-3): none recorded once its last day was observed is zero; otherwise unknown. */
+export async function readLapsedMonth(month: string): Promise<number | null> {
+  const values = await monthFields(month, ["lapsed"]);
+  return values?.[0] ?? null;
+}
+/** The month's closing stores kept past the published time, by reason; unknown, never zero, as above. */
+export async function readOverdueMonth(month: string): Promise<Record<OverdueReason, number> | null> {
+  const values = await monthFields(month, OVERDUE_REASONS.map((reason) => "over:" + reason));
+  if (!values || values.some((value) => value === null)) return null;
+  return Object.fromEntries(OVERDUE_REASONS.map((reason, i) => [reason, values[i] as number])) as Record<OverdueReason, number>;
 }
 export type HeldMonthCount = { month: string; count: number; peak: number };
 export async function readHeldMonth(month: string): Promise<HeldMonthCount | null> {

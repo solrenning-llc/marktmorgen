@@ -307,6 +307,16 @@ export class MemoryRedis {
           this.run(["HSET", month, "count", count, "peak", Math.max(count, peak), "day", day, "complete", complete]);
           this.run(["EXPIRE", month, seconds]); return 1;
         }
+        // lib/held-stores.ts HELD_ONCE (DONO-3): a store counted once in a month, its mark and its count together.
+        if (key.startsWith("-- marktmorgen:held-once:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, month, mark, field, seconds] = args;
+          const type = this.run(["TYPE", month]);
+          if (type !== "none" && type !== "hash") return -1;
+          const raw = this.run(["HGET", month, field]);
+          if (raw !== null && !/^(0|[1-9][0-9]*)$/.test(String(raw))) return -1;
+          if (this.run(["HSETNX", month, mark, "1"]) === 1) this.run(["HINCRBY", month, field, 1]);
+          this.run(["EXPIRE", month, seconds]); return 1;
+        }
         // CX-67: one funded held-store reconfirmation per UTC day, site ceiling.
         if (key.startsWith("-- marktmorgen:held-recheck:v1\n") && args[0] === "1" && args.length === 5) {
           const [, ledger, ref, rawLimit, seconds] = args;

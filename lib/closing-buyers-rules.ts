@@ -383,6 +383,27 @@ export function refundUnmadeLetter(input: { store: string; amount: string; conta
   };
 }
 
+/**
+ * The email to a member whose paid time was not given back because the store's Stripe never answered by the
+ * closing's deadline (DONO-3, lib/plan-closing.ts): said as that, with the day the store closed, never "today"
+ * (it closed days before), and as a refund that may not have been made (a refund Stripe did not answer about may
+ * have been made). `amount` is what was left to give.
+ */
+export function refundLapsedLetter(input: { store: string; amount: string; contact: string; closedOn: number }): BuyerLetter {
+  return {
+    subject: `Your refund from ${input.store} may not have been made`,
+    text: [
+      `${input.store} closed on ${dateWords(input.closedOn)}. You had paid for time after that day, and up to ${input.amount}`,
+      "of it was to be given back to you from the store's own Stripe account. Stripe did not answer us,",
+      "so we could not make this refund or check whether it was made.",
+      "",
+      `If ${input.store} has not refunded it to you already, please contact them directly: ${input.contact}`,
+      "",
+      "Marktmorgen does not hold the store's money and cannot make the refund.",
+    ].join("\n"),
+  };
+}
+
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 /**

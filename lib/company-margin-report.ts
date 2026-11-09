@@ -27,6 +27,8 @@ export type CompanyMonthlyMarginReport = {
   heldStoresPeak: number | null;
   /** Closed stores closed without Stripe at their deadline in the month (DONO-3); null is unknown, never zero. */
   lapsedStores: number | null;
+  /** Closing stores kept past the published time in the month, by reason (DONO-3); null is unknown, never zero. */
+  overdueStores: { key: number; answer: number; notice: number; other: number } | null;
 };
 export type CompanyMonthlyMarginPresentation = Readonly<{
   schema: 1;
@@ -127,7 +129,7 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
     revenueCents: null, variableCostsCents: null, fixedCostsCents: null,
     taxesCents: null, refundsCents: null, reservesCents: null, netProfitCents: null,
     netMarginBps: null, targetBps: COMPANY_NET_MARGIN_TARGET_BPS, targetMet: null,
-    heldStores: null, heldStoresPeak: null, lapsedStores: null,
+    heldStores: null, heldStoresPeak: null, lapsedStores: null, overdueStores: null,
   };
   if (month === null) return report;
   // Validate the original graph through the shared accounting boundary before
@@ -145,6 +147,11 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
   }
   if (observed && typeof observed === "object" && !Array.isArray(observed) && observed.month === month &&
       Number.isSafeInteger(observed.lapsed) && observed.lapsed >= 0) report.lapsedStores = observed.lapsed;
+  const overdue = observed && typeof observed === "object" && !Array.isArray(observed) && observed.month === month ? observed.overdue : null;
+  if (overdue && typeof overdue === "object" && !Array.isArray(overdue) &&
+      ["key", "answer", "notice", "other"].every((reason) => Number.isSafeInteger(overdue[reason]) && overdue[reason] >= 0)) {
+    report.overdueStores = { key: overdue.key, answer: overdue.answer, notice: overdue.notice, other: overdue.other };
+  }
   if (!data || typeof data !== "object" || Array.isArray(data)) return report;
   if (data.basis !== "reconciled_actual" || data.interval !== "month" || data.period !== month) {
     report.reason = "wrong_period_or_basis"; return report;
@@ -212,6 +219,9 @@ export function companyMonthlyMarginPresentation(
   const lapsedLine = report.lapsedStores === null
     ? "Lojas fechadas no prazo sem resposta do Stripe: desconhecido (não zero)."
     : `Lojas fechadas no prazo sem resposta do Stripe: ${report.lapsedStores}.`;
+  const overdueLine = report.overdueStores === null
+    ? "Lojas retidas além do prazo publicado: desconhecido (não zero)."
+    : `Lojas retidas além do prazo publicado: chave do Stripe recusada ${report.overdueStores.key}; resposta ilegível ${report.overdueStores.answer}; aviso que não saiu ${report.overdueStores.notice}; outros ${report.overdueStores.other}.`;
   // The pure presentation never invokes the paid Redis readers. Once a caller
   // explicitly supplies this source, missing or invalid evidence is visible as
   // unknown; omission preserves the earlier presentation until a funded caller exists.
@@ -239,6 +249,7 @@ export function companyMonthlyMarginPresentation(
       targetLine,
       heldLine,
       lapsedLine,
+      overdueLine,
       ...operationalLines,
       "Somente informativo: este relatório não abre vendas nem altera preço, limite, comissão, sinalizador ou trava.",
     ].join("\n"),
@@ -252,7 +263,8 @@ export async function companyMonthlyMarginReportWithHeld(input: CommercialProfit
   const heldStores = await import("./held-stores");
   const held = month === null ? null : await heldStores.readHeldMonth(month);
   const lapsed = month === null ? null : await heldStores.readLapsedMonth(month);
-  // The two observations are independent: either may be unknown without hiding the other.
-  const observed = month === null ? null : held === null ? (lapsed === null ? null : { month, lapsed }) : lapsed === null ? held : { ...held, lapsed };
+  const overdue = month === null ? null : await heldStores.readOverdueMonth(month);
+  // The observations are independent: any may be unknown without hiding the others.
+  const observed = month === null ? null : { ...(held ?? { month }), ...(lapsed === null ? {} : { lapsed }), ...(overdue === null ? {} : { overdue }) };
   return companyMonthlyMarginReport(input, now, observed);
 }

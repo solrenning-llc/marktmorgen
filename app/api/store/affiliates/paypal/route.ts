@@ -14,14 +14,14 @@ import { connectPayPal, disconnectPayPal, payWithPayPal, readOwnCheckAnswer, rea
  *   { op: "auto", on }                  pay by itself on payday, or not
  *   { op: "pay" }                       send everyone owed and cleared, now, from their PayPal
  *   { op: "settle" }                    ask PayPal what has been paid since
- *   { op: "resolve", batch, paid, unpaid }  the creator's own check of a batch PayPal could not confirm: who it paid
- *                                       (written down as paid) and who it did not (owed again); nothing is sent
+ *   { op: "resolve", batch, paypal }    the creator's own check of a batch PayPal could not confirm: the payout batch
+ *                                       ID PayPal gave it, read from PayPal and matched to the batch, which is then
+ *                                       settled by PayPal's own word per person; nothing is sent
  *
  * For the owner and Admins ("settings"): it moves the creator's own money.
  */
 export async function POST(request: NextRequest) {
-  // Room for the creator's own check of a large batch: two lists of 12-character ids (lib/paypal-payouts.ts).
-  const guarded = await guardStoreWrite(request, "settings", 40_000);
+  const guarded = await guardStoreWrite(request, "settings", 4_000);
   if (!guarded.ok) return guarded.response;
   const body = guarded.body;
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
@@ -53,8 +53,14 @@ export async function POST(request: NextRequest) {
     if (op === "resolve") {
       const answer = readOwnCheckAnswer(body);
       if (!answer) return fail("changed");
-      const result = await resolveOwnCheck(store, answer.batch, answer);
-      return result.ok ? Response.json(result) : fail(result.reason, result.reason === "error" ? 502 : 409);
+      // No payout batch ID, or not one: refused before anything is counted or asked of PayPal (owner's decision,
+      // C1-20261109-1029-C5-52, item 10: the creator's word alone never clears a batch).
+      if (!answer.paypal) return fail("id");
+      // Reading the batch from PayPal is a call to another service, counted before it is made (integrations line).
+      const refused = await withinServiceWhy("paypal-check", store.handle, 6, 3600, store);
+      if (refused) return serviceRefusedJson(refused, "slow");
+      const result = await resolveOwnCheck(store, answer.batch, answer.paypal);
+      return result.ok ? Response.json(result) : fail(result.reason, result.reason === "error" || result.reason === "unknown" ? 502 : 409);
     }
     if (op === "settle") {
       return Response.json({ ok: true, ...(await settlePayPal(store)) });

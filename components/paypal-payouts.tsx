@@ -30,8 +30,14 @@ const MESSAGES: Record<string, string> = {
   error: "PayPal could not be reached. Nothing was sent. Try again in a moment.",
   unknown: "We sent the batch to PayPal, but its answer did not reach us, so we do not know whether it was paid. Nobody in it will be sent again: they show as on their way. Look at your PayPal activity to see whether it went.",
   gone: "That payment was already sorted out. Reload the page to see where things stand.",
-  changed: "Your answers no longer match that payment. Reload the page and answer again.",
-  "own-error": "Your answers were not saved, and nothing was sent. Try again in a moment.",
+  changed: "That payment no longer matches this page. Reload the page and try again.",
+  id: "Enter the payout batch ID from PayPal: a code of capital letters and numbers, like 5UXD2E8A7EBQJ. Nothing was changed.",
+  "not-found": "PayPal finds no payment with that ID in the PayPal account you connected. Check that you copied the payout batch ID, not another number. Nothing was changed.",
+  other: "That ID is for a different payment in your PayPal, not this one. Look for the payment with the reference shown below. Nothing was changed.",
+  mismatch: "The payment with that ID does not match this one: the people or the amounts are different, or we cannot match who it went to. Nothing was changed.",
+  used: "That ID is already used for another payment here. Nothing was changed.",
+  "own-unknown": "We could not get a clear answer from PayPal about that ID, so nothing was changed. Try again in a few minutes.",
+  "own-error": "Nothing was saved, and nothing was sent. Try again in a moment.",
   pending: "Nobody was paid just now. But we could not confirm that this payment was cleared from our records, so our daily check may still send it from your PayPal, to the same people for the same amounts. Until then, they show as on their way. Do not pay them another way, or they could be paid twice.",
 };
 
@@ -66,7 +72,7 @@ export function PayPalPayouts({
   checking?: number;
   /** Of those, the ones PayPal could not confirm after a week, or said exist without saying which: not sent again. */
   manualCheck?: number;
-  /** Those payments, one by one, for the creator to say what PayPal shows; null when they could not be read. */
+  /** Those payments, one by one, for the creator to give the payout batch ID PayPal shows; null when not read. */
   ownChecks?: OwnCheckView[] | null;
   /** The day of the month the creator pays; 0 when none is set. */
   payday: number;
@@ -88,7 +94,7 @@ export function PayPalPayouts({
     setSure(false);
     if (!data.ok) {
       // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
-      const reason = op === "resolve" && data.error === "error" ? "own-error" : String(data.error);
+      const reason = op === "resolve" && (data.error === "error" || data.error === "unknown") ? `own-${String(data.error)}` : String(data.error);
       setError((typeof (data as { message?: unknown }).message === "string" && (data as { message: string }).message) || (MESSAGES[reason] ?? MESSAGES.error));
       return null;
     }
@@ -214,23 +220,23 @@ export function PayPalPayouts({
                   your PayPal activity
                   <NewTab />
                 </a>
-                {ownChecks && ownChecks.length ? ", then answer below." : ", then reload this page to answer."}
+                {ownChecks && ownChecks.length ? ", then enter its payout batch ID below." : ", then reload this page to enter its payout batch ID."}
               </p>
-              {ownChecks && ownChecks.length ? (
-                <p className="mt-2">
-                  If PayPal shows a payment as Pending or Unclaimed, wait until it is completed or returned before you answer.
-                </p>
-              ) : null}
+              <p className="mt-2">
+                Without that ID, we cannot mark the payment, so the people in it stay out of new payments and nobody is paid twice.
+                If PayPal shows no such payment, do not pay them another way yet: ask PayPal&rsquo;s support about the reference shown
+                with the payment.
+              </p>
               {(ownChecks ?? []).map((batch) => (
                 <OwnCheckForm
                   key={batch.id}
                   batch={batch}
                   disabled={busy !== null}
                   saving={busy === "resolve"}
-                  onSave={async (paid, unpaid) => {
-                    const data = await act("resolve", { batch: batch.id, paid, unpaid });
+                  onSave={async (paypal) => {
+                    const data = await act("resolve", { batch: batch.id, paypal });
                     if (data) {
-                      toast(`${Number(data.paid)} written down as paid, ${Number(data.unpaid)} owed again.`);
+                      toast("PayPal confirmed this payment. Each person shows as paid once PayPal says their part went through.");
                       router.refresh();
                     }
                     return data !== null;
@@ -282,8 +288,9 @@ export function PayPalPayouts({
 }
 
 /**
- * One payment PayPal could not confirm: the creator says, person by person, what their PayPal activity shows, reviews
- * what that will do, and only then saves it (lib/paypal-payouts.ts, resolveOwnCheck). Nothing is sent to PayPal.
+ * One payment PayPal could not confirm: the creator copies its payout batch ID from PayPal, and we check that ID with
+ * PayPal before anything changes (lib/paypal-payouts.ts, resolveOwnCheck). The creator's word alone never clears it.
+ * Nothing is sent to PayPal.
  */
 function OwnCheckForm({
   batch,
@@ -294,88 +301,57 @@ function OwnCheckForm({
   batch: OwnCheckView;
   disabled: boolean;
   saving: boolean;
-  onSave: (paid: string[], unpaid: string[]) => Promise<boolean>;
+  onSave: (paypal: string) => Promise<boolean>;
 }) {
   const id = useId();
-  const [answers, setAnswers] = useState<Record<string, "paid" | "unpaid">>({});
-  const [sure, setSure] = useState(false);
-  const [missing, setMissing] = useState(false);
+  const [paypal, setPaypal] = useState("");
   const money = (cents: number) => formatMoney(cents, batch.currency);
   const sent = new Date(batch.at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   const total = batch.people.reduce((n, p) => n + p.cents, 0);
-  const paid = batch.people.filter((p) => answers[p.id] === "paid");
-  const unpaid = batch.people.filter((p) => answers[p.id] === "unpaid");
-  const sum = (list: typeof paid) => money(list.reduce((n, p) => n + p.cents, 0));
   const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+  // Our own reference for the payment, which PayPal keeps with it as its sender batch ID.
+  const reference = batch.id.slice(1);
 
   return (
     <form
       className="mt-3 rounded-xl border border-line bg-white p-3 text-ink"
       onSubmit={async (e) => {
         e.preventDefault();
-        if (!sure) {
-          if (paid.length + unpaid.length < batch.people.length) {
-            setMissing(true);
-            return;
-          }
-          setMissing(false);
-          setSure(true);
-          return;
-        }
-        const saved = await onSave(paid.map((p) => p.id), unpaid.map((p) => p.id));
-        if (!saved) setSure(false);
+        if (await onSave(paypal)) setPaypal("");
       }}
     >
       <h4 className="font-semibold">{`Payment sent on ${sent}: ${money(total)} to ${people(batch.people.length)}`}</h4>
-      <p className="mt-1">What does your PayPal activity show?</p>
-      {batch.people.map((person) => (
-        <fieldset key={person.id} className="mt-3" disabled={disabled || sure}>
-          <legend className="font-medium">{`${person.email}, ${money(person.cents)}`}</legend>
-          <div className="mt-1 flex flex-wrap gap-x-6">
-            {(["paid", "unpaid"] as const).map((value) => (
-              <label key={value} className="flex min-h-[44px] items-center gap-2">
-                <input
-                  type="radio"
-                  className="h-4 w-4"
-                  name={`${id}-${person.id}`}
-                  value={value}
-                  checked={answers[person.id] === value}
-                  onChange={() => setAnswers((before) => ({ ...before, [person.id]: value }))}
-                />
-                <span>{value === "paid" ? "PayPal paid them" : "PayPal did not pay them"}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      ))}
-      {missing ? (
-        <p className="notice notice-error mt-3" role="alert">
-          Choose an answer for everyone in this payment.
-        </p>
-      ) : null}
-      {sure ? (
-        <div className="mt-3" role="status">
-          <p>
-            {`If you save this, ${people(paid.length)} will be written down as paid (${sum(paid)}), and ${people(unpaid.length)} will be owed again (${sum(unpaid)}) and go in your next payment. Nothing is sent now.`}
-          </p>
-          {unpaid.length ? (
-            <p className="mt-2 font-medium">
-              Only choose &ldquo;PayPal did not pay them&rdquo; when PayPal shows the payment failed, was returned or was canceled,
-              or does not show a payment to them at all.
-              If PayPal did pay them, your next payment would pay them twice.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+      <ul className="mt-1 list-disc pl-5">
+        {batch.people.map((person) => (
+          <li key={person.id}>{`${person.email}, ${money(person.cents)}`}</li>
+        ))}
+      </ul>
+      <p className="mt-2" id={`${id}-help`}>
+        {`PayPal gives each batch payment a payout batch ID: a code of capital letters and numbers, like 5UXD2E8A7EBQJ. In PayPal, find the payment sent on ${sent} for ${money(total)}, in your activity or under Payouts, and copy its payout batch ID. Our reference for it, which PayPal keeps as its sender batch ID, is ${reference}.`}
+      </p>
+      <label className="mt-3 block">
+        <span className="field-label">Payout batch ID</span>
+        <input
+          className="field mt-1"
+          value={paypal}
+          onChange={(e) => setPaypal(e.target.value)}
+          aria-describedby={`${id}-help`}
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          maxLength={64}
+          required
+          disabled={disabled}
+        />
+      </label>
+      <p className="mt-2 text-sm text-ink-soft">
+        We read this payment from your PayPal and check it was sent to these people for these amounts. Nothing is sent, and
+        nothing changes if it does not match.
+      </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button type="submit" className="btn btn-primary btn-sm" disabled={disabled}>
-          {sure ? (saving ? "Saving…" : "Yes, save this") : "Review my answers"}
+          {saving ? "Checking with PayPal…" : "Check this ID with PayPal"}
         </button>
-        {sure ? (
-          <button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={() => setSure(false)}>
-            Go back and change them
-          </button>
-        ) : null}
       </div>
     </form>
   );

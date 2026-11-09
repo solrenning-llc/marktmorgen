@@ -1724,7 +1724,9 @@ export const SCOPES: Record<string, ScopeClass> = {
   "inbox-new": BURST("inbox"), "chat-send": BURST("inbox"), "chat-start": BURST("inbox"),
   // Calls to other services: counted in the store's window as well (lib/metered-limits.ts, withinService).
   "meet-host": SERVICE, "meet-manage": SERVICE, "meet-start": SERVICE, "metaads-start": SERVICE, "discord-connect": SERVICE, esync: SERVICE,
-  "paypal-connect": SERVICE, "paypal-pay": SERVICE, "paypal-sell-connect": SERVICE, "aff-kit": SERVICE, "aff-payto": SERVICE, "outreach-find": SERVICE,
+  // "paypal-check": the creator's own check of a PayPal payout batch, read from PayPal by its payout batch ID before it
+  // is held (lib/paypal-payouts.ts, resolveOwnCheck; owner's decision C1-20261109-1029-C5-52, item 10).
+  "paypal-connect": SERVICE, "paypal-pay": SERVICE, "paypal-check": SERVICE, "paypal-sell-connect": SERVICE, "aff-kit": SERVICE, "aff-payto": SERVICE, "outreach-find": SERVICE,
   "person-find": SERVICE, "vault-open": SERVICE, "vault-sign": SERVICE, "stream-door": SERVICE, "stream-captions": SERVICE, "mail-picture": SERVICE,
   "host-calendar": SERVICE, "outreach-find-day": BURST("integrations"),
 };

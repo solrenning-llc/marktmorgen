@@ -339,7 +339,7 @@ async function main(): Promise<void> {
   statusOf.set(TOM, "SUCCESS");
   await settlePayPal(store);
   is("the first is settled and gone", await openFields(), [second]);
-  is("the same ID afterwards: still refused, as another batch's", await resolveOwnCheck(store, second, first.id), { ok: false, reason: "other" });
+  is("the same ID after that: still refused, as another batch's", await resolveOwnCheck(store, second, first.id), { ok: false, reason: "other" });
   is("the second batch stays for the creator's check", await openFields(), [second]);
 
   part("A batch PayPal never made has no ID: it cannot be cleared by the creator's word");

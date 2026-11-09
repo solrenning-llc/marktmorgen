@@ -37,7 +37,7 @@ import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affilia
 import { plainAmount } from "@/lib/money";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
 /** Local tests may point this at a stand-in on 127.0.0.1; nothing else is taken. */
@@ -413,92 +413,146 @@ export async function paypalOwnChecks(store: Store): Promise<OwnCheck[]> {
     .sort((x, y) => x.at - y.at);
 }
 
-/** The creator's answer for one such batch: who PayPal paid, and who it did not. */
-export type OwnCheckAnswer = { batch: string; paid: string[]; unpaid: string[] };
-const OWN_CHECK_PERSON = /^[0-9a-f]{12}$/;
-const OWN_CHECK_MAX_PEOPLE = 2_000;
+/**
+ * The payout batch ID the creator typed, as PayPal writes it (BATCH_ID: capital letters and digits), or "" when it is
+ * not one. Spaces around it are dropped and small letters taken as capitals; anything else is not an ID.
+ */
+export function payoutBatchIdOf(raw: unknown): string {
+  if (typeof raw !== "string" || raw.length > 64) return "";
+  const id = raw.trim().toUpperCase();
+  return BATCH_ID.test(id) ? id : "";
+}
 
-/** Reads the route's body into an answer, or null when it is not one (the people are checked against the batch later). */
+/** The creator's answer for one such batch: the payout batch ID PayPal gave the payment ("" when there is none). */
+export type OwnCheckAnswer = { batch: string; paypal: string };
+
+/** Reads the route's body into an answer, or null when it names no batch left for the creator's check. */
 export function readOwnCheckAnswer(body: unknown): OwnCheckAnswer | null {
   if (!record(body) || typeof body.batch !== "string" || !body.batch.startsWith(UNKNOWN_BATCH_PREFIX) || body.batch.length > 128) return null;
-  const list = (v: unknown): string[] | null =>
-    Array.isArray(v) && v.length <= OWN_CHECK_MAX_PEOPLE && v.every((id) => typeof id === "string" && OWN_CHECK_PERSON.test(id)) ? [...(v as string[])] : null;
-  const paid = list(body.paid);
-  const unpaid = list(body.unpaid);
-  if (!paid || !unpaid || paid.length + unpaid.length === 0) return null;
-  return { batch: body.batch, paid, unpaid };
+  return { batch: body.batch, paypal: payoutBatchIdOf(body.paypal) };
 }
 
 export type OwnCheckResult =
-  | { ok: true; paid: number; unpaid: number; gone: number }
-  /** "gone": no batch left for the creator's check under that id; "changed": the answer does not fit the batch; "error": not saved, safe to send again. */
-  | { ok: false; reason: "gone" | "changed" | "busy" | "error" };
+  | { ok: true; batch: string; people: number }
+  /**
+   * "id": no payout batch ID, or not one; "gone": no batch left for the creator's check under that field;
+   * "not-found": PayPal finds no such payment in the creator's own account; "other": it is another batch's payment;
+   * "mismatch": its amounts or people are not this batch's, or cannot be matched; "used": the ID is already held for
+   * another batch; "unknown": PayPal's answer is not known; "error": not saved. Nothing is marked in any of them.
+   */
+  | { ok: false; reason: "id" | "gone" | "not-found" | "other" | "mismatch" | "used" | "reconnect" | "unknown" | "busy" | "error" };
 
-/** The reference a payout written by the creator's own check carries: it names the batch, so it is written once. */
-const ownCheckReference = (field: string) => `PayPal ${field.slice(UNKNOWN_BATCH_PREFIX.length)}, checked by you`;
-/** lib/affiliates.ts, payoutsKey: where the book's payouts are kept. */
-const payoutsKey = (statsId: string) => `nl:aff:${statsId}:payouts`;
+/** PayPal sends at most 15,000 items in one batch, read here a thousand a page. */
+const OWN_CHECK_MAX_PAGES = 16;
+
+/** One item of a batch as PayPal's read gives it (payments_payouts_batch_v1, payout_batch_items). */
+type ReadItem = { sender: string; receiver: string; currency: string; value: string };
 
 /**
- * The affiliates already written down as paid under this reference, read exactly (rule 24): a reply that is not a
- * list of field and value pairs throws. A value that does not read as a payout is not in the book (readBook), so it
- * is not one of these either.
+ * Reads one payout batch of the creator's own PayPal, every page, with the creator's own app: an ID of another
+ * account's payment is not found under it. Null when PayPal says there is no such payment; throws when the answer is
+ * not known or not read exactly (rule 24).
  */
-async function writtenUnder(statsId: string, reference: string): Promise<Set<string>> {
-  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", payoutsKey(statsId)]]), 1)?.[0]);
-  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the payouts written down");
-  const out = new Set<string>();
-  for (let i = 1; i < flat.length; i += 2) {
-    let payout: unknown;
-    try { payout = JSON.parse(flat[i]); } catch { continue; }
-    if (record(payout) && payout.reference === reference && typeof payout.aff === "string") out.add(payout.aff);
+async function readBatchForCheck(auth: string, id: string): Promise<{ sender: string; items: ReadItem[] } | null> {
+  const items: ReadItem[] = [];
+  let sender = "";
+  for (let page = 1; ; page += 1) {
+    let data: Record<string, unknown>;
+    try {
+      data = await call("GET", `/v1/payments/payouts/${encodeURIComponent(id)}?page=${page}&page_size=1000&total_required=true`, auth);
+    } catch (error) {
+      // PayPal's own named refusal of this ID: not a payment of this account. Anything else is not known.
+      if (error instanceof PayPalError && [400, 403, 404].includes(error.status) && error.code !== "UNKNOWN" && error.code !== "UNREADABLE") return null;
+      throw error;
+    }
+    const header = data.batch_header;
+    const senderHeader = record(header) ? header.sender_batch_header : undefined;
+    if (!record(header) || header.payout_batch_id !== id || !record(senderHeader) || typeof senderHeader.sender_batch_id !== "string" || !Array.isArray(data.items)) {
+      throw new PayPalError(200, "UNREADABLE");
+    }
+    if (page > 1 && senderHeader.sender_batch_id !== sender) throw new PayPalError(200, "UNREADABLE");
+    sender = senderHeader.sender_batch_id;
+    for (const item of data.items as unknown[]) {
+      const detail = record(item) ? item.payout_item : undefined;
+      const amount = record(detail) ? detail.amount : undefined;
+      if (!record(detail) || !record(amount) || typeof detail.sender_item_id !== "string" || typeof detail.receiver !== "string" ||
+          typeof amount.currency !== "string" || typeof amount.value !== "string") throw new PayPalError(200, "UNREADABLE");
+      items.push({ sender: detail.sender_item_id, receiver: detail.receiver, currency: amount.currency, value: amount.value });
+    }
+    const pages = data.total_pages;
+    if (!Number.isSafeInteger(pages) || (pages as number) < 1 || (pages as number) > OWN_CHECK_MAX_PAGES) throw new PayPalError(200, "UNREADABLE");
+    if (page >= (pages as number)) return { sender, items };
   }
-  return out;
 }
 
 /**
- * The creator's answer to a batch left for their own check, from what their PayPal activity shows (Claude 5,
- * 09/11/2026; pre-review of #3335). Before it, such a batch kept its people on their way for good: out of every new
- * payment, payout file and recorded batch, with the store in the daily job.
- *
- * Under the payment's own lock, and only for a batch still marked for the creator's check whose people the answer
- * names exactly, each once. Those PayPal paid are written into the book, for what the batch sent them, under a
- * reference naming the batch, so a second answer finds them and never writes them twice. Then the batch is taken
- * away, on Redis's exact word, and those PayPal did not pay are owed again: they go in the next payment the creator
- * confirms. Nothing is sent to PayPal here. A person written down as paid who is now answered as not paid is refused.
- * Anything not known leaves the batch where it is, its people on their way, and the answer can be sent again.
+ * Whether PayPal's batch is exactly the one we sent: each person once, for what we sent them, in the batch's currency,
+ * to the address whose fingerprint we kept. A line kept with no fingerprint cannot be matched, so it never is.
  */
-export async function resolveOwnCheck(store: Store, field: string, answer: { paid: string[]; unpaid: string[] }): Promise<OwnCheckResult> {
+function sameBatch(sent: OpenBatch, items: ReadItem[]): boolean {
+  if (items.length !== sent.lines.length) return false;
+  const byPerson = new Map<string, ReadItem>();
+  for (const item of items) {
+    if (byPerson.has(item.sender)) return false;
+    byPerson.set(item.sender, item);
+  }
+  return sent.lines.every((line) => {
+    const item = byPerson.get(line.a.slice(0, 63));
+    return Boolean(item && line.r && item.currency === sent.currency.toUpperCase() && item.value === plainAmount(line.c, sent.currency) &&
+      receiverPrint(item.receiver) === line.r);
+  });
+}
+
+/**
+ * The creator's answer to a batch left for their own check: the payout batch ID PayPal gave the payment (owner's
+ * decision C1-20261109-1029-C5-52, item 10: the creator's word is not enough, and "paid" alone is not either).
+ *
+ * The ID is read from PayPal with the creator's own app, so a payment of another account is not found, and it is
+ * taken only when PayPal's batch was sent under this batch's own sender_batch_id, to exactly these people for exactly
+ * these amounts, and the ID is not already held for another batch. Then, under the payment's own lock and only if
+ * the batch is still the one checked, it is held under that ID (promoteBatch), and the settling writes each person
+ * as paid once PayPal says their part went through (once per item, nl:pp:item), or owed again when PayPal says it did
+ * not. Nothing is sent to PayPal here, and nothing is marked when anything is not known.
+ */
+export async function resolveOwnCheck(store: Store, field: string, paypalId: unknown): Promise<OwnCheckResult> {
   if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "error" };
   const statsId = store.statsId;
   if (!field.startsWith(UNKNOWN_BATCH_PREFIX)) return { ok: false, reason: "gone" };
+  const id = payoutBatchIdOf(paypalId);
+  if (!id) return { ok: false, reason: "id" };
+  const checkable = (open: Map<string, OpenBatch>): OwnCheckResult | OpenBatch => {
+    const batch = open.get(field);
+    if (!batch || batch.m !== 1 || heldUnknowns(open).has(field)) return { ok: false, reason: "gone" };
+    if (open.has(id)) return { ok: false, reason: "used" };
+    return batch;
+  };
   try {
+    const first = checkable(await readOpen(statsId));
+    if ("ok" in first) return first;
+    const auth = await bearer(store).catch((error: unknown) => {
+      console.error("asking PayPal for a token to check a payout batch failed", error);
+      return undefined;
+    });
+    if (auth === undefined) return { ok: false, reason: "unknown" };
+    if (auth === null) return { ok: false, reason: "reconnect" };
+    let read: Awaited<ReturnType<typeof readBatchForCheck>>;
+    try {
+      read = await readBatchForCheck(auth, id);
+    } catch (error) {
+      console.error("reading a PayPal payout batch for the creator's check failed", error);
+      return { ok: false, reason: "unknown" };
+    }
+    if (!read) return { ok: false, reason: "not-found" };
+    if (read.sender !== field.slice(UNKNOWN_BATCH_PREFIX.length)) return { ok: false, reason: "other" };
+    if (!sameBatch(first, read.items)) return { ok: false, reason: "mismatch" };
+    // PayPal was read outside the lock (its pages may take longer than the lock lasts); the batch is read again under
+    // it, and held only if it is still exactly the one PayPal's answer was matched to.
     return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (): Promise<OwnCheckResult> => {
-      const open = await readOpen(statsId);
-      const batch = open.get(field);
-      if (!batch || batch.m !== 1 || heldUnknowns(open).has(field)) return { ok: false, reason: "gone" };
-      const paid = new Set(answer.paid);
-      const unpaid = new Set(answer.unpaid);
-      const people = new Set(batch.lines.map((l) => l.a));
-      const named = [...answer.paid, ...answer.unpaid];
-      if (named.length !== people.size || new Set(named).size !== named.length || !named.every((a) => people.has(a))) {
-        return { ok: false, reason: "changed" };
-      }
-      const reference = ownCheckReference(field);
-      const written = await writtenUnder(statsId, reference);
-      if ([...unpaid].some((a) => written.has(a))) return { ok: false, reason: "changed" };
-      const date = new Date(batch.at).toISOString().slice(0, 10);
-      let gone = 0;
-      for (const line of batch.lines) {
-        if (!paid.has(line.a) || written.has(line.a)) continue;
-        // Throws (DataRoomError, UnknownReplyError) when it is not known to be written: the batch stays, and the next
-        // answer finds a payout that did go in under this reference.
-        const payout = await addPayout(store, { aff: line.a, cents: line.c, currency: batch.currency, date, reference });
-        // No longer in the program: there is no book to write in for them.
-        if (!payout) gone += 1;
-      }
-      if (!(await removedExactly(statsId, field))) return { ok: false, reason: "error" };
-      return { ok: true, paid: paid.size - gone, unpaid: unpaid.size, gone };
+      const now = checkable(await readOpen(statsId));
+      if ("ok" in now) return now;
+      if (JSON.stringify(now) !== JSON.stringify(first)) return { ok: false, reason: "gone" };
+      if (!(await promoteBatch(statsId, field, id, now))) return { ok: false, reason: "error" };
+      return { ok: true, batch: id, people: now.lines.length };
     });
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };

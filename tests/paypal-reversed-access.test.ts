@@ -20,6 +20,8 @@
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
+import { readFileSync } from "node:fs";
+import * as paypalSales from "@/lib/paypal-sales";
 import {
   REFUND_WATCH_BATCH,
   captureOrder,
@@ -33,7 +35,9 @@ import { importedFor } from "@/lib/imported-purchases";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import * as costRegistry from "./plan-cost-registry";
 import { NOT_A_COST, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
+import { FAMILIES } from "./store-data-registry";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
 const PARTNER_SECRET = "EPpartnerSecret0123456789";
@@ -279,6 +283,108 @@ async function main(): Promise<void> {
   unit.payments.captures[0].status = "DECLINED";
   await watchPayPal(store, Date.now() + 10_000, on);
   is("DECLINED: dropped, nothing handed over", [await stillPending(store, waitOpen.order), await held("slow@example.com")], [false, 0]);
+
+  // Claude 6's second money review of #3392, LEVE 2 (rule 30): the first door, captureOrder, answered "declined" for
+  // any status other than PENDING or COMPLETED and did not watch the order, although a status not known here is
+  // never "declined" in the sweep.
+  part("At the capture itself, a status not known here is waited on, never declined");
+  {
+    const odd = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+    if (!odd.ok) throw new Error("no order");
+    captureWith = (o) => ({ status: 201, body: completed(o, "49.00", "SOMETHING_NEW", "door@example.com") });
+    console.error = () => undefined;
+    const answer = await captureOrder(store, odd.order);
+    console.error = logged;
+    is("unknown status at capture: not declined, and asked again by the sweep", [answer.ok ? "paid" : answer.reason, await stillPending(store, odd.order)], ["pending", true]);
+    const gone = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+    if (!gone.ok) throw new Error("no order");
+    captureWith = (o) => ({ status: 201, body: completed(o, "49.00", "DECLINED", "door@example.com") });
+    const declined = await captureOrder(store, gone.order);
+    is("DECLINED at capture: declined, not watched", [declined.ok ? "paid" : declined.reason, await stillPending(store, gone.order)], ["declined", false]);
+    await redis.pipeline([["ZREM", `nl:ppsell:pending:${store.statsId}`, odd.order]]);
+  }
+
+  // LEVE 3: a pending payment PayPal has since completed and then refunded in part keeps the purchase (CAPTURE_KEEPS),
+  // so it is written down and handed over, never dropped with the money taken.
+  part("A pending order now refunded in part is paid: handed over, not dropped");
+  {
+    const part3 = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+    if (!part3.ok) throw new Error("no order");
+    captureWith = (o) => ({ status: 201, body: completed(o, "49.00", "PENDING", "partly@example.com") });
+    await captureOrder(store, part3.order);
+    orders.set(part3.order, completed(part3.order, "49.00", "PARTIALLY_REFUNDED", "partly@example.com"));
+    const run = await watchPayPal(store, Date.now() + 10_000, on);
+    is("PARTIALLY_REFUNDED after pending: handed over once, out of the pending list, watched for refunds", [run.cleared, await stillPending(store, part3.order), await watched(part3.order)], [1, false, true]);
+  }
+
+  // LEVE 1 (Claude 2's first review and Claude 6's second): the sweep always read the 25 oldest pending orders and
+  // skipped them without moving them, so 25 orders PayPal never settles held back a newer one already paid until
+  // their 30-day records ended. A skipped order now goes to the back of the list.
+  part("Pending orders PayPal does not settle never hold back a newer one that is paid");
+  {
+    const pendingKey = `nl:ppsell:pending:${store.statsId}`;
+    const fresh = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+    if (!fresh.ok) throw new Error("no order");
+    captureWith = (o) => ({ status: 201, body: completed(o, "49.00", "PENDING", "late@example.com") });
+    await captureOrder(store, fresh.order);
+    const [record] = await redis.pipeline([["GET", `nl:ppsell:o:${fresh.order}`]]);
+    const blockers = Array.from({ length: 25 }, (_, i) => `8P${String(i).padStart(15, "0")}`);
+    const firstSeen = Math.floor(Date.now() / 1000) - 3600;
+    for (const [i, order] of blockers.entries()) {
+      await redis.pipeline([["SET", `nl:ppsell:o:${order}`, String(record)], ["ZADD", pendingKey, String(firstSeen + i), order]]);
+      orders.set(order, completed(order, "49.00", i % 2 ? "PENDING" : "SOMETHING_NEW", `wait${i}@example.com`));
+    }
+    orders.set(fresh.order, completed(fresh.order, "49.00", "COMPLETED", "late@example.com"));
+    const realNow = Date.now;
+    let cleared = 0;
+    try {
+      console.error = () => undefined;
+      for (let sweep = 1; sweep <= 2; sweep++) {
+        const at = realNow() + sweep * 300_000;
+        Date.now = () => at;
+        cleared += (await watchPayPal(store, at + 10_000, on)).cleared;
+      }
+    } finally {
+      Date.now = realNow;
+      console.error = logged;
+    }
+    is("the newer paid order is handed over within two sweeps; the 25 still waited on", [cleared, await stillPending(store, fresh.order), (await Promise.all(blockers.map((o) => stillPending(store, o)))).every(Boolean)], [1, false, true]);
+    await redis.pipeline([["ZREM", pendingKey, ...blockers]]);
+  }
+
+  // LEVE 5: the watch keeps an order whose status is not known here until its paid record ends, so the storage
+  // registry's days for the watch list are the cost line's, not PayPal's 180.
+  part("The storage registry keeps the watch list as long as the watch does");
+  {
+    const family = FAMILIES["nl:ppsell:watch:@lib/paypal-sales.ts"];
+    const days = family?.parts?.map((p) => ("days" in p ? p.days : 0)) ?? [];
+    is("the watch list's days are the cost line's", days, [PAYPAL_REFUND_WATCH.daysWatchedAtMost]);
+  }
+
+  // LEVE 6: the sweep's pending half had no cost line; it now has one, held to the code.
+  part("The pending sweep's cost line says what it does");
+  {
+    is("NOT_A_COST names the pending batch", typeof NOT_A_COST.PENDING_SWEEP_BATCH === "string" && NOT_A_COST.PENDING_SWEEP_BATCH.includes("watchPayPal"), true);
+    // Read by name, so the check runs (and fails) before the line exists.
+    const line = (costRegistry as Record<string, unknown>).PAYPAL_PENDING_SWEEP as { ordersPerStoreRun?: unknown } | undefined;
+    const batch = (paypalSales as Record<string, unknown>).PENDING_SWEEP_BATCH;
+    is("the line's batch is the code's", [typeof batch, line?.ordersPerStoreRun], ["number", batch]);
+  }
+
+  // Claude 6's second money review, MEDIUM 1 and 2 (VR 2): the studio's PayPal box and the kept-by-currency note
+  // promised that a chargeback PayPal reverses is taken back and counted, and that the webhooks hear of it. PayPal's
+  // published capture statuses have no REVERSED (a chargeback comes as a webhook event or a dispute, neither read in
+  // the product), and no webhook event is sent for a payment taken back without a refund.
+  part("The studio and the numbers promise only what the watch does");
+  {
+    const studio = readFileSync("app/studio/page.tsx", "utf8");
+    const box = studio.slice(studio.indexOf('id="paypal"'), studio.indexOf("{store.paypalSeller ?", studio.indexOf('id="paypal"')));
+    const note = readFileSync("components/kept-by-currency.tsx", "utf8");
+    is("the PayPal box is found", box.includes("Sell with PayPal too"), true);
+    is("no promise that a reversal or chargeback is taken back or counted", [/revers/i.test(box), /revers/i.test(note)], [false, false]);
+    is("it says a chargeback is not read here", /chargeback[^<]*not read here/i.test(box), true);
+    is("the webhooks are said to get refund.issued only for a refund in full", /webhooks[^<]*refund\.issued/i.test(box), true);
+  }
 
   done();
 }

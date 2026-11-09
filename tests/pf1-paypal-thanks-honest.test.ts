@@ -44,6 +44,8 @@ const HANDING_OVER = "Payment received, we&#x27;re handing it over";
 const NOT_FOUND_LINE = "If PayPal shows a payment to Kiln Works";
 /** What the page says of a payment PayPal took back by another way than a refund (pre-review MEDIUM on C4-13). */
 const TAKEN_BACK_BODY = "This payment was taken back through PayPal, so this purchase is no longer yours to open.";
+/** And where to look next (Claude 6's second money review of #3392, LEVE 7). */
+const TAKEN_BACK_NEXT = "Your PayPal account shows what happened to it.";
 
 // The PayPal stand-in of tests/paypal-sales.test.ts, cut to what an order, its capture and its read need.
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
@@ -497,13 +499,16 @@ async function main(): Promise<void> {
     const en = THANKS_WORDS.en as unknown as Record<string, unknown>;
     is("English: could not check", en.ppCouldNotCheck, "We could not check this payment just now");
     is("English: handing over", en.ppHandingOver, "Payment received, we're handing it over");
-    is("English: taken back, neutral and true for a reversal, a failure or a decline", [en.ppTakenBack, en.ppTakenBackBody], ["Payment taken back", TAKEN_BACK_BODY]);
+    // Rule 23: the expected body gains its next step (Claude 6's second money review of #3392, LEVE 7, 3.3.3).
+    is("English: taken back, neutral and true for a reversal, a failure or a decline, with where to look next", [en.ppTakenBack, en.ppTakenBackBody], ["Payment taken back", `${TAKEN_BACK_BODY} ${TAKEN_BACK_NEXT}`]);
     is("English: the refund's own words stay as they were", en.ppRefundedBody, "This payment was refunded in full through PayPal, so this purchase is no longer yours to open. Your PayPal account shows the refund.");
     for (const [code, words] of Object.entries(THANKS_WORDS)) {
       const w = words as unknown as Record<string, unknown>;
       const body = typeof w.ppCouldNotCheckBody === "string" ? w.ppCouldNotCheckBody : "";
       const handing = typeof w.ppHandingOverBody === "function" ? String((w.ppHandingOverBody as (e: string) => string)(BUYER)) : "";
       is(`${code}: every new line is written`, [typeof w.ppCouldNotCheck === "string" && (w.ppCouldNotCheck as string).length > 10, body.length > 20, typeof w.ppHandingOver === "string" && (w.ppHandingOver as string).length > 10, handing.includes(BUYER), typeof w.ppRefunded === "string" && (w.ppRefunded as string).length > 10, typeof w.ppRefundedBody === "string" && (w.ppRefundedBody as string).length > 20, typeof w.ppTakenBack === "string" && (w.ppTakenBack as string).length > 10, typeof w.ppTakenBackBody === "string" && (w.ppTakenBackBody as string).length > 20], [true, true, true, true, true, true, true, true]);
+      // Where to look next, as the refund's line does: the buyer's PayPal account, named in the body a second time.
+      is(`${code}: the taken-back body says where to look next`, String(w.ppTakenBackBody).split("PayPal").length - 1, 2);
       if (code !== "en") is(`${code}: written in its own language, not English`, [w.ppCouldNotCheck === en.ppCouldNotCheck, w.ppHandingOver === en.ppHandingOver, body === en.ppCouldNotCheckBody, w.ppRefunded === en.ppRefunded, w.ppRefundedBody === en.ppRefundedBody, w.ppTakenBack === en.ppTakenBack, w.ppTakenBackBody === en.ppTakenBackBody], [false, false, false, false, false, false, false]);
     }
   }

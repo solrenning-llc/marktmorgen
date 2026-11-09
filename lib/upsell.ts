@@ -63,7 +63,7 @@ import type { Listing, Product, Store } from "@/lib/store";
 import { listingFinder, readListing, readListings, readProduct } from "@/lib/catalog";
 import { funnelProductIds } from "@/lib/funnel";
 import type { ProductFile } from "@/lib/product-file";
-import type { ProductImage } from "@/lib/product-image";
+import { type ProductImage, picturedFrom } from "@/lib/product-image";
 import { bundleFromMeta, bundleMeta, deliverableItems, deliveredIds } from "@/lib/bundle-rules";
 import { type BundleContents, contentsOf, offerableAfterPaying } from "@/lib/bundles";
 import { applyShareToPayment } from "@/lib/platform-share";
@@ -754,8 +754,8 @@ export async function funnelView(input: {
   }
   if (position.kind !== "offer") return { offer: null, taken, notes, declined };
   const { step, target } = position;
-  // Never from a product that is off the store: its picture may have moved to a name no public page gives out (R44).
-  const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom && !p.hidden) ?? null : null;
+  // Never a picture moved after a notice to a name no public page gives out (R44); a draft's, as the editor shows it.
+  const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom && picturedFrom(p)) ?? null : null;
   const afterNo = funnel.steps.some((s) => s.no === step.id && records.get(stepSlot(funnel, s))?.state === "declined");
   return {
     offer: {

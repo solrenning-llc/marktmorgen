@@ -15,7 +15,8 @@
  * so nothing the creator made is lost and the next press finishes. A record that cannot be read is never taken for
  * "nothing to move". A press after the record moved finds the old names in the steps and only deletes those files,
  * so a picture is never moved twice. A record the creator changed meanwhile is left as they left it, and the copies
- * made for it are deleted. A product published again before this runs is left alone.
+ * made for it are deleted; one that still shows an old file is read and moved again. A product published again
+ * before this runs is left alone.
  *
  * Not reached from here: copies a shared cache made before the takedown, kept there until they expire.
  */
@@ -77,6 +78,26 @@ export async function withdrawProductPicture(
   before: PictureNames | null,
   remember: (olds: PictureNames) => Promise<void>,
 ): Promise<"moved" | "none" | "changed"> {
+  // A record changed meanwhile that still shows an old file (the same picture with another smaller copy, say) is read
+  // again and moved again: a takedown is never done while an address its pages gave out still answers (Claude 2 on
+  // #3382). A record that keeps changing throws, every file still there, and the next press finishes.
+  for (let attempt = 0; attempt < WITHDRAW_ATTEMPTS; attempt += 1) {
+    const done = await withdrawOnce(ref, id, before, remember);
+    if (done !== "again") return done;
+  }
+  throw new Error("the picture kept changing while it was being moved");
+}
+
+/** How many times one press reads and moves a picture that changed meanwhile and still shows an old file. */
+const WITHDRAW_ATTEMPTS = 3;
+
+/** One read and move; "again" when the creator changed the picture meanwhile and it still shows an old file. */
+async function withdrawOnce(
+  ref: string,
+  id: string,
+  before: PictureNames | null,
+  remember: (olds: PictureNames) => Promise<void>,
+): Promise<"moved" | "none" | "changed" | "again"> {
   // Read again, after the product was taken off: the caller's copy of the store may predate it.
   const store = await storeForEmail(ref);
   if (!store) throw new Error("the store could not be read again");
@@ -115,7 +136,7 @@ export async function withdrawProductPicture(
     await del(made.filter((name) => !moved.shown.includes(name))).catch((error: unknown) => console.error("could not delete the copies of a picture changed meanwhile", error));
     const unshown = olds.filter((name) => !moved.shown.includes(name));
     if (unshown.length) await del(unshown);
-    return "changed";
+    return unshown.length < olds.length ? "again" : "changed";
   }
   // Only now, with the record confirmed to name the copies, the old files go.
   await del(olds);

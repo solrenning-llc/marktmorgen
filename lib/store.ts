@@ -3760,7 +3760,8 @@ export async function setProductImage(
  * product still shows exactly the files the copies were made from: "changed" when the creator replaced or removed
  * the picture since, and nothing is written. A smaller copy with no new name (`to.small` null) is dropped. Everything
  * else about the picture is kept as it is now; it is no longer marked as copied to the pictures' own bucket, which
- * holds the old names only. A "changed" answer names the files the product shows now, which are never deleted.
+ * holds the old names only, and it is marked `withdrawn`. A "changed" answer names the files the product shows now,
+ * which are never deleted.
  */
 export async function moveProductImage(
   email: string,
@@ -3777,7 +3778,7 @@ export async function moveProductImage(
     }
     const { r2: _r2, ...rest } = image;
     void _r2;
-    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null } };
+    return { ...product, image: { ...rest, path: to.path, small: image.small && to.small ? { ...image.small, path: to.small } : null, withdrawn: true as const } };
   });
   if (done.ok) return { ok: true };
   return done.reason === "changed" ? { ok: false, reason: "changed", shown } : { ok: false, reason: done.reason };

@@ -41,6 +41,15 @@ is(
   [{ id: "renewal", words: "Your plan's renewal payment did not go through.", link: { href: "/studio?store=s1#renewal-unpaid", label: "See what to do about your plan's payment" } }],
 );
 is("that notice is there, by that name", read("components/renewal-unpaid-notice.tsx").includes('id="renewal-unpaid"'), true);
+is(
+  "a renewal mark on a plan that is not paid up says nothing, as on the studio home (renewalUnpaid, lib/plan-standing.ts)",
+  [
+    ids(bellView(store({ subscriptionActive: false, renewalUnpaidSince: S - 3600 }), "owner", NOW).needs),
+    ids(bellView(store({ subscriptionActive: undefined, renewalUnpaidSince: S - 3600 }), "owner", NOW).needs),
+    ids(bellView(store({ renewalUnpaidSince: Number.NaN }), "owner", NOW).needs),
+  ],
+  [[], [], []],
+);
 const open = { id: "du_1", status: "open" as const, at: S - 86_400, coversUntil: S + 86_400 };
 is(
   "a plan payment disputed with the bank, on a plan that is paid up: to its notice",

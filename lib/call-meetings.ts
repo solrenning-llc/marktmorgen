@@ -33,7 +33,7 @@ import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
-import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack, unfinishedRefund } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
 import { markBookingsChanged, readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
@@ -180,6 +180,8 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   // A failed or unfinished read of the lost disputes keeps the anchor.
   let unsure = false;
   let lostRead: LostRead | null = null;
+  // The time of the oldest refund read that Stripe has not finished and that gives nothing back yet (Infinity: none).
+  let waiting = Number.POSITIVE_INFINITY;
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
@@ -199,7 +201,11 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
       if (!rowGivesBack(refund)) {
-        newest = Math.max(newest, created);
+        // A refund Stripe has not finished (requires_action, or pending on a charge not refunded in full yet) holds
+        // the anchor at its time (rule 30; review of #3188): once it goes through it is read again and the meeting
+        // ends. Moved past it, it was older than every later run's window and the paid call's meeting never ended.
+        if (unfinishedRefund(refund)) waiting = Math.min(waiting, created);
+        else newest = Math.max(newest, created);
         continue;
       }
       const [seen] = await redisPipeline([["SISMEMBER", seenKey(callsId), id]]);
@@ -266,7 +272,7 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", anchorKey(callsId), String(Math.max(newest, anchor)), "EX", REFUND_KEEP_SECONDS * 2]]);
+  if (done) await redisPipeline([["SET", anchorKey(callsId), String(Math.min(Math.max(newest, anchor), Math.max(waiting, since))), "EX", REFUND_KEEP_SECONDS * 2]]);
   else if (!(Number(anchorRaw) > 0)) {
     await redisPipeline([
       ["SET", anchorKey(callsId), String(anchor), "EX", REFUND_KEEP_SECONDS * 2],

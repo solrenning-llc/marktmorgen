@@ -66,6 +66,8 @@ import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, row
 import { readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
+// On its own line, so open pull requests that change the refunds import above still merge cleanly.
+import { unfinishedRefund } from "@/lib/refunds";
 import {
   MAX_PREFIX_LENGTH,
   MIN_GROUPS,
@@ -555,6 +557,8 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // anchor stays, so the next run looks at it again.
   let unsure = false;
   let lostRead: LostRead | null = null;
+  // The time of the oldest refund read that Stripe has not finished and that gives nothing back yet (Infinity: none).
+  let waiting = Number.POSITIVE_INFINITY;
   const handles = saleHandles(store);
 
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
@@ -573,7 +577,12 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       const id = typeof refund.id === "string" ? refund.id : "";
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
-      if (!rowGivesBack(refund)) continue;
+      if (!rowGivesBack(refund)) {
+        // A refund Stripe has not finished holds the anchor at its time (rule 30; review of #3188): a later full
+        // refund never moves the read past it, so it is read again once it goes through and its key is revoked.
+        if (unfinishedRefund(refund)) waiting = Math.min(waiting, created);
+        continue;
+      }
       const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
       if (Number(seen) === 1) {
         newest = Math.max(newest, created);
@@ -668,7 +677,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  if (done) await redisPipeline([["SET", refundAnchorKey(store), String(Math.min(Math.max(newest, anchor), Math.max(waiting, since))), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   else if (!(Number(anchorRaw) > 0)) {
     await redisPipeline([
       ["SET", refundAnchorKey(store), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],

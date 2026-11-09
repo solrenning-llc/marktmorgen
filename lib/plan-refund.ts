@@ -53,6 +53,8 @@ const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,128}$/;
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,128}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,128}$/;
 const CHARGE_STATUSES = new Set(["succeeded", "pending", "failed"]);
+/** Every status Stripe gives a dispute, as lib/refunds.ts lists them: anything else is unknown, never open or settled. */
+const DISPUTE_STATUSES = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "lost", "prevented", "charge_refunded"]);
 
 /** One payment the refund gives back: its charge, the amount for it, and when it was paid (seconds). */
 export type PlanRefundPart = { chargeId: string; paymentIntent: string; invoiceId: string; cents: number; paidAtSeconds: number };
@@ -167,13 +169,26 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       if (charge.id !== chargeId || idOf(charge.invoice) !== invoiceId || idOf(charge.customer) !== customer.id) return { refund: { kind: "unknown", reason: "unreadable" } };
       let disputeStatus: string | null = null;
       let disputedCents: number | null = null;
-      if (charge.disputed === true) {
-        const disputes = list(await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`), 10);
-        if (!disputes) return { refund: { kind: "unknown", reason: "unreadable" } };
+      // Whether Stripe says the charge is disputed, in its exact shape: anything but a boolean is unknown, never "no
+      // dispute" (rule 24).
+      if (typeof charge.disputed !== "boolean") return { refund: { kind: "unknown", reason: "unreadable" } };
+      if (charge.disputed) {
+        const disputesPage = await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`);
+        const disputes = list(disputesPage, 10);
+        // A list that says there is more was not read whole: not decided here.
+        if (!disputes || disputesPage.has_more !== false) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
-        disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
-        disputedCents = num(disputes[0].amount);
+        // Only this charge's own dispute decides (rule 30; review of #3133): a row of another charge, or naming none,
+        // says nothing about this one. A won row of another charge made the guarantee payable on a charge whose own
+        // dispute was lost, and lib/plan-refund-write.ts then asked for the money a second time. A status that is not
+        // one of Stripe's is unknown too, never read as open or settled.
+        const [own] = disputes;
+        if (idOf(own.charge) !== chargeId || typeof own.status !== "string" || !DISPUTE_STATUSES.has(own.status)) {
+          return { refund: { kind: "unknown", reason: "unreadable" } };
+        }
+        disputeStatus = own.status;
+        disputedCents = num(own.amount);
       }
       const lines = embedded(invoice.lines);
       if (!lines) return { refund: { kind: "unknown", reason: "unreadable" } };

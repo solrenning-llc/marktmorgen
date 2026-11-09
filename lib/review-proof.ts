@@ -37,7 +37,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
-import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack, unfinishedRefund } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
@@ -305,6 +305,8 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   // A failed or unfinished read of the lost disputes keeps the anchor.
   let unsure = false;
   let lostRead: LostRead | null = null;
+  // The time of the oldest refund read that Stripe has not finished and that gives nothing back yet (Infinity: none).
+  let waiting = Number.POSITIVE_INFINITY;
   try {
     for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
       const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
@@ -333,6 +335,9 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       if (lost && !lost.complete) unsure = true;
       // What gives back on the page, and which of it an earlier pass already took: one request for the page, and
       // nothing written again for one already taken (each pass reads the last days' refunds again).
+      // A refund Stripe has not finished holds the anchor at its time (rule 30; review of #3188): a later full refund
+      // never moves the read past it, so it is read again once it goes through and its reviews are marked.
+      for (const refund of refunds) if (unfinishedRefund(refund) && typeof refund.created === "number") waiting = Math.min(waiting, refund.created);
       const full = [...(lost?.rows ?? []), ...refunds]
         .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
         .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
@@ -373,7 +378,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", anchorKey(statsId), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  if (done) await redisPipeline([["SET", anchorKey(statsId), String(Math.min(Math.max(newest, anchor), Math.max(waiting, since))), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   else if (!(Number(anchorRaw) > 0)) {
     await redisPipeline([
       ["SET", anchorKey(statsId), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],

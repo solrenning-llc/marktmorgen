@@ -146,9 +146,33 @@ async function main(): Promise<void> {
     console.error = realError;
   };
 
+  // First, while the pass starts a week back: the refund is seen pending, then the clock moves on.
+  part("a group refund pending more than a week is said in the log at most once a payment a day");
+  const stuck = await make(3);
+  const stuckAt = NOW - 6 * 86_400;
+  refunds = [row("re_GdStuck00000001", stuckAt, "pending", stuck.pi, true)];
+  is("stuck: nothing taken back while pending", await run(), 0);
+  const said = () => logged.filter((l) => l.includes("pending for more than") && l.includes("re_GdStuck00000001")).length;
+  listen();
+  try {
+    Date.now = () => realNow() + 2 * 86_400_000;
+    for (let i = 0; i < 3; i += 1) await run();
+    is("stuck: three runs in one day say it once", said(), 1);
+    Date.now = () => realNow() + 3 * 86_400_000 + 60_000;
+    await run();
+    await run();
+    is("stuck: a day later it is said once more", said(), 2);
+    is("stuck: both places still hold it", await stuck.held(), 2);
+  } finally {
+    Date.now = realNow;
+    quiet();
+  }
+  refunds = [row("re_GdStuck00000001", stuckAt, "succeeded", stuck.pi, true)];
+  is("stuck: once it succeeded, both places are taken back", await run(), 2);
+
   part("a pending refund of an ordinary sale never holds the group anchor, and is never said to be a group purchase's");
-  await make(1);
-  refunds = [row("re_GdNewest0000001", NOW - 10, "succeeded", "pi_GdOrdinary00009", true), row("re_GdOrdinary00001", NOW - 6 * 86_400, "pending", "pi_GdOrdinary00001", true)];
+  // Inside the read left by the part before (its anchor is the stuck refund's time), six days old, then eight.
+  refunds = [row("re_GdNewest0000001", NOW - 10, "succeeded", "pi_GdOrdinary00009", true), row("re_GdOrdinary00001", NOW - 6 * 86_400 + 1000, "pending", "pi_GdOrdinary00001", true)];
   listen();
   try {
     await run();
@@ -176,29 +200,6 @@ async function main(): Promise<void> {
   is("no place holds it any more", await parted.held(), 0);
   is("only the group's charge was asked about", [...new Set(chargesAsked.map((c) => c.charge))], [`ch_${parted.pi.slice(3)}`]);
   is("a charge's refunds are read pinned to the list version (STRIPE_LIST_VERSION)", chargesAsked.every((c) => c.version === STRIPE_LIST_VERSION), true);
-
-  part("a group refund pending more than a week is said in the log at most once a payment a day");
-  const stuck = await make(3);
-  const stuckAt = NOW - 6 * 86_400;
-  refunds = [row("re_GdStuck00000001", stuckAt, "pending", stuck.pi, true)];
-  is("stuck: nothing taken back while pending", await run(), 0);
-  const said = () => logged.filter((l) => l.includes("pending for more than") && l.includes("re_GdStuck00000001")).length;
-  listen();
-  try {
-    Date.now = () => realNow() + 2 * 86_400_000;
-    for (let i = 0; i < 3; i += 1) await run();
-    is("stuck: three runs in one day say it once", said(), 1);
-    Date.now = () => realNow() + 3 * 86_400_000 + 60_000;
-    await run();
-    await run();
-    is("stuck: a day later it is said once more", said(), 2);
-    is("stuck: both places still hold it", await stuck.held(), 2);
-  } finally {
-    Date.now = realNow;
-    quiet();
-  }
-  refunds = [row("re_GdStuck00000001", stuckAt, "succeeded", stuck.pi, true)];
-  is("stuck: once it succeeded, both places are taken back", await run(), 2);
 
   part("a dispute closed as lost takes every place back; one won or still open takes nothing");
   const lost = await make(4);

@@ -47,10 +47,11 @@
  * purchaseRefunded(), and the jobs' lostDisputesSince(), which the jobs that
  * take back gifts (lib/gifts.ts) and pre-orders already handed over
  * (lib/preorders.ts, revokeRefundedPreorders) read too (queue 388 [TB14],
- * 5 November 2026), and a booking's own row in lib/calls.ts, which asks
+ * 5 November 2026), as does the job that takes back group places
+ * (lib/group-buy.ts, revokeRefundedGroups, since the owner's decision 18 of
+ * 9 November 2026), and a booking's own row in lib/calls.ts, which asks
  * Stripe with keptUnlessLost() for a charge marked disputed (callOrLost, at
- * most DISPUTE_READS_PER_READING a reading). Door still judged on refunds
- * only (queue 388): the job that takes back group places (lib/group-buy.ts). A payment added in one click after checkout is its own payment and
+ * most DISPUTE_READS_PER_READING a reading). A payment added in one click after checkout is its own payment and
  * is judged on its own; a product ticked at checkout is part of the
  * checkout's payment and goes with it.
  *
@@ -230,9 +231,9 @@ export function rowGivesBack(row: GivenBackRow): boolean {
 
 /**
  * The most pages of closing events one job's run reads for one store: each
- * a GET /events of up to 100, every five minutes, by the five jobs that
+ * a GET /events of up to 100, every five minutes, by the six jobs that
  * take things back (lib/licence-keys.ts, lib/call-meetings.ts,
- * lib/review-proof.ts, lib/gifts.ts, lib/preorders.ts). No other call: the
+ * lib/review-proof.ts, lib/gifts.ts, lib/preorders.ts, lib/group-buy.ts). No other call: the
  * dispute in the event says all a row needs.
  */
 export const LOST_DISPUTE_PAGES = 3;

@@ -60,6 +60,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     reads.push({ account, after, status: 200 });
     return new Response(JSON.stringify({ object: "list", data: all.slice(from, from + limit), has_more: from + limit < all.length }));
   }
+  // The store's disputes closed (charge.dispute.closed, lib/refunds.ts lostDisputesSince): none, read to the end.
+  if (path === "/events" && method === "GET") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
 

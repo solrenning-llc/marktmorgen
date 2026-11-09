@@ -74,6 +74,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const from = after ? listed.findIndex((row) => row.id === after) + 1 : 0;
     return answer({ object: "list", data: listed.slice(from, from + limit), has_more: from + limit < listed.length });
   }
+  // The store's disputes closed (charge.dispute.closed, lib/refunds.ts lostDisputesSince): none, read to the end.
+  if (path === "/events" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: [], has_more: false });
   return answer({ error: { message: `no stand-in for ${init?.method ?? "GET"} ${path}` } }, 404);
 }) as typeof fetch;
 

@@ -52,6 +52,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const index = after ? pages.findIndex((p) => ((p as { data?: { id?: string }[] }).data ?? []).some((row) => row?.id === after)) + 1 : 0;
     return new Response(JSON.stringify(pages[Math.min(index, pages.length - 1)]));
   }
+  // The store's disputes closed (charge.dispute.closed, lib/refunds.ts lostDisputesSince): none, read to the end.
+  if (path === "/events" && method === "GET") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
 

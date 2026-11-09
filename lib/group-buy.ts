@@ -7,6 +7,7 @@
  *   nl:grp:<id>:n            string  how many places were taken, as counted before 5 November 2026 (no longer written)
  *   nl:grp:<id>:t:<hash>     string  one open of an address's link at a time, for 30 seconds at most
  *   nl:grp:<id>:mail         string  emails this link sent today, so it cannot be used to fill inboxes
+ *   nl:grp:<id>:stuck        string  its refund stuck on its way was said in the log today (a day at most)
  *   nl:grp:take:<token>      string  the link in a place's email: which purchase, which address
  *   nl:grp:pi:<payment>      string  the purchase a payment paid for, so a refund finds it
  *   nl:grp:<store>:any       string  present once the store has sold one
@@ -50,7 +51,7 @@ import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { refundRowKnown } from "@/lib/refunds";
+import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { STRIPE_ACCOUNT_PATTERN, type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -157,9 +158,13 @@ const CHARGE_REFUND_LOOKUPS = 10;
  * A refund still on its way this long is said in the log, and still takes nothing back (the owner's decision 18, 9
  * November 2026: a refund pending for many days raises an alert, never a revocation). Stripe finishes almost every
  * refund within days; one still pending after a week needs a look (the creator's balance short, a payment method
- * that answers slowly). Said on every run that reads it, from the log alone: no store command, no email.
+ * that answers slowly). Said in the log at most once a payment a day (stuckKey), and only for a payment that paid for a
+ * group purchase: no email.
  */
 const REFUND_STUCK_SECONDS = 7 * 86_400;
+/** The mark that a purchase's refund stuck on its way was said in the log today: one SET NX EX a run while it is stuck. */
+const stuckKey = (id: string) => `nl:grp:${id}:stuck`;
+const STUCK_SAID_SECONDS = 86_400;
 
 // The reading of a refund in parts below is a copy of the one on #2868 (lib/licence-keys.ts, claude5/fix-licence-refund,
 // wholeOnItsOwn and chargeRefundsSettled), not yet on main: once both are, one shared function in lib/refunds.ts
@@ -204,7 +209,8 @@ async function chargeRefundsSettled(account: string, refund: Record<string, unkn
     return typeof status === "string" && REFUND_STATUS_KNOWN.has(status) && centsKnown(ownField(row, "amount")) && chargeId === id;
   };
   const listed = readStripePage(
-    await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`),
+    // Pinned to the version the list is read in, as the store's refund pages are (readPage below).
+    await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`, undefined, STRIPE_LIST_VERSION),
     legible,
   );
   if (listed.unreadable > 0 || listed.hasMore) throw new StripeListUnreadable("a charge's refunds");
@@ -905,7 +911,10 @@ function readPass(raw: unknown, account: string): RefundPass | null | undefined 
  * A refund takes the places back only once it succeeded on a charge refunded in full by the refunds that succeeded
  * (the owner's decision 18, 9 November 2026): one still on its way, or a part of a charge whose rest is on its way,
  * holds the anchor at its time and takes nothing back yet; one that failed or was canceled takes nothing back; one
- * on its way for more than REFUND_STUCK_SECONDS is said in the log, never taken back for that.
+ * on its way for more than REFUND_STUCK_SECONDS is said in the log, never taken back for that. A dispute Stripe closed
+ * as lost takes the places back as a full refund that succeeded does, whatever its amount; one won or still open takes
+ * nothing (lib/refunds.ts, lostDisputesOrRetry, read once a run as gifts and pre-orders read it). Only a payment that
+ * paid for a group purchase is looked at further: any other refund holds nothing and asks Stripe nothing more.
  *
  * The refunds are read in Stripe's exact list shape, every row as refundRowKnown (lib/refunds.ts) reads it, page
  * after page (CX-123 rules 24 and 30; C4-20261106-0450-C5-16). One pass from the anchor to the end of the list may
@@ -980,34 +989,41 @@ export async function revokeRefundedGroups(
   const stuck = new Set<string>();
 
   /**
-   * One refund row read whole: true when it was handled or takes nothing back; false when something it needed was left
-   * unknown, and then it is not marked handled; "hold" when it may still take its purchase back but has not yet, and it
-   * then holds the anchor at its time, so the next pass reads it again (audit of refunds, A1).
+   * One refund row, or one dispute closed as lost (as lostDisputesSince builds it), read whole: true when it was
+   * handled or takes nothing back; false when something it needed was left unknown, and then it is not marked handled;
+   * "hold" when it may still take its purchase back but has not yet, and it then holds the anchor at its time, so the
+   * next pass reads it again (audit of refunds, A1).
    *
-   * The owner's decision 18 (9 November 2026): the places go only once the refund succeeded on a charge refunded in full.
-   * A refund still on its way (pending, or waiting on an action) takes nothing back, since it may yet fail, and holds
-   * the anchor; failed or canceled, it takes nothing back and holds nothing. A refund in parts (as on #2868): a
-   * succeeded part on a charge read refunded in full (Stripe counts a refund still pending in amount_refunded) takes
-   * the places back only once the charge's succeeded refunds add up to the whole charge; while one of them is on its
-   * way, or when they cannot be read, it holds. `decided` is a refund already read through, kept to be tried again.
+   * The owner's decision 18 (9 November 2026): the places go only once the refund succeeded on a charge refunded in full,
+   * or the dispute was lost. A refund still on its way (pending, or waiting on an action) takes nothing back, since it
+   * may yet fail, and holds the anchor; failed or canceled, it takes nothing back and holds nothing. A refund in parts
+   * (as on #2868): a succeeded part on a charge read refunded in full (Stripe counts a refund still pending in
+   * amount_refunded) takes the places back only once the charge's succeeded refunds add up to the whole charge; while
+   * one of them is on its way, or when they cannot be read, it holds. A dispute lost takes the whole purchase back,
+   * whatever its amount (lib/refunds.ts, the owner's rule of 4 November 2026); one won or still open takes nothing.
+   * `decided` is a refund already read through, kept to be tried again.
+   *
+   * Whether the payment paid for a group purchase is read first (the pre-review of claude5/group-buy-cursor-account):
+   * a refund of any other sale never holds the anchor, is never said in the log, and never asks Stripe about its
+   * charge, so it cannot spend the lookups a group's own parts need.
    */
   const handle = async (refund: Record<string, unknown>, decided = false): Promise<boolean | "hold"> => {
     const id = refund.id as string;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-    if (!pi) return true;
-    if (!decided && REFUND_ON_ITS_WAY.has(refund.status as string)) {
-      if (typeof refund.created === "number" && refund.created <= now() - REFUND_STUCK_SECONDS && !stuck.has(id)) {
-        stuck.add(id);
-        // An alert for whoever reads the logs, never a revocation (the owner's decision 18): nothing goes until it succeeded.
-        console.error("a refund for a group purchase has been pending for more than seven days; its places are kept until it succeeds", { store: sid, account, refund: id, status: refund.status, created: refund.created });
-      }
-      return "hold";
+    const dispute = refund.object === "dispute";
+    const markRead = async (): Promise<boolean> => oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
+    if (dispute) {
+      if (!rowGivesBack(refund)) return true;
+      // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
+      if (!pi) return markRead();
     }
+    if (!pi) return true;
+    const onItsWay = !dispute && !decided && REFUND_ON_ITS_WAY.has(refund.status as string);
     const charge = refund.charge as { refunded?: unknown } | null;
-    if (refund.status !== "succeeded" || charge?.refunded !== true) return true;
-    // Through already when kept read through, or when its own amount covers the charge; otherwise only once the
-    // charge's refunds are read below.
-    const through = decided || wholeOnItsOwn(refund);
+    if (!dispute && !onItsWay && (refund.status !== "succeeded" || charge?.refunded !== true)) return true;
+    // Through already when lost to a dispute, kept read through, or when its own amount covers the charge; otherwise
+    // only once the charge's refunds are read below.
+    const through = dispute || decided || (!onItsWay && wholeOnItsOwn(refund));
     const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
     const handled = countOf(looked?.[0]);
     const groupId = looked?.[1];
@@ -1015,8 +1031,23 @@ export async function revokeRefundedGroups(
     // it keeps as through.
     if (!looked || handled === null || handled > 1 || (groupId !== null && typeof groupId !== "string")) return through ? false : "hold";
     if (handled === 1) return true;
+    // No group purchase paid by it: nothing to take back, so nothing held, said or asked of Stripe. One that gives its
+    // payment back is marked read, as before; one still on its way is read again with the list, at no cost.
+    if (groupId === null) return onItsWay ? true : markRead();
+    if (onItsWay) {
+      if (typeof refund.created === "number" && refund.created <= now() - REFUND_STUCK_SECONDS && !stuck.has(id)) {
+        stuck.add(id);
+        // An alert for whoever reads the logs, never a revocation (the owner's decision 18): nothing goes until it
+        // succeeded. At most once a payment a day: the mark is written first, and only a mark already there is quiet.
+        const mark = typeof groupId === "string" && GROUP_ID.test(groupId) ? repliesFor(await redisPipeline([["SET", stuckKey(groupId), "1", "NX", "EX", STUCK_SAID_SECONDS]]), 1)?.[0] : undefined;
+        if (mark !== null) {
+          console.error("a refund for a group purchase has been pending for more than seven days; its places are kept until it succeeds", { store: sid, account, refund: id, status: refund.status, created: refund.created });
+        }
+      }
+      return "hold";
+    }
     // A succeeded part of the charge: through only once the charge's succeeded refunds add up to it. Read after the
-    // handled mark, so a refund already handled asks Stripe nothing more.
+    // handled mark and the group purchase, so a refund already handled, or of another sale, asks Stripe nothing more.
     if (!through) {
       if (lookups <= 0) return "hold";
       lookups -= 1;
@@ -1106,7 +1137,7 @@ export async function revokeRefundedGroups(
       }
     }
     // Marked handled only now, once everything it takes back was written.
-    return oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
+    return markRead();
   };
 
   /**
@@ -1179,6 +1210,22 @@ export async function revokeRefundedGroups(
     }
   }
 
+  // Disputes closed as lost since this pass's start, read once a run as the siblings read them (lib/gifts.ts,
+  // lib/preorders.ts; lib/refunds.ts, lostDisputesOrRetry): each takes its purchase back as a full refund that succeeded
+  // does (the owner's decision 18). A read that fails or does not reach the end, or a dispute whose work was left
+  // unknown, keeps the anchor where this pass started should the pass end in this run, so they are read again; the place
+  // in the closing events moves only once every one read was handled (confirmLostRead).
+  const lost = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("grp", sid));
+  let lostUnsure = !lost.complete;
+  for (const closed of lost.rows) {
+    if (Date.now() >= deadline) return revoked;
+    if ((await handle(closed)) !== true) lostUnsure = true;
+  }
+  if (!(await confirmLostRead(lost, seenKey(sid)))) lostUnsure = true;
+  // No further than the newest closing read when the sweep went on from a kept place, so a dispute closed meanwhile is
+  // read from the top next time (as lib/gifts.ts does).
+  const lostHold = lostUnsure ? since + 300 : lost.resumed ? Math.max(lost.newest, since + 300) : undefined;
+
   let pages = REFUND_PAGES;
   if (after) {
     // Resuming a pass: the newest refunds first, so one made meanwhile is not left until the pass ends. What is read
@@ -1226,7 +1273,9 @@ export async function revokeRefundedGroups(
     if (!read.hasMore) {
       // Every row read and final: the anchor goes to the newest. A row not read, or a refund not final yet: no further
       // than its time, never back before where this pass started.
-      const at = hold === undefined ? newest : Math.max(since + 300, hold);
+      // The lost disputes of this run count only here, at the pass's end: they are read again on every run.
+      const until = lostHold === undefined ? hold : hold === undefined ? lostHold : Math.min(hold, lostHold);
+      const at = until === undefined ? newest : Math.max(since + 300, until);
       const ended = repliesFor(await redisPipeline([["EVAL", REFUNDS_END, 4, anchorKey(sid), ownerKey(sid), leftKey(sid), passKey(sid), String(at), account]]), 1);
       if (ended?.[0] !== 1) console.error("ending a pass over group refunds was left unknown");
       return revoked;

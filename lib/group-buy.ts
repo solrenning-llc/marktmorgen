@@ -51,9 +51,9 @@ import { addressHash, grantImported, importedKey } from "@/lib/imported-purchase
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { refundRowKnown } from "@/lib/refunds";
-import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
-import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
+import { STRIPE_ACCOUNT_PATTERN, type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { givenOption } from "@/lib/gift-rules";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -109,6 +109,27 @@ const seenKey = (sid: string) => `nl:grp:${sid}:seen`;
 const REFUND_PAGES = 10;
 /** Where a pass over the refunds stands, kept between runs (revokeRefundedGroups). */
 const passKey = (sid: string) => `nl:grp:${sid}:refunds:pass`;
+/**
+ * The Stripe account the anchor is of, written with it (REFUNDS_END). An anchor kept before anchors named their account
+ * has none, and is read as the store's account today, as it was read then.
+ */
+const ownerKey = (sid: string) => `nl:grp:${sid}:refunds:acct`;
+/**
+ * Where each account the store left is read from again should the store come back to it (A, then B, then A): a
+ * sorted set, the account as member and, as score, its anchor when the store left it, or the start of a pass on it
+ * that never ended. At most REFUND_ACCOUNTS_KEPT; past that the newest marks are let go, and an account with no mark
+ * is read from the oldest mark kept (never later than any mark let go) or a week back, whichever is older, so no
+ * refund is lost and what is kept stays bounded.
+ */
+const leftKey = (sid: string) => `nl:grp:${sid}:refunds:left`;
+const REFUND_ACCOUNTS_KEPT = 16;
+/** A pass ended: the anchor and the account it is of written together, that account's mark let go, the pass too. */
+const REFUNDS_END = `-- marktmorgen:group-refunds-end:v1
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('SET', KEYS[2], ARGV[2])
+redis.call('ZREM', KEYS[3], ARGV[2])
+redis.call('DEL', KEYS[4])
+return 1`;
 /** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
 const PASS_SECONDS = 7 * 86_400;
 /**
@@ -763,10 +784,26 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
 const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
 /**
  * Where a pass over the refunds stands between runs: its start, the page it continues from, the newest refund read,
- * the Stripe account whose list it is reading (its cursor is a refund of that account and of no other), and whether a
- * row it passed was not readable (`held`: then the anchor stays where it was when the pass ends).
+ * the Stripe account whose list it is reading (its cursor is a refund of that account and of no other), and, when a
+ * row it passed was not readable, the oldest time such a row holds (`hold`: the anchor goes no further when the pass
+ * ends, so the next pass reads that row again).
  */
-type RefundPass = { since: number; after: string; newest: number; account: string; held?: true };
+type RefundPass = { since: number; after: string; newest: number; account: string; hold?: number };
+/** A pass's cursor: an id as Stripe gives one. */
+const CURSOR = /^[A-Za-z0-9_]{3,255}$/;
+/** A time kept as a mark: whole seconds, as Redis answers a score or a value; anything else is unknown (undefined). */
+function timeMark(raw: unknown): number | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw === "number") return Number.isSafeInteger(raw) && raw >= 0 ? raw : undefined;
+  return typeof raw === "string" && /^\d{1,12}$/.test(raw) ? Number(raw) : undefined;
+}
+/** The oldest mark of an account left, from ZRANGEBYSCORE ... LIMIT 0 1 WITHSCORES: null when there is none. */
+function lowestMark(raw: unknown): number | null | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  if (raw.length === 0) return null;
+  if (raw.length !== 2 || typeof raw[0] !== "string") return undefined;
+  return timeMark(raw[1]) ?? undefined;
+}
 /**
  * A kept pass, only when it is in its exact shape and reads the store's account today. One kept on another account
  * (the creator connected another one) or before passes named their account is not read from: its cursor would be
@@ -781,11 +818,11 @@ function readPass(raw: unknown, account: string): RefundPass | null | undefined 
       Number.isSafeInteger(pass.since) &&
       Number.isSafeInteger(pass.newest) &&
       typeof pass.after === "string" &&
-      /^[A-Za-z0-9_]{3,255}$/.test(pass.after) &&
+      CURSOR.test(pass.after) &&
       pass.account === account &&
-      (pass.held === undefined || pass.held === true)
+      (pass.hold === undefined || (Number.isSafeInteger(pass.hold) && (pass.hold as number) >= 0))
     ) {
-      return { since: pass.since as number, after: pass.after, newest: pass.newest as number, account, ...(pass.held ? { held: true as const } : {}) };
+      return { since: pass.since as number, after: pass.after, newest: pass.newest as number, account, ...(pass.hold !== undefined ? { hold: pass.hold } : {}) };
     }
   } catch {}
   return undefined;
@@ -810,8 +847,17 @@ function readPass(raw: unknown, account: string): RefundPass | null | undefined 
  * the new one, and a kept cursor the account answers 404 `resource_missing` for is let go and the pass starts again
  * from the top in the same run, so a refund is never left unread behind a cursor that cannot be followed (the sibling
  * of M2 on #3301). A row that is not readable never holds back the pages after it (the sibling of M1 on #3301): the
- * pass goes on from the page's last readable row, and when it ends the anchor stays where it was, so the next pass
- * reads that row again; the anchor moves only after a pass that read every row.
+ * pass goes on from the page's last readable row or, on a page with none, from its last row's id when that id reads;
+ * when it ends, the anchor goes no further than the oldest such row's time (the start of the pass when that time does
+ * not read), so the next pass reads it again and the week a store with no anchor starts from never slides past it. A
+ * page with no row whose id reads gives nothing to go on from: the pass stays on it, says in the log that what is
+ * after it is unknown, and reads it again on the next run, at most the newest page and that one.
+ *
+ * The anchor is of one account (ownerKey). A store that connects another account starts that one from its own mark
+ * (leftKey): where it was left, or, for one never read, a week back or the oldest mark kept, whichever is older; the
+ * account left is marked at its anchor before anything else, and the anchor moves to the new account only once a pass
+ * over it ends (REFUNDS_END, in one step). So a store that goes back to an account it left reads that account from
+ * where it left it, never from the other account's anchor (A, then B, then A).
  */
 export async function revokeRefundedGroups(
   store: Store,
@@ -821,18 +867,38 @@ export async function revokeRefundedGroups(
   if (!store.statsId || !store.stripeAccountId || !isRedisConfigured()) return 0;
   const sid = store.statsId;
   const account = store.stripeAccountId;
-  const begun = repliesFor(await redisPipeline([["GET", anyKey(sid)], ["GET", anchorKey(sid)], ["GET", passKey(sid)]]), 3);
+  const begun = repliesFor(await redisPipeline([["GET", anyKey(sid)], ["GET", anchorKey(sid)], ["GET", passKey(sid)], ["GET", ownerKey(sid)]]), 4);
   if (!begun) return 0;
-  const [any, anchorRaw, passRaw] = begun;
+  const [any, anchorRaw, passRaw, ownerRaw] = begun;
   if (!any) return 0;
   // The anchor read exactly: in another shape, no pass starts (Claude 4 on #2781), never one from a week back.
   if (anchorRaw !== null && (typeof anchorRaw !== "string" || !/^\d{1,12}$/.test(anchorRaw))) return 0;
+  // And the account it is of: in another shape, no pass starts either.
+  if (ownerRaw !== null && (typeof ownerRaw !== "string" || !STRIPE_ACCOUNT_PATTERN.test(ownerRaw))) return 0;
+  // Where this account is read from: its anchor, when the anchor is of this account (or kept before anchors named one).
+  let start: number;
+  if (anchorRaw !== null && (ownerRaw === null || ownerRaw === account)) start = Number(anchorRaw);
+  else {
+    // No anchor of this account: its own mark, if the store left it before, else a week back or the oldest mark kept.
+    const marks = repliesFor(await redisPipeline([["ZSCORE", leftKey(sid), account], ["ZRANGEBYSCORE", leftKey(sid), "-inf", "+inf", "LIMIT", 0, 1, "WITHSCORES"]]), 2);
+    const own = marks ? timeMark(marks[0]) : undefined;
+    const lowest = marks ? lowestMark(marks[1]) : undefined;
+    if (own === undefined || lowest === undefined) return 0;
+    start = own ?? Math.min(lowest ?? Number.MAX_SAFE_INTEGER, Math.max(0, now() - 7 * 86_400));
+    // Before anything is read: the account left is marked at its anchor, and this one at where it starts, so neither
+    // is lost if the store moves again before a pass here ends; then the newest marks past the bound are let go.
+    const marking: (string | number)[][] = [];
+    if (anchorRaw !== null && ownerRaw !== null) marking.push(["ZADD", leftKey(sid), "NX", anchorRaw, ownerRaw]);
+    marking.push(["ZADD", leftKey(sid), "NX", String(start), account], ["ZREMRANGEBYRANK", leftKey(sid), REFUND_ACCOUNTS_KEPT, -1]);
+    const marked = repliesFor(await redisPipeline(marking), marking.length);
+    if (!marked || !marked.slice(0, -1).every(oneWrite) || countOf(marked.at(-1)) === null) return 0;
+  }
   const kept = readPass(passRaw, account);
   // A pass kept in an unknown shape, or on another account, is started again from the anchor, which never moved past it.
-  const since = kept ? kept.since : Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
-  let newest = kept ? kept.newest : Number(anchorRaw) || since;
+  const since = kept ? kept.since : Math.max(0, start - 300);
+  let newest = kept ? kept.newest : start;
   let after = kept ? kept.after : "";
-  let held = kept?.held === true;
+  let hold = kept?.hold;
   let revoked = 0;
 
   /** One refund row read whole: false when something it needed was left unknown, and then it is not marked handled. */
@@ -929,14 +995,36 @@ export async function revokeRefundedGroups(
 
   /**
    * One page of refunds: its rows read in their exact shape, null when the page itself could not be read, or "gone"
-   * when the account does not know the refund it was asked to read on from (404 `resource_missing` on a cursor).
+   * when the account does not know the refund it was asked to read on from (404 `resource_missing` on a cursor). With
+   * the page: its last row's id when that id reads, whatever the rest of the row (`tailId`), and the oldest time a row
+   * not readable holds (`holdAt`: its own time when that reads, the start of the pass when it does not).
    */
-  const readPage = async (from: string): Promise<StripePage | null | "gone"> => {
+  const readPage = async (from: string): Promise<(StripePage & { tailId: string | null; holdAt: number | null }) | null | "gone"> => {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
     if (from) query.set("starting_after", from);
     try {
-      return readStripePage(await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION), refundRowKnown);
+      const raw = await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION);
+      const page = readStripePage(raw, refundRowKnown);
+      // A page that read is a plain object whose own data is a list: its rows are looked at again, slot by slot.
+      const data = ownField(raw as Record<string, unknown>, "data") as unknown[];
+      const readable = new Set<unknown>(page.rows);
+      const slot = (i: number): unknown => {
+        const own = Object.getOwnPropertyDescriptor(data, String(i));
+        return own && Object.hasOwn(own, "value") ? own.value : undefined;
+      };
+      let holdAt: number | null = null;
+      for (let i = 0; i < data.length; i += 1) {
+        const row = slot(i);
+        if (readable.has(row)) continue;
+        const created = plainObject(row) ? ownField(row, "created") : undefined;
+        // A time Stripe could have given this list (inside its window, not ahead of now); otherwise the pass's start.
+        const at = typeof created === "number" && Number.isSafeInteger(created) && created >= since && created <= now() + 300 ? created : since + 300;
+        holdAt = holdAt === null ? at : Math.min(holdAt, at);
+      }
+      const last = data.length > 0 ? slot(data.length - 1) : undefined;
+      const lastId = plainObject(last) ? ownField(last, "id") : undefined;
+      return { ...page, tailId: typeof lastId === "string" && CURSOR.test(lastId) ? lastId : null, holdAt };
     } catch (error) {
       if (from && error instanceof StripeError && error.status === 404 && error.code === "resource_missing") {
         console.error("a kept pass over group refunds named a refund this account does not know; started again", error);
@@ -993,8 +1081,8 @@ export async function revokeRefundedGroups(
       // The anchor did not move during the pass, so nothing it covers is skipped; what was handled stays handled.
       await redisPipeline([["DEL", passKey(sid)]]);
       after = "";
-      newest = Number(anchorRaw) || since;
-      held = false;
+      newest = start;
+      hold = undefined;
       continue;
     }
     if (!read) return revoked;
@@ -1007,22 +1095,30 @@ export async function revokeRefundedGroups(
     }
     // A row neither handled nor kept for later: the page is read again next run.
     if (!whole) return revoked;
-    // A row not readable holds the anchor where it was, so the next pass reads it again, and never holds back the pages
+    // A row not readable holds the anchor at its time, so the next pass reads it again, and never holds back the pages
     // after it (the sibling of M1 on #3301).
-    if (read.unreadable > 0) held = true;
+    if (read.holdAt !== null) hold = hold === undefined ? read.holdAt : Math.min(hold, read.holdAt);
     for (const refund of read.rows) newest = Math.max(newest, refund.created as number);
     if (!read.hasMore) {
-      const end: (string | number)[][] = held ? [["DEL", passKey(sid)]] : [["SET", anchorKey(sid), String(newest)], ["DEL", passKey(sid)]];
-      const ended = repliesFor(await redisPipeline(end), end.length);
-      if (!ended) console.error("ending a pass over group refunds was left unknown");
+      // Every row read: the anchor goes to the newest. A row not read: no further than its time, never back before
+      // where this pass started.
+      const at = hold === undefined ? newest : Math.max(since + 300, hold);
+      const ended = repliesFor(await redisPipeline([["EVAL", REFUNDS_END, 4, anchorKey(sid), ownerKey(sid), leftKey(sid), passKey(sid), String(at), account]]), 1);
+      if (ended?.[0] !== 1) console.error("ending a pass over group refunds was left unknown");
       return revoked;
     }
-    // More pages: read on from the last readable row (a row not readable after it is read again on the next page). A
-    // page with no readable row at all gives nothing to read on from: the pass stays where it was.
-    const next = read.lastId ?? read.rows.at(-1)?.id ?? null;
-    if (!next) return revoked;
+    // More pages: read on from the last readable row (a row not readable after it is read again on the next page), or,
+    // on a page with no readable row, from its last row's id when that id reads.
+    const next = read.lastId ?? read.rows.at(-1)?.id ?? read.tailId;
+    if (!next) {
+      // Nothing to read on from: the refunds after this page are unknown until it reads. The pass stays on it and the
+      // anchor (or this account's mark) where it was, so nothing after it leaves the window; each run reads the newest
+      // page and this one again, inside its page bound.
+      console.error("a page of refunds for group purchases has no row whose id reads: the pass stays on it, and the refunds after it are unknown", { store: sid, account });
+      return revoked;
+    }
     after = next;
-    await redisPipeline([["SET", passKey(sid), JSON.stringify({ since, after, newest, account, ...(held ? { held: true as const } : {}) } satisfies RefundPass), "EX", PASS_SECONDS]]);
+    await redisPipeline([["SET", passKey(sid), JSON.stringify({ since, after, newest, account, ...(hold !== undefined ? { hold } : {}) } satisfies RefundPass), "EX", PASS_SECONDS]]);
   }
   return revoked;
 }

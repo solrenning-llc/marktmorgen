@@ -3,10 +3,11 @@
  * that take a purchase for several back (lib/group-buy.ts, revokeRefundedGroups) are read in Stripe's exact list
  * shape (lib/stripe-list.ts, refundRowKnown in lib/refunds.ts) and to their end. Against a stand-in for Stripe:
  *
- *   - a page in another shape, or a row not readable, never moves the anchor, so those refunds are read again;
+ *   - a page in another shape never moves the anchor, and a row not readable holds it at that row's time (at the
+ *     start of the pass when its time does not read), so those refunds are read again;
  *   - a refund on a later page is read and takes the purchase back, and the anchor moves only after the last page;
  *   - a refund on a readable row takes its purchase back even beside a row not readable (a "yes" stands), and the
- *     anchor stays;
+ *     anchor holds at the start of the pass;
  *   - more pages than one run reads leave the anchor where it was, and the next run goes on from where the last
  *     stopped, so a refund past them is reached (Codex G on #2781, M1);
  *   - a refund is marked handled only once its work was written: the group's close failing, or the reply that names
@@ -103,7 +104,10 @@ async function main(): Promise<void> {
   }
   pages = [list([other(1), { id: "re_LotThreeOdd001", created: now, status: "succeeded", payment_intent: 7, charge: { refunded: true } }])];
   await run().catch(() => 0);
-  is("a row not readable: the anchor stays", await anchor(), null);
+  // Rule 23 (Claude 5, group-buy refunds with no anchor yet): was null ("the anchor stays"). With no anchor, a row not
+  // readable now holds the anchor at its own time (now), so the week a later pass starts from never slides past it;
+  // the next pass still reads that row again (from now - 300).
+  is("a row not readable, with no anchor yet: the anchor holds at that row's time", await anchor(), String(now));
 
   part("group-buy.ts: refunds are read to their end");
   pages = [list([other(1), other(2)], true), list([other(3)], true), list([refund("re_LotThreeOurs001", "pi_LotThreeGroup01", now - 10)])];
@@ -111,7 +115,9 @@ async function main(): Promise<void> {
   await run();
   is("each page is read, after the last row of the one before", reads.map((r) => r.after), [null, "re_LotThreeOther002", "re_LotThreeOther003"]);
   is("its refund on the third page takes the purchase back", Boolean((await readGroup(later))?.revoked), true);
-  is("the anchor moves once the last page is read", await anchor(), String(now - 1));
+  // Rule 23 (Claude 5, group-buy refunds with no anchor yet): was now - 1. The anchor held by the row not readable just
+  // above (now) never goes back: it is the later of where it was and the newest refund read (now - 1).
+  is("the anchor moves once the last page is read, never back before where it was", await anchor(), String(now));
   is("each read pinned to the lot's version", reads.every((r) => r.version === STRIPE_LIST_VERSION), true);
 
   part("group-buy.ts: a readable refund stands beside a row not readable; the anchor does not move");
@@ -120,14 +126,18 @@ async function main(): Promise<void> {
   pages = [list([refund("re_LotThreeOurs002", "pi_LotThreeGroup02"), "re_garbled"])];
   await run();
   is("the purchase is taken back", Boolean((await readGroup(beside))?.revoked), true);
-  is("and the anchor stays", await anchor(), null);
+  // Rule 23 (Claude 5, group-buy refunds with no anchor yet): was null. A row with no time that reads ("re_garbled")
+  // now holds the anchor at the start of the pass, a week back, so the window never slides past it.
+  const heldAt = Number(await anchor());
+  is("and the anchor holds at the start of the pass, a week back", Math.abs(heldAt - (now - 7 * 86_400)) <= 5, true);
 
   part("group-buy.ts: more pages than one run reads");
   pages = Array.from({ length: 40 }, (_, n) => list([other(n + 10)], true));
   reads.length = 0;
   await run();
   is("read up to its own ceiling", reads.length > 1 && reads.length < 40, true);
-  is("and the anchor stays", await anchor(), null);
+  // Rule 23 (Claude 5, group-buy refunds with no anchor yet): was null; the anchor held just above stays where it was.
+  is("and the anchor stays", await anchor(), String(heldAt));
 
   part("group-buy.ts: a pass longer than one run goes on from where it stopped (Codex G on #2781, M1)");
   await redis.pipeline([["DEL", anchorKey], ["DEL", `${anchorKey}:pass`]]);

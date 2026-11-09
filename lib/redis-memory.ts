@@ -159,6 +159,15 @@ export class MemoryRedis {
           }
           return this.run(["HDEL", handles, handle]);
         }
+        // lib/group-buy.ts REFUNDS_END: a pass over a store's refunds ended, its anchor and the account it is of in one step.
+        if (key.startsWith("-- marktmorgen:group-refunds-end:v1\n") && args[0] === "4" && args.length === 7) {
+          const [, anchor, owner, left, pass, at, account] = args;
+          this.run(["SET", anchor, at]);
+          this.run(["SET", owner, account]);
+          this.run(["ZREM", left, account]);
+          this.run(["DEL", pass]);
+          return 1;
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;

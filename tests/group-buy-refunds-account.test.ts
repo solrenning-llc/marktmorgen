@@ -10,9 +10,17 @@
  *     with it, or a key that changed mode) is let go: the run never throws, starts the pass again from the top and
  *     takes the purchase back;
  *   - a row that is not readable never holds back the pages after it: a refund on a later page takes its purchase
- *     back in the same run, while the anchor stays where it was, so the next pass reads that row again; once it
- *     reads, the anchor moves;
- *   - a page whose last row is not readable goes on from its last readable row, so the page after it is reached.
+ *     back in the same run, while the anchor goes no further than that row's time, so the next pass reads it again;
+ *     once it reads, the anchor moves to the newest refund;
+ *   - a page whose last row is not readable goes on from its last readable row, so the page after it is reached;
+ *   - A, then B, then A: back on an account it left, the store reads it from where it left it, never from the other
+ *     account's anchor, so a refund made there meanwhile takes its purchase back; the marks of the accounts left stay
+ *     at sixteen, and an account whose mark was let go is read from the oldest mark kept, losing nothing;
+ *   - a page with no readable row goes on from its last row's id when that id reads; with no id that reads, the pass
+ *     stays on the page, says in the log that what is after it is unknown, reads at most two pages a run and keeps
+ *     the anchor, and goes on once the page reads;
+ *   - with no anchor yet, a row not readable holds the anchor at its own time (or, when that time does not read, at
+ *     the start of the pass), so the week the pass starts from never slides past it.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -152,7 +160,10 @@ async function main(): Promise<void> {
   reads.length = 0;
   is("the run does not throw", (await run()).startsWith("threw"), false);
   is("the refund on the second page takes the purchase back in the same run", await openGroup(await owner(), behind), null);
-  is("the anchor stays where it was, so the row not read is read again", await anchor(), String(now - 3 * 86_400));
+  // Rule 23 (Claude 5, A-B-A and no-anchor follow-up on this branch): was "the anchor stays where it was" (now - 3 days).
+  // The anchor now goes as far as the row not read and no further (its own time, now - 15), so the next pass still reads
+  // it again while the window it reads shrinks; nothing older than that row was left unread.
+  is("the anchor goes no further than the row not read, so it is read again", await anchor(), String(now - 15));
   is("and no pass is left over: the next run starts from the top", [await pass(), reads.length], [null, 3]);
   listOdd[10] = { ...listOdd[10], status: "succeeded" };
   await run();
@@ -170,7 +181,9 @@ async function main(): Promise<void> {
   await run();
   is("the next page is read from its last readable row", reads.map((r) => r.after).slice(0, 2), [null, "re_GCurE000098"]);
   is("and the refund on it takes the purchase back", await openGroup(await owner(), tail), null);
-  is("the anchor stays where it was", await anchor(), String(now - 3 * 86_400));
+  // Rule 23 (Claude 5, A-B-A and no-anchor follow-up on this branch): was "the anchor stays where it was" (now - 3 days).
+  // It now holds at the time of the row not read (the hundredth, now - 104), which the next pass reads again.
+  is("the anchor holds at the row not read", await anchor(), String(now - 104));
 
   /** Everything a pass keeps, the account its anchor is of and the marks of the accounts left behind included. */
   const ownerKey = `${anchorKey}:acct`;

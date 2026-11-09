@@ -2627,3 +2627,75 @@ Allprevious25pullrefsunchanged; main79f4→d894 advanced, normAGENTS/CLAUDE/inbo
 ### Delivery receipt — 2026-11-09 00:51 Fortaleza
 
 PONTO CXP-20261109-0041-C1-1 DELIVERED860e92a9f09307a087d7badd86b2d8f2998002fc/blob507a283a49963db3287c70f8ea491337b0876447/FULL7238601 exactFULLreadback. FourCAS409NOWRITE, eachwait>=120s (126/123/121/124), no testreplay/foreignrewrite. Successfulfreshfetch_fileSHA6d9ac48cde749a51fed2f45e50612b7f81e4e144→fetch_blobFULL7232463; prefix7224906EXACT; delta7557preserved beforeappend, modelFULLreadafterwritebeforethisreceipt. C2queue2935/2953main,C6PDFstamp/R18new3318financialrequest,C5pagebytes/2314/2880/3307,M3316focal5821440481 delivered remainTHEIRexecutions/claims/budgets/queue, notPgrant/lease. No Ptakeover3318financialpolicy(userprice/accountprohibitions preserved); nextfreshcompatibility/dedup required. No nominalC1new/grantP3107remainingwholecoverage. P3317review5821404588BODYexact/evidence6731656340exactreadback, noH/M/Lscopeonly/gatesrequired. No merge/CI/provider/securityglobal certificate. Ownscanner-generatedpycache removed. Current main d894 native27identities captured earlier; no laterf8c8mainreport promotedtoPnativecert. CPprior6bd902c8dFULL475529 preserved; projectongoing/serialMediumzeroagents/noautomationchange/backgroundwatch. NextFIRSTlatestCP+thisSTOP, doNOTrepeat completed3317/3107/M3316/U2832.
+
+
+## 2026-11-09 01:46 Fortaleza — #3324 independent privacy review delivered; conditional inherited race pending C1/R2
+
+FIRST canonical920ee297bc2b51f2beaffcabc4fd591f6918beaa/blob359f813d13e0695f6675a37b103fc81b7be7f5af/FULL476815 latestsectionFULL then ownSTOP0041FULL read. Channel7340386 indexed149headers (initial output truncated, subsequent middleheaders+directedC5/C6/M/U/C2/C4/own3317/3107 originals read, NOTall149technicalpayloadsFULL). C5finance6731943200 and security6732203476 read FULL directly inPR3107/3317: independentTHEIRS, not Pcapgrant/replay/globalclear. Main d894→f8c8 normsAGENTS/CLAUDE/inboxdiffempty. NewC5#3324request0132 explicitlyscienceP, syntheticcode-only compatibleprior3054scope; no personaldata/serviceaccess. C6R19/R21/R20 and C5newcourse/comments reservations preserved; notPproducttakeover. C5focals/newheads2868/2922/3014/3034 areTHEIRS; noforeignpromotion.
+
+# Codex P: independent synthetic privacy review #3324
+
+Exact ab3bc6112867bf13de4180ee76744b736481f6a3/tree f428b993d1596d2f6a8d7d95d8271af412d07d05, base f8c8e0d69201461ed4541d0053dc6a120803c8f6. Request C5-0132; claim6732332600 before source. Reservation720872d03f0e6379f77edc657e303f10a8795da6/blob1e4f42562be627c09f6b4ec52c0532f9519c50eb/FULL7353056 exactreadback BEFORE checkout/diff/source/tests. One CAS409 NOWRITE,124seconds before fresh full/prefix/dedup. All code/data local synthetic, no customer data or external service access; no author product/ref/test mutation.
+
+Read complete five-path delta, changed functions and caller contexts in checkout-sweep, erasureScope and suppress-before-erasers, erasure-index, suppression Lua and model contract. Durable note goes before conditional write. New no-email/no-stats refusal avoids unfindable new records. Current list suppression blocks already-deleted renewals and removes legacy data, strict whole HMGET rejects unknown reads. Four-day context and first purchase/lead suppression gaps are explicitly open in PR, not newly attributed regressions. Inventory describes them honestly; store-data adds note footprint. No global cost/financial review from registry success.
+
+Permanent ad-events-erasure source is BYTE-IDENTICAL at RED-only parent and final, Git blob5c0b0b7615ae298719c4947ba163af77d3563d84. Final graph with ONLY previous ad-events.ts overlaid:15checks/9FAIL; final15PASS. Linked exact-marks11/server-conversions42/person-data-registry20/store-data-registry7PASS:95 ordinary passing observations with overlap. Strict actual five roots/1122sources/0diagnostics, ES2017/Bundler, no filtering; lint five changed files0warnings/errors/scanner4694tracked0/diff0. Own artifact scanner separately logged.
+
+Proposed CONDITIONAL INHERITED MEDIUM residual for C1/R2 disposition, not a new regression or live incident: sendRenewals reads cookies plus suppression into a local snapshot (ad-events.ts:825 onward), then reserves/takes sent mark and calls deliver without coordinating with erasure. Synthetic real-door schedule: wrap redis.pipeline, run its original cookie/suppression reads, pause before returning the result, complete actual erasePerson, then resume sendRenewals. Current: erasure ok, stored cookie key gone, yet renewal returns1 and mock Meta receives1 AFTER erasure completion. SAME four assertions with only old ad-events module:3FAIL; final2FAIL (stored cookies now deleted, transmission residual remains). Two final failures are the same cause. No oracle/assertion changed across old/final; no real platform/network/user record. The initial suppression read is not a lifetime send exclusion. The new policy promise and inventory say none of their later payments is sent, with no in-flight qualification. Need owner disposition and either causal ordering/invalidation covering this schedule or an explicitly justified narrower policy; do not treat a second uncoordinated read as atomic proof. No author repair performed.
+
+Separate stale-list exploratory probe is INCONCLUSIVE/HARNESS, not a defect: attempted legitimate setup unexpectedly already had listId. Its prerequisite assertion fails on BOTH graphs, so no valid no-list stale world was constructed. Frozen9-check source/logs retained; no replay, correction, artificial list tamper or claim of GREEN from remaining assertions. Excluded from95PASS and from finding evidence. No setup/missing credentials failure in permanent or race graphs.
+
+Before each child:120seconds outer/512MiB heap/types1024/256KiB output/20000ALLnestedMemoryRedis.run/100mockHTTP, network fetch/net/tls/http/https denied before imports/compiler/lint. Counter checked before dispatch and latched86 on cap. Max377nested/26mock across observed graphs; no cap hit/raise/reset/split/replay/borrow. Serial zero agents; offline exact-lock donor ee4ba5640d542cb07c7ed382f256c816b076026d739bbe30d906870f351e67df, no install. No full erasure sweep, full suite/build/browser/AT/nativeRedis-Lua/real provider/CI/queue/merge/publication/global privacy compliance certificate.
+
+FIRST canonical920ee297bc2b51f2beaffcabc4fd591f6918beaa/FULL476815 lastsection and STOP0041 read FULL. Fresh channel7340386 indexed149headers (not all payloads), directed C5/C6 claims/requests/own3317/3107/U/C2/C4 read FULL. C5 finance6731943200 and security6732203476 FULL from original PR discussions; theirs, not P cap grants or replacement executions. P3107whole two100caps remain inconclusive. Native27heads mainf8c8 plus2868/2922/3014 changed, rest unchanged; current3324 exact metadata separately. Norm AGENTS/CLAUDE/inbox d894→f8c8 diff empty. Foreign owner/reservation/qualified reviews preserved.
+
+Disposition only AFTER complete durable evidence readback: NOT CLEAN pending C1/R2 classification/disposition of the conditional inherited concurrency residual. Credit the demonstrated single-pass erasure fix; do not invent an unconditional HIGH or approve global privacy. Author-described open gaps remain separate.
+
+
+## Same-review extension to latest head
+
+Author expanded scope while first review ran: NEW exact5eb6a3ca9b3a47548b2e794c45627619c428bf1b/treeea0ccee4201a4c691e900e60562e34457d3b510d. Old evidence6732402760/FULL61217 exactreadback archived before any opinion; progress6732413909 declared superseded head and proposed race, no old verdict emitted. M6732370372 is SECOND independent reviewer, not P duplicate.
+
+New-scope channel reservation54c2e91316724267ef70cd552fe3b307079d9177/blobb4f1d102094317ea695a3bfeeb75c34ee85bf137/FULL7379313 exactreadback BEFORE new-head source/diff/tests. Own existing scope only; no author ref changes. Detached own checkout advanced only after preserving old evidence.
+
+Read complete old-to-new five-path delta and six-path full scope. Purchases/pass/leads now ask exact suppression in claim pipeline; context deleted with known sale, each server-conversions checkout now has its own token. Changes logically close already-suppressed single-pass sends and reduce kept context lifetime. Policy/inventory widened accordingly. No price/config change. No rerun of passed unchanged linked graphs; new permanent29PASS and changed server-conversions43PASS (72 observations with overlap). SAME frozen four-assertion race unchanged: latest4checks/2FAIL, erasure completed/cookie deleted but renewal1/mockMeta1. Race old module4/3FAIL and priorab3bc4/2FAIL remain archived, not rerun. Current6roots1123sourcesstrict0diagnostics/lint6files0/scanner4694/0/diff0. Max595nested/26mock, no cap. Exploratory stale-list remains inconclusive/excluded.
+
+Final disposition proposed after latest evidence/readback: NOT CLEAN pending C1/R2 disposition of ONE conditional inherited concurrency MEDIUM. It remains on latest head; not a new regression, independent of other explicit historical gaps. Credit72current+95prior ordinary assertions with overlap and different heads, do not sum as unique coverage or call final race green. No real platform/send/privacy compliance/CI/merge certificate. R2/C1 may define an honest in-flight exception or require ordering; do not silently claim the unconditional new policy promise proved.
+
+
+DELIVERED COMMENT5821729391 on exactLATEST5eb6, BODYreadbackEXACT. NOTCLEAN pendingC1/R2 proposedCONDITIONALINHERITEDMEDprivacyordering; no unqualifiednewHIGH/newregression/liveincident. Latest49artifact archive6732436323+6732436571(45528+34128bodychars) bothEXACTreadback BEFOREopinion/raw222385JSONbytes/SHA256dab52c0b1831ae5d2dcc1fc1be2c86a0f227697e279076bbd917577252eded54. Prior35artifact6732402760/FULL61217 exact retained; progress6732413909 explicitly notoldverdict/currentapproval. Samefrozenrace:oldmainmodule4/3FAIL→ab3bc4/2FAIL→latest4/2FAIL. Cookie nowgone butoneoutboundmockMeta afteractualerasurecompleted; oneclass/twoasserts. Exploratoryno-listprerequisitefailedonboth:INCONCLUSIVE/HARNESS notdefect/green. Latest72ordinaryPASS(overlap), prior95ordinary differentheadnotuniqueaggregate. No author repair.
+
+Currentnative28identities(main+26known+3324), noCIorMERGEDcert:
+```
+f8c8e0d69201461ed4541d0053dc6a120803c8f6	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+d8e871ad3ce54cd3dc708dacf7bf2bbfb0100341	refs/pull/2832/head
+daaf5306187d4aa43c9f47590d429dcb10656519	refs/pull/2843/head
+92ceda7c7991fcd71a96521ff1c410363be9fd61	refs/pull/2868/head
+6c3077cdaefaac049ca0e12e836be68691bfd875	refs/pull/2892/head
+256dbc1eb899bc5ae27dea69ff59a1f852e7032c	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+c5db63a1fffc5c79a5866831d54ddff01b3825fa	refs/pull/2999/head
+8e3d930eed8ef1a2dc715f0fe101ba8e7f00cb8a	refs/pull/3014/head
+1a20dd5c31a70da2f2a95aee20f7b520b76dcd41	refs/pull/3034/head
+9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+442a057113c87b8728e1a23711510fa852bd0e6d	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+1b38fa1cf19813764fc9256c9b81808db7fc0c0d	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
+64dc6cf819c3cac7e34d7036e7f09bbecabfb51b	refs/pull/3317/head
+5eb6a3ca9b3a47548b2e794c45627619c428bf1b	refs/pull/3324/head
+```
+Nativeheads changed sincepriorCP:2868/2922/3014/3034;mainf8c8,3324new5eb6; otherssame. OffPRcandidatesnotfreshlyreconfirmed/promoted. OldPfourproductsalreadyMERGEDnorecreate,2020C1scope/2514CodeQLHIGHHOLDintact; oldreviewreturns3135/3263/3054/3245unchanged. P3107twoWHOLE100capstillINCONCLUSIVE evenC5owncleanreviewretainscredit. MSECOND3324inprogress6732370372/RES0140 preserved, nodedup/claimsteal; M3316/U2832/G3299/S3309/budgetsTHEIRS, no R2grantborrow. Conditionalfinding requiresC1/R2classificationandauthorcausalfix/newheadreturn, notPmodifyforeignproduct.
+
+Ownonlyproof/docs, syntheticdata, noauthortrackedchange;scannerpycacheremoved. SerialMedium0agents/perchildoriginalcapsretained/noActionsloop/CIqueryretrycancel/fila/enqueue/merge/pushproduct/docsreservations/provider/PII/commercial/price/limit/commission/flag/account/payment/terms/key/contact/automationchange/backgroundwatch. Projectongoing/transientreviewdecisions, no disable/newcontinuity. FinalSTOPafterfreshmetadata→FULLUTF8/prefix/dedupappend/readback. NextFIRSTthislatestsection+STOP, returnonlycausal3324delta/disposition; doNOTrepeatGREEN/budgetsreset/3107/3317.

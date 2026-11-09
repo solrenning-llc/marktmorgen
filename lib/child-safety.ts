@@ -215,7 +215,7 @@ function deadline(ms: number): string {
  * words, since those may describe the content. False when it was not sent.
  */
 export async function alertOwner(
-  report: { kind: ReportKind; url: string; work?: string },
+  report: { kind: ReportKind; url: string; work?: string; email?: string },
   outcome: HoldOutcome,
   now = Date.now(),
   noticeKept = true,
@@ -253,8 +253,9 @@ export async function alertOwner(
     to: SUPPORT_EMAIL,
     subject: subject.slice(0, 200),
     text: lines.join("\n"),
-    // One urgent email per address and kind a day: a retry after a failed notice does not send it twice.
-    idempotencyKey: `report-urgent-${report.kind}-${createHash("sha256").update(report.url).digest("hex").slice(0, 24)}-${new Date(now).toISOString().slice(0, 10)}`,
+    // One urgent email per request a day: a retry of the same request (address, sender, words) does not send it twice,
+    // and a new request on the same address, by another person or about another image, still does.
+    idempotencyKey: `report-urgent-${report.kind}-${createHash("sha256").update(`${report.url}\n${report.email ?? ""}\n${report.work ?? ""}`).digest("hex").slice(0, 24)}-${new Date(now).toISOString().slice(0, 10)}`,
   })
     .catch(() => false)
     .then((sent) => {

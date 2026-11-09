@@ -63,9 +63,11 @@ export function ReportForm({ url: given }: { url: string }) {
       <div role="status" className="card p-6 sm:p-8">
         <p className="text-lg font-semibold text-ink">Your notice was sent</p>
         <p className="mt-2 text-ink-soft">
-          {kind === "child_safety" || kind === "intimate_image"
-            ? "We read it now. A reported product usually comes off the store at once; when it does not, we act on it by hand. If we need anything else, we write to the email address you gave. No copy is emailed to you."
-            : "We read it and act on it as our Copyright and Takedown Policy says. If we need anything else, we write to the email address you gave. No copy is emailed to you."}
+          {kind === "child_safety"
+            ? "We got it. A reported product usually comes off the store at once; when it does not, we act on it by hand. If we need anything else, we write to the email address you gave. No copy is emailed to you."
+            : kind === "intimate_image"
+              ? "We got it. We remove the image within 48 hours of a complete request. If we need anything else, we write to the email address you gave. No copy is emailed to you."
+              : "We read it and act on it as our Copyright and Takedown Policy says. If we need anything else, we write to the email address you gave. No copy is emailed to you."}
         </p>
       </div>
     );
@@ -101,7 +103,7 @@ export function ReportForm({ url: given }: { url: string }) {
           <p className="font-semibold">Do not upload, attach or describe the images. Tell us only where they are.</p>
           {child ? (
             <p className="mt-2">
-              We take the product off the store at once, keep what we need to report it, and report child sexual abuse material to the National Center
+              A reported product usually comes off the store at once (when it does not, we act on it by hand). We keep what we need to report it, and report child sexual abuse material to the National Center
               for Missing &amp; Exploited Children (NCMEC). You can also report it to NCMEC yourself at{" "}
               <a href="https://report.cybertip.org" className="underline underline-offset-2">report.cybertip.org</a>.
             </p>

@@ -153,6 +153,12 @@ async function main(): Promise<void> {
   await alertOwner({ kind: "intimate_image", url: retried, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18, 0, 5));
   is("the same address and kind on the same day carry the same key, so the provider sends one", sent.length === 1 || (sent.length === 2 && sent[0].key === sent[1].key && Boolean(sent[0].key)), true);
   sent.length = 0;
+  const shared = `https://marktmorgen.com/@safetyshop/p/${many[2]}`;
+  await alertOwner({ kind: "intimate_image", url: shared, work: INTIMATE.work, email: "first@example.com" }, "not_held", Date.UTC(2026, 10, 9, 18));
+  await alertOwner({ kind: "intimate_image", url: shared, work: "Another image of me on the same page, shared without my consent.", email: "second@example.com" }, "not_held", Date.UTC(2026, 10, 9, 18, 5));
+  is("a new request on the same address the same day still reaches the owner", sent.length === 2 && sent[0].key !== sent[1].key, true);
+
+  sent.length = 0;
   await alertOwner({ kind: "intimate_image", url, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18), false);
   is("a notice that was not kept is said, not pointed to", [sent.at(-1)?.text.includes("could not be confirmed as kept"), sent.at(-1)?.text.includes("is in the notice email")], [true, false]);
 
@@ -161,6 +167,7 @@ async function main(): Promise<void> {
   is("the form offers both kinds and points to the CyberTipline", [page.includes("child_safety"), page.includes("intimate_image"), page.includes("report.cybertip.org")], [true, true, true]);
   is("it asks people not to send or describe the images", page.includes("Do not upload, attach or describe"), true);
   is("it does not promise more than is done: an intimate image is removed within 48 hours", [page.includes("we act on those at once"), page.includes("removed within 48")], [false, true]);
+  is("the form note does not promise more either, and an intimate-image confirmation does not speak of a product", [page.includes("We take the product off the store at once"), page.includes("We remove the image within 48 hours of a complete request")], [false, true]);
   is("a child-safety report usually comes off at once, and is otherwise acted on by hand, in the intro and after sending", [page.includes("usually comes off the store at once"), (page.match(/act on it\s+by hand/g)?.length ?? 0) >= 2], [true, true]);
   const terms = readFileSync("app/terms/page.tsx", "utf8");
   is("the Terms forbid it and say it is reported", [terms.includes('id="child-safety"'), terms.includes("Exploited Children (NCMEC)")], [true, true]);

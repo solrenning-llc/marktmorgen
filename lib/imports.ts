@@ -954,14 +954,20 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
     return false;
   });
   const seen = await firstSeen(job, kept.map((v) => ({ key: `p:${v.email}|${v.productId}`, line: v.line })));
+  const repeats: { v: (typeof kept)[number]; earlier: number }[] = [];
   const fresh = kept.filter((v, i) => {
     if (seen[i] === null) return true;
-    skipped.push({ line: v.line, column: "email", problem: `The same buyer and product as row ${seen[i]}`, value: v.email });
+    repeats.push({ v, earlier: seen[i] });
     return false;
   });
   // Checked again where each is written, in the same step (GRANT_UNLESS_ERASED): somebody deleted since is left out
   // the same way, nothing written for them, and let go from the rows the import saw.
   const given = await grantUnlessErased(statsId, job.id, fresh.map((v) => ({ email: v.email, productId: v.productId, items: v.bundle })), erasedCheck(listId), store).catch(writeUnknown);
+  // A repeated row is said once that step has answered: of an address it found deleted, as deleted, by its row only.
+  const goneNow = new Set(fresh.filter((_, i) => given[i] === "erased").map((v) => v.email));
+  for (const { v, earlier } of repeats) {
+    skipped.push(goneNow.has(v.email) ? { line: v.line, column: "email", problem: DELETED, value: "" } : { line: v.line, column: "email", problem: `The same buyer and product as row ${earlier}`, value: v.email });
+  }
   const toMail: string[] = [];
   const unseen: string[] = [];
   given.forEach((answer, i) => {
@@ -1191,13 +1197,19 @@ async function membersStep(job: ImportJob, store: Store, rows: string[][], now =
     return false;
   });
   const seen = await firstSeen(job, kept.map((v) => ({ key: `m:${v.email}|${v.productId}`, line: v.line })));
+  const repeats: { v: (typeof kept)[number]; earlier: number }[] = [];
   const fresh = kept.filter((v, i) => {
     if (seen[i] === null) return true;
-    skipped.push({ line: v.line, column: "email", problem: `The same member and membership as row ${seen[i]}`, value: v.email });
+    repeats.push({ v, earlier: seen[i] });
     return false;
   });
   // Checked again where each is written, in the same step (INVITE_UNLESS_ERASED), as for past buyers.
   const fields = await inviteMembers(store, job.id, fresh, now, erasedCheck(listId)).catch(writeUnknown);
+  // A repeated row is said once that step has answered, as for past buyers.
+  const goneNow = new Set(fresh.filter((_, i) => fields[i] === false).map((v) => v.email));
+  for (const { v, earlier } of repeats) {
+    skipped.push(goneNow.has(v.email) ? { line: v.line, column: "email", problem: DELETED, value: "" } : { line: v.line, column: "email", problem: `The same member and membership as row ${earlier}`, value: v.email });
+  }
   const toMail: string[] = [];
   const unseen: string[] = [];
   fields.forEach((field, i) => {
@@ -1313,11 +1325,15 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   // Nobody deleted from the store since they were queued is written to. Read whole (CX-123 rule 24): any other reply
   // puts the same addresses back, gives the portion back and throws, the step left as it was. A store read without a
-  // list is read again, since a deletion gives it one.
+  // list is read again and given one if it still has none, as the rows' step does (listFor); one whose record cannot
+  // be read is the same unknown, never taken as having deleted nobody.
   if (messages.length) {
     let deleted: Set<string>;
     try {
-      deleted = await deletedAmong(store.listId ?? (await storeForId(job.sid))?.listId, messages.map((m) => m.to));
+      const listId = await listFor(store).catch(() => {
+        throw new UnknownReplyError("the store's list");
+      });
+      deleted = await deletedAmong(listId, messages.map((m) => m.to));
     } catch (error) {
       await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
       await unsent(portion);

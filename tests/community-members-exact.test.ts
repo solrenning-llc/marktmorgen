@@ -48,8 +48,8 @@ import CommunityMembersPage from "@/app/[handle]/community/members/page";
 import CommunitySearchPage from "@/app/[handle]/community/search/page";
 import StudioCommunityPage from "@/app/studio/community/page";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { CREATOR, addComment, createPost, directory, freshConfig, readMembers, saveConfig, setProfile, touchMember } from "@/lib/community";
-import { claimHandle, whoIs } from "@/lib/community-mentions";
+import { CREATOR, addComment, createPost, directory, directorySize, freshConfig, readMembers, saveConfig, setProfile, touchMember } from "@/lib/community";
+import { claimHandle, releaseHandle, whoIs } from "@/lib/community-mentions";
 import { membersFound } from "@/lib/community-found";
 import { say } from "@/lib/community-chat";
 import { pairOf, send } from "@/lib/community-dm";
@@ -283,6 +283,47 @@ async function main(): Promise<void> {
     is("search, control: Zed is found among members", [found.startsWith("PAGE_FAILED") ? found.slice(0, 160) : "drawn", found.includes("Zed Quill"), found.includes(SEARCH)], ["drawn", true, false]);
     const unread = await withOdd(hmget(MEMBERS), ["QUEUED"], () => draw(search));
     is("search, members unread: says the members could not be searched, never No match", [typeof unread === "string" && unread.includes(SEARCH), typeof unread === "string" && /No match/.test(unread)], [true, false]);
+  }
+
+  part("directorySize and releaseHandle, read exactly");
+  {
+    // directorySize read its ZCARD as `Number(n) || 0`: a reply lost or in another shape was "0 members listed".
+    const zcard = (c: Command[]) => c.length === 1 && c[0][0] === "ZCARD";
+    is("control: the directory counts the one member listed", await directorySize(cid), 1);
+    for (const [what, reply] of [["no reply at all", []], ["a hole", [undefined]], ["a word", ["QUEUED"]], ["a count as text", ["1"]], ["a negative count", [-1]], ["a fraction", [1.5]], ["a thrown pipeline", "throw"]] as [string, unknown][]) {
+      is(`directorySize, ${what}: unknown, never a count`, await withOdd(zcard, reply, () => directorySize(cid)), "thrown");
+    }
+    const members = () => CommunityMembersPage({ params: Promise.resolve(handle), searchParams: Promise.resolve({}) });
+    const fine = await draw(members);
+    is("members, control: the count is said", [fine.startsWith("PAGE_FAILED") ? fine.slice(0, 160) : "drawn", fine.includes("1 member has chosen to be listed"), fine.includes(LIST)], ["drawn", true, false]);
+    const unknown = await withOdd(zcard, ["QUEUED"], () => draw(members));
+    is(
+      "members, the count unread: drawn, no number, says the list could not be loaded",
+      [typeof unknown === "string" && unknown.startsWith("PAGE_FAILED"), typeof unknown === "string" && /chosen to be listed/.test(unknown), typeof unknown === "string" && unknown.includes(LIST), typeof unknown === "string" && unknown.includes("Zed Quill")],
+      [false, false, true, true],
+    );
+
+    // releaseHandle sent its HDEL and never read the answer: a release lost or in another shape passed as done.
+    await original([["HSET", HANDLES, "gone-soon", "x".repeat(zed.k.length)]]);
+    is("releaseHandle, control: a handle held is given back (true), and then is not there (false)", [await releaseHandle(cid, "gone-soon"), await releaseHandle(cid, "gone-soon")], [true, false]);
+    await original([["HSET", HANDLES, "gone-soon", "x".repeat(zed.k.length)]]);
+    const hdel = (c: Command[]) => c.length === 1 && c[0][0] === "HDEL" && c[0][1] === HANDLES;
+    for (const [what, reply] of [["no reply at all", []], ["a word", ["QUEUED"]], ["a count as text", ["1"]], ["a count of two", [2]], ["a thrown pipeline", "throw"]] as [string, unknown][]) {
+      const quiet = console.error;
+      const logged: string[] = [];
+      console.error = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
+      odd = { match: hdel, reply };
+      let outcome: unknown;
+      try {
+        outcome = await releaseHandle(cid, "gone-soon");
+      } catch (error) {
+        outcome = error instanceof Error ? error.name : "thrown";
+      } finally {
+        odd = null;
+        console.error = quiet;
+      }
+      is(`releaseHandle, ${what}: refused (never true or false) and logged`, [outcome, logged.some((l) => /handle/.test(l) && /gone-soon/.test(l))], [what === "a thrown pipeline" ? "Error" : "UnknownReplyError", true]);
+    }
   }
 
   part("The room's route: names that did not read are said, never 'A member'");

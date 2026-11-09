@@ -96,6 +96,9 @@ function Codes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   );
 }
 
+/** Said in place of the recovery sentence or the turn-on form when the recovery address could not be read just now. */
+const RECOVERY_UNKNOWN = "Your recovery address could not be read just now.";
+
 /**
  * The person's two-step login (lib/two-step.ts), in the studio's Account part,
  * beside their passkeys: turn it on with an authenticator app, see how many
@@ -103,8 +106,10 @@ function Codes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
  *
  * `unread`: the page could not read it, so it is neither on nor off here, and
  * nothing is offered that would change it (CX-123 rule 24, lib/redis-reply.ts).
+ * `recoveryUnknown`: the recovery address could not be read just now, so the
+ * manager never says there is none and does not ask for one to turn it on.
  */
-export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: initialReset, backup: backupShown, fresh, locked = false, unread = false }: { on: boolean; codesLeft: number; reset: number; backup: string; fresh: boolean; locked?: boolean; unread?: boolean }) {
+export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: initialReset, backup: backupShown, recoveryUnknown = false, fresh, locked = false, unread = false }: { on: boolean; codesLeft: number; reset: number; backup: string; recoveryUnknown?: boolean; fresh: boolean; locked?: boolean; unread?: boolean }) {
   const [reset, setReset] = useState(initialReset);
   const [recoveryShown, setRecoveryShown] = useState(backupShown);
   const [on, setOn] = useState(initialOn);
@@ -166,7 +171,7 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
       {title}
       <p className="mt-2 text-sm text-ink-soft">
         {on
-          ? `On. Logging in with the emailed link also asks for the code in your authenticator app; a passkey needs no code. ${left} recovery ${left === 1 ? "code" : "codes"} left.${recoveryShown ? ` Lose your phone and your codes, and a link to your recovery address, ${recoveryShown}, lets you back in.` : " There is no recovery address: add one above, so losing your phone never keeps you out."}`
+          ? `On. Logging in with the emailed link also asks for the code in your authenticator app; a passkey needs no code. ${left} recovery ${left === 1 ? "code" : "codes"} left.${recoveryShown ? ` Lose your phone and your codes, and a link to your recovery address, ${recoveryShown}, lets you back in.` : recoveryUnknown ? ` ${RECOVERY_UNKNOWN}` : " There is no recovery address: add one above, so losing your phone never keeps you out."}`
           : "After the emailed link, ask for a six-digit code from an authenticator app, such as Google Authenticator, Microsoft Authenticator, 1Password or Authy. Someone who gets into your email still cannot open your studio without your phone. A passkey needs no code."}
       </p>
 
@@ -216,6 +221,8 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
             Log in again
           </Link>
         </div>
+      ) : !on && !setup && !recoveryShown && recoveryUnknown ? (
+        <p className="mt-4 text-sm text-ink-soft">{`${RECOVERY_UNKNOWN} Turning on two-step login asks for it, so reload the page in a moment.`}</p>
       ) : !on && !setup ? (
         <form
           className="mt-4 flex flex-wrap items-end gap-3"

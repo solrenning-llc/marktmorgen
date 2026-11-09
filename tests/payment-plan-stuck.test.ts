@@ -13,10 +13,22 @@
  *     still in place; when the earlier end is taken away first, the agreed end
  *     is set again before it comes.
  *   - P3: a plan stuck at 403 is tried at growing intervals and, after
- *     PLAN_GIVE_UP_DAYS with no good answer, leaves both lines with a line in
- *     the log and a mark in nl:plans:given-up. A plan watched for its earlier
- *     end counts those days from when it was due to be read again, so one
- *     failure after a long wait does not drop it.
+ *     PLAN_GIVE_UP_DAYS with no good answer, is never let go (the review of
+ *     19ff2c726c, M2, the coordinator's decision): it stays in its line, tried
+ *     once every PLAN_STUCK_RETRY_DAYS, its creator told once by email, and
+ *     settled as soon as the account answers again. A plan watched for its
+ *     earlier end counts those days from when it was due to be read again, so
+ *     one failure after a long wait does not slow it.
+ *   - P5 (the review's proof, M1): only the creator's own account refusing
+ *     (a 403, a 401 naming the account, a reply not its own) counts toward
+ *     PLAN_GIVE_UP_DAYS. Stripe down (500), too many requests (429), our own
+ *     key refused (401) or missing, for longer than PLAN_GIVE_UP_DAYS, leave
+ *     the plan in the line at its usual pace, its creator not told, and it
+ *     gets its end once Stripe answers. The cron route does not run the plans
+ *     at all without the platform's key.
+ *   - An end earlier than the plan's own by less than a day is read again two
+ *     days before the plan's own (two daily runs), never minutes before it
+ *     (the review's item 3).
  *   - P4: a run stops at the deadline it is given, and every plan it did not
  *     reach is still in its line; the cron route passes it one.
  *   - Item 6: a reply of unknown shape is not an empty line: the run throws
@@ -30,15 +42,29 @@
  * end, so it checks the outcome (the agreed end set in time) and not one
  * schedule; P4 gives the run a deadline and a Stripe that takes a second a
  * call, since a run on a clock that never moves cannot stop at a time budget.
+ *
+ * Changed with the review of 19ff2c726c (rule 23): P3 asserted the stuck plan
+ * left the lines on day 30 with a mark in nl:plans:given-up and a log line;
+ * that silent letting go is the defect (M2), so it now asserts the plan stays,
+ * is tried once a week from day 30, its creator emailed once, nothing written
+ * to nl:plans:given-up (the family is gone: nothing read it), and that it is
+ * settled once the account answers. The run's counts name `stuck` and `told`
+ * instead of `givenUp`.
  */
 import { readFileSync } from "node:fs";
 import * as plans from "@/lib/plans";
 import { addPeriods, rememberPlan, settlePlans } from "@/lib/plans";
+import { StripeError } from "@/lib/stripe-account";
+import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import * as registry from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_prerev";
+process.env.RESEND_API_KEY = "re_test_plans_stuck_stand_in";
+process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
+const OWNER = "plans-stuck-owner@example.com";
 const ACCOUNT = "acct_1TestPlans0001";
 const STUCK = "acct_1TestPlansStuck1";
 const FLAKY = "acct_1TestPlansFlaky1";
@@ -52,6 +78,12 @@ let stripeCalls = 0;
 let callMs = 0;
 /** While true, the flaky account answers 500. */
 let flakyDown = false;
+/** Accounts that refuse us (a 403, as a disconnected account does). */
+const refusing = new Set<string>([STUCK]);
+/** When set, every Stripe call answers this (Stripe down, too many requests, our own key refused). */
+let platform: { status: number; body: unknown } | null = null;
+const emails: { to: string; subject: string; text: string }[] = [];
+let resendFails = false;
 const realNow = Date.now;
 let clock = Math.floor(realNow() / 1000) * 1000;
 const setClock = (seconds: number) => {
@@ -61,14 +93,22 @@ const setClock = (seconds: number) => {
 const tick = (days: number) => setClock(clock / 1000 + days * DAY);
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (url.hostname === "api.resend.com") {
+    if (resendFails) return answer({ message: "down" }, 500);
+    const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
+    emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
+    return answer({ id: `email_${emails.length}` });
+  }
+  if (url.hostname !== "api.stripe.com") return answer({ object: "list", data: [], has_more: false });
   stripeCalls += 1;
   clock += callMs;
-  const url = new URL(String(input));
   const method = init?.method ?? "GET";
   const path = url.pathname.replace(/^\/v1/, "");
-  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   const on = (init?.headers as Record<string, string> | undefined)?.["Stripe-Account"];
-  if (on === STUCK) return answer({ error: { message: "no access" } }, 403);
+  if (platform) return answer(platform.body, platform.status);
+  if (on && refusing.has(on)) return answer({ error: { message: "no access" } }, 403);
   if (on === FLAKY && flakyDown) return answer({ error: { message: "try later" } }, 500);
   const session = /^\/checkout\/sessions\/(cs_test_[A-Za-z0-9]+)$/.exec(path);
   if (session) return sessions[session[1]] ? answer(sessions[session[1]]) : answer({ error: { message: "No such checkout" } }, 404);
@@ -91,7 +131,19 @@ const inALine = async (account: string, session: string) => {
   const [pending] = await redis.pipeline([["SMEMBERS", "nl:plans:pending"]]);
   return [...(pending as string[]), ...(await retryMembers())].some((m) => m.startsWith(`${account}|${session}|`));
 };
-const givenUp = async () => (await redis.pipeline([["ZRANGEBYSCORE", "nl:plans:given-up", "-inf", "+inf"]]))[0] as string[];
+const givenUpKey = async () => (await redis.pipeline([["EXISTS", "nl:plans:given-up"]]))[0];
+/** A store of OWNER's on `account`, with one product: what rememberPlan is told about the plan. */
+async function planStore(account: string): Promise<{ sid: string; product: string }> {
+  await claimHandle(OWNER, "plansstuck", "Harbor Plans", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, account, true);
+  await setSubscription(OWNER, { customerId: "cus_PlansStuck01", subscriptionId: "sub_PlansStuck01", active: true, period: paidPeriod(Date.now(), { behind: 10, ahead: 400 }) });
+  const made = await addProduct(OWNER, "Twelve-week coaching", "", "300", null);
+  const store = (await storeForEmail(OWNER))!;
+  return { sid: store.sid, product: made.ok ? made.product.id : "" };
+}
+type Remember = (account: string, session: string, about?: { sid: string; product: string }) => Promise<void>;
+const remember = rememberPlan as unknown as Remember;
 type Pipe = (commands: (string | number)[][]) => Promise<unknown[]>;
 const real: Pipe = redis.pipeline.bind(redis);
 const swapPipeline = (next: Pipe) => {
@@ -180,27 +232,83 @@ async function main(): Promise<void> {
   const late = await settlePlans();
   is("the plan's own end has come with the earlier end still there: settled", [late.done, await inALine(ACCOUNT, "cs_test_last00000001")], [1, false]);
 
-  part("P3: a plan stuck at 403 is tried less often, then let go with a log line and a mark");
   redis.clear();
+  setClock(ANCHOR + 10 * DAY);
+  sessions.cs_test_edge00000001 = checkout("cs_test_edge00000001", { ends_after: "3", ends_interval: "month" });
+  const edgeEnd = addPeriods(ANCHOR, "month", 3);
+  subscriptions.sub_edge00000001 = { id: "sub_edge00000001", status: "active", billing_cycle_anchor: ANCHOR, cancel_at: edgeEnd - 3600 };
+  await rememberPlan(ACCOUNT, "cs_test_edge00000001");
+  await settlePlans();
+  const [edgeMember] = await retryMembers();
+  const [edgeScore] = await redis.pipeline([["ZSCORE", "nl:plans:retry", edgeMember ?? ""]]);
+  is("an end an hour sooner than its own: read again two days before its own end (two daily runs ahead)", [Number(edgeMember?.split("|")[2]), Number(edgeScore)], [edgeEnd - 2 * DAY, edgeEnd - 2 * DAY]);
+
+  part("P3: a plan stuck at 403 is never let go: tried less often, then once a week, its creator told once");
+  redis.clear();
+  emails.length = 0;
   setClock(Math.floor(realNow() / 1000));
-  await rememberPlan(STUCK, "cs_test_dead00000001");
-  const deadMember = ((await redis.pipeline([["SMEMBERS", "nl:plans:pending"]]))[0] as string[])[0];
+  const about = await planStore(STUCK);
+  await remember(STUCK, "cs_test_dead00000001", about);
   logged.length = 0;
-  const calls1 = stripeCalls;
   const giveUp = (plans as Record<string, unknown>).PLAN_GIVE_UP_DAYS;
-  is("PLAN_GIVE_UP_DAYS is 30", giveUp, 30);
-  let leftOn = -1;
-  for (let d = 1; d <= 60; d += 1) {
+  const weekly = (plans as Record<string, unknown>).PLAN_STUCK_RETRY_DAYS;
+  is("PLAN_GIVE_UP_DAYS is 30, PLAN_STUCK_RETRY_DAYS 7", [giveUp, weekly], [30, 7]);
+  const triedOn: number[] = [];
+  const emailedOn: number[] = [];
+  for (let d = 1; d <= 90; d += 1) {
+    const calls = stripeCalls;
+    const sent = emails.length;
     tick(1);
     await settlePlans();
-    if (leftOn < 0 && !(await inALine(STUCK, "cs_test_dead00000001"))) leftOn = d;
+    if (stripeCalls > calls) triedOn.push(d);
+    if (emails.length > sent) emailedOn.push(d);
   }
-  const [n] = await redis.pipeline([["ZCARD", "nl:plans:retry"]]);
-  is("after 60 days the stuck plan is gone from the lines", [n, await inPending(deadMember)], [0, false]);
-  is("it left on day 30, not before", leftOn, 30);
-  is("tried at growing intervals: far fewer than one try a day", stripeCalls - calls1 <= 12, true);
-  is("a mark names it in nl:plans:given-up", await givenUp(), [deadMember]);
-  is("and the log says so, once", logged.filter((line) => line.includes("no longer tried")).length, 1);
+  is("after 90 days the stuck plan is still in its line", await inALine(STUCK, "cs_test_dead00000001"), true);
+  is("tried at growing intervals for its first 30 days: far fewer than one try a day", triedOn.filter((d) => d < 30).length <= 12, true);
+  is("from day 30, once every 7 days", triedOn.filter((d) => d >= 30), [30, 37, 44, 51, 58, 65, 72, 79, 86]);
+  is("its creator is emailed once, on day 30", emailedOn, [30]);
+  const told = emails[0];
+  is("to the store's owner, naming the store and that the plan's end could not be saved", [told?.to, /Harbor Plans/.test(told?.subject ?? ""), /payment plan/i.test(told?.subject ?? "")], [OWNER, true, true]);
+  is("the email names the product, the account, the risk and the fix", [
+    (told?.text ?? "").includes("Twelve-week coaching"),
+    (told?.text ?? "").includes(STUCK),
+    /keep charging the buyer/.test(told?.text ?? ""),
+    /reconnect/i.test(told?.text ?? ""),
+  ], [true, true, true, true]);
+  is("and nothing about the buyer: no address in it at all", /@/.test(told?.text ?? ""), false);
+  is("nothing is written to nl:plans:given-up", await givenUpKey(), 0);
+  is("the log says so, once", logged.filter((line) => line.includes("tried once a week")).length, 1);
+  sessions.cs_test_dead00000001 = checkout("cs_test_dead00000001", { kind: "plan", plan_payments: "12", plan_interval: "month" });
+  subscriptions.sub_dead00000001 = { id: "sub_dead00000001", status: "active", billing_cycle_anchor: ANCHOR + 400 * DAY };
+  const back = updates.length;
+  // The creator reconnects the account: it answers again.
+  refusing.delete(STUCK);
+  const settledOn = await (async () => {
+    for (let d = 1; d <= 7; d += 1) {
+      tick(1);
+      await settlePlans();
+      if (!(await inALine(STUCK, "cs_test_dead00000001"))) return d;
+    }
+    return -1;
+  })();
+  is("once the account answers again, the plan is given its end within a week and leaves the line", [settledOn > 0, updates.length - back, Number(updates.at(-1)?.body.get("cancel_at"))], [true, 1, addPeriods(ANCHOR + 400 * DAY, "month", 12)]);
+  is("and the creator was told only that once", emails.length, 1);
+  refusing.add(STUCK);
+
+  redis.clear();
+  emails.length = 0;
+  setClock(Math.floor(realNow() / 1000));
+  await remember(STUCK, "cs_test_tell00000001", await planStore(STUCK));
+  resendFails = true;
+  const mailedOn: number[] = [];
+  for (let d = 1; d <= 40; d += 1) {
+    const sent = emails.length;
+    if (d === 31) resendFails = false;
+    tick(1);
+    await settlePlans();
+    if (emails.length > sent) mailedOn.push(d);
+  }
+  is("an email that could not be sent on day 30 is sent at the next weekly try, once", mailedOn, [37]);
 
   redis.clear();
   setClock(ANCHOR + DAY);
@@ -224,6 +332,55 @@ async function main(): Promise<void> {
     await settlePlans();
   }
   is("and once Stripe answers, it is given its own end", [updates.at(-1)?.id, Number(updates.at(-1)?.body.get("cancel_at")), await inALine(FLAKY, "cs_test_flky00000001")], ["sub_flky00000001", own, false]);
+
+  part("P5: only the creator's own account refusing counts toward PLAN_GIVE_UP_DAYS");
+  const refusal = (plans as Record<string, unknown>).isAccountRefusal as ((error: unknown) => boolean) | undefined;
+  is("a 403 from the account, a 401 or 403 naming the account, and account_invalid count", [
+    new StripeError(403, "unknown", "no access"),
+    new StripeError(401, "unknown", "The provided key 'sk_test_***' does not have access to account 'acct_1TestPlansProof01' (or that account does not exist). Application access may have been revoked."),
+    new StripeError(400, "account_invalid", "The account is invalid."),
+  ].map((e) => refusal?.(e) ?? null), [true, true, true]);
+  is("Stripe down, too many requests, our own key refused or short of a permission, a timeout, no key: none counts", [
+    new StripeError(500, "api_error", "api down"),
+    new StripeError(429, "rate_limit_error", "Too many requests"),
+    new StripeError(401, "unknown", "Invalid API Key provided: sk_test_****abcd"),
+    new StripeError(401, "api_key_expired", "Expired API Key provided: sk_test_****abcd"),
+    new StripeError(403, "unknown", "The provided key 'rk_test_***' does not have the required permissions for this endpoint on account 'acct_1TestPlansProof01'."),
+    new Error("Selling is not configured"),
+    Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }),
+  ].map((e) => refusal?.(e) ?? null), [false, false, false, false, false, false, false]);
+  const PROOF = "acct_1TestPlansProof01";
+  const failures: [string, { status: number; body: unknown } | null][] = [
+    ["Stripe down (500)", { status: 500, body: { error: { message: "api down", type: "api_error" } } }],
+    ["too many requests (429)", { status: 429, body: { error: { message: "Too many requests", type: "rate_limit_error" } } }],
+    ["our own key refused (401)", { status: 401, body: { error: { message: "Invalid API Key provided: sk_test_****abcd", type: "invalid_request_error" } } }],
+    ["our restricted key short of a permission (403)", { status: 403, body: { error: { message: `The provided key 'rk_test_***' does not have the required permissions for this endpoint on account '${PROOF}'.`, type: "invalid_request_error" } } }],
+    ["the platform's key missing", null],
+  ];
+  for (const [name, failure] of failures) {
+    redis.clear();
+    emails.length = 0;
+    setClock(ANCHOR);
+    sessions.cs_test_prof00000001 = checkout("cs_test_prof00000001", { kind: "plan", plan_payments: "12", plan_interval: "month" });
+    subscriptions.sub_prof00000001 = { id: "sub_prof00000001", status: "active", billing_cycle_anchor: ANCHOR };
+    await remember(PROOF, "cs_test_prof00000001", await planStore(PROOF));
+    if (failure) platform = failure;
+    else delete process.env.STRIPE_SECRET_KEY;
+    for (let d = 0; d < 31; d += 1) {
+      tick(1);
+      await settlePlans();
+    }
+    platform = null;
+    process.env.STRIPE_SECRET_KEY = "sk_test_prerev";
+    is(`${name} for 31 days: the plan is still in its line, its creator not told`, [await inALine(PROOF, "cs_test_prof00000001"), emails.length], [true, 0]);
+    for (let d = 0; d < 5; d += 1) {
+      tick(1);
+      await settlePlans();
+    }
+    is(`${name}: once Stripe answers, the plan gets its agreed end within days`, [subscriptions.sub_prof00000001.cancel_at, await inALine(PROOF, "cs_test_prof00000001")], [addPeriods(ANCHOR, "month", 12), false]);
+  }
+  const cron = readFileSync("app/api/cron/plans/route.ts", "utf8");
+  is("the cron route runs the plans only with the platform's key", /if \(isBillingConfigured\(\)\) \{\s*try \{\s*plans = await settlePlans\(/.test(cron), true);
 
   part("P4: a run stops at its deadline, and loses nothing");
   redis.clear();
@@ -259,7 +416,7 @@ async function main(): Promise<void> {
   is("the run's limit is PLANS_PER_RUN", [perRun, declared?.plansPerRun], [200, 200]);
   redis.clear();
   setClock(Math.floor(realNow() / 1000));
-  // Every way a plan can come out of a try: given its end, gone, open, watched, failing, and given up.
+  // Every way a plan can come out of a try: given its end, gone, open, watched, failing, and stuck past PLAN_GIVE_UP_DAYS.
   sessions.cs_test_cost00000001 = checkout("cs_test_cost00000001", { kind: "plan", plan_payments: "3", plan_interval: "month" });
   subscriptions.sub_cost00000001 = { id: "sub_cost00000001", status: "active", billing_cycle_anchor: ANCHOR + 400 * DAY };
   sessions.cs_test_cost00000002 = checkout("cs_test_cost00000002", { kind: "plan", plan_payments: "3", plan_interval: "month" }, { status: "open", subscription: null });
@@ -277,7 +434,7 @@ async function main(): Promise<void> {
   stripeCalls = 0;
   const run = await settlePlans();
   swapPipeline(real);
-  const tried = run.done + run.open + run.dropped + run.failed + ((run as Record<string, number>).givenUp ?? 0) + ((run as Record<string, number>).watched ?? 0);
+  const tried = run.done + run.open + run.dropped + run.failed + ((run as Record<string, number>).stuck ?? 0) + ((run as Record<string, number>).watched ?? 0);
   is("all six were tried", tried, 6);
   is("Redis commands within readCommandsPerRun + tried x ownCommandsPerPlanTried", commands <= (declared?.readCommandsPerRun ?? 0) + tried * (declared?.ownCommandsPerPlanTried ?? 0), true);
   is("Stripe calls within tried x stripeCallsPerPlanTried", stripeCalls <= tried * (declared?.stripeCallsPerPlanTried ?? 0), true);

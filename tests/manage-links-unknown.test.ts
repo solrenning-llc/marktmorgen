@@ -5,7 +5,9 @@
  *
  * 1. openCancel claims the creator's offer to stay with an SET NX: only an exact "OK" makes the offer, nil means it
  *    was already made, and any other reply is unknown and the cancellation page opens without the coupon (the
- *    member can still cancel; the creator's coupon is never given twice).
+ *    member can still cancel; the creator's coupon is never given twice). The order's write throws on such a reply,
+ *    on a refused command and on a script answer in another shape (lib/order-data.ts, readScript): each is the same
+ *    unknown, never a failed cancellation.
  * 2. The opens counter of an emailed link (openPortal, openCancel, openCardUpdate): an INCR reply that is not a
  *    whole count refuses the press as "error" and makes no Stripe page; a link whose opens are spent stays "used".
  * 3. findMember: a customers or subscriptions list in another shape is not "no membership". The request throws,
@@ -15,6 +17,7 @@ import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { openCancel, openPortal, requestManageLink } from "@/lib/membership-manage";
 import { cardLink, openCardUpdate } from "@/lib/card-update";
+import { ORDER_WRITE_ERROR } from "@/lib/order-data";
 import { POST as manageRoute } from "@/app/api/store/manage/route";
 import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
@@ -138,7 +141,7 @@ async function main(): Promise<void> {
 
   part("1. The offer to stay: an SET NX reply in an unknown shape never offers it again");
   const fresh = "c".repeat(64);
-  for (const [label, bad] of [["a missing slot", undefined], ["0", 0], ["a stray word", "QUEUED"], ["an object", { ok: true }]] as const) {
+  for (const [label, bad] of [["a missing slot", undefined], ["0", 0], ["a stray word", "QUEUED"], ["an object", { ok: true }], ["a refused command", `${ORDER_WRITE_ERROR}ERR refused`]] as const) {
     await redis.pipeline([["DEL", `nl:save:${ACCOUNT}:sub_Member0000001`]]);
     await grantLink(fresh);
     garble("nl:save:", "SET", bad);
@@ -147,6 +150,20 @@ async function main(): Promise<void> {
     redis.pipeline = original;
     // Even on a membership never offered before: whether the mark was written is not known, so the coupon is
     // left out (the creator's money), and the member can still cancel (one cancellation page, no offer).
+    is(`${label}: the member can still cancel, and the coupon is not offered`, [opened.ok, cancelPages(), offered()], [true, 1, false]);
+  }
+
+  // The whole script answered in another shape (no charge to read): the write throws before any reply is read.
+  for (const [label, bad] of [["the script answered nil", null], ["the script answered a word", "OK"]] as const) {
+    await redis.pipeline([["DEL", `nl:save:${ACCOUNT}:sub_Member0000001`]]);
+    await grantLink(fresh);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = await original(commands);
+      return JSON.stringify(commands).includes("nl:save:") ? replies.map(() => bad) : replies;
+    }) as typeof redis.pipeline;
+    posts.length = 0;
+    const opened = await openCancel(store, fresh, "sub_Member0000001", origin);
+    redis.pipeline = original;
     is(`${label}: the member can still cancel, and the coupon is not offered`, [opened.ok, cancelPages(), offered()], [true, 1, false]);
   }
 

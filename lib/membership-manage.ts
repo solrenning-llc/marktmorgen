@@ -563,9 +563,16 @@ export async function openCancel(store: Store, token: string, subscription: stri
       // Only an exact "OK" is a claim made now; nil is the offer already made. Any other reply is unknown: the
       // mark may be written already, so the offer is left out (the creator's coupon is never given twice) and
       // the member can still cancel, which is what they came for (Claude 5, sweep APP2 finding 1).
-      const claimed = repliesFor(await orderWrite(store, [["SET", offeredKey(grant.a, subscription), String(Date.now()), "NX"]]), 1)?.[0];
-      if (claimed !== "OK" && claimed !== null) console.error("the offer to stay was left out: its mark answered in an unknown shape", store.handle);
-      withOffer = claimed === "OK";
+      // An order's write now reads each reply in its exact shape and throws on any other (lib/order-data.ts,
+      // readScript), and it throws on a refused command too: whether the mark landed is then unknown, so it is
+      // the same case, the offer left out and the cancellation page still made, never a failed cancellation.
+      try {
+        const claimed = repliesFor(await orderWrite(store, [["SET", offeredKey(grant.a, subscription), String(Date.now()), "NX"]]), 1)?.[0];
+        if (claimed !== "OK" && claimed !== null) console.error("the offer to stay was left out: its mark answered in an unknown shape", store.handle);
+        withOffer = claimed === "OK";
+      } catch (error) {
+        console.error("the offer to stay was left out: its mark could not be written", store.handle, error);
+      }
     }
 
     // The reason given on the store's own page (lib/leave-rules.ts), written

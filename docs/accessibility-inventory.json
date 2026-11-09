@@ -1479,6 +1479,7 @@
     "components/path-certificates.tsx",
     "components/path-checkout-notice.tsx",
     "components/path-growth-missions.tsx",
+    "components/path-milestone.tsx",
     "components/path-missions.tsx",
     "components/path-onboarding.tsx",
     "components/path-reminder-button.tsx",
@@ -1489,6 +1490,7 @@
     "components/pause-editor.tsx",
     "components/payment-comparison.tsx",
     "components/payment-mix.tsx",
+    "components/payment-received.tsx",
     "components/payment-requests-studio.tsx",
     "components/payments-panel.tsx",
     "components/paypal-payouts.tsx",
@@ -1666,6 +1668,7 @@
     "app/api/billing/refund/route.ts",
     "app/api/billing/return/route.ts",
     "app/api/billing/switch/route.ts",
+    "app/api/billing/withdraw/route.ts",
     "app/api/creators/route.ts",
     "app/api/cron/affiliates/route.ts",
     "app/api/cron/closed-data/route.ts",
@@ -2063,6 +2066,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 141
+    "pageTemplates": 142
   }
 }

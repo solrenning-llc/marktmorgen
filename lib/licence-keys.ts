@@ -68,7 +68,7 @@ import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, ref
 import { hasProduct, readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
-import { keepRefunds, readHeldRefunds, releaseHeld } from "@/lib/held-refunds";
+import { keepRefunds, readHeldRefunds, releaseHeld, requeueHeld } from "@/lib/held-refunds";
 import {
   MAX_PREFIX_LENGTH,
   MIN_GROUPS,
@@ -609,6 +609,13 @@ type RefundPass = { from: number; start: number; after: string; newest: number; 
 
 const passSeconds = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
+/** A kept anchor read exactly (as String(seconds) writes it, never 0); null for anything else, which is unknown. */
+function readRefundAnchor(raw: unknown): number | null {
+  if (typeof raw !== "string" || !/^[1-9][0-9]{0,15}$/.test(raw)) return null;
+  const seconds = Number(raw);
+  return Number.isSafeInteger(seconds) ? seconds : null;
+}
+
 /** A kept pass read exactly; anything else is no pass, and a new one starts from the anchor, which never moved past it. */
 function readRefundPass(raw: unknown): RefundPass | null {
   if (typeof raw !== "string") return null;
@@ -651,12 +658,17 @@ export function storeHasKeys(store: Store): boolean {
  * made that payment (a cs_… reference), or the payment itself for an offer
  * taken in one click (a pi_… reference). Both the product bought and the one
  * ticked at checkout lose their keys, since both were paid by that payment.
- * A partial refund changes nothing. A full refund still pending revokes a
- * key already given, but a sale with none yet only gets PENDING_REFUND_SALE,
- * and that refund stays unread until Stripe says it went through (the mark
- * turns final) or answers it failed or canceled (the mark is cleared, so the
- * paid sale can be given its key); every failed or canceled refund read is
- * looked up once for that, inside the same lookups. A dispute Stripe closed as lost takes
+ * A partial refund changes nothing. A full refund still pending takes
+ * nothing back yet, since it may still fail: a key already given stays valid,
+ * a sale with none yet only gets PENDING_REFUND_SALE (no key while it is
+ * pending), and that refund stays unread until Stripe says it went through
+ * (the key is revoked, the mark turns final) or answers it failed or canceled
+ * (the mark is cleared, so the paid sale can be given its key; a key given
+ * stays as it is); every failed or canceled refund read is looked up once for
+ * that, inside the same lookups (Claude 5's pre-review of
+ * claude5/licence-refunds-combined, HIGH 2: a pending refund revoked the key
+ * at once and was read, so one that then failed left a paid sale's key
+ * revoked for good). A dispute Stripe closed as lost takes
  * the key back as a full refund does (queue 388 [TB14]): the disputes closed
  * since the last run are read with the first page of refunds, from Stripe's
  * closing events, so a lost dispute revokes within the same five minutes;
@@ -680,13 +692,20 @@ export function storeHasKeys(store: Store): boolean {
  * it again; one the run had no time or lookups for is where the pass goes on.
  *
  * Two kinds of unfinished refund are told apart. A full refund still pending
- * (its charge already refunded in full) marks the sale PENDING_REFUND_SALE and
- * holds the anchor, as above. One that gives nothing back yet (requires_action,
- * or pending on a charge not refunded in full: unfinishedRefund) is kept by its
- * id (lib/held-refunds.ts), so the anchor may move past it; each run reads back
- * at most HELD_REFUND_READS kept ones that are due, and one that now gives
- * everything back is read as a row of the window, with at most half the run's
- * lookups, and let go once handled (rule 30).
+ * (its charge already refunded in full) is held as above and holds the anchor.
+ * One that gives nothing back yet (requires_action, or pending on a charge not
+ * refunded in full: unfinishedRefund) is kept by its id (lib/held-refunds.ts),
+ * so the anchor may move past it; each run reads back at most
+ * HELD_REFUND_READS kept ones that are due, and one that now gives everything
+ * back, or that Stripe answers failed or canceled (which may undo the mark it
+ * left while pending; HIGH 1 of the same pre-review), is read as a row of the
+ * window, with at most half the run's lookups, and let go once handled; one
+ * read back and not handled goes behind the others due (rule 30).
+ *
+ * The anchor is read exactly: none is a store's first pass, from
+ * REFUND_LOOKBACK_SECONDS back; one in any other shape is unknown, never "none"
+ * (it may be older than the look-back, held at a refund left pending), so the
+ * run throws, writes nothing and leaves it as it is (rule 24).
  */
 /**
  * A Stripe reply of a shape these reads cannot tell a sale from (CX-123 rule 24): never "no sale" nor "not a plan".
@@ -807,7 +826,10 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   const account = store.stripeAccountId as string;
   const now = Math.floor(Date.now() / 1000);
   const [anchorRaw, passRaw] = await redisPipeline([["GET", refundAnchorKey(store)], ["GET", refundPassKey(store)]]);
-  const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
+  // No anchor yet is a store's first pass; one that does not read is unknown, never "start again" (rule 24).
+  const anchorKept = anchorRaw === null ? null : readRefundAnchor(anchorRaw);
+  if (anchorRaw !== null && anchorKept === null) throw new Error("A store's place in its refunds for license keys did not read");
+  const anchor = anchorKept ?? now - REFUND_LOOKBACK_SECONDS;
   // A pass an earlier run began goes on from where it stopped (Claude 5's audit of the Stripe reads, A3); none, or one
   // in an unknown shape, begins at the anchor, which never moved past anything a pass left unread.
   const kept = readRefundPass(passRaw);
@@ -827,10 +849,36 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // those that now give everything back are read this run, before the pages, as a refund of the window is. A kept set
   // that does not read throws, so the run writes nothing and the anchor stays where it was.
   const heldKey = refundHeldKey(store);
-  const heldRead = await readHeldRefunds(account, heldKey, now, deadline);
+  // Those Stripe answers failed or canceled are read too, so the mark one left while pending is cleared (HIGH 1).
+  const heldRead = await readHeldRefunds(account, heldKey, now, deadline, { ended: true });
   // Every row handled this run, so one listed twice (kept and in the window, or in the newest page and the pass) is
   // handled once.
   const handledIds = new Set<string>();
+  /** A refund Stripe answers exactly failed or canceled: it takes nothing back, but may undo a pending one's mark. */
+  const undoneRow = (refund: Record<string, unknown>) => refund.object !== "dispute" && (refund.status === "failed" || refund.status === "canceled");
+  /** The rows read before this run handled them that an earlier run read (refundSeenKey), asked per batch (seenOf). */
+  const seenBefore = new Set<string>();
+  /**
+   * Asks the read set once about every row of a batch (the kept ones read back, the lost disputes, a page) that visit
+   * would look at: one SMISMEMBER, none when there is none, where it was one SISMEMBER a row (Claude 5's pre-review
+   * of claude5/licence-refunds-combined, MEDIUM). An answer in another shape throws: the run writes nothing more and
+   * the anchor stays (rule 24); a flag other than 1 is "not read", so the row is looked at again, never skipped.
+   */
+  const seenOf = async (rows: readonly Record<string, unknown>[]) => {
+    const ids = [
+      ...new Set(
+        rows
+          .filter((row) => typeof row.id === "string" && row.id && !handledIds.has(row.id) && !seenBefore.has(row.id) && (rowGivesBack(row) || undoneRow(row)))
+          .map((row) => row.id as string),
+      ),
+    ];
+    if (!ids.length) return;
+    const [flags] = await redisPipeline([["SMISMEMBER", refundSeenKey(store), ...ids]]);
+    if (!Array.isArray(flags) || flags.length !== ids.length) throw new UnknownReplyError("SMISMEMBER of the refunds already read");
+    ids.forEach((id, i) => {
+      if (Number(flags[i]) === 1) seenBefore.add(id);
+    });
+  };
   /** The read mark of a row handled now, sent with the kept set's release of it (once: a second visit sends none). */
   const markRead = async (id: string) => {
     await redisPipeline([
@@ -844,7 +892,8 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   /**
    * One row read: "nothing" when it takes nothing back, "handled" once read (marked read, its keys revoked for sure),
    * "held" when its sale could not be told or its keys not revoked for sure, or it is a full refund still pending that
-   * holds a sale's mark (the row stays unread, for the next pass), and "later" when the run had no time or lookups left
+   * holds a sale's mark or leaves a key given valid (the row stays unread, for the next pass, or kept, for the next
+   * look), and "later" when the run had no time or lookups left
    * for it, above the `reserve` it keeps (the pass reads it again from there next run).
    */
   const visit = async (refund: Record<string, unknown>, reserve: number): Promise<"nothing" | "handled" | "held" | "later"> => {
@@ -856,12 +905,12 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     // A refund Stripe answers exactly failed or canceled takes nothing back, but may undo the mark a pending one left
     // (PENDING_REFUND_SALE): its sale is looked up like any refund's, and only that mark is cleared. Any other row
     // that gives nothing back is skipped as before (Claude 2's focal money review of #2868, LOW).
-    const undone = !givesBack && refund.object !== "dispute" && (refund.status === "failed" || refund.status === "canceled");
+    const undone = !givesBack && undoneRow(refund);
     if (!givesBack && !undone) return "nothing";
     // A full refund not yet through: the keyless sale is marked pending, and the refund stays unread until it settles.
     const pending = givesBack && refund.object !== "dispute" && refund.status === "pending";
-    const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
-    if (Number(seen) === 1) {
+    // Asked with the row's batch (seenOf), before any visit of it.
+    if (seenBefore.has(id)) {
       // Read by an earlier run: a kept refund read back is let go now.
       const release = releaseHeld(heldKey, heldRead, id);
       if (release.length) await redisPipeline(release);
@@ -969,10 +1018,17 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
                 throw new UnknownReplyError("the swap of a pending refund's mark");
               }
             } else if (key !== REFUNDED_SALE) {
-              // A key whose record settle has not written yet is not "nothing to revoke": the refund stays unread and
-              // the next run revokes the record written meanwhile (Claude 2's second money review of #2868, MEDIUM).
-              if (!(await setRevoked(store, product, key, true, "refund"))) throw new RecordNotWrittenYet();
-              here += 1;
+              if (pending) {
+                // A key already given stays valid while the refund is pending: it may still fail, and a key revoked
+                // then would stay revoked on a sale that was paid. The refund stays unread and is read again until it
+                // goes through (the key is revoked then) or fails (the key stays as it is; HIGH 2).
+                heldHere = true;
+              } else {
+                // A key whose record settle has not written yet is not "nothing to revoke": the refund stays unread and
+                // the next run revokes the record written meanwhile (Claude 2's second money review of #2868, MEDIUM).
+                if (!(await setRevoked(store, product, key, true, "refund"))) throw new RecordNotWrittenYet();
+                here += 1;
+              }
             }
           }
           // A buyer still waiting for a key from an empty pool keeps the place while the refund is pending, and is
@@ -1018,9 +1074,12 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     return listed;
   };
 
-  // The kept refunds that now give everything back, read before the pages with at most half the run's lookups, so the
-  // pass still moves. One handled is let go (markRead); one held or left for later stays kept and due for the next run.
-  for (const refund of heldRead.rows) {
+  // The kept refunds that now give everything back, or that Stripe answers failed or canceled (to clear the mark one
+  // left while pending), read before the pages with at most half the run's lookups, so the pass still moves. One
+  // handled is let go (markRead); one held or left for later stays kept, behind the others due (requeueHeld).
+  const heldRows = [...heldRead.rows, ...heldRead.ended];
+  await seenOf(heldRows);
+  for (const refund of heldRows) {
     if ((await visit(refund, PASS_LOOKUPS)) === "later") break;
   }
 
@@ -1031,8 +1090,12 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     if (lost) return;
     const read = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account));
     lost = read;
+    await seenOf(read.rows);
+    // With at most half the run's lookups, as the kept refunds and the newest page: lost disputes whose sale stays
+    // unknown run after run never take every lookup from the pass (Claude 5's pre-review, LOW). One left for later
+    // keeps the lost disputes' place and the anchor where they were (confirmLostRead).
     for (const row of read.rows) {
-      if ((await visit(row, 0)) === "handled") pass.newest = Math.max(pass.newest, row.created as number);
+      if ((await visit(row, PASS_LOOKUPS)) === "handled") pass.newest = Math.max(pass.newest, row.created as number);
     }
   };
 
@@ -1044,6 +1107,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     pages -= 1;
     const top = await readPage("");
     if (top) await readLost();
+    await seenOf(top?.rows ?? []);
     for (const refund of top?.rows ?? []) {
       if ((await visit(refund, PASS_LOOKUPS)) === "later") break;
     }
@@ -1070,6 +1134,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     // The pass moves past a refund only once it was read: handled, nothing to take back, or held below for the next
     // pass. One the run had no time or lookups for is where the next run goes on from, never skipped.
     let whole = true;
+    await seenOf(listed.rows);
     for (const refund of listed.rows) {
       const read = await visit(refund, 0);
       if (read === "later") {
@@ -1106,6 +1171,8 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       ["SET", refundAnchorKey(store), String(moved), "EX", REFUND_LOOKBACK_SECONDS * 2],
       ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
       ["DEL", refundPassKey(store)],
+      // Kept refunds read back and not handled go behind the others due (lib/held-refunds.ts, requeueHeld).
+      ...requeueHeld(heldKey, heldRead, now),
     ]);
     return revoked;
   }
@@ -1116,12 +1183,13 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   const writes: (string | number)[][] = [];
   if (restart) writes.push(["DEL", refundPassKey(store)]);
   else if (pass.after && next !== passRaw) writes.push(["SET", refundPassKey(store), next, "EX", REFUND_PASS_SECONDS]);
-  if (!(Number(anchorRaw) > 0)) {
+  if (anchorKept === null) {
     writes.push(
       ["SET", refundAnchorKey(store), String(pass.from), "EX", REFUND_LOOKBACK_SECONDS * 2],
       ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
     );
   }
+  writes.push(...requeueHeld(heldKey, heldRead, now));
   if (writes.length) await redisPipeline(writes);
   return revoked;
 }

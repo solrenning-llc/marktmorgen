@@ -28,9 +28,18 @@
  *     "read" mark), so a run that runs out of lookups or time reads it again;
  *     one still unfinished is looked at again later (every
  *     HELD_REFUND_RECHECK_SECONDS); one that ended without giving everything
- *     back (failed, canceled, a partial refund) is let go; a reply that is not
- *     that refund, or a failed request, is unknown and keeps it for the next
- *     look, never let go;
+ *     back (a partial refund) is let go; one Stripe answers failed or canceled
+ *     is let go too, unless the job asked for those (`ended`): then it is
+ *     handed to the job beside the rows, and stays due until the job has
+ *     handled it, so a mark a pending full refund left can be undone (the
+ *     license keys' PENDING_REFUND_SALE; Claude 5's pre-review of
+ *     claude5/licence-refunds-combined, HIGH 1); a reply that is not that
+ *     refund, or a failed request, is unknown and keeps it for the next look,
+ *     never let go;
+ *   - requeueHeld(): a job that read a kept refund back but did not handle it
+ *     (held, or no lookups or time left) moves it to the back of the due ones,
+ *     still due next run, so a few that stay unsettled never take every read
+ *     of a run from the others (one command, in place of its release);
  *   - a refund is kept at most HELD_REFUND_MAX_SECONDS from its `created`, the
  *     jobs' own look-back: past it, it is let go without a request. An
  *     unfinished row whose `created` does not read is not kept (its ceiling
@@ -104,17 +113,25 @@ export async function keepRefunds(key: string, rows: readonly GivenBackRow[], no
   return whole;
 }
 
-/** What a run read back: the kept refunds that now give everything back, as rows, and each one's member by its id. */
-export type HeldRead = { rows: GivenBackRow[]; members: Map<string, string> };
+/**
+ * What a run read back: the kept refunds that now give everything back, as rows; those Stripe answered failed or
+ * canceled, when the job asked for them (`ended`); and each one's member by its id.
+ */
+export type HeldRead = { rows: GivenBackRow[]; ended: GivenBackRow[]; members: Map<string, string> };
+
+/** A refund Stripe answers exactly failed or canceled: it took nothing back, and may undo what it marked while pending. */
+const endedRefund = (reply: Record<string, unknown>): boolean => reply.status === "failed" || reply.status === "canceled";
 
 /**
  * Reads back the refunds kept under `key` that are due (at most HELD_REFUND_READS, the longest due first), on the
  * creator's `account`. Returns those that now give everything back, for the job to handle as rows of its reading and
  * then let go (releaseHeld); looks again later at those still unfinished; lets go of those that ended otherwise or are
- * past their ceiling. Throws only when the kept set cannot be read: the job then keeps its anchor, as for any failed read.
+ * past their ceiling. With `ended`, those Stripe answers failed or canceled are handed to the job too (HeldRead.ended),
+ * to be let go once handled, as the rows are. Throws only when the kept set cannot be read: the job then keeps its
+ * anchor, as for any failed read.
  */
-export async function readHeldRefunds(account: string, key: string, nowSeconds: number, deadline: number): Promise<HeldRead> {
-  const read: HeldRead = { rows: [], members: new Map() };
+export async function readHeldRefunds(account: string, key: string, nowSeconds: number, deadline: number, options: { ended?: boolean } = {}): Promise<HeldRead> {
+  const read: HeldRead = { rows: [], ended: [], members: new Map() };
   const [raw] = await redisPipeline([["ZRANGEBYSCORE", key, "-inf", nowSeconds, "LIMIT", 0, HELD_REFUND_READS]]);
   if (!Array.isArray(raw) || raw.some((member) => typeof member !== "string")) throw new Error("The kept refunds did not read");
   const writes: Command[] = [];
@@ -141,7 +158,10 @@ export async function readHeldRefunds(account: string, key: string, nowSeconds: 
       read.rows.push(reply);
       read.members.set(kept.id, member);
     } else if (unfinishedRefund(reply)) later(member);
-    else writes.push(["ZREM", key, member]);
+    else if (options.ended && endedRefund(reply)) {
+      read.ended.push(reply);
+      read.members.set(kept.id, member);
+    } else writes.push(["ZREM", key, member]);
   }
   if (writes.length) await redisPipeline(writes);
   return read;
@@ -151,4 +171,13 @@ export async function readHeldRefunds(account: string, key: string, nowSeconds: 
 export function releaseHeld(key: string, held: HeldRead, id: string): Command[] {
   const member = held.members.get(id);
   return member ? [["ZREM", key, member]] : [];
+}
+
+/**
+ * The commands that move every kept refund read back this run and not let go (still in `held.members`: held by the
+ * job, or left for want of lookups or time) behind the others due, still due at the next run. One command a member,
+ * in place of its release, so a run never sends both for one member.
+ */
+export function requeueHeld(key: string, held: HeldRead, nowSeconds: number): Command[] {
+  return [...held.members.values()].map((member) => ["ZADD", key, "XX", nowSeconds + HELD_REFUND_FIRST_LOOK_SECONDS, member]);
 }

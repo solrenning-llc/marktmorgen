@@ -56,6 +56,7 @@ import { StripeListUnreadable, plainObject, ownField, readStripePage } from "@/l
 import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { sendOrderMail } from "@/lib/order-mail-owed";
 import { isHouseStore } from "@/lib/house-store";
 import { HOLD_SECONDS, checkoutClosesAt, onAccount } from "@/lib/stripe-account";
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
@@ -1747,7 +1748,10 @@ export async function confirmBooking(input: {
     const b = bookingWords(store.language);
     const locale = LANGUAGES[parseLanguage(store.language)].locale;
     const hours = Math.max(setup.noticeHours, 1);
-    await sendEmail({ meter: { by: "order" },
+    // The booking is marked confirmed above, once, so nothing else would send this again: a certain refusal is owed
+    // and tried again, never dropped (lib/order-mail-owed.ts, the owner's EM1). Keyed by the checkout and the time,
+    // so a moved booking's confirmation is its own email, and no try of one is ever sent twice.
+    await sendOrderMail(store, {
       from: storeSender(store),
       to: buyerEmail,
       subject: b.bookedSubject(product.title, store.name),
@@ -1778,14 +1782,16 @@ export async function confirmBooking(input: {
       // offer a single call.
       replyTo: store.email,
       attachments: [{ filename: "call.ics", content: invite(buyerNote(b, store, room, place), b) }],
-    });
+      idempotencyKey: `nimbus-call-booked:${session}:${start}`,
+    }, "a booking's confirmation to its buyer");
   }
 
   const creatorSide = hostRecipient(store, hosts);
   const theirs = onTheirCalendar(meeting, creatorSide, store.email);
   // The reminders before the call go to the store's own address (lib/call-reminders.ts, remindCreator).
   const toOwner = creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase();
-  await sendEmail({ meter: { by: "order" },
+  // Owed the same way (lib/order-mail-owed.ts); given up, the store's own address is told, unless it is the one refused.
+  await sendOrderMail(store, {
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: creatorSide,
     subject: `New booking: ${product.title}, ${readableTime(start, setup.tz)}`,
@@ -1829,7 +1835,8 @@ export async function confirmBooking(input: {
     ...(theirs
       ? {}
       : { attachments: [{ filename: "call.ics", content: invite(place ? `With ${buyerEmail ?? "your buyer"}. In person, at: ${placeLine(place)}` : `With ${buyerEmail ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`) }] }),
-  });
+    idempotencyKey: `nimbus-call-host:${session}:${start}`,
+  }, "a booking's confirmation to its host");
 }
 
 /**

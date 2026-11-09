@@ -78,7 +78,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
-  "nl:orders:open:", "nl:orders:pending:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
+  "nl:orders:open:", "nl:orders:pending:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:owedmail:due", "nl:owedmail:m:", "nl:owedmail:s:", "nl:owedmail:told:", "nl:pause:", "nl:pause:due",
   "nl:pause:last:", "nl:pay:currencies:", "nl:taxreg:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
@@ -326,6 +326,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // may retain its receipt for767days; this is not its legacy price envelope.
   "nl:orders:seen:": X(767),
   "nl:outreach:": E, "nl:outreach:stop:all": C, "nl:outreach:stoplink:": T("nl:outreach:"),
+  // Order emails owed after a certain refusal (lib/order-mail-owed.ts): the due list names no store; each email and
+  // its told mark expire within two days; the store's own list of them is erased with it.
+  "nl:owedmail:due": C, "nl:owedmail:m:": X(2), "nl:owedmail:s:": E, "nl:owedmail:told:": X(2),
   // Emails published on the store (lib/letters.ts): the store's list goes, and each copy through it.
   "nl:letters:s:": E, "nl:letters:i:": T("nl:letters:s:", 400),
   // Who may read an email kept for members (lib/letter-access.ts): an answer kept for minutes, a link and the counts of links asked, an hour each.

@@ -20,6 +20,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
 import { sendAsked } from "@/lib/checkout-ask";
 import { sendAssistReminders } from "@/lib/assistant-reminder";
+import { sendOwedOrderMail } from "@/lib/order-mail-owed";
 import { deliverDue, watchStripe } from "@/lib/webhooks";
 import { settlePendingOffers } from "@/lib/upsell";
 import { sendReviewRequests } from "@/lib/review-requests";
@@ -164,6 +165,13 @@ async function run(request: NextRequest, started: number): Promise<Response> {
       return Response.json({ ok: true, mail: "unavailable", checkouts, offers, events, webhooks: await runWebhooks(webhooksBy, meetingsCutoff) }, { headers: { "Cache-Control": "no-store" } });
     }
     const deadline = started + 30_000;
+    // Order emails a sender refused for certain (lib/order-mail-owed.ts, the owner's EM1): owed, never dropped, and
+    // tried again here before the creators' own emails, in a few seconds of their own.
+    try {
+      await sendOwedOrderMail(storeForHandle, Math.min(deadline, Date.now() + 4_000));
+    } catch (error) {
+      console.error("sending owed order emails failed", error);
+    }
     // Each kept apart: one failing never skips the others for this run.
     let broadcasts = 0;
     try {

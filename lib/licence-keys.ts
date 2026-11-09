@@ -59,6 +59,7 @@ import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
+import { sendOrderMail } from "@/lib/order-mail-owed";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -781,7 +782,9 @@ async function serveWaiting(store: Store, product: Listing, origin: string): Pro
     served += 1;
     if (!email) continue;
     const g = givingWords(store.language);
-    await sendEmail({ meter: { by: "order" },
+    // The key is given above and the buyer is off the waiting list: a certain refusal is owed and tried again, never
+    // dropped (lib/order-mail-owed.ts, the owner's EM1), since nothing else would ever email it.
+    await sendOrderMail(store, {
       from: `"${displayName(store.name)}" <${senderAddress()}>`,
       to: email,
       replyTo: store.email,
@@ -797,7 +800,7 @@ async function serveWaiting(store: Store, product: Listing, origin: string): Pro
         g.keyQuestions(store.name),
       ].join("\n"),
       idempotencyKey: `nimbus-key:${store.statsId}:${product.id}:${reference}`,
-    }).catch((error) => console.error("emailing a waiting buyer their key failed", error));
+    }, "emailing a waiting buyer their key");
   }
   return served;
 }

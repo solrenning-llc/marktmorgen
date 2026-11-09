@@ -28,13 +28,22 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import { givingWords } from "@/lib/buyer-words/giving";
 
 /** Every `sendEmail({ ... })` object in a file, braces balanced. */
+// Rule 23 (claude5/order-mail-kept, 9 November 2026): an order email sent through sendOrderMail(store, {...})
+// (lib/order-mail-owed.ts, owed when refused) is read as one sent through sendEmail({...}) was; the message is the
+// same object, so what each email must say is held unchanged.
+const SEND = /sendEmail\(\{|sendOrderMail\(store, \{/g;
 function sends(file: string): string[] {
   const text = readFileSync(file, "utf8");
   const out: string[] = [];
-  let at = text.indexOf("sendEmail({");
+  const next = (from: number) => {
+    SEND.lastIndex = from;
+    const found = SEND.exec(text);
+    return found ? found.index + found[0].length - 1 : -1;
+  };
+  let at = next(0);
   while (at >= 0) {
     let depth = 0;
-    let i = at + "sendEmail(".length;
+    let i = at;
     for (; i < text.length; i += 1) {
       if (text[i] === "{") depth += 1;
       else if (text[i] === "}") {
@@ -43,7 +52,7 @@ function sends(file: string): string[] {
       }
     }
     out.push(text.slice(at, i + 1));
-    at = text.indexOf("sendEmail({", i);
+    at = next(i);
   }
   return out;
 }

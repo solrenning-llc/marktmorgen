@@ -26,7 +26,7 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isConfirmed } from "@/lib/calls";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
 import { purchaseRefunded } from "@/lib/refunds";
-import { sendEmail } from "@/lib/email";
+import { sendOrderMail } from "@/lib/order-mail-owed";
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { withLock } from "@/lib/redis-lock";
 import type { CallPackage } from "@/lib/call-package-rules";
@@ -214,7 +214,9 @@ export async function recordPackage(input: { store: Store; session: Session; pro
   // the date written its way, in the currency actually paid.
   const b = bookingWords(store.language);
   const said = speechFor(store.language, currency);
-  await sendEmail({ meter: { by: "order" },
+  // A certain refusal is owed and tried again, never dropped (lib/order-mail-owed.ts, the owner's EM1): the package is
+  // written once above, so nothing else would ever send its booking link.
+  await sendOrderMail(store, {
     from: input.from,
     to: email,
     subject: b.packageSubject(total, product.title).slice(0, 200),
@@ -236,7 +238,7 @@ export async function recordPackage(input: { store: Store; session: Session; pro
     ].join("\n"),
     replyTo: store.email,
     idempotencyKey: `nimbus-package:${checkout}`,
-  }).catch((error) => console.error("a package confirmation failed", error));
+  }, "a package confirmation");
   return bought;
 }
 

@@ -12,7 +12,7 @@
  *   bounds     OWED_MAIL_PER_STORE a store, OWED_MAIL_MAX_BYTES an email:
  *              past either it is given up at once and the creator told.
  */
-import { OWED_MAIL_KEEP_SECONDS, OWED_MAIL_MAX_BYTES, OWED_MAIL_PER_STORE, OWED_MAIL_RETRY_SECONDS, sendOrderMail, sendOwedOrderMail } from "@/lib/order-mail-owed";
+import { OWED_MAIL_COMMANDS, OWED_MAIL_KEEP_SECONDS, OWED_MAIL_MAX_BYTES, OWED_MAIL_PER_STORE, OWED_MAIL_RETRY_SECONDS, sendOrderMail, sendOwedOrderMail } from "@/lib/order-mail-owed";
 import { REFUSED_TRIES } from "@/lib/refused-tries";
 import { answers, sends } from "./order-mail-owed-world";
 import { store as redis } from "./redis-stub";
@@ -115,6 +115,28 @@ async function main(): Promise<void> {
   wait(OWED_MAIL_KEEP_SECONDS);
   await run();
   is("nothing more, ever", sends.length, REFUSED_TRIES + 1);
+
+  part("Its commands, its whole life, inside OWED_MAIL_COMMANDS (tests/plan-cost-registry.ts, line orders and NOT_A_COST)");
+  reset();
+  const counted = redis.pipeline;
+  let commands = 0;
+  redis.pipeline = async (list) => {
+    commands += list.length;
+    return counted.call(redis, list);
+  };
+  try {
+    answers.push("refused", "refused", "refused");
+    await sendOrderMail(shop, message(10), "a key");
+    is("inside the order: its first refusal counted and the email kept, 7", commands, 7);
+    wait(OWED_MAIL_RETRY_SECONDS[0]);
+    await run();
+    wait(OWED_MAIL_RETRY_SECONDS.at(-1)!);
+    await run();
+  } finally {
+    redis.pipeline = counted;
+  }
+  is("its whole life, given up and its creator told, at most OWED_MAIL_COMMANDS", [commands <= OWED_MAIL_COMMANDS, OWED_MAIL_COMMANDS], [true, 21]);
+  is("and three tries of its own, then one note", sends.length, REFUSED_TRIES + 1);
 
   part("An email to the creator's own address: given up without telling the address that refused it");
   reset();

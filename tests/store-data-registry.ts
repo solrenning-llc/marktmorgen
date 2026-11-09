@@ -88,6 +88,7 @@ import { SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS 
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
+import { OWED_MAIL_MAX_BYTES, OWED_MAIL_PER_STORE } from "@/lib/order-mail-owed";
 
 const KB = 1_024;
 /** A key with its name and a small value: what most links and records of a few fields weigh, rounded up. */
@@ -825,6 +826,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:rec:set:@lib/recovery-address.ts": company("A recovery address being set", "An account's, minutes."),
   "nl:auth:rec:until:@lib/recovery-address.ts": company("Until when a recovery holds", "An account's."),
   // One count for every caller that asks again on a certain refusal (rule 30; #3377 bounded its own checkout reminders the same way).
+  // An order email a sender refused for certain, owed and tried again (the owner's EM1; Claude 5's email audit, HIGH 2).
+  "nl:owedmail:due@lib/order-mail-owed.ts": company("Order emails owed, by when each is tried next", "One sorted set for every store, each member a hash of one email's key, never an address or a store: gone when the email is sent, its answer is not known or it is given up, within hours (OWED_MAIL_RETRY_SECONDS)."),
+  "nl:owedmail:m:@lib/order-mail-owed.ts": { what: "An order email owed, as written, two days at most", parts: [capped(OWED_MAIL_PER_STORE * OWED_MAIL_MAX_BYTES, "OWED_MAIL_PER_STORE emails a store at once, each OWED_MAIL_MAX_BYTES at most; one more is given up and its creator told.", src("lib/order-mail-owed.ts", "OWED_MAIL_PER_STORE", "OWED_MAIL_MAX_BYTES", "OWED_MAIL_KEEP_SECONDS"))] },
+  "nl:owedmail:s:@lib/order-mail-owed.ts": { what: "The order emails a store owes, its cap's count", parts: [capped(OWED_MAIL_PER_STORE * 64 + KEY, "OWED_MAIL_PER_STORE ids of 32 characters, one set a store, two days after its last.", src("lib/order-mail-owed.ts", "OWED_MAIL_PER_STORE"))] },
+  "nl:owedmail:told:@lib/order-mail-owed.ts": short("A creator told an order email to their buyer or host was given up: at most the order's two emails, two days", "order", 2, 2 * MARK),
   "nl:refused:@lib/refused-tries.ts": short("How many times a sender refused one of the store's emails for certain (REFUSED_TRIES at most): a day, a payment request's reminders its open time (REFUSED_MAX_SECONDS)", "store", 45, MARK),
   "nl:rl:@lib/request-guard.ts": short("Per connection, person or store counts, by their scope", "request", 1),
   "nl:rlm:@lib/request-guard.ts": short("Monthly counts by their scope", "day", 62, 128),

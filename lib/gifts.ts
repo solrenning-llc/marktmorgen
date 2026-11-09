@@ -17,7 +17,7 @@ import { consentEmailLines } from "@/lib/digital-consent-email";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { sendEmail } from "@/lib/email";
+import { sendOrderMail } from "@/lib/order-mail-owed";
 import { cleanLine, cleanText } from "@/lib/community-text";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
@@ -220,7 +220,9 @@ export async function deliverGift(input: {
   const label = gift.o ? product.options.find((o) => o.id === gift.o)?.label ?? "" : "";
   const title = label ? `${product.title} (${label})` : product.title;
   const link = (await input.ordersLink(gift.to)) ?? `${base}/orders`;
-  await sendEmail({ meter: { by: "order" },
+  // The gift is given above, before its email, and the recipient learns of it only from the email: a certain refusal
+  // is owed and tried again, never dropped (lib/order-mail-owed.ts, the owner's EM1); given up, the creator is told.
+  await sendOrderMail(store, {
     from: input.from,
     to: gift.to,
     subject: g.giftSubject(who, title).slice(0, 200),
@@ -236,13 +238,13 @@ export async function deliverGift(input: {
       g.sentByNothing(store.name),
     ].join("\n"),
     idempotencyKey: `nimbus-gift:${gift.id}`,
-  }).catch((error) => console.error("a gift email failed", error));
+  }, "a gift email");
 
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   if (buyer) {
     const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents;
     const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
-    await sendEmail({ meter: { by: "order" },
+    await sendOrderMail(store, {
       from: input.from,
       to: buyer,
       subject: g.giftReceiptSubject(title).slice(0, 200),
@@ -261,7 +263,7 @@ export async function deliverGift(input: {
       ].join("\n"),
       replyTo: store.email,
       idempotencyKey: `nimbus-gift-receipt:${gift.id}`,
-    }).catch((error) => console.error("a gift receipt failed", error));
+    }, "a gift receipt");
   }
   return "given";
 }

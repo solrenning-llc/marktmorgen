@@ -25,8 +25,11 @@ for (const code of LANGUAGE_CODES) {
 
 const source = readFileSync("lib/gifts.ts", "utf8");
 const grant = source.indexOf("await grantImported");
-const email = source.indexOf("await sendEmail", grant);
+// Rule 23 (claude5/order-mail-kept, 9 November 2026): the gift's email goes through sendOrderMail
+// (lib/order-mail-owed.ts), which never throws: a refused one is owed and tried again, given up with its creator told,
+// and never takes the gift back. Was: sendEmail(...).catch(console.error), which dropped a refused email.
+const email = source.indexOf("await sendOrderMail", grant);
 is("the paid gift belongs to the recipient before email is attempted", grant >= 0 && email > grant, true);
-is("a refused gift email is logged without taking the gift back", source.includes('}).catch((error) => console.error("a gift email failed", error));'), true);
+is("a refused gift email is owed, without taking the gift back", source.includes('}, "a gift email");') && !/sendOrderMail[\s\S]{0,4000}revoke/.test(source.slice(email, source.indexOf('return "given";', email))), true);
 is("the gift sender has no inbox-delivery event", /delivered|delivery event|inbox event/i.test(source.slice(email, source.indexOf("const buyer", email))), false);
 done();

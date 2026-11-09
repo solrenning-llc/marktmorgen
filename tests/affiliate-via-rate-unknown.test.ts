@@ -104,7 +104,7 @@ async function main(): Promise<void> {
   // writer (lib/store-checkout.ts, lib/cart-checkout.ts). One that does not read was skipped in silence, so its part
   // of the order was weighed at the front product's share and written down for good (HSETNX): a bump at 30% behind a
   // front product at 0% earned nothing. It follows the same rule as via_rate: nothing written, the commission waits.
-  part("A product ticked at checkout: its share and its price read, or nothing is written");
+  part("A product checked at checkout: its share and its price read, or nothing is written");
   // 10,000 cents in all, 4,000 of them the bump: 60% at the front share, 40% at the bump's.
   const bumped = (id: string, extra: Record<string, string>) => session(id, { via_rate: "20", bump: "ebook", ...extra });
   is("a bump at 30 behind a front at 20 is weighed: 20 × 0.6 + 30 × 0.4 = 24", [await outcome(() => noteSession(store, bumped("cs_bump30", { bump_cents: "4000", bump_rate: "30" }), new Map(), [])), (await sale("cs_bump30"))?.rate], ["written", 24]);

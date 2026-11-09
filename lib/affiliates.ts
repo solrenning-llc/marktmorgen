@@ -2446,7 +2446,7 @@ export function linkShare(value: unknown): number {
  */
 function bumpCents(value: unknown): number {
   const cents = typeof value === "string" && /^\d{1,15}$/.test(value) ? Number(value) : NaN;
-  if (!Number.isSafeInteger(cents)) throw new UnknownReplyError("the price of a product ticked at checkout");
+  if (!Number.isSafeInteger(cents)) throw new UnknownReplyError("the price of a product checked at checkout");
   return cents;
 }
 

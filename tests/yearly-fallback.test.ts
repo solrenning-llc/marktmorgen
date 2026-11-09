@@ -22,6 +22,7 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, s
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { priceEcho } from "./stripe-price-echo";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_yearly_fallback_only";
@@ -74,7 +75,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const status = invoiceReads.shift() ?? "open";
     return json({ id: "in_Year00000001", status, billing_reason: "subscription_cycle", amount_due: 20000, currency: "usd", parent: { subscription_details: { subscription: "sub_Year00000001" } } });
   }
-  if (method === "POST" && path === "/prices") return json({ id: "price_Month00001" });
+  // Rule 30 (claude5/switch-price-checked): Stripe answers the price just written, as it does; a bare id is no longer used.
+  if (method === "POST" && path === "/prices") return json(priceEcho("price_Month00001", body));
   if (method === "POST" && path === "/invoices/in_Year00000001") return json({ id: "in_Year00000001" });
   if (method === "POST" && path === "/subscriptions/sub_Year00000001") {
     const metadata = metadataOf(body);

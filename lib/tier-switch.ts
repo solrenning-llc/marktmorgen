@@ -2,7 +2,7 @@
  * A member switching their membership to another tier, up or down, on the
  * creator's own Stripe account (the rules are in lib/tier-rules.ts).
  *
- *   nl:tier:price:<account>:<product>:<amount>:<currency>:<interval>   the price made for a tier, reused
+ *   nl:tier:price:<account>:<product>:<amount>:<currency>:<interval>[:<tax>]:checked   the price made for a tier, reused
  *
  * From the member's own page (lib/membership-manage.ts), reached by the link
  * emailed to the address they pay with. Two steps, so nothing is charged by
@@ -49,9 +49,34 @@ export const PREVIEW_SECONDS = 15 * 60;
 
 /** How a price made here treats tax, as checkout's own price data does (lib/tax.ts, applyTax): none when tax is off. */
 const taxMode = (store: Store): "inclusive" | "exclusive" | "" => (store.tax.enabled ? (store.tax.included ? "inclusive" : "exclusive") : "");
-/** One cached price per product, amount, currency, interval and tax treatment: a price's tax behavior never changes. */
+/**
+ * One cached price per product, amount, currency, interval and tax treatment: a price's tax behavior never changes.
+ * Only a price Stripe answered as the one written is kept (isPriceWritten), under the `:checked` ending; an id kept
+ * before that check, under the key without it, was never read against the price written and is never read again.
+ */
 const priceKey = (account: string, product: Listing, currency: string, tax: string) =>
-  `nl:tier:price:${account}:${product.id}:${product.priceCents}:${currency}:${product.recurring?.interval ?? ""}${tax ? `:${tax}` : ""}`;
+  `nl:tier:price:${account}:${product.id}:${product.priceCents}:${currency}:${product.recurring?.interval ?? ""}${tax ? `:${tax}` : ""}:checked`;
+
+/** What a price made for a switch was written as: what Stripe's reply must say back (isPriceWritten). */
+export type WrittenPrice = { cents: number; currency: string; interval: string; tax: string; product: string };
+
+/**
+ * Whether Stripe's reply to POST /prices is the price just written (rule 30, as ensurePrice in lib/billing.ts and the
+ * assistant's price in lib/assistant-billing.ts): a price id, the amount and the currency sent, a recurring price
+ * every one `interval` (no count is sent and Stripe's default is 1; a reply with another count, or none, is another
+ * frequency or none said), the tax treatment when one was sent, and the product it hands over in its own metadata
+ * (lib/tier-rules.ts reads the tier there). Any other reply is never used for a switch, nor kept for the next: the
+ * switch that asked fails, and the next asks Stripe again. The prices themselves come from the product, unchanged.
+ */
+export function isPriceWritten(reply: Record<string, unknown>, written: WrittenPrice): reply is Record<string, unknown> & { id: string } {
+  const recurring = reply.recurring as { interval?: unknown; interval_count?: unknown } | null | undefined;
+  const metadata = reply.metadata as { product?: unknown } | null | undefined;
+  return typeof reply.id === "string" && PRICE_PATTERN.test(reply.id) &&
+    reply.unit_amount === written.cents && reply.currency === written.currency &&
+    !!recurring && typeof recurring === "object" && recurring.interval === written.interval && recurring.interval_count === 1 &&
+    (!written.tax || reply.tax_behavior === written.tax) &&
+    !!metadata && typeof metadata === "object" && metadata.product === written.product;
+}
 
 /** The tiers members can switch between today: still memberships, still on sale. */
 export async function liveTiers(store: Store): Promise<Listing[]> {
@@ -224,10 +249,11 @@ export async function tierPrice(store: Store, product: Listing): Promise<string>
   const [cached] = await redisPipeline([["GET", key]]);
   if (typeof cached === "string" && PRICE_PATTERN.test(cached)) return cached;
   const made = await onAccount("POST", account, "/prices", tierPriceBody(store, product));
-  const id = typeof made.id === "string" ? made.id : "";
-  if (!PRICE_PATTERN.test(id)) throw new Error("Stripe returned no price");
-  await redisPipeline([["SET", key, id, "EX", 400 * 86_400]]);
-  return id;
+  // Nothing is kept on any other reply: the switch that asked fails, and the next one asks Stripe again (rule 30).
+  const written = { cents: product.priceCents, currency: store.currency, interval: product.recurring?.interval ?? "month", tax: taxMode(store), product: product.id };
+  if (!isPriceWritten(made, written)) throw new Error("Stripe did not return the price just written");
+  await redisPipeline([["SET", key, made.id, "EX", 400 * 86_400]]);
+  return made.id;
 }
 
 /** The cached price of a tier dropped, when Stripe says it no longer has or sells it: the next use makes a new one. */

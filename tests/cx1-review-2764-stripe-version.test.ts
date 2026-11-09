@@ -8,6 +8,7 @@ import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { is, done } from "./check";
+import { priceEcho } from "./stripe-price-echo";
 
 // Synthetic transport only. No request is forwarded to a provider.
 const emails: { to: string | string[]; text: string }[] = [];
@@ -32,7 +33,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "GET" && path === "/customers") return json({ object: "list", data: [{ id: customer, created: 1 }], has_more: false });
   if (method === "GET" && path === `/customers/${customer}`) return json({ id: customer, email: "member@example.test" });
   if (method === "GET" && path === "/subscriptions") return json({ object: "list", data: [row()], has_more: false });
-  if (method === "POST" && path === "/prices") return json({ id: "price_CX1Target0001" });
+  // Rule 30 (claude5/switch-price-checked): Stripe answers the price just written, as it does; a bare id is no longer used.
+  if (method === "POST" && path === "/prices") return json(priceEcho("price_CX1Target0001", body));
   if (method === "POST" && path === `/subscriptions/${subscription}`) {
     if (!body.has("items[0][price]")) return json(row());
     const invoice = { id: "in_CX1Paid0001", status: "paid", total: 1000, amount_paid: 1000, currency: "usd" };

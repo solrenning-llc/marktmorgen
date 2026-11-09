@@ -2,7 +2,7 @@
  * A monthly member moving to the same membership's yearly price, on the
  * creator's own Stripe account (the rules are in lib/yearly-switch-rules.ts).
  *
- *   nl:yearly:price:<account>:<product>:<cents>:<currency>   the yearly price made for switches, reused
+ *   nl:yearly:price:<account>:<product>:<cents>:<currency>:checked   the yearly price made for switches, reused
  *   nl:yearly:link:<hash>                                     the emailed link to one switch, 14 days
  *
  * The same two steps as a switch between plans (lib/tier-switch.ts), so
@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { chargedOf, previewBody, previewKnown, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
+import { chargedOf, isPriceWritten, previewBody, previewKnown, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -57,7 +57,11 @@ async function sha256Hex(value: string): Promise<string> {
 }
 
 const linkKey = async (token: string) => `nl:yearly:link:${(await sha256Hex(`nimbus-yearly:${token}`)).slice(0, 40)}`;
-const priceKey = (account: string, product: Listing, cents: number, currency: string) => `nl:yearly:price:${account}:${product.id}:${cents}:${currency}`;
+/**
+ * Only a price Stripe answered as the one written is kept (isPriceWritten), under the `:checked` ending; an id kept
+ * before that check, under the key without it, was never read against the price written and is never read again.
+ */
+const priceKey = (account: string, product: Listing, cents: number, currency: string) => `nl:yearly:price:${account}:${product.id}:${cents}:${currency}:checked`;
 
 /** A link to one membership's switch, for the email that offers it. Opens nothing else. */
 export async function mintYearlyLink(store: Store, customer: string, subscription: string): Promise<string> {
@@ -116,10 +120,11 @@ export async function yearlyPrice(store: Store, product: Listing, cents: number)
   const [cached] = await redisPipeline([["GET", key]]);
   if (typeof cached === "string" && PRICE_PATTERN.test(cached)) return cached;
   const made = await onAccount("POST", account, "/prices", yearlyPriceBody(store, product, cents));
-  const id = typeof made.id === "string" ? made.id : "";
-  if (!PRICE_PATTERN.test(id)) throw new Error("Stripe returned no price");
-  await redisPipeline([["SET", key, id, "EX", 400 * 86_400]]);
-  return id;
+  // Nothing is kept on any other reply: the move that asked fails, and the next one asks Stripe again (rule 30).
+  // No tax treatment is sent for the yearly price, so none is asked back.
+  if (!isPriceWritten(made, { cents, currency: store.currency, interval: "year", tax: "", product: product.id })) throw new Error("Stripe did not return the price just written");
+  await redisPipeline([["SET", key, made.id, "EX", 400 * 86_400]]);
+  return made.id;
 }
 
 export type YearlyPreview = {

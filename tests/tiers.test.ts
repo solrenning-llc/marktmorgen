@@ -26,6 +26,7 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { priceEcho } from "./stripe-price-echo";
 import { paidPeriod } from "./billing-period-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { consentMetaValue } from "@/lib/digital-consent";
@@ -66,7 +67,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       ],
     });
   }
-  if (method === "POST" && path === "/prices") return json({ id: "price_Tier00000001" });
+  // Rule 30 (claude5/switch-price-checked): Stripe answers the price just written, as it does; a bare id is no longer used.
+  if (method === "POST" && path === "/prices") return json(priceEcho("price_Tier00000001", body));
   if (method === "POST" && path === "/invoices/create_preview") {
     if (jPreviewUnknown) return json({});
     if (jPreviewPartial) return json({currency:"usd",starting_balance:0,lines:{object:"list",has_more:true,data:[{amount:0,proration:true,period:{start:Number(body.get("subscription_details[proration_date]"))}}]}});

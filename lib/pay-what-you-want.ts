@@ -93,7 +93,30 @@ async function fingerprint(value: string): Promise<string> {
     .join("");
 }
 
-const priceKey = (account: string, print: string) => `nl:pwyw:${account}:${print}`;
+/**
+ * Only a Price Stripe answered as the one written is kept (isPwywPrice), under the `:checked` ending; an id kept
+ * before that check, under the key without it, was never read against the Price written and is never read again.
+ */
+const priceKey = (account: string, print: string) => `nl:pwyw:${account}:${print}:checked`;
+
+/** What a choose-your-price Price was written as: what Stripe's reply must say back (isPwywPrice). */
+type WrittenPwyw = { currency: string; minimum: number; preset: number; maximum: number; tax: string; product: string };
+
+/**
+ * Whether Stripe's reply to POST /prices is the choose-your-price Price just written (rule 30, as ensurePrice in
+ * lib/billing.ts): a price id, the currency sent, the buyer's box with the floor, the suggestion and the ceiling sent,
+ * no set amount, paid once and never again, the tax treatment when one was sent, and the product it is for. Any other
+ * reply is never used for a checkout, nor kept for the next: the checkout that asked fails, and the next asks again.
+ */
+function isPwywPrice(reply: Record<string, unknown>, written: WrittenPwyw): reply is Record<string, unknown> & { id: string } {
+  const box = reply.custom_unit_amount as { minimum?: unknown; preset?: unknown; maximum?: unknown } | null | undefined;
+  const metadata = reply.metadata as { product?: unknown } | null | undefined;
+  return typeof reply.id === "string" && /^price_[A-Za-z0-9]{6,64}$/.test(reply.id) && reply.currency === written.currency &&
+    !!box && typeof box === "object" && box.minimum === written.minimum && box.preset === written.preset && box.maximum === written.maximum &&
+    reply.unit_amount === null && reply.recurring === null &&
+    (!written.tax || reply.tax_behavior === written.tax) &&
+    !!metadata && typeof metadata === "object" && metadata.product === written.product;
+}
 
 /** A year: long enough that a steady seller never waits for Stripe twice. */
 const KEEP_SECONDS = 365 * 24 * 60 * 60;
@@ -148,7 +171,9 @@ export async function pwywPriceId(
   if (shape.tax) body.set("tax_behavior", shape.tax);
   // Two buyers pressing buy at the same moment make one Price, not two.
   const price = await onAccount("POST", account, "/prices", body, undefined, `pwyw-${print}${fresh ? `-${Date.now()}` : ""}`);
-  if (typeof price.id !== "string" || !price.id) throw new Error("Stripe did not return a price");
+  // Nothing is kept on any other reply: the checkout that asked fails, and the next one asks Stripe again (rule 30).
+  const written = { currency: store.currency, minimum: shape.minimum, preset: shape.preset, maximum: shape.maximum, tax: shape.tax, product: product.id };
+  if (!isPwywPrice(price, written)) throw new Error("Stripe did not return the price just written");
   if (cache) await redisPipeline([["SET", key, price.id, "EX", KEEP_SECONDS]]).catch(() => {});
   return price.id;
 }

@@ -93,6 +93,8 @@ export type Seller = { name: string; address: string | null; handles: Set<string
 
 /** An amount Stripe gives: a whole number of the currency's smallest unit, never negative. */
 const amount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+/** The last second a Date can hold (8.64e15 ms): a later charge date cannot be written, so it is not a date. */
+const LAST_SECOND = 8_640_000_000_000;
 const CURRENCY = /^[a-z]{3}$/;
 const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
 const LINE_ID = /^li_[A-Za-z0-9]{6,255}$/;
@@ -133,6 +135,9 @@ export function receiptFrom(seller: Seller, reference: string, session: unknown,
   const tax = ownField(details, "amount_tax");
   if (!amount(discount) || !amount(shipping) || !amount(tax)) return refuse("unreadable");
   // Stripe's figures must add up one way or the other: tax on top, or tax inside the prices.
+  // Either way tax is a part of the total, never all of it or more (total is above zero here): tax on top
+  // needs a real amount before it, and tax inside the prices is smaller than what they add up to.
+  if (tax > 0 && tax >= total) return refuse("unreadable");
   const before = subtotal - discount + shipping;
   let taxIncluded: boolean;
   if (before + tax === total) taxIncluded = false;
@@ -158,7 +163,7 @@ export function receiptFrom(seller: Seller, reference: string, session: unknown,
     ownField(charge, "currency") !== currency || charged !== total ||
     !amount(refunded) || refunded > charged ||
     typeof fullyRefunded !== "boolean" || typeof disputed !== "boolean" ||
-    !amount(created)
+    !amount(created) || created > LAST_SECOND
   ) return refuse("unreadable");
   if (fullyRefunded || refunded === charged) return refuse("refunded");
   if (disputed) return refuse("disputed");

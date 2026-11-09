@@ -17,6 +17,7 @@ import {
   RECEIPT_PDF_MAX_BYTES,
   RECEIPT_PDF_UNITS,
   RECEIPT_STRIPE_TIMEOUT_MS,
+  receiptDrawable,
   receiptFrom,
   receiptPdf,
   receiptTexts,
@@ -189,6 +190,34 @@ async function main(): Promise<void> {
   is("the payment not expanded", receiptFrom(seller, REF, paidSession({ payment_intent: "pi_1TestReceipt0001" }), linesPage()), { ok: false, why: "unreadable" });
   is("no buyer address", receiptFrom(seller, REF, paidSession({ customer_details: null }), linesPage()), { ok: false, why: "unreadable" });
 
+  part("Figures that cannot be true make no file (Codex P M1/L1 on #2952)");
+  // One line of 100 cents, so each case below changes only the tax or the date.
+  const hundred = linesPage([{ id: "li_1TestLineTax01", object: "item", description: "Kit", quantity: 1, amount_subtotal: 100, amount_total: 100, currency: "usd" }]);
+  const included = (tax: number) => receiptFrom(seller, REF, paidSession({ amount_subtotal: 100, amount_total: 100, total_details: { amount_discount: 0, amount_shipping: 0, amount_tax: tax } }, { amount: 100 }), hundred);
+  is("tax said to be inside a total smaller than it: unreadable", included(101), { ok: false, why: "unreadable" });
+  is("tax said to be the whole of a total: unreadable", included(100), { ok: false, why: "unreadable" });
+  const smaller = included(99);
+  is("control: tax inside the total and smaller than it still reads", smaller.ok && [smaller.receipt.taxIncluded, smaller.receipt.tax, smaller.receipt.total], [true, 99, 100]);
+  const none = included(0);
+  is("control: no tax on a total that adds up without it still reads", none.ok && [none.receipt.taxIncluded, none.receipt.tax], [false, 0]);
+  // Claude 6 on #2952 at fb231071 (MÉDIO, rule 24/30): the tax-on-top branch took before + tax === total with nothing
+  // before tax, so tax as large as the whole total still made a receipt. Same one-line page of 100 cents.
+  const onTop = (discount: number, tax: number, total: number) =>
+    receiptFrom(seller, REF, paidSession({ amount_subtotal: 100, amount_total: total, total_details: { amount_discount: discount, amount_shipping: 0, amount_tax: tax } }, { amount: total }), hundred);
+  is("tax on top of an amount below zero: unreadable", onTop(300, 300, 100), { ok: false, why: "unreadable" });
+  is("tax on top of nothing, the whole total: unreadable", onTop(100, 50, 50), { ok: false, why: "unreadable" });
+  const smallest = onTop(0, 1, 101);
+  is("control: tax on top of a real amount, below the total, still reads", smallest.ok && [smallest.receipt.taxIncluded, smallest.receipt.tax, smallest.receipt.total], [false, 1, 101]);
+  const MAX_SECONDS = 8_640_000_000_000; // the last second a Date can hold (8.64e15 ms)
+  const at = (created: number) => receiptFrom(seller, REF, paidSession({}, { created }), linesPage());
+  is("a charge date past any Date: unreadable, not a crash", at(Number.MAX_SAFE_INTEGER), { ok: false, why: "unreadable" });
+  is("a charge date one second past the last Date: unreadable", at(MAX_SECONDS + 1), { ok: false, why: "unreadable" });
+  const last = at(MAX_SECONDS);
+  let lastDrawable: unknown;
+  // Drawn as every receipt is since U2: with the store's number (lib/receipt-number.ts).
+  try { lastDrawable = last.ok && (await receiptDrawable({ ...last.receipt, number: "R-000001" })); } catch (error) { lastDrawable = `threw ${String(error)}`; }
+  is("control: the last date a Date can hold still reads and draws", [last.ok, lastDrawable], [true, true]);
+
   part("The file: tagged for a screen reader (PDF/UA)");
   const one = await structure(await receiptPdf(r));
   is("one page, a heading first, every text an element, in order", [one.pages, one.roles.length, one.roles[0]], [1, receiptTexts(r).length, "/H1"]);
@@ -251,6 +280,15 @@ async function main(): Promise<void> {
   answer(missingTax, linesPage());
   const unread = await get(`reference=${REF}`);
   is("a figure unknown: no PDF, and the reason in plain words", [unread.status, (await unread.text()).includes("Stripe dashboard")], [502, true]);
+  answer(paidSession({}, { created: Number.MAX_SAFE_INTEGER }), linesPage());
+  let farOff: unknown;
+  try {
+    const answered = await get(`reference=${REF}`);
+    farOff = [answered.status, answered.headers.get("content-type")?.startsWith("application/pdf") ?? false];
+  } catch (error) {
+    farOff = `threw ${String(error)}`;
+  }
+  is("a charge date no Date can hold: the plain refusal, never a bare 500", farOff, [502, false]);
 
   part("Reached from the list of sales");
   const page = readFileSync("app/studio/page.tsx", "utf8");

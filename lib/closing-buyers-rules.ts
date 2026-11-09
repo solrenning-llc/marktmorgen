@@ -200,6 +200,8 @@ export type PaidPeriod = {
   want?: number;
   /** The member was emailed that their refund could not be made. */
   m?: 1;
+  /** The Stripe account it was paid on, when not the store's first (lib/store.ts, salesAccounts); absent for the first. */
+  a?: string;
 };
 
 /**

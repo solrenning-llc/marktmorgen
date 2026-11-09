@@ -384,6 +384,14 @@ export type Store = {
    */
   stripeAccountId: string | null;
   /**
+   * The Stripe accounts this store was disconnected from, oldest first, at
+   * most MAX_FORMER_STRIPE_ACCOUNTS. Disconnecting lets go of an account on
+   * this side only, and what the store sold there stays on it, so its
+   * closing still reaches each of them (salesAccounts). Absent until the
+   * first disconnect. Nothing that sells reads it.
+   */
+  formerStripeAccounts?: string[];
+  /**
    * Whether Stripe last told us that account can take a payment, and when we
    * asked. Kept as a snapshot so the studio does not have to call Stripe on
    * every page load, and shown with its date so it is never read as a promise
@@ -814,6 +822,25 @@ export function syncTakesBuyer(store: Pick<Store, "emailSync">, productId: strin
 /** The shape Stripe gives a connected account: acct_ and then base62. */
 export const STRIPE_ACCOUNT_PATTERN = /^acct_[A-Za-z0-9]{8,64}$/;
 
+/** The most accounts a store keeps from its disconnects; past it, a disconnect is refused (clearStripeAccount). */
+export const MAX_FORMER_STRIPE_ACCOUNTS = 10;
+
+/**
+ * Every Stripe account the store sold through: those it was disconnected
+ * from, oldest first, then the one connected now. What a closing reaches
+ * (lib/closing-holds.ts, lib/closing-refunds.ts, lib/closing-buyers.ts,
+ * lib/closed-store-data.ts). A row a closing wrote naming no account
+ * belongs to the first of them.
+ */
+export function salesAccounts(store: Pick<Store, "stripeAccountId" | "formerStripeAccounts">): string[] {
+  return [...new Set([...(store.formerStripeAccounts ?? []), ...(store.stripeAccountId ? [store.stripeAccountId] : [])])];
+}
+
+function parseFormerAccounts(value: unknown): Pick<Store, "formerStripeAccounts"> {
+  const ids = Array.isArray(value) ? [...new Set(value.filter((id): id is string => typeof id === "string" && STRIPE_ACCOUNT_PATTERN.test(id)))] : [];
+  return ids.length ? { formerStripeAccounts: ids.slice(0, MAX_FORMER_STRIPE_ACCOUNTS) } : {};
+}
+
 /** The same, for the customer and subscription that pay us. */
 export const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 export const SUBSCRIPTION_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -952,6 +979,7 @@ function parseStore(raw: unknown): Store | null {
         STRIPE_ACCOUNT_PATTERN.test(value.stripeAccountId)
           ? value.stripeAccountId
           : null,
+      ...parseFormerAccounts(value.formerStripeAccounts),
       stripeChargesEnabled: value.stripeChargesEnabled === true,
       stripeCheckedAt: value.stripeCheckedAt ?? "",
       stripeCustomerId:
@@ -2114,15 +2142,23 @@ export async function setSubscription(
   return result ?? null;
 }
 
-/** Forgets the connection here. Returns the account that was let go. */
+/**
+ * Forgets the connection here. Returns the account that was let go, which
+ * the store keeps among its former accounts for its closing; `full` when it
+ * already keeps MAX_FORMER_STRIPE_ACCOUNTS, and then nothing changes.
+ */
 export async function clearStripeAccount(
   email: string,
-): Promise<{ store: Store; was: string | null } | null> {
+): Promise<{ store: Store; was: string | null } | { full: true } | null> {
   return withStore(email, async (store, save) => {
     const was = store.stripeAccountId;
+    const former = store.formerStripeAccounts ?? [];
+    const keeps = was !== null && !former.includes(was);
+    if (keeps && former.length >= MAX_FORMER_STRIPE_ACCOUNTS) return { full: true as const };
     const next = await save({
       ...store,
       stripeAccountId: null,
+      ...(keeps ? { formerStripeAccounts: [...former, was] } : {}),
       stripeChargesEnabled: false,
       stripeCheckedAt: "",
     });

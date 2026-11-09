@@ -40,7 +40,7 @@ import { redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { signedOf } from "@/lib/redis-count";
 import { repliesFor } from "@/lib/redis-reply";
-import { type Store, storeFolder, storeRef } from "@/lib/store";
+import { type Store, salesAccounts, storeFolder, storeRef } from "@/lib/store";
 import { type PaidPeriod, REFUNDS_PER_REQUEST, stillToGive, totalsOf, unusedOf } from "@/lib/closing-buyers-rules";
 import { paidPeriods, savePaidPeriod, takeCalls, workKey } from "@/lib/closing-holds";
 
@@ -256,7 +256,8 @@ export function settledCost(give: number, charge: { amount?: unknown; currency?:
 }
 
 /**
- * Gives back each member's unused part, from the creator's own account.
+ * Gives back each member's unused part, from the creator's own account it
+ * was paid on (one of salesAccounts: the row's `a`, or the first).
  * `subs` limits it to the rows a review screen showed; `mark` is that
  * screen's reviewMark, and nothing is done when the rows changed since.
  * `final` is the closing day's: a refund the balance does not cover is then
@@ -268,8 +269,8 @@ export async function giveBackUnused(
   day: number,
   options: { subs?: string[]; mark?: string; until?: number; final?: boolean } = {},
 ): Promise<Settled | "changed" | "busy" | "unavailable"> {
-  const account = store.stripeAccountId;
-  if (!account) return "unavailable";
+  const accounts = salesAccounts(store);
+  if (!accounts.length) return "unavailable";
   const until = options.until ?? Number.POSITIVE_INFINITY;
   const folder = await storeFolder(storeRef(store));
   // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run, or not known to be
@@ -286,9 +287,11 @@ export async function giveBackUnused(
     const out: Settled = { done: [], short: [], unmade: [], pending: 0, disputed: 0, none: 0, over: 0, failed: 0, left: Math.max(0, rows.length - REFUNDS_PER_REQUEST) };
     rows = rows.slice(0, REFUNDS_PER_REQUEST);
     if (!rows.length) return out;
-    let funds: Map<string, number>;
+    // The account each row was paid on; "" for a row naming none of the store's accounts, which is never acted on.
+    const accountOf = (row: UnusedRow): string => (row.paid.a === undefined ? accounts[0] : accounts.includes(row.paid.a) ? row.paid.a : "");
+    const balances = new Map<string, Map<string, number>>();
     try {
-      funds = await available(account);
+      for (const account of new Set(rows.map(accountOf).filter(Boolean))) balances.set(account, await available(account));
     } catch (error) {
       console.error("reading a closing store's Stripe balance failed", error);
       return { ...out, failed: rows.length };
@@ -297,6 +300,13 @@ export async function giveBackUnused(
     for (const row of rows) {
       if (Date.now() > until) {
         out.left += 1;
+        continue;
+      }
+      const account = accountOf(row);
+      const funds = balances.get(account);
+      if (!funds) {
+        console.error("a closing member's payment names an account the store does not have; tried again");
+        out.failed += 1;
         continue;
       }
       const settle = async (r: PaidPeriod["r"], amount?: number) =>

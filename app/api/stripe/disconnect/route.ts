@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await clearStripeAccount(ref);
     if (!result) return away(origin, studio("stripe=nostore"));
+    if ("full" in result) return away(origin, studio("stripe=kept"));
     if (store.stripeAccountId) after(() => noticeCreator(store, { kind: "stripe-disconnected" }));
     return away(origin, studio("stripe=forgotten"));
   } catch (error) {

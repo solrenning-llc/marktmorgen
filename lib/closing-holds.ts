@@ -48,7 +48,7 @@ import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, saleHandles, salesAccounts, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
 import { forgetCredit } from "@/lib/closing-credit";
@@ -119,14 +119,17 @@ async function inTurn<T>(items: T[], until: number, each: (item: T) => Promise<v
 }
 
 /**
- * Every subscription the store sold, page by page on its own account, from
- * the cursor kept under `field`; bounded by `until` and HOLD_PAGES_PER_RUN.
- * Answers whether it reached the end (and lets the cursor go then).
+ * Every subscription the store sold, page by page on each account it sold
+ * through (salesAccounts), from the cursor kept under `field`; bounded by
+ * `until` and HOLD_PAGES_PER_RUN. Answers whether it reached the end (and
+ * lets the cursor go then).
  */
-async function eachSold(store: Store, folder: string, field: string, until: number, each: (rows: Row[]) => Promise<boolean>): Promise<boolean> {
-  const account = store.stripeAccountId;
-  if (!account) return true;
-  const handles = [...saleHandles(store)];
+async function eachSold(store: Store, folder: string, field: string, until: number, each: (rows: Row[], account: string) => Promise<boolean>): Promise<boolean> {
+  const accounts = salesAccounts(store);
+  if (!accounts.length) return true;
+  // Each handle on each account, the accounts in salesAccounts' order: that list only grows at its end, so the cursor
+  // still names the same account and handle after a disconnect or a new connection.
+  const handles = accounts.flatMap((account) => [...saleHandles(store)].map((handle) => ({ account, handle })));
   const [raw] = await redisPipeline([["HGET", workKey(folder), field]]);
   let cursor = parseCursor(raw);
   for (let pages = 0; pages < HOLD_PAGES_PER_RUN; pages += 1) {
@@ -135,7 +138,8 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
       return true;
     }
     if (Date.now() > until) return false;
-    const query = new URLSearchParams({ limit: "100", query: `metadata['store']:'${handles[cursor.h]}'` });
+    const { account, handle } = handles[cursor.h];
+    const query = new URLSearchParams({ limit: "100", query: `metadata['store']:'${handle}'` });
     query.append("expand[]", "data.customer");
     if (cursor.p) query.set("page", cursor.p);
     const found = await onAccount("GET", account, `/subscriptions/search?${query}`);
@@ -154,9 +158,9 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
       console.error("plan-closing: Stripe's search gave a subscription that could not be read; tried again");
       return false;
     }
-    const rows = listed.filter((row): row is Row => (row as Row).metadata?.store === handles[cursor.h]);
+    const rows = listed.filter((row): row is Row => (row as Row).metadata?.store === handle);
     if (rows.length < listed.length) console.error(`plan-closing: Stripe's search gave ${listed.length - rows.length} subscription(s) of another store; left alone`);
-    if (!(await each(rows))) return false;
+    if (!(await each(rows, account))) return false;
     cursor = found.has_more ? { h: cursor.h, p: next } : { h: cursor.h + 1, p: "" };
     await redisPipeline([["HSET", workKey(folder), field, JSON.stringify(cursor)]]);
   }
@@ -250,9 +254,9 @@ function ownInvoices(reply: unknown, sub: string, customer: string, what: string
  * refund's calls are set aside once it is held. Throws when Stripe could not
  * be asked, or listed an invoice that is not the member's own (before any
  * write, so the member is tried again whole); answers "over" when the budget
- * did not cover it.
+ * did not cover it. `mark` is how the member's rows name its account (markOf).
  */
-async function holdOne(account: string, folder: string, sub: Row, endedAt: number): Promise<"held" | "over"> {
+async function holdOne(account: string, folder: string, sub: Row, endedAt: number, mark: string): Promise<"held" | "over"> {
   const id = sub.id as string;
   // Its open and draft invoices listed, its paid ones read, its hold and its release; and its refund's, set aside.
   const plan = isPaymentPlan(sub);
@@ -280,7 +284,7 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
   if (!plan) {
     const period = paid.map((invoice) => paidPeriodOf(invoice, email)).find((p): p is PaidPeriod => p !== null) ?? null;
     // The first reading is the one before any hold (HSETNX).
-    if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(period)]]);
+    if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(mark === FIRST_ACCOUNT ? period : { ...period, a: account })]]);
   }
   await onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, holdBody(sub, endedAt), undefined, `closing-hold:${id}:${endedAt}`);
   // Set aside only now that it is held: a hold that failed leaves its refund's calls spent, never a second reserve.
@@ -341,7 +345,14 @@ function memberEmail(sub: Row): string {
   return typeof customer?.email === "string" ? normaliseEmail(customer.email) : "";
 }
 
-async function holdRows(account: string, folder: string, rows: Row[], endedAt: number, until: number): Promise<boolean> {
+/**
+ * How a closing's rows name the account a member belongs to: "1", as always, for the first of the store's accounts
+ * (salesAccounts), the account's id for any other. A payment row names it only when it is not the first (`a`).
+ */
+const FIRST_ACCOUNT = "1";
+const markOf = (store: Store, account: string): string => (account === salesAccounts(store)[0] ? FIRST_ACCOUNT : account);
+
+async function holdRows(account: string, folder: string, rows: Row[], endedAt: number, until: number, mark: string): Promise<boolean> {
   const todo = rows.filter((sub) => typeof sub.id === "string" && SUB_ID.test(sub.id) && chargeable(sub) && !(sub.metadata?.store_hold === String(endedAt) && sub.pause_collection));
   // Every member's address is written down from the row itself, before any
   // budget or call, so one that is past the budget or that Stripe refused is
@@ -355,11 +366,11 @@ async function holdRows(account: string, folder: string, rows: Row[], endedAt: n
   return inTurn(todo, until, async (sub) => {
     const id = sub.id as string;
     try {
-      const done = await holdOne(account, folder, sub, endedAt);
+      const done = await holdOne(account, folder, sub, endedAt, mark);
       await redisPipeline(done === "held" ? [["HDEL", workKey(folder), `f:${id}`, `o:${id}`]] : [["HSET", workKey(folder), `o:${id}`, "1"], ["HDEL", workKey(folder), `f:${id}`]]);
       if (done === "over") console.error("plan-closing: a member past the closing's call budget was not held; it ends on the closing day");
     } catch (error) {
-      await redisPipeline([["HSET", workKey(folder), `f:${id}`, "1"]]);
+      await redisPipeline([["HSET", workKey(folder), `f:${id}`, mark]]);
       console.error("holding a member's charges after the plan ended failed; tried again tomorrow", error);
     }
   });
@@ -373,9 +384,7 @@ async function holdRows(account: string, folder: string, rows: Row[], endedAt: n
  */
 export async function holdCharges(store: Store, endedAt: number, until: number): Promise<{ done: boolean; failed: number; over: number }> {
   const folder = await storeFolder(storeRef(store));
-  const account = store.stripeAccountId;
-  let done = true;
-  if (account) done = await eachSold(store, folder, "hc", until, (rows) => holdRows(account, folder, rows, endedAt, until));
+  const done = await eachSold(store, folder, "hc", until, (rows, account) => holdRows(account, folder, rows, endedAt, until, markOf(store, account)));
   await redisPipeline([["ZADD", HELD_INDEX, endedAt, storeRef(store)]]);
   return { done, ...(await holdCounts(folder)) };
 }
@@ -383,11 +392,15 @@ export async function holdCharges(store: Store, endedAt: number, until: number):
 /** The members not held yet, tried again: read one by one, then held. */
 export async function retryHolds(store: Store, endedAt: number, until: number): Promise<{ failed: number; over: number }> {
   const folder = await storeFolder(storeRef(store));
-  const account = store.stripeAccountId;
-  if (!account) return holdCounts(folder);
+  const accounts = salesAccounts(store);
+  if (!accounts.length) return holdCounts(folder);
   const [fields] = await redisPipeline([["HKEYS", workKey(folder)]]);
   const ids = (Array.isArray(fields) ? (fields as unknown[]).map(String) : []).filter((k) => k.startsWith("f:")).map((k) => k.slice(2)).filter((id) => SUB_ID.test(id));
+  const owners = accounts.length > 1 ? await markedAccounts(folder, ids, accounts) : new Map(ids.map((id) => [id, accounts[0]]));
   await inTurn(ids, until, async (id) => {
+    // A mark that names none of the store's accounts: nothing is known of where it is, so it stays marked and counted.
+    const account = owners.get(id);
+    if (!account) return;
     try {
       if (!(await takeCalls(folder, 1))) {
         await redisPipeline([["HSET", workKey(folder), `o:${id}`, "1"], ["HDEL", workKey(folder), `f:${id}`]]);
@@ -401,7 +414,7 @@ export async function retryHolds(store: Store, endedAt: number, until: number): 
         await redisPipeline([["HDEL", workKey(folder), `f:${id}`]]);
         return;
       }
-      await holdRows(account, folder, [sub], endedAt, until);
+      await holdRows(account, folder, [sub], endedAt, until, markOf(store, account));
     } catch (error) {
       console.error("holding a member's charges failed again; tried again tomorrow", error);
     }
@@ -409,14 +422,30 @@ export async function retryHolds(store: Store, endedAt: number, until: number): 
   return holdCounts(folder);
 }
 
+/**
+ * The account each member to try again belongs to, from its mark (markOf), read exactly (CX-123 rule 24): a reply
+ * that is not one text per member throws, and the members stay marked for the next run.
+ */
+async function markedAccounts(folder: string, ids: string[], accounts: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  const marks = repliesFor(await redisPipeline([["HMGET", workKey(folder), ...ids.map((id) => `f:${id}`)]]), 1)?.[0];
+  if (!Array.isArray(marks) || marks.length !== ids.length || !marks.every((mark) => typeof mark === "string")) throw new UnknownReplyError("the marks of a closing's members to try again");
+  ids.forEach((id, i) => {
+    const mark = marks[i] as string;
+    const account = mark === FIRST_ACCOUNT ? accounts[0] : accounts.includes(mark) ? mark : "";
+    if (account) out.set(id, account);
+  });
+  return out;
+}
+
 /** Lets every held member of the store go again, as they were. `done` when every one was reached. */
 export async function releaseHolds(store: Store, until: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ done: boolean; released: number; failed: number }> {
   const out = { done: true, released: 0, failed: 0 };
-  const account = store.stripeAccountId;
-  if (!account) return out;
+  if (!salesAccounts(store).length) return out;
   const folder = await storeFolder(storeRef(store));
   // Each held member's release was taken from the budget with its hold (STRIPE_CALLS_PER_MEMBER): it is never refused for want of it.
-  const reached = await eachSold(store, folder, "rc", until, async (rows) => {
+  const reached = await eachSold(store, folder, "rc", until, async (rows, account) => {
     const todo = rows.filter((sub) => typeof sub.id === "string" && SUB_ID.test(sub.id) && Boolean(sub.metadata?.store_hold) && chargeable(sub));
     let failed = 0;
     const all = await inTurn(todo, until, async (sub) => {
@@ -536,6 +565,8 @@ export async function heldPaymentsOf(store: Store, email: string): Promise<(Paid
   for (let i = 0; i + 1 < flat.length; i += 2) {
     try {
       const row = JSON.parse(flat[i + 1]) as PaidPeriod;
+      // The creator's account it was paid on is the creator's, not part of the person's copy.
+      delete row.a;
       if (typeof row.e === "string" && row.e.trim().toLowerCase() === address) out.push({ ...row, subscription: flat[i] });
     } catch {
       // Not a payment row: skipped, as the closing itself skips it.

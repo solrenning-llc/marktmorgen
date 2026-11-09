@@ -442,6 +442,10 @@ const STRIPE_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Stripe did not answer as expected",
     body: "Nothing was changed. Try again in a moment.",
   },
+  kept: {
+    title: "Stripe is still connected",
+    body: "This store already keeps the most Stripe accounts it can from earlier disconnects, so it can still pause, end and refund what it sold on them if it closes. Nothing was changed. Write to us if you need to use another Stripe account.",
+  },
 };
 
 

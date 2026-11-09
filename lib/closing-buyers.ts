@@ -35,7 +35,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
-import { type Store, saleHandles, storeFolder, storeRef } from "@/lib/store";
+import { type Store, saleHandles, salesAccounts, storeFolder, storeRef } from "@/lib/store";
 import { readPayPalSales } from "@/lib/paypal-sales";
 import { importedBuyers } from "@/lib/imported-purchases";
 import { storeBase } from "@/lib/purchase-email";
@@ -183,8 +183,9 @@ function searchPageOf(reply: unknown): { rows: Record<string, unknown>[]; next: 
  * and those brought over or paid with PayPal, are told first; each address
  * told is written down at once, so a run that stops part-way never writes to
  * anybody twice). Then the payments that name this store in their own
- * metadata, found by Stripe's search on the creator's account (never the
- * account's whole history), BUYER_PAGES_PER_RUN pages a run and `maxPages`
+ * metadata, found by Stripe's search on each of the creator's accounts the
+ * store sold through (salesAccounts; never an account's whole history),
+ * BUYER_PAGES_PER_RUN pages a run and `maxPages`
  * in all; at that cap it is done, and says it was `capped`. `day` is the
  * closing day the emails name.
  */
@@ -241,15 +242,17 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
     if (!(await tell(kept))) return out;
     out.after = "start";
   }
-  const account = store.stripeAccountId;
-  if (!account) return { ...out, done: true };
-  const handles = [...saleHandles(store)];
+  // Each handle on each account the store sold through, in salesAccounts' order (it only grows at its end, so the
+  // cursor still names the same account and handle after a disconnect or a new connection).
+  const handles = salesAccounts(store).flatMap((account) => [...saleHandles(store)].map((handle) => ({ account, handle })));
+  if (!handles.length) return { ...out, done: true };
   let [h, page] = out.after === "start" ? [0, ""] : [Number(out.after.split("|")[0]), out.after.slice(out.after.indexOf("|") + 1)];
   for (let run = 0; run < BUYER_PAGES_PER_RUN; run += 1) {
     if (h >= handles.length) return { ...out, done: true };
     if (out.pages >= maxPages) return { ...out, done: true, capped: true };
     if (Date.now() > until) return out;
-    const query = new URLSearchParams({ limit: "100", query: `metadata['store']:'${handles[h]}' AND status:'succeeded'` });
+    const { account, handle } = handles[h];
+    const query = new URLSearchParams({ limit: "100", query: `metadata['store']:'${handle}' AND status:'succeeded'` });
     query.append("expand[]", "data.latest_charge");
     if (page) query.set("page", page);
     const list = await onAccount("GET", account, `/payment_intents/search?${query}`);

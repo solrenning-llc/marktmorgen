@@ -82,7 +82,7 @@ import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, salesAccounts, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -942,8 +942,11 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       },
     );
     try {
-      const stopped = await stopRenewals(store, until);
-      if (!stopped.done) return { key, state: "held", note: "the renewals it sold are not all stopped yet" };
+      // On each Stripe account the store sold through (salesAccounts): what it sold before a disconnect stays there.
+      for (const account of salesAccounts(store)) {
+        const stopped = await stopRenewals({ ...store, stripeAccountId: account }, until);
+        if (!stopped.done) return { key, state: "held", note: "the renewals it sold are not all stopped yet" };
+      }
     } catch (error) {
       console.error("stopping a closing store's renewals failed", error);
       return { key, state: "held", note: "Stripe could not be asked to stop its renewals" };
@@ -972,7 +975,8 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       if (told.untold) console.error(`plan-closing: ${told.untold} members whose refund could not be made were not covered by the store's closing emails`);
     }
     const left = (await unusedRows(store, next.day ?? day)).filter((row) => row.paid.r !== "pending");
-    if (settled !== "changed" && settled !== "unavailable" && (settled.failed > 0 || left.length > 0)) return { key, state: "held", note: "its members' unused time is not all settled yet" };
+    // "unavailable" (no Stripe account to refund on) settles only a store with nothing left to give back.
+    if (settled !== "changed" && (left.length > 0 || (settled !== "unavailable" && settled.failed > 0))) return { key, state: "held", note: "its members' unused time is not all settled yet" };
     next = { ...next, refunds: now };
     await save(next);
   }

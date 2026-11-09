@@ -17,12 +17,14 @@
  * Synthetic Stripe and an in-memory Redis; the real ledger, gate, checkout route, studio route and drip job run.
  */
 import { NextRequest } from "next/server";
+import { readFileSync } from "node:fs";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { POST as courseRoute } from "@/app/api/store/course/route";
 import {
   addProduct,
   claimHandle,
   ensureStatsId,
+  setPastBuyers,
   setProductCourse,
   setStripeAccount,
   setSubscription,
@@ -32,7 +34,10 @@ import {
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { readProduct } from "@/lib/catalog";
 import type { Listing } from "@/lib/store";
+import * as learn from "@/lib/learn";
 import { courseAccess, emailKey, mintPass, storeKey, passCookieName, recordEnrollment, registerDrip, sendDripEmails, touchStudent } from "@/lib/learn";
+import * as accessEnd from "@/lib/course-access-end";
+import { grantImported } from "@/lib/imported-purchases";
 import { type Course, editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { paidPeriod } from "./billing-period-fixture";
 import { withConsent } from "./digital-consent-fixture";
@@ -46,6 +51,7 @@ const LATER = SET_AT + 20 * DAY;
 
 type Session = Record<string, unknown>;
 let listed: Session[] = [];
+let stripeDown = false;
 const opened: URLSearchParams[] = [];
 const realFetch = globalThis.fetch;
 process.env.STRIPE_SECRET_KEY = "sk_test_course_access_end_stamp";
@@ -55,6 +61,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     opened.push(new URLSearchParams(String(init.body)));
     return Response.json({ id: "cs_test_accessEndStamp0001", url: "https://checkout.stripe.com/c/pay/cs_test_accessEndStamp0001" });
   }
+  if (url.hostname === "api.stripe.com" && stripeDown) return Response.json({ error: { message: "synthetic outage" } }, { status: 500 });
   if (url.hostname === "api.stripe.com" && url.pathname === "/v1/checkout/sessions") return Response.json({ object: "list", has_more: false, data: listed });
   if (url.hostname === "api.stripe.com") return Response.json({ object: "list", has_more: false, data: [] });
   return Response.json({}, { status: 404 });
@@ -241,6 +248,57 @@ async function main(): Promise<void> {
   }
   is("the student whose end passed before the module opens: not emailed", claimed.some((key) => key.includes(emailKey("drip-ended@example.test"))), false);
   is("the student with no end: emailed as before", claimed.some((key) => key.includes(emailKey("drip-open@example.test"))), true);
+
+  part("M-A (C2 focal): a checkout opened before the end and paid after it has no end");
+  // Stripe keeps a checkout open for up to 24 hours: a stamp counts only on a session made at least that long before it.
+  listed = [session(a.store, { product: a.product.id, access_end: String(END) }, END - 3600)];
+  is("opened an hour before the end, read an hour after: open", (await gate(a.store, a.product, course, "ma-late@example.test", END + 3600)).state, "open");
+  listed = [session(a.store, { product: a.product.id, access_end: String(END) }, END - 24 * 3600)];
+  is("opened 24 hours before the end: the end holds", (await gate(a.store, a.product, course, "ma-24h@example.test", END + 3600)).state, "expired");
+  const noCreated = session(a.store, { product: a.product.id, access_end: String(END) }, SET_AT + DAY);
+  delete noCreated.created;
+  listed = [noCreated];
+  is("a session whose creation does not read: no end", (await gate(a.store, a.product, course, "ma-nocreated@example.test", END + 3600)).state, "open");
+  const forSale = (accessEnd as Record<string, unknown>).shownAccessEnd as (c: Course, now?: number) => string;
+  is("in its last 24 hours the date is no longer said, nor sent with the form", [forSale(course, END - 12 * 3600), forSale(course, END - 25 * 3600)], ["none", String(END)]);
+  is("nor the line on the sales page", accessEnd.accessEndFact(course, "en", END - 12 * 3600), null);
+  const near = await shop("stampnear");
+  const nearEnd = Math.floor(Date.now() / 1000) + 12 * 3600;
+  await saveCourse(withEnd(near.courseId, nearEnd), near.store);
+  opened.length = 0;
+  const nearForm = withConsent(new URLSearchParams({ handle: near.store.handle, product: near.product.id, access_end: "none" }));
+  await checkoutRoute(new NextRequest("https://marktmorgen.test/api/store/checkout", { method: "POST", headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" }, body: nearForm.toString() }));
+  is("a page drawn in the last 24 hours said none: the checkout opens with no stamp", [opened.length, opened[0]?.get("metadata[access_end]") ?? null], [1, null]);
+
+  part("M-B (C2 focal): a place, gift or pre-order given after a stamped end reopens the course");
+  const recordOpen = ((learn as Record<string, unknown>).recordOpenEnrollment ?? recordEnrollment) as typeof recordEnrollment;
+  listed = [session(a.store, { product: a.product.id, access_end: String(END) }, SET_AT + DAY)];
+  await recordEnrollment(a.store, "mb-place@example.test", a.product.id, SET_AT + DAY);
+  await recordOpen(a.store, "mb-place@example.test", a.product.id, END + DAY);
+  is("a group place taken after the stamped end: open", (await gate(a.store, a.product, course, "mb-place@example.test", LATER)).state, "open");
+  // As deliverGift and handOverPreorder do: the grant, and the store's doors that read grants opened.
+  await grantImported(a.store.statsId!, "g".repeat(24), [{ email: "mb-gift@example.test", productId: a.product.id, items: null }], END + DAY, a.store.sid);
+  await setPastBuyers(a.owner);
+  const granting = (await storeForEmail(a.owner))!;
+  is("a gift or pre-order after the stamped end (both written as a grant): open", (await gate(granting, a.product, course, "mb-gift@example.test", LATER)).state, "open");
+  const group = readFileSync("app/[handle]/group/[group]/page.tsx", "utf8");
+  const paypal = readFileSync("lib/paypal-delivery.ts", "utf8");
+  is("the group place and the PayPal sale write their course as one with no end", [/recordOpenEnrollment\(store, email, productId, start\)/.test(group), /recordOpenEnrollment\(store, email, productId, start\)/.test(paypal)], [true, true]);
+
+  part("L-A (C2 focal): a learner with no end needs no answer from Stripe");
+  stripeDown = true;
+  await recordOpen(a.store, "la-open@example.test", a.product.id, SET_AT + DAY);
+  is("Stripe down, a group place: open, not \"could not check\"", (await gate(a.store, a.product, course, "la-open@example.test", LATER)).state, "open");
+  stripeDown = false;
+
+  part("L-B (C2 focal): the start button keeps the student's stamp right");
+  const stampOf = (learn as Record<string, unknown>).purchaseStamp as ((st: Store, email: string, productId: string) => Promise<number | null | "unknown">) | undefined;
+  listed = [session(a.store, { product: a.product.id, access_end: String(END) }, SET_AT + DAY), session(a.store, { product: a.product.id }, END + DAY)];
+  is("the gate's stamp for a learner who bought again with no end: none", stampOf ? await stampOf(a.store, "lb-again@example.test", a.product.id) : "missing", null);
+  listed = [session(a.store, { product: a.product.id, access_end: String(END) }, SET_AT + DAY)];
+  is("and for a stamped learner: the stamp", stampOf ? await stampOf(a.store, "lb-stamped@example.test", a.product.id) : "missing", END);
+  const start = readFileSync("app/api/store/course/start/route.ts", "utf8");
+  is("the start route keeps it on the student row", /purchaseStamp\(store, order\.email, product\.id\)/.test(start) && /noteStudentStamp\(/.test(start), true);
 
   globalThis.fetch = realFetch;
   done();

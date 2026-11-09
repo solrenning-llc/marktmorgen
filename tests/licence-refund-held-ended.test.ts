@@ -13,7 +13,12 @@
  *   - kept refunds read back and held (still pending) keeping their turn, so HELD_REFUND_READS of them took every read
  *     of every run and one that went through behind them was never read (rule 30, the same flow);
  *   - LOW: an anchor in an unknown shape read as none and written again thirty days back (rule 24);
- *   - LOW: lost disputes whose sale stays unknown taking every lookup of the run from the refunds of the window.
+ *   - LOW: lost disputes whose sale stays unknown taking every lookup of the run from the refunds of the window;
+ *   - #2868's HIGH at 9fa5c95602 (5bb167d833) on the kept path: a kept refund read back succeeded as only part of a
+ *     charge read refunded in full, while the rest of that charge is still pending, revoked a key given (or wrote the
+ *     final mark on a keyless sale) before the rest went through; when the rest then failed, a sale mostly paid kept
+ *     its key revoked. The merge of #2868 checked the charge's refunds only in its own loop, which this branch's pass
+ *     replaced, so neither the rows of the pages nor the kept ones read back were checked.
  */
 import { type Store, claimHandle, ensureStatsId, addProduct, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { PENDING_REFUND_SALE, checkKey, keyForSale, revokeRefunded } from "@/lib/licence-keys";
@@ -38,6 +43,8 @@ let listed: Row[] = [];
 const byId = new Map<string, Row>();
 /** Stripe's charge.dispute.closed events, newest first. */
 let events: Row[] = [];
+/** The charges whose own refunds were read (GET /refunds?charge=). */
+const chargeReads: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -47,6 +54,15 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   if (one) {
     const found = byId.get(one[1]);
     return found ? answer(found) : answer({ error: { message: "No such refund" } }, 404);
+  }
+  if (path === "/refunds" && url.searchParams.has("charge")) {
+    // A charge's own refunds, as they stand now (a kept one as GET /refunds/{id} answers it), the charge as its id.
+    const charge = url.searchParams.get("charge") ?? "";
+    const now = new Map<string, Row>();
+    for (const row of [...listed, ...byId.values()]) now.set(String(row.id), row);
+    const rows = [...now.values()].filter((row) => (row.charge as { id?: string } | null)?.id === charge).map((row) => ({ ...row, charge }));
+    chargeReads.push(charge);
+    return list(rows);
   }
   if (path === "/refunds") {
     const gte = Number(url.searchParams.get("created[gte]") ?? 0);
@@ -73,9 +89,12 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 
 type Status = "requires_action" | "pending" | "succeeded" | "failed" | "canceled";
 /** A refund as Stripe gives it, its charge expanded: `full` when the charge is refunded in full. */
+// Regra 23: the row now carries its own amount, as every refund Stripe sends does: each refund here is one of the whole
+// charge, so it is whole on its own and needs no read of the charge's refunds (#2868's 5bb167d833, merged here).
 const refundRow = (id: string, pi: string, created: number, status: Status, full: boolean): Row => ({
   id,
   object: "refund",
+  amount: 2900,
   created,
   status,
   payment_intent: pi,
@@ -239,6 +258,48 @@ async function main(): Promise<void> {
   const kKey = ((await keyForSale(store, app, k.reference, "buyer@example.com")) as { key?: string } | null)?.key ?? "";
   listed = [refundRow(k.id, k.pi, NOW - 50, "succeeded", true)];
   is("the refund of the window is handled in the same run", [await run(), await checkKey(store, app, kKey), await seenOf(k.id)], [1, "revoked", 1]);
+
+  part("#2868's HIGH on the kept path: a kept refund read back succeeded as part of a charge whose rest is pending takes nothing back");
+  // A $29 sale: $10 kept while it needed action, then succeeded; the other $19 made later, in the window, pending.
+  // Stripe counts a pending refund in the charge's amount_refunded, so the kept $10 reads back as refunded in full.
+  await fresh();
+  const partRow = (id: string, pi: string, created: number, status: Status, amount: number, charge: string, back: number): Row => ({
+    id,
+    object: "refund",
+    amount,
+    created,
+    status,
+    payment_intent: pi,
+    charge: { id: charge, object: "charge", amount: 2900, amount_refunded: back, refunded: back >= 2900 },
+  });
+  // p: a key given, the $19 fails. q: no key yet, the $19 fails. r: a key given, the $19 goes through.
+  const [p, q, r] = [sale("36"), sale("37"), sale("38")];
+  const pKey = ((await keyForSale(store, app, p.reference, "buyer@example.com")) as { key?: string } | null)?.key ?? "";
+  const rKey = ((await keyForSale(store, app, r.reference, "buyer@example.com")) as { key?: string } | null)?.key ?? "";
+  const tenCreated = NOW - 7_200;
+  await keepThenPass([p, q, r].map((s) => ({ ...s, created: tenCreated })));
+  is("the three $10 refunds kept, the anchor moved past them (set-up)", [(await keptIds()).length, Number(await anchorOf()) > tenCreated + 300], [3, true]);
+  const chargeOf = (s: { id: string }) => `ch_${s.id.slice(3)}`;
+  const nineteen = (s: { id: string; pi: string }, status: Status, back: number) => partRow(`${s.id}N`, s.pi, NOW - 5, status, 1900, chargeOf(s), back);
+  for (const s of [p, q, r]) byId.set(s.id, partRow(s.id, s.pi, tenCreated, "succeeded", 1000, chargeOf(s), 2900));
+  listed = [p, q, r].map((s) => nineteen(s, "pending", 2900));
+  await due();
+  chargeReads.length = 0;
+  is(
+    "the $10 read back with the $19 pending: nothing revoked, both keys valid, the $10 refunds kept and unread",
+    [await run(), await checkKey(store, app, pKey), await checkKey(store, app, rKey), await keptIds(), await seenOf(p.id), await seenOf(r.id)],
+    [0, "valid", "valid", [p.id, q.id, r.id].sort(), 0, 0],
+  );
+  is("the keyless sale holds the pending mark, never the final one", await placeOf(app, q.reference), PENDING_REFUND_SALE);
+  is("each kept $10 read its charge's refunds once", [...new Set(chargeReads)].sort(), [p, q, r].map(chargeOf).sort());
+  // The $19 of p and q fail (the charges read $10 back now); r's goes through.
+  for (const s of [p, q]) byId.set(s.id, partRow(s.id, s.pi, tenCreated, "succeeded", 1000, chargeOf(s), 1000));
+  listed = [nineteen(p, "failed", 1000), nineteen(q, "failed", 1000), nineteen(r, "succeeded", 2900)];
+  await due();
+  await run();
+  is("p: the $19 fails: the key of a sale mostly paid stays valid", await checkKey(store, app, pKey), "valid");
+  is("q: the $19 fails: the pending mark is cleared, and the paid sale gets its key", ((await keyForSale(store, app, q.reference, "buyer@example.com")) as { state?: string } | null)?.state, "issued");
+  is("r: the $19 goes through: the key is revoked, the $10 read and let go", [await checkKey(store, app, rKey), await seenOf(r.id), await keptIds()], ["revoked", 1, []]);
   done();
 }
 

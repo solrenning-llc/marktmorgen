@@ -215,7 +215,7 @@ test("the click wins over the code, always", () => {
   const src = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const start = src.indexOf("export async function noteSession");
   assert.ok(start > 0, "noteSession should exist");
-  const body = src.slice(start, start + 3_000);
+  const body = src.slice(start, src.indexOf("export async function noteCharge"));
   const cookie = body.indexOf("meta.via");
   const code = body.indexOf("affiliateForCodes");
   assert.ok(cookie > 0 && code > 0, "both paths should be in noteSession");

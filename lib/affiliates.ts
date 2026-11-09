@@ -295,6 +295,11 @@ export type PartnerEarning = {
   percent: number;
   /** Bought by the partner themselves: written down, earns nothing. */
   self: boolean;
+  /**
+   * Set when `base` is the part of some lines of an order (notePartners, `lines`): what the whole order paid before
+   * tax. A refund names no line, so it is settled against this (settleLine). Absent: `base` is the whole order.
+   */
+  whole?: number;
 };
 
 export type Payout = {
@@ -637,6 +642,8 @@ function parsePartnerEarning(raw: unknown): PartnerEarning | null {
       currency: readCurrencyCode(value.currency),
       percent: n(value.percent),
       self: value.self === true,
+      // Written by notePartners as whole cents; one that does not read is settled as if the refund were all before tax.
+      ...(value.whole !== undefined ? { whole: Number.isSafeInteger(value.whole) && (value.whole as number) >= 0 ? (value.whole as number) : Number.MAX_SAFE_INTEGER } : {}),
     };
   } catch {
     return null;
@@ -2350,6 +2357,8 @@ export async function notePartners(
   for (const partner of holders) {
     const theirs = lines.filter((line) => shareOn(partner.share, line.product) > 0);
     const weight = theirs.reduce((sum, line) => sum + line.cents, 0);
+    // The whole order: every line that was charged is theirs (an order whose every line is free, only when every line is).
+    const whole = weight === charged && (charged > 0 || theirs.length === lines.length);
     const earning: PartnerEarning = {
       ref: sale.ref,
       pi: sale.pi,
@@ -2357,12 +2366,13 @@ export async function notePartners(
       at: sale.at,
       product: theirs[0].product,
       title: sale.title.slice(0, 200),
-      base: weight === charged ? sale.base : charged > 0 ? Math.floor((sale.base * weight) / charged) : 0,
+      base: whole ? sale.base : charged > 0 ? Math.floor((sale.base * weight) / charged) : 0,
       total: sale.total,
       currency: readCurrencyCode(sale.currency),
       percent: shareOn(partner.share, theirs[0].product),
       // A 50% partner buying their own product at 50% off is not a sale.
       self: Boolean(buyer) && normaliseEmail(partner.email) === buyer,
+      ...(whole ? {} : { whole: sale.base }),
     };
     commands.push(["HSETNX", sharesKey(store.statsId), `${sale.ref}:${partner.id}`, JSON.stringify(earning)]);
   }
@@ -2518,7 +2528,13 @@ export async function noteSession(
   // one part that has to run for a sale no affiliate brought at all, which is
   // most of them (lib/partner-share.ts).
   // On an order of several lines, each partner earns on the lines of their own products (orderLines); a line that
-  // does not read writes no partner's share for the order, never a guessed base.
+  // does not read writes no partner's share for the order, never a guessed base. A partner step that failed is thrown
+  // once the affiliate's step is done (`settle`), so the sweep keeps the order for its next run (lib/checkout-sweep.ts,
+  // failOrder) instead of losing the share; both writes are once per order (HSETNX), so the next run adds nothing twice.
+  let partnerFailure: { error: unknown } | null = null;
+  const settle = (): void => {
+    if (partnerFailure) throw partnerFailure.error;
+  };
   try {
     const lines = orderLines(meta, session.amount_subtotal);
     await notePartners(
@@ -2527,7 +2543,8 @@ export async function noteSession(
       partners,
     );
   } catch (error) {
-    console.error("noting a partner's share failed", error);
+    console.error("noting a partner's share failed; the order waits for the next run", error);
+    partnerFailure = { error };
   }
 
   // Then the affiliate. The click first: a buyer who followed a link and then
@@ -2563,12 +2580,12 @@ export async function noteSession(
       found = await contactFor(store, buyer, at, session.id);
       how = "contact";
     }
-    if (!found) return;
+    if (!found) return settle();
     // A code, a bond or a contact only ever credits somebody the creator approves today.
     // An affiliate they declined or removed keeps their record — it is
     // history — and earns nothing more through either.
     const who = await readAffiliate(store, found);
-    if (who?.status !== "approved") return;
+    if (who?.status !== "approved") return settle();
     aff = found;
     own = who.rate;
   }
@@ -2627,6 +2644,7 @@ export async function noteSession(
       console.error("remembering an affiliate's buyer failed", error),
     );
   }
+  settle();
 }
 
 /** Writes down a paid offer after paying that follows an affiliate's sale. */
@@ -2842,10 +2860,16 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
   return { byIntent, complete: false };
 }
 
-/** A sale as it stands today, after any refund. */
-export function settleLine(referral: Referral, refunded: number): Line {
+/**
+ * A sale as it stands today, after any refund. `whole` is set for a partner's share of some lines of an order
+ * (PartnerEarning.whole): a refund names no line, so it may be all on theirs, and they keep only what no reading of
+ * it can take, the order's refunded part before tax off their base, never below 0; never a guessed line.
+ */
+export function settleLine(referral: Referral, refunded: number, whole?: number): Line {
   const back = Math.min(Math.max(0, refunded), referral.total);
-  const kept = referral.total > 0 ? Math.round((referral.base * (referral.total - back)) / referral.total) : 0;
+  const keptOf = (base: number) => (referral.total > 0 ? Math.round((base * (referral.total - back)) / referral.total) : 0);
+  const order = Math.min(whole ?? 0, referral.total);
+  const kept = whole === undefined || back === 0 ? keptOf(referral.base) : Math.max(0, referral.base - (order - keptOf(order)));
   const status: LineStatus = referral.self
     ? "own purchase"
     : back >= referral.total && referral.total > 0
@@ -2982,9 +3006,15 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // "partner" (lib/partner-share.ts). Keeping the shape means the payouts, the
   // batches, the spreadsheet and the partner's own page all work unchanged,
   // and one sale can produce several of these alongside a commission.
+  // A share of some lines of an order is settled against the whole order's base (settleLine), kept beside the line.
+  const partOf = new Map<string, number>();
   const partnerLines: Referral[] = pairs(shares)
     .map(([, raw]) => parsePartnerEarning(raw))
     .filter((e): e is PartnerEarning => e !== null && (!only || e.aff === only))
+    .map((e) => {
+      if (e.whole !== undefined) partOf.set(`${e.ref}:${e.aff}`, e.whole);
+      return e;
+    })
     .map((e) => ({
       ref: `${e.ref}:${e.aff}`,
       pi: e.pi,
@@ -3073,7 +3103,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       }
     }
   }
-  const settled = everything.map((r) => settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0));
+  const settled = everything.map((r) => settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0, r.how === "partner" ? partOf.get(r.ref) : undefined));
   // Each lead as it stands: the program's caps and budget counted across every affiliate's, then only the ones asked for.
   let ends = new Map<string, number>();
   const openBookings = leads.filter((l) => l.kind === "booking" && l.state === "open" && l.ref && mine(l.aff)).slice(0, 200);

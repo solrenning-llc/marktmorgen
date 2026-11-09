@@ -212,7 +212,7 @@ test("a share is written for every sale, not only the referred ones", () => {
   const at = aff.indexOf("export async function noteSession");
   const body = aff.slice(at, aff.indexOf("export async function noteCharge"));
   const partners = body.indexOf("notePartners");
-  const bails = body.indexOf("if (!found) return;");
+  const bails = body.indexOf("if (!found) return settle();");
   assert.ok(partners > 0 && bails > 0, "both should be in noteSession");
   assert.ok(partners < bails, "the partner lines must be written before any path that gives up on finding an affiliate");
 

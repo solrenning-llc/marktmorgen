@@ -1,0 +1,11 @@
+{
+  "file": "proofs/s/2912-status-focal/status.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "393695bb6ffa29c5961ef5b9f0f28aa99079698b",
+  "stdout": "  ok    healthy member exists before injected response corruption\nS2912_ROWS {\"mode\":\"status whitespace\",\"found\":null,\"given\":{\"ok\":false,\"reason\":\"stripe\"}}\n  ok    status whitespace: lookup remains unknown, never an empty membership list\n  ok    status whitespace: give reports unreadable Stripe, never confirmed not_member\nS2912_ROWS {\"mode\":\"status unknown\",\"found\":null,\"given\":{\"ok\":false,\"reason\":\"stripe\"}}\n  ok    status unknown: lookup remains unknown, never an empty membership list\n  ok    status unknown: give reports unreadable Stripe, never confirmed not_member\n  ok    confirmed empty complete customer page stays empty\n  ok    confirmed canceled subscription stays excluded\n  ok    missing page data is unknown as already fixed\n  ok    no subscription write or email was attempted\n\n9 checks, all passing.\nS_VOLUME {\"runs\":17,\"attempts\":15,\"forwarded\":15}\n",
+  "stderr": "reading a member's memberships failed Error: Stripe answered a subscription row in an unknown shape\n    at memberSubRows ([stdin]:57779:39)\n    at async freeDaysSubs ([stdin]:57885:16)\n    at async main ([stdin]:58044:19)\nreading a member's memberships failed Error: Stripe answered a subscription row in an unknown shape\n    at memberSubRows ([stdin]:57779:39)\n    at async giveFreeDays ([stdin]:57898:16)\n    at async main ([stdin]:58045:19)\nreading a member's memberships failed Error: Stripe answered a subscription row in an unknown shape\n    at memberSubRows ([stdin]:57779:39)\n    at async freeDaysSubs ([stdin]:57885:16)\n    at async main ([stdin]:58044:19)\nreading a member's memberships failed Error: Stripe answered a subscription row in an unknown shape\n    at memberSubRows ([stdin]:57779:39)\n    at async giveFreeDays ([stdin]:57898:16)\n    at async main ([stdin]:58045:19)\nreading a member's memberships failed Error: Stripe answered subscriptions in an unknown shape\n    at onePage ([stdin]:57739:11)\n    at memberSubRows ([stdin]:57777:20)\n    at async freeDaysSubs ([stdin]:57885:16)\n    at async main ([stdin]:58055:56)\n",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

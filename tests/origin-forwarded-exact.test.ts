@@ -32,4 +32,12 @@ is("a host with a path", originFrom(at({ "x-forwarded-host": "marktmorgen.com/ev
 is("a host with a user part", originFrom(at({ "x-forwarded-host": "marktmorgen.com@evil.example", "x-forwarded-proto": "https" })), "https://marktmorgen.com");
 is("a host with a space", originFrom(at({ "x-forwarded-host": "marktmorgen.com evil.example", "x-forwarded-proto": "https" })), "https://marktmorgen.com");
 
+part("A host the URL parser refuses is never pasted (Codex M, review 5821099238)");
+is("a malformed IPv6 address", originFrom(at({ "x-forwarded-host": "[:::]", "x-forwarded-proto": "https" })), "https://marktmorgen.com");
+is("a bracketed number that is not an IPv6 address", originFrom(at({ "x-forwarded-host": "[1]", "x-forwarded-proto": "https" })), "https://marktmorgen.com");
+is("a port above 65535", originFrom(at({ "x-forwarded-host": "marktmorgen.com:65536", "x-forwarded-proto": "https" })), "https://marktmorgen.com");
+is("the emailed link under a port above 65535 on a platform host", linkOrigin(at({ "x-forwarded-host": "demo.vercel.app:99999", "x-forwarded-proto": "https" })), "https://marktmorgen.com");
+is("a healthy IPv6 address with a port is kept", originFrom(at({ host: "[::1]:3000", "x-forwarded-proto": "http" }, "http://[::1]:3000/x")), "http://[::1]:3000");
+is("port 65535 is kept", originFrom(at({ "x-forwarded-host": "shop.example:65535", "x-forwarded-proto": "https" })), "https://shop.example:65535");
+
 done();

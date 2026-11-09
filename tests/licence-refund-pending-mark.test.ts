@@ -27,12 +27,25 @@ const NOW = Math.floor(Date.now() / 1000);
 const sessionsByPayment: Record<string, Record<string, unknown>[]> = {};
 let refunds: Record<string, unknown>[] = [];
 let sessionsAnswer: "list" | "broken" = "list";
+/** How the charge's own refunds (GET /refunds?charge=) are answered, and the charges asked about. */
+let chargeRefundsAnswer: "list" | "broken" | "more" = "list";
+const chargeReads: string[] = [];
+/** The charge a refund row names, as an id or its expanded object. */
+const chargeIdOf = (row: Record<string, unknown>) => (typeof row.charge === "string" ? row.charge : ((row.charge as { id?: string } | null)?.id ?? ""));
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   const list = (data: unknown[]) => answer({ object: "list", data, has_more: false });
   const path = url.pathname.replace(/^\/v1/, "");
   if (path === "/checkout/sessions") return sessionsAnswer === "broken" ? answer({ object: "list" }) : list(sessionsByPayment[url.searchParams.get("payment_intent") ?? ""] ?? []);
+  if (path === "/refunds" && url.searchParams.has("charge")) {
+    const charge = url.searchParams.get("charge") ?? "";
+    chargeReads.push(charge);
+    if (chargeRefundsAnswer === "broken") return answer({ object: "list" });
+    // Stripe lists a charge's refunds with the charge as its id (not expanded on this read).
+    const rows = refunds.filter((row) => chargeIdOf(row) === charge).map((row) => ({ ...row, charge }));
+    return chargeRefundsAnswer === "more" ? answer({ object: "list", data: rows, has_more: true }) : list(rows);
+  }
   if (path === "/refunds") return list(refunds);
   if (/^\/payment_intents\/pi_/.test(path)) return answer({ id: path.split("/").pop(), object: "payment_intent", metadata: {} });
   if (path === "/events") return list([]);
@@ -221,6 +234,82 @@ async function main(): Promise<void> {
   const kept = (await give(app, "cs_test_licpend000009")) as { key?: string };
   const keptSale = sale("09", app, "failed");
   is("read, the key still valid", [await run(), await seenOf(keptSale.id), await checkKey(store, app, kept.key ?? "")], [0, 1, "valid"]);
+
+  part("11. HIGH (Claude 2's focal review of #2868 at 9fa5c95602): a full refund made of a succeeded part and a pending rest takes nothing back while the rest is pending");
+  // A $29 sale: $10 refunded and succeeded, the other $19 refunded and still pending. Stripe counts a pending refund in
+  // the charge's amount_refunded, so the charge reads refunded in full on both rows, the succeeded $10 one too.
+  const CHARGE_AMOUNT = 2900;
+  /** Both refunds of one charge as GET /refunds gives them, each with the charge expanded as it reads now. */
+  const split = (n: string, tenStatus: Status, nineteen: Status | null, nineteenFirst = false) => {
+    const pi = `pi_LicencePend00${n}`;
+    const charge = `ch_LicencePendCh${n}`;
+    const counts = (status: Status | null) => status === "pending" || status === "succeeded";
+    const back = (counts(tenStatus) ? 1000 : 0) + (counts(nineteen) ? 1900 : 0);
+    const charged = { id: charge, object: "charge", amount: CHARGE_AMOUNT, amount_refunded: back, refunded: back >= CHARGE_AMOUNT };
+    const ten = { id: `re_LicencePendTen${n}`, object: "refund", amount: 1000, created: nineteenFirst ? NOW - 20 : NOW - 40, status: tenStatus, payment_intent: pi, charge: charged };
+    const rest = nineteen ? [{ id: `re_LicencePendNin${n}`, object: "refund", amount: 1900, created: nineteenFirst ? NOW - 40 : NOW - 20, status: nineteen, payment_intent: pi, charge: charged }] : [];
+    // Newest first, as Stripe lists them.
+    refunds = [ten, ...rest].sort((a, b) => b.created - a.created);
+    return { ten: ten.id, nineteen: `re_LicencePendNin${n}`, charge };
+  };
+  const splitSale = (n: string, product: Listing) => {
+    const reference = `cs_test_licpend0000${n}`;
+    sessionsByPayment[`pi_LicencePend00${n}`] = [{ id: reference, object: "checkout.session", metadata: { store: "licencepending", product: product.id } }];
+    return reference;
+  };
+
+  // Probe A: both rows read in the same run.
+  const aRef = splitSale("11", app);
+  const aKey = ((await give(app, aRef)) as { key?: string }).key ?? "";
+  let ids = split("11", "succeeded", "pending");
+  is("A: the $10 succeeded and the $19 pending in one run: nothing revoked, the key valid, neither refund read", [await run(), await checkKey(store, app, aKey), await seenOf(ids.ten), await seenOf(ids.nineteen)], [0, "valid", 0, 0]);
+  ids = split("11", "succeeded", "failed");
+  is("A: the $19 fails: the key of a sale mostly paid stays valid", [await run(), await checkKey(store, app, aKey)], [0, "valid"]);
+
+  // Probe A the other way round: the pending $19 made first, the succeeded $10 after it (listed first).
+  const a2Ref = splitSale("12", app);
+  const a2Key = ((await give(app, a2Ref)) as { key?: string }).key ?? "";
+  split("12", "succeeded", "pending", true);
+  is("A2: the succeeded $10 listed before the pending $19: nothing revoked, the key valid", [await run(), await checkKey(store, app, a2Key)], [0, "valid"]);
+  split("12", "succeeded", "failed", true);
+  is("A2: the $19 fails: the key stays valid", [await run(), await checkKey(store, app, a2Key)], [0, "valid"]);
+
+  // Probe B: the $10 row read alone first; the pending $19 arrives next run.
+  const bRef = splitSale("13", app);
+  const bKey = ((await give(app, bRef)) as { key?: string }).key ?? "";
+  split("13", "succeeded", null);
+  is("B: the $10 alone changes nothing", [await run(), await checkKey(store, app, bKey)], [0, "valid"]);
+  ids = split("13", "succeeded", "pending");
+  is("B: the pending $19 arrives: the $10 row, still in the window, revokes nothing", [await run(), await checkKey(store, app, bKey), await seenOf(ids.ten)], [0, "valid", 0]);
+  ids = split("13", "succeeded", "succeeded");
+  const bThrough = await run();
+  is("B: the $19 goes through: the key is revoked and both refunds read", [typeof bThrough === "number" && bThrough >= 1, await checkKey(store, app, bKey), await seenOf(ids.ten), await seenOf(ids.nineteen)], [true, "revoked", 1, 1]);
+
+  // Rule 30, the same harm on a sale with no key yet: the succeeded $10 must not write the final mark while the $19 is pending.
+  const cRef = splitSale("14", app);
+  split("14", "succeeded", "pending");
+  is("C: a keyless sale gets the pending mark, not the final one", [await run(), isPendingMark(await placeOf(app, cRef))], [0, true]);
+  split("14", "succeeded", "failed");
+  await run();
+  is("C: the $19 fails: the mark is cleared and the paid sale gets a valid key", ((await give(app, cRef)) as { state?: string } | null)?.state, "issued");
+
+  // Rule 24: the charge's refunds answered in an unknown shape, or more than one page, is not "none pending".
+  const dRef = splitSale("15", app);
+  const dKey = ((await give(app, dRef)) as { key?: string }).key ?? "";
+  ids = split("15", "succeeded", "succeeded");
+  chargeRefundsAnswer = "broken";
+  is("D: the charge's refunds in an unknown shape: nothing revoked, the refunds unread", [await run(), await checkKey(store, app, dKey), await seenOf(ids.ten)], [0, "valid", 0]);
+  chargeRefundsAnswer = "more";
+  is("D: the charge's refunds with more than one page: the same", [await run(), await checkKey(store, app, dKey), await seenOf(ids.ten)], [0, "valid", 0]);
+  chargeRefundsAnswer = "list";
+  is("D: read in full, every part through: revoked and read", [(await run()) !== 0, await checkKey(store, app, dKey), await seenOf(ids.ten), await seenOf(ids.nineteen)], [true, "revoked", 1, 1]);
+
+  // A single refund of the whole charge needs no read of the charge's refunds.
+  const eRef = splitSale("16", app);
+  const eKey = ((await give(app, eRef)) as { key?: string }).key ?? "";
+  refunds = [{ id: "re_LicencePendWhole16", object: "refund", amount: CHARGE_AMOUNT, created: NOW - 30, status: "succeeded", payment_intent: "pi_LicencePend0016", charge: { id: "ch_LicencePendCh16", object: "charge", amount: CHARGE_AMOUNT, amount_refunded: CHARGE_AMOUNT, refunded: true } }];
+  chargeReads.length = 0;
+  is("E: one refund of the whole charge: revoked, with no read of the charge's refunds", [await run(), await checkKey(store, app, eKey), chargeReads.length], [1, "revoked", 0]);
   done();
 }
 

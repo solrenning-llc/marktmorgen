@@ -10,6 +10,7 @@ import { ordersLinkFor } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
 import { type Paid, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
+import { owePayPalRefund } from "@/lib/paypal-owed";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
@@ -53,7 +54,12 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
     throw error;
   }
   if (!product) {
+    // Paid (settle writes only a capture PayPal answered COMPLETED) for a product the store no longer has: unless it was
+    // handed over before the product went, it is marked refund owed and the creator emailed once to refund it
+    // (lib/paypal-owed.ts; the owner's decision 2 of C1-20261109-1029-C5-52). A read that is unknown throws, and an
+    // email the sender did not take answers "later": either way the order stays on the list for the sweep.
     console.error("a PayPal purchase named a product the store no longer has", store.handle, paid.order);
+    if ((await owePayPalRefund(store, paid)) === "later") return false;
     if (store.statsId) await handedOver(store.statsId, paid.order);
     return false;
   }
@@ -139,8 +145,10 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
  */
 export async function sweepPayPal(store: Store, deadline: number): Promise<{ cleared: number; revoked: number }> {
   const done = await watchPayPal(store, deadline, {
+    // On the hand-over list since settle wrote it down: one that throws (a read unknown, or a removed product's email
+    // to the creator not sent) is tried again by handOverAgain, and the rest of the store's sweep goes on.
     handOver: async (paid) => {
-      await handOverPayPal(store, paid);
+      await handOverPayPal(store, paid).catch((error) => console.error("handing over a PayPal purchase failed; tried again at the next sweep", store.handle, paid.order, error));
     },
     dropStart: (email, productId) => dropEnrollment(store, email, productId),
     // A course put back for a payment that keeps the purchase (Codex G's M1 on #2791): HSETNX, so nothing for one

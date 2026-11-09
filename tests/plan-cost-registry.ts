@@ -683,6 +683,22 @@ export const PATH_BOARD_JOIN = request("heavy",70,30_000);
  */
 export const BUYER_LEDGER_BYTES = 2 * ALL_TIME_PAGES * 100 * 320;
 /**
+ * A PayPal order paid for a product removed before it was handed over (lib/paypal-owed.ts, owePayPalRefund; the owner's
+ * decision 2 of C1-20261109-1029-C5-52), held by tests/paypal-removed-owed.test.ts:
+ * - ownCommandsAtMost: one try's own Redis commands at the most: the buyer's grant read exactly (HGET, SISMEMBER, the
+ *   refund mark's ZSCORE, and the taken-back mark's ZSCORE where that is read), the mark's pipeline (ZADD NX, EXPIRE,
+ *   ZREMRANGEBYSCORE, the email's GET), the email's claim (SET NX, GET when its answer is odd), then either the "sent"
+ *   SET or, when the sender did not take it, the claim let go (an EVAL billed with its GET and DEL) and the list's ZADD XX
+ *   that makes it due later. The count of the order (lib/orders.ts countOrder) and the email are the order's own, as a
+ *   hand-over's are: the email goes in place of the receipt, which is not sent (meter "order"), at most once accepted;
+ * - triesAtMost: the email is tried at most TELL_TRIES_AT_MOST times (the first, then one every TELL_RETRY_SECONDS until
+ *   TELL_WINDOW_SECONDS after the payment), each a try of at most ownCommandsAtMost; past the window the order leaves
+ *   the list. The first try is the order's own work, and costs less than the hand-over it replaces (the test measures
+ *   both); the later ones are the five-minute job's, inside NOT_A_COST.HAND_OVER_BATCH's batch.
+ * The refund itself is not made by the code (no call to PayPal's refund of a capture yet), so it costs nothing here.
+ */
+export const PAYPAL_REFUND_OWED = { ownCommandsAtMost: 14, triesAtMost: 13, emailsAcceptedPerOrder: 1 } as const;
+/**
  * A store's PayPal sales and refunds read for its buyers at the most
  * (lib/paypal-sales.ts, readPayPalSales and readPayPalRefundsWithCoverage;
  * round 5, H1): ALL_TIME_PAGES pages of a hundred sales and PAYPAL_REFUNDS_READ
@@ -1764,6 +1780,8 @@ export const EMAIL_SITES: Record<string, string[]> = {
   // Active shipment delivery uses sendQueuedShipmentMail in lib/email.ts.
   // The never-activated deployment retains its original one-shot ORDER sender.
   "lib/paypal-sales.ts": ORDER, "lib/preorders.ts": ORDER, "lib/shipments.ts": ORDER,
+  // A removed product's PayPal payment: the email asking the creator to refund it, in place of the order's receipt.
+  "lib/paypal-owed.ts": ORDER,
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
   "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE,

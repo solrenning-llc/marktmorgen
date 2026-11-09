@@ -52,6 +52,7 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { readPaid, stillPending } from "@/lib/paypal-sales";
 import { paypalHandedOver } from "@/lib/paypal-handed";
+import { refundOwed } from "@/lib/paypal-owed";
 import { saleClock } from "@/lib/store-sale";
 import { readListing } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -1452,7 +1453,13 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
   // this order's own hand-over is proven (Claude 5's LOW on #2911).
   const delivered = ours !== null && (handed === true || handed === "owned");
   const ownReceipt = ours !== null && handed === true;
-  const handing = ours !== null && handed === false;
+  // Paid, nothing handed over, and the product gone: marked refund owed, and its creator emailed to refund it when the
+  // email went (lib/paypal-owed.ts); the page says they were asked only then. A mark that cannot be read is unknown.
+  const notHanded = ours !== null && handed === false;
+  const owed = notHanded ? await refundOwed(ours.store, ours.order).catch(() => "unknown" as const) : false;
+  if (owed === "unknown") unread = true;
+  const unavailable = notHanded && (owed === "told" || owed === "owed");
+  const handing = notHanded && owed === false;
   // Refunded in full by PayPal and taken back by the refund watch: said so, with no link, no purchase event and no
   // hand-over or receipt promised (the Claude 4 team's second money review of #2911).
   const refunded = ours !== null && handed === "refunded";
@@ -1479,6 +1486,13 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
               <p className="st-price text-sm">{t.paidWithPayPal}</p>
               <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.ppRefunded}</h1>
               <p className="st-muted mt-4">{t.ppRefundedBody}</p>
+              <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
+            </>
+          ) : ours && unavailable ? (
+            <>
+              <p className="st-price text-sm">{t.paidWithPayPal}</p>
+              <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.ppUnavailable}</h1>
+              <p className="st-muted mt-4">{owed === "told" ? t.ppUnavailableAsked(store.name) : t.ppUnavailableOwed(store.name)}</p>
               <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
             </>
           ) : ours && handing ? (

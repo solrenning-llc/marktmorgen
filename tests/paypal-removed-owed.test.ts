@@ -4,16 +4,18 @@
  * capture, and PayPal's official documentation was not readable here, so no integration that moves money is guessed.
  * What does not need that call is held here:
  *
- * - A capture PayPal answered COMPLETED (a written paid record), nothing handed over, and the product gone: the creator
- *   is emailed once to refund it in PayPal, the order is marked "refund owed" (lib/paypal-owed.ts), it leaves the
+ * - A capture PayPal answered COMPLETED (a written paid record), nothing handed over, and the product gone: the order
+ *   is marked "refund owed" (lib/paypal-owed.ts), the creator is emailed once to refund it in PayPal, it leaves the
  *   hand-over list, and the buyer's page says the truth: the product is no longer available and the creator was asked
  *   to refund the payment. Before, it only left the list with a log line: nobody was told and the page said "handing
  *   it over" for ever.
  * - Asked again (a reload, a sweep, another try): no second email.
  * - A capture PayPal has not confirmed (PENDING): nothing is marked and nobody is emailed; the sweep settles it once
  *   PayPal completes it, and only then is it marked.
- * - A read that is unknown (the buyer's grant), or an email the sender would not take: nothing is marked, the order
- *   stays on the list, and the sweep tries again (CX-123 rule 24).
+ * - A read that is unknown (the buyer's grant): nothing is marked, the order stays on the list, and the sweep tries
+ *   again (CX-123 rule 24).
+ * - An email the sender would not take: the order is marked, the page does not say the creator was asked, and the
+ *   email is tried again later (not every run), inside a window; past it the order leaves the list marked.
  * - Handed over before the product was removed: never marked, nobody emailed.
  *
  * Synthetic only: a stand-in for PayPal's and Resend's APIs, the Redis stub, the real return route, the real sweep and
@@ -26,6 +28,7 @@ import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, removeProduct, setPayPalSeller, setProductLink, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { handOverKey, openOrder, readPaid } from "@/lib/paypal-sales";
 import { handOverPayPal, sweepPayPal } from "@/lib/paypal-delivery";
+import { TELL_RETRY_SECONDS, TELL_TRIES_AT_MOST, TELL_WINDOW_SECONDS, owePayPalRefund } from "@/lib/paypal-owed";
 import { readListing } from "@/lib/catalog";
 import { importedKey } from "@/lib/imported-purchases";
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -33,6 +36,7 @@ import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
+import { PAYPAL_REFUND_OWED } from "./plan-cost-registry";
 
 const OWNER = "kiln@example.com";
 const BASE = "https://marktmorgen.com";
@@ -63,7 +67,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.resend.com") {
-    if (resendFails) return json({ name: "internal_server_error" }, 500);
+    if (resendFails) return json({ name: "validation_error" }, 422);
     const mail = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
     sent.push({ to: Array.isArray(mail.to) ? String(mail.to[0]) : String(mail.to), subject: String(mail.subject ?? ""), text: String(mail.text ?? "") });
     return json({ id: `e${sent.length}` });
@@ -150,7 +154,7 @@ async function main(): Promise<void> {
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
   await setSubscription(OWNER, { customerId: "cus_kiln00002", subscriptionId: "sub_kiln00002", active: true, tier: "creator", period: paidPeriod() });
-  process.env.RESEND_API_KEY = "re_test_paypal_removed_owed";
+  process.env.RESEND_API_KEY = "re_test_only";
   delete process.env.PAYPAL_ENV;
   process.env.PAYPAL_PARTNER_CLIENT_ID = PARTNER_CLIENT;
   process.env.PAYPAL_PARTNER_SECRET = "EPpartnerSecret0123456789";
@@ -224,21 +228,95 @@ async function main(): Promise<void> {
     is("and it leaves the list", await onList(store, order), false);
   }
 
-  part("The email to the creator is not taken: nothing marked, tried again");
+  // Changed after the RED commit (rule 23): this part first expected "nothing marked" while the email was not taken. The
+  // mark now goes first, so the order is owed whatever the email does, and the page says the creator was asked only
+  // once the email went; a refusal (422, which the sender confirms it did not take) is tried again later, not every run.
+  part("The email to the creator is not taken: marked, the page does not say they were asked, tried again later");
   {
     const { order } = await opened("Firing chart", "refused@example.com", true);
     resendFails = true;
     await returnFor(await owner(), order);
     resendFails = false;
     const store = await owner();
-    is("nothing is marked", await owed(store, order), false);
+    is("the order is marked refund owed", await owed(store, order), true);
+    is("nobody is emailed yet", told(order), 0);
     is("it stays on the hand-over list", await onList(store, order), true);
+    const [score] = await redis.pipeline([["ZSCORE", handOverKey(store.statsId!), order]]);
+    const due = Number(score) + 600 - Math.floor(Date.now() / 1000);
+    is("due again in about TELL_RETRY_SECONDS, not at the next run", due > TELL_RETRY_SECONDS - 120 && due <= TELL_RETRY_SECONDS, true);
+    await sweep();
+    is("the next run does not try it again", told(order), 0);
     const html = await page(order);
-    is("the page does not say the creator was asked yet", html.includes(UNAVAILABLE), false);
+    is("the page says the product is no longer available", html.includes(UNAVAILABLE), true);
+    is("it does not say the creator was asked", html.includes("asked Kiln Works to refund"), false);
+    is("it says the payment is owed back, and how to ask for it", html.includes("This payment is owed back to you: ask Kiln Works for a refund"), true);
     await dueNow(store, order);
     await sweep();
-    is("the sweep marks it", await owed(store, order), true);
-    is("and the creator gets one email", told(order), 1);
+    is("once due, the sweep emails the creator once", told(order), 1);
+    is("and it leaves the list", await onList(store, order), false);
+    is("the page now says the creator was asked", (await page(order)).includes("asked Kiln Works to refund"), true);
+  }
+
+  part("The email never taken inside the window: marked, no longer tried");
+  {
+    const { order } = await opened("Glaze tests", "never@example.com", true);
+    resendFails = true;
+    await returnFor(await owner(), order);
+    const store = await owner();
+    const paid = (await readPaid(order))!;
+    is("tried once, not taken", [await owed(store, order), told(order), await onList(store, order)], [true, 0, true]);
+    is("past the window it leaves the list, marked", await owePayPalRefund(store, paid, paid.at + TELL_WINDOW_SECONDS), "owed");
+    resendFails = false;
+    is("nobody was emailed", told(order), 0);
+    is("the page does not say the creator was asked", (await page(order)).includes("asked Kiln Works to refund"), false);
+    is("the tries are bounded", TELL_TRIES_AT_MOST, 13);
+  }
+
+  part("Cost: one try's own commands, and the first try against the hand-over it replaces");
+  {
+    // Each order's return-route hand-over is made to fail on its first step (the buyer's grant), so it stays on the
+    // list with nothing done; then one hand-over is run and counted, as the sweep would run it.
+    const fresh = async (title: string, buyer: string, remove: boolean) => {
+      const made = await opened(title, buyer, remove);
+      const undo = failReadsOf(/^nl:imp:buy:/);
+      await returnFor(await owner(), made.order);
+      undo();
+      return (await readPaid(made.order))!;
+    };
+    const own = /^nl:ppsell:owed:|^nl:imp:buy:|^nl:ppsell:refunded:|^nl:ppsell:reversed:|^nl:ppsell:own:|^nl:ppsell:handover:/;
+    const count = async (run: () => Promise<unknown>) => {
+      const real = redis.pipeline.bind(redis);
+      let all = 0;
+      let mine = 0;
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        all += commands.length;
+        mine += commands.filter((c) => c.some((p) => own.test(String(p)))).length;
+        return real(commands);
+      }) as typeof redis.pipeline;
+      try {
+        await run();
+      } finally {
+        redis.pipeline = real;
+      }
+      return { all, mine };
+    };
+    const healthy = await fresh("Healthy guide", "healthy@example.com", false);
+    const atHealthy = await owner();
+    const handOver = await count(() => handOverPayPal(atHealthy, healthy));
+    const gone = await fresh("Gone guide", "gonecost@example.com", true);
+    const atGone = await owner();
+    const owedTry = await count(() => handOverPayPal(atGone, gone));
+    const refused = await fresh("Refused guide", "refusedcost@example.com", true);
+    const atRefused = await owner();
+    resendFails = true;
+    const refusedTry = await count(() => handOverPayPal(atRefused, refused));
+    resendFails = false;
+    console.log(`        commands: hand-over ${JSON.stringify(handOver)}, owed ${JSON.stringify(owedTry)}, refused ${JSON.stringify(refusedTry)}`);
+    is("the healthy order was handed over, the others owed", [(await redis.pipeline([["HLEN", importedKey(healthy.store, "healthy@example.com")]]))[0], await owed(await owner(), gone.order), await owed(await owner(), refused.order)], [1, true, true]);
+    // Less the list's own ZREM (listCommandsPerSale, PAYPAL_HAND_OVER_RETRY), which is not one of this try's own.
+    is("a try's own commands stay within PAYPAL_REFUND_OWED.ownCommandsAtMost", [owedTry.mine - 1 <= PAYPAL_REFUND_OWED.ownCommandsAtMost, refusedTry.mine <= PAYPAL_REFUND_OWED.ownCommandsAtMost], [true, true]);
+    is("the first try costs less than the hand-over it replaces", owedTry.all < handOver.all, true);
+    is("the tries are those the registry states", PAYPAL_REFUND_OWED.triesAtMost, TELL_TRIES_AT_MOST);
   }
 
   part("Handed over, then the product removed: nothing owed");

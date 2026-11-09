@@ -33,6 +33,7 @@ import { resendSignedCopy } from "@/lib/agreements";
 import { erasureScope } from "@/lib/person-erasure";
 import { COPIERS } from "@/lib/person-copy";
 import { POST as studioRoute } from "@/app/api/store/agreements/route";
+import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -243,6 +244,29 @@ async function main(): Promise<void> {
     is("the other agreement stays", (await readAgreement(openOne.agreement.id))?.id, openOne.agreement.id);
     is("a withdrawn one: \"deleted\"", [(await withdrawAgreement(store, openOne.agreement.id) as { state?: string } | null)?.state, await deleteAgreement(store, openOne.agreement.id), keptKeys(openOne.agreement.id)], ["withdrawn", "deleted", []]);
     is("another store's id: null", await deleteAgreement({ ...store, sid: "someone-else" }, lapsedOne.agreement.id), null);
+  }
+
+  part("Cost: the studio's delete stays inside one studio request's commands (UNIT_COST.studio), with no wait added");
+  {
+    const store = await freshStore();
+    const { agreement } = await make(store, SIGNER, lapsed);
+    const session = await openSession("agree-locked@example.com");
+    // Every command counted, and a script as itself plus each redis.call it runs (the fenced delete once per key).
+    let commands = 0;
+    hook = async (batch) => {
+      for (const c of batch) {
+        if (c[0] !== "EVAL") { commands += 1; continue; }
+        const source = String(c[1]);
+        commands += 1 + (source.match(/redis\.call/g)?.length ?? 0) + (source.startsWith("-- marktmorgen:fenced-del:v1\n") ? Number(c[2]) - 2 : 0);
+      }
+      return realPipeline(batch);
+    };
+    const started = Date.now();
+    const r = await studioRoute(new NextRequest("https://marktmorgen.com/api/store/agreements", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "delete", id: agreement.id }) }));
+    hook = null;
+    is("deleted through the studio", r.status, 200);
+    is("its commands, scripts counted with what they run, fit one studio request", commands <= 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, true);
+    is("the lock is taken at once, never waited for", Date.now() - started < 1_000, true);
   }
 
   part("A writer held up past its lock while the delete runs: nothing is written back");

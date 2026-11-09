@@ -31,6 +31,7 @@
  */
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -365,11 +366,15 @@ const intentOf = (value: unknown): string =>
 export async function markPaid(store: Store, id: string, session: PaidSession, now = Date.now()): Promise<{ request: PaymentRequest; fresh: boolean } | null> {
   const done = await changeRequest(store, id, (request) => {
     if (request.state === "paid" || request.state === "refunded") return { next: null, answer: false };
+    // What Stripe took, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero. Anything
+    // else is unknown and throws, never the request's total before tax: nothing is written, the lock is let go, the
+    // request stays open and its confirmation is tried again on the next pass.
+    if (!Number.isSafeInteger(session.amount_total) || Number(session.amount_total) < 0) throw new UnknownReplyError("a paid request's amount");
     const paid: PaymentRequest = {
       ...request,
       state: "paid",
       paidAt: typeof session.created === "number" ? Math.min(now, session.created * 1000) : now,
-      amountPaid: typeof session.amount_total === "number" ? session.amount_total : request.total,
+      amountPaid: Number(session.amount_total),
       payment: intentOf(session.payment_intent).slice(0, 255),
       session: typeof session.id === "string" ? session.id.slice(0, 255) : request.session,
       failed: "",
@@ -455,6 +460,9 @@ export async function sendReceipt(input: { store: Store; request: PaymentRequest
   const w = requestWords(store.language);
   const amount = said.money(request.amountPaid || request.total);
   const lines = request.lines.map((line) => `- ${line.text}${line.quantity > 1 ? ` × ${line.quantity}` : ""}: ${said.money(line.cents * line.quantity)}`);
+  // Sales tax added on top at Stripe's page (lib/tax.ts applyTax; audit R48) is all a request's checkout adds to its
+  // lines: shown, with the total, so the lines add up to what was paid. Without it the receipt is as before.
+  const taxed = request.amountPaid > request.total ? [w.receiptTax(said.money(request.amountPaid - request.total)), w.emailTotal(amount)] : [];
   return sendEmail({
     meter: { by: "order" },
     from: input.from,
@@ -467,6 +475,7 @@ export async function sendReceipt(input: { store: Store; request: PaymentRequest
       w.receiptLead(store.name, amount, said.date(request.paidAt || Date.now())),
       "",
       ...lines,
+      ...taxed,
       "",
       `${w.reference}: ${request.payment || request.id}`,
       "",

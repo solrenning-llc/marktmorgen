@@ -289,6 +289,9 @@ test("D: the day of payment is the latest calendar day anywhere on Earth", () =>
 const preorderSession = (id: string, product: string, created: number, metadata: Record<string, string> = {}) => ({
   ...paid(id, product, created, { preorder: "yes", ...metadata }),
   payment_intent: `pi_test${id.padEnd(16, "0")}`,
+  // What Stripe charged, as every settled checkout says it: the pre-order receipt states it, read exactly (audit R48).
+  amount_total: 4900,
+  currency: "usd",
 });
 const deps = { base: `${ORIGIN}/@mara`, from: "Mara <orders@example.com>", ordersLink: async () => null, recordStart: async () => {} };
 

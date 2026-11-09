@@ -240,8 +240,14 @@ export async function deliverGift(input: {
 
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   if (buyer) {
-    const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents;
-    const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+    // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+    // three-letter currency. Anything else leaves the line out, never the catalog's current price or the store's own
+    // currency.
+    const amount = session.amount_total;
+    const currency = session.currency;
+    const paid = Number.isSafeInteger(amount) && Number(amount) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency)
+      ? formatMoney(Number(amount), currency, speech(store).lang.locale)
+      : null;
     await sendEmail({ meter: { by: "order" },
       from: input.from,
       to: buyer,
@@ -251,7 +257,7 @@ export async function deliverGift(input: {
         "",
         g.aGift(title),
         g.giftFor(gift.to),
-        g.paidLine(formatMoney(amount, currency, speech(store).lang.locale)),
+        ...(paid ? [g.paidLine(paid)] : []),
         g.orderRef(sessionId),
         ...consentEmailLines(store, session.metadata),
         "",

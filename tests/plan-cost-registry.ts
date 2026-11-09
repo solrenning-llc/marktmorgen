@@ -1331,6 +1331,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/buyer-actions.ts", names: ["takeBuyerAction", "restingAway"] },
       { file: "app/api/store/community/route.ts", names: ["takeBuyerAction(store, owner ? \"owner\" : \"buyer\")", "UNCOUNTED"] },
       { file: "app/api/store/community/rsvp/route.ts", names: ["takeBuyerAction(store)"] },
+      // A challenge's join or check-in (19 [E2] unit 1): one buyer action a press, before anything is read.
+      { file: "app/api/store/community/challenge/route.ts", names: ["takeBuyerAction(store)"] },
       { file: "app/api/store/community/chat/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/messages/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/push/route.ts", names: ["takeBuyerAction"] },
@@ -1343,7 +1345,7 @@ export const COST_LINES: CostLine[] = [
       // Removing a like spends at most five commands after its buyer action is taken: EVAL, two ZSCOREs and two writes.
       { file: "lib/community-points.ts", names: ["REMOVE_POINT", "award"] },
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
-      { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR"] },
+      { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR", "CHALLENGE_WRITES_PER_HOUR"] },
     ],
     basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
   },

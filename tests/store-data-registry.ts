@@ -442,6 +442,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:evmail:@lib/community-event-mail.ts": { what: "An event's emails, and who they go to", parts: [per("own", 30, 512, "Each reader's place in a send, thirty days.", MAIL("event"))] },
   "nl:cm:evmailq@lib/community-event-mail.ts": company("Event sends under way", "One set, members gone when sent."),
   "nl:cm:@lib/community-events.ts": { what: "Events, their places and who is coming", room: ["lib/community-events.ts"] },
+  "nl:cm:@lib/community-challenges.ts": { what: "Challenges, who joined each and their daily check-ins; the creator's changes this hour, an hour", room: ["lib/community-challenges.ts"] },
   "nl:cm:evq@lib/community-events.ts": company("Event reminders due", "One sorted set for every store, counted with each event's room."),
   "nl:rl:cm:ev:@lib/community-events.ts": short("Event changes an hour", "studio", 1),
   "nl:cimg:@lib/community-files.ts": { what: "Community pictures, their owners and counts", line: "community-pictures" },

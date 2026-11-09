@@ -181,7 +181,7 @@ async function main(): Promise<void> {
 
   part("Deleted by the creator, room and all");
   const target = (await keptChallenges(cid, t)).at(-1)!;
-  is("she joins the last one", await joinChallenge(cid, target, ada, again, t), "joined");
+  is("she had joined the last one", await joinChallenge(cid, target, ada, again, target.start), "joined");
   is("deleted", await deleteChallenge(again, target.id), "deleted");
   is("its slot is empty", Number(redis.run(["HGET", dataKey(again)!, `cm:ch:${target.id}`])) || 0, 0);
   is("and its members' list is gone", redis.run(["EXISTS", `nl:cm:${cid}:ch:${target.id}:in`]), 0);

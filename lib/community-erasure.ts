@@ -10,8 +10,9 @@
  *   - what they were told, the devices they let us notify, their private
  *     conversations and requests, what they said in the room and the leave
  *     they held there;
- *   - their answers to whether they are coming to each live event, and the
- *     answers kept about whether they may come in;
+ *   - their answers to whether they are coming to each live event, their
+ *     places and check-ins in challenges, and the answers kept about whether
+ *     they may come in;
  *   - the record behind the unsubscribe link in the announcements they got.
  *
  * What they wrote in the feed — posts, comments, likes, poll votes, reports
@@ -31,11 +32,17 @@ import { forgetDmPerson } from "@/lib/community-dm";
 import { forgetChatPerson } from "@/lib/community-chat";
 import { forgetGrantPerson } from "@/lib/chat-grant";
 import { forgetRsvpsPerson } from "@/lib/community-events";
+import { forgetChallengesPerson } from "@/lib/community-challenges";
 import { forgetAccessPerson } from "@/lib/community-access";
 import { unindexMember } from "@/lib/community-index";
+import type { DataStore } from "@/lib/store-data";
 
-/** Deletes one person from one community. Answers how many records went. */
-export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[]): Promise<number> {
+/**
+ * Deletes one person from one community. Answers how many records went.
+ * `room`, the store, gets back the room what is deleted was counted in, where
+ * a module counts it per person (the challenges).
+ */
+export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[], room?: DataStore): Promise<number> {
   // Not swallowed (CX-123 rule 24): read as none, every space's record of
   // the person below would be skipped while the erasure said it was done.
   // Except a setup stored damaged (review of #3091 by Claude 2), which asking
@@ -62,6 +69,7 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   records += await forgetChatPerson(id, who);
   records += await forgetGrantPerson(id, who);
   records += await forgetRsvpsPerson(id, who, email);
+  records += await forgetChallengesPerson(id, who, room);
   records += await forgetAccessPerson(id, email, (config?.spaces ?? []).map((s) => s.id), productIds);
   return records;
 }

@@ -23,3 +23,34 @@ export function challengeWindowState(startsAt: unknown, endsAt: unknown, now: un
   if (now < startsAt) return "scheduled";
   return now < endsAt ? "active" : "ended";
 }
+
+/** A challenge's day: midnight to midnight UTC (lib/community-challenges.ts). */
+export const CHALLENGE_DAY_MS = 86_400_000;
+
+/** Which day of a challenge `now` falls on: 0 for its first day, -1 before it. */
+export function challengeDay(start: number, now: number): number {
+  return now < start ? -1 : Math.floor((now - start) / CHALLENGE_DAY_MS);
+}
+
+/** How many days a challenge has. */
+export function challengeDays(challenge: { start: number; end: number }): number {
+  return Math.max(0, Math.round((challenge.end - challenge.start) / CHALLENGE_DAY_MS));
+}
+
+/** A day's date, as YYYY-MM-DD in UTC. */
+export function dayDate(start: number, day: number): string {
+  return new Date(start + day * CHALLENGE_DAY_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * The days in a row checked in, counted back from `today` when it is done,
+ * else from the day before (today is not missed until it is over). Past the
+ * last day, counted back from the last day.
+ */
+export function streakOf(days: boolean[], today: number): number {
+  let day = Math.min(today, days.length - 1);
+  if (day >= 0 && day === today && !days[day]) day -= 1;
+  let streak = 0;
+  for (; day >= 0 && days[day]; day -= 1) streak += 1;
+  return streak;
+}

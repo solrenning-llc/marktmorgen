@@ -22,6 +22,10 @@ import { announcementReach, canAnnounceByEmail } from "@/lib/community-mail";
 import { can } from "@/lib/team-roles";
 import { CommunityStudio, type QueueRow, type StudioMember } from "@/components/community-studio";
 import { CommunityEventsStudio, type StudioEvent } from "@/components/community-events-studio";
+import { CommunityChallengesStudio, type StudioChallenge } from "@/components/community-challenges-studio";
+import { challengeCounts, keptChallenges } from "@/lib/community-challenges";
+import { challengeWindowState, CHALLENGE_DAY_MS } from "@/lib/community-challenge-rules";
+import { challengeDate } from "@/lib/buyer-words/challenges";
 import { VIDEO_ROOM_NOTE } from "@/lib/call-rooms";
 import { configuredProviders } from "@/lib/meet-providers";
 import { meetView } from "@/lib/meet-connect";
@@ -79,6 +83,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   let rewards: Reward[] = [];
   let coming: StudioEvent[] = [];
   let over: StudioEvent[] = [];
+  let challenges: StudioChallenge[] = [];
   // Google Calendar and Zoom (lib/meet-connect.ts): which accounts an event
   // can have a meeting made on, for the form. Nothing is read when the
   // deployment has neither.
@@ -134,6 +139,25 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
         return m ? [{ name: m.n, email: m.e, at: r.at }] : [];
       }),
       post: e.post,
+    });
+    // The challenges (lib/community-challenges.ts), with their counts: counts
+    // that do not read are shown as not known, never as 0 (rule 30).
+    const kept = await keptChallenges(id, now).catch(() => []);
+    const counted = await challengeCounts(id, kept, now).catch(() => null);
+    challenges = kept.map((c) => {
+      const state = challengeWindowState(c.start, c.end, now);
+      const n = counted?.get(c.id) ?? null;
+      return {
+        id: c.id,
+        title: c.title,
+        task: c.task,
+        from: challengeDate("en-US", c.start),
+        to: challengeDate("en-US", c.end - CHALLENGE_DAY_MS),
+        state: state === "invalid" ? "ended" : state,
+        joined: n?.joined ?? null,
+        checkIns: n?.checkIns ?? null,
+        today: n?.today ?? null,
+      };
     });
     coming = soon.map((e, i) => shape(e, i));
     over = past.events.map((e, i) => shape(e, soon.length + i));
@@ -276,6 +300,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
             ) : null
           }
         />
+        {config ? <CommunityChallengesStudio challenges={challenges} canManage={can(view.role, "events")} /> : null}
       </main>
       </StudioStorePin>
     </div>

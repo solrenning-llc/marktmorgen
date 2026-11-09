@@ -4,6 +4,7 @@ import { photoUrl } from "@/lib/photo-limits";
 import { isFree, type Listing, type Store } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { communityWords, pollWhenIn, whenIn } from "@/lib/buyer-words/community";
+import { challengeWords } from "@/lib/buyer-words/challenges";
 import { LANGUAGES } from "@/lib/store-language";
 import { CREATOR, type CommunityConfig, type Member, type Post } from "@/lib/community";
 import { communityImageFile } from "@/lib/community-image";
@@ -65,7 +66,7 @@ export function communityImageUrl(store: Store, path: string): string {
   return `/api/store/community/image?h=${encodeURIComponent(store.handle)}&f=${communityImageFile(path)}`;
 }
 
-export type Tab = "feed" | "events" | "members" | "leaderboard" | "you" | "search" | "messages" | "notifications" | "chat";
+export type Tab = "feed" | "events" | "challenges" | "members" | "leaderboard" | "you" | "search" | "messages" | "notifications" | "chat";
 
 /** The bar across the top of every community page. */
 export function CommunityBar({
@@ -100,6 +101,7 @@ export function CommunityBar({
     { id: "feed", label: w.tabFeed, href: home },
     ...(room ? [{ id: "chat" as Tab, label: w.tabRoom, href: `${home}/chat` }] : []),
     { id: "events", label: w.tabEvents, href: `${home}/events` },
+    { id: "challenges", label: challengeWords(store.language).tab, href: `${home}/challenges` },
     { id: "members", label: w.tabMembers, href: `${home}/members` },
     { id: "leaderboard", label: w.tabLeaderboard, href: `${home}/leaderboard` },
     { id: "you", label: w.tabYou, href: `${home}/you` },

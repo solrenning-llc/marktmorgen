@@ -126,6 +126,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/community-chat.ts", how: "erased", via: CE, what: "What they said in the community's room" },
   { file: "lib/chat-grant.ts", how: "erased", via: CE, what: "The leave they held in the room" },
   { file: "lib/community-events.ts", how: "erased", via: CE, what: "Their answers to whether they are coming to each live event" },
+  { file: "lib/community-challenges.ts", how: "erased", via: CE, what: "The challenges they joined and the days they checked in" },
   { file: "lib/community-access.ts", how: "erased", via: CE, what: "The answers kept about whether they may come into the community and its spaces" },
   { file: "lib/community-mail.ts", how: "erased", via: CE, what: "The link that stops your announcement emails to them" },
   { file: "lib/community-search.ts", how: "erased", via: CE, what: "Their place in the community's member search" },

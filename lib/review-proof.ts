@@ -232,6 +232,19 @@ export async function mintReviewLink(store: Store, reference: string, email: str
   return token;
 }
 
+/**
+ * Deletes a link that was stored but never emailed (lib/review-requests.ts, when sending its order stopped after it was
+ * minted). Never throws: a link a failed delete leaves behind is in no email and runs out at its own expiry.
+ */
+export async function dropReviewLink(token: string): Promise<void> {
+  if (!REVIEW_LINK_PATTERN.test(token) || !isRedisConfigured()) return;
+  try {
+    await redisPipeline([["DEL", linkKey(token)]]);
+  } catch (error) {
+    console.error("an unsent review link could not be deleted; it runs out on its own", error);
+  }
+}
+
 async function readLink(store: Store, token: string): Promise<LinkGrant | null> {
   if (!REVIEW_LINK_PATTERN.test(token) || !isRedisConfigured()) return null;
   // Absent (null) is a link that ran out; any other answer is not known and throws, never "expired" (rule 24).

@@ -38,7 +38,6 @@ import { OFFER_DAYS, ONCE_PER_DAYS, canWinBack, winbackOn } from "@/lib/winback"
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
-import { repliesFor as linkWriteReplies } from "@/lib/redis-reply";
 
 const CURSOR_KEY = "nl:wb:cursor";
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -188,6 +187,12 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
     const claim = claimValue();
     if ((await claimMark(sentKey(account, subId), 90 * 86_400, claim)) !== "ours") continue;
     lookedAt += 1;
+    // This run's own marks, and the offer's link once stored: let go when a call throws before the email is handed to
+    // the sender (rule 30), so the next run, inside the same window, sends the offer once. From the send on, not sent is
+    // not known, so a throw keeps them: the person is written to at most once.
+    const held: [string, string][] = [[sentKey(account, subId), claim]];
+    let link = "";
+    let handed = false;
     try {
       const found = await onAccount("GET", account, `/customers/${customer}`);
       const email = typeof found.email === "string" && EMAIL_PATTERN.test(found.email) ? normaliseEmail(found.email) : "";
@@ -214,6 +219,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         if (once === "unknown") await releaseMark(sentKey(account, subId), claim);
         continue;
       }
+      held.push([onceKey(statsId, email, product.id), onceValue]);
 
       const token = randomBytes(20).toString("hex");
       const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
@@ -225,9 +231,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const saved = await storedLink(write);
       if (saved !== "OK") {
         console.error("a come-back offer's link was not stored, so no email was sent", store.handle);
-        await unclaimOffer([[sentKey(account, subId), claim], [onceKey(statsId, email, product.id), onceValue]], linkKey(token));
+        await unclaimOffer(held, linkKey(token));
         continue;
       }
+      link = linkKey(token);
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
       const mail = winbackEmail({
         storeName: store.name,
@@ -242,6 +249,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       // the list, and the creator's postal address.
       const withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.winback.address } };
       const rendered = render(withAddress, mail.subject, mail.body, unsub);
+      handed = true;
       const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
         from: fromLine(withAddress),
         to: email,
@@ -262,6 +270,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       }
     } catch (error) {
       console.error("sending a come-back offer failed", store.handle, error);
+      if (!handed) await unclaimOffer(held, link);
     }
   }
   return sent;
@@ -270,14 +279,15 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
 /** The SET's own reply to a come-back link's write, read exactly; null when the write threw or answered in another shape. */
 async function storedLink(write: Parameters<typeof redisPipeline>[0]): Promise<unknown> {
   try {
-    return linkWriteReplies(await redisPipeline(write), write.length)?.[0] ?? null;
+    return repliesFor(await redisPipeline(write), write.length)?.[0] ?? null;
   } catch {
     return null;
   }
 }
 
 /**
- * Undoes a come-back offer whose link was not stored: this run's own marks are let go first (releaseMark only deletes
+ * Undoes a come-back offer whose link was not stored, or that stopped before its email was handed to the sender (with
+ * no link yet when `link` is empty): this run's own marks are let go first (releaseMark only deletes
  * a mark still holding this run's value, and never throws), then the link, in case it landed, is deleted. A failed
  * delete is logged, never thrown: the marks are already gone, so the next run sends the offer once, and a link left
  * behind runs out at its own OFFER_DAYS expiry, in no email. Should a release itself not reach Redis, its mark still
@@ -285,6 +295,7 @@ async function storedLink(write: Parameters<typeof redisPipeline>[0]): Promise<u
  */
 async function unclaimOffer(marks: [string, string][], link: string): Promise<void> {
   for (const [key, value] of marks) await releaseMark(key, value);
+  if (!link) return;
   try {
     await redisPipeline([["DEL", link]]);
   } catch (error) {

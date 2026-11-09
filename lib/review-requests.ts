@@ -43,7 +43,7 @@ import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
 import { ASK_DUE_KEY, type AskEntry, againDueAt, dueAt, readAskMember } from "@/lib/review-ask";
-import { mintReviewLink, provePurchase } from "@/lib/review-proof";
+import { dropReviewLink, mintReviewLink, provePurchase } from "@/lib/review-proof";
 import { readReview, reviewId } from "@/lib/reviews";
 import { REVIEW_SITES, parseReviewElsewhere } from "@/lib/review-elsewhere";
 import { type Store, storeForHandle } from "@/lib/store";
@@ -247,145 +247,185 @@ export async function sendReviewRequests(
   const members = Array.isArray(raw) ? (raw as string[]) : [];
   const stores = new Map<string, Store | null>();
   const groups = new Map<string, { store: Store; ready: Ready[] }>();
+  // One order's call that throws never stops the run's other orders (rule 30). A drop or a later that throws leaves the
+  // order on the list at the time it was due, so the next run looks at it again; nothing is held and nothing goes twice.
   const drop = async (member: string) => {
-    counts.dropped += 1;
-    await redisPipeline([["ZREM", ASK_DUE_KEY, member]]);
+    try {
+      await redisPipeline([["ZREM", ASK_DUE_KEY, member]]);
+      counts.dropped += 1;
+    } catch (error) {
+      console.error("a review request could not be taken off the list; the next run looks at it again", error);
+      counts.waiting += 1;
+    }
   };
   const later = async (member: string, at: number) => {
     counts.waiting += 1;
-    await redisPipeline([["ZADD", ASK_DUE_KEY, "XX", at, member]]);
+    try {
+      await redisPipeline([["ZADD", ASK_DUE_KEY, "XX", at, member]]);
+    } catch (error) {
+      console.error("a review request could not be moved later; it stays due for the next run", error);
+    }
+  };
+  /**
+   * Undoes one order's claim when nothing was sent on it, and never throws: the first's own mark goes (releaseMark
+   * never deletes one another run holds, and a mark it could not reach runs out on its own) and the order waits on the
+   * list; the reminder, taken off the list to claim it, goes back on it. Should that ZADD not reach Redis, the reminder
+   * is not sent (never twice), and the error is logged.
+   */
+  const unclaimOne = async (reference: string, member: string, claim: string | undefined, at: number) => {
+    if (claim) {
+      await releaseMark(sentKey(reference), claim);
+      await later(member, at);
+      return;
+    }
+    counts.waiting += 1;
+    try {
+      await redisPipeline([["ZADD", ASK_DUE_KEY, at, member]]);
+    } catch (error) {
+      console.error("a review reminder could not go back on the list", error);
+    }
   };
 
   for (const member of members) {
     if (Date.now() >= deadline) break;
-    const entry = readAskMember(member);
-    if (!entry) {
-      await drop(member);
-      continue;
-    }
-    if (!stores.has(entry.handle)) stores.set(entry.handle, await load(entry.handle).catch(() => null));
-    const store = stores.get(entry.handle) ?? null;
-    if (!store || store.statsId !== entry.statsId || !store.reviewAsk.days) {
-      await drop(member);
-      continue;
-    }
-    // Asked already: only the one reminder may follow, when the creator chose it; anything else is done.
-    // Read exactly (CX-123 rule 24, L9): one reply, nil or text. Anything else is unknown and waits, never "not asked".
-    const read = repliesFor(await redisPipeline([["GET", sentKey(entry.reference)]]), 1);
-    if (!read || (read[0] !== null && typeof read[0] !== "string")) continue;
-    const mark = read[0];
-    const stage = askStage(mark, store.reviewAsk.again);
-    if (!stage) {
-      await drop(member);
-      continue;
-    }
-    const due = askDueAt(stage, mark, entry.paidAt, store.reviewAsk);
-    if (due > nowSeconds) {
-      await later(member, due);
-      continue;
-    }
-    if (nowSeconds - due > LATE_SECONDS) {
-      await drop(member);
-      continue;
-    }
-    if (!canWrite(store)) {
-      await later(member, nowSeconds + RETRY_SECONDS.plan);
-      continue;
-    }
-    const proof = await provePurchase(store, entry.reference);
-    if (proof.state === "error") {
-      await later(member, nowSeconds + RETRY_SECONDS.stripe);
-      continue;
-    }
-    if (proof.state !== "ok" || proof.proof.refunded) {
-      await drop(member);
-      continue;
-    }
-    const email = proof.proof.email;
-    const checks = await redisPipeline([
-      ["EXISTS", offKey(entry.statsId, email)],
-      store.listId ? ["HGET", leadsKey(store.listId), normaliseEmail(email)] : ["EXISTS", "nl:none"],
-      suppressedCommand(store.listId, email),
-    ]).catch(() => null);
-    const recipient = reviewRecipientState(checks, Boolean(store.listId));
-    if (recipient === "unknown") {
-      await later(member, nowSeconds + RETRY_SECONDS.stripe);
-      continue;
-    }
-    // Nobody who pressed stop, left the list, or was deleted from the store (lib/suppression.ts).
-    if (recipient === "stopped") {
-      await drop(member);
-      continue;
-    }
-    const open = [];
-    for (const product of proof.proof.products) {
-      if (!(await readReview(entry.statsId, product.id, reviewId(entry.statsId, product.id, email)))) open.push(product);
-    }
-    if (open.length === 0) {
-      await drop(member);
-      continue;
-    }
-    // Claimed before anything is sent, so two runs never send one email twice: the first by its mark,
-    // the reminder by taking the order off the list (only one run takes it).
-    // Ours only on OK or our own value read back (lib/claim-mark.ts); its value still reads as "being sent" to
-    // askStage. Taken by another run: dropped as before. Not known: let go if ours, left for the next run, nothing sent.
-    const claim = stage === "first" ? `sending:${claimValue()}` : undefined;
-    if (claim) {
-      const claimed = await claimMark(sentKey(entry.reference), SENT_MARK_SECONDS, claim);
-      if (claimed === "taken") {
+    // This run's hold on the order once claimed (and its link once minted), until it is in a batch: a call that throws
+    // undoes it (rule 30), so the order is asked again by a later run, and the run goes on with the others.
+    let held: { reference: string; claim?: string; token?: string } | null = null;
+    try {
+      const entry = readAskMember(member);
+      if (!entry) {
         await drop(member);
         continue;
       }
-      if (claimed === "unknown") {
-        // It may have landed, and its "sending:" value would make the next run drop the order (askStage) though
-        // nothing was sent (Claude 5 on #2722). Nothing is sent on it, so it is let go if it still holds our own
-        // value (never another run's), and the order, still due, is asked again by the next run.
-        await releaseMark(sentKey(entry.reference), claim);
+      if (!stores.has(entry.handle)) stores.set(entry.handle, await load(entry.handle).catch(() => null));
+      const store = stores.get(entry.handle) ?? null;
+      if (!store || store.statsId !== entry.statsId || !store.reviewAsk.days) {
+        await drop(member);
         continue;
       }
-    } else {
-      const taken = repliesFor(await redisPipeline([["ZREM", ASK_DUE_KEY, member]]), 1);
-      if (!taken || countOf(taken[0]) !== 1) continue;
-    }
-    const token = await mintReviewLink(store, entry.reference, email);
-    if (!token) {
-      // The link was not stored (rule 24): nothing is sent, and the claim is undone as unclaim does below, so the order
-      // is asked again in an hour: the first's own mark goes (never one another run holds), the reminder goes back on
-      // the list.
-      const at = nowSeconds + RETRY_SECONDS.stripe;
+      // Asked already: only the one reminder may follow, when the creator chose it; anything else is done.
+      // Read exactly (CX-123 rule 24, L9): one reply, nil or text. Anything else is unknown and waits, never "not asked".
+      const read = repliesFor(await redisPipeline([["GET", sentKey(entry.reference)]]), 1);
+      if (!read || (read[0] !== null && typeof read[0] !== "string")) continue;
+      const mark = read[0];
+      const stage = askStage(mark, store.reviewAsk.again);
+      if (!stage) {
+        await drop(member);
+        continue;
+      }
+      const due = askDueAt(stage, mark, entry.paidAt, store.reviewAsk);
+      if (due > nowSeconds) {
+        await later(member, due);
+        continue;
+      }
+      if (nowSeconds - due > LATE_SECONDS) {
+        await drop(member);
+        continue;
+      }
+      if (!canWrite(store)) {
+        await later(member, nowSeconds + RETRY_SECONDS.plan);
+        continue;
+      }
+      const proof = await provePurchase(store, entry.reference);
+      if (proof.state === "error") {
+        await later(member, nowSeconds + RETRY_SECONDS.stripe);
+        continue;
+      }
+      if (proof.state !== "ok" || proof.proof.refunded) {
+        await drop(member);
+        continue;
+      }
+      const email = proof.proof.email;
+      const checks = await redisPipeline([
+        ["EXISTS", offKey(entry.statsId, email)],
+        store.listId ? ["HGET", leadsKey(store.listId), normaliseEmail(email)] : ["EXISTS", "nl:none"],
+        suppressedCommand(store.listId, email),
+      ]).catch(() => null);
+      const recipient = reviewRecipientState(checks, Boolean(store.listId));
+      if (recipient === "unknown") {
+        await later(member, nowSeconds + RETRY_SECONDS.stripe);
+        continue;
+      }
+      // Nobody who pressed stop, left the list, or was deleted from the store (lib/suppression.ts).
+      if (recipient === "stopped") {
+        await drop(member);
+        continue;
+      }
+      const open = [];
+      for (const product of proof.proof.products) {
+        if (!(await readReview(entry.statsId, product.id, reviewId(entry.statsId, product.id, email)))) open.push(product);
+      }
+      if (open.length === 0) {
+        await drop(member);
+        continue;
+      }
+      // Claimed before anything is sent, so two runs never send one email twice: the first by its mark,
+      // the reminder by taking the order off the list (only one run takes it).
+      // Ours only on OK or our own value read back (lib/claim-mark.ts); its value still reads as "being sent" to
+      // askStage. Taken by another run: dropped as before. Not known: let go if ours, left for the next run, nothing sent.
+      const claim = stage === "first" ? `sending:${claimValue()}` : undefined;
       if (claim) {
-        await releaseMark(sentKey(entry.reference), claim);
-        await later(member, at);
+        const claimed = await claimMark(sentKey(entry.reference), SENT_MARK_SECONDS, claim);
+        if (claimed === "taken") {
+          await drop(member);
+          continue;
+        }
+        if (claimed === "unknown") {
+          // It may have landed, and its "sending:" value would make the next run drop the order (askStage) though
+          // nothing was sent (Claude 5 on #2722). Nothing is sent on it, so it is let go if it still holds our own
+          // value (never another run's), and the order, still due, is asked again by the next run.
+          await releaseMark(sentKey(entry.reference), claim);
+          continue;
+        }
       } else {
-        await redisPipeline([["ZADD", ASK_DUE_KEY, at, member]]);
+        const taken = repliesFor(await redisPipeline([["ZREM", ASK_DUE_KEY, member]]), 1);
+        if (!taken || countOf(taken[0]) !== 1) continue;
+      }
+      held = { reference: entry.reference, claim };
+      const token = await mintReviewLink(store, entry.reference, email);
+      if (!token) {
+        // The link was not stored (rule 24): nothing is sent, and the claim is undone, so the order is asked again in an
+        // hour: the first's own mark goes (never one another run holds), the reminder goes back on the list.
+        await unclaimOne(entry.reference, member, claim, nowSeconds + RETRY_SECONDS.stripe);
+        continue;
+      }
+      held.token = token;
+      const stop = await stopLink(store, email);
+      const fromName = store.mail?.fromName || store.name;
+      const words = requestText(store, open.map((p) => p.title), entry.paidAt, `${storeBase(store)}/review?ask=${token}`, stage);
+      const g = givingWords(store.language);
+      const page = `${SITE_URL}/unsubscribe?v=${stop}`;
+      const r = render(store, words.subject, words.body, null, {
+        page,
+        oneClick: `${SITE_URL}/api/mail/unsubscribe?v=${stop}`,
+        why: g.askWhy(fromName),
+        label: g.askStopLabel,
+        after: g.askStopAfter(fromName),
+        line: g.askStopLine(page),
+        sent: g.sentWith,
+        lang: speech(store).lang.locale,
+      });
+      const group = groups.get(entry.handle) ?? { store, ready: [] };
+      group.ready.push({
+        entry,
+        member,
+        stage,
+        claim,
+        message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers },
+      });
+      groups.set(entry.handle, group);
+      held = null;
+    } catch (error) {
+      console.error("a review request failed; the run goes on with the others", error);
+      if (held) {
+        // Nothing was sent on it: its unsent link goes, and the claim is undone as for a link not stored.
+        if (held.token) await dropReviewLink(held.token);
+        await unclaimOne(held.reference, member, held.claim, nowSeconds + RETRY_SECONDS.stripe);
+      } else {
+        // Nothing held: the order stays on the list at the time it was due, for the next run.
         counts.waiting += 1;
       }
-      continue;
     }
-    const stop = await stopLink(store, email);
-    const fromName = store.mail?.fromName || store.name;
-    const words = requestText(store, open.map((p) => p.title), entry.paidAt, `${storeBase(store)}/review?ask=${token}`, stage);
-    const g = givingWords(store.language);
-    const page = `${SITE_URL}/unsubscribe?v=${stop}`;
-    const r = render(store, words.subject, words.body, null, {
-      page,
-      oneClick: `${SITE_URL}/api/mail/unsubscribe?v=${stop}`,
-      why: g.askWhy(fromName),
-      label: g.askStopLabel,
-      after: g.askStopAfter(fromName),
-      line: g.askStopLine(page),
-      sent: g.sentWith,
-      lang: speech(store).lang.locale,
-    });
-    const group = groups.get(entry.handle) ?? { store, ready: [] };
-    group.ready.push({
-      entry,
-      member,
-      stage,
-      claim,
-      message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers },
-    });
-    groups.set(entry.handle, group);
   }
 
   for (const { store, ready } of groups.values()) {
@@ -395,32 +435,55 @@ export async function sendReviewRequests(
       const agains = ready.filter((item) => item.stage === "again");
       // Only this run's own first marks are let go (releaseMark), never one another run holds now.
       for (const item of firsts) if (item.claim) await releaseMark(sentKey(item.entry.reference), item.claim);
-      if (at !== null && agains.length) await redisPipeline(agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member]));
+      if (at !== null && agains.length) {
+        try {
+          await redisPipeline(agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member]));
+        } catch (error) {
+          console.error("review reminders could not go back on the list", error);
+        }
+      }
       if (at !== null) for (const item of firsts) await later(item.member, at);
       counts.waiting += at === null ? 0 : agains.length;
     };
-    const reserved = await reserve(store, ready.length);
-    if (reserved !== "ok") {
-      await unclaim(nowSeconds + RETRY_SECONDS.plan);
-      continue;
-    }
-    const outcome = await sendBatch(
-      ready.map((item) => item.message),
-      `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
-    );
-    if (outcome !== "sent") {
-      await release(store, ready.length);
-      if (outcome === "refused") {
-        await unclaim(null);
-        for (const item of ready) await drop(item.member);
-      } else {
-        await unclaim(nowSeconds + RETRY_SECONDS.sender);
+    // One store's batch that throws never stops the other stores' (rule 30). Before the batch is handed to the sender,
+    // a throw undoes its claims, so its orders are asked again; from the send on, not sent is not known, so nothing is
+    // undone and nothing is sent twice.
+    let handed = false;
+    try {
+      const reserved = await reserve(store, ready.length);
+      if (reserved !== "ok") {
+        await unclaim(nowSeconds + RETRY_SECONDS.plan);
+        continue;
       }
-      continue;
+      handed = true;
+      const outcome = await sendBatch(
+        ready.map((item) => item.message),
+        `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
+      );
+      if (outcome !== "sent") {
+        // Nothing went: the claims are undone whatever happens to the count given back (a count not given back only
+        // leaves the store's month counted higher, never an email sent).
+        await release(store, ready.length).catch((error: unknown) => console.error("review requests not sent could not be given back to the month", error));
+        if (outcome === "refused") {
+          await unclaim(null);
+          for (const item of ready) await drop(item.member);
+        } else {
+          await unclaim(nowSeconds + RETRY_SECONDS.sender);
+        }
+        continue;
+      }
+      counts.sent += ready.length;
+      // After the first, the order waits on the list for its one reminder, when the creator chose one. Should this write
+      // throw, the emails went all the same: the first's "sending:" mark makes the next run drop it, never send it again.
+      try {
+        await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
+      } catch (error) {
+        console.error("review requests went, but their marks could not be written; none is sent again", error);
+      }
+    } catch (error) {
+      console.error("a batch of review requests failed; the run goes on with the other stores", error);
+      if (!handed) await unclaim(nowSeconds + RETRY_SECONDS.plan);
     }
-    // After the first, the order waits on the list for its one reminder, when the creator chose one.
-    await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
-    counts.sent += ready.length;
   }
   return counts;
 }

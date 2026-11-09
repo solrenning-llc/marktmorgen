@@ -272,7 +272,7 @@ async function main(): Promise<void> {
   before = await ai.aiLeft(store);
   readingSays = JSON.stringify({ parts: [], format: "", for: "" });
   const empty = await writeFromPdf(store, input, Date.now(), told("pdfassistempty01", []));
-  is("a reading with nothing in it: the writing step never starts, and its job comes back", [calls, before - (await ai.aiLeft(store)), empty], [1, READ_PDF_JOBS, { ok: false, reason: "failed", returned: 1, left: before - READ_PDF_JOBS }]);
+  is("a reading with nothing in it: the writing step never starts, its job comes back, and it says the PDF gave nothing", [calls, before - (await ai.aiLeft(store)), empty], [1, READ_PDF_JOBS, { ok: false, reason: "empty", returned: 1, left: before - READ_PDF_JOBS }]);
 
   fresh();
   before = await ai.aiLeft(store);

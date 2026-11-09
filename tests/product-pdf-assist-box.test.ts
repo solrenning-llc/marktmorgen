@@ -58,6 +58,16 @@ async function main(): Promise<void> {
     b.mounted.unmount();
   }
 
+  part("A PDF with nothing to suggest from: the box's own words, no retry of the same");
+  {
+    const b = await box("ready");
+    const said = (find(b.mounted.tree(), (n) => n.type === AiStepsAssist)[0]?.props as { messages?: Record<string, string> } | undefined)?.messages?.empty ?? "";
+    is("the step-by-step box is given this box's words for an empty reading", said, (PDF_ASSIST_COPY as Record<string, string>).empty ?? "missing");
+    is("they say the PDF gave nothing, not that a page was not written", [/nothing to suggest from/i.test(said), /\bpage was not written\b/.test(said)], [true, false]);
+    is("and never ask for a retry that would read the same pages", /try again/i.test(said), false);
+    b.mounted.unmount();
+  }
+
   part("Two suggestions in a row: one list of benefits, the creator's description whole");
   {
     const b = await box("ready");

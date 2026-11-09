@@ -9,10 +9,13 @@
  * public page gives out while the product is off the store.
  *
  * Each new name comes from the old one and a key only this deployment has (lib/secret-box.ts), so a press after an
- * unconfirmed step finds the copies the earlier press made. The order is the copies, then the old files, then the
- * record, so every step that fails leaves something the next press can finish: a step the file store does not
- * confirm throws, with the record as it was. A record the creator changed meanwhile is left as they left it, and
- * the copies made for it are deleted. A product published again before this runs is left alone.
+ * unconfirmed step finds the copies the earlier press made. The order is the copies, then the old names kept with
+ * the takedown's steps, then the record, and the old files only once the record names the copies (Claude 2 on
+ * #3382): a step that fails or is not confirmed throws and leaves every file there, the originals and the copies,
+ * so nothing the creator made is lost and the next press finishes. A record that cannot be read is never taken for
+ * "nothing to move". A press after the record moved finds the old names in the steps and only deletes those files,
+ * so a picture is never moved twice. A record the creator changed meanwhile is left as they left it, and the copies
+ * made for it are deleted. A product published again before this runs is left alone.
  *
  * Not reached from here: copies a shared cache made before the takedown, kept there until they expire.
  */
@@ -55,12 +58,25 @@ async function copyTo(from: string, to: string): Promise<"copied" | "absent"> {
   }
 }
 
+/** The files of one picture: the picture and its smaller copy, when it has one. */
+export type PictureNames = { path: string; small: string | null };
+
+const namesOf = (picture: PictureNames): string[] => [picture.path, ...(picture.small ? [picture.small] : [])];
+
 /**
  * Moves the picture of a product that is off the store to new names. "none" when there is nothing to move (no
  * picture, a product shown again, or a picture whose file is no longer there); "changed" when the creator replaced
- * or removed it meanwhile. Throws when a step's outcome is unknown.
+ * or removed it meanwhile. Throws when a step's outcome is unknown, with every file still there.
+ *
+ * `before`: the old names an earlier press of this takedown kept; `remember` keeps them, confirmed, before the
+ * record is pointed at the copies (lib/takedown.ts keeps them with the takedown's steps).
  */
-export async function withdrawProductPicture(ref: string, id: string): Promise<"moved" | "none" | "changed"> {
+export async function withdrawProductPicture(
+  ref: string,
+  id: string,
+  before: PictureNames | null,
+  remember: (olds: PictureNames) => Promise<void>,
+): Promise<"moved" | "none" | "changed"> {
   // Read again, after the product was taken off: the caller's copy of the store may predate it.
   const store = await storeForEmail(ref);
   if (!store) throw new Error("the store could not be read again");
@@ -70,6 +86,12 @@ export async function withdrawProductPicture(ref: string, id: string): Promise<"
   if (!product || !product.hidden || !product.image) return "none";
   const key = deriveKey("picture-withdraw");
   if (!key) throw new Error("there is no key to name a moved picture with");
+  const shown = namesOf({ path: product.image.path, small: product.image.small?.path ?? null });
+  if (before && product.image.path === movedName(key, before.path)) {
+    // An earlier press pointed the record at the copies and its delete of the old files was not confirmed.
+    await del(namesOf(before).filter((name) => !shown.includes(name)));
+    return "moved";
+  }
   const from = { path: product.image.path, small: product.image.small?.path ?? null };
   const to = { path: movedName(key, from.path), small: from.small ? movedName(key, from.small) : null };
 
@@ -82,11 +104,20 @@ export async function withdrawProductPicture(ref: string, id: string): Promise<"
     if (made.length) await del([...olds, ...made]);
     return "none";
   }
-  await del(olds);
+  await remember(from);
   const moved = await moveProductImage(ref, id, from, { path: to.path, small: small === "copied" ? to.small : null });
-  if (!moved.ok) {
-    await del(made).catch((error: unknown) => console.error("could not delete the copies of a picture changed meanwhile", error));
-    return moved.reason === "changed" ? "changed" : "none";
+  if (!moved.ok && moved.reason !== "changed") {
+    // The record could not be read or written: the originals and the copies stay, and the next press finishes.
+    throw new Error("the product's record could not be confirmed");
   }
+  if (!moved.ok) {
+    // The creator replaced or removed the picture meanwhile: what they show now is kept, nothing else of the old.
+    await del(made.filter((name) => !moved.shown.includes(name))).catch((error: unknown) => console.error("could not delete the copies of a picture changed meanwhile", error));
+    const unshown = olds.filter((name) => !moved.shown.includes(name));
+    if (unshown.length) await del(unshown);
+    return "changed";
+  }
+  // Only now, with the record confirmed to name the copies, the old files go.
+  await del(olds);
   return "moved";
 }

@@ -754,7 +754,8 @@ export async function funnelView(input: {
   }
   if (position.kind !== "offer") return { offer: null, taken, notes, declined };
   const { step, target } = position;
-  const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom) ?? null : null;
+  // Never from a product that is off the store: its picture may have moved to a name no public page gives out (R44).
+  const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom && !p.hidden) ?? null : null;
   const afterNo = funnel.steps.some((s) => s.no === step.id && records.get(stepSlot(funnel, s))?.state === "declined");
   return {
     offer: {

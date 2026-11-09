@@ -329,24 +329,6 @@ export class MemoryRedis {
           const [, lock, token] = args;
           return this.run(["GET", lock]) === token ? this.run(["DEL", lock]) : 0;
         }
-        // lib/group-buy.ts takePlace: a place's record deleted only while it holds exactly what this run wrote.
-        if (key.startsWith("-- marktmorgen:hdel-own:v1\n") && args[0] === "1" && args.length === 4) {
-          const [, hash, field, value] = args;
-          return this.run(["HGET", hash, field]) === value ? this.run(["HDEL", hash, field]) : 0;
-        }
-        // lib/group-buy.ts takePlace: the places counter brought down to the places' records, never below them.
-        if (key.startsWith("-- marktmorgen:places-heal:v1\n") && args[0] === "2" && args.length === 3) {
-          const [, count, hash] = args;
-          const raw = this.run(["GET", count]);
-          const c = raw === null ? 0 : typeof raw === "string" && /^-?\d+$/.test(raw) ? Number(raw) : NaN;
-          if (!Number.isSafeInteger(c)) return -1;
-          const h = Number(this.run(["HLEN", hash]));
-          if (c > h) {
-            this.run(["DECRBY", count, String(c - h)]);
-            return h;
-          }
-          return c;
-        }
         if (key.startsWith("-- marktmorgen:extend:v1\n") && args[0] === "1" && args.length === 4) {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;

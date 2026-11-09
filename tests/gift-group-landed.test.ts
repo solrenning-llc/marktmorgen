@@ -6,14 +6,14 @@
  * A/B. M1: the last write (the gift marked given, the purchase marked paid) lands with an unknown reply. The run
  *      throws (rule 24), and the next run must still send the emails that come after that write (the friend's, the
  *      payer's receipt, the receipt with the link that hands out the places), once, never "already" with nothing sent.
- * C.   L1: the places counter's INCR lands with an unknown reply. Two places paid for: two people hold the product,
+ * C.   L1: the places counter (on the main, the HLEN of the marks) answers in an unknown shape. Two places paid for: two people hold the product,
  *      the link page does not say "full" to the second, and never a place more than paid.
  * D.   Rule 30: an address holding a leftover record of a place without the product is never emailed "You already
- *      took your place"; on a full purchase it is told "full", as takePlace says.
+ *      took your place"; on a full purchase it is told "full", as takePlace says once its mark is given back.
  * E.   N1: the grant of a place answers in another shape. Not landed: the place is given back and the link works
  *      again; landed: the place is taken. Two places paid for: two people hold the product.
  * F.   N2 (Claude 1 on #2872): a give-back's two commands run one at a time, and a second taker past the places paid
- *      for runs its whole take (and the count heal) between them. No reply is altered. Two places paid for: the count
+ *      for runs its whole take between them. No reply is altered. Two places paid for: the count
  *      stays at two, a later address is told full, and only two people hold the product.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -158,7 +158,9 @@ async function main(): Promise<void> {
     return r === "threw" ? r : r.outcome;
   };
   const ask = (id: string, email: string) => askPlace({ store, id, email, product, base, from, ordersLink: async () => null });
-  const isCount = (id: string) => (c: Command) => c[0] === "INCR" && c[1] === `nl:grp:${id}:n`;
+  // Rule 23: the main counts places by their marks (the HLEN of the marks right after a mark's HSETNX), no longer by an
+  // INCR of ":n"; the unknown answer is put on that HLEN. Expectations unchanged.
+  const isCount = (id: string) => (c: Command) => c[0] === "HLEN" && c[1] === `nl:grp:${id}:m`;
 
   part("C. Control: a purchase for 2, three people: two hold it, the third is told full");
   const c0 = await paidGroup(2);
@@ -199,15 +201,21 @@ async function main(): Promise<void> {
   part("D. Rule 30: full, the give-back script fails every time, then that address asks on the link page");
   const d1 = await paidGroup(2);
   is("two places, taken", [await take(await d1.link("kai@example.com")), await take(await d1.link("lu@example.com"))], ["taken", "taken"]);
-  const isDrop = (c: Command) => c[0] === "EVAL" && c[3] === `nl:grp:${d1.id}:m`;
+  // Rule 23: on the main a place is given back by an HDEL of the address's mark (no script, no DECR).
+  const isDrop = (c: Command) => c[0] === "HDEL" && c[1] === `nl:grp:${d1.id}:m`;
   redis.pipeline = (async (commands: Command[]) => {
     if (!commands.some(isDrop)) return real(commands);
     await real(commands.filter((c) => !isDrop(c)));
     throw new Error("Redis error: ERR script failed");
   }) as typeof redis.pipeline;
-  const maxFirst = await take(await d1.link("max@example.com"));
+  const maxLink = await d1.link("max@example.com");
+  const maxFirst = await take(maxLink);
+  const maxSecond = await take(maxLink);
   restore();
-  is("max is told full, then 'pending', nothing handed over", [maxFirst, await take(await d1.link("max@example.com")), await owns("max@example.com")], ["full", "pending", []]);
+  // Rule 23: on the main a give-back whose every HDEL fails is said as not done (it throws: the page says "We could
+  // not finish opening your place", lib/group-buy.ts placeNotice "opening"), not "full" then "pending", which the
+  // main does not have; the leftover mark is max's own and is picked up and given back once the HDEL works: "full".
+  is("max: not done twice while the give-back fails, then full; nothing handed over", [maxFirst, maxSecond, await take(maxLink), await owns("max@example.com")], ["threw", "threw", "full", []]);
   sent.length = 0;
   const maxAsk = await ask(d1.id, "max@example.com");
   is("never emailed 'You already took your place' while holding nothing", sent.filter((e) => /already took your place/.test(e.text)).length, 0);
@@ -242,10 +250,12 @@ async function main(): Promise<void> {
   const f1 = await paidGroup(2);
   is("al and bo take the two places", [await take(await f1.link("al2@example.com")), await take(await f1.link("bo2@example.com"))], ["taken", "taken"]);
   const diToken = await f1.link("di2@example.com");
+  // Rule 23: on the main the give-back past the places paid for is the HDEL of the mark and the HLEN of the marks
+  // after it (no script, no DECR); the second taker's whole take runs between those two commands. Expectations unchanged.
   const isGiveBack = (commands: Command[]) =>
     commands.length === 2 &&
-    commands.some((c) => c[0] === "EVAL" && c[3] === `nl:grp:${f1.id}:m`) &&
-    commands.some((c) => c[0] === "DECR" && c[1] === `nl:grp:${f1.id}:n`);
+    commands.some((c) => c[0] === "HDEL" && c[1] === `nl:grp:${f1.id}:m`) &&
+    commands.some((c) => c[0] === "HLEN" && c[1] === `nl:grp:${f1.id}:m`);
   let between: string | null = null;
   redis.pipeline = (async (commands: Command[]) => {
     if (between !== null || !isGiveBack(commands)) return real(commands);

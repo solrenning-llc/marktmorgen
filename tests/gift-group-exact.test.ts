@@ -206,7 +206,9 @@ async function main(): Promise<void> {
   is("both places hold the product; nothing for the third", [await owns("ana@example.com"), await owns("ben@example.com"), await owns("cy@example.com")], [[product.id], [product.id], []]);
 
   part("3. takePlace: the places counter answers in an unknown shape (the count still moves)");
-  unknownFor((c) => c[0] === "INCR" && String(c[1]).endsWith(":n"), true);
+  // Rule 23: the main counts places by their marks (HLEN of the marks, after the mark's HSETNX), no longer by an INCR
+  // of ":n"; the unknown answer is put on that HLEN. Expectations unchanged.
+  unknownFor((c) => c[0] === "HLEN" && String(c[1]).endsWith(":m"), true);
   const third = await take("dee@example.com");
   restore();
   is("refused (a temporary error), never 'taken' past the two paid for", third === "taken", false);
@@ -222,7 +224,9 @@ async function main(): Promise<void> {
     await real([["SET", `nl:grp:take:${t}`, JSON.stringify({ g: two.group.id, e: email }), "EX", 3600]]);
     return t;
   };
-  unknownFor((c) => c[0] === "INCR" && String(c[1]).endsWith(":n"), false);
+  // Rule 23: as above, the counter is the HLEN of the marks on the main (not run here, as the INCR was not).
+  // Expectations unchanged.
+  unknownFor((c) => c[0] === "HLEN" && String(c[1]).endsWith(":m"), false);
   const firstUnknown = await outcome(takePlace({ store, token: await tokenFor("gus@example.com"), recordStart: async () => {} }));
   restore();
   is("refused, nothing handed over", [firstUnknown === "threw" || (firstUnknown as { outcome: string }).outcome !== "taken", await owns("gus@example.com")], [true, []]);
@@ -249,23 +253,30 @@ async function main(): Promise<void> {
   is("sent, with a place link written for that address", [sentOk, links.some((l) => l.includes("hal@example.com"))], ["sent", true]);
 
   part("4. askPlace: healthy control, the day's email cap (2 x 3 + 10 = 16) reached");
-  await real([["SET", `nl:grp:${id}:mail`, "16", "EX", 86_400], ["SET", `nl:grp:${id}:n`, "0"]]);
+  // Rule 23: places are counted by their marks on the main, so setting ":n" to 0 no longer frees the full purchase
+  // `id` (it read "full", not "slow"); the cap is put on `room`, whose two places are free. Expectation unchanged.
+  await real([["SET", `nl:grp:${room.group.id}:mail`, "16", "EX", 86_400]]);
   links.length = 0;
   watching(null);
-  const healthy = await ask(id, "eve@example.com");
+  const healthy = await ask(room.group.id, "eve@example.com");
   restore();
   is("slow: no link written", [healthy, links.length], ["slow", 0]);
 
   part("4. askPlace: the day's email count answers in an unknown shape (the count still moves)");
+  // Rule 23: on `room` with the day's count back at 0, so the healthy answer here would be "sent" (on the full `id`
+  // it was "full" whatever the count said). Expectation unchanged.
+  await real([["SET", `nl:grp:${room.group.id}:mail`, "0", "EX", 86_400]]);
   watching((c) => c[0] === "INCR" && String(c[1]).endsWith(":mail"));
-  const asked = await outcome(ask(id, "fay@example.com"));
+  const asked = await outcome(ask(room.group.id, "fay@example.com"));
   restore();
   is("nothing sent: no link for fay written, and not 'sent'", [asked === "sent", links.some((l) => l.includes("fay@example.com"))], [false, false]);
 
   part("4. askPlace: the places read answers in an unknown shape");
-  await real([["SET", `nl:grp:${id}:mail`, "0", "EX", 86_400], ["SET", `nl:grp:${id}:n`, "0"]]);
-  watching((c) => c[0] === "GET" && String(c[1]).endsWith(":n"));
-  const unread = await outcome(ask(id, "gil@example.com"));
+  // Rule 23: the places read on the main is the HLEN of the marks (no GET of ":n"), on `room`, whose places are
+  // free, so a healthy read would send. Expectation unchanged.
+  await real([["SET", `nl:grp:${room.group.id}:mail`, "0", "EX", 86_400]]);
+  watching((c) => c[0] === "HLEN" && String(c[1]).endsWith(":m"));
+  const unread = await outcome(ask(room.group.id, "gil@example.com"));
   restore();
   is("nothing sent: no link for gil written, and not 'sent'", [unread === "sent", links.some((l) => l.includes("gil@example.com"))], [false, false]);
 

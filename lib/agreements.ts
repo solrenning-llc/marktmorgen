@@ -12,7 +12,7 @@
  * as PDF. Nothing here costs anything a store's emails, its data room and its
  * store commands do not already count.
  */
-import { sendEmail } from "@/lib/email";
+import { sendEmailOutcome } from "@/lib/email";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import { speechFor } from "@/lib/buyer-words";
 import { type AgreementWords, agreementWords } from "@/lib/buyer-words/agreements";
@@ -26,6 +26,14 @@ export function agreementLink(store: Store, a: Pick<Agreement, "id">): string {
 }
 
 const NOT_SENT = "Not sent: your store's emails for this month may be used, or email could not be sent just now. You can send it again from here.";
+/**
+ * Said when an email's send is not known (a timeout, a 5xx, a network error
+ * after the request may have reached the sender): it may have arrived, so it
+ * is never said "Not sent", and it counts as one of the agreement's emails,
+ * so its count, the day before another and the next email's own key all
+ * move on and nothing sends it twice (9 November 2026, rule 30).
+ */
+const UNCONFIRMED = "We could not confirm it was sent. It may still arrive; check before sending again.";
 
 /**
  * Emails the link to the person it is for: the first version, a new version,
@@ -33,7 +41,7 @@ const NOT_SENT = "Not sent: your store's emails for this month may be used, or e
  * going to the creator; taken from the store's emails for the month before it
  * goes. Writes down when it went, or why it did not.
  */
-export async function sendAgreementEmail(store: Store, a: Agreement, version: AgreementVersion, now = Date.now()): Promise<{ sent: boolean; agreement: Agreement }> {
+export async function sendAgreementEmail(store: Store, a: Agreement, version: AgreementVersion, now = Date.now()): Promise<{ sent: boolean; uncertain?: true; agreement: Agreement }> {
   if (a.sent.length >= MAX_SENDS) return { sent: false, agreement: a };
   const w = agreementWords(store.language);
   const said = speechFor(store.language, version.currency);
@@ -54,7 +62,7 @@ export async function sendAgreementEmail(store: Store, a: Agreement, version: Ag
     "",
     w.footer(store.name),
   ].join("\n");
-  const sent = await sendEmail({
+  const outcome = await sendEmailOutcome({
     meter: { by: "store", store, kind: "email" },
     from: fromStore(store),
     to: a.email,
@@ -62,15 +70,15 @@ export async function sendAgreementEmail(store: Store, a: Agreement, version: Ag
     subject: (fresh ? w.newVersionSubject(store.name, version.title, version.n) : w.subject(store.name, a.kind, version.title)).slice(0, 180),
     text,
     idempotencyKey: `nimbus-agree:${a.id}:${a.sent.length}`,
-  }).catch(() => false);
+  }).catch(() => "uncertain" as const);
   // Written onto the record as it is now: a signature or a version given
-  // while the email was on its way stays (MM-SA-03).
-  const next = await changeAgreement(store, a.id, (current) => (sent ? { ...current, sent: [...current.sent, now], failed: "" } : { ...current, failed: NOT_SENT }), now);
-  return { sent, agreement: next ?? a };
+  // while the email was on its way stays (MM-SA-03). Not known: counted and said so (UNCONFIRMED).
+  const next = await changeAgreement(store, a.id, (current) => (outcome === "refused" ? { ...current, failed: NOT_SENT } : { ...current, sent: [...current.sent, now], failed: outcome === "sent" ? "" : UNCONFIRMED }), now);
+  return outcome === "uncertain" ? { sent: false, uncertain: true, agreement: next ?? a } : { sent: outcome === "sent", agreement: next ?? a };
 }
 
 /** One more email of the link by hand, within the same counts (lib/agreement-rules.ts, canSendAgain). */
-export async function sendAgain(store: Store, id: string, now = Date.now()): Promise<{ ok: true; sent: boolean } | { ok: false; why: string }> {
+export async function sendAgain(store: Store, id: string, now = Date.now()): Promise<{ ok: true; sent: boolean; uncertain?: true } | { ok: false; why: string }> {
   const a = await agreementOf(store, id);
   if (!a) return { ok: false, why: "That agreement is gone. Reload the page." };
   const may = canSendAgain(a, now);
@@ -79,7 +87,7 @@ export async function sendAgain(store: Store, id: string, now = Date.now()): Pro
   const version = latest ? await readVersion(a, latest.n) : null;
   if (!version) return { ok: false, why: "That agreement can't be read right now. Try again in a minute." };
   const done = await sendAgreementEmail(store, a, version, now);
-  return { ok: true, sent: done.sent };
+  return done.uncertain ? { ok: true, sent: false, uncertain: true } : { ok: true, sent: done.sent };
 }
 
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -154,7 +162,7 @@ export async function sendSignedCopies(store: Store, a: Agreement, version: Agre
     ].join("\n");
   const date = said.date(signature.at);
   const subject = w.copySubject(store.name, version.title).slice(0, 180);
-  const signer = await sendEmail({
+  const signer = await sendEmailOutcome({
     meter: { by: "store", store, kind: "email" },
     from: fromStore(store),
     to: a.email,
@@ -163,9 +171,9 @@ export async function sendSignedCopies(store: Store, a: Agreement, version: Agre
     text: [w.greeting(a.name), "", body(w.copyLead(signature.name, date))].join("\n"),
     attachments,
     idempotencyKey: `nimbus-agree-copy:${a.id}:${version.n}:signer`,
-  }).catch(() => false);
+  }).catch(() => "uncertain" as const);
   const creator = store.email
-    ? await sendEmail({
+    ? await sendEmailOutcome({
         meter: { by: "store", store, kind: "email" },
         from: fromStore(store),
         to: store.email,
@@ -173,14 +181,17 @@ export async function sendSignedCopies(store: Store, a: Agreement, version: Agre
         text: body(w.copyCreatorLead(signature.name, a.email, date)),
         attachments,
         idempotencyKey: `nimbus-agree-copy:${a.id}:${version.n}:creator`,
-      }).catch(() => false)
-    : false;
-  await changeAgreement(store, a.id, (current) => ({ ...current, copies: current.copies + (signer ? 1 : 0) + (creator ? 1 : 0), failed: signer ? "" : NOT_SENT }), now).catch(() => undefined);
-  return { signer, creator };
+      }).catch(() => "uncertain" as const)
+    : "refused";
+  // A copy counts as sent only when a sender took it; the signer's whose send is not known is said so (UNCONFIRMED).
+  const copied = (signer === "sent" ? 1 : 0) + (creator === "sent" ? 1 : 0);
+  const failed = signer === "sent" ? "" : signer === "uncertain" ? UNCONFIRMED : NOT_SENT;
+  await changeAgreement(store, a.id, (current) => ({ ...current, copies: current.copies + copied, failed }), now).catch(() => undefined);
+  return { signer: signer === "sent", creator: creator === "sent" };
 }
 
 /** The signed copy of the latest signed version, to the person who signed, once more by hand: one of the agreement's emails. */
-export async function resendSignedCopy(store: Store, id: string, now = Date.now()): Promise<{ ok: true; sent: boolean } | { ok: false; why: string }> {
+export async function resendSignedCopy(store: Store, id: string, now = Date.now()): Promise<{ ok: true; sent: boolean; uncertain?: true } | { ok: false; why: string }> {
   const a = await agreementOf(store, id);
   if (!a) return { ok: false, why: "That agreement is gone. Reload the page." };
   const mark = [...a.versions].reverse().find((m) => m.signature);
@@ -193,7 +204,7 @@ export async function resendSignedCopy(store: Store, id: string, now = Date.now(
   const w = agreementWords(store.language);
   const said = speechFor(store.language, version.currency);
   const html = signedCopyHtml(store, a, version, mark.signature);
-  const sent = await sendEmail({
+  const outcome = await sendEmailOutcome({
     meter: { by: "store", store, kind: "email" },
     from: fromStore(store),
     to: a.email,
@@ -202,7 +213,12 @@ export async function resendSignedCopy(store: Store, id: string, now = Date.now(
     text: [w.greeting(a.name), "", w.copyLead(mark.signature.name, said.date(mark.signature.at)), "", `--- ${w.textHeading} ---`, version.text, "---", "", w.copyPage, agreementLink(store, a), "", w.footer(store.name)].join("\n"),
     attachments: [{ filename: `signed-${a.id.slice(0, 8)}-v${version.n}.html`, content: Buffer.from(html, "utf8").toString("base64") }],
     idempotencyKey: `nimbus-agree:${a.id}:${a.sent.length}`,
-  }).catch(() => false);
-  await changeAgreement(store, a.id, (current) => (sent ? { ...current, sent: [...current.sent, now], copies: current.copies + 1, failed: "" } : { ...current, failed: NOT_SENT }), now);
-  return { ok: true, sent };
+  }).catch(() => "uncertain" as const);
+  // Not known: one of its emails (the next one's key moves on), not a copy known to be sent, and said so (UNCONFIRMED).
+  await changeAgreement(store, a.id, (current) => (outcome === "refused"
+    ? { ...current, failed: NOT_SENT }
+    : outcome === "sent"
+      ? { ...current, sent: [...current.sent, now], copies: current.copies + 1, failed: "" }
+      : { ...current, sent: [...current.sent, now], failed: UNCONFIRMED }), now);
+  return outcome === "uncertain" ? { ok: true, sent: false, uncertain: true } : { ok: true, sent: outcome === "sent" };
 }

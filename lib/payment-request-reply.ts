@@ -1,7 +1,8 @@
 import { ID_PATTERN } from "@/lib/payment-request-rules";
 
 export type RequestAction = "create" | "remind" | "cancel" | "delete" | "outside";
-export type RequestActionReply = { ok: boolean; message?: string; sent?: boolean };
+/** `uncertain`: an email whose send is not known, so it may still arrive (lib/payment-requests.ts sendRequestEmail). */
+export type RequestActionReply = { ok: boolean; message?: string; sent?: boolean; uncertain?: true };
 
 /** An HTTP error or an incomplete receipt never confirms a request action. */
 export function paymentRequestReply(httpOk: boolean, value: unknown, action: RequestAction): RequestActionReply {
@@ -14,7 +15,8 @@ export function paymentRequestReply(httpOk: boolean, value: unknown, action: Req
   if (action === "create" && (!own("id") || typeof data.id !== "string" || !ID_PATTERN.test(data.id))) return { ok: false };
   if (action === "create" || action === "remind") {
     if (!own("sent") || typeof data.sent !== "boolean") return { ok: false };
-    return { ok: true, sent: data.sent };
+    // Read only when its own and true beside a send that did not surely go.
+    return own("uncertain") && data.uncertain === true && data.sent === false ? { ok: true, sent: false, uncertain: true } : { ok: true, sent: data.sent };
   }
   return { ok: true };
 }

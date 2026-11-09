@@ -11,5 +11,6 @@ export function agreementReply(httpOk: boolean, value: unknown, action: Agreemen
  if (!httpOk || !own("ok") || data.ok!==true) return message?{ok:false,message}:{ok:false};
  if ((action==="create"||action==="revise")&&(!own("id")||typeof data.id!=="string"||!ID_PATTERN.test(data.id))) return {ok:false};
  if (["create","revise","resend","copy"].includes(action)&&(!own("sent")||typeof data.sent!=="boolean")) return {ok:false};
- return {...data,ok:true,message,sent:typeof data.sent==="boolean"?data.sent:undefined};
+ // `uncertain` (its email's send not known, lib/agreements.ts) only when own and true.
+ return {...data,ok:true,message,sent:typeof data.sent==="boolean"?data.sent:undefined,uncertain:own("uncertain")&&data.uncertain===true&&data.sent===false?true:undefined};
 }

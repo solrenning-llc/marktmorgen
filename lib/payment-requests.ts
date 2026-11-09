@@ -33,7 +33,7 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 import { LANGUAGES } from "@/lib/store-language";
 import { isHouseStore } from "@/lib/house-store";
 import { canSell } from "@/lib/store-checkout";
-import { sendEmail } from "@/lib/email";
+import { sendEmailOutcome } from "@/lib/email";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
@@ -65,13 +65,18 @@ export function requestsOpen(store: Store): boolean {
   return canSell(store) && !isHouseStore(store);
 }
 
+/** Said on a request whose email was surely not sent. */
+const NOT_SENT = "Not sent: your store's emails for this month may be used, or email could not be sent just now. You can send it again from here.";
+/** Said on a request whose email's send is not known: it may have arrived. */
+const UNCONFIRMED = "We could not confirm it was sent. It may still arrive; check before sending again.";
+
 /**
  * Emails a request, or a reminder of it, to the person it is for, from the
  * store's name, with replies going to the creator. Taken from the store's
  * emails for the month before it goes. Writes down when it went, or why it
  * did not, and when the next reminder is due.
  */
-export async function sendRequestEmail(store: Store, request: PaymentRequest, now = Date.now()): Promise<{ sent: boolean; request: PaymentRequest }> {
+export async function sendRequestEmail(store: Store, request: PaymentRequest, now = Date.now()): Promise<{ sent: boolean; uncertain?: true; request: PaymentRequest }> {
   const reminder = request.sent.length > 0;
   const said = speechFor(store.language, request.currency);
   const w = requestWords(store.language);
@@ -100,7 +105,7 @@ export async function sendRequestEmail(store: Store, request: PaymentRequest, no
     "",
     w.footer(store.name),
   ].join("\n");
-  const sent = await sendEmail({
+  const outcome = await sendEmailOutcome({
     meter: { by: "store", store, kind: "email" },
     from: fromStore(store),
     to: request.email,
@@ -108,25 +113,34 @@ export async function sendRequestEmail(store: Store, request: PaymentRequest, no
     subject: (reminder ? w.reminderSubject(store.name, total) : w.subject(store.name, total)).slice(0, 180),
     text,
     idempotencyKey: `nimbus-payreq:${request.id}:${request.sent.length}`,
-  }).catch(() => false);
+  }).catch(() => "uncertain" as const);
   // Written onto the record as it is now, not as it was read before the email
   // went: a payment made while it was being sent stays paid (MM-SA-02).
-  const failed = "Not sent: your store's emails for this month may be used, or email could not be sent just now. You can send it again from here.";
-  const done = await changeRequest(store, request.id, (current) => ({ next: sent ? { ...current, sent: [...current.sent, now], failed: "" } : { ...current, failed }, answer: null }), now);
-  return { sent, request: done?.request ?? request };
+  // An answer not known (a timeout, a 5xx, a network error after the request
+  // may have reached the sender) may have delivered it: it counts as one of
+  // the request's emails, so its count, the day before another and the next
+  // email's own key all move on and nothing sends it twice, and the studio
+  // says it could not be confirmed. Only a certain refusal says "Not sent"
+  // (9 November 2026, rule 30).
+  const done = await changeRequest(store, request.id, (current) => ({
+    next: outcome === "refused" ? { ...current, failed: NOT_SENT } : { ...current, sent: [...current.sent, now], failed: outcome === "sent" ? "" : UNCONFIRMED },
+    answer: null,
+  }), now);
+  const kept = done?.request ?? request;
+  return outcome === "uncertain" ? { sent: false, uncertain: true, request: kept } : { sent: outcome === "sent", request: kept };
 }
 
 /**
  * Sends one more email about a request by hand, within the same counts as
  * the reminders that go by themselves (lib/payment-request-rules.ts, canSendAgain).
  */
-export async function remindNow(store: Store, id: string, now = Date.now()): Promise<{ ok: true; request: PaymentRequest; sent: boolean } | { ok: false; why: string }> {
+export async function remindNow(store: Store, id: string, now = Date.now()): Promise<{ ok: true; request: PaymentRequest; sent: boolean; uncertain?: true } | { ok: false; why: string }> {
   const request = await requestOf(store, id);
   if (!request) return { ok: false, why: "That request is gone. Reload the page." };
   const may = canSendAgain(request, now);
   if (!may.ok) return may;
   const done = await sendRequestEmail(store, request, now);
-  return { ok: true, request: done.request, sent: done.sent };
+  return done.uncertain ? { ok: true, request: done.request, sent: false, uncertain: true } : { ok: true, request: done.request, sent: done.sent };
 }
 
 /**
@@ -198,6 +212,8 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
       }
       const done = await sendRequestEmail(store, request, now);
       if (done.sent) counts.sent += 1;
+      // Not known: counted as one of its emails, so its next reminder is already set from the record, never sooner.
+      else if (done.uncertain) counts.skipped += 1;
       else {
         // Not sent (the store's emails for the month are used, or email failed): tried again tomorrow, never sooner.
         await delayReminder(sid, id, now + RETRY_MS);

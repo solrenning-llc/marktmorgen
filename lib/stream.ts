@@ -861,9 +861,13 @@ export async function sweep(deadline: number, now = Date.now()): Promise<{ looke
     if (record?.state === "failed") counts.failed += 1;
   }
   const [gone] = await redisPipeline([["SMEMBERS", GONE]]);
-  for (const id of (Array.isArray(gone) ? gone : []).slice(0, 40)) {
+  const queued = (Array.isArray(gone) ? gone : []).slice(0, 40).filter((id): id is string => typeof id === "string");
+  // A video queued for removal before a child-safety hold stays (lib/held-files.ts); a mark that cannot be read removes none.
+  const held = await heldAmong(queued.map((id) => `v:${id}`)).catch(() => null);
+  if (!held) return counts;
+  for (const id of queued) {
     if (Date.now() > deadline) return counts;
-    if (typeof id !== "string") continue;
+    if (held.has(`v:${id}`)) continue;
     const answer = STREAM_ID_PATTERN.test(id) ? await ask(config, "DELETE", `/videos/${id}`) : { status: 404, data: null };
     if (answer.status === 200 || answer.status === 404) {
       await redisPipeline([["SREM", GONE, id]]);

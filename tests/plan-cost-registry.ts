@@ -601,6 +601,9 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // A webhook settings change (lib/webhooks.ts, changeConfig) is inside a studio or API request above: a GET and the
   // compare-and-set a try, CONFIG_WRITE_TRIES tries at the most, and only on a reply it cannot read one GET more, the
   // settings read back once (CX-123 rule 24); when they are as they were read, that read starts the next try.
+  // A delivery line written for a try (lib/webhooks.ts, writeLines: emitEvent; and the notice lines of skippedLines
+  // and markGivenUp, inside the job or event that writes them) is read back once, one GET a line, only on a reply it
+  // cannot read; a message not kept whose line is not there then gives its day's count back (one DECR).
   // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
   webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
 };

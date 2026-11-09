@@ -623,7 +623,10 @@ async function main() {
     loseReplyOnce(bad);
     await watchStripe(Date.now() + 10_000);
     mend();
-    is(`${what}, the reply lost: the event waits for the next visit`, await waitOf(), "evt_LostReply|1");
+    // Lines that landed are read back and the event goes on at once (lib/webhooks.ts, writeLines); a later step's
+    // lost reply still leaves it waiting for the next visit.
+    const readBack = what === "the deliveries written";
+    is(`${what}, the reply lost: ${readBack ? "read back, the event goes on at once" : "the event waits for the next visit"}`, await waitOf(), readBack ? null : "evt_LostReply|1");
     await watchStripe(Date.now() + 10_000);
     const log = (await webhooksView(store)).log;
     is(`${what}, the reply lost: exactly one delivery an endpoint in the log and on the queue after the next visit`, [log.length, new Set(log.map((d) => d.id)).size, log.map((d) => d.endpoint).sort(), (await queued()).length, await waitRecord()], [2, 2, ["hooks.example.net/in", "hooks.example.org/two"], 2, null]);

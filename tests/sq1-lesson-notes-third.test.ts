@@ -133,7 +133,9 @@ function pageLink() {
   const page = read("app/[handle]/course/[product]/page.tsx");
   const learn = read("lib/learn.ts");
   is("setup: a signed-in learner without this course is 'closed' with a learner", /return \{ state: "closed", learner \}/.test(learn), true);
-  is("no notes control on a page any signed-in learner reaches without the course", /access\.state !== "open" && access\.learner && !access\.learner\.owner \?/.test(page), false);
+  // Rule 23: main's lesson-position forget key (line 82) uses the same condition for something else, so the proof is
+  // held to a block the page renders, not to the condition anywhere.
+  is("no notes control on a page any signed-in learner reaches without the course", /\{access\.state !== "open" && access\.learner && !access\.learner\.owner \? \(/.test(page), false);
   is("the notes control is shown only when access ended", /\{access\.state === "ended" \? \(\s*<LessonNotesKept\b/.test(page), true);
   const w = lessonNotesWords("en");
   const html = renderToStaticMarkup(createElement(LessonNotesKept, { handle: "bakery", product: "p1", language: "en" }));

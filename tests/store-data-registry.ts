@@ -961,6 +961,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:team:log:@lib/team.ts": { what: "What the team did", parts: [capped(LOG_LINES * 512, "The newest LOG_LINES.", src("lib/team.ts", "LOG_LINES"))] },
   "nl:team:of:@lib/team.ts": company("The stores a person is on", "A person's, not a store's: at most the stores they are on."),
   "nl:product:note:@lib/thanks-note-store.ts": { what: "Notes after paying", room: ["lib/thanks-note-store.ts"] },
+  "nl:ticket:in:@lib/ticket-code.ts": { what: "An in-person ticket's one-time check-in mark (36 [F5] unit 1): event and ticket ids only, a time-and-random value, made with SET NX and its expiry, kept until the code ends and a day more (MAX_TICKET_DAYS + 1 at most), never for good. Built and off: nothing calls checkIn, and no ticket is sold before the opening; one ticket is one order", parts: [per("order", 401, MARK, "A ticket's check-in mark, at most 401 days.")] },
   "nl:tier:@lib/tier-switch.ts": short("A membership's lock while it changes tier", "request", 1, 128, REQ("tier switch")),
   "nl:tier:price:@lib/tier-switch.ts": { what: "A price made for a tier switch, per product and currency: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:traffic:day:@lib/traffic.ts": short("Who came that day, each once", "request", 2, 64),

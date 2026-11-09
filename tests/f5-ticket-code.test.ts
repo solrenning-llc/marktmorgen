@@ -34,6 +34,12 @@ const made = (event = EVENT, ticket = TICKET, expiresAt = EXP, now = NOW) => {
   return out.ok ? out.code : `refused:${out.reason}`;
 };
 
+/** Puts an environment value back as it was, absent included (assigning undefined would write "undefined"). */
+const restore = (name: string, value: string | undefined) => {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+};
+
 async function main(): Promise<void> {
   redis.clear();
   const code = made();
@@ -69,7 +75,7 @@ async function main(): Promise<void> {
     process.env.NIMBUS_DATA_KEY = "another-deployment-secret-of-enough-length-0001";
     is("a code made under another deployment's key", readTicketCode(code, NOW), { ok: false, reason: "forged" });
     const other = made();
-    process.env.NIMBUS_DATA_KEY = before;
+    restore("NIMBUS_DATA_KEY", before);
     is("and that deployment's code here", readTicketCode(other, NOW), { ok: false, reason: "forged" });
   }
   is("a forged code with an old date reads as forged, not expired", readTicketCode([v, e, t, (SEC - 10).toString(36), sig].join("."), NOW), { ok: false, reason: "forged" });
@@ -95,8 +101,8 @@ async function main(): Promise<void> {
     is("not made", made(), "refused:no_key");
     is("not read, never taken as good", readTicketCode(code, NOW), { ok: false, reason: "no_key" });
     is("check-in refuses", await checkIn(code, { event: EVENT, now: NOW }), { ok: false, reason: "no_key" });
-    process.env.NIMBUS_DATA_KEY = before.d;
-    if (before.s !== undefined) process.env.STRIPE_SECRET_KEY = before.s;
+    restore("NIMBUS_DATA_KEY", before.d);
+    restore("STRIPE_SECRET_KEY", before.s);
   }
 
   part("Check-in admits once");
@@ -122,7 +128,7 @@ async function main(): Promise<void> {
   const odd = async (reply: unknown, readBack: unknown) => {
     redis.clear();
     let calls = 0;
-    redis.pipeline = (async (commands: (string | number)[][]) => {
+    redis.pipeline = (async () => {
       calls += 1;
       if (calls === 1) return [reply];
       return [readBack];

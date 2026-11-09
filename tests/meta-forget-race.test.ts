@@ -16,7 +16,7 @@
  * The deletion is made to land just before the write reaches Redis, whatever command carries it, so the test reads
  * the same on the old code (check, then write) and on one where the check and the write are one command.
  */
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { chooseAccount, finishMeta, forgetMetaUser, linesKey, readMetaSpend } from "@/lib/meta-ads";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -33,6 +33,8 @@ const USER = "10150000000000002";
 const today = new Date().toISOString().slice(0, 10);
 /** How Meta answers the next ad spend read: the rows, a refusal of the token, or an outage. */
 let insights: "rows" | "auth" | "outage" = "rows";
+/** How many times the permission was given back to Meta (DELETE /me/permissions). */
+let gaveBack = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -43,7 +45,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const token = url.searchParams.get("access_token");
   if (token && url.searchParams.get("appsecret_proof") !== createHmac("sha256", SECRET).update(token).digest("hex")) return json({ error: { code: 190 } }, 400);
   if (path === "/oauth/access_token") return url.searchParams.get("grant_type") === "fb_exchange_token" ? json({ access_token: "EAAlong", expires_in: 5_184_000 }) : json({ access_token: "EAAshort" });
-  if (path === "/me/permissions" && method === "DELETE") return json({ success: true });
+  if (path === "/me/permissions" && method === "DELETE") {
+    gaveBack += 1;
+    return json({ success: true });
+  }
   if (path === "/me/permissions") return json({ data: [{ permission: "ads_read", status: "granted" }] });
   if (path === "/me") return json({ id: USER });
   if (path === "/me/adaccounts") {
@@ -78,6 +83,33 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 
 const confirmed = () => (Array.isArray(forgotNow) ? forgotNow.length : forgotNow);
 
+/** Every reply of the next pipeline that carries an EVAL, when set: a reply in a shape no Redis gives. */
+let weird: unknown = undefined;
+/** The key whose EVAL the deletion lands just after; "" when nothing is armed. */
+let after = "";
+/** The deletion's own mark is answered in a shape no Redis gives, when true. */
+let weirdMark = false;
+const armed = redis.pipeline;
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  if (weird !== undefined && commands.some((c) => String(c[0]).toUpperCase() === "EVAL")) return commands.map(() => weird);
+  if (weirdMark && commands.some((c) => String(c[0]).toUpperCase() === "SET" && String(c[1]).startsWith("nl:metaads:gone:"))) {
+    weirdMark = false;
+    return commands.map(() => "QUEUED");
+  }
+  const out = await armed(commands);
+  if (after && commands.some((c) => String(c[0]).toUpperCase() === "EVAL" && c.includes(after))) {
+    after = "";
+    // Meta's deletion callback lands just after the write reached Redis.
+    forgotNow = await forgetMetaUser(USER).catch((error: unknown) => `threw ${error}`);
+  }
+  return out;
+}) as typeof redis.pipeline;
+
+/** The index of the stores a Meta user connected (lib/meta-ads.ts userKey), as Redis names it. */
+const userIndex = (user: string) => `nl:metaads:user:${createHash("sha256").update(`metaads-user:${user}`).digest("hex").slice(0, 40)}`;
+/** The mark a deletion leaves for a Meta user (lib/meta-ads.ts goneKey), as Redis names it. */
+const goneMark = (user: string) => `nl:metaads:gone:${createHash("sha256").update(`metaads-gone:${user}`).digest("hex").slice(0, 40)}`;
+
 async function main(): Promise<void> {
   redis.clear();
   console.error = () => {};
@@ -87,8 +119,13 @@ async function main(): Promise<void> {
   const statsId = store.statsId!;
   const connKey = `nl:metaads:conn:${statsId}`;
   const readKey = `nl:metaads:read:${statsId}`;
+  // A consent flow that began at `startedAt` (lib/meta-ads.ts beginMeta) and is finished now.
+  const fin = (startedAt = Date.now()) =>
+    finishMeta({ statsId, sid: store.sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: "metarace@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt });
   const connect = async () => {
-    const connected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: "metarace@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency });
+    // A prior case's deletion leaves its mark: each case starts as if that deletion were long past.
+    await pipeline([["DEL", goneMark(USER)]]);
+    const connected = await fin();
     if (!connected.ok) throw new Error(`not connected: ${connected.error}`);
     // Two accounts in the store's currency: none is taken for the creator, so the one read is chosen here.
     if (!(await chooseAccount(statsId, "act_333"))) throw new Error("the account could not be chosen");
@@ -97,6 +134,8 @@ async function main(): Promise<void> {
     forgotNow = null;
   };
   const kept = async () => pipeline([["EXISTS", connKey], ["EXISTS", linesKey(statsId)], ["EXISTS", readKey]]);
+  /** Everything about the person: the connection, the lines, the read's record, and the store in the person's index. */
+  const keptAll = async () => [...(await kept()), Number((await pipeline([["SISMEMBER", userIndex(USER), statsId]]))[0])];
 
   part("Control: a deletion with nothing under way leaves nothing");
   await connect();
@@ -140,6 +179,60 @@ async function main(): Promise<void> {
   is("the deletion was confirmed to Meta for the store", confirmed(), 1);
   is("the choice is not said as made on a connection that is gone", chosen, false);
   is("the connection is not written back (connection, lines, record)", await kept(), [0, 0, 0]);
+
+  part("finishMeta: a deletion confirmed just before a reconnection writes the connection");
+  await connect();
+  gaveBack = 0;
+  armedFor = connKey;
+  const reconnected = await fin().catch((error: unknown) => `threw ${error}`);
+  is("the deletion was confirmed to Meta for the store", confirmed(), 1);
+  is("the reconnection says honestly that nothing was kept", reconnected, { ok: false, error: "removed" });
+  is("nothing about the person is kept after the confirmed deletion (connection, lines, record, index)", await keptAll(), [0, 0, 0, 0]);
+  is("the token the flow was holding is given back to Meta", gaveBack, 1);
+
+  part("finishMeta: a deletion confirmed after the flow began, before it finishes");
+  await connect();
+  const began = Date.now();
+  is("the deletion confirms the store", ((await forgetMetaUser(USER)) as unknown[]).length, 1);
+  is("the flow begun before it is not kept", await fin(began), { ok: false, error: "removed" });
+  is("nothing about the person is kept (connection, lines, record, index)", await keptAll(), [0, 0, 0, 0]);
+  is("a flow begun within the clocks' margin after it is not kept either", await fin(Date.now() + 1_000), { ok: false, error: "removed" });
+
+  part("finishMeta: a reconnection begun well after the deletion connects again");
+  // The deletion's mark says it was confirmed two minutes ago: a consent given since is the person's new choice.
+  await pipeline([["SET", goneMark(USER), String(Date.now() - 120_000), "EX", 86_400]]);
+  const fresh = await fin();
+  is("it connects", fresh.ok, true);
+  is("and keeps the connection and the person's index", await keptAll(), [1, 0, 0, 1]);
+  await forgetMetaUser(USER);
+
+  part("finishMeta: a flow older than the deletion's mark can cover is not written");
+  await pipeline([["DEL", goneMark(USER)]]);
+  is("a flow begun 21 minutes ago is refused as expired", await fin(Date.now() - 21 * 60_000), { ok: false, error: "expired" });
+  is("nothing is kept (connection, lines, record, index)", await keptAll(), [0, 0, 0, 0]);
+
+  part("The inverse race: a deletion just after the read wrote its lines");
+  await connect();
+  insights = "rows";
+  after = linesKey(statsId);
+  const inverse = await readMetaSpend(statsId, store.currency).catch((error: unknown) => `threw ${error}`);
+  is("the deletion was confirmed to Meta for the store", confirmed(), 1);
+  is("the read read before it", inverse, "read");
+  is("nothing is kept after it (connection, lines, record)", await kept(), [0, 0, 0]);
+
+  part("A reply in a shape no Redis gives is unknown, never written or refused");
+  await connect();
+  weird = "1";
+  is("chooseAccount fails closed", await chooseAccount(statsId, "act_444").then((v) => `ok ${v}`, (error: Error) => error.name), "UnknownReplyError");
+  insights = "rows";
+  is("a read does not say it read", await readMetaSpend(statsId, store.currency).catch((error: Error) => error.name), "error");
+  insights = "auth";
+  is("markBroken fails closed", await readMetaSpend(statsId, store.currency).then((v) => `ok ${v}`, (error: Error) => error.name), "UnknownReplyError");
+  is("finishMeta fails closed", await fin().then((v) => `ok ${v.ok}`, (error: Error) => error.name), "UnknownReplyError");
+  weird = undefined;
+  weirdMark = true;
+  is("a deletion whose mark is not confirmed does not say it deleted", await forgetMetaUser(USER).then((v) => `ok ${v.length}`, (error: Error) => error.name), "UnknownReplyError");
+  is("the deletion confirms once its mark is written", ((await forgetMetaUser(USER)) as unknown[]).length, 1);
 
   part("Control: with nothing in the way, a choice and a broken token are still written");
   await connect();

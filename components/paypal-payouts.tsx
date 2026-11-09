@@ -360,7 +360,8 @@ function OwnCheckForm({
           </p>
           {unpaid.length ? (
             <p className="mt-2 font-medium">
-              Only choose &ldquo;PayPal did not pay them&rdquo; when PayPal shows the payment failed, was returned or was canceled.
+              Only choose &ldquo;PayPal did not pay them&rdquo; when PayPal shows the payment failed, was returned or was canceled,
+              or does not show a payment to them at all.
               If PayPal did pay them, your next payment would pay them twice.
             </p>
           ) : null}

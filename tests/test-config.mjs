@@ -1,7 +1,38 @@
+import {existsSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
-/** One wiring source for the repository runner and local parallel verification. */
+/**
+ * One wiring source for the repository runner and local parallel verification.
+ * A new test that needs aliases declares them in its own file,
+ * tests/aliases/<test file>.json, never by adding a line to the list below:
+ * every pull request appended one at the same place, and two of them conflicted
+ * (Claude 1, C1-20261107-1232-TODOS-3). The file is one object from alias to
+ * target, read after this list, so it may also replace an entry of it:
+ * a target is a path under tests/, or under the repository root when it starts
+ * with "@/", and null takes a default of the list away for that test only.
+ * A target that does not exist, or a file that does not read so, fails the test.
+ */
 export function testAliases(file,root,here){
+ return withOwnAliases(centralAliases(file,root,here),file,root,here);
+}
+function withOwnAliases(aliases,file,root,here){
+ const path=join(here,'aliases',file+'.json');
+ if(!existsSync(path))return aliases;
+ let own;
+ try{own=JSON.parse(readFileSync(path,'utf8'));}catch(error){throw new Error(`tests/aliases/${file}.json does not parse: ${error.message}`);}
+ if(!own||typeof own!=='object'||Array.isArray(own))throw new Error(`tests/aliases/${file}.json is not one object from alias to target`);
+ for(const [name,target] of Object.entries(own)){
+  if(target===null){delete aliases[name];continue;}
+  if(typeof target!=='string'||!target)throw new Error(`tests/aliases/${file}.json: the target of ${name} is not a path or null`);
+  const resolved=target.startsWith('@/')?join(root,target.slice(2)):join(here,target);
+  if(!existsSync(resolved))throw new Error(`tests/aliases/${file}.json: the target of ${name}, ${target}, does not exist`);
+  aliases[name]=resolved;
+ }
+ return aliases;
+}
+/** The list kept from before tests/aliases: add nothing here. */
+function centralAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
+ if(file==='stats-notes-read-evidence.test.ts')aliases['@/lib/redis']=join(here,'stats-notes-read-world.ts');
  if(file==='path-weekly-summary-page.test.ts'){
   for(const name of ['ai','path-wording-source','path-scripts','path-growth-facts','path-board','opening','store-checkout','stripe-connect','path-campaign','studio-route','store-allowance','store-allowance-rules','path-plan','larger-plan','path'])aliases['@/lib/'+name]=join(here,'path-weekly-summary-page-world.tsx');
   for(const name of ['path-certificates','path-ai-wording','path-social-scripts','path-growth-missions','path-board','path-checkout-notice','path-missions','path-reminder-button','path-share-card','studio-header','studio-store-pin','path-onboarding'])aliases['@/components/'+name]=join(here,'path-weekly-summary-page-world.tsx');
@@ -43,7 +74,7 @@ export function testAliases(file,root,here){
  if(file==='letter-members.test.ts'||file==='bv1-letter-preview.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
  if(['public-reads-ceiling.test.ts','draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts','pf1-paypal-thanks-honest.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(['draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts','pf1-paypal-thanks-honest.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
- if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts'||file==='encanto-tone-route.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
+ if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts'||file==='picture-owner-followup.test.ts'||file==='picture-door-replies.test.ts'||file==='encanto-tone-route.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
  if(['review-g2-card-read-completeness.test.ts','creator-card-partial-read-g.test.ts','creator-card-remove-race-g.test.ts','creator-card-reload-delete-g.test.ts','creator-card-reload-held.test.ts','studio-team-two-step-unknown.test.ts','studio-import-unknown.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='meeting-disabled-settings.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='zoom-arrival.test.ts')aliases['next/navigation']=join(here,'meeting-withdrawal-page-world.ts');
@@ -81,7 +112,7 @@ export function testAliases(file,root,here){
  if(file==='path-growth-facts.test.ts')for(const name of ['redis','catalog','broadcasts','reviews'])aliases['@/lib/'+name]=join(here,'path-growth-world.ts');
  if(file==='path-reminder-push.test.ts')aliases['@/lib/web-push']=join(here,'path-push-world.ts');
  if(file==='digital-consent.test.ts'||file==='checkout-key-count.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
- if(file==='cart-physical.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='cart-physical.test.ts'||file==='cart-soon-unknown.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-stock.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-open.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
@@ -147,6 +178,7 @@ export function testAliases(file,root,here){
   aliases['@/lib/ai-spend-policy']=join(here,'commercial-ai-approved-policy.ts');
   aliases['@/lib/upload-budget-policy']=join(here,'upload-budget-approved-policy.ts');
  }
+ if(file==='quiz-underway-exact.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
  if(file==='restart-activation-ack.test.ts'){
   aliases['@/lib/redis']=join(here,'restart-activation-ack-world.ts');
   aliases['@/lib/contract-funding-rules']=join(here,'restart-activation-enabled-rules.ts');

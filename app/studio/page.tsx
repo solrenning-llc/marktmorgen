@@ -64,7 +64,7 @@ import { SocialsEditor } from "@/components/socials-editor";
 import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
 import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
-import { productsInStats, reachProducts, readAllTimeSales, studioStats } from "@/lib/stats";
+import { productsInStats, reachProducts, readAllTimeSales, resultsByCampaign, studioStats } from "@/lib/stats";
 import { ReadingFailed, ReadingsUsed, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
@@ -1573,11 +1573,7 @@ export default async function StudioPage({
                         products={[...(await titles)].map(([id, title]) => ({ id, title }))}
                         results={
                           numbers
-                            ? (numbers.posts?.d90 ?? []).reduce<Record<string, { visits: number; sales: number; cents: number }>>((all, row) => {
-                                const sum = all[row.campaign] ?? { visits: 0, sales: 0, cents: 0 };
-                                all[row.campaign] = { visits: sum.visits + row.visits, sales: sum.sales + row.sales, cents: sum.cents + row.cents };
-                                return all;
-                              }, {})
+                            ? resultsByCampaign(numbers.posts?.d90 ?? [])
                             : undefined
                         }
                         currency={store.currency}

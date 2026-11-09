@@ -25,6 +25,7 @@
  * (lib/payment-recovery.ts), so nothing depends on the redirect arriving.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -123,6 +124,15 @@ export async function cardView(store: Store, grant: CardGrant): Promise<CardView
   }
 }
 
+/** The presses after SET ... NX and INCR: a whole number from one up, or null when the reply is not that. */
+function pressCount(replies: unknown): number | null {
+  const both = repliesFor(replies, 2);
+  const set = both?.[0];
+  if (!both || (set !== "OK" && set !== null)) return null;
+  const count = countOf(both[1]);
+  return count !== null && count >= 1 ? count : null;
+}
+
 export type OpenCard = { ok: true; url: string } | { ok: false; reason: "expired" | "used" | "ended" | "error" };
 
 /** The button: a Stripe page in setup mode that saves a card for this membership. */
@@ -130,11 +140,20 @@ export async function openCardUpdate(store: Store, token: string, origin: string
   const grant = await cardGrant(store, token);
   if (!grant) return { ok: false, reason: "expired" };
   const key = await opensKey(token);
-  const [, count] = await redisPipeline([
+  // Counted before Stripe is asked, in its exact shape: a press that cannot
+  // be counted is not a first press (CX-123 rule 24).
+  const presses = await redisPipeline([
     ["SET", key, "0", "EX", CARD_LINK_SECONDS, "NX"],
     ["INCR", key],
-  ]);
-  if (Number(count) > MAX_OPENS) return { ok: false, reason: "used" };
+  ]).then(
+    (replies) => pressCount(replies),
+    (error: unknown) => {
+      console.error("counting a card link's presses failed", store.handle, error);
+      return null;
+    },
+  );
+  if (presses === null) return { ok: false, reason: "error" };
+  if (presses > MAX_OPENS) return { ok: false, reason: "used" };
   try {
     const sub = await subFor(store, grant.a, grant.c, grant.s);
     if (!sub) return { ok: false, reason: "error" };

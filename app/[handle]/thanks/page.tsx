@@ -80,6 +80,7 @@ import { HeardAsk } from "@/components/heard-ask";
 import { heardOff } from "@/lib/heard";
 import { listedReturn, listedSite, purchaseReturn } from "@/lib/embed-sites";
 import { eventIdFor } from "@/lib/webhooks";
+import { adEventId, adEventRelay } from "@/lib/ad-events";
 import { Suspense } from "react";
 import { NextOfferCard } from "@/components/next-offer-card";
 import { NewTab } from "@/components/new-tab";
@@ -193,14 +194,16 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               <p className="st-muted mt-3">{t.bookBy(longDate(bought.until))}</p>
             ) : null}
             {book ? (
-              <Link href={book} className="btn st-btn btn-lg mt-7">{t.bookFirst}</Link>
+              // A full page load, not Next's client move: the link names the package's token,
+              // and this page's ad scripts would count a history change as a view of it.
+              <a href={book} className="btn st-btn btn-lg mt-7">{t.bookFirst}</a>
             ) : (
               <p className="st-note mt-6 text-sm">{t.noBookingLink}</p>
             )}
             <p className="st-muted mt-5 text-sm">{t.packageSameLink(order.email ?? t.theAddressYouPaidWith)}</p>
             <StoreTracking
               store={store}
-              event={{ type: "purchase", id: sessionId, value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
+              event={{ type: "purchase", id: adEventId(sessionId), relay: adEventRelay(sessionId, store.handle), value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
             />
           </div>
         </main>
@@ -253,7 +256,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 store={store}
                 event={{
                   type: "purchase",
-                  id: sessionId,
+                  id: adEventId(sessionId),
+                  relay: adEventRelay(sessionId, store.handle),
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -320,7 +324,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 store={store}
                 event={{
                   type: "purchase",
-                  id: sessionId,
+                  id: adEventId(sessionId),
+                  relay: adEventRelay(sessionId, store.handle),
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -396,7 +401,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 store={store}
                 event={{
                   type: "purchase",
-                  id: sessionId,
+                  id: adEventId(sessionId),
+                  relay: adEventRelay(sessionId, store.handle),
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -1319,7 +1325,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 order.state === "paid" && sessionId
                   ? {
                       type: "purchase",
-                      id: sessionId,
+                      id: adEventId(sessionId),
+                      relay: adEventRelay(sessionId, store.handle),
                       value: toMajor(order.amount, order.currency),
                       currency: order.currency,
                       productId: order.product.id,
@@ -1382,9 +1389,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <p className="st-muted mt-2 text-sm leading-relaxed">
               {t.earnHow(store.affiliates.percent, store.name)}
             </p>
-            <Link href={`/@${store.handle}/affiliates?order=${encodeURIComponent(sessionId)}`} className="btn st-btn mt-6">
+            {/* A full page load, not Next's client move: the affiliate page takes the order only
+                in its address, and this page's ad scripts would count a history change as a view of it. */}
+            <a href={`/@${store.handle}/affiliates?order=${encodeURIComponent(sessionId)}`} className="btn st-btn mt-6">
               {t.getMyLink}
-            </Link>
+            </a>
           </section>
         ) : null}
       </main>
@@ -1481,7 +1490,7 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
               <p className={`st-muted ${ownReceipt ? "mt-3" : "mt-5"} text-sm`}>{t.ppPaidTo(store.name)}</p>
               <StoreTracking
                 store={store}
-                event={{ type: "purchase", id: order, value: toMajor(ours.cents, ours.currency), currency: ours.currency, productId: product.id, title: product.title }}
+                event={{ type: "purchase", id: adEventId(order), value: toMajor(ours.cents, ours.currency), currency: ours.currency, productId: product.id, title: product.title }}
               />
             </>
           ) : ours && delivered ? (

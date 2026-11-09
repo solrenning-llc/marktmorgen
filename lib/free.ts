@@ -33,6 +33,7 @@ import { freeCopiesLimitFor } from "@/lib/order-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { isPaidUp } from "@/lib/billing";
 import { csvCell } from "@/lib/csv";
 import { type Listing, type Store, isFree } from "@/lib/store";
@@ -136,12 +137,28 @@ function senderAddress(): string {
   return (match ? match[1] : NIMBUS_FROM).trim();
 }
 
-async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+/** A whole number from one up after INCR, or null when the reply is not exactly that. */
+function incremented(reply: unknown): number | null {
+  const count = countOf(reply);
+  return count !== null && count >= 1 ? count : null;
+}
+
+/**
+ * Whether one more request fits in the hour: true or false on a count read in
+ * its exact shape, null when the answer is missing, cut short or of another
+ * shape, which is never taken as room (CX-123 rule 24).
+ */
+async function within(key: string, limit: number): Promise<boolean | null> {
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
+  const count = incremented(both[1]);
+  return count === null ? null : count <= limit;
 }
 
 export type RequestResult = "sent" | "email" | "limited" | "unavailable" | "error";
@@ -190,8 +207,12 @@ export async function requestCopy(input: {
   const email = normaliseEmail(raw);
   if (!canGiveProduct(store, product)) return "unavailable";
 
-  if (!(await within(await ipKey(ip, store.handle), IP_LIMIT))) return "limited";
-  if (!(await within(await addressKey(email), ADDRESS_LIMIT))) return "limited";
+  const byConnection = await within(await ipKey(ip, store.handle), IP_LIMIT);
+  if (byConnection === null) return "error";
+  if (!byConnection) return "limited";
+  const byAddress = await within(await addressKey(email), ADDRESS_LIMIT);
+  if (byAddress === null) return "error";
+  if (!byAddress) return "limited";
   // Free copies stop at what the month allows (lib/order-rules.ts): a trial's
   // figure in a free trial, nothing without a plan, and for a store that pays
   // its plan's figure, admitted with its paid orders (lib/order-admission.ts).
@@ -292,11 +313,18 @@ export async function spendClaim(token: string): Promise<UseResult> {
   if (!claim) return { ok: false, reason: "expired" };
 
   const uses = await usesKey(token);
-  const [count] = await redisPipeline([
-    ["INCR", uses],
-    ["EXPIRE", uses, CLAIM_TTL_SECONDS],
-  ]);
-  if (Number(count) > MAX_CLAIM_USES) return { ok: false, reason: "spent" };
+  const both = repliesFor(
+    await redisPipeline([
+      ["INCR", uses],
+      ["EXPIRE", uses, CLAIM_TTL_SECONDS],
+    ]),
+    2,
+  );
+  // A use that cannot be counted hands nothing out; it is neither "expired"
+  // nor "spent", so it is said as not done (CX-123 rule 24).
+  const count = both ? incremented(both[0]) : null;
+  if (count === null) throw new UnknownReplyError("a free link's uses");
+  if (count > MAX_CLAIM_USES) return { ok: false, reason: "spent" };
   return { ok: true, claim };
 }
 

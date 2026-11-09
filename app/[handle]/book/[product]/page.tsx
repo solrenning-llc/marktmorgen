@@ -313,7 +313,7 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <main id="content" className="relative mx-auto max-w-xl px-4 py-12 sm:py-16">
+      <main id="content" className="st-measure relative mx-auto max-w-xl px-4 py-12 sm:py-16">
         <div className="flex items-center justify-center gap-3">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -327,7 +327,7 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
         </div>
         {children}
         <div className="mt-6 text-center">
-          <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+          <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {w.backTo(store.name)}
           </Link>
           <StoreTracking store={store} presence />

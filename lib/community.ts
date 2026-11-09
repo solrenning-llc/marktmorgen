@@ -322,6 +322,23 @@ export async function readConfig(id: string): Promise<CommunityConfig | null> {
   return parseConfig(raw);
 }
 
+/**
+ * The settings, read before anything is written over them: null only when
+ * the GET answered exactly nil, so there is no setup yet. A lost reply, one
+ * in another shape or a value that does not parse throws, and the caller
+ * writes nothing; a fresh setup over the creator's spaces and access would
+ * lock every paying member out.
+ */
+export async function readConfigExact(id: string): Promise<CommunityConfig | null> {
+  if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community setup");
+  if (replies[0] === null) return null;
+  const config = parseConfig(replies[0]);
+  if (!config) throw new UnknownReplyError("a community setup");
+  return config;
+}
+
 export async function saveConfig(id: string, config: CommunityConfig): Promise<void> {
   await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]);
 }

@@ -6,4 +6,5 @@ Only Claude 3 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 3 | C1-20261107-1232-TODOS-3 (2): each test declares its own aliases, so no pull request edits the central list | claude3/test-alias-sidecars | `tests/test-alias-sidecars.test.ts`, `tests/aliases/README.md` (new; other files in `tests/aliases/` belong to each test's own pull request); `tests/test-config.mjs` is shared and only gains the reader | 07/11/2026 12h40 |
 | Claude 3 | 631 [AA1] unit 8 (MCP tools get_live and get_numbers_for_days, a title on every tool; stacked on unit 5) | claude3/aa1-read-tools | `lib/mcp-tools.ts`, `lib/mcp-catalog.ts`, `app/api/mcp/route.ts`, `app/developers/page.tsx`, `tests/mcp-read-tools.test.ts`, `tests/mcp-dispatch.test.ts` | 02/11/2026 14h19 |

@@ -22,7 +22,19 @@ import { emailKey, storeKey } from "@/lib/learn";
 import { type Store, storeForId } from "@/lib/store";
 import { giveRole, putMember, removeMember, takeRole } from "@/lib/discord";
 import { KICK_TRIES, rolesDiff, rolesFor } from "@/lib/discord-rules";
-import { accountOf, checkSoon, dueMembers, forgetMember, keepMember, productRoles, readMember, readServer } from "@/lib/discord-store";
+import {
+  type Member,
+  accountOf,
+  checkSoon,
+  dueMembers,
+  forgetMember,
+  keepMember,
+  productRoles,
+  productRolesOrThrow,
+  readMember,
+  readServer,
+  readServerOrThrow,
+} from "@/lib/discord-store";
 
 const cacheKey = (store: Store, email: string, productId: string) => `nl:dc:ok:${storeKey(store)}:${emailKey(email)}:${productId}`;
 
@@ -57,15 +69,26 @@ export async function joinServer(input: { store: Store; email: string; accessTok
   if (!wanted.length) return { ok: false, reason: "none" };
   const reason = `Marktmorgen: bought from ${store.name}`.slice(0, 200);
 
-  // One Discord account per address: one brought in before gives its roles up.
-  const before = await accountOf(room, email);
-  if (before && before !== user.id) {
-    const old = await readMember(room, before);
-    for (const role of old?.r ?? []) await takeRole(server.id, before, role, "Marktmorgen: the buyer joined with another Discord account");
-    await forgetMember(room, store.sid, before, email);
+  // One Discord account per address: one brought in before gives its roles up. Every account is read before anything
+  // is changed, and an unknown read is not "none" (CX-123 rule 24): the join fails, so a guess never leaves the earlier
+  // account its roles while this one is given them too.
+  let before: string | null;
+  let old: Member | null = null;
+  let mine: Member | null;
+  try {
+    before = await accountOf(room, email);
+    if (before && before !== user.id) old = await readMember(room, before);
+    mine = await readMember(room, user.id);
+    if (before && before !== user.id) {
+      for (const role of old?.r ?? []) await takeRole(server.id, before, role, "Marktmorgen: the buyer joined with another Discord account");
+      await forgetMember(room, store.sid, before, email);
+    }
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    console.error("reading a buyer's Discord accounts failed", error);
+    return { ok: false, reason: "failed" };
   }
 
-  const mine = await readMember(room, user.id);
   const placed = await putMember(server.id, user.id, accessToken, wanted, reason);
   if (placed === "failed") return { ok: false, reason: "failed" };
   // Already in the server: the roles are given one by one, and those given for what is no longer held taken back.
@@ -91,9 +114,11 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
   const store = await storeForId(sid).catch(() => null);
   if (!store) return "gone";
   const room = storeKey(store);
-  const [server, member] = await Promise.all([readServer(room), readMember(room, userId)]);
+  // Read exactly: an unknown server, member or roles read throws (sweepDiscord keeps the person in line), never read
+  // as "gone" (dropped from the checks, roles never taken back) or "no product gives a role" (a paying buyer's roles taken).
+  const [server, member] = await Promise.all([readServerOrThrow(room), readMember(room, userId)]);
   if (!server || !member) return "gone";
-  const byProduct = await productRoles(room);
+  const byProduct = await productRolesOrThrow(room);
   let held: string[];
   try {
     held = await heldProducts(store, member.e, [...byProduct.keys()]);
@@ -189,11 +214,14 @@ export const ERASE_ROLE_CALLS = 10;
  */
 export async function forgetDiscordPerson(store: Store, email: string, productIds: string[]): Promise<{ records: number; rolesLeft: boolean }> {
   const room = storeKey(store);
-  const userId = await accountOf(room, email).catch(() => null);
+  // Never "no Discord access" on an unknown read (sweep A2 finding 4, CX-123 rule 24): an error or a reply of another
+  // shape from the link, the member or the server throws, so the erasure says this part did not finish
+  // (lib/person-erasure.ts) and keeps what it would have deleted for the next try. Only the exact null is "none kept".
+  const userId = await accountOf(room, email);
   let records = 0;
   let rolesLeft = false;
   if (userId) {
-    const [server, member] = await Promise.all([readServer(room), readMember(room, userId)]);
+    const [server, member] = await Promise.all([readServerOrThrow(room), readMember(room, userId)]);
     if (member && server) {
       for (const role of member.r.slice(0, ERASE_ROLE_CALLS)) {
         const done = await takeRole(server.id, userId, role, "Marktmorgen: deleted at their request").catch(() => "failed" as const);
@@ -205,9 +233,11 @@ export async function forgetDiscordPerson(store: Store, email: string, productId
     records += 1;
   }
   if (productIds.length) {
-    const gone = countOf(repliesFor(await redisPipeline([["DEL", ...productIds.map((id) => cacheKey(store, email, id))]]), 1)?.[0]);
+    const keys = productIds.map((id) => cacheKey(store, email, id));
+    const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
     // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
-    if (gone === null) throw new UnknownReplyError("the deletion of a person's Discord access checks");
+    // DEL removes at most one per distinct key, so a larger count is unknown too (Codex Z on #2932, same pattern as forgetMember).
+    if (gone === null || gone > new Set(keys).size) throw new UnknownReplyError("the deletion of a person's Discord access checks");
     records += gone;
   }
   return { records, rolesLeft };

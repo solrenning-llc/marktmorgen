@@ -70,16 +70,27 @@ function zoneName(ms: number, tz: string, locale: string): string {
 /**
  * A call still to come: when, in the buyer's own time zone, where to join,
  * and the calendar file and the way to move it, as in the booking email.
+ *
+ * Each of its links is named by the call it is for (WCAG 2.4.9, technique
+ * ARIA7): the link's own words first, as WCAG 2.5.3 asks of a visible label,
+ * then the card's heading, then its time when the buyer booked the same
+ * product more than once, so "Add it to your calendar" is read as "Add it to
+ * your calendar Coaching call" and a list of the page's links tells every
+ * call apart. By reference, not by repeating
+ * the title in each link: a title of MAX_TITLE_LENGTH at the costliest
+ * character, three times more in each of MAX_LISTED calls, would outgrow
+ * ORDERS_PAGE_BYTES (tests/orders-page-bounds.test.ts).
  */
-function BookedCallCard({ call, store, words }: { call: BookedCall; store: Store; words: OrdersWords }) {
+function BookedCallCard({ call, store, words, id, sameTitle }: { call: BookedCall; store: Store; words: OrdersWords; id: string; sameTitle: boolean }) {
   const video = isVideoRoom(call.room);
   const minutes = Math.round((call.end - call.start) / 60_000);
   const locale = speech(store).lang.locale;
+  const named = (link: string) => ({ id: `${id}${link}`, "aria-labelledby": `${id}${link} ${id}${sameTitle ? ` ${id}w` : ""}` });
   return (
     <li className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
       {/* A heading under "Booked calls", so the list is walked call by call (WCAG 2.4.10). */}
-      <h3 className="font-semibold">{call.title}</h3>
-      <p className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>
+      <h3 id={id} className="font-semibold">{call.title}</h3>
+      <p id={sameTitle ? `${id}w` : undefined} className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>
         {readableTime(call.start, call.buyerTz, locale)}
       </p>
       <p className="st-muted text-sm">{words.callLength(zoneName(call.start, call.buyerTz, locale), minutes)}</p>
@@ -88,19 +99,19 @@ function BookedCallCard({ call, store, words }: { call: BookedCall; store: Store
           /* In person (lib/call-place.ts): where, as text, and no link. */
           <p className="text-sm" data-call-place="">{bookingWords(store.language).whereAt(placeLine(call.setup.place))}</p>
         ) : call.room ? (
-          <a href={call.room} rel="noopener noreferrer nofollow" target="_blank" className="btn st-btn btn-block">
+          <a href={call.room} rel="noopener noreferrer nofollow" target="_blank" className="btn st-btn btn-block" {...named("j")}>
             {words.roomLabels[roomKind(call.room)]}
           <NewTab language={store.language} /></a>
         ) : (
           <p className="st-muted text-sm">{words.linkBeforeCall(store.name)}</p>
         )}
         {video ? <p className="st-muted text-xs leading-relaxed">{words.videoRoomNote}</p> : null}
-        <a href={icsLink("", store, call.session)} className="btn btn-secondary btn-block">
+        <a href={icsLink("", store, call.session)} className="btn btn-secondary btn-block" {...named("a")}>
           {words.addToCalendar}
         </a>
         {canMove(call.setup, call.start, call.moves) ? (
           <p className="text-center text-sm">
-            <a href={moveLink("", store, call.productId, call.session)} className="st-footer-link inline-flex min-h-11 items-center font-semibold">
+            <a href={moveLink("", store, call.productId, call.session)} className="st-footer-link inline-flex min-h-11 items-center font-semibold" {...named("m")}>
               {words.moveCall}
             </a>
           </p>
@@ -248,8 +259,8 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                     {words.bookedCalls(calls.length)}
                   </h2>
                   <ul className="mt-4 space-y-4">
-                    {calls.map((call) => (
-                      <BookedCallCard key={call.session} call={call} store={store} words={words} />
+                    {calls.map((call, i) => (
+                      <BookedCallCard key={call.session} call={call} store={store} words={words} id={`bc${i}`} sameTitle={calls.some((other) => other !== call && other.title === call.title)} />
                     ))}
                   </ul>
                 </section>

@@ -291,7 +291,10 @@ export async function POST(request: NextRequest) {
   if (!canSell(store)) return away(`/@${store.handle}`);
 
   const products = (await Promise.all(ids.map((id) => readProduct(store, id).catch(() => null)))).filter((p) => p !== null);
-  const coming = await soonState(store).catch(() => ({ soon: new Set<string>() }));
+  // Which products are still coming soon: a reading that cannot be had is never "none" (review of #2846):
+  // back to the cart to try again, nothing charged.
+  const coming = await soonState(store).catch(() => null);
+  if (!coming) return away(`/@${store.handle}?cart=error#cart`);
   const fit = products.length === ids.length && products.every((p) => cartable(p) && p.fields.length === 0 && !coming.soon.has(p.id));
   if (!fit) return away(`/@${store.handle}?cart=changed#cart`);
   for (const product of products) {

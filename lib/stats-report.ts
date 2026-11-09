@@ -369,7 +369,8 @@ const CHANNEL_WORDS: Record<string, string> = {
   deepseek: "DeepSeek",
   grok: "Grok",
 };
-const channelWord = (source: string) => CHANNEL_WORDS[source] ?? source;
+/** Only the map's own words: a channel is a visitor's utm_source, so "__proto__" or "constructor" stays its own text (tests/proto-keys.test.ts). */
+const channelWord = (source: string) => (Object.hasOwn(CHANNEL_WORDS, source) ? CHANNEL_WORDS[source] : source);
 
 /** The week's email, in words. Null when the store had no visitors in the week: nothing to say. */
 export function weeklyMessage(store: Store, data: StatsData, stopUrl: string, spends: AdSpend[] = [], goal = 0): { subject: string; text: string } | null {
@@ -605,7 +606,7 @@ export async function maybeBusyAlert(store: Store, today: number, now = Date.now
       verdict.times >= 2 ? `, about ${verdict.times} times a usual day` : ", more than any day in the last two weeks"
     }.`,
     "",
-    top ? `Most of them came from ${CHANNEL_WORDS[top.name] ?? top.name}.` : "",
+    top ? `Most of them came from ${channelWord(top.name)}.` : "",
     "While people are arriving is a good moment to answer comments, pin the post that is working, or share it again.",
     "",
     `See who is on your store right now and where they came from: ${SITE_URL}/studio`,

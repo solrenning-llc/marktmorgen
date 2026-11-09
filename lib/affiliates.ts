@@ -3335,32 +3335,63 @@ export type ProgramNumbers = {
   since: number;
 };
 
+/**
+ * A HGETALL reply as pairs, read exactly: a list of strings with an even
+ * count, or UnknownReplyError. Never an empty hash from a reply that is
+ * missing, cut short or of another shape (lib/redis-reply.ts).
+ */
+function exactPairs(reply: unknown, what: string): [string, string][] {
+  const list = stringList(reply);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
+  const out: [string, string][] = [];
+  for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
+  return out;
+}
+
+/**
+ * Throws UnknownReplyError when a reply is not in its exact shape, so the
+ * directory shows the program without numbers, never with zeros
+ * (lib/affiliate-directory.ts, readDirectory).
+ */
 export async function programNumbers(store: Store): Promise<ProgramNumbers | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const statsId = store.statsId;
-  const [people, clicks, sales, payouts] = await redisPipeline([
-    ["HGETALL", peopleKey(statsId)],
-    ["HGETALL", clicksKey(statsId)],
-    ["HGETALL", salesKey(statsId)],
-    ["HGETALL", payoutsKey(statsId)],
-  ]);
-  const approved = pairs(people)
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HGETALL", peopleKey(statsId)],
+      ["HGETALL", clicksKey(statsId)],
+      ["HGETALL", salesKey(statsId)],
+      ["HGETALL", payoutsKey(statsId)],
+    ]),
+    4,
+  );
+  if (!replies) throw new UnknownReplyError("a program's numbers");
+  const people = exactPairs(replies[0], "a program's affiliates");
+  const clicks = exactPairs(replies[1], "a program's clicks").map(([, n]) => {
+    // Written only by HINCRBY: a whole number from zero up, or of an unknown shape.
+    const count = /^\d+$/.test(n) ? countOf(Number(n)) : null;
+    if (count === null) throw new UnknownReplyError("a program's click count");
+    return count;
+  });
+  const sales = exactPairs(replies[2], "a program's sales");
+  const payouts = exactPairs(replies[3], "a program's payments");
+  const approved = people
     .map(([, raw]) => parseAffiliate(raw))
     .filter((a): a is Affiliate => a !== null && a.status === "approved");
   const currency = store.currency.toLowerCase();
-  const referrals = pairs(sales)
+  const referrals = sales
     .map(([, raw]) => parseReferral(raw))
     .filter((r): r is Referral => r !== null && !r.self && (r.currency || "usd").toLowerCase() === currency);
   const earned = (r: Referral) => commissionOn(r.base, r.rate);
   const byClick = referrals.filter((r) => r.how === "click");
   return {
     affiliates: approved.length,
-    clicks: pairs(clicks).reduce((sum, [, n]) => sum + (Number(n) || 0), 0),
+    clicks: clicks.reduce((sum, n) => sum + n, 0),
     clickSales: byClick.length,
     clickEarnedCents: byClick.reduce((sum, r) => sum + earned(r), 0),
     sales: referrals.length,
     earnedCents: referrals.reduce((sum, r) => sum + earned(r), 0),
-    paidCents: pairs(payouts)
+    paidCents: payouts
       .map(([, raw]) => parsePayout(raw))
       .filter((p): p is Payout => p !== null && (p.currency || "usd").toLowerCase() === currency)
       .reduce((sum, p) => sum + p.cents, 0),

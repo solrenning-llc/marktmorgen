@@ -52,6 +52,7 @@
  * with the orders that sold them (ORDER_COST).
  */
 import { onAccount } from "@/lib/stripe-account";
+import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
@@ -750,18 +751,30 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
   if (!account) return out;
   for (const handle of saleHandles(store)) {
     let page = "";
-    for (let round = 0; round < 50; round += 1) {
+    let reachedEnd = false;
+    for (let round = 0; round < RENEWAL_SEARCH_ROUNDS; round += 1) {
       if (Date.now() > until) return { ...out, done: false };
       const query = encodeURIComponent(`metadata['store']:'${handle}'`);
-      const found = (await onAccount("GET", account, `/subscriptions/search?limit=100&query=${query}${page ? `&page=${encodeURIComponent(page)}` : ""}`)) as Record<string, unknown>;
-      const rows = Array.isArray(found.data) ? (found.data as Record<string, unknown>[]) : [];
+      const found = await onAccount("GET", account, `/subscriptions/search?limit=100&query=${query}${page ? `&page=${encodeURIComponent(page)}` : ""}`);
+      // Read in its exact shape (rule 24/30, lib/stripe-list.ts): a reply with no `data` list or no boolean `has_more`
+      // is not "nothing to stop". It throws StripeListUnreadable, the closing day is held and the search asked again,
+      // so no member goes on being charged after the store closed (until 9 November 2026 it was read as an empty list).
+      const listed = readStripePage(found, renewalRowReadable, RENEWAL_ID);
+      // A row that cannot be read may be a running member: the pass is not done (the readable ones are still stopped).
+      if (listed.unreadable > 0) {
+        console.error(`plan-closing: Stripe's search gave ${listed.unreadable} subscription(s) that could not be read; asked again`);
+        out.done = false;
+      }
       const toStop: string[] = [];
-      for (const sub of rows) {
-        const id = typeof sub.id === "string" ? sub.id : "";
-        const status = typeof sub.status === "string" ? sub.status : "";
-        if (!id || ["canceled", "incomplete_expired"].includes(status)) continue;
-        out.subs.push(id);
-        toStop.push(id);
+      for (const sub of listed.rows) {
+        // Only the store's own sales of the handle searched (rule 30, as lib/closing-holds.ts): another's is never ended.
+        if ((ownField(sub, "metadata") as Record<string, unknown>).store !== handle) {
+          console.error("plan-closing: Stripe's search gave a subscription of another store; left alone");
+          continue;
+        }
+        if (["canceled", "incomplete_expired"].includes(ownField(sub, "status") as string)) continue;
+        out.subs.push(sub.id);
+        toStop.push(sub.id);
       }
       for (let i = 0; i < toStop.length; i += RENEWALS_AT_ONCE) {
         if (Date.now() > until) return { ...out, done: false };
@@ -769,10 +782,30 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
           onAccount("DELETE", account, `/subscriptions/${encodeURIComponent(id)}`, undefined, undefined, `closed-now:${id}`)));
         out.stopped += Math.min(RENEWALS_AT_ONCE, toStop.length - i);
       }
-      page = typeof found.next_page === "string" ? found.next_page : "";
-      if (found.has_more !== true || !page) break;
+      if (!listed.hasMore) {
+        reachedEnd = true;
+        break;
+      }
+      // More follow and the page does not say where: not the end, never read as one.
+      const next = ownField(found as Record<string, unknown>, "next_page");
+      if (typeof next !== "string" || !next) {
+        console.error("plan-closing: Stripe's search said more subscriptions follow but not where; asked again");
+        return { ...out, done: false };
+      }
+      page = next;
     }
+    // The run's pages ran out before the search's did: the rest are asked for on the next run.
+    if (!reachedEnd) return { ...out, done: false };
   }
   return out;
+}
+
+/** Pages of one handle's search read in one run; past them the pass is not done and the next run starts again. */
+const RENEWAL_SEARCH_ROUNDS = 50;
+/** A subscription id as Stripe writes it; it goes into the DELETE's path. */
+const RENEWAL_ID = /^sub_[A-Za-z0-9]{1,250}$/;
+/** A search row counts only with its status in text and its metadata as an object (to tell its store). */
+function renewalRowReadable(row: Record<string, unknown>): boolean {
+  return typeof ownField(row, "status") === "string" && plainObject(ownField(row, "metadata"));
 }
 

@@ -95,6 +95,15 @@ function heldUnder(key: string): string {
   return type === "none" ? "" : JSON.stringify(redis.run(["GET", key]));
 }
 
+/**
+ * The store's count of emails to people brought over this month, cleared: the past buyers' parts use the month, and a
+ * members import holds the emails for its whole file when it starts (#3384), so each members part starts from an
+ * unused month (synthetic, in the stand-in).
+ */
+function monthUnused(sid: string) {
+  for (const key of (redis.run(["SCAN", "0", "MATCH", `nl:imports:moved:${sid}:*`]) as [string, string[]])[1]) redis.run(["DEL", key]);
+}
+
 /** A store as one made before every store had a list: its record kept with no list id (synthetic, in the stand-in). */
 function withoutList(sid: string) {
   const [, keys] = redis.run(["SCAN", "0", "MATCH", "*"]) as [string, string[]];
@@ -163,6 +172,7 @@ async function main(): Promise<void> {
 
   part("And a members import");
   let before = emails.length;
+  monthUnused(store.sid);
   const m = await startImport(store, OWNER, "members", { expected: 2, file: "patrons.csv", stopped: true });
   if (!m.ok) throw new Error(`members not started: ${m.reason}`);
   await addRows(store, m.job.id, [["2", "gone@example.com", "The Inner Circle", renews, ""], ["3", "member@example.com", "The Inner Circle", renews, ""]]);
@@ -197,6 +207,7 @@ async function main(): Promise<void> {
   part("An unknown reply about who was deleted holds the members' rows");
   {
     store = await fresh();
+    monthUnused(store.sid);
     const job = await startImport(store, OWNER, "members", { expected: 1, file: "patrons.csv", stopped: true });
     if (!job.ok) throw new Error(`not started: ${job.reason}`);
     await addRows(store, job.job.id, [["2", "heldmember@example.com", "The Inner Circle", renews, ""]]);
@@ -347,6 +358,7 @@ async function main(): Promise<void> {
   part("Somebody deleted while the members' rows are being invited");
   {
     store = await fresh();
+    monthUnused(store.sid);
     const job = await startImport(store, OWNER, "members", { expected: 2, file: "patrons.csv", stopped: true });
     if (!job.ok) throw new Error(`not started: ${job.reason}`);
     await addRows(store, job.job.id, [["2", "racemember@example.com", "The Inner Circle", renews, ""], ["3", "calmmember@example.com", "The Inner Circle", renews, ""]]);
@@ -382,6 +394,7 @@ async function main(): Promise<void> {
     const report = after ? await reportCsv(after) : "";
     is("past buyers: both rows are left out as deleted, the address in neither", [after?.counts.skipped, report.includes("gone@example.com"), heldUnder(`nl:import:${job.job.id}:errors`).includes("gone@example.com")], [2, false, false]);
     is("past buyers: nor kept among the rows the import saw", heldUnder(`nl:import:${job.job.id}:seen`).includes("gone@example.com"), false);
+    monthUnused(store.sid);
     const m2 = await startImport(store, OWNER, "members", { expected: 2, file: "patrons.csv", stopped: true });
     if (!m2.ok) throw new Error(`not started: ${m2.reason}`);
     await addRows(store, m2.job.id, [["2", "gone@example.com", "The Inner Circle", renews, ""], ["3", "gone@example.com", "The Inner Circle", renews, ""]]);
@@ -442,6 +455,7 @@ async function main(): Promise<void> {
     }
     {
       store = await fresh();
+      monthUnused(store.sid);
       const job = await startImport(store, OWNER, "members", { expected: 1, file: "patrons.csv", stopped: true });
       if (!job.ok) throw new Error(`not started: ${job.reason}`);
       await addRows(store, job.job.id, [["2", "wmember@example.com", "The Inner Circle", renews, ""]]);
@@ -529,6 +543,7 @@ async function main(): Promise<void> {
       [after?.counts.skipped, report.split("Left out: Deleted from your store before, so left alone").length - 1, report.includes("racetwice@example.com"), heldUnder(`nl:import:${job.job.id}:errors`).includes("racetwice@example.com"), heldUnder(`nl:import:${job.job.id}:seen`).includes("racetwice@example.com")],
       [2, 2, false, false, false],
     );
+    monthUnused(store.sid);
     const m = await startImport(store, OWNER, "members", { expected: 3, file: "patrons.csv", stopped: true });
     if (!m.ok) throw new Error(`not started: ${m.reason}`);
     await addRows(store, m.job.id, [["2", "racetwicem@example.com", "The Inner Circle", renews, ""], ["3", "racetwicem@example.com", "The Inner Circle", renews, ""], ["4", "calmtwicem@example.com", "The Inner Circle", renews, ""]]);

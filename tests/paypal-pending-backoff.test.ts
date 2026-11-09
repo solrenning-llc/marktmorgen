@@ -105,7 +105,8 @@ async function main(): Promise<void> {
   is("and is off pending", redis.run(["ZSCORE", PENDING, PAID_ORDER]), null);
   const stuckScores = Array.from({ length: 25 }, (_, i) => Number(redis.run(["ZSCORE", PENDING, stuckId(i + 1)])));
   is("each order PayPal did not answer for is still pending, asked again later (its score is its next look)", stuckScores.every((s) => s > now), true);
-  is("the next look of an order two hours old is half an hour on", stuckScores.every((s) => s >= now + 1800 && s <= now + 1800 + 60), true);
+  // Rule 23: was "half an hour on" (now + 1800); each step now leaves 30 seconds for a late run (pre-review LOW 3).
+  is("the next look of an order two hours old is half an hour on, less 30 seconds for a late run", stuckScores.every((s) => s >= now + 1770 && s <= now + 1770 + 60), true);
 
   part("Only the orders whose turn has come are read");
   asked.length = 0;
@@ -117,14 +118,25 @@ async function main(): Promise<void> {
 
   part("Asked less and less often, from when it was opened");
   is(
-    "five minutes in the first hour, half an hour in the first day, three hours in the first week, then six",
+    // Rule 23: each step was the whole interval (300, 1800, 3 h, 6 h); it now leaves 30 seconds for a run of the
+    // five-minute job that starts late, so a delay never doubles the pace (pre-review LOW 3).
+    "five minutes in the first hour, half an hour in the first day, three hours in the first week, then six, each less 30 seconds",
     [nextPendingLook(1000, 1000 + 60), nextPendingLook(1000, 1000 + 2 * 3600), nextPendingLook(1000, 1000 + 2 * DAY), nextPendingLook(1000, 1000 + 20 * DAY)],
-    [1000 + 60 + 300, 1000 + 2 * 3600 + 1800, 1000 + 2 * DAY + 3 * 3600, 1000 + 20 * DAY + 6 * 3600],
+    [1000 + 60 + 270, 1000 + 2 * 3600 + 1770, 1000 + 2 * DAY + 3 * 3600 - 30, 1000 + 20 * DAY + 6 * 3600 - 30],
   );
-  is("a time in the future (a clock moved back) is read as just opened", nextPendingLook(5000, 1000), 1300);
+  // Rule 23: was 1300 (five minutes on); now less the same 30 seconds.
+  is("a time in the future (a clock moved back) is read as just opened", nextPendingLook(5000, 1000), 1270);
+  // Rule 23: counted on the five-minute job's runs (one look a run at most, pre-review LOW 2), not on the function's
+  // own steps, which now fall 30 seconds early and would count a look no run makes.
   let looks = 0;
-  for (let t = 0; t < DAY; t = nextPendingLook(0, t)) looks += 1;
-  is("at most as many looks in an order's first day as the cost registry names", looks, PAYPAL_PENDING_WATCH.looksPerOrderPerDayAtMost);
+  let turn = 0;
+  for (let t = 0; t < DAY; t += 300) {
+    if (t < turn) continue;
+    looks += 1;
+    turn = nextPendingLook(0, t);
+  }
+  is("at most as many looks in an order's first day as the cost registry names, one a run", looks, PAYPAL_PENDING_WATCH.looksPerOrderPerDayAtMost);
+  is("a run that starts 10 seconds late, then one 5 seconds late, keeps the five-minute pace", 600 + 5 >= nextPendingLook(0, 300 + 10), true);
 
   part("A pending order's record is kept while it is pending, never past thirty days from opening");
   const slow = "5O190127TNSLOW0001";
@@ -168,6 +180,54 @@ async function main(): Promise<void> {
   await sweep();
   onAsk = () => undefined;
   is("the sweep's next look does not add it back", redis.run(["ZSCORE", PENDING, raced]), null);
+
+  part("A record without a real opening time is not asked about as if opened in 1970 (pre-review, junction with #3411)");
+  const noTime = "5O190127TNNOTIME01";
+  redis.run(["SET", orderKey(noTime), JSON.stringify({ s: STATS, h: "harbor", p: "guide01", c: 4900, cur: "usd", m: SELLER, at: 0, meta: {} }), "EX", String(3 * DAY)]);
+  redis.run(["ZADD", PENDING, "1", noTime]);
+  asked.length = 0;
+  await sweep();
+  const noTimeScore = redis.run(["ZSCORE", PENDING, noTime]);
+  is("read as unknown: PayPal not asked, kept and asked again in an hour", [asked.includes(noTime), noTimeScore !== null && Number(noTimeScore) >= Math.floor(Date.now() / 1000) + 3500], [false, true]);
+
+  part("The last look comes at most one run before the record ends (pre-review MEDIUM 1, proof prerev-ppback-proof)");
+  // Opened two days before T0; the return asked for the capture at T0 and PayPal held it as pending (watchLater kept
+  // its record thirty days from then, as on main). The five-minute job runs from T0 to T0 + 33 days.
+  const tail = "5O190127TNTAIL0001";
+  const realNow = Date.now;
+  const realError = console.error;
+  const errors: string[] = [];
+  try {
+    redis.clear();
+    const t0 = Math.floor(realNow() / 1000);
+    let clock = t0 * 1000;
+    Date.now = () => clock;
+    console.error = (...args: unknown[]) => void errors.push(args.map(String).join(" "));
+    redis.run(["SET", orderKey(tail), JSON.stringify({ s: STATS, h: "harbor", p: "guide01", c: 4900, cur: "usd", m: SELLER, at: t0 - 2 * DAY, meta: {} }), "EX", String(30 * DAY)]);
+    redis.run(["ZADD", PENDING, String(t0), tail]);
+    const pending = completed(tail);
+    ((pending.purchase_units as { payments: { captures: { status: string }[] } }[])[0].payments.captures[0]).status = "PENDING";
+    answers.set(tail, pending);
+    asked.length = 0;
+    const askedAt: number[] = [];
+    onAsk = (order) => {
+      if (order === tail) askedAt.push(Math.floor(clock / 1000));
+    };
+    let recordEnd = 0;
+    for (let t = t0; t <= t0 + 33 * DAY; t += 300) {
+      clock = t * 1000;
+      await sweep();
+      if (!recordEnd && redis.run(["EXISTS", orderKey(tail)]) === 0) recordEnd = t;
+    }
+    onAsk = () => undefined;
+    is("the record ends thirty days from opening", recordEnd > 0 && recordEnd - (t0 - 2 * DAY) <= 30 * DAY + 300, true);
+    is("asked within one run (600 s) of its end, not a six-hour step before", recordEnd - (askedAt.at(-1) ?? 0) <= 600, true);
+    is("and let go of pending only then", redis.run(["ZSCORE", PENDING, tail]), null);
+    is("letting it go is logged, with the order", errors.some((e) => e.includes("record ended") && e.includes(tail)), true);
+  } finally {
+    Date.now = realNow;
+    console.error = realError;
+  }
   done();
 }
 

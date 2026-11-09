@@ -59,7 +59,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/checkout-recovery.ts", how: "erased", what: "The marks that they heard a checkout reminder about a product this week" },
   { file: "lib/checkout-ask.ts", how: "expires", days: 1, what: "A checkout reminder they asked for in the last hour waits in its queue; it is not sent to a deleted address" },
   { file: "lib/review-ask.ts", how: "none", what: "Review requests wait for their day by the order's reference, never by address, and are not sent to a deleted address" },
-  { file: "lib/welcome-offer-send.ts", how: "erased", what: "When their welcome offer began, and that its reminder was set" },
+  { file: "lib/welcome-offer-send.ts", how: "erased", what: "When their welcome offer began, that its reminder was set, and the reminder still waiting for its hour, with their address" },
   { file: "lib/winback-send.ts", how: "erased", what: "The marks that they heard a come-back offer about a product" },
   { file: "lib/erasure-index.ts", how: "erased", what: "Every link your store emailed them that is still kept: stop links, waitlist links, review links, free-product and sign-up links" },
   { file: "lib/email-sync.ts", how: "erased", what: "The record of sending them to your connected email platform, and any send still waiting" },
@@ -104,6 +104,7 @@ export const PERSON_DATA: PersonData[] = [
 
   // ---------------------------------------------------------------- courses
   { file: "lib/learn.ts", how: "erased", what: "Their progress in your courses: when they began and came back, the lessons they marked done, the drip emails sent them, and every browser let in with their address" },
+  { file: "lib/lesson-position.ts", how: "none", what: "Where they stopped in a lesson video is kept only in their own browser, under a code made on our server, and never sent to us (Privacy #lesson-places)" },
   { file: "lib/learn.ts", how: "expires", days: 1, what: "A sign-in link to a course already emailed works for an hour" },
   { file: "lib/course-finish.ts", how: "erased", what: "The marks that they opened and finished each course" },
   { file: "lib/quiz.ts", how: "erased", what: "Their quiz tries, results and passes" },
@@ -158,7 +159,6 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/buyer-library.ts", how: "erased", what: "The note that they bought from your store, used for their library across stores" },
   { file: "lib/buyer-library.ts", how: "expires", days: 1, what: "A link to their library across stores works for 24 hours" },
   { file: "lib/checkout-recovery.ts", how: "expires", days: 7, what: "The mark that they heard about a cart of several products, a one-way hash, for a week" },
-  { file: "lib/welcome-offer-send.ts", how: "expires", days: 7, what: "A welcome reminder waiting for its hour is not sent to a deleted address" },
   { file: "lib/erasure-request.ts", how: "expires", days: 1, what: "The emailed link with which a person deletes themselves works for an hour, then is deleted" },
   { file: "lib/webhooks.ts", how: "expires", days: 7, what: "Events your webhooks already sent, kept for seven days, as your endpoint received them" },
 
@@ -183,6 +183,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/store-assistant.ts", how: "none", what: "Questions your Store assistant could not answer, with the day, never who asked; what they chose to send you goes into your inbox, deleted with it" },
   { file: "lib/closing-buyers.ts", how: "kept", what: "Only while your store is closing: the address of each buyer we emailed that it closes, so nobody is emailed twice and each can be told if it stays open", why: "Needed to tell them once, at least 7 days before the store closes, as the checkout promised; deleted the day the store closes or the day it stays open, and never used for anything else" },
   { file: "lib/plan-refund-flow.ts", how: "none", what: "A plan refund in progress is noted by the store's id and its subscription only; the emails about it are sent to the store's own address read from the store at the time, and nothing of it is kept here" },
+  { file: "lib/plan-withdrawal.ts", how: "expires", days: 400, what: "A withdrawal from your own plan: when you first sent it, how many times its receipt and the note to our support team were tried, and why a refund was not made at once, under the store's id and its subscription. Your name and the email for the receipt are not kept here: they go in the receipt. Deleted 400 days after the withdrawal" },
   { file: "lib/closing-plan-guard.ts", how: "kept", what: "Only if a plan is paid for your store after its closing day began: your address, your Stripe customer and the store's name", why: "Needed to end that plan, return its payment in full and tell you so; deleted as soon as that is done (only the dates are kept 40 days, so it is never done twice and a refund your bank sends back is made again)" },
   { file: "lib/closing-holds.ts", how: "kept", what: "Only while your store is closing: each member's address on Stripe and last payment (its amount and period), from the day your plan ended", why: "Needed to give back the time they paid for after the closing day, from your own Stripe account, and to tell them if it could not be; deleted the day the store closes or the day it stays open" },
   { file: "lib/assistant-reminder.ts", how: "erased", what: "A checkout reminder they asked for with your Store assistant's box at checkout: the address they typed, the sentence they checked, when and its version. Deleted by itself three days after that checkout opened, sent or not" },

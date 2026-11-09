@@ -1137,6 +1137,57 @@ export class MemoryRedis {
           this.run(["SET", gone, "1", "EX", seconds]);
           return taken;
         }
+        // lib/erasure-index.ts FORGET_NOTED and FORGET_NOTED_PART, step for step, read as Redis reads: a missing or
+        // empty container is not a key, and a note of another type is refused before anything is deleted (the plain
+        // SMEMBERS and ZRANGEBYSCORE here would make an empty one instead).
+        if (key.startsWith("-- marktmorgen:forget-noted:v2\n") || key.startsWith("-- marktmorgen:forget-noted-part:v2\n")) {
+          const count = Number(args[0]);
+          const named = args.slice(1, count + 1);
+          const argv = args.slice(count + 1);
+          const [index, notes] = named;
+          const filled = (one: string) => {
+            this.live(one);
+            const value = this.data.get(one);
+            return value instanceof Set || value instanceof Map ? value.size > 0 : Array.isArray(value) ? value.length > 0 : value !== undefined;
+          };
+          const members = (one: string, kind: "set" | "zset"): string[] => {
+            if (!filled(one)) return [];
+            const value = this.data.get(one);
+            if (kind === "set" && value instanceof Set) return [...value];
+            if (kind === "zset" && Array.isArray(value) && typeof value[0] === "object") return this.run(["ZRANGEBYSCORE", one, "-inf", "+inf"]) as string[];
+            throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          };
+          const remove = (keys: string[]) => {
+            let gone = 0;
+            for (const one of new Set(keys)) {
+              if (filled(one)) gone += 1;
+              this.run(["DEL", one]);
+            }
+            return gone;
+          };
+          if (!Number.isSafeInteger(count) || count < 2 || named.length !== count) throw new Error("MemoryRedis: unsupported EVAL");
+          if (key.startsWith("-- marktmorgen:forget-noted-part:v2\n")) {
+            if (count < 3 || argv.length) throw new Error("MemoryRedis: unsupported EVAL");
+            const records = named.slice(2);
+            const typeOf = (one: string) => (filled(one) ? this.run(["TYPE", one]) : "none");
+            const [setType, zsetType] = [typeOf(index), typeOf(notes)];
+            if ((setType !== "none" && setType !== "set") || (zsetType !== "none" && zsetType !== "zset")) return -1;
+            // As a real redis-server runs it: the DEL, then SREM and ZREM; a set or sorted set left empty is no longer a key.
+            const gone = remove(records);
+            for (const [one, kind, verb] of [[index, "set", "SREM"], [notes, "zset", "ZREM"]] as const) {
+              if (!members(one, kind).length) continue;
+              this.run([verb, one, ...records]);
+              if (!filled(one)) this.run(["DEL", one]);
+            }
+            return gone;
+          }
+          const raw = members(index, "set");
+          const scored = members(notes, "zset");
+          const read = Number(argv[0]);
+          if (!Number.isSafeInteger(read) || raw.length !== read || scored.length !== argv.length - 1 - read) return "changed";
+          if (!argv.slice(1, read + 1).every((one) => raw.includes(one)) || !argv.slice(read + 1).every((one) => scored.includes(one))) return "changed";
+          return [remove(named), (read ? 1 : 0) + (argv.length - 1 - read ? 1 : 0)];
+        }
         // lib/stock.ts STOCK_ADMIT and STOCK_BIND (513 [PF1], Codex G2's review of #1730, 5 November 2026), step for step.
         if (key.startsWith("-- marktmorgen:stock-admit:v1\n")) {
           const count = Number(args[0]);

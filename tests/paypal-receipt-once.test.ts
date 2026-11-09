@@ -16,6 +16,8 @@
  *       at most RECEIPT_TRIES_AT_MOST times, each try's Redis commands at most the registry's (PAYPAL_HAND_OVER_RETRY
  *       in tests/plan-cost-registry.ts; the account refusal, with the owner told, is the longest try measured, longer
  *       than a message refusal; Resend alone is held by tests/paypal-handover-cost.test.ts);
+ *   E2: the same, with Resend asking to slow down (429) on every attempt: viaResend makes its three attempts in each
+ *       try, the longest try of all, measured and held to the registry's commandsPerReceiptTry;
  *   F:  Amazon refuses it for the account, then is down for 23 hours: Resend sends it in the same try (review
  *       6739456860, probe D);
  *   G:  Amazon refuses it every time while ready: Resend sends it in the same try, Amazon is not asked again (probe D2);
@@ -47,8 +49,8 @@ const orders = new Map<string, Record<string, unknown>>();
 let made = 0;
 let buyerFor = "buyer@example.com";
 const orderId = (n: number) => `6P290127TN36471${String(n).padStart(2, "0")}`;
-/** What Resend answers: accepted, a 503 (its answer not known to be a refusal), or a 422 (a refusal). */
-let resendMode: "up" | "503" | "422" = "up";
+/** What Resend answers: accepted, a 503 (its answer not known to be a refusal), a 422 (a refusal) or a 429 (slow down). */
+let resendMode: "up" | "503" | "422" | "429" = "up";
 /** Called on each Resend request before it is answered (probe D). */
 let onResendPost: (() => void) | null = null;
 /** Every Resend request: its idempotency key and body text. */
@@ -103,6 +105,7 @@ const mail = installSesMailFixture({
     onResendPost?.();
     if (resendMode === "503") return json({ name: "service_unavailable", message: "synthetic outage" }, 503);
     if (resendMode === "422") return json({ name: "validation_error", message: "synthetic refusal" }, 422);
+    if (resendMode === "429") return json({ name: "rate_limit_exceeded", message: "synthetic slow down" }, 429);
     return json({ id: `resend_fixture_${resendPosts.length}` });
   },
 });
@@ -294,6 +297,45 @@ async function main(): Promise<void> {
   is("Resend tried more than once and at most RECEIPT_TRIES_AT_MOST times", resendTo(buyerE) > 1 && resendTo(buyerE) <= delivery.RECEIPT_TRIES_AT_MOST, true);
   is("one try's Redis commands at most as the registry states", mostATry > 0 && mostATry <= Number((PAYPAL_HAND_OVER_RETRY as Record<string, number>).commandsPerReceiptTry), true);
   is("then off the list", (await listed()).includes(e), false);
+
+  part("E2: Amazon refuses it for the account, then Resend asks to slow down on every attempt: the longest try, measured");
+  startOfNextDay();
+  mail.configure();
+  await mail.setReady(true);
+  mail.setSesOutcome(["account"]);
+  resendMode = "429";
+  const buyerE2 = "resend-slow@example.com";
+  const undoE2 = after((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ppsell:receipt:"), () => ["QUEUED"]);
+  const e2 = await pay(11, buyerE2);
+  undoE2();
+  is("the return route's try sent nothing", copies(buyerE2).length, 0);
+  const paidKeyE2 = `nl:ppsell:paid:${e2}`;
+  let longest = 0;
+  for (let run = 0; run < (26 * 3600) / 300; run += 1) {
+    ahead += 300_000;
+    const sent: (string | number)[][] = [];
+    const pipeline = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      sent.push(...commands);
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    try {
+      await delivery.sweepPayPal(await fresh(), Date.now() + 10_000);
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    const from = sent.findIndex((c) => c[0] === "GET" && c[1] === paidKeyE2);
+    if (from < 0) continue;
+    const to = sent.findLastIndex((c) => c[1] === handOverKey(statsId) && c[c.length - 1] === e2);
+    longest = Math.max(longest, to - from + 1);
+  }
+  mail.setSesOutcome("ok");
+  resendMode = "up";
+  console.log(`        tries: Amazon ${sesTo(buyerE2)}, Resend ${resendTo(buyerE2)}, most commands a try: ${longest}`);
+  is("Amazon was asked once", sesTo(buyerE2), 1);
+  is("Resend asked at most three times a try, at most RECEIPT_TRIES_AT_MOST tries", resendTo(buyerE2) > 3 && resendTo(buyerE2) <= 3 * delivery.RECEIPT_TRIES_AT_MOST, true);
+  is("the longest try's Redis commands at most as the registry states", longest > mostATry && longest <= Number((PAYPAL_HAND_OVER_RETRY as Record<string, number>).commandsPerReceiptTry), true);
+  is("then off the list", (await listed()).includes(e2), false);
 
   /** Copies a sender accepted for this buyer: the ones that reached them. */
   const delivered = (buyer: string) => mail.sent.filter((m) => m.to.includes(buyer));

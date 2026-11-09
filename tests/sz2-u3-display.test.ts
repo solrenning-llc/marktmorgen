@@ -22,8 +22,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductImage, setProductLegal, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { catalogRecord, listingOf, parseCatalog, parseProduct, readListing, readProduct, readProductLegal } from "@/lib/catalog";
-import { activeShipping, parseShipping, shipsToWords } from "@/lib/shipping";
-import { GPSR_AREA, safetyGaps, unitWords } from "@/lib/physical-legal";
+import { activeShipping, parseShipping, SHIP_COUNTRIES, shipsToWords } from "@/lib/shipping";
+import { GPSR_AREA, gpsrCloses, safetyGaps, unitWords } from "@/lib/physical-legal";
 import { deliveryWords } from "@/lib/answers";
 import { SHIPPING_WORDS } from "@/lib/buyer-words/shipping";
 import { type PhysicalLegal, safetySummary } from "@/lib/physical-legal-record";
@@ -227,7 +227,12 @@ async function main(): Promise<void> {
   // The checkout closes the EU/EEA (shippingNow above), so the studio must say so (VR 2): the creator is told
   // that buyers there can't buy, only when the closing holds for that product, from the same rule.
   const SOME_CANT = "Until these details are complete, buyers in the EU and EEA can't buy this product.";
-  const NO_ONE = "Until these details are complete, no one can buy this product, because it only ships to the EU and EEA.";
+  // Changed assertion, noted (Codex U's LEVE on lib/physical-legal-record.ts:158, 9 Nov 2026): the old sentence said
+  // "because it only ships to the EU and EEA", which is false for Svalbard and Jan Mayen (SJ), closed with the area but
+  // not inside it. The new one gives the reason that holds for every closed place.
+  const NO_ONE = "Until these details are complete, no one can buy this product, because every place it ships to needs them.";
+  const PARTLY_CANT = "Until these details are complete, buyers in Svalbard and Jan Mayen can't buy this product.";
+  const BOTH_CANT = "Until these details are complete, buyers in the EU and EEA and in Svalbard and Jan Mayen can't buy this product.";
   const filledSafety = {
     manufacturer: { name: "Harbor Print Co.", postal: "1 Dock Rd", electronic: "https://harbor.example/contact", country: "DE" },
     responsible: null,
@@ -251,6 +256,16 @@ async function main(): Promise<void> {
   is("and the studio says no one can buy it", said(studioEuOnly).endsWith(` ${NO_ONE}`), true);
   const svalbard = shipped({ cents: 600, region: "custom", countries: ["SJ"], note: "" }, null, true);
   is("Svalbard and Jan Mayen only: closed by the checkout, so the studio says so too", [shipsNowhere(svalbard), said(svalbard).endsWith(` ${NO_ONE}`)], [true, true]);
+  // Codex U's LEVE: no closing sentence may call a place outside GPSR_AREA "the EU and EEA", and the named partly-in
+  // places must be exactly the codes closed outside the area, so a new one cannot be closed under the wrong name.
+  is("the only code closed outside the area is SJ, the one the sentences name", SHIP_COUNTRIES.filter((code) => gpsrCloses(code) && !GPSR_AREA.includes(code)), ["SJ"]);
+  is("Svalbard and Jan Mayen only: never told it ships only to the EU and EEA", said(svalbard).includes("EU and EEA."), false);
+  const svalbardAndUs = shipped({ cents: 600, region: "custom", countries: ["SJ", "US"], note: "" }, null, true);
+  is("Svalbard and Jan Mayen with the US: the US stays open and the studio names the place closed", [shippingNow(svalbardAndUs)!.countries, said(svalbardAndUs).endsWith(` ${PARTLY_CANT}`)], [["US"], true]);
+  const svalbardGermanyUs = shipped({ cents: 600, region: "custom", countries: ["DE", "SJ", "US"], note: "" }, null, true);
+  is("Germany, Svalbard and Jan Mayen and the US: both closed places are named", [shippingNow(svalbardGermanyUs)!.countries, said(svalbardGermanyUs).endsWith(` ${BOTH_CANT}`)], [["US"], true]);
+  const germanyUs = shipped({ cents: 600, region: "custom", countries: ["DE", "US"], note: "" }, null, true);
+  is("Germany with the US: only the EU and EEA are named", said(germanyUs).endsWith(` ${SOME_CANT}`), true);
   for (const [name, product] of [
     ["filled, shipped worldwide", shipped({ cents: 600, region: "world", note: "" }, filledSafety, true)],
     ["filled but no picture", shipped({ cents: 600, region: "world", note: "" }, filledSafety, false)],
@@ -260,7 +275,7 @@ async function main(): Promise<void> {
   ] as const) {
     const closes = shippingNow(product)!.countries.length < activeShipping(product)!.countries.length;
     // Changed assertion, noted (after the RED commit): either closing sentence counts, "no one can buy" included.
-    is(`${name}: the studio says buyers can't buy exactly when the checkout closes a country`, [SOME_CANT, NO_ONE].some((words) => said(product).endsWith(` ${words}`)), closes);
+    is(`${name}: the studio says buyers can't buy exactly when the checkout closes a country`, [SOME_CANT, PARTLY_CANT, BOTH_CANT, NO_ONE].some((words) => said(product).endsWith(` ${words}`)), closes);
   }
   is("the form shows the closing in the studio's notice style, from the same rule", /safetyClosed\(product\.shipping\.countries, /.test(editor) && /notice notice-warn/.test(editor), true);
 

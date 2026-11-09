@@ -20,8 +20,9 @@
  *   nl:csa:keep:<store>:<product>      "1"      preservation hold, 400 days (unit 2)
  *
  * Unit 2: the hold also marks the product for KEEP_SECONDS, before it is
- * taken off, and while the mark is there the product route refuses to remove,
- * edit or publish it (isHeldForReport): the law asks for what was reported to
+ * taken off, and while the mark is there no studio route removes, edits,
+ * publishes it or changes or deletes any of its files, options, picture,
+ * page, episodes or lessons (heldRefusal): the law asks for what was reported to
  * be kept for a year from the report (18 U.S.C. § 2258A(h), as the REPORT Act
  * amended it), and a creator could otherwise delete it from the studio.
  */
@@ -32,6 +33,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeRef } from "@/lib/store";
 import { type Report, reportedProduct } from "@/lib/takedown";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
+import { productIdFor } from "@/lib/catalog";
 
 /** Automatic holds a store takes from child-safety reports in one UTC day; past them the owner decides. */
 export const CHILD_SAFETY_HOLDS_PER_DAY = 3;
@@ -54,6 +56,25 @@ export async function isHeldForReport(store: Pick<Store, "statsId" | "handle">, 
   if (value === null) return false;
   if (value === "1") return true;
   throw new Error("A preservation hold could not be read");
+}
+
+/**
+ * The answer a studio route gives instead of changing or deleting anything of
+ * a product kept for a report, or null to go on: 409 `on_hold` while it is
+ * held, 503 when the hold cannot be read, never the change. The id may name
+ * the product or one of its price options, whose product is the one held; an
+ * id the store does not have reads nothing, since nothing of it can change.
+ */
+export async function heldRefusal(store: Store, id: string): Promise<Response | null> {
+  const productId = productIdFor(store, id);
+  if (!productId) return null;
+  try {
+    if (await isHeldForReport(store, productId)) return Response.json({ ok: false, error: "on_hold" }, { status: 409 });
+    return null;
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  }
 }
 
 /**

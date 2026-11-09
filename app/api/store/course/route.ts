@@ -38,6 +38,7 @@ import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
 import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
 import { readListing } from "@/lib/catalog";
+import { heldRefusal } from "@/lib/child-safety";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { claimUpload, dropStream } from "@/lib/stream";
@@ -131,6 +132,11 @@ export async function POST(request: NextRequest) {
     if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
     const product = await readListing(store, id);
     if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+    // A product kept for a child-safety report (lib/child-safety.ts) keeps its course as it is: no lesson, module,
+    // file, quiz, assignment, handed-in work, certificate or comment changed or deleted while the hold lasts; a hold
+    // that cannot be read refuses too.
+    const held = await heldRefusal(store, id);
+    if (held) return held;
 
     if (action === "enable") {
       if (product.course) return Response.json({ ok: true, courseId: product.course.id });

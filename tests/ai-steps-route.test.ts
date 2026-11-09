@@ -146,6 +146,35 @@ async function main(): Promise<void> {
   is("the result says the stop, the one job given back and what is left", pdfLines[pdfLines.length - 1], { done: true, ok: false, error: "stopped", returned: 1, left: leftBefore - READ_PDF_JOBS });
   is("one model call: the reading", calls, 1);
 
+  part("A job that reads the PDF first is refused before the file is read when it could not be admitted");
+  let fileReads = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (new URL(String(input)).hostname.endsWith(".r2.cloudflarestorage.com")) fileReads += 1;
+    return realFetch(input, init);
+  }) as typeof fetch;
+  const SMALL = "steps.route.small@example.com";
+  await claimHandle(SMALL, "stepsroutesmall", "Small Route", "");
+  await ensureStatsId(SMALL);
+  await setSubscription(SMALL, { customerId: "cus_StepsRt0002", subscriptionId: "sub_StepsRt0002", active: true, tier: "creator", trialEnds: 0, period: paidPeriod() });
+  const smallMade = await addProduct(SMALL, "Small Pack", "A small pack", "9", null);
+  if (!smallMade.ok) throw new Error("no small product");
+  await setProductFile(SMALL, smallMade.product.id, { pathname: `vault/${"b".repeat(32)}/${smallMade.product.id}/token0002/book.pdf`, name: "book.pdf", bytes: book.length, contentType: "application/pdf", addedAt: "2026-11-09" });
+  const smallSession = await openSession(SMALL);
+  const askSmall = (body: Record<string, unknown>) =>
+    POST(new NextRequest(`${ORIGIN}/api/store/ai`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${smallSession}` }, body: JSON.stringify(body) }));
+  calls = 0;
+  is("a plan without enough writing jobs: refused as used", await json(await askSmall({ kind: "page", product: smallMade.product.id, steps: true, run: "routerunsmall001", readFile: true, notes: "" })), [400, { ok: false, error: "used" }]);
+  is("the same for a title and benefits from the PDF", await json(await askSmall({ kind: "product-pdf", product: smallMade.product.id, run: "routerunsmall002", notes: "" })), [400, { ok: false, error: "used" }]);
+  is("the file is never read for them, and nothing is asked", [fileReads, calls], [0, 0]);
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  is("no writing help on this deployment: refused as off", await json(await ask({ kind: "page", product: made.product.id, steps: true, run: "routerunoff00001", readFile: true, notes: "" })), [400, { ok: false, error: "off" }]);
+  is("the same for a title and benefits from the PDF", await json(await ask({ kind: "product-pdf", product: made.product.id, run: "routerunoff00002", notes: "" })), [400, { ok: false, error: "off" }]);
+  is("and the file is never read", fileReads, 0);
+  process.env.ANTHROPIC_API_KEY = apiKey;
+  globalThis.fetch = realFetch;
+
   part("Without steps, one answer as before");
   calls = 0;
   const plain = await ask({ kind: "page", product: made.product.id, notes: "" });

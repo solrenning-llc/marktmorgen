@@ -163,25 +163,42 @@ async function cameBack(
 }
 
 /**
+ * Every customer of an address on the creator's account, or null when the list cannot be made whole (CX-123 rule 24;
+ * Claude 2 and Codex S on #3371). Each store checkout keeps the address as it was typed, and Stripe's list filter
+ * matches the text exactly, so the customers are read twice: listed by the address as given, and found by Stripe's
+ * customer search, whose rows count when their address is the same in small letters. Two calls. A list read in part,
+ * in another shape, or with a row that cannot be read is null; a provider error throws, for the caller to read as
+ * unknown.
+ */
+async function customersOf(account: string, email: string): Promise<string[] | null> {
+  const customers: string[] = [];
+  const listed = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
+  if (listed.hasMore || listed.unreadable > 0) return null;
+  for (const row of listed.rows) if (!customers.includes(row.id)) customers.push(row.id);
+  const query = new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" });
+  const found = readStripePage(await onAccount("GET", account, `/customers/search?${query}`), (row) => typeof row.email === "string", CUSTOMER_PATTERN);
+  if (found.hasMore || found.unreadable > 0) return null;
+  const address = normaliseEmail(email);
+  for (const row of found.rows) if (normaliseEmail(row.email as string) === address && !customers.includes(row.id)) customers.push(row.id);
+  return customers;
+}
+
+/**
  * Whether this address is back on this product under any of its customers on the creator's account: true, false, or
  * null when it cannot be said (audit R43; CX-123 rule 24). Each store checkout makes a new customer, so the one whose
- * membership ended is read first, then every other customer listed under the address as Stripe holds it and in small
- * letters (Stripe's email filter matches the text exactly). A customer list that is not one, read in part, with a row
- * that cannot be read, or not read at all (a provider error), and more memberships than CAME_BACK_OFFER_PAGES, are
- * unknown, never "has not come back".
+ * membership ended is read first, then every other customer of the address in any letters (customersOf). A customer
+ * list that cannot be made whole or not read at all (a provider error), and more memberships than
+ * CAME_BACK_OFFER_PAGES, are unknown, never "has not come back".
  */
 async function cameBackUnder(account: string, customer: string, email: string, product: string): Promise<boolean | null> {
   const budget = { pages: CAME_BACK_OFFER_PAGES };
   const own = await cameBack(account, customer, product, budget);
   if (own !== false) return own;
   try {
-    const others: string[] = [];
-    for (const address of new Set([email, normaliseEmail(email)])) {
-      const page = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email: address, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
-      if (page.hasMore || page.unreadable > 0) return null;
-      for (const row of page.rows) if (row.id !== customer && !others.includes(row.id)) others.push(row.id);
-    }
-    for (const other of others) {
+    const customers = await customersOf(account, email);
+    if (!customers) return null;
+    for (const other of customers) {
+      if (other === customer) continue;
       const back = await cameBack(account, other, product, budget);
       if (back !== false) return back;
     }
@@ -194,23 +211,15 @@ async function cameBackUnder(account: string, customer: string, email: string, p
 
 /**
  * Whether the person a come-back link is for already has a membership of this product that has not ended, under any
- * customer of the address on the creator's account: true, false, or null when it cannot be said (CX-123 rule 24).
- * Each store checkout keeps the address as it was typed, and Stripe's list filter matches the text exactly, so the
- * customers are read twice: listed by the address the link holds, and found by Stripe's customer search, whose rows
- * count when their address is the same in small letters. At most WINBACK_OPEN_STRIPE_CALLS calls: a list read in
- * part, in another shape, with a row that cannot be read, or not at all, and more memberships than the calls left
+ * customer of the address on the creator's account (customersOf, in any letters): true, false, or null when it cannot
+ * be said (CX-123 rule 24). At most WINBACK_OPEN_STRIPE_CALLS calls: the two reads of the customers, then their
+ * memberships. A customer list that cannot be made whole or not read at all, and more memberships than the calls left
  * read, are unknown, never "no membership".
  */
 async function runningFor(account: string, email: string, product: string): Promise<boolean | null> {
   try {
-    const customers: string[] = [];
-    const listed = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
-    if (listed.hasMore || listed.unreadable > 0) return null;
-    for (const row of listed.rows) if (!customers.includes(row.id)) customers.push(row.id);
-    const query = new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" });
-    const found = readStripePage(await onAccount("GET", account, `/customers/search?${query}`), (row) => typeof row.email === "string", CUSTOMER_PATTERN);
-    if (found.hasMore || found.unreadable > 0) return null;
-    for (const row of found.rows) if (normaliseEmail(row.email as string) === email && !customers.includes(row.id)) customers.push(row.id);
+    const customers = await customersOf(account, email);
+    if (!customers) return null;
     const budget = { pages: WINBACK_OPEN_STRIPE_CALLS - 2 };
     for (const customer of customers) {
       const running = await cameBack(account, customer, product, budget, NOT_ENDED);
@@ -226,10 +235,10 @@ async function runningFor(account: string, email: string, product: string): Prom
 /** Pages of a window's ended memberships read in one run (a hundred each). */
 const EVENT_PAGES = 10;
 /**
- * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, up to two
- * pages of the address's customers, up to CAME_BACK_OFFER_PAGES pages of their memberships and an email. The window
- * is read whole to decide, but no more than this is spent on it in one run, as when only its first page was read;
- * the rest wait for the next run.
+ * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, two reads of
+ * the address's customers (customersOf), up to CAME_BACK_OFFER_PAGES pages of their memberships and an email. The
+ * window is read whole to decide, but no more than this is spent on it in one run, as when only its first page was
+ * read; the rest wait for the next run.
  */
 const OFFERS_PER_RUN = 100;
 

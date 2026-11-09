@@ -116,11 +116,13 @@ is("an expiry that is not a positive whole time", [0, -5, 1.5, "1"].map((expires
 
 part("deletion records, on their own page");
 const record = { source: "r2", key: `vault/${STORE}/owner/abc/f.pdf`, recordedAt: 1_800_000_000_000, reason: "creator_deleted" };
-const deletions = { version: 1, kind: "deletions", records: [record], cursor: null, complete: true, reason: "done" };
+// A complete page of records carries the point the next read resumes from: records are read once, never again each day.
+const deletions = { version: 1, kind: "deletions", records: [record], cursor: "resume-here", complete: true, reason: "done" };
 is("a good page of records", parseDeletionPage(deletions), deletions);
-is("every reason the contract knows", ["creator_deleted", "store_closed", "privacy_request"].map((reason) => recordRefused({ ...deletions, records: [{ ...record, reason }] })), [false, false, false]);
+is("every reason the contract knows", ["creator_deleted", "store_closed", "privacy_request", "site_cleanup"].map((reason) => recordRefused({ ...deletions, records: [{ ...record, reason }] })), [false, false, false, false]);
 is("an unknown reason, date or extra field", [recordRefused({ ...deletions, records: [{ ...record, reason: "other" }] }), recordRefused({ ...deletions, records: [{ ...record, recordedAt: "2026-11-08" }] }), recordRefused({ ...deletions, records: [{ ...record, person: "a@b.c" }] })], [true, true, true]);
 is("a files page is never read as records, nor records as files", [recordRefused(good), refused(deletions)], [true, true]);
-is("complete with a cursor, or incomplete without", [recordRefused({ ...deletions, cursor: "x" }), recordRefused({ ...deletions, complete: false, reason: "more" })], [true, true]);
+is("complete without a resume point, or incomplete without a cursor", [recordRefused({ ...deletions, cursor: null }), recordRefused({ ...deletions, cursor: null, complete: false, reason: "more" })], [true, true]);
+is("incomplete with a cursor reads", recordRefused({ ...deletions, complete: false, reason: "more" }), false);
 
 done();

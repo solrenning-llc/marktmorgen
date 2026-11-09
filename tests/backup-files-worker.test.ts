@@ -431,6 +431,50 @@ async function main(): Promise<void> {
   for (let hour = 2; hour < 12 && !report.finished; hour++) report = await runAt(0, hour, { maxSubrequests: 60 });
   is("the following runs finish the day", [report.finished, copies(S).length, copies(T).length], [true, 40, 40]);
 
+  part("deletion records are read once: each day resumes where the last read ended");
+  fresh();
+  const six = objects("blob", S, 6);
+  setListing("blob", S, six);
+  await runAt(0);
+  world.records = [{ source: "blob", key: six[0].key, recordedAt: DAY0 + DAY + 60_000, reason: "creator_deleted" }];
+  setListing("blob", S, six.slice(1));
+  await runAt(1);
+  const asks = () => world.calls.filter((c) => c.url.includes("page=deletions")).map((c) => new URL(c.url).searchParams.get("cursor"));
+  world.calls = [];
+  report = await runAt(2);
+  is("the next day asks from the point the last read ended", asks(), ["r1"]);
+  is("no second copy of a record already received, no share counted twice", [files.under(`deletions/${iso(DAY0 + 2 * DAY)}/`).length, has(report, "records_share"), report.heartbeat], [0, false, true]);
+
+  part("a resume point the site no longer keeps: alarm, then read again from the oldest kept");
+  world.recordsKeptFrom = 5;
+  report = await runAt(3);
+  is("409: alarmed as deletions_expired, nothing deleted, no heartbeat", [has(report, "deletions_expired"), report.heartbeat, deletesIn(files).length], [true, false, 0]);
+  world.calls = [];
+  await runAt(3, 2);
+  is("the next run asks from the start", asks(), [null]);
+  await runAt(4);
+  is("and the next day resumes from where that read ended", asks(), [null, "r5"]);
+
+  part("a record named twice by the site is counted once");
+  fresh();
+  const many = objects("blob", S, 100);
+  setListing("blob", S, many);
+  await runAt(0);
+  const twice = many.slice(0, 15).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 60_000, reason: "creator_deleted" as const }));
+  world.records = [...twice, ...twice];
+  setListing("blob", S, many.slice(15));
+  report = await runAt(1);
+  is("15 objects, 15%: under the 20% guard of the store and of the source", [has(report, "records_share"), has(report, "records_share_source")], [false, false]);
+
+  part("a store named on two pages of the stores list is read once, at its larger room");
+  fresh();
+  world.storePages = [[{ store: S, roomBytes: 10_000_000 }], [{ store: T, roomBytes: 10_000_000 }, { store: S, roomBytes: 20_000_000 }]];
+  setListing("blob", S, objects("blob", S, 2));
+  setListing("blob", T, objects("blob", T, 2));
+  report = await runAt(0);
+  is("the stores are read, both copied", [has(report, "stores_unavailable"), copies(S).length, copies(T).length], [false, 2, 2]);
+  is("at the larger of its two rooms, never the smaller", (files.json(`state/stores/${S}.json`) as { roomBytes?: number } | null)?.roomBytes, 20_000_000);
+
   part("two sources of one store, and the videos' own bucket");
   fresh();
   setListing("blob", S, objects("blob", S, 2));

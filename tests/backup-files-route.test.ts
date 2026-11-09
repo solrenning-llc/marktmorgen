@@ -23,7 +23,7 @@
  *   - bunny answered as a listing while its zone and its originals are
  *     unconfirmed; R2 asked while its own read-only key is unset (or is the
  *     site's read-write key); an R2 entry without its ETag answered as a
- *     page; deletion records answered while none are kept.
+ *     page.
  */
 import * as route from "@/app/api/backup/files/route";
 import { BACKUP_FILES_PAGES_PER_STORE, BACKUP_FILES_URL_SECONDS, parseFilesPage, type BackupFilesPage } from "@/lib/backup-files-contract";
@@ -252,12 +252,13 @@ async function main(): Promise<void> {
   globalThis.fetch = realFetch;
   for (const name of Object.keys(r2Env)) delete process.env[name];
 
-  part("deletion records are not kept yet");
+  part("the stores and deletions pages never list or sign a file");
   reset();
+  // The stores and deletions pages are answered now (tests/backup-files-pages.test.ts): they never list or sign a file.
   answer = await call("?page=deletions");
-  is("deletion records: 503, never an empty, complete page", [answer.status, (answer.json as { error?: string }).error, answer.text.includes("records")], [503, "deletions_unavailable", false]);
+  is("the deletions page reads no file store", [answer.status, blobWorld.listCalls.length, blobWorld.tokenCalls.length], [200, 0, 0]);
   answer = await call("?page=stores");
-  is("the stores page (each store with its plan's room) is not built: 503, never an empty, complete page", [answer.status, (answer.json as { error?: string }).error, answer.text.includes("stores\""), blobWorld.listCalls.length, commands.length], [503, "stores_unavailable", false, 0, 0]);
+  is("nor does the stores page", [answer.status, blobWorld.listCalls.length, blobWorld.tokenCalls.length], [200, 0, 0]);
 
   part("a request it does not understand is refused before any work");
   reset();

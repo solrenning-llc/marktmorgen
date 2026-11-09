@@ -128,9 +128,15 @@ export const world = {
   tickPerRead: 0,
   stores: [] as { store: string; roomBytes: number }[],
   storesStatus: 200,
-  /** Records the deletions page answers once, then forgets (the Worker keeps them). */
+  /** Records written since the last call: each call adds them to `recordLog`, the records the site keeps. */
   records: [] as BackupDeletionRecord[],
+  /** Every record the site keeps, in the order written; a cursor `r<n>` resumes after the first n. */
+  recordLog: [] as BackupDeletionRecord[],
+  /** A resume point below this is one the site no longer keeps: 409 records_expired. */
+  recordsKeptFrom: 0,
   recordsStatus: 200,
+  /** The stores page answered in these pages, one call each, instead of `stores` on one page. */
+  storePages: null as { store: string; roomBytes: number }[][] | null,
   listings: new Map<string, SourceObject[]>(),
   /** A listing answered otherwise: a status, or a JSON value to send as the page. */
   listingFault: new Map<string, { status?: number; body?: unknown; afterPages?: number }>(),
@@ -150,7 +156,10 @@ export function resetWorld(): void {
   world.stores = [];
   world.storesStatus = 200;
   world.records = [];
+  world.recordLog = [];
+  world.recordsKeptFrom = 0;
   world.recordsStatus = 200;
+  world.storePages = null;
   world.listings = new Map();
   world.listingFault = new Map();
   world.pageSize = 1000;
@@ -182,12 +191,24 @@ function routeAnswer(url: URL): Response {
   const page = params.get("page");
   if (page === "deletions") {
     if (world.recordsStatus !== 200) return json({ version: 1, error: "deletions_unavailable" }, world.recordsStatus);
-    const records = world.records;
+    world.recordLog.push(...world.records);
     world.records = [];
-    return json({ version: 1, kind: "deletions", records, cursor: null, complete: true, reason: "done" });
+    const from = params.get("cursor");
+    const at = from === null ? world.recordsKeptFrom : Number(from.slice(1));
+    if (at < world.recordsKeptFrom) return json({ version: 1, error: "records_expired" }, 409);
+    const slice = world.recordLog.slice(at, at + world.pageSize);
+    const next = at + slice.length;
+    const more = next < world.recordLog.length;
+    return json({ version: 1, kind: "deletions", records: slice, cursor: `r${next}`, complete: !more, reason: more ? "more" : "done" });
   }
   if (page === "stores") {
     if (world.storesStatus !== 200) return json({ version: 1, error: "stores_unavailable" }, world.storesStatus);
+    if (world.storePages) {
+      const from = params.get("cursor");
+      const i = from === null ? 0 : Number(from.slice(1));
+      const last = i + 1 >= world.storePages.length;
+      return json({ version: 1, kind: "stores", stores: world.storePages[i], cursor: last ? null : `s${i + 1}`, complete: last, reason: last ? "done" : "more" });
+    }
     return json({ version: 1, kind: "stores", stores: world.stores, cursor: null, complete: true, reason: "done" });
   }
   const source = params.get("source") as BackupFilesSource;

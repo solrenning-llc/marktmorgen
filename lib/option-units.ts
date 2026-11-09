@@ -39,7 +39,9 @@ export function unitLines(options: { id: string; label: string; priceCents: numb
   for (const row of rows) {
     if (row.count === 1) continue;
     const perUnitCents = Math.round(row.option.priceCents / row.count);
-    const saved = Math.floor((1 - row.option.priceCents / row.count / single.option.priceCents) * 100);
+    // In whole cents, so exactly 10% less says 10, never 9 from a floating-point remainder.
+    const asSingles = single.option.priceCents * row.count;
+    const saved = Math.floor(((asSingles - row.option.priceCents) * 100) / asSingles);
     out.set(row.option.id, { perUnitCents, unit: single.word, savePercent: saved >= 5 ? saved : 0 });
   }
   return out;

@@ -7,8 +7,12 @@
  * Its id is fixed, so a second checkout racing the first finds the same
  * coupon rather than making another. Its name is what Stripe shows the buyer
  * beside the amount taken off.
+ *
+ * The note that it was made is read and written exactly (lib/coupon-note.ts):
+ * a lost or unreadable note is said in the log and asks Stripe again, which
+ * finds this same coupon by its id and never makes a second one.
  */
-import { redisPipeline } from "@/lib/redis";
+import { couponNoted, noteCoupon } from "@/lib/coupon-note";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { introCouponId } from "@/lib/intro-price";
 
@@ -17,8 +21,7 @@ const madeKey = (account: string, id: string) => `nl:intro:c:${account}:${id}`;
 /** The coupon's id, made on the account if it is not there yet. Throws when Stripe has neither made nor found it. */
 export async function introCoupon(account: string, currency: string, offCents: number, count: number): Promise<string> {
   const id = introCouponId(currency, offCents, count);
-  const [known] = await redisPipeline([["GET", madeKey(account, id)]]).catch(() => [null]);
-  if (known === "1") return id;
+  if (await couponNoted(madeKey(account, id))) return id;
   try {
     await onAccount(
       "POST",
@@ -52,9 +55,10 @@ export async function introCoupon(account: string, currency: string, offCents: n
       String(found.currency).toLowerCase() === currency.toLowerCase() &&
       found.duration === (count > 1 ? "repeating" : "once") &&
       (count > 1 ? Number(found.duration_in_months) === count : true) &&
-      found.valid !== false;
+      // Valid only as Stripe says it: a coupon whose answer does not say so is not used.
+      found.valid === true;
     if (!same) throw new Error(`coupon ${id} is not the introductory price it should be`);
   }
-  await redisPipeline([["SET", madeKey(account, id), "1"]]).catch(() => undefined);
+  await noteCoupon(madeKey(account, id));
   return id;
 }

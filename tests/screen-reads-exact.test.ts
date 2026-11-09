@@ -7,7 +7,8 @@
 // "nothing". Only an exact empty reply means none. Writes do not change.
 // Synthetic Redis only (tests/redis-stub.ts).
 import { readFileSync } from "node:fs";
-import { assistantMissed } from "@/lib/store-assistant";
+import { assistantLeft, assistantMissed } from "@/lib/store-assistant";
+import { assistantWindow } from "@/lib/store-assistant-rules";
 import { search, searchEverything } from "@/lib/community-search";
 import { visibleReviews } from "@/lib/reviews";
 import { COMMUNITY_WORDS } from "@/lib/buyer-words/community";
@@ -100,6 +101,35 @@ async function main(): Promise<void> {
   redis.run(["LPUSH", missedKey, JSON.stringify({ q: "Is it a PDF?", at: 1 })]);
   is("a healthy list is read", await outcome(() => assistantMissed(store)), [{ question: "Is it a PDF?", at: 1 }]);
 
+  part("The assistant's month (rule 30, same file): an off-shape pool is unknown, never a full month left");
+  const now = Date.now();
+  const plan = { subscriptionId: "sub_Screen0001", active: true, period: { start: Math.floor(now / 1000) - 86_400, end: Math.floor(now / 1000) + 86_400, renews: true }, cancelsAtEnd: false, disputedAt: "" };
+  const paid = { statsId: STATS, assistantPlan: plan } as Store;
+  const poolKey = `nl:assist:pool:${STATS}:${assistantWindow(plan, now / 1000)!.id}`;
+  const poolReads: [string, unknown][] = [
+    ["a text pipeline", "OK"],
+    ["a short pipeline", []],
+    ["a null pool", [null]],
+    ["a text pool", ["nope"]],
+    ["an odd pool", [["spent"]]],
+    ["a non-string field", [["spent", 5]]],
+    ["a value that is not a number", [["spent", "lots"]]],
+    ["an empty value", [["spent", ""]]],
+    ["a hole in the pool", [sparse(2)]],
+  ];
+  for (const [label, reply] of poolReads) {
+    redis.clear();
+    const read = swap("HGETALL", poolKey, reply);
+    is(`${label} is unknown`, await outcome(() => assistantLeft(paid, now)), "unknown");
+    is(`${label} was the reply read`, read.hit(), true);
+  }
+  redis.clear();
+  const fresh = (await outcome(() => assistantLeft(paid, now))) as { answered: number; spentMicroUsd: number };
+  is("an exact empty pool is a month with nothing used", [fresh.answered, fresh.spentMicroUsd], [0, 0]);
+  redis.run(["HSET", poolKey, "spent", "1000", "n", "3"]);
+  const used = (await outcome(() => assistantLeft(paid, now))) as { answered: number; spentMicroUsd: number };
+  is("a healthy pool is read", [used.answered, used.spentMicroUsd], [3, 1000]);
+
   part("The studio says the list could not be read, never that there is none");
   const studio = readFileSync("app/studio/page.tsx", "utf8");
   const editor = readFileSync("components/store-assistant-editor.tsx", "utf8");
@@ -121,7 +151,7 @@ async function main(): Promise<void> {
     ["an odd page", [["p12", "12", "p11"], 2]],
     ["a score that is not a number", [["p12", "twelve"], 2]],
     ["a hole in the page", [sparse(2), 2]],
-    ["a count that is not a count", [["p12", "12", "p11", "11"], "2"]],
+    ["a count that is not a count", [["p12", "12", "p11", "11"], "two"]],
     ["a lost count", [["p12", "12", "p11", "11"], null]],
   ];
   for (const [label, reply] of pageReads) {
@@ -149,7 +179,7 @@ async function main(): Promise<void> {
     is(`several words: ${label} is unknown`, await outcome(() => search(COMMUNITY, "bread jam")), "unknown");
     is(`several words: ${label} was the reply read`, hit, true);
   }
-  for (const [label, count] of [["a text count", "1"], ["a lost count", null], ["a negative count", -1]] as [string, unknown][]) {
+  for (const [label, count] of [["a text count", "one"], ["a lost count", null], ["a negative count", -1]] as [string, unknown][]) {
     seedSearch();
     let hit = false;
     redis.pipeline = (async (batch: Command[]) => {

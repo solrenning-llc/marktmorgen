@@ -12,6 +12,9 @@
  *   - a picture taken off its store's list only (by the code before the list of unclaimed pictures, after a rollback;
  *     Claude 2 on #3347 @1eef9e91e1) is never deleted: the sweep deletes only while the store's note is still there,
  *     and a store note read in another shape keeps the file and puts it back;
+ *   - a late note from that earlier code, landing on the store's list after the picture was put on, never makes it
+ *     deletable again (Claude 2 on #3347 @ca5c7b6214): the sweep deletes only while the store's note was written at
+ *     the same time as the note on the list of unclaimed pictures, as this code's door writes both;
  *   - the refusal says unused pictures go "about" 30 days after upload: the grace counts from the door.
  *
  * Synthetic files in a file store held in memory (tests/failure-cleanup-world.ts) and the real door, attach routes and
@@ -154,6 +157,29 @@ async function main(): Promise<void> {
   is("the file is still kept and put back", [files.has(odd), onList(odd), onStore(odd)], [true, true, true]);
   is("the next healthy run deletes it (its store note is there, stored after it, past the grace)", await run(Date.now() + 31 * DAY), [odd]);
   is("and both notes go", [onStore(odd), onList(odd)], [false, false]);
+
+  part("A late note from the code before this list, after the picture was put on, never makes it deletable again");
+  // This code's door notes the name on both lists at one time. After a rollback, a second door for the same name, on
+  // the code before this list, found no file yet; the upload is stored, the earlier code's take removes the store
+  // note and the product shows the picture; then that second door's note lands on the store's list only, at its own
+  // time, with no taken mark to read (Claude 2 on #3347 @ca5c7b6214).
+  const late = name();
+  is("this code's door opens", await answer(await ask(late)), [200, "ok"]);
+  const doorAt = Number(redis.run(["ZSCORE", UNCLAIMED, late]));
+  files.set(late, { bytes: JPEG, contentType: "image/jpeg", at: doorAt + 2 });
+  is("the earlier code's take finds the store's note", redis.run(["ZSCORE", doors, late]) !== null, true);
+  redis.run(["ZREM", doors, late]);
+  const putLate = await setProductImage(OWNER, productId, { path: late, width: 1200, height: 800, alt: "", bytes: JPEG.length, small: null });
+  is("and puts the picture on the product", putLate.ok, true);
+  redis.run(["ZADD", doors, doorAt + 1, late]);
+  is("the earlier code's late note is back on the store's list, at another time", redis.run(["ZSCORE", doors, late]), String(doorAt + 1));
+  is("the list of unclaimed pictures still holds this code's door", redis.run(["ZSCORE", UNCLAIMED, late]), String(doorAt));
+  is("a sweep 31 days on deletes nothing", await run(Date.now() + 31 * DAY), []);
+  is("the product's picture is still in the file store", files.has(late), true);
+  is("and still on the product", await shown(), late);
+  is("it is not looked at again", onList(late), false);
+  is("a later sweep deletes nothing either", await run(Date.now() + 32 * DAY), []);
+  is("and the file is still kept", files.has(late), true);
 
   part("The sweep checks the file itself before deleting");
   // A note on a file stored before it (as a late note whose undo was lost would leave): never this note's upload.

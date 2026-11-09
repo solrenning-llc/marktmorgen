@@ -219,14 +219,13 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
       const write = [["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...noteForErasure(statsId, email, linkKey(token))];
       // A paid email only with a link Redis said it stored (rule 24): a reply short, long or other than exactly "OK" for
-      // the SET sends nothing, lets this run's own marks go, as a refused send does, and deletes the link in case it
-      // landed with its answer lost; the next run, inside the same window, sends the offer once.
-      const saved = linkWriteReplies(await redisPipeline(write), write.length);
-      if (saved?.[0] !== "OK") {
+      // the SET, or a write that throws (a timeout, an error status or item), sends nothing, lets this run's own marks go,
+      // as a refused send does, and deletes the link in case it landed with its answer lost; the next run, inside the
+      // same window, sends the offer once.
+      const saved = await storedLink(write);
+      if (saved !== "OK") {
         console.error("a come-back offer's link was not stored, so no email was sent", store.handle);
-        await releaseMark(sentKey(account, subId), claim);
-        await releaseMark(onceKey(statsId, email, product.id), onceValue);
-        await redisPipeline([["DEL", linkKey(token)]]);
+        await unclaimOffer([[sentKey(account, subId), claim], [onceKey(statsId, email, product.id), onceValue]], linkKey(token));
         continue;
       }
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
@@ -266,6 +265,31 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
     }
   }
   return sent;
+}
+
+/** The SET's own reply to a come-back link's write, read exactly; null when the write threw or answered in another shape. */
+async function storedLink(write: Parameters<typeof redisPipeline>[0]): Promise<unknown> {
+  try {
+    return linkWriteReplies(await redisPipeline(write), write.length)?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Undoes a come-back offer whose link was not stored: this run's own marks are let go first (releaseMark only deletes
+ * a mark still holding this run's value, and never throws), then the link, in case it landed, is deleted. A failed
+ * delete is logged, never thrown: the marks are already gone, so the next run sends the offer once, and a link left
+ * behind runs out at its own OFFER_DAYS expiry, in no email. Should a release itself not reach Redis, its mark still
+ * runs out at its own expiry (90 days, ONCE_PER_DAYS): never held for good.
+ */
+async function unclaimOffer(marks: [string, string][], link: string): Promise<void> {
+  for (const [key, value] of marks) await releaseMark(key, value);
+  try {
+    await redisPipeline([["DEL", link]]);
+  } catch (error) {
+    console.error("an unstored come-back link could not be deleted; it runs out on its own", error);
+  }
 }
 
 /** How many come-back emails a store has sent. */

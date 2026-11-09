@@ -210,14 +210,21 @@ type LinkGrant = { s: string; r: string; e: string };
 
 /**
  * A link for the review request: one order, one address, 60 days. Null when Redis did not say it stored it (rule 24):
- * a reply short, long or other than exactly "OK" for the SET, and then the link, in case it landed with its answer
- * lost, is deleted, so no email carries a link that may open nothing.
+ * a reply short, long or other than exactly "OK" for the SET, or a write that throws, and then the link, in case it
+ * landed with its answer lost, is deleted, so no email carries a link that may open nothing. Never throws.
  */
 export async function mintReviewLink(store: Store, reference: string, email: string): Promise<string | null> {
   const token = randomBytes(24).toString("hex");
   const grant: LinkGrant = { s: store.statsId ?? "", r: reference, e: email };
   const write = [["SET", linkKey(token), JSON.stringify(grant), "EX", REVIEW_LINK_SECONDS], ...noteForErasure(store.statsId, email, linkKey(token))];
-  const saved = linkWriteReplies(await redisPipeline(write), write.length);
+  // A write that throws (a timeout, an error status or item) is a link not known to be stored, as an odd reply is: it
+  // never throws out of here, so the caller undoes its claim and asks again, and one order never stops the run's others.
+  let saved: unknown[] | null = null;
+  try {
+    saved = linkWriteReplies(await redisPipeline(write), write.length);
+  } catch (error) {
+    console.error("a review link's write failed, so no link was given", error);
+  }
   if (saved?.[0] !== "OK") {
     await redisPipeline([["DEL", linkKey(token)]]).catch(() => {});
     return null;

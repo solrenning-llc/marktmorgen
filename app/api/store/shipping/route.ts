@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError, setProductShipping } from "@/lib/store";
 import { readShippingWrite } from "@/lib/shipping-request";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * Makes a product a physical one the creator ships, or an ordinary one again
@@ -16,6 +17,8 @@ export async function POST(request: NextRequest) {
   const { body, store, ref } = guarded;
   const id = text(body.id, 40);
   if (!id) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+  const onHold = await heldRefusal(guarded.store, id);
+  if (onHold) return onHold;
   if (!Object.hasOwn(body,"shipping")) return Response.json({ok:false,error:"ship_price"},{status:400});
   const read = readShippingWrite(body.shipping,store.currency);
   if (!read.ok) return Response.json({ok:false,error:read.reason},{status:400});

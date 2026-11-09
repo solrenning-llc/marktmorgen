@@ -40,3 +40,6 @@ export async function guardStoreWrite(request: NextRequest) {
   return { ok: true as const, store, ref: "synthetic-ref", body: await request.json() as Record<string, unknown> };
 }
 export async function setProductPreview(_ref: string, id: string, pages: number) { state.settings += 1; return { ok: true as const, product: { id, preview: pages } }; }
+
+/** The child-safety hold on a studio change (lib/child-safety.ts, tests/child-safety-routes-settings.test.ts holds the real one): never held here. */
+export async function heldRefusal(): Promise<Response | null> { return null; }

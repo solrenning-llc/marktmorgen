@@ -3,6 +3,7 @@ import { StoreFullError, setProductFields, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { readFields } from "@/lib/checkout-fields";
 import { readListing } from "@/lib/catalog";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * Sets the questions a product asks at checkout.
@@ -20,6 +21,8 @@ export async function POST(request: NextRequest) {
   const { ref, body } = guarded;
   const id = text(body.id, 40);
   if (!id) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+  const onHold = await heldRefusal(guarded.store, id);
+  if (onHold) return onHold;
 
   const fields = readFields(body.fields);
   if (!Array.isArray(fields)) {

@@ -12,7 +12,7 @@
  * a sender (however the address is written) is sent on at most
  * SUPPORT_SENDER_HOURLY times an hour and SUPPORT_SENDER_DAILY a day; all
  * senders together at most SUPPORT_DAILY a UTC day, of which senders with no
- * store under the address SUPPORT_PUBLIC_DAILY; files at most
+ * paid plan under the address SUPPORT_PUBLIC_DAILY; files at most
  * SUPPORT_FILE_BYTES_DAILY bytes a UTC day, each charged once at its listed
  * size and never read past it. Each is counted before the send. A message
  * past a ceiling is "held": not sent on, not tried again, readable in Resend,
@@ -46,7 +46,7 @@ const PUBLIC_DAILY = limits.SUPPORT_PUBLIC_DAILY ?? 120;
 const ANNOUNCED = limits.SUPPORT_ANNOUNCED_DAILY ?? 1_000;
 const CREATOR_SENDER_DAILY = limits.SUPPORT_CREATOR_SENDER_DAILY ?? 30;
 const FILE_BYTES = limits.SUPPORT_FILE_BYTES_DAILY ?? 300_000_000;
-type Forward = (id: string, now?: number, announcedTo?: unknown) => Promise<string>;
+type Forward = (id: string, now?: number, announcedTo?: unknown, announcedFrom?: unknown) => Promise<string>;
 const forward = inbound.forwardInbound as unknown as Forward;
 const costs = registry as unknown as Record<string, number | undefined>;
 
@@ -372,6 +372,36 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   const lateResult = await forward(message("late@q.example", [], [], "hello@marktmorgen.com"), NOON, ["hello@marktmorgen.com"]);
   const lateNotice = notices().at(-1)?.text ?? "";
   is("held at the announcement: hello@", [lateResult, notices().length - before, /written to hello@marktmorgen\.com/.test(lateNotice), /written to support@/.test(lateNotice)], ["held", 1, true, false]);
+
+
+  part("1st review (Claude 3) MEDIO 1: made-up announcements cannot hold a paying creator's mail unread");
+  const announce = (from: string, to = "support@marktmorgen.com") => forward(message(from, [], [], to), NOON, to, `Someone <${from}>`);
+  is("SUPPORT_ANNOUNCED_CREATOR_DAILY is a positive whole number under the day's announcements", Number.isSafeInteger(limits.SUPPORT_ANNOUNCED_CREATOR_DAILY) && (limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 0) > 0 && (limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 0) < ANNOUNCED, true);
+  fresh();
+  makeCreator("paying@studio.example");
+  for (let i = 0; i < ANNOUNCED; i++) await announce(`junk${i}@made${i}.example`);
+  const readsBeforeCreator = mailReads;
+  is("a paying creator's message after 1,000 made-up announcements is still read and sent on", [await announce("paying@studio.example"), mailReads - readsBeforeCreator], ["sent", 1]);
+  is("the made-up ones read at Resend stay within the day's announcements less the creators' reserve", readsBeforeCreator <= ANNOUNCED - (limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? ANNOUNCED), true);
+
+  part("an announcement with no From is counted with the public, never in the reserve");
+  fresh();
+  makeCreator("paying@studio.example");
+  for (let i = 0; i < ANNOUNCED; i++) await forward(message(`junk${i}@made${i}.example`), NOON, "support@marktmorgen.com");
+  is("so the reserve is still there for a paying creator who announces its From", await announce("paying@studio.example"), "sent");
+
+  part("past the day's announcements, a held one with a From costs one command (EXISTS) beyond the route's, none without");
+  fresh();
+  for (let i = 0; i < ANNOUNCED + 1; i++) await announce(`junk${i}@made${i}.example`);
+  commands = 0;
+  for (let i = 0; i < 200; i++) await announce(`late${i}@made${i}.example`);
+  is("at most one command each", commands <= 200, true);
+
+  part("LOW 3: the held notice speaks of a paid plan and names the creator's own ceiling");
+  fresh();
+  for (let i = 0; i < HOURLY + 1; i++) await forward(message("loud@example.com"), NOON);
+  const words = notices()[0]?.text ?? "";
+  is("no 'with no store here'; 'paid plan' and the creator ceiling are named", [/no store here/.test(words), /paid plan/.test(words), words.includes(`${CREATOR_SENDER_DAILY} times in a day`)], [false, true, true]);
 
   globalThis.fetch = originalFetch;
   fixture.restore();

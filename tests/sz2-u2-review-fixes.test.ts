@@ -32,7 +32,9 @@ const cart = cartShipping([cartItemOf(world)]);
 // no longer ships the incomplete product to DE, so the studio now says buyers there can't buy it (VR 2).
 is("the cart leaves DE out of an incomplete product (since #3029)", cart.kind === "ships" && !cart.countries.includes("DE") && cart.countries.includes("US"), true);
 const said = summaryOf(world.shipping!.countries, world.legal?.safety ?? null, false);
-is("so the studio says buyers in the EU and EEA can't buy it", said.endsWith(" Until these details are complete, buyers in the EU and EEA can't buy this product."), true);
+// Changed assertion, noted (Codex U's LEVE on #3029, 9 Nov 2026): "world" includes SJ (Svalbard and Jan Mayen), closed
+// with the area but not inside it, so the studio names both closed places.
+is("so the studio says buyers in the EU and EEA and in Svalbard and Jan Mayen can't buy it", said.endsWith(" Until these details are complete, buyers in the EU and EEA and in Svalbard and Jan Mayen can't buy this product."), true);
 is("it says what is needed before selling there", said.startsWith("Needed before selling to buyers in the EU/EEA: "), true);
 is("the words of the gaps list", record.gapSummary(["manufacturer-name", "picture", "warnings"]), "Needed before selling to buyers in the EU/EEA: the manufacturer's name, a picture of the product and the warnings, or a check that it has none.");
 is("nothing missing is no gaps sentence", record.gapSummary([]), "");

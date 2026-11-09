@@ -249,7 +249,9 @@ async function main(): Promise<void> {
   const said = (product: ReturnType<typeof shipped>) => safetySummary(product.shipping!.countries, product.legal?.safety ?? null, Boolean(product.image));
   const studioWorld = shipped({ cents: 600, region: "world", note: "" }, null, false);
   is("fields not filled, shipped worldwide: the checkout leaves out Germany", shippingNow(studioWorld)!.countries.includes("DE"), false);
-  is("and the studio says buyers in the EU and EEA can't buy it", said(studioWorld).endsWith(` ${SOME_CANT}`), true);
+  // Changed assertion, noted (Codex U's LEVE, sibling): "worldwide" includes SJ, which the checkout closes too, so the
+  // studio names both closed places, not the EU and EEA alone.
+  is("and the studio says buyers in the EU and EEA and in Svalbard and Jan Mayen can't buy it", said(studioWorld).endsWith(` ${BOTH_CANT}`), true);
   is("after the list of what is needed", said(studioWorld).startsWith("Needed before selling to buyers in the EU/EEA: "), true);
   const studioEuOnly = shipped({ cents: 600, region: "eu", note: "" }, null, true);
   is("shipped only to the EU/EEA: not sold at all", shipsNowhere(studioEuOnly), true);

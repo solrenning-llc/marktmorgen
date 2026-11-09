@@ -22,6 +22,7 @@ import {
   MAX_PROP65,
   MAX_TYPE,
   MAX_WARNINGS,
+  GPSR_AREA,
   checkProp65,
   electronicAddress,
   gpsrClosedCountries,
@@ -152,11 +153,25 @@ export function safetyClosed(shipsTo: readonly string[], info: SafetyInfo | null
   return gpsrClosedCountries(shipsTo, info, hasPicture).length > 0;
 }
 
-/** What the closing means for buyers, said to the creator (VR 2): some countries, or every one the product ships to. */
+/**
+ * What the closing means for buyers, said to the creator (VR 2): every place the product ships to, or the places
+ * closed by name. SJ (Svalbard and Jan Mayen) is closed with the area but is not inside it (PARTLY_IN in
+ * lib/physical-legal.ts), so it is never called "the EU and EEA"; tests/sz2-u3-display.test.ts holds that SJ is the
+ * only such code.
+ */
 export const CLOSED_WORDS = {
   some: "Until these details are complete, buyers in the EU and EEA can't buy this product.",
-  all: "Until these details are complete, no one can buy this product, because it only ships to the EU and EEA.",
+  partly: "Until these details are complete, buyers in Svalbard and Jan Mayen can't buy this product.",
+  both: "Until these details are complete, buyers in the EU and EEA and in Svalbard and Jan Mayen can't buy this product.",
+  all: "Until these details are complete, no one can buy this product, because every place it ships to needs them.",
 } as const;
+
+function closedWords(shipsTo: readonly string[], closed: readonly string[]): string {
+  if (closed.length === shipsTo.length) return CLOSED_WORDS.all;
+  const inArea = closed.some((code) => GPSR_AREA.includes(code));
+  const outside = closed.some((code) => !GPSR_AREA.includes(code));
+  return inArea && outside ? CLOSED_WORDS.both : outside ? CLOSED_WORDS.partly : CLOSED_WORDS.some;
+}
 
 /**
  * The studio's status of the EU/EEA product safety fields, from where the
@@ -169,7 +184,7 @@ export function safetySummary(shipsTo: readonly string[], info: SafetyInfo | nul
   const needed = gapSummary(safetyGaps(info, hasPicture));
   if (!needed) return "The EU/EEA product safety fields are filled.";
   const closed = gpsrClosedCountries(shipsTo, info, hasPicture);
-  return `${needed} ${closed.length === shipsTo.length ? CLOSED_WORDS.all : CLOSED_WORDS.some}`;
+  return `${needed} ${closedWords(shipsTo, closed)}`;
 }
 
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;

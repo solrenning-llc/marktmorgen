@@ -2996,3 +2996,155 @@ One native main+29pullref batch completed exit0: main now8b3d1936a4353a47dbed5af
 No new claim/RES/source/diff/probe/test/runtime/review/CI query/retry/cancel/queue/merge/product/foreign ref/docsreservations/account/provider/payment/price/limit/commission/flag/gate/terms/key/PII/contact/agent/automation change. All immutable local proof/limits and prior qualified results preserved, no replay/reset/raise/borrow. Project ongoing/transient transport failure; existing continuity intact, no background watcher. No new public vulnerability details. Latest local report path remains docs/reviews/p-3380-pending-delivery.md in own detachedp3380-review.
 
 Next FIRST latest canonical+verifiedSTOP0529 and fresh channel metadata→FULL UTF8 blob. After successful transport, reconcile directed C1/C2/M/P messages and exact evidence603d8dce before any corrective focal RES/readback/new head source or opinion. No third review or invented delivery receipt. Remote channel PONTO and P3380 formal publication still pending. End after exact own CP readback.
+
+
+## 2026-11-09 12:40 Fortaleza — M focal received; P delivery still transport-blocked
+
+FIRST canonical branch3efa712cd18daf831352fa46ec942ea06d493dce/blobfae0e8c1b4bdfef7b200eb521c65935f6ff14357/FULL531243 read successfully through fetch_file metadata then FULL fetch_blob. Latest sections and verified STOP0529 pointers reconciled. Authorized ROOTmessages.md metadata2a0e416bf8b27ca804e283a75283fb39085ea2a6 obtained only for SHA; mandatory FULL fetch_blob explicitly returned Transport closed. Fresh channel remains UNREAD. No retry loop, partial read/write fallback, channel update, new RES or remote PONTO claimed. Last fully verified PONTO remains CXP-20261109-0529-C1-1/ea628b97fd8633e5a21bdba61f221284c13c7555/blobcfae92502174d8ed4d1a4fda92597010de24dcce/FULL7908578. Private3380 evidence603d8dce ACK remains pending exact FULL readback; no P formal review id. No quota/reset/status403 inference.
+
+Fresh read-only API metadata independently confirms all four original user-listed products CLOSED/MERGED; no recreation or pending integration is appropriate:
+
+| PR | Final head | Confirmed merge |
+| --- | --- | --- |
+| #2487 | dd4895cc085bfb3a5869b7b2c6fddfc8c338a0d1 | 23be8ea6a701ba4f0e833d006038bafecf4dcde9 |
+| #2518 | b9f351e8ae757fde883253e355ced8620e8ec996 | 7fa81fd99b117c7b33c4bccd9c44e4d45c0de008 |
+| #2539 | 2fb7140af59bfef6d796c2080796dbc3b6bd703d | 35261ed388034c71bb3271b4f04ad9b64d3fbb50 |
+| #2542 | 54041a6edf51067b4785d4e7b5e87bb268feeb36 | 050bf383ae011cfedeed5d32f4198333a62423a8 |
+
+Fresh3380 metadata OPEN/unmerged/head6ee69ba31a08e99a2264f0cabdbfcc0ea1053d57/base8679ebd3d3f9dddfd5786d3fe98fdcfe7390e346. FULL returned7-item PR discussion includes NEW M nominal SECOND focal5826017803, created2026-11-09T12:45:41Z on that exact6ee head: M1/M2 closed within M scope; no additional HIGH/MEDIUM demonstrated. M reports own causal old/new proof, directed validation and exact-head hosted CI. These are M's independently attributed results, not P reproduction, P closure, financial/MR clearance, queue admission or a P observation of CI. Previous six entries unchanged. P FIRST claim6736874762 and historical original990 proof remain separate. H2 withdrew its duplicate claim; no third review.
+
+One native ls-remote batch completed exit0:94 own codex/p-* branches, main,29 followed PR refs enumerated below without mutation. Main advanced to1e66e861cca52dc33483aa54dd77e45d552fa62a; all29 followed PR head identities match previous09:33 snapshot. No source fetch, normative diff, source/diff inspection, test graph, current-main integration or CI query this run. Ref identities alone do not certify PR state, CI or merge. Only the four originals and3380 states above were freshly API-verified.
+
+Workspace continuity limitation: the current supplied scratch directory is empty of prior worktrees/proof files, and a targeted check found no p3380-review at the recorded sibling locations. Earlier statements that raw local originals were retained describe the previous execution environment, not availability in this run. Do not silently recreate, claim local proof recovery, rerun historical graphs or promote the pending archive ACK to verified durability. P3380's22-artifact/72070-byte private archive SHA25621bcb35880db71339ff9c030fdfced4c476084cc0c77fbaa2cfe4647ed3f2e66 remains the recovery pointer, not a recovered artifact. No dependency installation or repository checkout performed.
+
+No channel/product/foreign-ref/reservation-document/review/claim/queue/merge/provider/account/payment/price/limit/commission/flag/gate/terms/key/PII/contact/automation/subagent mutation. Unknown costs remain unknown. This own checkpoint append is permitted because its complete exact prefix was read; it does not bypass the shared-channel protocol. Serial Medium, zero agents, no background watcher. Existing continuity intact; transient read failure, ongoing project.
+
+Next FIRST this latest canonical plus fresh authorized channel metadata→FULL UTF8 blob. On successful recovery, reconcile directed C1/C2/M/P originals and latest PONTO; verify private evidence603d8dce bytes/archive hash before any formal opinion. Obtain/read back the causal focal RES for current subject before source or execution. Recover the original frozen evidence before deciding whether a narrowly requested current-head return can proceed; do not replay completed graphs, borrow M results as P, issue a third review or relabel old990 findings as6ee. New remote PONTO and P opinion remain pending; no delivery receipt invented.
+
+Exact native snapshot (captured before this own checkpoint commit; the checkpoint branch identity below is its read predecessor):
+```
+7079e575c8111f41424254bcbbbebe32b3955fbd	refs/heads/codex/p-2807-assignment-order-red
+7079e575c8111f41424254bcbbbebe32b3955fbd	refs/heads/codex/p-2807-course-absence-fix
+6e6848c775c13c49de816254fc8bd893f2e62951	refs/heads/codex/p-assignment-room-read-evidence
+b9f53b2fc15ea8a3f2771b86f327063e44317e79	refs/heads/codex/p-caption-cue-order
+775f12a4bda7f99062c49956ecfe618d1e1aad50	refs/heads/codex/p-caption-cue-order-red
+bccfc3f9e5467e639873b08bfef9523ece9a76aa	refs/heads/codex/p-caption-whole-file
+fa3047914e5f1149f93a473813871cb064bacded	refs/heads/codex/p-caption-whole-file-followup-red
+c7ab933b28f13c7b159b173b051de803c4dacff7	refs/heads/codex/p-caption-whole-file-red
+464dde17dc4eb4175341a70b9b6a13ce7c4818d0	refs/heads/codex/p-caption-youtube-red
+c795ac20fdcfd7144e377fb4a2ce1ad337645208	refs/heads/codex/p-certificate-copy-evidence
+e28066bec5640836318df5676b49bbf1f41e4dc8	refs/heads/codex/p-certificate-copy-evidence-red
+c36a00758c9e66870edec71fcd9eae1b69f40b38	refs/heads/codex/p-certificate-copy-index-red
+0d550c7dbc79844de52957e3c7da6add38b9c828	refs/heads/codex/p-certificate-privacy-red
+c3eb91a61ccceeeb8313edd3b9c4fd5939fa826c	refs/heads/codex/p-certificate-record-evidence
+3ce3fa5ab0eebeb22a2ee9975b90242e6774078d	refs/heads/codex/p-certificate-record-evidence-red
+3efa712cd18daf831352fa46ec942ea06d493dce	refs/heads/codex/p-checkpoint-2026-11-05
+d7473f34a941f00220a9d68013da8b1f8b4c8812	refs/heads/codex/p-checkup-status-names
+54041a6edf51067b4785d4e7b5e87bb268feeb36	refs/heads/codex/p-course-comment-reply-copy
+fbafbe909d85435f0529a5676f73486ca14ecf39	refs/heads/codex/p-course-comment-reply-copy-red
+dd4895cc085bfb3a5869b7b2c6fddfc8c338a0d1	refs/heads/codex/p-course-finish-claim
+9196975d3d65dfe5479292c5cda9f62c7e07f700	refs/heads/codex/p-course-finish-claim-red
+0e6374acc408c09e19aad17b70b1aa8fee1fb85a	refs/heads/codex/p-course-finish-descriptor-red
+8ee6da99a0683151537b7d2a434e606ed57e561e	refs/heads/codex/p-course-finish-erasure-bound-red
+92c78660cec8051842b7d3d860c97ba884ae2e2d	refs/heads/codex/p-course-finish-erasure-count
+1880c09d2af6038a99b7114dc2296cbafa57eb5c	refs/heads/codex/p-course-finish-erasure-count-red
+124a3c48217f6ff23379c0703644f60775292e43	refs/heads/codex/p-course-removal-comments-red
+ca3c56aa05f1e0d77726cca483cef12e07e04879	refs/heads/codex/p-course-template-close
+59dbf47a787d128beb55b3d98941a869ce09cc25	refs/heads/codex/p-course-template-focus
+07231e38fbca6888656ba91a00b02e059566d3c7	refs/heads/codex/p-course-template-focus-red
+8ac5b49fa1dffa0385f10b3bd30f2e09823ec314	refs/heads/codex/p-course-template-pending
+15c36f971774aaafae46969a421469c42870e388	refs/heads/codex/p-course-template-pending-red
+55f137f81e42461e4883cbefc27690f1a4088060	refs/heads/codex/p-course-templates-library
+12cd4125a8a47a695dbd13bd90112f489c4c3ad5	refs/heads/codex/p-course-templates-library-red
+9ba423430e6dbd5a4dba7c4232a8d120d07ff8a2	refs/heads/codex/p-course-templates-library-review-red
+f4f90e67c1fb3cefa6bcacdc867fbe5fc0b96794	refs/heads/codex/p-email-studio-accessibility-proof
+b2945e33bc9ad7c72c7c7e146e4eab6995f77d2c	refs/heads/codex/p-focal-2954-whole-job
+d933b7b8c4db1ebc8118dfb9c626e237557d92f2	refs/heads/codex/p-focal-3077-given-ack
+1997c41c8a69d392da662ce8df51804d4fb1e44b	refs/heads/codex/p-focal-3087-stage
+05380d108928dd4297ffab73772b2289e07863aa	refs/heads/codex/p-focal-3135-cas
+a17826919e1d407a9f902b36db0cfa7fdf441ce4	refs/heads/codex/p-lesson-comment-delete-cost-red
+2fb7140af59bfef6d796c2080796dbc3b6bd703d	refs/heads/codex/p-lesson-comment-delete-evidence
+b8755b9364a6df0fc4d4c7acd1e7737668b27192	refs/heads/codex/p-lesson-comment-delete-red
+2af12b75b072b3539ac9cf51cca638e41d21a926	refs/heads/codex/p-lesson-comment-index-overflow-red
+b282538c08c656f5c489c432c22aff35fb464473	refs/heads/codex/p-lesson-comment-record-evidence
+9ce36a609f453950e077cf54c45ce3097518a9d1	refs/heads/codex/p-lesson-comment-record-red
+781fc195e6c51adf63e7428d45856ba2f545c0c4	refs/heads/codex/p-lesson-comment-thread-boundaries-red
+e41e64f607f930b1d0d59c9a18ceb79cf8699709	refs/heads/codex/p-lesson-comment-write-red
+98b25fa50faee35f8705de9d7863aef6f991db70	refs/heads/codex/p-lesson-comments-drop-receipts
+7094cbb513d4157be65426a46fac1fb8c41b79fa	refs/heads/codex/p-lesson-comments-drop-receipts-red
+357f7a5fa631d5a930944ce2abbbb57e17d82775	refs/heads/codex/p-lesson-html-preview
+b614bef7037c40de941c35605d3e3411220bdb3b	refs/heads/codex/p-lesson-html-preview-red
+094d366994e2eb49eeac86c06fec311bde75bc5d	refs/heads/codex/p-quiz-attempt-person-copy-red
+f71526a1841bbc78b55769c9c03f2dcece2a783c	refs/heads/codex/p-quiz-attempt-read-evidence
+211e436b78301df73b7d13d40693bbc2d78c95c1	refs/heads/codex/p-quiz-attempt-read-red
+5049b581058c7989ce958aea15d3459f53c20d54	refs/heads/codex/p-quiz-attempt-slot-types-red
+01c876556f999b35be02faf4f7473d3641abab7b	refs/heads/codex/p-quiz-draft-choice-indices-red
+b9f351e8ae757fde883253e355ced8620e8ec996	refs/heads/codex/p-quiz-record-evidence
+2df71de6c56ad002faccf9254d9f14139d0c939b	refs/heads/codex/p-quiz-record-evidence-red
+7b861aa234735908d272ade3e6fc795a14bc9991	refs/heads/codex/p-quiz-usage-response-evidence
+967c20a0a8701e0621f7cf089b19706f323f34fe	refs/heads/codex/p-quiz-usage-response-red
+2f54e0d2370c0098d97c1cfe4579f7eaee9b5ca5	refs/heads/codex/p-reserve-caption-whole-file
+69366bdede3c988cebfc67af715aa92bffd2b015	refs/heads/codex/p-reserve-certificate-record-evidence
+723e59558c1497fb4075377fb6b9ab8322279573	refs/heads/codex/p-reserve-course-finish-claim
+63919b7dc3b4b7fe1e49878d73d2baf23a4bf126	refs/heads/codex/p-reserve-course-template-focus
+eadd3841f33906a4949fac8397a6c10dcfe34392	refs/heads/codex/p-reserve-course-template-pending
+af0094cb92808466941467aae09b33a19e2b50d3	refs/heads/codex/p-review-2156-picture-door-ack
+67ea34b9fbdb614899951e5685fae155f9ef4e95	refs/heads/codex/p-review-2571-page-read-evidence
+1eb038014c197989dfe673a991ac8b7e89f71a79	refs/heads/codex/p-review-2655-room-number-shape
+ef59d744956f9fb44f35e32453c76e132bf60957	refs/heads/codex/p-review-2682-provider-io-proof
+cd304cf095f70b6209635aedfca41392b4a81184	refs/heads/codex/p-review-2774-refund-row
+79700d22c0e364884143fa81a53a2543fb10192d	refs/heads/codex/p-review-2847-assignments
+14512855dbab691716867beec17bc4d768cde798	refs/heads/codex/p-review-2928-dsa-statement
+64fbcf5c712e28768aa189c6910681afe06881a0	refs/heads/codex/p-review-2952-receipt-evidence
+b9746da28b421a438f1385330702961199711828	refs/heads/codex/p-review-2954-release-unknown
+ea94c9aa0d4e18a3a6b26775e2a8e32cc2500e21	refs/heads/codex/p-review-2965-series-count
+7530013f1161ff010758c3d5438033b9662379a0	refs/heads/codex/p-review-2967-hub-shapes
+ce40fdceb308ebca5289776ee4b33a39d4b448fe	refs/heads/codex/p-review-3009-untold-readback
+3d5445551b901c7ae6465aa0149e3b576a0736a5	refs/heads/codex/p-review-3011-course-length-exact
+a41b435e2a0069018b552e165bfc70415a1544ea	refs/heads/codex/p-review-3034-concurrent-history
+9b9ecdba655339242a9179fb349fb3bcc695a58f	refs/heads/codex/p-review-3035-bulk-students-local
+afece11e8b8d96f1e56803c773d194804f5bbe44	refs/heads/codex/p-review-3036-file-admission
+2d11ad8e49d4aff123bc503a7b1f94088bfb13ec	refs/heads/codex/p-review-3077-preorder-record
+f28a752ab99821c9985bb0a789306c576a22bca8	refs/heads/codex/p-review-3087-stage-evidence
+d3b8cd1806d887d78d4b3ed31ca9abe2fe6a23d8	refs/heads/codex/p-review-3135-hand-in
+5a907171f38559adbc4ffde0454f8132bc647d38	refs/heads/codex/p-review-n2389
+c4e7cf2f9e57cd01724ec436de34ff8a7336b3fb	refs/heads/codex/p-review-n2700-erasure-token
+7907926f53e4a009463e84cff82ef59f84f446ce	refs/heads/codex/p-review-o2391
+ac1cc91dfeda437f8f60c09f27ce1ac0ac70c207	refs/heads/codex/p-review-o2391-corrective
+2f24ee091a8a08c464913c5ff7fa98d76d785178	refs/heads/codex/p-review-o2550-descriptor
+0a6f5b549cce327d61957bdbdc2e4a54b56caf58	refs/heads/codex/p-review-o2640-descriptor-evidence
+63a7992287af3da1ca063a05316d0dd3ee219327	refs/heads/codex/p-review-o2640-vector-evidence
+cf16619b195f28b1830a1925b747aa9f3f091fcf	refs/heads/codex/p-review-t2486
+c995579b8b471593984783bdb1394d42cad505de	refs/heads/codex/p-review-w2514
+3e3db5661a3deeefaa699a09bff9c26092b866a6	refs/heads/codex/p-short-link-theme
+1e66e861cca52dc33483aa54dd77e45d552fa62a	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+d8e871ad3ce54cd3dc708dacf7bf2bbfb0100341	refs/pull/2832/head
+b25d768db2d4398f6d089e748e7cfbd181041177	refs/pull/2843/head
+5bb167d83371073efb8b8646132c316ad5a8bae9	refs/pull/2868/head
+6c3077cdaefaac049ca0e12e836be68691bfd875	refs/pull/2892/head
+62eeb4ee1a7af9f2f1a38ef97b6942cf554d253d	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+c5db63a1fffc5c79a5866831d54ddff01b3825fa	refs/pull/2999/head
+8e3d930eed8ef1a2dc715f0fe101ba8e7f00cb8a	refs/pull/3014/head
+1a20dd5c31a70da2f2a95aee20f7b520b76dcd41	refs/pull/3034/head
+d4284d9d127c6f76436d9eff323527834c1d0c08	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+80931dd9a15aee852dcc474d23e4bf1069650e67	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+1b38fa1cf19813764fc9256c9b81808db7fc0c0d	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
+64dc6cf819c3cac7e34d7036e7f09bbecabfb51b	refs/pull/3317/head
+72f917007b0179c5f1761b017a6d5202cc9f4655	refs/pull/3324/head
+8679ebd3d3f9dddfd5786d3fe98fdcfe7390e346	refs/pull/3360/head
+6ee69ba31a08e99a2264f0cabdbfcc0ea1053d57	refs/pull/3380/head
+```

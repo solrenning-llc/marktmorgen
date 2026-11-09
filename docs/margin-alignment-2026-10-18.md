@@ -17,12 +17,12 @@ Room is the unchanged extra non-tax cost held by the spend-floor tests:25cents m
 
 | Unit | Current price | Revenue | Receiving and reserves | Full usage | Taxes | Net profit | Net margin | Cost room | With room | On sale |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Store monthly ($69) | $69.00 | $54.33 | $9.14 | $7.47 | $32.21 | $5.51 | 10.14% | $0.25 | positive | no |
-| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $86.61 | $317.25 | $53.79 | 9.90% | $1.00 | positive | no |
-| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $25.60 | $230.31 | $41.66 | 11.78% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $292.25 | $2,279.20 | $410.00 | 11.59% | $1.00 | positive | no |
-| Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $52.48 | $516.53 | $93.84 | 11.92% | $0.25 | positive | no |
-| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $600.86 | $5,110.27 | $923.19 | 11.73% | $1.00 | positive | no |
+| Store monthly ($69) | $69.00 | $54.33 | $9.14 | $7.83 | $31.93 | $5.43 | 9.99% | $0.25 | positive | no |
+| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $90.91 | $313.89 | $52.85 | 9.72% | $1.00 | positive | no |
+| Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $26.50 | $229.61 | $41.46 | 11.72% | $0.25 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $302.99 | $2,270.81 | $407.65 | 11.53% | $1.00 | positive | no |
+| Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $55.17 | $514.43 | $93.25 | 11.85% | $0.25 | positive | no |
+| Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $633.08 | $5,085.08 | $916.16 | 11.64% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |
 | AI captions, 1 language (6 min, $36.00) | $36.00 | $28.34 | $5.06 | $1.20 | $18.69 | $3.39 | 11.96% | $0.00 | positive | no |
 | AI captions, 2 languages (3 min, $36.00) | $36.00 | $28.34 | $5.06 | $0.90 | $18.92 | $3.46 | 12.20% | $0.00 | positive | no |

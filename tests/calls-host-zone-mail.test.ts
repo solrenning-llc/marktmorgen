@@ -6,7 +6,7 @@
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
-import { type CallListing, confirmBooking, holdAndCheckout } from "@/lib/calls";
+import { type CallListing, confirmBooking, holdAndCheckout, moveBooking, zoneForRecipient } from "@/lib/calls";
 import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
 import { putMember } from "@/lib/team";
 import type { TeamHost } from "@/lib/team-scheduling-rules";
@@ -86,6 +86,24 @@ async function main(): Promise<void> {
   is("it went to Maya", Boolean(toMaya), true);
   is("its subject gives Maya's own time, not the store's zone without a zone name", [toMaya?.subject.includes(lisbon), toMaya?.subject.includes(newYork)], [true, false]);
   is("its body never calls the store's zone 'your time zone' for a host elsewhere", /\((EST|EDT|Eastern[^)]*), your time zone\)/.test(toMaya?.text ?? ""), false);
+  is("its subject names Maya's zone", /\(WE?ST|\(GMT|\(UTC|WEST|Lisbon/.test(toMaya?.subject ?? ""), true);
+
+  part("The same host, when the booking is moved");
+  mails.length = 0;
+  const S2 = weekdayAt(5, 660); // 11:00 AM in New York = 4:00 PM in Lisbon
+  const moved = await moveBooking({ store: harbor.store, product: (await readListing(harbor.store, harbor.product.id)) as CallListing, session: held.session, booked: { start: S, end: S + HOUR, email: "ana@example.com", buyerTz: NY }, start: S2, origin: "https://marktmorgen.com" });
+  is("moved", moved.ok, true);
+  const movedToMaya = mails.find((m) => String(m.to).includes(MAYA) && /^Moved:/.test(m.subject));
+  const lisbon2 = new Intl.DateTimeFormat("en-US", { timeZone: LISBON, hour: "numeric", minute: "2-digit" }).format(new Date(S2));
+  const newYork2 = new Intl.DateTimeFormat("en-US", { timeZone: NY, hour: "numeric", minute: "2-digit" }).format(new Date(S2));
+  is("its subject gives Maya's own time", [movedToMaya?.subject.includes(lisbon2), movedToMaya?.subject.includes(newYork2)], [true, false]);
+  is("its body gives her time too, for 'Now' and 'Was'", [movedToMaya?.text.includes(`Now: `) && movedToMaya.text.split("\n").find((l) => l.startsWith("Now: "))?.includes(lisbon2), movedToMaya?.text.split("\n").find((l) => l.startsWith("Was: "))?.includes(lisbon)], [true, true]);
+
+  part("Who is told in which zone");
+  const zones = [{ email: "Maya@Example.com", tz: LISBON }];
+  is("a host is matched by address, ignoring case", zoneForRecipient(zones, "maya@example.com", NY), LISBON);
+  is("the owner, who hosts nothing, keeps the call's zone", zoneForRecipient(zones, "owner@example.com", NY), NY);
+  is("no hosts keeps the call's zone", zoneForRecipient(undefined, "maya@example.com", NY), NY);
   done();
 }
 

@@ -635,8 +635,12 @@ export function isCallProduct<T extends Listing>(product: T): product is T & { c
 
 /** Whether a booking was already confirmed, so the mail job knows to leave it. */
 export async function isConfirmed(session: string): Promise<boolean> {
-  const [seen] = await redisPipeline([["EXISTS", confirmedKey(session)]]);
-  return Number(seen) === 1;
+  // Exactly 0 or 1 (rule 24): a reply in any other shape is not "not confirmed", which would free a package session
+  // already used (lib/call-packages.ts, spent); it throws, and nothing is released.
+  const seen = await onlyReply(["EXISTS", confirmedKey(session)], "whether a booking was confirmed");
+  if (seen === 1) return true;
+  if (seen === 0) return false;
+  throw new UnknownReplyError("whether a booking was confirmed");
 }
 
 // ---- Saving a product's setup --------------------------------------------
@@ -1384,7 +1388,7 @@ export async function moveBooking(input: {
     console.error("moving a booking's meeting failed", error),
   );
   const hosts = team && teamOwn ? hostEmails(team, teamOwn.hosts) : [];
-  await tellMoved({ store, product, session, from, start, end, moves, email: input.booked.email, buyerTz: input.booked.buyerTz, origin, hosts }).catch(
+  await tellMoved({ store, product, session, from, start, end, moves, email: input.booked.email, buyerTz: input.booked.buyerTz, origin, hosts, hostZones: team ? team.hosts.map((h) => ({ email: h.email, tz: h.tz })) : [] }).catch(
     (error) => console.error("sending the move emails failed", error),
   );
   await emitEvent(store, "call.moved", `${session}|${moves}`, {
@@ -1411,11 +1415,15 @@ async function tellMoved(input: {
   origin: string;
   /** A team booking's hosts, by address: the creator's email goes to them (hostRecipient). */
   hosts?: string[];
+  /** Each of those hosts' own time zone, which the email to the one it goes to is written in. */
+  hostZones?: { email: string; tz: string }[];
 }): Promise<void> {
   if (!writesAboutBookings(input.store)) return;
   const { store, product, session, from, start, end, moves, email, origin } = input;
   const hosts = input.hosts ?? [];
   const setup = product.call;
+  const hostTo = hostRecipient(store, hosts);
+  const hostTz = zoneForRecipient(input.hostZones, hostTo, setup.tz);
   const buyerTz = isTimeZone(input.buyerTz) ? input.buyerTz : setup.tz;
   // A one-to-one booking keeps its video room when it moves; a seat in a
   // group moves into the room of its new time (lib/call-rooms.ts).
@@ -1462,14 +1470,14 @@ async function tellMoved(input: {
 
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: `"Marktmorgen" <${senderAddress()}>`,
-    to: hostRecipient(store, hosts),
-    subject: `Moved: ${product.title}, now ${readableTime(start, setup.tz)}`,
+    to: hostTo,
+    subject: `Moved: ${product.title}, now ${at(start, hostTz)}`,
     text: [
       `${email ?? "A buyer"} moved their booking of ${product.title}.`,
       ...(hosts.length ? [hostLine(hosts)] : []),
       "",
-      `Now: ${at(start, setup.tz)}, your time zone`,
-      `Was: ${at(from.start, setup.tz)}`,
+      `Now: ${at(start, hostTz)}, your time zone`,
+      `Was: ${at(from.start, hostTz)}`,
       "",
       "The old time is free again for somebody else. The calendar file attached has the new time; delete the old event from your calendar if it is still there.",
       ...(place ? ["", `In person, at: ${placeLine(place)}`] : room ? ["", `${video ? "The video room" : "The meeting link"}: ${room}`, ...(video ? [VIDEO_ROOM_NOTE] : [])] : []),
@@ -1496,6 +1504,17 @@ async function teamForMove(store: Store, product: CallListing) {
 export function hostRecipient(store: Pick<Store, "email">, hosts: string[]): string {
   const owner = store.email.trim().toLowerCase();
   return !hosts.length || hosts.includes(owner) ? store.email : hosts[0];
+}
+
+/**
+ * The time zone a creator-side email is written in: the zone of the team host it goes to (lib/team-scheduling-rules.ts,
+ * TeamHost.tz), else the call's own zone, which is the store's (an owner who does not host the team's calls). Matched
+ * by address, ignoring case. A host's week is written in their zone, so Maya in Lisbon is told 3:00 PM, not 10:00 AM.
+ */
+export function zoneForRecipient(hostZones: { email: string; tz: string }[] | undefined, to: string, fallback: string): string {
+  const who = to.trim().toLowerCase();
+  const found = (hostZones ?? []).find((h) => h.email.trim().toLowerCase() === who);
+  return found && isTimeZone(found.tz) ? found.tz : fallback;
 }
 
 function hostLine(hosts: string[]): string {
@@ -1782,13 +1801,15 @@ export async function confirmBooking(input: {
   }
 
   const creatorSide = hostRecipient(store, hosts);
+  // Told in the zone of the host it goes to (Maya in Lisbon is told Lisbon's time), zone named in the subject too.
+  const hostTz = zoneForRecipient(team?.zones, creatorSide, setup.tz);
   const theirs = onTheirCalendar(meeting, creatorSide, store.email);
   // The reminders before the call go to the store's own address (lib/call-reminders.ts, remindCreator).
   const toOwner = creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase();
   await sendEmail({ meter: { by: "order" },
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: creatorSide,
-    subject: `New booking: ${product.title}, ${readableTime(start, setup.tz)}`,
+    subject: `New booking: ${product.title}, ${readableTime(start, hostTz)} (${zoneName(start, hostTz)})`,
     text: [
       `${buyerEmail ?? "A buyer"} booked ${product.title} (${minutes} minutes) ${input.amountCents === 0 ? "as one session of a package they bought from you, so nothing more was charged" : "and paid on your Stripe account"}.`,
       ...(hosts.length ? [hostLine(hosts)] : []),
@@ -1796,7 +1817,7 @@ export async function confirmBooking(input: {
       ...(input.answers?.length
         ? ["What they answered before paying:", ...input.answers.map((answer) => `${answer.label}: ${answer.value}`), ""]
         : []),
-      `${readableTime(start, setup.tz)} (${zoneName(start, setup.tz)}, your time zone)`,
+      `${readableTime(start, hostTz)} (${zoneName(start, hostTz)}, your time zone)`,
       "",
       place ? `In person, at: ${placeLine(place)}` : meeting ? meetingLine(meeting, setup.kind === "live" || setup.seats > 1) : room
         ? video
@@ -1838,7 +1859,7 @@ export async function confirmBooking(input: {
  * checkout itself. Null for an ordinary call. Read from the team as it was
  * saved, whatever the plan allows today: a paid booking is kept.
  */
-async function bookingTeam(store: Store, product: CallListing, session: string): Promise<{ hosts: string[]; claim: string; emails: string[] } | null> {
+async function bookingTeam(store: Store, product: CallListing, session: string): Promise<{ hosts: string[]; claim: string; emails: string[]; zones: { email: string; tz: string }[] } | null> {
   if (!store.callsId || product.call.kind !== "weekly" || product.call.seats !== 1) return null;
   const teams = await readTeams(store);
   if (!teams.has(product.id)) return null;
@@ -1854,7 +1875,8 @@ async function bookingTeam(store: Store, product: CallListing, session: string):
     const paid = await paidCall(store, session);
     found = paid && paid.claim ? { hosts: paid.hosts, claim: paid.claim } : null;
   }
-  return found ? { ...found, emails: hostEmails(setup, found.hosts) } : null;
+  const emails = found ? hostEmails(setup, found.hosts) : [];
+  return found ? { ...found, emails, zones: setup.hosts.filter((h) => emails.includes(h.email)).map((h) => ({ email: h.email, tz: h.tz })) } : null;
 }
 
 /** Whether a booking's meeting is an event already in the creator's Google Calendar. */
@@ -1944,7 +1966,7 @@ export async function tellNewLink(input: {
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: store.email,
-    subject: `${name} link made: ${product.title}, ${readableTime(meeting.start, setup.tz)}`,
+    subject: `${name} link made: ${product.title}, ${readableTime(meeting.start, setup.tz)} (${zoneName(meeting.start, setup.tz)})`,
     text: [
       `The ${name} link for ${product.title} could not be made when ${people.length === 1 ? "it was booked" : "it was first booked"}, and it has been made now.`,
       "",

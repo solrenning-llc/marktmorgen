@@ -147,7 +147,9 @@ async function main() {
   );
 
   part("The invoice names no payment, and the list of its payments is not whole (has_more)");
-  await triedAgain("notwhole", false, { invoice: noIntentInvoice, listed: { object: "list", has_more: true, data: [{ id: "inpay_closeown3", object: "invoice_payment", invoice: INVOICE, status: "canceled" }] }, intent: ownIntent }, 2);
+  // Rule 23 (Claude 5, 09/11/2026): was 2 calls. The invoice's payments are now paged (starting_after), so page 2 is read
+  // with one more call from the budget; this stub answers it with the same page again, which is not followed: tried again.
+  await triedAgain("notwhole", false, { invoice: noIntentInvoice, listed: { object: "list", has_more: true, data: [{ id: "inpay_closeown3", object: "invoice_payment", invoice: INVOICE, status: "canceled" }] }, intent: ownIntent }, 3);
 
   part("The invoice names no payment, and the list says whether it is whole in no readable way");
   await triedAgain("nohasmore", false, { invoice: noIntentInvoice, listed: { object: "list", data: [] }, intent: ownIntent }, 2);

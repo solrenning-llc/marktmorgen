@@ -160,6 +160,21 @@ const idOf = (value: unknown): unknown => (value !== null && typeof value === "o
  */
 const KNOWN_UNPAID: ReadonlySet<unknown> = new Set(["open", "canceled"]);
 
+/** The most pages of an invoice's payments read for one member's refund (a hundred a page; each page past the first is a call taken from the closing's budget). */
+export const INVOICE_PAYMENT_PAGES = 5;
+
+/**
+ * An invoice's payments could not all be read within the closing's calls: no call was left for the next page, or the
+ * list ran past INVOICE_PAYMENT_PAGES. Handled as a member the closing's limit did not reach ("over": told on the
+ * closing day, counted for the creator before it), never as "no payment" and never as a run that fails every day.
+ */
+export class PaymentsPastLimit extends Error {
+  constructor(what: string) {
+    super(`an invoice's payments were not read to the end within the closing's limit: ${what}`);
+    this.name = "PaymentsPastLimit";
+  }
+}
+
 /**
  * The payment intent an invoice was paid by, whichever way this account's API version names it; "" only when this
  * invoice's own whole list of payments holds none paid. A reply for another invoice, a list that is not one, a row of
@@ -167,38 +182,62 @@ const KNOWN_UNPAID: ReadonlySet<unknown> = new Set(["open", "canceled"]);
  * null, off-pattern, or of another type: Codex G on #3120, Claude 6 on #3097) is unknown and throws, so the member is
  * counted failed and tried again, never refunded on another payment and never settled as owed nothing. So is a row whose
  * status is not one this code knows (missing, null, not a string, or a value Stripe does not document: Codex G's residual
- * finding on #3120): only "paid" decides paid, and only KNOWN_UNPAID decides not paid.
+ * finding on #3120): only "paid" decides paid, and only KNOWN_UNPAID decides not paid. The list is followed page by page
+ * within the closing's calls (`more` takes each further page's call before it is read); one longer than they reach is
+ * PaymentsPastLimit, a member the closing's limit did not reach, never "none" and never a failure every day.
  */
-async function intentOf(account: string, invoice: string, count: () => void): Promise<string> {
+async function intentOf(account: string, invoice: string, count: () => void, more: () => Promise<boolean>): Promise<string> {
   count();
   const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
   if (!isOwnReply(read, invoice)) throw new Error("Stripe answered for another invoice");
   const direct = idOf(read.payment_intent);
   if (typeof direct === "string" && INTENT_ID.test(direct)) return direct;
-  count();
-  const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
-  const rows = objectOf(listed)?.data;
-  if (!Array.isArray(rows)) throw new Error("an invoice's payments did not come as a list");
   // A paid row is a payment made, whatever it reads as: one that does not name a readable intent proves no absence.
-  // A readable paid intent of this invoice is still found whatever the row order.
+  // A readable paid intent of this invoice is still found whatever the row order and on any page, beside rows that do
+  // not read (a row that is not an object only keeps the list from saying "none"; lib/stripe-list.ts).
   // A status this code does not know proves nothing either, so it never lets the list settle none.
+  // The list is read a hundred at a time, each page from the last row of the one before (starting_after); each page
+  // past the first takes one call from the closing's budget before it is read (`more`), up to INVOICE_PAYMENT_PAGES.
+  // No call left, or past the cap: PaymentsPastLimit ("over"), never "none" (Claude 5's pre-review of 14544f2f9a).
   let unread = false;
   let unknownStatus = false;
-  for (const item of rows) {
-    const row = objectOf(item);
-    if (!row || idOf(row.invoice) !== invoice) throw new Error("a payment listed is not this invoice's");
-    if (row.status !== "paid") {
-      if (!KNOWN_UNPAID.has(row.status)) unknownStatus = true;
-      continue;
+  let after: string | null = null;
+  for (let pages = 0; ; pages += 1) {
+    if (pages >= INVOICE_PAYMENT_PAGES) throw new PaymentsPastLimit(`more than ${INVOICE_PAYMENT_PAGES} pages`);
+    if (pages > 0 && !(await more())) throw new PaymentsPastLimit("no call left for the next page");
+    count();
+    const query = new URLSearchParams({ invoice, limit: "100" });
+    if (after) query.set("starting_after", after);
+    const listed = await onAccount("GET", account, `/invoice_payments?${query}`);
+    const rows = objectOf(listed)?.data;
+    if (!Array.isArray(rows)) throw new Error("an invoice's payments did not come as a list");
+    for (const item of rows) {
+      const row = objectOf(item);
+      if (!row) {
+        unread = true;
+        continue;
+      }
+      if (idOf(row.invoice) !== invoice) throw new Error("a payment listed is not this invoice's");
+      if (row.status !== "paid") {
+        if (!KNOWN_UNPAID.has(row.status)) unknownStatus = true;
+        continue;
+      }
+      const id = idOf(objectOf(row.payment)?.payment_intent);
+      if (typeof id === "string" && INTENT_ID.test(id)) return id;
+      unread = true;
     }
-    const id = idOf(objectOf(row.payment)?.payment_intent);
-    if (typeof id === "string" && INTENT_ID.test(id)) return id;
-    unread = true;
+    // "None" only from a whole list: one whose last page says, exactly, that there is no more.
+    const hasMore = objectOf(listed)?.has_more;
+    if (hasMore === false) break;
+    if (hasMore !== true) throw new Error("an invoice's payments could not be read whole");
+    const last = objectOf(rows[rows.length - 1])?.id;
+    if (typeof last !== "string" || !last) throw new Error("an invoice's payments could not be followed past a page");
+    // A page that ends where the one before it began from is the same page again: not followed, the member tried again.
+    if (last === after) throw new Error("an invoice's payments did not move past a page");
+    after = last;
   }
-  if (unread) throw new Error("an invoice's paid payment did not read as a payment intent");
+  if (unread) throw new Error("an invoice's payment did not read");
   if (unknownStatus) throw new Error("an invoice's payment has a status that does not read as paid or not paid");
-  // "None" only from a whole list: one that says, exactly, that there is no more.
-  if (objectOf(listed)?.has_more !== false) throw new Error("an invoice's payments could not be read whole");
   return "";
 }
 
@@ -306,7 +345,8 @@ export async function giveBackUnused(
         out.short.push({ sub: row.sub, amount: give, cur: row.paid.cur, email: row.paid.e });
       };
       // Its payment, the refunds already made on it and the refund itself, and two more when Stripe did not name its
-      // payment when it was held. Before the closing day they come from the budget; only the closing day uses the
+      // payment when it was held (and one more for each further page of the invoice's payments, taken as it is read).
+      // Before the closing day they come from the budget; only the closing day uses the
       // calls set aside when it was held (rcalls), so pressing the button again can never drain them. Every call not
       // made is given back to where it was taken from.
       const need = row.paid.pi ? 3 : 5;
@@ -358,7 +398,9 @@ export async function giveBackUnused(
         continue;
       }
       try {
-        const intent = row.paid.pi ?? (await intentOf(account, row.paid.inv, count));
+        // Each page of the invoice's payments past the first: one more call from the budget, as the rest are taken.
+        const more = async () => (options.final ? (await take("calls", 1)) || (await take("rcalls", 1)) : await take("calls", 1));
+        const intent = row.paid.pi ?? (await intentOf(account, row.paid.inv, count, more));
         if (!intent) {
           await settle("none");
           out.none += 1;
@@ -472,6 +514,16 @@ export async function giveBackUnused(
           out.done.push({ sub: row.sub, amount: give, cur: row.paid.cur });
         }
       } catch (error) {
+        if (error instanceof PaymentsPastLimit) {
+          // As a member the closing's calls did not reach: on the closing day final, and told honestly that it was not
+          // made automatically, with what is left to give; before it, counted for the creator and tried again.
+          if (options.final) {
+            const amount = stillToGive(row.unused, row.paid.back ?? 0);
+            await settle("over", amount);
+            out.unmade.push({ sub: row.sub, amount, cur: row.paid.cur, email: row.paid.e });
+          } else out.over += 1;
+          continue;
+        }
         console.error("giving a member's unused time back failed; tried again", error);
         out.failed += 1;
       } finally {

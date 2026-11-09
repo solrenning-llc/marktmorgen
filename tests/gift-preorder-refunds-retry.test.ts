@@ -27,6 +27,17 @@
  *      read again with its status then, so one Stripe fails is never taken
  *      back. A refund not final yet read on an earlier page still holds the
  *      anchor when the pass ends.
+ *   3. The list keeps only which refund it was, never whether it still gives
+ *      the money back (review of #3302, Claude 2 MEDIUM; the owner's decision
+ *      18 of 9 November 2026: access is taken back only on a full refund that
+ *      succeeded, or a dispute lost). Each row is read again from Stripe
+ *      (GET /refunds/{id}, its charge expanded, on the store's account) before
+ *      anything is taken back: only a refund that succeeded on a charge
+ *      refunded in full is taken back; one not final yet stays on the list; one
+ *      Stripe failed or canceled, or whose charge is not refunded in full, is
+ *      let go with nothing taken back; a read in another shape or one Stripe
+ *      answers with an error leaves it on the list, nothing taken back. At most
+ *      ten are read a run, from a place that moves on every five minutes.
  *
  * Checked through the real gift and pre-order journeys against a stand-in for
  * the creator's Stripe account that pages as Stripe does.
@@ -45,6 +56,13 @@ const NOW = Math.floor(Date.now() / 1000);
 /** The store's refunds, newest first, as Stripe lists them. */
 let refunds: Record<string, unknown>[] = [];
 const refundCalls: URLSearchParams[] = [];
+/** Every refund Stripe has, by id, as GET /refunds/{id} answers one no longer in `refunds` (list() writes each row here). */
+const ledger = new Map<string, Record<string, unknown>>();
+/** Each refund read again by itself: its id, the account asked and what was expanded. */
+const rereads: { id: string; account: string; expand: string[] }[] = [];
+/** Refunds Stripe answers with an error when read by themselves. */
+const erring = new Set<string>();
+const ACCOUNT = "acct_1TestRetryRef01";
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -59,6 +77,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const data = refunds.slice(from, from + limit);
     return answer({ object: "list", data, has_more: from + limit < refunds.length });
   }
+  const one = /^\/refunds\/([^/]+)$/.exec(path);
+  if (one) {
+    const id = decodeURIComponent(one[1]);
+    rereads.push({ id, account: new Headers(init?.headers).get("Stripe-Account") ?? "", expand: url.searchParams.getAll("expand[]") });
+    if (erring.has(id)) return answer({ error: { type: "api_error", message: "a stand-in error" } }, 500);
+    const row = refunds.find((r) => r.id === id) ?? ledger.get(id);
+    return row ? answer(row) : answer({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such refund" } }, 404);
+  }
   if (path === "/events") return answer({ object: "list", data: [], has_more: false });
   if (path.startsWith("/payment_intents/")) return answer({ id: path.split("/")[2], object: "payment_intent", latest_charge: { object: "charge", refunded: false, amount: 2500, amount_refunded: 0 } });
   return answer({ error: { message: `no stand-in for ${init?.method ?? "GET"} ${path}` } }, 404);
@@ -66,7 +92,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 /** `count` full refunds, newest first, created from `newest` down; those at the indexes of `paid` paid with its payments. */
 function list(tag: string, count: number, newest: number, paid: Record<number, string>): Record<string, unknown>[] {
-  return Array.from({ length: count }, (_, i) => ({
+  const rows = Array.from({ length: count }, (_, i) => ({
     id: `re_${tag}${String(i).padStart(6, "0")}`,
     object: "refund",
     created: newest - i,
@@ -74,6 +100,8 @@ function list(tag: string, count: number, newest: number, paid: Record<number, s
     payment_intent: paid[i] ?? `pi_${tag}other${String(i).padStart(6, "0")}`,
     charge: { object: "charge", refunded: true },
   }));
+  for (const row of rows) ledger.set(row.id, row);
+  return rows;
 }
 
 type Made = { pi: string; email: string; holds: () => Promise<boolean> };
@@ -119,11 +147,14 @@ async function anchors(job: Job, base: number): Promise<void> {
   const listed = await job.make(11);
   const listedId = `re_${job.name}listed0001`;
   await original.call(redis, [["HSET", job.retry, listedId, listed.pi], ["SET", job.anchor, "not a time"]]);
+  ledger.set(listedId, { id: listedId, object: "refund", created: NOW - 9 * 86_400, status: "succeeded", payment_intent: listed.pi, charge: { object: "charge", refunded: true } });
   refundCalls.length = 0;
+  rereads.length = 0;
   is(`${job.name}: the refund on the list is taken back`, await job.run(), 1);
   is(`${job.name}: no longer held`, await listed.holds(), false);
   is(`${job.name}: and let go of the list`, await waiting(job.retry), {});
-  is(`${job.name}: still nothing asked of Stripe`, refundCalls.length, 0);
+  is(`${job.name}: read again from Stripe first, by itself, on the store's account`, rereads, [{ id: listedId, account: ACCOUNT, expand: ["charge"] }]);
+  is(`${job.name}: and no page of refunds asked of Stripe`, refundCalls.length, 0);
   is(`${job.name}: and the anchor left as it is`, await read(job.anchor), "not a time");
 
   part(`${job.name}: an anchor read as something other than text does nothing this run`);
@@ -271,6 +302,128 @@ async function stuck(job: Job, base: number): Promise<void> {
   is(`${job.name}: and the anchor moves to the newest refund`, await read(job.anchor), String(base + 3600));
 }
 
+/**
+ * A refund on the list read again before anything is taken back (review of #3302, Claude 2 MEDIUM, probes P1 and P3;
+ * the owner's decision 18 of 9 November 2026). Each part starts from a confirmed absent anchor, so its rows are read.
+ */
+async function stale(job: Job, base: number): Promise<void> {
+  const row = (tag: string, i: number) => `re_${job.name}${tag}${String(i).padStart(6, "0")}`;
+  const refusing = (who: string) => async (email: string) => {
+    if (email === who) throw new Error("the ledger never answers for this one");
+  };
+  /** A refund whose work fails once and goes on the list; then Stripe lists nothing newer, and reads it as `now` says. */
+  const listedThen = async (tag: string, n: number, first: Record<string, unknown> = {}): Promise<{ made: Made; id: string; says: (now: Record<string, unknown>) => void }> => {
+    await original.call(redis, [["DEL", job.anchor], ["DEL", job.pass]]);
+    const made = await job.make(n);
+    refunds = list(`${job.name}${tag}`, 3, base, { 1: made.pi });
+    refunds[1] = { ...refunds[1], ...first };
+    const id = row(tag, 1);
+    is(`${job.name} ${tag}: run 1, its work fails: nothing taken back`, await job.run(refusing(made.email)), 0);
+    is(`${job.name} ${tag}: on the list to try again`, await waiting(job.retry), { [id]: made.pi });
+    const kept = refunds[1];
+    refunds = [];
+    return { made, id, says: (now) => void ledger.set(id, { ...kept, ...now }) };
+  };
+
+  part(`${job.name}: a full refund on the list that Stripe then fails is never taken back (probe P1)`);
+  const p1 = await listedThen("x", 30);
+  p1.says({ status: "failed", charge: { object: "charge", refunded: false, amount: 2500, amount_refunded: 0 } });
+  rereads.length = 0;
+  is(`${job.name} P1: the work could be done now, but nothing is taken back: the refund failed`, await job.run(), 0);
+  is(`${job.name} P1: still held: the buyer did not get the money back`, await p1.made.holds(), true);
+  is(`${job.name} P1: let go of the list`, await waiting(job.retry), {});
+  is(`${job.name} P1: read again once, on the store's account, with its charge`, rereads, [{ id: p1.id, account: ACCOUNT, expand: ["charge"] }]);
+
+  part(`${job.name}: a part refund on a charge marked refunded, whose other part then fails, is never taken back (probe P3)`);
+  const p3 = await listedThen("y", 31, { amount: 1500, charge: { object: "charge", refunded: true, amount: 2500, amount_refunded: 2500 } });
+  p3.says({ charge: { object: "charge", refunded: false, amount: 2500, amount_refunded: 1500 } });
+  is(`${job.name} P3: nothing taken back: the charge is no longer refunded in full`, await job.run(), 0);
+  is(`${job.name} P3: still held`, await p3.made.holds(), true);
+  is(`${job.name} P3: let go of the list`, await waiting(job.retry), {});
+
+  part(`${job.name}: a refund on the list that Stripe cancels is let go, nothing taken back`);
+  const off = await listedThen("c", 32);
+  off.says({ status: "canceled", charge: { object: "charge", refunded: false } });
+  is(`${job.name} canceled: nothing taken back`, await job.run(), 0);
+  is(`${job.name} canceled: still held`, await off.made.holds(), true);
+  is(`${job.name} canceled: let go of the list`, await waiting(job.retry), {});
+
+  part(`${job.name}: a refund on the list Stripe reads as not final yet stays on it, and is taken back once it succeeds`);
+  const slow = await listedThen("z", 33);
+  for (const status of ["pending", "requires_action"]) {
+    slow.says({ status });
+    is(`${job.name} ${status}: nothing taken back`, await job.run(), 0);
+    is(`${job.name} ${status}: still held`, await slow.made.holds(), true);
+    is(`${job.name} ${status}: still on the list`, await waiting(job.retry), { [slow.id]: slow.made.pi });
+  }
+  slow.says({ status: "succeeded" });
+  is(`${job.name}: succeeded on a charge refunded in full: taken back`, await job.run(), 1);
+  is(`${job.name}: no longer held`, await slow.made.holds(), false);
+  is(`${job.name}: and let go of the list`, await waiting(job.retry), {});
+
+  part(`${job.name}: a refund on the list read in another shape, or answered with an error, stays on it, nothing taken back`);
+  const odd = await listedThen("o", 34);
+  const good = { status: "succeeded", charge: { object: "charge", refunded: true } };
+  for (const [label, now] of [
+    ["a status Stripe does not give", { ...good, status: "done" }],
+    ["its charge not expanded", { ...good, charge: "ch_NotExpanded000001" }],
+    ["no charge", { ...good, charge: null }],
+    ["a charge with no refunded flag", { ...good, charge: { object: "charge", amount: 2500, amount_refunded: 2500 } }],
+    ["another refund's id", { ...good, id: "re_SomeoneElse000001" }],
+    ["another payment", { ...good, payment_intent: "pi_SomeoneElse000001" }],
+    ["another object", { ...good, object: "charge" }],
+  ] as const) {
+    odd.says(now);
+    is(`${job.name}, ${label}: nothing taken back`, await job.run(), 0);
+    is(`${job.name}, ${label}: still held`, await odd.made.holds(), true);
+    is(`${job.name}, ${label}: still on the list`, await waiting(job.retry), { [odd.id]: odd.made.pi });
+  }
+  odd.says(good);
+  erring.add(odd.id);
+  is(`${job.name}, Stripe answers with an error: nothing taken back`, await job.run(), 0);
+  is(`${job.name}, Stripe answers with an error: still on the list`, await waiting(job.retry), { [odd.id]: odd.made.pi });
+  erring.delete(odd.id);
+  ledger.delete(odd.id);
+  is(`${job.name}, Stripe has no such refund: nothing taken back`, await job.run(), 0);
+  is(`${job.name}, Stripe has no such refund: still on the list`, await waiting(job.retry), { [odd.id]: odd.made.pi });
+  odd.says(good);
+  is(`${job.name}: control: read in its shape, succeeded and refunded in full: taken back`, await job.run(), 1);
+  is(`${job.name}: control: no longer held`, await odd.made.holds(), false);
+  is(`${job.name}: control: let go of the list`, await waiting(job.retry), {});
+
+  part(`${job.name}: at most ten refunds on the list are read again a run, from a place that moves on every five minutes`);
+  await original.call(redis, [["DEL", job.anchor], ["DEL", job.pass]]);
+  refunds = [];
+  const many = Array.from({ length: 25 }, (_, i) => ({ id: row("m", i), pi: `pi_${job.name}many${String(i).padStart(6, "0")}` }));
+  await original.call(redis, [["HSET", job.retry, ...many.flatMap((m) => [m.id, m.pi])]]);
+  for (const m of many) ledger.set(m.id, { id: m.id, object: "refund", created: base, status: "pending", payment_intent: m.pi, charge: { object: "charge", refunded: true } });
+  const realNow = Date.now;
+  const seen = new Set<string>();
+  try {
+    for (let slot = 0; slot < 3; slot += 1) {
+      const at = realNow() + slot * 300_000;
+      Date.now = () => at;
+      rereads.length = 0;
+      await job.run();
+      is(`${job.name}, five minutes x ${slot}: ten read again`, rereads.length, 10);
+      for (const r of rereads) seen.add(r.id);
+    }
+    is(`${job.name}: in three runs every one on the list was read again`, seen.size, 25);
+    is(`${job.name}: none let go while not final yet`, Object.keys(await waiting(job.retry)).length, 25);
+    for (const m of many) ledger.set(m.id, { ...ledger.get(m.id), status: "succeeded" });
+    const left: number[] = [];
+    for (let slot = 3; slot < 6; slot += 1) {
+      const at = realNow() + slot * 300_000;
+      Date.now = () => at;
+      await job.run();
+      left.push(Object.keys(await waiting(job.retry)).length);
+    }
+    is(`${job.name}: handled ten a run, until the list is empty`, left, [15, 5, 0]);
+  } finally {
+    Date.now = realNow;
+  }
+}
+
 async function main(): Promise<void> {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_refund_retry_only_a_stand_in";
@@ -346,8 +499,10 @@ async function main(): Promise<void> {
 
   await anchors(gift, NOW - 10_000);
   await stuck(gift, NOW - 9_000);
+  await stale(gift, NOW - 20_000);
   await anchors(pre, NOW - 5_000);
   await stuck(pre, NOW - 4_000);
+  await stale(pre, NOW - 20_000);
 
   done();
 }

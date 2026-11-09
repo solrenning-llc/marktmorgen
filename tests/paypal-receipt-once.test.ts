@@ -634,7 +634,22 @@ async function main(): Promise<void> {
   redis.run(["SET", recordKey, JSON.stringify(record)]);
   is("control: the store has no list", (await fresh()).listId, null);
   const buyerK4 = "no-list-yet@example.com";
-  const k4 = await pay(18, buyerK4);
+  const sentK4: (string | number)[][] = [];
+  const pipelineK4 = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    sentK4.push(...commands);
+    return pipelineK4(commands);
+  }) as typeof redis.pipeline;
+  let k4 = "";
+  try {
+    k4 = await pay(18, buyerK4);
+  } finally {
+    redis.pipeline = pipelineK4;
+  }
+  // The store's list written once, between the pin's read and the keep: the commands that try adds, at most.
+  const listWrite = sentK4.findIndex(keepsReceipt) - sentK4.findIndex((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:pin:")) - 1;
+  console.log(`        the list's write added ${listWrite} commands to that try`);
+  is("the list's write, once in a store's life, adds at most the 7 commands the registry adds for it (commandsPerReceiptTry)", listWrite > 0 && listWrite <= 7, true);
   is("its receipt is sent once", copies(buyerK4).length, 1);
   is("the store has a list now", typeof (await fresh()).listId, "string");
   is("and the order leaves the list", (await listed()).includes(k4), false);

@@ -711,17 +711,20 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  *   attempt, and none again once an answer was not known;
  * - commandsPerReceiptTry: every Redis command one such try sends, from the paid record's GET to the list's ZADD, the
  *   hand-over's rerun (its writes already there), the first-try mark, the link's grant, the receipt kept as first
- *   made (two GETs each try; on the try that keeps it, its three erasure notes, SET NX and GET) and the kept sender
- *   included, at the most measured with either sender refusing (tests/paypal-handover-cost.test.ts for Resend,
- *   tests/paypal-receipt-once.test.ts for Amazon): 37, with the receipt kept, Amazon refusing for the account (the
- *   owner told), the key moved to Resend and Resend asking to slow down (429) on each of viaResend's three attempts,
- *   all in one try (a refusal Amazon gave goes on to Resend in the same try; part E2). The kept receipt is at most
+ *   made (two GETs each try; on the try that keeps it, one EVAL, KEEP_RECEIPT, whose six calls are the person's
+ *   deletion mark read, its three erasure notes, SET NX and GET) and the kept sender included, at the most measured
+ *   with either sender refusing (tests/paypal-handover-cost.test.ts for Resend, tests/paypal-receipt-once.test.ts for
+ *   Amazon): 33 sent, with the receipt kept, Amazon refusing for the account (the owner told), the key moved to Resend
+ *   and Resend asking to slow down (429) on each of viaResend's three attempts, all in one try (a refusal Amazon gave
+ *   goes on to Resend in the same try; part E2). 52 counts each of KEEP_RECEIPT's six calls besides its EVAL (39),
+ *   and a store from before lists given its list in that try, once in its life (ensureListId: 7 sent, measured in
+ *   part K, the three lock and write scripts' two calls each counted too, 13). The kept receipt is at most
  *   RECEIPT_MAIL_BYTES (lib/paypal-delivery.ts), written once and read back by each try; its key is priced as the
  *   order's in tests/store-data-registry.ts (nl:ppsell:mail:). The guarded Resend ledger's own EVALs are lib/resend-fallback-budget's.
  *   PAYPAL_RECEIPT_RETRY_COMMANDS is their product: the most one order's receipt retries send.
  * Why the retry is the five-minute job's, not a plan's: NOT_A_COST.HAND_OVER_BATCH.
  */
-export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 37 } as const;
+export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 52 } as const;
 export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTriesPerOrder * PAYPAL_HAND_OVER_RETRY.commandsPerReceiptTry;
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**

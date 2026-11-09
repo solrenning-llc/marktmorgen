@@ -552,6 +552,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sender:@lib/email.ts": company("Emails handed to the sender, a month", "One count a month, the company's."),
   "nl:ses:once:@lib/email.ts": company("An email already handed over", "The company's, minutes."),
   "nl:mail:pin:@lib/email.ts": company("The sender an email tried again under one key went to", "The company's, a day."),
+  "nl:mail:pin:@lib/paypal-delivery.ts": company("The sender a PayPal receipt's key went to, as lib/email.ts keeps it", "Read only (pinnedSenderKey): lib/email.ts writes it, the company's, a day."),
   "nl:ses:rest:@lib/email.ts": company("A batch's rest already handed over", "The company's, minutes."),
   "nl:ses:told:@lib/email.ts": company("The owner told of the sender", "One key a day, the company's."),
   "nl:@lib/erasure-index.ts": company("Not a key: the start every key noted for a deletion must have", "Read only, to check what is deleted."),

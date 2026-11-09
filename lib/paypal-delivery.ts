@@ -12,14 +12,15 @@ import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
 import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
-import type { Store } from "@/lib/store";
+import { type Store, ensureListId, storeRef } from "@/lib/store";
 import { creditPayPalSale } from "@/lib/affiliates";
 import { emitEvent } from "@/lib/webhooks";
 import { deriveKey } from "@/lib/secret-box";
 import { createHash } from "node:crypto";
 import { noteForErasure } from "@/lib/erasure-index";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 /**
  * Where lib/email.ts keeps the sender of a key's email (its pinKey), written just before the first request made under
@@ -145,6 +146,29 @@ function keptReceipt(raw: string, made: PayPalReceipt): PayPalReceipt {
 }
 
 /**
+ * Keeps a receipt as first made, noted for the person's deletion, in one step, unless the person was deleted from the
+ * store at or after the payment (lib/suppression.ts: erasePerson writes their print before it deletes anything, and
+ * the print is kept): a deletion that ran between the receipt being made and kept finds the note and deletes the
+ * receipt, or the receipt is never kept. A person deleted before they paid again is sent the new receipt.
+ * KEYS[1] the receipt, KEYS[2] the store's prints of deleted people, KEYS[3] the person's erasure notes
+ * (lib/erasure-index.ts); ARGV[1] the receipt, ARGV[2] its seconds, ARGV[3] the person's print, ARGV[4] when it was
+ * paid (seconds), ARGV[5..7] the note's score, the oldest score kept and the notes' seconds (noteForErasure).
+ * Answers 0 when the person was deleted (nothing written), else {1 when this SET kept it or 0, the receipt kept};
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const KEEP_RECEIPT = `-- marktmorgen:paypal-receipt-keep:v1
+local erased = redis.call("HGET", KEYS[2], ARGV[3])
+if erased then
+  local at = tonumber(erased)
+  if not at or at >= tonumber(ARGV[4]) then return 0 end
+end
+redis.call("ZADD", KEYS[3], ARGV[5], KEYS[1])
+redis.call("ZREMRANGEBYSCORE", KEYS[3], "-inf", ARGV[6])
+redis.call("EXPIRE", KEYS[3], ARGV[7])
+local written = redis.call("SET", KEYS[1], ARGV[1], "NX", "EX", ARGV[2])
+return {written and 1 or 0, redis.call("GET", KEYS[1])}`;
+
+/**
  * The receipt an order's every try sends: the one kept from its first try, word for word, so a sender asked again is
  * given the same bytes under the same key (the guarded Resend transport's attempt is its path, body and key; other
  * words would be another attempt and another request after an answer that was not known; second money review of
@@ -152,14 +176,16 @@ function keptReceipt(raw: string, made: PayPalReceipt): PayPalReceipt {
  *
  * - Kept: that one, read in its exact shape (keptReceipt).
  * - None kept and no sender kept for its key (pinnedSenderKey, written by lib/email.ts just before the first request):
- *   no request was ever made under the key, so the receipt just made is kept (SET NX, read back by the same
- *   pipeline's GET; noted first for the person's deletion, lib/erasure-index.ts), and what is kept is sent.
+ *   no request was ever made under the key, so the receipt just made is kept, noted for the person's deletion
+ *   (lib/erasure-index.ts), in one step that refuses it when the person was deleted at or after the payment
+ *   (KEEP_RECEIPT): "erased", and nothing is sent. Otherwise what is kept is sent. A store from before lists is given
+ *   its list first (ensureListId, as an erasure does), so the deletion is always checked where it is written.
  * - None kept but a sender kept: a request was made with words now gone (deleted with the person, or lost). Null:
  *   nothing is sent with other words, and the order waits out its window (RECEIPT_RETRY_SECONDS).
  *
  * Throws UnknownReplyError when a reply is not exactly what its command answers: nothing is sent, the order stays.
  */
-async function sameReceipt(statsId: string, paid: Paid, made: PayPalReceipt): Promise<PayPalReceipt | null> {
+async function sameReceipt(store: Store, paid: Paid, made: PayPalReceipt): Promise<PayPalReceipt | "erased" | null> {
   if (!isRedisConfigured()) return made;
   const key = receiptMailKey(paid.order);
   const seen = repliesFor(await redisPipeline([["GET", key], ["GET", pinnedSenderKey(made.idempotencyKey)]]), 2);
@@ -173,14 +199,20 @@ async function sameReceipt(statsId: string, paid: Paid, made: PayPalReceipt): Pr
   }
   const value = JSON.stringify(made);
   if (Buffer.byteLength(value) > RECEIPT_MAIL_BYTES) throw new Error("a PayPal receipt weighs more than RECEIPT_MAIL_BYTES; not kept, so not sent");
-  const notes = noteForErasure(statsId, made.to, key);
-  const replies = repliesFor(await redisPipeline([...notes, ["SET", key, value, "NX", "EX", RECEIPT_MAIL_SECONDS], ["GET", key]]), notes.length + 2);
-  const written = replies?.[notes.length];
-  const kept = replies?.[notes.length + 1];
-  if (
-    !replies || !notes.length || replies.slice(0, notes.length).some((reply) => countOf(reply) === null) ||
-    (written !== "OK" && written !== null) || typeof kept !== "string" || (written === "OK" && kept !== value)
-  ) {
+  const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId ?? null;
+  if (!listId) throw new UnknownReplyError("the store's list, to check a deletion where a PayPal receipt is kept");
+  const [add, trim, expire] = noteForErasure(store.statsId, made.to, key);
+  if (add?.[0] !== "ZADD" || trim?.[0] !== "ZREMRANGEBYSCORE" || expire?.[0] !== "EXPIRE" || add[1] !== trim[1] || add[1] !== expire[1]) {
+    throw new Error("a PayPal receipt could not be noted for the person's deletion; not kept, so not sent");
+  }
+  const replies = repliesFor(await redisPipeline([[
+    "EVAL", KEEP_RECEIPT, 3, key, suppressedKey(listId), add[1],
+    value, RECEIPT_MAIL_SECONDS, suppressionPrint(listId, made.to), paid.at, add[2], trim[3], expire[2],
+  ]]), 1);
+  const reply = replies?.[0];
+  if (reply === 0) return "erased";
+  const [written, kept] = Array.isArray(reply) && reply.length === 2 ? reply : [];
+  if ((written !== 1 && written !== 0) || typeof kept !== "string" || (written === 1 && kept !== value)) {
     throw new UnknownReplyError("a PayPal receipt kept as first made");
   }
   return keptReceipt(kept, made);
@@ -224,8 +256,9 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     return "gone";
   }
   const base = storeBase(store);
-  // What receiptMayGo answered, when the receipt was asked about (not when the hand-over stopped before it).
-  const asked: { window: { go: boolean; firstAt: number } | null } = { window: null };
+  // What receiptMayGo answered, when the receipt was asked about (not when the hand-over stopped before it), and
+  // whether the receipt was refused because its person was deleted from the store at or after the payment.
+  const asked: { window: { go: boolean; firstAt: number } | null; erased: boolean } = { window: null, erased: false };
   const receipted = await deliverPayPal({
     store,
     paid,
@@ -243,7 +276,12 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
       return asked.window.go;
     },
     // deliverPayPal makes no receipt without a stats id; with none, nothing could be noted for deletion, and none is kept.
-    keep: (receipt) => sameReceipt(store.statsId ?? "", paid, receipt),
+    keep: async (receipt) => {
+      const kept = await sameReceipt(store, paid, receipt);
+      if (kept !== "erased") return kept;
+      asked.erased = true;
+      return null;
+    },
   });
   await creditPayPalSale(store, paid, product.title).catch((error) => console.error("crediting a PayPal sale failed", error));
   await emitEvent(store, "sale.completed", `paypal:${paid.order}`, {
@@ -262,8 +300,9 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
   }, paid.at * 1000).catch((error) => console.error("telling the webhooks of a PayPal sale failed", error));
   if (!store.statsId) return "handed";
   const window = asked.window;
-  if (receipted || !window?.go) {
-    if (!receipted) console.error("a PayPal purchase's receipt was not accepted within its retry window; no longer tried", store.handle, paid.order);
+  if (receipted || !window?.go || asked.erased) {
+    if (asked.erased) console.error("a PayPal purchase's person was deleted from the store; its receipt is not kept or sent, and not tried again", store.handle, paid.order);
+    else if (!receipted) console.error("a PayPal purchase's receipt was not accepted within its retry window; no longer tried", store.handle, paid.order);
     await handedOver(store.statsId, paid.order);
   } else {
     // Still in the list since settle wrote it: this only sets when it is due again (receiptDue; the list's score is

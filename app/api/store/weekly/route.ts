@@ -50,17 +50,32 @@ export async function GET(request: NextRequest) {
   );
 }
 
+/** Said when the change could not be confirmed (CX-123 rule 24): never "Stopped" or "On again" on an unknown answer. */
+function notConfirmed(what: string): Response {
+  return page("Not changed yet", `<h1>Not changed yet</h1><p>We could not confirm that ${what} just now. Please go back and press the button again in a minute.</p>`, 503);
+}
+
 export async function POST(request: NextRequest) {
   const member = readMember(request);
   if (member) {
-    await leaveWeeklyTeam(member.handle, member.email);
+    try {
+      await leaveWeeklyTeam(member.handle, member.email);
+    } catch (error) {
+      console.error("stopping a team member's weekly email could not be confirmed", error);
+      return notConfirmed("your copy of the weekly email stopped");
+    }
     return page("Stopped", `<h1>Stopped</h1><p>You will not get the weekly email of @${esc(member.handle)} anymore. The owner can add you again.</p>`);
   }
   const asked = read(request);
   if (!asked) return page("Link not recognized", "<p>This link is not one we recognize.</p>", 400);
   const form = await limited(request, 2_000).then((r) => r.formData()).catch(() => null);
   const off = form?.get("do") !== "on";
-  await setWeeklyOff(asked.handle, off);
+  try {
+    await setWeeklyOff(asked.handle, off);
+  } catch (error) {
+    console.error("stopping or starting the weekly email could not be confirmed", error);
+    return notConfirmed(off ? "these emails stopped" : "these emails started again");
+  }
   const action = `/api/store/weekly?h=${encodeURIComponent(asked.handle)}&t=${encodeURIComponent(asked.token)}`;
   return off
     ? page(

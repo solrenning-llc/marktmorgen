@@ -612,7 +612,10 @@ async function runClaimed(statsId: string, id: string, now = Date.now()): Promis
   }
   const config = await readConfig(delivery.statsId);
   const endpoint = config?.endpoints.find((e) => e.id === delivery.endpoint);
-  const store = endpoint && config?.handle ? await storeForHandle(config.handle).catch(() => null) : null;
+  // A store that cannot be read just now (a Redis call that failed or timed out) is unknown, never "not found"
+  // (CX-123 rule 24): the read throws, the delivery stays on the queue under its lease and is tried again when the
+  // lease ends. Only a store that reads as gone (null) fails the delivery.
+  const store = endpoint && config?.handle ? await storeForHandle(config.handle) : null;
   const done = await attempt(delivery, endpoint, store && store.statsId === delivery.statsId ? store : null, now);
   const commands: (string | number)[][] = [["SET", deliveryKey(id), JSON.stringify(done), "EX", DELIVERY_SECONDS]];
   commands.push(

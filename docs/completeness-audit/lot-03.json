@@ -1,0 +1,1601 @@
+{
+ "lot": 3,
+ "main": "d7bbf9d35",
+ "request": "C1-20261105-1919-C4-1 / C4-20261105-1925-C5-3",
+ "items": [
+  {
+   "n": 152,
+   "tag": "S11-HOME-CTAS",
+   "state": "done",
+   "state_evidence": "queue.md:3316 'implementado e absorvido na versão publicada179; reconciliação documental23/10/2026'; queue.md:594 'MQ1(b): já concluído/publicado, sem reconstrução'; queue.md:14314 (ME, 28/10/2026) lista 152 entre os que 'Já existem e NÃO devem ser refeitos'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Cinco pares HomeActions 'Start your store' (/signin) + 'See the live demo' (/demo) ao longo da home, a cada uma ou duas seções",
+     "status": "out of scope",
+     "evidence": "Substituído por decisão registrada do dono: 571 [VS1] (maquete aprovada 30/10/2026, app/page.tsx:20-31 'One action in words, \"Claim it\", at the top and at the end') e 498 [ME3] (queue.md:14330, home com no máximo 600 palavras/30 links; 'Os itens de página inicial já na fila (... 152 [S11-HOME-CTAS] ...) passam a respeitar esse limite'). HomeActions não existe mais em app/ nem components/ (grep 'HomeActions' sem resultado no código), por substituição deliberada, não por falta.",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Ação de criação e demo na home com destinos existentes",
+     "status": "present",
+     "evidence": "components/home-claim.tsx:38 (formulário GET /signin, no topo e no fim), app/page.tsx:209 (/signin), components/home-claim.tsx:127 (link /demo)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Par Start your store / See the live demo com ordem de teclado em páginas de venda",
+     "status": "present",
+     "evidence": "tests/e2e/sales-comparisons.mjs:71-75 (Start your store -> Tab -> /demo nas páginas de comparação)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: links, foco/teclado, nomes acessíveis, axe e 390/1280 sem overflow, zero gravações de API",
+     "status": "present",
+     "evidence": "tests/e2e/home-actions.mjs:14-60 (390/1280, skip link, destinos, axe, fit, 'home actions make no API writes'), chamado em tests/e2e/sales-comparisons.mjs:12 e tests/e2e/store-copy.mjs:850",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Sem pop-up, urgência, Talk to an expert/Book a demo, telemetria ou endpoint novo",
+     "status": "present",
+     "evidence": "app/page.tsx e components/home-claim.tsx: formulário GET simples, sem chamadas novas; o 'Start free' do menu (tests/e2e/home-actions.mjs) vem da VS1, decisão posterior do dono",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Registro M0 antes/depois sem mudar preço/limite/gate",
+     "status": "out of scope",
+     "evidence": "Registro documental de margem; nenhuma mudança de preço/limite/gate exigida (item 152 na fila)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 153,
+   "tag": "S12-HOME-PATH",
+   "state": "done",
+   "state_evidence": "queue.md:3324 'implementado e absorvido na versão publicada179; reconciliação documental23/10/2026'; queue.md:595 'MQ1(b): já concluído/publicado, sem reconstrução'; queue.md:14314 lista 153 entre os que já existem",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "PATH_HOME_STEPS derivado das sete missões reais de dayMissions(NO_FACTS), mesmos IDs/títulos/ordem, sem duplicar nomes",
+     "status": "present",
+     "evidence": "lib/path-home.ts:12; tests/path-home.test.ts:3",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Cada passo distingue 'What you do' e 'What Marktmorgen checks'",
+     "status": "present",
+     "evidence": "lib/path-home.ts:3-11; app/platform/path/page.tsx:11",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Limites honestos: teste não verifica acesso/entrega, loja live sem autocompra, lead não é consentimento, nenhuma venda/prazo garantidos",
+     "status": "present",
+     "evidence": "tests/path-home.test.ts:4 (asserções de 'does not verify file access or delivery', 'never asked to make a real self-purchase', 'not marketing consent', 'No sale or deadline is guaranteed')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Sem promessa proibida (forbiddenIn)",
+     "status": "present",
+     "evidence": "tests/path-home.test.ts:3 (forbiddenIn(...) === null)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Seção na home ligada a /platform/path",
+     "status": "present",
+     "evidence": "Movida da home para /platform/path por decisão registrada do dono (571 [VS1] e 498 [ME3], queue.md:14330 'Todo o conteúdo que sair da página inicial vai para as páginas de recursos'); app/platform/path/page.tsx:11 mantém as sete missões; lib/home-modules.ts:16 liga /platform/path em /platform; tests/e2e/home-path.mjs:6-20 ('VS1 ... the Path summary left the home page')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Par adicional Start your store/demo depois do Path na home",
+     "status": "out of scope",
+     "evidence": "Substituído pela VS1 (app/page.tsx:20-31) e limitado pela ME3; não é falta",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 390/1280, foco, links, axe, sete missões e papéis, zero gravações",
+     "status": "present",
+     "evidence": "tests/e2e/home-path.mjs:1-20 (390/1280, teclado, 7 li, 7 'What you do', writes), chamado em tests/e2e/store-copy.mjs:852 e tests/e2e/sales-comparisons.mjs:11",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Registro M0 antes/depois",
+     "status": "out of scope",
+     "evidence": "Registro documental de margem, sem mudança de preço/limite/gate",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 154,
+   "tag": "B2-CONTACT-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:3754 'concluído; PR666 incorporado20/10/2026 04:18:34 Fortaleza; publicação funcional80 confirmada'; queue.md:596 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Sucesso só com HTTP ok, ok===true, sem erro e snapshot canônico (on/heading/line)",
+     "status": "present",
+     "evidence": "components/contact-box-editor.tsx:49",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Campos bloqueados durante a espera, aria-busy, sem duplo envio",
+     "status": "present",
+     "evidence": "components/contact-box-editor.tsx:63,72,88,101,124",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Perda/incerteza pede recarregar para conferir sem alegar mudança",
+     "status": "present",
+     "evidence": "components/contact-box-editor.tsx:54,56",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Alerta com danger-text (contraste)",
+     "status": "present",
+     "evidence": "components/contact-box-editor.tsx:123",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Endereço longo do media kit quebra linha em 390px (break-words)",
+     "status": "present",
+     "evidence": "components/kit-editor.tsx:136",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 28 casos interceptados em 390/1280, sem POST real",
+     "status": "present",
+     "evidence": "tests/e2e/contact-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:853",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 155,
+   "tag": "B2-RECOVERY-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:3788 'concluído; PR667 incorporado20/10/2026 04:24:41 Fortaleza; publicação funcional81 confirmada'; queue.md:597 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Sucesso só com HTTP ok, ok===true, sem erro, enabled/address canônicos e asks booleano",
+     "status": "present",
+     "evidence": "components/recovery-editor.tsx:53",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Campos bloqueados, aria-busy, sem duplo envio",
+     "status": "present",
+     "evidence": "components/recovery-editor.tsx:121,125,139,160",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Incerteza honesta (recarregar para conferir) e erros só próprios",
+     "status": "present",
+     "evidence": "components/recovery-editor.tsx:18",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Política/envio/opt-in/tetos inalterados",
+     "status": "present",
+     "evidence": "lib/recovery-setting.ts e lib/recovery-setting-rules.ts mantêm parseRecovery; nenhuma mudança exigida",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 64 casos (16 respostas x 2 larguras x 2 flags), sem POST real",
+     "status": "present",
+     "evidence": "tests/e2e/recovery-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:854",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 156,
+   "tag": "B2-SOCIAL-PROFILE-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:3795 'concluído; PR668 incorporado20/10/2026 04:27:15 Fortaleza; publicação funcional82 confirmada'; queue.md:598 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Sucesso só com HTTP ok, ok===true, sem erro e lista exata (parseSocials, ordem, URLs, remoção vazia)",
+     "status": "present",
+     "evidence": "components/socials-editor.tsx:137",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Bloquear campos, reordenar, remover, adicionar e cancelar durante a espera; aria-busy",
+     "status": "present",
+     "evidence": "components/socials-editor.tsx:188,202,218,232,235,238,255,264,265",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Incerteza manda conferir; alerta e erro de campo com danger-text",
+     "status": "present",
+     "evidence": "components/socials-editor.tsx:33,243,262",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 48 casos em 390/1280, incluindo remoção vazia e índices",
+     "status": "present",
+     "evidence": "tests/e2e/social-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:855",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 157,
+   "tag": "B2-SIGNUP-SETTING-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:3802 'concluído; PR669 incorporado20/10/2026 04:30:29 Fortaleza; publicação funcional83 confirmada'; queue.md:599 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Sucesso só com HTTP ok, ok===true, sem erro e snapshot join canônico",
+     "status": "present",
+     "evidence": "components/join-box-editor.tsx:50",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Campos bloqueados, aria-busy, rascunho preservado",
+     "status": "present",
+     "evidence": "components/join-box-editor.tsx:64,73,89,102,125",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Incerteza pede recarregar para conferir",
+     "status": "present",
+     "evidence": "components/join-box-editor.tsx:55,57",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Alerta com danger-text",
+     "status": "present",
+     "evidence": "components/join-box-editor.tsx:124",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 28 casos em 390/1280, sem inscrição/POST real",
+     "status": "present",
+     "evidence": "tests/e2e/signup-setting-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:856",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 158,
+   "tag": "B2-WELCOME-VIDEO-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:4056 'concluído; PR671 incorporado20/10/2026 04:53:09 Fortaleza; publicação funcional84 confirmada'; queue.md:600 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Comparar HTTP, ok booleano, sem erro e provider/id/hash canônicos de /api/store/intro",
+     "status": "present",
+     "evidence": "components/intro-editor.tsx:33-41",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Remoção exige null confirmado",
+     "status": "present",
+     "evidence": "components/intro-editor.tsx:35-36 (expected === null ? saved === null); a própria fila registra que a remoção null não tem cobertura de navegador e não é alegada",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Entrada bloqueada, aria-busy, mensagem honesta",
+     "status": "present",
+     "evidence": "components/intro-editor.tsx:47,49,57",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 72 casos (YouTube/Vimeo/Loom x 390/1280)",
+     "status": "present",
+     "evidence": "tests/e2e/intro-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:857",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 159,
+   "tag": "B2-SUPPORT-SETTING-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:4064 'concluído; PR672 incorporado20/10/2026 04:57:39 Fortaleza; publicação funcional85 confirmada'; queue.md:601 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Reusar parseTips/readTipAmount e comparar on/heading/line e valores na mesma ordem",
+     "status": "present",
+     "evidence": "components/tips-editor.tsx:66; lib/store-tips.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Índices de erro inteiros válidos e rascunho preservado",
+     "status": "present",
+     "evidence": "components/tips-editor.tsx:72",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Campos bloqueados, aria-busy, mensagem honesta, danger-text",
+     "status": "present",
+     "evidence": "components/tips-editor.tsx:78,80,87,97,116,139,152,184,185",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 34 respostas em 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/support-setting-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:858",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 160,
+   "tag": "B2-STORE-FAQ-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:4117 'concluído; PR674 incorporado20/10/2026 05:22:36 Fortaleza; publicação funcional86 confirmada'; queue.md:602 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Salvar manual só confirma HTTP/ok booleano/sem erro e lista exata parseFaq (ordem/perguntas/respostas)",
+     "status": "present",
+     "evidence": "components/faq-editor.tsx:102",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Bloquear edição, reordenar, remover, adicionar e rascunho de IA enquanto salva, e salvar enquanto rascunha; aria-busy",
+     "status": "present",
+     "evidence": "components/faq-editor.tsx:120,127,138,140,142,143,144,152,157",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Incerteza pede conferir",
+     "status": "present",
+     "evidence": "components/faq-editor.tsx:111,113",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Requisição de IA, pool, reserva e tetos intactos",
+     "status": "present",
+     "evidence": "components/faq-editor.tsx:75 (rascunho de IA inalterado); nenhuma mudança exigida",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 30 respostas manuais em 390/1280, zero chamadas de IA",
+     "status": "present",
+     "evidence": "tests/e2e/faq-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:861",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 161,
+   "tag": "B2-PDF-PREVIEW-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:4148 'concluído; PR676 incorporado20/10/2026 05:50:10 Fortaleza; publicação funcional87 confirmada'; queue.md:603 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "POST devolve id/pages de result.product, sem leitura adicional",
+     "status": "present",
+     "evidence": "app/api/store/preview/route.ts:50",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Cliente exige HTTP/ok booleano/sem erro/id/páginas exatos e mensagem honesta",
+     "status": "present",
+     "evidence": "components/pdf-preview-toggle.tsx:42-43,49",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "aria-busy e duplo envio bloqueado",
+     "status": "present",
+     "evidence": "components/pdf-preview-toggle.tsx:57,61",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 24 respostas em 390/1280, zero GET de prévia",
+     "status": "present",
+     "evidence": "tests/e2e/pdf-preview-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:860",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 162,
+   "tag": "B2-PDF-STAMP-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:4179 'concluído; PR678 incorporado20/10/2026 06:14:38 Fortaleza; publicação funcional88 confirmada'; queue.md:604 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "POST devolve id/on de result.product",
+     "status": "present",
+     "evidence": "app/api/store/stamp/route.ts:50",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Cliente exige HTTP/ok booleano/sem erro/id/on exatos; erros só próprios",
+     "status": "present",
+     "evidence": "components/pdf-stamp-toggle.tsx:16,69",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "aria-busy e sem duplo envio",
+     "status": "present",
+     "evidence": "components/pdf-stamp-toggle.tsx:85,91",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 26 respostas em 390/1280, zero GET de carimbo",
+     "status": "present",
+     "evidence": "tests/e2e/pdf-stamp-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:859",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 163,
+   "tag": "B2-MEMBER-NUDGE-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:4210 'concluído; PR680 incorporado20/10/2026 06:42:37 Fortaleza; publicação funcional89 confirmada'; queue.md:605 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "parseNudge/snapshot, HTTP/ok booleano/sem erro, on/address canônicos",
+     "status": "present",
+     "evidence": "components/nudge-editor.tsx:35",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Erros apenas próprios e incerteza honesta",
+     "status": "present",
+     "evidence": "components/nudge-editor.tsx:14,41",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Campos bloqueados, aria-busy, sem duplo envio",
+     "status": "present",
+     "evidence": "components/nudge-editor.tsx:56,80,85,87",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: 28 respostas em 390/1280 com fixture recorrente",
+     "status": "present",
+     "evidence": "tests/e2e/nudge-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:880",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 164,
+   "tag": "B2-164",
+   "state": "done",
+   "state_evidence": "queue.md:4241 'Concluído e publicado na entrega 90'; queue.md:606 'MQ1(b): já concluído/publicado, sem reconstrução'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Exigir HTTP ok, ok===true, sem erro e o booleano exato pedido antes de mudar o estado exibido",
+     "status": "present",
+     "evidence": "components/no-count-toggle.tsx:23",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Controles bloqueados e aria-busy; resposta incerta pede recarregar",
+     "status": "present",
+     "evidence": "components/no-count-toggle.tsx:27,30,37,46",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Escopo/expiração do cookie e permissão de estatísticas preservados",
+     "status": "present",
+     "evidence": "lib/no-count.ts (mecanismo existente; nenhuma mudança exigida)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prova: casos interceptados nos dois sentidos em 390/1280, sem gravação real",
+     "status": "present",
+     "evidence": "tests/e2e/no-count-acknowledgment.mjs, chamado em tests/e2e/store-copy.mjs:879",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 165,
+   "tag": "B2-165",
+   "state": "done",
+   "state_evidence": "queue.md:4247 'Estado: Concluído e publicado na entrega 91'; queue.md:607 'MQ1(b): já concluído/publicado'; PR #683 merged 2026-10-20T10:34:46Z (ffbeee19487f417bd97373546c6e31a521bbb52e), publication 91 JSON in queue (pr 683)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Successful HTTP, strict boolean ok, no contradictory error, matching canonical note on save",
+     "status": "present",
+     "evidence": "components/thanks-note-editor.tsx:62-66 (response.ok, data.ok !== true, data.error, JSON.stringify(parseNote(data.note)) vs expected)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Removal requires explicit null note",
+     "status": "present",
+     "evidence": "components/thanks-note-editor.tsx:49,64 (expected null => data.note !== null rejected; hasOwnProperty 'note')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock all fields while pending (busy)",
+     "status": "present",
+     "evidence": "components/thanks-note-editor.tsx:85,103,111,124,130,134,145,149 (aria-busy, disabled={busy})",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Preserve creator draft on uncertain reply; honest uncertainty message",
+     "status": "present",
+     "evidence": "components/thanks-note-editor.tsx:66 ('We could not confirm this note. Reload this page...'), fields only reset after confirmation at :72-73",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Reuse existing note parsers (parseNote/readNote)",
+     "status": "present",
+     "evidence": "components/thanks-note-editor.tsx:49,64",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Synthetic intercepted save/removal cases at 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/thanks-note-acknowledgment.mjs:16; tests/e2e/store-copy.mjs:878 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 166,
+   "tag": "B2-166",
+   "state": "done",
+   "state_evidence": "queue.md:4313 'Estado: Concluído e publicado na entrega 92'; queue.md:608 MQ1(b); PR #685 merged 2026-10-20T11:19:13Z (766a81b34b9c8e813d39f11efb79d0d94ffe66dd), publication 92",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Successful HTTP, strict ok, no error, exact supported selected language",
+     "status": "present",
+     "evidence": "components/store-language-editor.tsx:38 (!response.ok, data.ok !== true, data.error, isLanguage, data.language !== chosen)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock selector while pending; retain draft on uncertainty",
+     "status": "present",
+     "evidence": "components/store-language-editor.tsx:53,68 (select disabled={busy}), :39,46 (uncertainty message, saved only updated at :42)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Preserve existing language identifiers, no new language/translation/AI call",
+     "status": "present",
+     "evidence": "components/store-language-editor.tsx (only existing isLanguage/LANGUAGES used)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "26 synthetic intercepted cases at 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/language-acknowledgment.mjs:18; tests/e2e/store-copy.mjs:877 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Verification repair: pricing FAQ targets >=44px with axe kept and explicit target-height checks",
+     "status": "present",
+     "evidence": "tests/e2e/decision-faq.mjs:32-34 (axe + 'pricing FAQ target height' >=44), called via tests/e2e/sales-comparisons.mjs:13 from tests/e2e/store-copy.mjs:57; app/globals.css:807,930 (min-height 44px)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 167,
+   "tag": "B2-167",
+   "state": "done",
+   "state_evidence": "queue.md:4385 'Estado: Concluído e publicado na entrega 93'; queue.md:609 MQ1(b); PR #687 merged 2026-10-20T11:21:53Z (016df7653695057bbfaa72b38ed4ba46cae72ee7), publication 93",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Successful HTTP, boolean ok, no error, exact saved theme/accent/badge/sold/font/backdrop",
+     "status": "present",
+     "evidence": "components/look-editor.tsx:150-162 (expected six fields compared to data.look snapshot)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Existing response returns look (no extra read)",
+     "status": "present",
+     "evidence": "app/api/store/look/route.ts:44 (Response.json({ ok: true, look }))",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock appearance fields and Undo while pending",
+     "status": "present",
+     "evidence": "components/look-editor.tsx:221 (aria-busy), :261,269,283,320,370,394,428,456 (disabled={working}), :484,501-504 (Undo changes disabled={working})",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Preserve draft on uncertainty",
+     "status": "present",
+     "evidence": "components/look-editor.tsx:168-171 (error status; draft state untouched)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "32 synthetic intercepted appearance replies at 390/1280, no photo operation",
+     "status": "present",
+     "evidence": "tests/e2e/look-acknowledgment.mjs:16; tests/e2e/store-copy.mjs:876 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 168,
+   "tag": "B2-168",
+   "state": "done",
+   "state_evidence": "queue.md:4514 'Estado: Publicado — entrega94'; queue.md:610 MQ1(b); queue.md:4535 '94 — PR#689 ... merge ac522e01...'; PR #689 merged 2026-10-20T11:49:09Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Sections: strict HTTP/ok/no error and exact canonical snapshot",
+     "status": "present",
+     "evidence": "components/store-layout-editor.tsx:15-18,65 (savedSections parsed and compared)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "News: strict check with explicit null on removal and exact announcement snapshot",
+     "status": "present",
+     "evidence": "components/store-layout-editor.tsx:66",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Preserve legacy count/on fields and add snapshots from existing setter result",
+     "status": "present",
+     "evidence": "app/api/store/sections/route.ts:16 (sections count + savedSections); app/api/store/announcement/route.ts:17 (on + announcement)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Pending controls lock and announce busy; uncertain drafts preserved; message confirms settings",
+     "status": "present",
+     "evidence": "components/store-layout-editor.tsx:10,74,79,145,184",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "96 synthetic intercepted save/removal cases at 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/layout-acknowledgment.mjs:19 (390/1280); tests/e2e/store-copy.mjs:875 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 169,
+   "tag": "B2-169",
+   "state": "done",
+   "state_evidence": "queue.md:4520 'Estado: Publicado — entrega95'; queue.md:611 MQ1(b); queue.md:4536 '95 — PR#690 ... merge 5a173ac3...'; PR #690 merged 2026-10-20T11:51:41Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Strict HTTP/ok/no error and matching canonical collections and order",
+     "status": "present",
+     "evidence": "components/collections-editor.tsx:70-79",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Existing IDs must match; new server IDs valid, unique, not reusing existing IDs",
+     "status": "present",
+     "evidence": "components/collections-editor.tsx:75 (sameId; new id must not be in saved); lib/store-collections.ts:84-97 (COLLECTION_ID regex, duplicate ids dropped, length check at editor :73)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "No browser-created ID; baseline updated only after confirmation",
+     "status": "present",
+     "evidence": "components/collections-editor.tsx:68 (id: row.id || undefined), :84-85 (setSaved after match)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock pending controls, retain uncertain drafts, confirm settings not visibility",
+     "status": "present",
+     "evidence": "components/collections-editor.tsx:27,81,86,96,212",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Wrap long collection addresses",
+     "status": "present",
+     "evidence": "components/collections-editor.tsx:194 (break-all)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Caps 12 collections/24 products/title 60/blurb 200 preserved",
+     "status": "present",
+     "evidence": "lib/store-collections.ts:28-32",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "84 synthetic intercepted create/edit/removal replies at 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/collections-acknowledgment.mjs:33; tests/e2e/store-copy.mjs:874 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 170,
+   "tag": "B2-170",
+   "state": "done",
+   "state_evidence": "queue.md:4526 'Estado: Publicado — entrega96'; queue.md:612 MQ1(b); queue.md (item 173 block) 'Publicação funcional96 — PR#691 incorporado às09:23:53, merge cc4c4d1e...'; PR #691 merged 2026-10-20T12:23:53Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Strict HTTP/ok/no error, matching product id and exact ordered pairs",
+     "status": "present",
+     "evidence": "components/pairs-editor.tsx:58",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Pairs response adds only the product id, no extra read",
+     "status": "present",
+     "evidence": "app/api/store/pairs/route.ts:20 ({ ok, id, pairs })",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock pending selections, retain uncertain drafts, confirm settings",
+     "status": "present",
+     "evidence": "components/pairs-editor.tsx:14,60,65,75,107",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "MAX_PAIRS 3 preserved",
+     "status": "present",
+     "evidence": "lib/store-collections.ts:34",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "48 synthetic intercepted save/removal cases at 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/pairs-acknowledgment.mjs:12; tests/e2e/store-copy.mjs:873 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 171,
+   "tag": "B2-171",
+   "state": "done",
+   "state_evidence": "queue.md:4541 'Estado: Publicado — entrega97'; queue.md:613 MQ1(b); item 173 block '97 — PR#693 incorporado às09:43:54, merge e9d8f37e...'; PR #693 merged 2026-10-20T12:43:54Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Course enable: successful HTTP, strict true, no error and valid 32-hex courseId before navigation",
+     "status": "present",
+     "evidence": "components/course-toggle.tsx:71-74",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Podcast enable: same with 32-hex podcastId",
+     "status": "present",
+     "evidence": "components/podcast-toggle.tsx:64-67",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Pending guard and own-property error lookup with honest uncertainty",
+     "status": "present",
+     "evidence": "components/course-toggle.tsx:58,60,76-79 (Object.hasOwn); components/podcast-toggle.tsx:50,69-72",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "48 synthetic intercepted replies at 390/1280 incl. navigation and staying in studio",
+     "status": "present",
+     "evidence": "tests/e2e/enable-acknowledgment.mjs:13; tests/e2e/store-copy.mjs:872 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 172,
+   "tag": "B2-172",
+   "state": "done",
+   "state_evidence": "queue.md:4547 'Estado: Publicado — entrega98'; queue.md:614 MQ1(b); item 173 block '98 — PR#694 incorporado às09:46:18, merge 14e80c33...'; PR #694 merged 2026-10-20T12:46:18Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Strict HTTP/ok/no error and exact deal snapshot (on/min/percent)",
+     "status": "present",
+     "evidence": "components/cart-deal-editor.tsx:35-41",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock checkbox, minimum and percentage while pending",
+     "status": "present",
+     "evidence": "components/cart-deal-editor.tsx:54,62,69,79,95",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Preserve uncertain drafts; confirm settings without claiming live charges",
+     "status": "present",
+     "evidence": "components/cart-deal-editor.tsx:41,44 ('Cart deal settings saved.'), :47",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "MAX_CART 4 and existing bounds preserved",
+     "status": "present",
+     "evidence": "lib/cart-rules.ts:24",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "52 synthetic intercepted on/off replies at 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/cart-acknowledgment.mjs:14; tests/e2e/store-copy.mjs:871 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 173,
+   "tag": "B2-173",
+   "state": "done",
+   "state_evidence": "queue.md:4560 'Estado: Publicado — entrega99'; queue.md:615 MQ1(b); 'Publicação funcional99 — PR#695 incorporado às10:01:36, merge 8ee3fba1...'; PR #695 merged 2026-10-20T13:01:36Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Strict HTTP/ok/no error and exact exitOffer id/null snapshot",
+     "status": "present",
+     "evidence": "components/exit-offer-editor.tsx:31",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock pending selection; saved baseline advanced only after confirmation",
+     "status": "present",
+     "evidence": "components/exit-offer-editor.tsx:15,35,46,61,70",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Preserve uncertain drafts; confirm settings without claiming delivery",
+     "status": "present",
+     "evidence": "components/exit-offer-editor.tsx:32,36,39",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "44 synthetic enable/removal replies at 390/1280 with isolated local fixture",
+     "status": "present",
+     "evidence": "tests/e2e/exit-offer-acknowledgment.mjs:12; tests/e2e/store-copy.mjs:227 (exitFixture), tests/e2e/store-copy.mjs:870 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 174,
+   "tag": "B2-174",
+   "state": "done",
+   "state_evidence": "queue.md:4602 'Estado: Publicado — entrega100'; queue.md:616 MQ1(b); 'Publicação funcional100 — PR#699 incorporado às10:25:06, merge ae095dfd...'; PR #699 merged 2026-10-20T13:25:06Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Strict HTTP/ok/no error and exact returned order before confirming save and reset",
+     "status": "present",
+     "evidence": "components/page-order-editor.tsx:40-61 (same save() used for move-save and 'Back to the usual order')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock and announce pending controls; baseline advanced only after confirmation; draft kept on uncertainty",
+     "status": "present",
+     "evidence": "components/page-order-editor.tsx:53-54,68,96,105,127-140",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Message confirms settings, not public visibility",
+     "status": "present",
+     "evidence": "components/page-order-editor.tsx:55 ('Page order settings saved.')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "48 synthetic move-save/usual-reset cases at 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/order-acknowledgment.mjs:33; tests/e2e/store-copy.mjs:869 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 175,
+   "tag": "B2-175",
+   "state": "done",
+   "state_evidence": "queue.md:4617 'Estado: Publicado — entrega101'; queue.md:617 MQ1(b); 'Publicação funcional101 — PR#701 incorporado às10:50:18, merge 35f03221...'; PR #701 merged 2026-10-20T13:50:18Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Strict HTTP/ok/no error and exact ordered tier IDs",
+     "status": "present",
+     "evidence": "components/tier-editor.tsx:31-34",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock pending selections, announce busy, preserve drafts and saved on/off status",
+     "status": "present",
+     "evidence": "components/tier-editor.tsx:23 (on from saved), :35-43, :52,69,86,90",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Single-selection refusal",
+     "status": "present",
+     "evidence": "components/tier-editor.tsx:86 (disabled when picked.length === 1)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "MIN_TIERS 2 / MAX_TIERS 6 unchanged",
+     "status": "present",
+     "evidence": "lib/tier-rules.ts:20-21",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "44 synthetic enable/disable replies plus single-selection refusal at 390/1280 with isolated 2-membership fixture",
+     "status": "present",
+     "evidence": "tests/e2e/tier-acknowledgment.mjs:12; tests/e2e/store-copy.mjs:227 (tierFixture), tests/e2e/store-copy.mjs:868 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 176,
+   "tag": "B2-176",
+   "state": "done",
+   "state_evidence": "queue.md:4632 'Estado: Publicado — entrega102'; queue.md:618 MQ1(b); 'Publicação funcional102 — PR#703 incorporado às11:11:46, merge 658f001a...'; PR #703 merged 2026-10-20T14:11:46Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Strict HTTP/ok/no error and exact reminders/cardNotice snapshot",
+     "status": "present",
+     "evidence": "components/dunning-editor.tsx:46-47",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock pending controls, announce busy, saved baseline updated only after confirmation",
+     "status": "present",
+     "evidence": "components/dunning-editor.tsx:48,70,97,112,115",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Preserve uncertain drafts and no 'nothing changed' claim after uncertainty",
+     "status": "present",
+     "evidence": "components/dunning-editor.tsx:15,53-57 (only 'We could not confirm...' message; no 'nothing changed' text found by grep)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "48 synthetic settings replies at 390/1280 reusing isolated recurring fixture",
+     "status": "present",
+     "evidence": "tests/e2e/dunning-acknowledgment.mjs:13; tests/e2e/store-copy.mjs:867 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 177,
+   "tag": "B2-177",
+   "state": "done",
+   "state_evidence": "queue.md:4647 'Estado: Publicado — entrega103'; queue.md:619 MQ1(b); 'Publicação funcional103 — PR#705 incorporado às11:38:08, merge b94eef4a...'; PR #705 merged 2026-10-20T14:38:08Z",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Strict HTTP/ok/no error and exact canonical on/address snapshot",
+     "status": "present",
+     "evidence": "components/yearly-ask-editor.tsx:32-36",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Reuse browser-safe parseYearlyAsk normalization",
+     "status": "present",
+     "evidence": "components/yearly-ask-editor.tsx:6,28",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lock pending controls; saved status/address updated only after confirmation",
+     "status": "present",
+     "evidence": "components/yearly-ask-editor.tsx:37,60,89,94,96",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Preserve uncertain drafts; confirm settings without claiming delivery",
+     "status": "present",
+     "evidence": "components/yearly-ask-editor.tsx:14,40,44",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "300-character cap unchanged",
+     "status": "present",
+     "evidence": "components/yearly-ask-editor.tsx:94 (maxLength={300})",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "48 synthetic on/off replies at 390/1280 with synthetic French address",
+     "status": "present",
+     "evidence": "tests/e2e/yearly-acknowledgment.mjs:3,14 ('10 Rue Étoile, Montréal'); tests/e2e/store-copy.mjs:866 (called in CI by .github/workflows/product-checks.yml:76,292)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 178,
+   "tag": "B2-178",
+   "state": "done",
+   "state_evidence": "queue.md 4662: 'Estado: Publicado — entrega104'; 4685-4689: Publicação funcional104, PR#707 incorporado 20/10/2026 12:09:56, merge 78e1d23d...; 620: MQ1(b) 'já concluído/publicado'",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Create confirmation: HTTP ok, ok===true strict, no contradictory error",
+     "status": "present",
+     "evidence": "components/numbers-links-editor.tsx:41",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Create confirmation: exact canonical label, revenue choice, 20-char ID, exact URL, expiry = server creation time + duration",
+     "status": "present",
+     "evidence": "components/numbers-links-editor.tsx:57-59; server returns made: app/api/store/numbers-links/route.ts:41-42; lib/numbers-links.ts:92-93",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Removal confirms the requested ID in the same response",
+     "status": "present",
+     "evidence": "components/numbers-links-editor.tsx:81",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Pending controls locked and announced busy",
+     "status": "present",
+     "evidence": "components/numbers-links-editor.tsx:97 (aria-busy), inputs/buttons disabled={busy} lines ~115-159",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Uncertain label/password/choices preserved; reload instruction before retry",
+     "status": "present",
+     "evidence": "drafts cleared only on confirmed path (components/numbers-links-editor.tsx:60-61); MESSAGES.server_error 'Reload this page to check before trying again.' line 18",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Synthetic intercepted creation/revocation tests at 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/numbers-acknowledgment.mjs:1-30, called from tests/e2e/store-copy.mjs:27,865",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Existing caps (5 live links, 7/30/90 days, password 8-100, read-only scope) unchanged",
+     "status": "present",
+     "evidence": "lib/numbers-links.ts (unchanged bounds); no change requested",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 179,
+   "tag": "B2-179",
+   "state": "done",
+   "state_evidence": "queue.md 4668: 'Estado: Publicado — entrega105'; 4694-4698: Publicação funcional105, PR#708 incorporado 12:18:09, merge d61c3d7f...; 621 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Save/stop confirmation: HTTP ok, ok===true, no error, exact sessions/priceCents/days or explicit null",
+     "status": "present",
+     "evidence": "components/package-editor.tsx:30,37-40",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Pending controls locked and announced; drafts and saved summary kept on uncertainty",
+     "status": "present",
+     "evidence": "components/package-editor.tsx:55 (aria-busy), 66,76,81,93,97 disabled={busy}; setSaved only on confirmation line 41",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Confirmation does not claim checkout availability",
+     "status": "present",
+     "evidence": "components/package-editor.tsx:93,97 toasts 'Package settings saved.' / 'Package taken off...'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Synthetic intercepted save/stop tests 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/package-acknowledgment.mjs (cases wrong count/price/days, still offered), called tests/e2e/store-copy.mjs:864",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 180,
+   "tag": "B2-180",
+   "state": "done",
+   "state_evidence": "queue.md 4674: 'Estado: Publicado — entrega106'; 4702-4706: Publicação funcional106, PR#709 incorporado 12:20:35, merge 9fa40d3d...; 622 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Confirmation: HTTP ok, ok===true, no error, exact on/reasons/creator words",
+     "status": "present",
+     "evidence": "components/leave-editor.tsx:54-67",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Valid unique own-reason IDs, unchanged persisted IDs; adopt new IDs only after confirmed save",
+     "status": "present",
+     "evidence": "components/leave-editor.tsx:56-63 (isOwnReasonId, expected.id match, uniqueness), setOwn(confirmedOwn) line 70",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Pending fields locked and busy; drafts kept on uncertainty",
+     "status": "present",
+     "evidence": "components/leave-editor.tsx:92 aria-busy, 115,118,140,162 disabled",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Synthetic intercepted tests incl. refusal to replace known persisted ID",
+     "status": "present",
+     "evidence": "tests/e2e/leave-acknowledgment.mjs (cases 'invalid reason ID', 'changed persisted ID'), called tests/e2e/store-copy.mjs:863",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 181,
+   "tag": "B2-181",
+   "state": "done",
+   "state_evidence": "queue.md 4680: 'Estado: Publicado — entrega107'; 4710-4714: Publicação funcional107, PR#710 incorporado 12:29:25, merge 9b73b2f3...; 623 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Confirmation: HTTP ok, ok===true, no error, exact ordered canonical origins",
+     "status": "present",
+     "evidence": "components/checkout-script-editor.tsx:84-86",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Raw uncertain draft and saved baseline preserved; pending list locked and busy/error announced",
+     "status": "present",
+     "evidence": "components/checkout-script-editor.tsx:52-53,87-92 (setSites only on confirmation), 132 aria-busy, 146,161 disabled",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Code generator keeps using the last confirmed list",
+     "status": "present",
+     "evidence": "components/checkout-script-editor.tsx:31 comment and sites state used by generator; 223",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Synthetic intercepted save/clear tests 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/sites-acknowledgment.mjs, called tests/e2e/store-copy.mjs:862",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 182,
+   "tag": "HT0",
+   "state": "done",
+   "state_evidence": "queue.md 4720: 'Estado: implementado e absorvido na versão179; reconciliação documental23/10/2026'; 4983/item185 text: 'HT0 incorporado via PR712, merge 7e5b1660..., 20/10/2026 12:55:08'; 624 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Section renamed to 'HT — Lições da auditoria da Hotmart (20/10/2026)'",
+     "status": "present",
+     "evidence": "queue.md:3900",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "HT0 subsection immediately below the title",
+     "status": "present",
+     "evidence": "queue.md:3902",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "HT1–HT17 subtitles in the same order, old [H1]/[H2]/[H3] untouched",
+     "status": "present",
+     "evidence": "queue.md:3938-4036",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "States per item (liberados/condicionados) and execution order recorded",
+     "status": "present",
+     "evidence": "queue.md:3921 'Ordem vigente: ... HT0; depois HT1...HT17; depois calcular HT10,HT11,HT13,HT14'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "PR712 merged",
+     "status": "present",
+     "evidence": "gh api pulls/712: merged_at 2026-10-20T15:55:08Z, merge 7e5b166093cbcb9737b6900f8abcde2285eb1902",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 183,
+   "tag": "HT1",
+   "state": "done",
+   "state_evidence": "queue.md 4733: 'Publicado como funcional108'; 4797-4799: PR713 incorporado 20/10/2026 13:09:39, READY 13:11:16, versão 571c6cd4...; 625 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Outcome-oriented hero headline and subheadline",
+     "status": "present",
+     "evidence": "components/home-claim.tsx:69 'Your link in bio, now a store.' (hero rewritten by owner decision 571 [VS1], 30/10/2026; queue.md 20984); tests/e2e/home-hero.mjs:1-13 'HT1, renewed for VS1'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Pillar 'Your store. Your Stripe. Your money.' preserved",
+     "status": "present",
+     "evidence": "replaced by recorded owner decision: VS1 new home (queue.md 20984, PR #1334) and 498 [ME3] short home (queue.md 14330, max 600 words); no file in app/ components/ lib/ carries the phrase now (grep), consistent with those decisions, not a regression",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Single dominant CTA, demo as secondary link, large targets",
+     "status": "present",
+     "evidence": "tests/e2e/home-hero.mjs:16-19 (one hero submit 'Claim it', >=44px); components/home-claim.tsx:127 demo link; app/page.tsx:209 /signin",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Closed-sale notice visible; no guaranteed-earnings copy",
+     "status": "present",
+     "evidence": "app/page.tsx:192,200,236 PLANS_ON_SALE; tests/e2e/home-hero.mjs:13-14,20",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Synthetic browser test 390/1280 wired in CI",
+     "status": "present",
+     "evidence": "tests/e2e/home-hero.mjs; tests/e2e/store-copy.mjs:23,896",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Documentation docs/ht1-home-hero.md",
+     "status": "uncertain",
+     "evidence": "docs/ht1-home-hero.md:3-5 still describes the superseded hero ('Sell your work. Build your business.', the pillar, 'Start your store' repeated in HomeActions); content replaced by VS1/ME3, the doc reads as history and was not updated",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar docs/ht1-home-hero.md, que ainda descreve a página inicial deste item (título \"Sell your work. Build your business.\", pilar \"Your store. Your Stripe. Your money.\" e o link \"Start your store\" repetido); a página inicial atual é a de 571 [VS1], com a ação única \"Claim it\" (components/home-claim.tsx), e o limite de 498 [ME3]. O documento deve dizer que essa versão foi substituída, por qual item e onde está a atual."
+  },
+  {
+   "n": 184,
+   "tag": "HT2",
+   "state": "done",
+   "state_evidence": "queue.md 4744: 'Publicado como funcional109'; 4890-4892: PR714 incorporado 13:32:08, READY 13:33:12, versão 653b978e...; 626 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "/platform organized Create→Charge→Deliver→Sell more→Automate→Grow",
+     "status": "present",
+     "evidence": "lib/creator-journey.ts (6 stages); app/platform/page.tsx:12,48,88",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "18 links to real feature pages in lib/feature-pages.ts, without prefetch",
+     "status": "present",
+     "evidence": "lib/creator-journey.ts (18 slug entries); app/platform/page.tsx:74 prefetch={false}; tests/creator-journey.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Catalog/anchor preserved, native anchor with focus",
+     "status": "present",
+     "evidence": "app/platform/page.tsx:70 (id, scroll-mt, tabIndex -1)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Closed-sale notice while PLANS_ON_SALE=false",
+     "status": "present",
+     "evidence": "app/platform/page.tsx:50",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Browser test 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/creator-journey.mjs; tests/e2e/store-copy.mjs:895",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Documentation docs/ht2-creator-journey.md",
+     "status": "uncertain",
+     "evidence": "docs/ht2-creator-journey.md last paragraph: 'Full final-head CI and exact production proof are still required before publication.' although publication 109 is recorded (queue.md 4890); possible stale line",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar docs/ht2-creator-journey.md, linha 11, que ainda diz \"Full final-head CI and exact production proof are still required before publication\"; a publicação funcional 109 deste item já está registrada na fila."
+  },
+  {
+   "n": 185,
+   "tag": "HT3",
+   "state": "done",
+   "state_evidence": "queue.md 4755: 'Publicado — publicação funcional110 confirmada'; 4973-4975: PR #715 incorporado 13:34:10, versão cf2c5a0b...; 627 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Ten benefit groups (Checkout ... CRM) linking to real feature pages",
+     "status": "present",
+     "evidence": "lib/pricing-value.ts; components/pricing-value.tsx:1-13; tests/e2e/pricing-value.mjs:3,14",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Value shown before prices on home #pricing and /pricing",
+     "status": "present",
+     "evidence": "order replaced by recorded owner decisions: 243 [CF6] (31/10/2026, plans first on /pricing; tests/pricing-card-repeats.test.ts:68, tests/e2e/pricing-value.mjs:15-16) and 571 [VS1] (home keeps one plan card and links to pricing; tests/e2e/pricing-value.mjs:9); PricingValue at app/pricing/page.tsx:54",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Honest Hotmart fee contrast reusing COMPETITOR_PRICES.hotmart and feeWords, dated official sources",
+     "status": "present",
+     "evidence": "lib/competitor-prices.ts:35-36,130; components/pricing-value.tsx:8; tests/e2e/pricing-value.mjs:22-27",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Existing ToolsCalculator reused",
+     "status": "present",
+     "evidence": "app/pricing/page.tsx:11,71; components/tools-calculator.tsx:14",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Component in accessibility inventory",
+     "status": "present",
+     "evidence": "docs/accessibility-inventory.json (components/pricing-value.tsx listed)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Documentation docs/ht3-pricing-value.md",
+     "status": "uncertain",
+     "evidence": "docs/ht3-pricing-value.md:3 still says both home #pricing and /pricing show value 'before the existing plan-price markup'; superseded by CF6/VS1, doc not updated",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar docs/ht3-pricing-value.md, que ainda descreve o valor antes dos preços, na página inicial (#pricing) e em /pricing; a ordem foi invertida pelo complemento 243 [CF6] (31/10/2026) e pelo 571 [VS1]: os planos vêm primeiro em /pricing e a lista de valor saiu da página inicial. O documento deve registrar essa substituição."
+  },
+  {
+   "n": 186,
+   "tag": "HT4",
+   "state": "done",
+   "state_evidence": "queue.md 4766: 'Publicado — publicação funcional111 confirmada'; 4980-4982: PR #716 incorporado 13:36:57, versão f9bca29f...; 628 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Existing /proof/hotmart page gains payout timing, branding/domain and ecosystem rows",
+     "status": "present",
+     "evidence": "lib/site-pages.ts:181,198-200 (Payout timing, Branding and domains, Ecosystem and portability)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Official sources dated 20/10 (Hotmart 360028608652, Club page, docs.stripe.com/payouts)",
+     "status": "present",
+     "evidence": "lib/site-pages.ts:218-220",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Existing fees, caveats, Hotmart advantages preserved; no duplicate page",
+     "status": "present",
+     "evidence": "lib/site-pages.ts:194-195,215-216",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tests: tradeoffs/links resolved, browser 390/1280",
+     "status": "present",
+     "evidence": "tests/hotmart-comparison.test.ts; tests/e2e/hotmart-comparison.mjs; tests/e2e/store-copy.mjs:893",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 187,
+   "tag": "HT5",
+   "state": "done",
+   "state_evidence": "queue.md 4775: 'Publicado — publicação funcional112 confirmada'; 5055-5057: PR717 incorporado 14:21:34, versão 867e2d66...; 629 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Same AI store draft shown before the checklist (same pool/ceiling/reservation, no automatic call)",
+     "status": "present",
+     "evidence": "app/studio/page.tsx:1320-1324 (StoreSetupAi then StudioStart)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Setup products created hidden in the existing write",
+     "status": "present",
+     "evidence": "lib/store-setup.ts:40 addProduct(..., true)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Checklist reusing funnel-launch-checklist with store labels",
+     "status": "present",
+     "evidence": "app/studio/page.tsx:10,1324; components/studio-start.tsx:67",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "First explicit publication recorded in the same mutation; unknown for older stores; republish does not reset",
+     "status": "present",
+     "evidence": "lib/store.ts:365-368,940-941,1304,3103,4033-4034; lib/store-activation.ts activationTiming",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Progress and minutes shown",
+     "status": "present",
+     "evidence": "components/studio-start.tsx:47,52",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Synthetic unit and browser tests",
+     "status": "present",
+     "evidence": "tests/store-activation.test.ts; tests/e2e/store-activation.mjs; tests/e2e/store-copy.mjs:892",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 188,
+   "tag": "HT6",
+   "state": "done",
+   "state_evidence": "queue.md 4789: 'Publicado; verificação integral e READY/domínio/SHA confirmados abaixo'; 5132-5134: Publicação funcional113, PR718 incorporado 14:56:03, versão c20edc97...; 630 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Email-only form, no password/card; CTA 'Email me a link'",
+     "status": "present",
+     "evidence": "components/signin-form.tsx:228",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "/signin for new creators shows monthly prices of all plans first, then setup without card",
+     "status": "present",
+     "evidence": "app/signin/page.tsx:248-251",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Honest trial eligibility (first eligible store only) and closed-sale wording",
+     "status": "present",
+     "evidence": "app/signin/page.tsx:252",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Returning login and received annual/monthly choice preserved",
+     "status": "present",
+     "evidence": "app/signin/page.tsx:193,241-245,255-262",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Browser test 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/signin-terms.mjs; tests/e2e/store-copy.mjs:891",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 189,
+   "tag": "HT7",
+   "state": "done",
+   "state_evidence": "queue.md 4862: 'Publicado; verificação integral e READY/domínio/SHA confirmados abaixo'; 5141-5143: Publicação funcional114, PR719 incorporado 15:00:54, versão a74a6cad...; 631 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Static registry of reviewed permissions (scope public-showcase, grant/record dates, evidence ref)",
+     "status": "present",
+     "evidence": "lib/creator-showcase.ts; tests/creator-showcase.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "/proof/creator-showcase shows only the labeled demo while no real permission exists",
+     "status": "present",
+     "evidence": "lib/site-pages.ts:1,96; tests/e2e/creator-showcase.mjs:16-18",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Home showcase section",
+     "status": "present",
+     "evidence": "removed from the home by recorded owner decision 571 [VS1] (30/10/2026): tests/e2e/creator-showcase.mjs:5-9 'with no real creators yet, the home page shows no showcase at all'; home hero labels the demo (components/home-claim.tsx:86,127)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Browser test 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/creator-showcase.mjs; tests/e2e/store-copy.mjs:890",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 190,
+   "tag": "HT8",
+   "state": "done",
+   "state_evidence": "queue.md 4871: 'Publicado; verificação integral e READY/domínio/SHA confirmados abaixo'; 5150-5152: Publicação funcional115, PR720 incorporado 15:07:24, versão 43c9ea81...; 632 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "Hidden counters with thresholds 100 stores / 1000 sales / 50 active creators, null snapshot, exact integer and date",
+     "status": "present",
+     "evidence": "lib/platform-proof.ts:4; tests/platform-proof.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Counters render when a real audited snapshot exists",
+     "status": "uncertain",
+     "evidence": "rendering lives only in components/creator-showcase.tsx:1,23-24, which is no longer imported anywhere (grep CreatorShowcase in app/ components/ lib/) since VS1 removed the showcase from the home; today correct because the snapshot is null and counters must stay hidden; a mount point will be needed when real data exists",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "recent-sales: no 'now' fallback, invalid/future timestamps and hidden/removed products blocked, no extra query",
+     "status": "present",
+     "evidence": "lib/recent-sales.ts:20,39,67,151,165; tests/recent-sales.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Browser test: unknown counters absent, no viewer fiction",
+     "status": "present",
+     "evidence": "tests/e2e/platform-proof.mjs:5-8; tests/e2e/store-copy.mjs:889",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 191,
+   "tag": "HT9",
+   "state": "done",
+   "state_evidence": "queue.md 4881: 'Publicado; verificação integral e READY/domínio/SHA confirmados abaixo'; 5159-5161: Publicação funcional116, PR721 incorporado 15:09:30, versão 4e1ffced...; 633 MQ1(b)",
+   "state_fix": "",
+   "asks": [
+    {
+     "what": "/studio/growth points to the studio 'Grow your sales' section for stats readers",
+     "status": "present",
+     "evidence": "app/studio/growth/page.tsx:45",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Six levers (bump, upsell, downsell, bundle, recovery, next offer) with saved state and links",
+     "status": "present",
+     "evidence": "lib/sales-levers.ts:4,12-17 and salesLeverSettings; components/sales-levers.tsx; app/studio/page.tsx:1504",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Last 30 UTC days, store currency, no conversion/projection; downsell-only and next-offer unknown, never 0",
+     "status": "present",
+     "evidence": "lib/sales-levers.ts:9-34; components/sales-levers.tsx:12",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "No new activation switch; no extra query",
+     "status": "present",
+     "evidence": "lib/stats.ts:1,1680 (reuses existing read)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Component in accessibility inventory",
+     "status": "present",
+     "evidence": "docs/accessibility-inventory.json:1485",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unit and browser tests",
+     "status": "present",
+     "evidence": "tests/sales-levers.test.ts; tests/e2e/sales-levers.mjs; tests/e2e/store-copy.mjs:888",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  }
+ ]
+}

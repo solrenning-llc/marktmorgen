@@ -444,7 +444,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:@lib/community-events.ts": { what: "Events, their places and who is coming", room: ["lib/community-events.ts"] },
   "nl:cm:evq@lib/community-events.ts": company("Event reminders due", "One sorted set for every store, counted with each event's room."),
   "nl:rl:cm:ev:@lib/community-events.ts": short("Event changes an hour", "studio", 1),
-  "nl:cimg:@lib/community-files.ts": { what: "Community pictures, their owners and counts", line: "community-pictures" },
+  // A door's note lives a day; a picture's mark lives as long as its post keeps it, and is taken from the store's data
+  // room with the post (lib/community.ts postBytes, PICTURE_MARK_BYTES), so the room's line prices it.
+  "nl:cimg:@lib/community-files.ts": { what: "Community pictures, their owners and counts; a posted picture's mark, in its post's data room", line: "community-pictures" },
   "nl:cimg:doors@lib/community-files.ts": company("Picture doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's."),
   "nl:cimg:n:@lib/community-files.ts": { what: "A community's pictures counted", parts: [capped(KEY, "One count a store.")] },
   "nl:cm:@lib/community-found.ts": short("A member's ticket for a course in the search, answered", "request", 1, 512, REQ("search")),

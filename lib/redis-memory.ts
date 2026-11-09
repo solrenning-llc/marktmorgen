@@ -1154,19 +1154,28 @@ export class MemoryRedis {
           }
           return 1;
         }
-        // lib/community-files.ts TAKE_PICTURE: the member's note becomes TAKEN and the path leaves the doors' list, together.
-        if (key.startsWith("-- marktmorgen:community-picture-take:v1\n") && args[0] === "2" && args.length === 7) {
-          const [, note, doors, author, taken, seconds, path] = args;
-          this.live(note);
-          const held = this.data.get(note);
-          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
-          if (held !== author) return 0;
-          this.data.set(note, taken);
-          this.until.set(note, this.now() + Number(seconds) * 1000);
-          this.live(doors);
-          const z = this.zset(doors);
-          const at = z.findIndex((entry) => entry.member === path);
-          if (at >= 0) z.splice(at, 1);
+        // lib/community-files.ts NOTE_PICTURE: a name with no note and no mark is noted for the member and listed, together.
+        if (key.startsWith("-- marktmorgen:community-picture-note:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, note, doors, author, seconds, at, path] = args;
+          if (this.run(["SET", note, author, "NX", "EX", seconds]) !== "OK") return 0;
+          this.run(["ZADD", doors, at, path]);
+          return 1;
+        }
+        // lib/community-files.ts TAKE_PICTURE: the member's note becomes the picture's mark, kept with no end, and the
+        // path leaves the doors' list, together.
+        if (key.startsWith("-- marktmorgen:community-picture-take:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, note, doors, author, mark, path] = args;
+          if (this.run(["GET", note]) !== author) return 0;
+          this.run(["SET", note, mark]);
+          this.run(["ZREM", doors, path]);
+          return 1;
+        }
+        // lib/community-files.ts UNTAKE_PICTURE: only the member's own mark becomes their note again, listed, together.
+        if (key.startsWith("-- marktmorgen:community-picture-untake:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, note, doors, mark, author, seconds, at, path] = args;
+          if (this.run(["GET", note]) !== mark) return 0;
+          this.run(["SET", note, author, "EX", seconds]);
+          this.run(["ZADD", doors, at, path]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);

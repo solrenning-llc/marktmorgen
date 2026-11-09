@@ -185,6 +185,8 @@ export const it: BuyerWords = {
     `Quando sarà attivo, il pagamento verrà incassato da Stripe sul conto di ${store}: Marktmorgen non trattiene mai il denaro e non ne prende nulla.`,
   paidBy: (takers, store) =>
     `Il pagamento viene incassato da ${takers} sul conto di ${store}. Marktmorgen non trattiene mai il denaro e non ne prende nulla.`,
+  whoAnswers: (store) =>
+    `${store} è il venditore e risponde di ciò che compri, dei rimborsi e dell'eventuale diritto di recesso. Marktmorgen ospita le pagine del negozio e non è parte del contratto di vendita.`,
   noPaymentsTitle: "Questo negozio non può ancora accettare pagamenti.",
   noPaymentsBody: (store) => `I prezzi qui sopra sono reali, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,
   noPaymentsBodyOne: (store) => `Il prezzo qui sopra è reale, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,
@@ -303,9 +305,12 @@ export const it: BuyerWords = {
   askTermsCut: () => "Qui non ho le condizioni complete. Chiedi al creatore prima di acquistare.",
 
   noLongerOnSale: "Questo prodotto non è più in vendita.",
+  cardUnread: "Non è stato possibile caricare questo prodotto ora. Riprova tra un momento.",
+  cardBuyUnread: "L'acquisto non è disponibile ora. Riprova tra un momento.",
   seeStore: (store) => `Vedi ${store}`,
   cardTestMode: "Modalità di prova: nessuna carta reale viene addebitata.",
   cardCheckout: "Pagamento sicuro con Stripe, in una nuova scheda.",
+  cardSoldBy: (store) => `Venduto da ${store}, che ne risponde.`,
   cardOpens: (store) => `Si apre nel negozio di ${store}, in una nuova scheda.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

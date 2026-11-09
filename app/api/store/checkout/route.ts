@@ -160,7 +160,8 @@ export async function POST(request: NextRequest) {
   // (lib/waitlist.ts) — unless it takes pre-orders and that is what was
   // pressed (lib/preorders.ts). A pre-order is sold before there is anything
   // to hand over: it is handed over the day the product comes out.
-  const coming = await soonOne(store, product.id).catch(() => ({ soon: false, day: null }));
+  const coming = await soonOne(store, product.id).catch(() => null);
+  if (!coming) return away(`/@${store.handle}?status=error`);
   const preorder = coming.soon && wantsPreorder && preorderDay(store, product, coming.soon, coming.day) !== null;
   if (coming.soon && !preorder) return away(`/@${store.handle}/p/${product.id}#waitlist`);
   // Refused here rather than at Stripe, so a buyer never reaches a card form

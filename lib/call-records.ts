@@ -24,6 +24,7 @@
  * so one planned before a move is recognised as out of date and dropped.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
 
 export type Move = {
   /** The new start and end, in milliseconds. */
@@ -44,36 +45,54 @@ export const REMINDER_MIN_LEAD_MS = 60 * 60_000;
 
 export type Mark = "c" | "24" | "1";
 
-function parseMove(raw: unknown): Move | null {
-  if (typeof raw !== "string") return null;
+/**
+ * A kept move read exactly, or null: a JSON object whose start and end are finite numbers, the end after the start,
+ * and whose count is a whole number from zero up, as writeMove keeps it (CX-123 rule 24).
+ */
+function parseMove(raw: string): Move | null {
+  let value: unknown;
   try {
-    const value = JSON.parse(raw) as Move;
-    if (Number.isFinite(value.s) && Number.isFinite(value.e) && value.e > value.s && Number.isInteger(value.n)) {
-      return { s: value.s, e: value.e, n: value.n };
-    }
+    value = JSON.parse(raw);
   } catch {
-    // Unreadable: treated as never moved.
+    return null;
   }
-  return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { s, e, n } = value as Record<string, unknown>;
+  if (typeof s !== "number" || typeof e !== "number" || typeof n !== "number") return null;
+  if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || !Number.isSafeInteger(n) || n < 0) return null;
+  return { s, e, n };
 }
 
-/** The moves recorded for these checkout sessions, by session. */
+/**
+ * The moves recorded for these checkout sessions, by session.
+ *
+ * Read exactly (CX-123 rule 24): only a value MGET answers null (a key that is gone, or holds no string) is a booking
+ * never moved. A pipeline or an MGET answered in another shape, a value that is not a string, or a string that is not
+ * a move throws UnknownReplyError, never "never moved": read at its old time, a moved booking would lose the reminder
+ * for its real time (lib/call-reminders.ts), be moved past MAX_MOVES (lib/calls.ts moveBooking), and have its
+ * affiliate lead approved before the call took place (lib/affiliate-leads.ts bookingEnds). Each caller refuses or
+ * tries again later on the throw.
+ */
 export async function readMoves(sessions: string[]): Promise<Map<string, Move>> {
   const found = new Map<string, Move>();
   const list = sessions.filter(Boolean);
   if (!list.length || !isRedisConfigured()) return found;
   // A hundred keys at one MGET, every MGET in one trip: a command for each hundred bookings, not one a booking
   // (lib/call-moves-read.ts, MOVES_PER_MGET, prices it; tests/plan-cost-registry.test.ts holds the two equal).
-  // A key that is gone, or holds no string, is answered null and read as never moved, as an unreadable move is.
   const perRead = 100;
   const lots: string[][] = [];
   for (let i = 0; i < list.length; i += perRead) lots.push(list.slice(i, i + perRead));
-  const replies = await redisPipeline(lots.map((lot) => ["MGET", ...lot.map(movedKey)]));
+  const replies = repliesFor(await redisPipeline(lots.map((lot) => ["MGET", ...lot.map(movedKey)])), lots.length);
+  if (!replies) throw new UnknownReplyError("the bookings' moves");
   lots.forEach((lot, l) => {
-    const values = Array.isArray(replies[l]) ? (replies[l] as unknown[]) : [];
+    const values = listSlots(replies[l]);
+    if (!values || values.length !== lot.length) throw new UnknownReplyError("the bookings' moves");
     lot.forEach((session, i) => {
-      const move = parseMove(values[i]);
-      if (move) found.set(session, move);
+      const raw = values[i];
+      if (raw === null) return;
+      const move = typeof raw === "string" ? parseMove(raw) : null;
+      if (!move) throw new UnknownReplyError("a booking's move");
+      found.set(session, move);
     });
   });
   return found;

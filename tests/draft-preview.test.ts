@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   is("even a link made straight after never opens", await readDraftPreview(sneaky.code, now + 60), null);
   const refusedDown = await send({ action: "make", id: draft.product.id });
   is("the route makes no new link for it", [refusedDown.status, refusedDown.body.error], [409, "taken_down"]);
-  is("publishing it again is what clears the mark", readFileSync("app/api/store/product/route.ts", "utf8").includes("clearTakenDown("), true);
+  is("publishing it again is what clears the mark, never in a switched-off store", readFileSync("app/api/store/product/route.ts", "utf8").includes("body.hidden === false && !guarded.store.suspended) await clearTakenDown("), true);
   await clearTakenDown(store, draft.product.id);
   is("cleared: links work again", [await isTakenDown(store, draft.product.id), (await readDraftPreview((await makeDraftPreview(store, draft.product.id, now)).code, now + 60))?.productId], [false, draft.product.id]);
   is("a mark that cannot be read throws", await throws([], () => isTakenDown(store, draft.product.id)), true);

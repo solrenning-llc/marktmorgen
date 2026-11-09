@@ -22,6 +22,7 @@ import { summaryOf, visibleReviews } from "@/lib/reviews";
 import { bumpTargets } from "@/lib/product-extras";
 import { pageAction, pricePill, productPath } from "@/components/store-product";
 import { PageEditor } from "@/components/page-editor";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { readPageFacts } from "@/lib/page-facts-read";
 import { readStats } from "@/lib/stats";
 import { readCourse } from "@/lib/course";
@@ -82,13 +83,17 @@ export default async function StudioPagesPage({ searchParams }: Params) {
   if (chosen && !listed.some((p) => p.id === chosen.id)) listed.unshift(chosen);
   // What the selected product offers in the box at checkout, for where its buttons lead.
   const related = selected?.bumps.length ? await readListings(store, bumpTargets(selected)) : [];
-  const [page, about, summary] = selected
+  const [read, about, summary] = selected
     ? await Promise.all([
-        selected.page ? readPage(store.statsId, selected.id) : Promise.resolve({ ...EMPTY_PAGE, blocks: [] }),
+        // A read whose answer is not known is said so, and no editor or template draft is drawn from it: an empty one
+        // could be saved over the page (C4-20261106-2610-C6-153, unit B). No page saved yet is read as empty, as before.
+        selected.page ? readPage(store.statsId, selected.id).catch(() => "unread" as const) : Promise.resolve({ ...EMPTY_PAGE, blocks: [] }),
         selected.about ? readAbout(store.statsId, selected.id) : Promise.resolve(""),
         summaryOf(store.statsId, selected.id).catch(() => null),
       ])
     : [null, "", null];
+  const unread = read === "unread";
+  const page = unread ? null : read;
   // Library intents only seed an unsaved empty page. Saved creator content wins.
   const template = typeof query.template === "string" ? PAGE_TEMPLATES.find(item => item.id === query.template) : undefined;
   const sectionId = typeof query.sectionTemplate === "string" && /^[a-zA-Z0-9_-]{10}$/.test(query.sectionTemplate) ? query.sectionTemplate : "";
@@ -146,7 +151,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
         </p>
 
         {templateNotice ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{templateNotice}</p> : null}
-        {products.length === 0 || !selected || !page || !action ? (
+        {products.length === 0 || !selected || (!page && !unread) || !action ? (
           <div className="card mt-8 p-6 sm:p-8">
             <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Nothing to build a page for yet</p>
             <p className="mt-2 text-ink-soft">Add a product in the studio and its page can be built here.</p>
@@ -203,6 +208,13 @@ export default async function StudioPagesPage({ searchParams }: Params) {
             </nav>
 
             <div className="min-w-0">
+            {/* A page whose read is not known is said so in place of its editor only: the list beside it and the note
+                after paying, read on their own, stay, so the creator can choose another product (#2832, review). */}
+            {!page ? (
+              <div className="card p-6 sm:p-8">
+                <p role="status" className="text-lg font-semibold tracking-[-0.02em] text-ink">{STUDIO_MESSAGES.page_unread}</p>
+              </div>
+            ) : (
             <AiOn value={aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}>
             <PageEditor
               // One editor per product: a save keeps the editor as it is, with the
@@ -254,6 +266,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
                 .catch(() => null)}
             />
             </AiOn>
+            )}
             {/* What a buyer reads after paying (lib/thanks-note.ts). Something free has its own page after a sign-up. */}
             {!isFree(selected) ? (
               <ThanksNoteEditor

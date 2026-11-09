@@ -45,6 +45,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  */
 async function nextProduct(store: Store, free: Listing | null): Promise<Listing | null> {
   if (!free?.page) return null;
+  // A page whose read is not known names no next product: the card is optional, and leaving out what could not be
+  // confirmed says nothing is missing (C4-20261106-2610-C6-153, unit B).
   const page = await readPage(store.statsId, free.id).catch(() => null);
   const next = page?.next && pageShown(page) ? await readListing(store, page.next) : null;
   return next && next.priceCents > 0 && canSellProduct(store, next) ? next : null;

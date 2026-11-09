@@ -38,14 +38,39 @@ export async function POST(request: NextRequest) {
   }
 
   const expired = () => plain(410, "This link has expired. Ask the store for a new copy.");
-  // The store the link names is read before a use of the link is spent: a store that is gone, or
-  // switched off after notices about its content (lib/takedown.ts), hands nothing over, lists no one,
-  // tells no webhook, and the link keeps its uses for when the store is back.
-  const named = await readClaim(token);
+  // Everything the link names is read, and every refusal made, before a use of the link is spent: a
+  // store switched off after notices about its content, or a product taken down after one (hidden;
+  // lib/takedown.ts), hands nothing over, lists no one, tells no webhook, and the link keeps its uses
+  // for when it is back. A link, store or product that could not be read hands nothing over, and says
+  // so (CX-123 rule 24).
+  let named: Awaited<ReturnType<typeof readClaim>>;
+  let store: Awaited<ReturnType<typeof storeForHandle>>;
+  let product: Awaited<ReturnType<typeof readListing>>;
+  try {
+    named = await readClaim(token);
+    store = named ? await storeForHandle(named.handle) : null;
+    product = named && store ? await readListing(store, named.productId) : null;
+  } catch (error) {
+    console.error("reading a free copy's link, store or product failed", error);
+    return plain(503, "This link could not be checked just now. Try again in a moment.");
+  }
   if (!named) return expired();
-  const store = await storeForHandle(named.handle);
   if (!store) return plain(404, "This store is not here anymore.");
-  if (store.suspended) return plain(404, `${blockWords(store.language).unavailableTitle}.`);
+  // A takedown, of the store or of the product, answers as the store's other pages do while it is
+  // switched off (app/[handle]/free, review, left): this page is unavailable, with no promise of when.
+  if (store.suspended || product?.hidden) return plain(404, `${blockWords(store.language).unavailableTitle}.`);
+
+  // Looked up again rather than trusted from the claim: a product the creator
+  // has since removed or started charging for is not handed out for free on
+  // the strength of an old email. The same condition as the request for a
+  // copy (lib/free-offer.ts), with the store's suspended mark.
+  const g = givingWords(store.language);
+  if (!product || !stillGivenFree(store, product)) {
+    return plain(410, g.freeGone);
+  }
+  if (!product.file && !product.link) {
+    return plain(404, g.freeNothing);
+  }
 
   // A use count that could not be read hands nothing over, and says so (CX-123 rule 24).
   const used = await spendClaim(token).catch((error: unknown) => {
@@ -59,30 +84,8 @@ export async function POST(request: NextRequest) {
       : expired();
   }
   const { claim } = used;
-  // The same link names the same store; anything else is a link that changed under it.
-  if (claim.h !== named.handle) return expired();
-
-  // A product that could not be read hands nothing over, and says so (CX-123 rule 24).
-  let product: Awaited<ReturnType<typeof readListing>>;
-  try {
-    product = await readListing(store, claim.p);
-  } catch (error) {
-    console.error("reading a free copy's product failed", error);
-    return plain(503, "This link could not be checked just now. Try again in a moment.");
-  }
-
-  // Looked up again rather than trusted from the claim: a product the creator
-  // has since removed, hidden (a draft, or taken down after a notice about its
-  // content) or started charging for, or a store switched off after notices
-  // (lib/takedown.ts), is not handed out for free on the strength of an old
-  // email. The same condition as the request for a copy (lib/free-offer.ts).
-  const g = givingWords(store.language);
-  if (!product || !stillGivenFree(store, product)) {
-    return plain(410, g.freeGone);
-  }
-  if (!product.file && !product.link) {
-    return plain(404, g.freeNothing);
-  }
+  // The same link names the same store and product; anything else is a link that changed under it.
+  if (claim.h !== named.handle || claim.p !== named.productId) return expired();
 
   const listed = await recordLead(store, claim, product.title);
   // Sequences start only for someone who agreed to hear from the creator,

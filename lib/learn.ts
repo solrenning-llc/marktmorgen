@@ -65,8 +65,8 @@ export const PASS_SECONDS = 90 * 24 * 60 * 60;
 /** How long an emailed link works, and how many times it opens. */
 export const LINK_SECONDS = 60 * 60;
 const MAX_LINK_OPENS = 10;
-/** How long an answer from Stripe about who bought what is reused. */
-const PAID_SECONDS = 10 * 60;
+/** How long an answer from Stripe about who bought what is reused (lib/certificate-refunds.ts waits past it). */
+export const PAID_SECONDS = 10 * 60;
 const IP_LIMIT = 10;
 const ADDRESS_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;

@@ -42,7 +42,7 @@ const COURSE_ID = "d".repeat(32);
 
 type Charge = { object: "charge"; id: string; amount: number; amount_refunded: number; refunded: boolean; disputed: boolean };
 type Refund = { id: string; object: "refund"; created: number; status: string; amount: number; payment_intent: string; charge: Charge };
-type Session = Record<string, unknown> & { id: string; customer_details: { email: string }; payment_intent: { id: string; object: "payment_intent"; latest_charge: Charge } };
+type Session = Record<string, unknown> & { id: string; created: number; customer_details: { email: string }; payment_intent: { id: string; object: "payment_intent"; latest_charge: Charge } };
 
 const sessions: Session[] = [];
 const refunds: Refund[] = [];
@@ -66,7 +66,7 @@ function paged<T extends { id: string; created: number }>(rows: T[], q: URLSearc
   const after = q.get("starting_after");
   if (after) {
     const at = sorted.findIndex((row) => row.id === after);
-    if (at < 0) return new Response(JSON.stringify({ error: { message: "No such object" } }), { status: 400 });
+    if (at < 0) return new Response(JSON.stringify({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such refund" } }), { status: 400 });
     sorted = sorted.slice(at + 1);
   }
   return listOf(sorted.slice(0, limit).map(present), sorted.length > limit, url);
@@ -214,6 +214,16 @@ async function main(): Promise<void> {
   garbled.delete(xiaRefund.id);
   for (let i = 0; i < 3; i += 1) await run().catch(() => 0);
   is("once it reads, Xia's certificate goes", await withdrawn(xia.id), true);
+
+  part("A place whose row Stripe no longer knows is read again from the newest, never left stuck");
+  const at = await anchorAt();
+  await redis.pipeline([["SET", anchorKey, `${at}|re_gone0000000000000000000|${at}|0`, "EX", 86_400]]);
+  await run().catch(() => 0);
+  is("the row to read on after is dropped, the place itself kept", String((await redis.pipeline([["GET", anchorKey]]))[0]), String(at));
+  const vic = await student("vic@example.com");
+  refundInFull(vic.session);
+  await run().catch(() => 0);
+  is("the next pass reads from the newest again: a new full refund withdraws its certificate", await withdrawn(vic.id), true);
 
   part("M2: what the pass costs is in the registry");
   const registry = NOT_A_COST as Record<string, string | undefined>;

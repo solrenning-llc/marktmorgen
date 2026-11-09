@@ -86,3 +86,34 @@ export async function waitingFor(store: Store, email: string, now = Date.now(), 
     unread,
   };
 }
+
+/** A count in words: an exact number up to what one read lists, and "more than" past it, never a total that was not counted (Codex J, #1969). */
+function countWords(n: number): string {
+  return n > WAITING_SHOWN ? `more than ${WAITING_SHOWN}` : String(n);
+}
+
+/**
+ * What the library says on a store's card (app/library): how many payment
+ * requests and things to sign wait there, in words, and whether some could
+ * not be read just now; or "" for nothing waiting. The library is
+ * Marktmorgen's own page, so it is in US English.
+ */
+export function waitingLine(waiting: Pick<Waiting, "requestsTotal" | "agreementsTotal" | "unread">): string {
+  const parts: string[] = [];
+  const requests = waiting.requestsTotal;
+  const toSign = waiting.agreementsTotal;
+  if (requests > 0) parts.push(`${countWords(requests)} payment ${requests === 1 ? "request" : "requests"} to pay`);
+  if (toSign > 0) parts.push(`${countWords(toSign)} ${toSign === 1 ? "proposal or agreement" : "proposals or agreements"} to sign`);
+  const counted = parts.length ? `Waiting for you: ${parts.join(" and ")}.` : "";
+  if (!waiting.unread) return counted;
+  return counted ? `${counted} Some of it could not be read just now.` : WAITING_UNCHECKED;
+}
+
+/**
+ * What a store's card says when nothing could be checked: its read was not known, or its requests for the read
+ * were used up, so nothing was read (Codex J, #1969). It says neither that something waits nor when it will show,
+ * since the code knows neither (Claude 5 on #1969, VR item 2).
+ */
+export const WAITING_UNCHECKED = "We could not check just now whether this store is waiting on anything from you.";
+/** The same words when the store's requests for the read were used up. */
+export const WAITING_LATER = WAITING_UNCHECKED;

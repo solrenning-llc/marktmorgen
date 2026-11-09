@@ -1,0 +1,66 @@
+import { cartLinkProducts, cartLinkUnits, CART_LINK_UNIT_BYTES } from '@/lib/cart-link-products';
+import { KIND, MAX_PRODUCT_BYTES, productIds } from '@/lib/catalog';
+import { STUDIO_PAGE_UNITS } from '@/lib/studio-allowance-rules';
+import { countStudio } from '@/lib/studio-route';
+import { addDraftProducts, claimHandle, ensureStatsId, setProductFile, setProductHidden, setSubscription, storeForEmail } from '@/lib/store';
+import { store as redis } from './redis-stub';
+import { paidPeriod } from './billing-period-fixture';
+import { is, done } from './check';
+
+globalThis.fetch = async () => { throw Error('No external service in G review'); };
+async function main() {
+  redis.clear(); const owner = 'g-weight-envelope@example.test';
+  await claimHandle(owner, 'g-weight-envelope', 'Synthetic store', ''); await ensureStatsId(owner);
+  await setSubscription(owner, { customerId: 'cus_GWeightEnvelope', subscriptionId: 'sub_GWeightEnvelope', active: true, tier: 'pro', period: paidPeriod() });
+  const drafts = [...Array.from({ length: 30 }, (_, i) => ({ title: 'Free ' + i, summary: '', priceCents: 0, link: 'https://example.test/free' })), ...Array.from({ length: 24 }, (_, i) => ({ title: 'Paid ' + i, summary: '', priceCents: 1900, link: 'https://example.test/paid' }))];
+  const added = await addDraftProducts(owner, drafts); if (!added.ok) throw Error('fixture creation refused');
+  let shop = (await storeForEmail(owner))!;
+  for (const id of productIds(shop)) { const result = await setProductHidden(owner, id, false); if (!result.ok) throw Error('publish refused'); }
+  shop = (await storeForEmail(owner))!;
+  const paidIds = shop.catalog.items.filter(p => (p.kind & KIND.paid) !== 0).map(p => p.id);
+  if (paidIds.length !== 24) throw Error('fixture did not identify its 24 paid records');
+  const mode = process.env.G_WEIGHT_MODE ?? 'race';
+  // Synthetic existing file metadata, within the catalog record ceiling. No upload or blob read occurs.
+  if (mode !== 'race') for (const id of paidIds) {
+    const result = await setProductFile(owner, id, { pathname: `stores/synthetic/${id}/file.pdf`, name: 'x'.repeat(80_000) + '.pdf', bytes: 1, contentType: 'application/pdf', addedAt: '2026-11-06' });
+    if (!result.ok) throw Error('synthetic file metadata was refused');
+  }
+  shop = (await storeForEmail(owner))!;
+  const base = redis.pipeline.bind(redis);
+  const debits: number[] = []; let reads = 0, bytes = 0, injected = 0, paidBeforeFirst = 0;
+  redis.pipeline = async commands => {
+    if (commands.some(c => c[0] === 'HMGET' && String(c[1]).startsWith('nl:data:'))) {
+      injected++;
+      if (mode === 'extra') return [Array(commands[0].length - 2).fill('1'), 0];
+      if (mode === 'unknown') return [null];
+      if (mode === 'race') {
+        const snapshot = await base(commands);
+        redis.pipeline = base;
+        try {
+          for (const id of paidIds) {
+            const grown = await setProductFile(owner, id, { pathname: `stores/synthetic/${id}/file.pdf`, name: 'x'.repeat(80_000) + '.pdf', bytes: 1, contentType: 'application/pdf', addedAt: '2026-11-06' });
+            if (!grown.ok) throw Error('concurrent real metadata growth refused');
+          }
+        } finally { redis.pipeline = spy; }
+        return snapshot;
+      }
+    }
+    if (commands.some(c => c[0] === 'GET' && /^nl:catalog:.*:l:/.test(String(c[1]))) && !reads) paidBeforeFirst = debits.reduce((a, b) => a + b, 0);
+    const answer = await base(commands);
+    commands.forEach((c, i) => {
+      if (c[0] === 'INCRBY' && String(c[1]).includes(':studio:')) debits.push(Number(c[2]));
+      if (c[0] === 'GET' && /^nl:catalog:.*:l:/.test(String(c[1]))) { reads++; bytes += Buffer.byteLength(String(answer[i])); }
+    }); return answer;
+  };
+  const spy = redis.pipeline;
+  let listed: Awaited<ReturnType<typeof cartLinkProducts>> = [];
+  try { const admitted = await countStudio(shop, null, STUDIO_PAGE_UNITS); if (!admitted.ok) throw Error('fixture studio page refused'); listed = await cartLinkProducts(shop); }
+  finally { redis.pipeline = base; }
+  console.log('G_WEIGHT_ENVELOPE', JSON.stringify({ mode, injected, reads, bytes, debits, paidBeforeFirst, capacity: paidBeforeFirst * CART_LINK_UNIT_BYTES, listed: listed.length }));
+  is('the exact weight boundary was reached', injected, 1);
+  is('the builder reads and offers its bounded 24 existing products', [reads, listed.length], [24, 24]);
+  if (mode !== 'healthy' && mode !== 'race') is('an unknown outer envelope charges the conservative per-record ceiling', debits.at(-1), cartLinkUnits(24, 24 * MAX_PRODUCT_BYTES));
+  is('actual listing bytes fit all admission completed before the first read', bytes <= paidBeforeFirst * CART_LINK_UNIT_BYTES, true);
+  done();
+}
+void main();

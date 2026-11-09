@@ -50,6 +50,8 @@ part("A row's pictures and videos");
 const video = { provider: "youtube", id: "dQw4w9WgXcQ" } as unknown as Extract<RowElement, { kind: "video" }>["video"];
 is("a row's described picture is a look inside", check(input([hero, row("row00001", { kind: "image", picture, decorative: false })]), "show")?.done, true);
 is("a row's video is a look inside", check(input([hero, row("row00001", { kind: "video", video, title: "A lesson" })]), "show")?.done, true);
+is("a row's video in a window is a look inside", check(input([hero, row("row00001", { kind: "video-window", video, title: "A lesson", label: "Watch a lesson" })]), "show")?.done, true);
+is("a video window's \"Click here\" is counted as a vague button", check(input([hero, row("row00001", ownButton("Get the course"), { kind: "video-window", video, title: "", label: "Click here" })]), "button_words")?.label, "Every button says what it does (1 does not)");
 is("a decorative picture is not", check(input([hero, row("row00001", { kind: "image", picture: { ...picture, alt: "" }, decorative: true })]), "show")?.done, false);
 is("a row's picture without words is asked for its description", check(input([hero, row("row00001", { kind: "image", picture: { ...picture, alt: "" }, decorative: false })]), "described")?.done, false);
 is("a decorative one is not", check(input([hero, row("row00001", { kind: "image", picture: { ...picture, alt: "" }, decorative: true })]), "described"), undefined);

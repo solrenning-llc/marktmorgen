@@ -51,6 +51,8 @@ import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { countOrder } from "@/lib/orders";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { StripeListUnreadable, plainObject, ownField, readStripePage } from "@/lib/stripe-list";
 import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -59,7 +61,7 @@ import { HOLD_SECONDS, checkoutClosesAt, onAccount } from "@/lib/stripe-account"
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { askForCallReminder, recoveryOn, refusedRecovery, withoutCallReminder } from "@/lib/recovery-setting";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
-import { refundedInFull } from "@/lib/refunds";
+import { keptUnlessLost, refundedInFull } from "@/lib/refunds";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import type { Listing, Product, Store } from "@/lib/store";
 import { idsOfKind, listingFinder, readListing, readListings, sellsAny } from "@/lib/catalog";
@@ -155,49 +157,78 @@ export const confirmedKey = (session: string) => `nl:call:confirmed:${session}`;
  */
 export const CONFIRMED_SECONDS = 430 * 86_400;
 
-function readEntries(flat: string[]): { field: string; entry: Entry }[] {
-  const out: { field: string; entry: Entry }[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      out.push({ field: flat[i], entry: JSON.parse(flat[i + 1]) as Entry });
-    } catch {
-      out.push({ field: flat[i], entry: { e: NaN, until: -1 } });
-    }
+/** A time as the diary's writers make it: a whole number of milliseconds since 1970, after 1970. */
+const diaryTime = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+/**
+ * One diary entry, read exactly (CX-123 rule 24): a JSON object whose start
+ * (`s` or, for an entry filed by its start before group calls, its field) and
+ * end `e` are diary times with the end after the start, and whose `until` is 0
+ * (a booking) or a diary time (a hold: holdAndCheckout writes Date.now() plus
+ * the hold). Anything else throws UnknownReplyError: an entry that cannot be
+ * read could be a held or booked seat, so it is never read as free, and never
+ * deleted as stale (a negative `until` once read as a hold that ran out, and
+ * the real hold was deleted and its time sold again: Codex Z on #3240).
+ */
+function entryOf(field: string, value: string): Entry & { start: number } {
+  let entry: unknown;
+  try {
+    entry = JSON.parse(value);
+  } catch {
+    throw new UnknownReplyError("a call diary entry that does not parse");
   }
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new UnknownReplyError("a call diary entry that is not an object");
+  const { s, e, until } = entry as Entry;
+  const start = s === undefined ? Number(field) : s;
+  if ((until !== 0 && !diaryTime(until)) || !diaryTime(start) || !diaryTime(e) || e <= start) {
+    throw new UnknownReplyError("a call diary entry whose times cannot be read");
+  }
+  return { ...(entry as Entry), start };
+}
+
+/** Every entry of a diary, each read exactly (entryOf): one that cannot be read throws, and nothing is read from the rest. */
+function readEntries(flat: string[]): { field: string; value: string; entry: Entry & { start: number } }[] {
+  const out: { field: string; value: string; entry: Entry & { start: number } }[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) out.push({ field: flat[i], value: flat[i + 1], entry: entryOf(flat[i], flat[i + 1]) });
   return out;
 }
 
 export { PAST_CALL_DAYS };
 
+/**
+ * The diary's fields and values as HGETALL gives them, read in their exact
+ * shape (CX-123 rule 24): a list of strings in pairs, empty only when Redis
+ * says the diary is empty. Anything else throws UnknownReplyError, never read
+ * as "nothing held": a held or booked time would be offered and sold again.
+ */
+async function readDiary(callsId: string): Promise<string[]> {
+  const one = repliesFor(await redisPipeline([["HGETALL", busyKey(callsId)]]), 1);
+  const flat = one ? stringList(one[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a call diary's holds");
+  return flat;
+}
+
 async function heldAndBooked(store: Store, now: number): Promise<(TeamBusy & { field: string })[]> {
   const callsId = store.callsId as string;
-  const [raw] = await redisPipeline([["HGETALL", busyKey(callsId)]]);
-  const flat = Array.isArray(raw) ? (raw as string[]) : [];
+  // Every entry is read before anything is decided or deleted: one that cannot be read throws (entryOf), and the
+  // whole diary is then unknown, so no time is offered or sold and nothing is let go on it.
+  const entries = readEntries(await readDiary(callsId));
   const busy: (TeamBusy & { field: string })[] = [];
   const stale: string[] = [];
   const past: string[] = [];
   let freed = 0;
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const entry = JSON.parse(flat[i + 1]) as Entry;
-      if (entry.until === 0 && Number.isFinite(entry.e) && entry.e < now - PAST_CALL_DAYS * 86_400_000) {
-        past.push(flat[i]);
-        freed += fieldReleaseBytes(flat[i], flat[i + 1]);
-      }
-    } catch {
-      // Read as stale below.
+  for (const { field, value, entry } of entries) {
+    if (entry.until === 0 && entry.e < now - PAST_CALL_DAYS * 86_400_000) {
+      past.push(field);
+      freed += fieldReleaseBytes(field, value);
+      continue;
     }
-  }
-  for (const { field, entry } of readEntries(flat)) {
-    if (past.includes(field)) continue;
-    if (entry.until === -1 || (entry.until !== 0 && entry.until < now)) {
+    if (entry.until !== 0 && entry.until < now) {
       stale.push(field);
       continue;
     }
-    const start = typeof entry.s === "number" ? entry.s : Number(field);
-    if (!Number.isFinite(start) || !Number.isFinite(entry.e)) continue;
     const team = teamOf(entry);
-    busy.push({ start, end: entry.e, product: entry.p, session: entry.session, field, ...(team ? { hosts: team.hosts, claim: team.claim } : {}) });
+    busy.push({ start: entry.start, end: entry.e, product: entry.p, session: entry.session, field, ...(team ? { hosts: team.hosts, claim: team.claim } : {}) });
   }
   // Holds that ran out are tidied as they are noticed, and calls long over let go.
   if (stale.length) await redisPipeline([["HDEL", busyKey(callsId), ...stale]]).catch(() => {});
@@ -273,8 +304,41 @@ export async function paidCallsRead(store: Store): Promise<{ paid: Awaited<Retur
 type CallRow = Awaited<ReturnType<typeof paidCalls>>[number];
 
 /**
+ * The most charges one reading of a store's bookings asks Stripe about a
+ * dispute (queue 388 [TB14]): only a charge Stripe marks as disputed is
+ * asked (GET /disputes?charge=, lib/refunds.ts, keptUnlessLost), which is
+ * rare, and none else. Past it, or when Stripe cannot be asked, the booking
+ * keeps its time: in the doubt the buyer keeps what they paid for, and a
+ * later reading frees it (Claude 4, C4-20261105-2100-C6-4).
+ */
+export const DISPUTE_READS_PER_READING = 5;
+
+/** Whether Stripe marks this booking's charge as disputed (the payment read with its latest charge expanded). */
+function disputedCharge(row: SessionRow): boolean {
+  const payment = row.payment_intent as { latest_charge?: { disputed?: unknown } | null } | null | undefined;
+  return !!payment && typeof payment === "object" && !!payment.latest_charge && typeof payment.latest_charge === "object" && payment.latest_charge.disputed === true;
+}
+
+/**
+ * callFromRow, with a disputed charge asked about while `reads.left` lasts: a
+ * dispute lost frees the booking as a full refund does (lib/refunds.ts, the
+ * owner's rule of 4 November 2026: whatever its amount).
+ */
+async function callOrLost(store: Store, row: SessionRow, handles: Set<string>, reads: { left: number }): Promise<CallRow | "refunded" | null> {
+  const call = callFromRow(row, handles);
+  if (!call || call === "refunded" || !disputedCharge(row) || !store.stripeAccountId) return call;
+  if (reads.left <= 0) {
+    console.warn("a disputed booking keeps its time: this reading asked Stripe about as many disputes as it may", store.handle, call.session);
+    return call;
+  }
+  reads.left -= 1;
+  return (await keptUnlessLost(store.stripeAccountId, row.payment_intent)) ? "refunded" : call;
+}
+
+/**
  * A paid booking of this store from one checkout session, or null. A booking
  * refunded in full is `refunded`: it no longer holds its time or gets reminders.
+ * A dispute lost is read by callOrLost, which asks Stripe.
  */
 function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded" | null {
   const meta = row.metadata ?? {};
@@ -322,9 +386,23 @@ async function withMoves(found: CallRow[]): Promise<CallRow[]> {
 }
 
 /**
+ * A completed checkout row as Stripe gives it: its metadata a plain object.
+ * A row whose metadata cannot be read could be a booking, so it is not read
+ * as "not a call".
+ */
+function sessionRowKnown(row: Record<string, unknown>): boolean {
+  return plainObject(ownField(row, "metadata"));
+}
+
+/**
  * The paid bookings Stripe lists for this store, and the sessions of those
  * refunded in full. Only completed checkouts are read, so holds that ran out
  * never use up the pages.
+ *
+ * Each page is read in its exact shape (lib/stripe-list.ts; CX-123 rule 24):
+ * a page in another shape, a row that cannot be read, or a page that says
+ * there is more without a row to read on from throws StripeListUnreadable,
+ * never read as "no booking", so a paid time is never offered again.
  */
 async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refunded: Set<string>; partial: boolean }> {
   const refunded = new Set<string>();
@@ -332,27 +410,31 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
   const handles = saleHandles(store);
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 86400;
   const found: CallRow[] = [];
+  const reads = { left: DISPUTE_READS_PER_READING };
   let after = "";
   // Whether the last page read still said there were more: older bookings were then left out.
   let partial = false;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const list = (await onAccount(
-      "GET",
-      store.stripeAccountId,
-      `/checkout/sessions?limit=100&status=complete&created[gte]=${since}&expand[]=data.payment_intent.latest_charge${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
-    )) as { data?: unknown; has_more?: unknown };
-    const rows = Array.isArray(list.data) ? (list.data as SessionRow[]) : [];
+    const list = readStripePage(
+      await onAccount(
+        "GET",
+        store.stripeAccountId,
+        `/checkout/sessions?limit=100&status=complete&created[gte]=${since}&expand[]=data.payment_intent.latest_charge${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+      ),
+      sessionRowKnown,
+    );
+    if (list.unreadable > 0) throw new StripeListUnreadable(`${list.unreadable} checkout row(s) could not be read`);
+    if (list.hasMore && !list.lastId) throw new StripeListUnreadable("more checkouts, with no row to read on from");
+    const rows = list.rows as SessionRow[];
     for (const row of rows) {
-      const call = callFromRow(row, handles);
+      const call = await callOrLost(store, row, handles, reads);
       if (call === "refunded") {
         if (typeof row.id === "string") refunded.add(row.id);
       } else if (call) found.push(call);
     }
-    if (list.has_more !== true || rows.length === 0) break;
+    if (!list.hasMore) break;
     if (page === MAX_PAGES - 1) partial = true;
-    const last = rows[rows.length - 1];
-    after = typeof last.id === "string" ? last.id : "";
-    if (!after) break;
+    after = list.lastId as string;
   }
   return { paid: await withMoves(found), refunded, partial };
 }
@@ -369,7 +451,7 @@ export async function paidCall(store: Store, session: string): Promise<CallRow |
     store.stripeAccountId,
     `/checkout/sessions/${encodeURIComponent(session)}?expand[]=payment_intent.latest_charge`,
   )) as SessionRow;
-  const call = callFromRow(row, saleHandles(store));
+  const call = await callOrLost(store, row, saleHandles(store), { left: 1 });
   if (!call || call === "refunded") return null;
   return (await withMoves([call]))[0] ?? null;
 }
@@ -398,7 +480,12 @@ async function readBusy(
   sessions.catch(() => {});
   let refunded = new Set<string>();
   try {
-    ({ paid, refunded } = await readCallSessions(store));
+    let partial: boolean;
+    ({ paid, refunded, partial } = await readCallSessions(store));
+    // A reading that stopped at its last page while Stripe said there were more left older completed checkouts
+    // unread: a paid booking among them, whose diary entry is missing, would be offered and sold again. Not every
+    // paid booking is known then, so no time is offered or sold on this reading (Claude 2 on #3233).
+    if (partial) throw new StripeListUnreadable(`more completed checkouts than ${MAX_PAGES} pages; paid bookings not all read`);
   } catch (error) {
     // Without Stripe's answer a paid time could be offered twice. Refusing to
     // show any time is the safe failure; the caller treats the throw as that.
@@ -471,8 +558,8 @@ function ownerOf(store: Pick<Store, "email">): string {
 export async function releaseOwnHold(store: Store, session: string): Promise<void> {
   if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return;
   if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
-  const [raw] = await redisPipeline([["HGETALL", busyKey(store.callsId)]]);
-  const flat = Array.isArray(raw) ? (raw as string[]) : [];
+  // A diary that cannot be read throws: the hold is left alone, as when it is not found, and runs out by itself.
+  const flat = await readDiary(store.callsId);
   const held = readEntries(flat).filter(({ entry }) => entry.session === session && entry.until !== 0);
   const fields = held.map(({ field }) => field);
   if (!fields.length) return;
@@ -617,21 +704,46 @@ export async function checkCallChange(
 
 // ---- The lock around a check and a write ---------------------------------
 
+/** The one reply of a single command, in a reply list of exactly one; UnknownReplyError otherwise. */
+async function onlyReply(command: (string | number)[], what: string): Promise<unknown> {
+  const one = repliesFor(await redisPipeline([command]), 1);
+  if (!one) throw new UnknownReplyError(what);
+  return one[0];
+}
+
+/**
+ * Takes the store's lock: true when it is ours, false when somebody else
+ * holds it. Each reply is read exactly (CX-123 rule 24; Claude 6, audit round
+ * 5): only "OK" to the SET NX takes the lock and nil is somebody else's; any
+ * other answer throws UnknownReplyError, and the caller refuses, opening no
+ * checkout and writing no move. A held lock is taken over only when its GET
+ * is a time in milliseconds that is 15 seconds old, and only on an "OK" to
+ * that SET; a GET in another shape, or one that says the lock is gone while
+ * SET NX still says it is held, is never read as a lock left behind.
+ */
 async function takeLock(callsId: string): Promise<boolean> {
   const lock = lockKey(callsId);
+  const take = async (): Promise<boolean> => {
+    const got = await onlyReply(["SET", lock, String(Date.now()), "NX", "EX", 15], "a call lock's SET NX");
+    if (got === "OK") return true;
+    if (got === null) return false;
+    throw new UnknownReplyError("a call lock's SET NX");
+  };
   // Another buyer of this store may be picking a time right now. They hold
   // the lock for a second or two, so wait for it rather than turn this one
   // away over a time nobody took.
-  let got: unknown = null;
-  for (let attempt = 0; attempt < 12 && got === null; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250));
-    [got] = await redisPipeline([["SET", lock, String(Date.now()), "NX", "EX", 15]]);
+    if (await take()) return true;
   }
-  if (got === null) {
-    const [held] = await redisPipeline([["GET", lock]]);
-    // A lock left behind by a request that died is taken over after 15 seconds.
-    if (typeof held === "string" && Date.now() - Number(held) < 15_000) return false;
-    await redisPipeline([["SET", lock, String(Date.now()), "EX", 15]]);
+  const held = await onlyReply(["GET", lock], "a call lock's GET");
+  // Gone since: tried once more, never taken over.
+  if (held === null) return take();
+  if (typeof held !== "string" || !/^\d{1,16}(\.\d{1,9})?$/.test(held)) throw new UnknownReplyError("a call lock's GET");
+  // A lock left behind by a request that died is taken over after 15 seconds.
+  if (Date.now() - Number(held) < 15_000) return false;
+  if ((await onlyReply(["SET", lock, String(Date.now()), "EX", 15], "a call lock's take-over")) !== "OK") {
+    throw new UnknownReplyError("a call lock's take-over");
   }
   return true;
 }
@@ -903,7 +1015,16 @@ export async function holdAndCheckout(input: {
   // Past the store's orders the buyer is told the call cannot be booked right now, and nothing is charged.
   if (!admitted.ok) return { ok: false, reason: "unavailable" };
 
-  if (!(await takeLock(store.callsId))) return { ok: false, reason: "taken" };
+  // A lock that cannot be read is not ours: refused, and nothing is opened. It is not let go either (it may be
+  // somebody else's); it runs out at its own 15 seconds.
+  let locked: boolean;
+  try {
+    locked = await takeLock(store.callsId);
+  } catch (error) {
+    console.error("taking a call's lock failed", error);
+    return { ok: false, reason: "error" };
+  }
+  if (!locked) return { ok: false, reason: "taken" };
 
   // A team booking's claim on its hosts' time, once taken: let go again if no checkout comes of it.
   let claimed: { hosts: string[]; claim: string } | null = null;
@@ -1151,10 +1272,25 @@ export async function moveBooking(input: {
   if (length === null) return { ok: false, reason: "taken" };
   let end = start + length;
   const callsId = store.callsId;
-  // Moves keep their hosts, so the team as it was saved is used whatever the plan allows now.
-  const team = await teamForMove(store, product).catch(() => null);
+  // Moves keep their hosts, so the team as it was saved is used whatever the plan allows now. A team that cannot be read
+  // is not known, never "no team" (rule 24): moved by the store's own hours, its hosts' claim would be let go below.
+  let team: Awaited<ReturnType<typeof teamForMove>>;
+  try {
+    team = await teamForMove(store, product);
+  } catch (error) {
+    console.error("reading a moved booking's team failed", error);
+    return { ok: false, reason: "error" };
+  }
 
-  if (!(await takeLock(callsId))) return { ok: false, reason: "taken" };
+  // As in holdAndCheckout: a lock that cannot be read refuses the move, and is left to run out.
+  let locked: boolean;
+  try {
+    locked = await takeLock(callsId);
+  } catch (error) {
+    console.error("taking a call's lock for a move failed", error);
+    return { ok: false, reason: "error" };
+  }
+  if (!locked) return { ok: false, reason: "taken" };
   let from: { start: number; end: number; moves: number };
   let teamOwn: { hosts: string[]; claim: string } | null = null;
   // A team booking whose call is no longer a team event: its hosts' old claim is let go after the move.
@@ -1205,10 +1341,19 @@ export async function moveBooking(input: {
     // The seat moves in the diary too: whatever was written under this
     // checkout — a hold, a booking, one filed by its start before group calls
     // — gives way to one entry at the new time.
-    const [raw] = await redisPipeline([["HGETALL", busyKey(callsId)]]);
-    const old = readEntries(Array.isArray(raw) ? (raw as string[]) : [])
-      .filter(({ field, entry }) => entry.session === session && field !== session)
-      .map(({ field }) => field);
+    //
+    // The move is written by now, so this reading is tidying only: read exactly (readDiary, entryOf), and when the
+    // diary or an entry cannot be read, nothing is deleted and the move is still reported as done. An old entry
+    // left in place keeps its old time taken (never a time freed on an unknown reply) until it runs out or the
+    // call is long past.
+    let old: string[] = [];
+    try {
+      old = readEntries(await readDiary(callsId))
+        .filter(({ field, entry }) => entry.session === session && field !== session)
+        .map(({ field }) => field);
+    } catch (error) {
+      console.error("reading a moved booking's old entries failed; left in place", error);
+    }
     const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(teamOwn ? { h: teamOwn.hosts, c: teamOwn.claim } : {}) };
     // Counted in the store's room at what it really adds (lib/order-data.ts).
     await orderWrite(store, [
@@ -1511,6 +1656,17 @@ export async function confirmBooking(input: {
   }
   due = due ?? null;
   cancel = cancel ?? null;
+  // A team booking's hosts are read before the once-only mark too, the same way: a failed read is not known, never "no
+  // team" (rule 24), which would confirm the booking without them and let their claim run out with the hold. It is
+  // left for the next confirmation, and thrown rather than returned (Codex G on #3080): the mail job counts a
+  // confirmation that returned and takes it off its queue, so only a throw keeps it there for the next run; the
+  // thanks page and catchUpBookings catch it and try again later.
+  let team: Awaited<ReturnType<typeof bookingTeam>>;
+  try {
+    team = await bookingTeam(store, product, session);
+  } catch (error) {
+    throw new Error("reading a team booking's hosts failed; confirmed later", { cause: error });
+  }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;
   // Booked: the orders it was admitted as are the window's (lib/orders.ts), once, by the checkout.
@@ -1521,11 +1677,7 @@ export async function confirmBooking(input: {
     await recordLead(store, { aff: input.lead, kind: "booking", email: buyerEmail, end: Math.floor(end / 1000), ref: session, pi: input.pi ?? "", paid: input.amountCents ?? 0, title: product.title });
   }
 
-  // A team booking keeps its hosts and the claim on their time, now for good.
-  const team = await bookingTeam(store, product, session).catch((error) => {
-    console.error("reading a team booking's hosts failed", error);
-    return null;
-  });
+  // A team booking keeps its hosts and the claim on their time, now for good (read above).
   const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(team ? { h: team.hosts, c: team.claim } : {}) };
   // Kept for good now that it is paid: written anew, so the store's room is
   // charged the whole entry (lib/order-data.ts), not only what it grew by

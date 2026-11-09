@@ -69,7 +69,8 @@ test("confirmed absence, empty inventory and zero count remain valid", async () 
   assert.equal(await findLink(kept.code), null);
   assert.deepEqual(await readLinks(owner.statsId), []);
   assert.equal(await countLinks(owner.statsId), 0);
-  inject("HLEN", ["0"]); assert.equal(await countLinks(owner.statsId), 0);
+  // Main's exact count (countOf, CX-123 rule 24) takes only a number: a text "0" is unknown, never zero links.
+  inject("HLEN", ["0"]); await assert.rejects(countLinks(owner.statsId));
   redis.pipeline = pipeline;
   const response = await GET(new Request(`https://example.test/l/${kept.code}`) as never, { params: Promise.resolve({ code: kept.code }) });
   assert.equal(response.status, 302);

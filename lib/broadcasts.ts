@@ -17,11 +17,12 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
 import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
-import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonth } from "@/lib/mail";
+import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonthExact } from "@/lib/mail";
 import { WINDOW_ID, allowanceWindow, opensAgainWords, windowId } from "@/lib/allowance-window";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { costStandingOf } from "@/lib/plan-standing";
@@ -156,17 +157,22 @@ export const NO_BUYERS_NOTE = "Your store can no longer read its sales (Stripe a
 export const LIST_RETRY_SECONDS = 3_600;
 /** Said when a narrowed email's list could not be made now for a reason that passes: tried again in an hour. */
 const LIST_WAIT_NOTE = "The list of who it goes to could not be prepared just now. Nothing was sent. It is tried again in an hour.";
-/** Said on an email canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
+/** Said on an email to the whole list canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
 export const PLAN_OFF_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent and none of your studio requests were used for it. To send it, write it again while your plan is on.";
+/**
+ * The same for a narrowed email: counting its buyers when it was written, and any reading of them since, used studio
+ * requests that stay used, so it never says none were (review of #2205, C3-112); what it set aside is given back.
+ */
+export const PLAN_OFF_NARROWED_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent. What it set aside of your studio requests is given back; what finding its buyers already used stays used. To send it, write it again while your plan is on.";
 /** Said on an email stopped partway because the plan stopped being paid and running: how many had gone, and nothing more. */
 export function planOffPartNote(sent: number, total: number): string {
   return `Your plan stopped being active while this email was going out, so the rest was canceled: ${sent.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} had gone out. Nothing more is sent. To reach the rest, write it again while your plan is on.`;
 }
 /** Said on a narrowed email whose reading of its buyers failed at Stripe or PayPal: nothing spent, tried again later. */
 export const READ_FAILED_NOTE = `Your sales could not be read just now, so the list of who it goes to could not be made. Nothing was sent. What that try used of your studio requests stays used. It is tried again later, up to ${READ_MISSES_ALLOWED} times in a row, then it stops.`;
-/** Said on a narrowed email waiting for the month whose studio requests will pay for its reading of the buyers. */
+/** Said on a narrowed email waiting for the month whose studio requests will pay for its reading of the buyers: only if the plan still runs then (a trial or a plan set to end that ends first cancels it). */
 export function studioWaitNote(opens: string): string {
-  return `Your studio requests for this month are used up, so the list of who it goes to could not be made. Nothing was sent. It goes out by itself when they open again, on ${opens} (UTC).`;
+  return `Your studio requests for this month are used up, so the list of who it goes to could not be made. Nothing was sent. It goes out by itself when they open again, on ${opens} (UTC), if your plan is still active then; if it ends first, the email is canceled.`;
 }
 
 /** The note of an email stopped because its readings of the buyers ran out: why it waited, without "tried again". */
@@ -218,6 +224,13 @@ async function save(b: Broadcast): Promise<void> {
   if (!Array.isArray(response) || response.length !== 1 || response[0] !== "OK") throw new Error("Campaign progress write could not be confirmed");
 }
 
+/** The ids LRANGE answered, when they are exactly a list of ids this code writes (rule 24, repliesFor/stringList); null otherwise. Pure. */
+function listedIds(response: unknown, limit: number): string[] | null {
+  const ids = stringList(repliesFor(response, 1)?.[0]);
+  if (!ids || ids.length > limit || !ids.every((id) => BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) return null;
+  return ids;
+}
+
 /**
  * How many of the newest `limit` broadcasts there are and how many bytes
  * their records hold, before they are read: for a reading that pays for its
@@ -225,23 +238,46 @@ async function save(b: Broadcast): Promise<void> {
  */
 export async function broadcastSizes(listId: string | null, limit = 30): Promise<{ count: number; bytes: number } | null> {
   if (!listId || !isRedisConfigured()) return { count: 0, bytes: 0 };
-  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
+  // Only Redis's own list of ids: any other answer is unknown, never "no campaigns".
+  const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
+  if (!list) return null;
   if (!list.length) return { count: 0, bytes: 0 };
-  const lengths = (await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)]))).map(Number);
-  if (lengths.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+  const replies = repliesFor(await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)])), list.length);
+  if (!replies) return null;
+  const lengths = replies.map(countOf);
+  if (lengths.some((n) => n === null)) return null;
   // A broadcast added between this and the reading is a few bytes more, bounded by how fast a store writes them.
-  return { count: list.length, bytes: lengths.reduce((a, b) => a + b, 0) };
+  return { count: list.length, bytes: (lengths as number[]).reduce((a, b) => a + b, 0) };
 }
 
-/** The store's broadcasts, newest first. */
+export class BroadcastsUnreadable extends Error {
+  constructor(what: string) {
+    super(`The store's campaigns could not be read: ${what}`);
+    this.name = "BroadcastsUnreadable";
+  }
+}
+
+/**
+ * The store's broadcasts, newest first, read exactly (rule 24). A record Redis answers as its own nil is a campaign
+ * whose record expired (it is written before its id is listed, and kept RECORD_DAYS): left out, known. A list of
+ * ids in another shape, a record that does not read, or one of another id or list throws BroadcastsUnreadable, never
+ * read as fewer or no campaigns. Records read as before (parse, with its documented defaults).
+ */
 export async function listBroadcasts(listId: string | null, limit = 30): Promise<Broadcast[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
+  const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
+  if (!list) throw new BroadcastsUnreadable("the list of campaigns");
   if (!list.length) return [];
-  const rows = await redisPipeline(list.map((id) => ["GET", bcKey(id)]));
-  return rows.map(parse).filter((b): b is Broadcast => b !== null);
+  const rows = repliesFor(await redisPipeline(list.map((id) => ["GET", bcKey(id)])), list.length);
+  if (!rows) throw new BroadcastsUnreadable("the campaigns' records");
+  const out: Broadcast[] = [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (rows[i] === null) continue;
+    const b = parse(rows[i]);
+    if (!b || b.id !== list[i] || b.listId !== listId) throw new BroadcastsUnreadable("a campaign's record");
+    out.push(b);
+  }
+  return out;
 }
 
 
@@ -280,7 +316,13 @@ async function readBroadcastForWork(id: string): Promise<Broadcast | null> {
 }
 
 /** A studio snapshot is all-or-unavailable; missing rows must not look like no campaigns. */
-export async function listBroadcastsStrict(listId: string | null, limit = 30): Promise<Broadcast[]> {
+/**
+ * With `expired: "skip"`, an id whose record Redis answers as its own nil is left out: the record is written before
+ * its id enters the list (createBroadcast) and lives RECORD_DAYS under its own EXPIRE while the list never expires, so
+ * nil is a campaign that is gone, known. Every other answer still throws (rule 24). Without it, one missing record
+ * withholds the whole list, as before.
+ */
+export async function listBroadcastsStrict(listId: string | null, limit = 30, options: { expired?: "skip" } = {}): Promise<Broadcast[]> {
   if (!listId) return [];
   if (!isRedisConfigured()) throw new Error("Campaign storage is unavailable");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid campaign history limit");
@@ -291,7 +333,12 @@ export async function listBroadcastsStrict(listId: string | null, limit = 30): P
   if (!ids.length) return [];
   const rows = await redisPipeline(ids.map(id => ["GET", bcKey(id as string)]));
   if (!Array.isArray(rows) || rows.length !== ids.length) throw new Error("Campaign records are incomplete");
-  return ids.map((id, i) => parseStoredBroadcast(rows[i], id as string, listId));
+  const out: Broadcast[] = [];
+  for (let i = 0; i < ids.length; i += 1) {
+    if (options.expired === "skip" && rows[i] === null) continue;
+    out.push(parseStoredBroadcast(rows[i], ids[i] as string, listId));
+  }
+  return out;
 }
 
 /**
@@ -388,9 +435,9 @@ export async function createBroadcast(
   if (startsNow) {
     // The month as the plan counts it (lib/allowance-window.ts), the same window
     // reserve takes from and the studio shows; a window that cannot be told
-    // leaves nothing, as reserve would refuse every batch of it.
+    // leaves nothing, as reserve would refuse every batch of it. A count that cannot be read throws: never an untouched month.
     const window = windowId(store);
-    const left = window ? monthlyAllowance(store) - (await usedThisMonth(store.listId, window)) : 0;
+    const left = window ? monthlyAllowance(store) - (await usedThisMonthExact(store.listId, window)) : 0;
     if (reach > left) return { ok: false, reason: "allowance" };
   }
   const broadcast: Broadcast = {
@@ -548,7 +595,7 @@ export async function advanceBroadcast(
     const standing = costStandingOf(store, now);
     if (standing !== "paid" && standing !== "trial") {
       const held = b.hold;
-      b = { ...b, status: "cancelled", note: b.sent > 0 ? planOffPartNote(b.sent, b.total) : PLAN_OFF_NOTE, finishedAt: now, ...(held ? { hold: { ...held, units: 0 } } : {}) };
+      b = { ...b, status: "cancelled", note: b.sent > 0 ? planOffPartNote(b.sent, b.total) : b.narrow ? PLAN_OFF_NARROWED_NOTE : PLAN_OFF_NOTE, finishedAt: now, ...(held ? { hold: { ...held, units: 0 } } : {}) };
       await save(b);
       await redisPipeline([["SREM", QUEUE, id], ["DEL", toKey(id)]]);
       if (held?.units) await giveAllowanceIn(store, "studio", held.units, held.window);

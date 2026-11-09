@@ -1,3 +1,4 @@
+import { UnknownReplyError } from '@/lib/redis-reply';
 import { consumeAiCallBudget } from '@/lib/ai-call-budget';
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -62,11 +63,11 @@ test("untrustworthy reservation acknowledgements never authorize work", async ()
     }
   } finally { redis.run = original; }
 });
-test("unknown allowance displays no remaining jobs", async () => {
+test("unknown allowance refuses to certify a remaining balance", async () => {
   const store = customer("corrupt");
   for (const raw of ["", " ", "invalid", "-1", "1.5", "9007199254740992"]) {
     redis.run(["SET", aiMonthKey(store, new Date(now))!, raw]);
-    assert.equal(await aiLeft(store, now), 0);
+    await assert.rejects(aiLeft(store, now), UnknownReplyError);
   }
 });
 

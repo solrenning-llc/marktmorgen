@@ -23,6 +23,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 
 type Command = (string | number)[];
 
@@ -45,14 +46,25 @@ export function noteForErasure(statsId: string | null | undefined, email: string
   return [["ZADD", index, now, key], ["ZREMRANGEBYSCORE", index, "-inf", now - INDEX_SECONDS * 1000], ["EXPIRE", index, INDEX_SECONDS]];
 }
 
-/** Deletes every record noted for this address in this store, and the note itself. */
+/**
+ * Deletes every record noted for this address in this store, and the note itself.
+ *
+ * The note is the only way to the records (audit SG2, finding 4): a reply
+ * not in its exact shape deletes nothing, keeps the note and fails, so the
+ * erasure says this step is not finished instead of a receipt of none.
+ */
 export async function forgetNoted(statsId: string | null | undefined, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const index = indexKey(statsId, email);
   const notes = notesKey(statsId, email);
-  const [raw, scored] = await redisPipeline([["SMEMBERS", index], ["ZRANGEBYSCORE", notes, "-inf", "+inf"]]);
-  const keys = [...new Set([...(Array.isArray(raw) ? raw : []), ...(Array.isArray(scored) ? scored : [])].map(String).filter((k) => k.startsWith("nl:")))];
-  const held = (Array.isArray(raw) && raw.length ? 1 : 0) + (Array.isArray(scored) && scored.length ? 1 : 0);
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", index], ["ZRANGEBYSCORE", notes, "-inf", "+inf"]]), 2);
+  const raw = stringList(replies?.[0]);
+  const scored = stringList(replies?.[1]);
+  if (!raw || !scored) throw new UnknownReplyError("the notes of an address's records");
+  const keys = [...new Set([...raw, ...scored].filter((k) => k.startsWith("nl:")))];
+  const held = (raw.length ? 1 : 0) + (scored.length ? 1 : 0);
   const [gone] = await redisPipeline([["DEL", index, notes, ...keys]]);
-  return Math.max(0, (Number(gone) || 0) - held);
+  const count = countOf(gone);
+  if (count === null) throw new UnknownReplyError("the deletion of an address's records");
+  return Math.max(0, count - held);
 }

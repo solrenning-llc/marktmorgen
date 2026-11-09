@@ -4,14 +4,16 @@ import { isResting } from "@/lib/traffic";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
-import { courseAccess, doneLessons, emailKey, lessonVideo } from "@/lib/learn";
-import { type Attempt, attemptOf, heldBack, passedQuizzes, readQuizFor, studentQuiz } from "@/lib/quiz";
+import { courseAccess, doneLessonsOrUnknown, emailKey, lessonVideo } from "@/lib/learn";
+import { type Attempt, attemptOf, heldBack, passedForGate, readQuizFor, studentQuiz } from "@/lib/quiz";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -27,6 +29,12 @@ import { speech } from "@/lib/buyer-words";
 import { type CoursesWords, coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
+import { StampedPlayer } from "@/components/video-stamp";
+import { LessonPlayer } from "@/components/lesson-player";
+import { devicePlaceKey } from "@/lib/lesson-position";
+import { resumeWordsOf } from "@/lib/lesson-position-rules";
+import { videoStampText } from "@/lib/video-stamp";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -77,6 +85,12 @@ export default async function LessonPage({ params, searchParams }: Params) {
   if (!store) notFound();
   const product = await readListing(store, productId);
   if (!product?.course) redirect(`/@${store.handle}`);
+  const jar = await cookies();
+  const access = await courseAccess(store, product, jar);
+  // A draft is not: only its students and the store's owner and team, signed
+  // in, see anything of it, a free preview included (MM-SA-30). Anyone else
+  // goes where an id that does not exist goes, before its lessons are read.
+  if (product.hidden && access.state !== "open" && !(await seesDrafts(store, jar.get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const course = await readCourse(product.course.id);
   const base = `/@${store.handle}/course/${product.id}`;
   const found = course ? findLesson(course, lessonId) : null;
@@ -84,7 +98,6 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const said = speech(store);
   const w = coursesWords(store.language);
 
-  const access = await courseAccess(store, product, await cookies());
   const open = access.state === "open" && isOpen(course, found.unit, access.start);
   // A free preview is open to anyone; everything else to a student whose
   // module has opened.
@@ -98,9 +111,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Once the whole month's visits are used, a lesson rests too (lib/traffic-rules.ts).
   if (student && (await isResting(store, undefined, "buyer"))) redirect(`/@${store.handle}/resting`);
   if (student) await countDay(store);
+  // Null: the lessons done could not be read just now; said so, and no done/not-done toggle on a guess (rule 24).
   const [done, passed] = student
-    ? await Promise.all([doneLessons(course.id, student.email), passedQuizzes(course.id, who)])
-    : [new Set<string>(), new Set<string>()];
+    ? await Promise.all([doneLessonsOrUnknown(course.id, student.email), passedForGate(course.id, who)])
+    : [new Set<string>() as Set<string> | null, new Set<string>()];
   // A quiz that has to be passed holds the lessons after it shut, for a student.
   const held = student ? heldBack(course, passed) : new Map<string, string>();
   const blocker = held.get(lesson.id);
@@ -136,13 +150,23 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Work to hand in, still holding the lessons after it shut.
   const mustHandIn = Boolean(student && task && lesson.task?.gate && !passed.has(lesson.id));
 
+  // The buyer's mark over the video (602 [WP1]): only a signed-in student's own
+  // email and the day they joined, only when the creator switched it on; never
+  // for the creator, a visitor on a free preview, or anybody else's email.
+  const stamp = course.stampVideo === true && student && start !== null ? videoStampText(student.email, "", new Date(start * 1000)) : null;
+
   const order = lessonsInOrder(course);
   const at = order.findIndex((entry) => entry.lesson.id === lesson.id);
   const reachable = (entry: (typeof order)[number]) =>
     entry.lesson.preview || (start !== null && isOpen(course, entry.unit, start) && !held.has(entry.lesson.id));
   const previous = order.slice(0, at).reverse().find(reachable) ?? null;
   const next = order.slice(at + 1).find(reachable) ?? null;
-  const isDone = done.has(lesson.id);
+  const isDone = done?.has(lesson.id) ?? false;
+  // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
+  // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
+  const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
+  // Plain text only: a function cannot cross to the client player (Claude 5 on #2728).
+  const resumeWords = resumeWordsOf(w);
   const moduleNumber = course.modules.findIndex((m) => m.id === unit.id) + 1;
 
   return (
@@ -176,39 +200,86 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {lesson.video ? (
               video?.kind === "stream" ? (
-                <div className="mt-6 overflow-hidden rounded-2xl bg-black">
-                  {/* The video service's player (lib/stream.ts): it sends the
-                      size the line can carry, so the video does not stop to
-                      wait. The frame takes the video's own shape, so one
-                      filmed upright stays upright, and is never taller than
-                      three quarters of the screen. */}
-                  <iframe
-                    src={video.src}
-                    title={lesson.title}
-                    allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
-                    allowFullScreen
-                    referrerPolicy="strict-origin-when-cross-origin"
-                    className="mx-auto block w-full"
-                    style={{
-                      aspectRatio: `${video.width} / ${video.height}`,
-                      maxWidth: `calc(75vh * ${video.width} / ${video.height})`,
-                      border: 0,
-                    }}
-                  />
-                </div>
+                stamp ? (
+                  <StampedPlayer text={stamp} seed={`${course.id}:${who}`} enter={w.fullScreen} exit={w.exitFullScreen}>
+                    {/* Stamped: the service's own full screen and picture in
+                        picture are not given to its frame, since they would
+                        show the video without the mark; the button under it
+                        puts both in full screen instead. */}
+                    <iframe
+                      src={video.src}
+                      title={lesson.title}
+                      allow="accelerometer; gyroscope; autoplay; encrypted-media"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      className="mx-auto block w-full"
+                      style={{
+                        aspectRatio: `${video.width} / ${video.height}`,
+                        maxWidth: `calc(var(--player-tall, 75vh) * ${video.width} / ${video.height})`,
+                        border: 0,
+                      }}
+                    />
+                  </StampedPlayer>
+                ) : (
+                  <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
+                    {/* The video service's player (lib/stream.ts): it sends the
+                        size the line can carry, so the video does not stop to
+                        wait. The frame takes the video's own shape, so one
+                        filmed upright stays upright, and is never taller than
+                        three quarters of the screen. */}
+                    <iframe
+                      src={video.src}
+                      title={lesson.title}
+                      allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
+                      allowFullScreen
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      className="mx-auto block w-full"
+                      style={{
+                        aspectRatio: `${video.width} / ${video.height}`,
+                        maxWidth: `calc(75vh * ${video.width} / ${video.height})`,
+                        border: 0,
+                      }}
+                    />
+                  </div>
+                )
               ) : video?.kind === "file" ? (
-                <div className="mt-6 overflow-hidden rounded-2xl bg-black">
-                  {/* Vertical videos stay vertical: the player takes the
-                      shape of the video instead of forcing it wide. */}
-                  <video
-                    src={video.src}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    controlsList="nodownload"
-                    className="mx-auto block max-h-[75vh] w-full object-contain"
-                  />
-                </div>
+                stamp ? (
+                  <StampedPlayer text={stamp} seed={`${course.id}:${who}`} enter={w.fullScreen} exit={w.exitFullScreen}>
+                    {/* Stamped: the video's own full screen and picture in
+                        picture are turned off where the browser allows it,
+                        and the button under it puts the video and the mark
+                        in full screen together. */}
+                    <LessonPlayer
+                      courseId={course.id}
+                      lessonId={lesson.id}
+                      learner={placeKey}
+                      words={resumeWords}
+                      src={video.src}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      controlsList="nodownload nofullscreen"
+                      disablePictureInPicture
+                      className="mx-auto block max-h-[var(--player-tall,75vh)] w-full object-contain"
+                    />
+                  </StampedPlayer>
+                ) : (
+                  <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
+                    {/* Vertical videos stay vertical: the player takes the
+                        shape of the video instead of forcing it wide. */}
+                    <LessonPlayer
+                      courseId={course.id}
+                      lessonId={lesson.id}
+                      learner={placeKey}
+                      words={resumeWords}
+                      src={video.src}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      controlsList="nodownload"
+                      className="mx-auto block max-h-[75vh] w-full object-contain"
+                    />
+                  </div>
+                )
               ) : video?.kind === "preparing" ? (
                 <p className="st-note mt-6" role="status">
                   <strong>{w.preparingStrong}</strong>{` ${w.preparingRest}`}
@@ -257,7 +328,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
             ) : null}
 
             {!lesson.video && !body && !lesson.link && lesson.files.length === 0 && !quiz && !task ? (
-              <p className="st-muted mt-6">{w.emptyLesson}</p>
+              <EmptyState title={said.w.nothingYet} body={w.emptyLesson} className="mt-6" />
             ) : null}
 
             {quiz ? (
@@ -290,6 +361,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
             <div className="mt-8 flex flex-wrap items-center gap-3 border-t pt-6" style={{ borderColor: "var(--st-line)" }}>
               {student && open && mustPass ? (
                 <p className="st-muted text-sm font-semibold">{w.passAbove}</p>
+              ) : student && open && done === null ? (
+                <p className="st-note text-sm" role="status">{w.progressUnknown}</p>
               ) : student && open && lesson.task ? (
                 // Done by handing the work in, or by its approval, never by a button.
                 isDone ? <span className="text-sm font-semibold" style={{ color: "var(--st-text)" }}>{w.doneMark}</span> : null
@@ -313,7 +386,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                   )}
                 </form>
               ) : null}
-              {next && (isDone || !student || !open || lesson.task) ? (
+              {next && (isDone || done === null || !student || !open || lesson.task) ? (
                 <Link href={`${base}/${next.lesson.id}`} className="btn st-btn">{w.nextLesson}</Link>
               ) : null}
               {previous ? (
@@ -325,7 +398,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
           <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2">
             <p className="st-label">{w.inThisCourse}</p>
             <div className="mt-3">
-              <CourseOutline course={course} base={base} start={start} done={done} current={lesson.id} held={held} language={store.language} />
+              <CourseOutline course={course} base={base} start={start} done={done ?? new Set<string>()} current={lesson.id} held={held} language={store.language} />
             </div>
             {!open ? (
               <Link href={base} className="btn st-btn btn-block mt-5">{w.getWhole}</Link>

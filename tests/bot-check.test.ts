@@ -111,9 +111,9 @@ test("the host is slow: let through within three seconds, not held", async () =>
 
 test("asking for a login link is checked after the limit per machine and before anything is sent", () => {
   const route = readFileSync(join(process.cwd(), "app/api/auth/request/route.ts"), "utf8");
-  const limit = route.indexOf("withinRateLimit(ip)");
+  const limit = route.indexOf("rateLimitAnswer(ip)");
   const check = route.indexOf("await isAutomated()");
-  const address = route.indexOf("withinAddressLimit(email)");
+  const address = route.indexOf("addressLimitAnswer(email)");
   const send = route.indexOf("sendSignInLink(email");
   assert.ok(limit > 0 && check > limit, "the check comes after the limit per machine");
   assert.ok(address > check && send > address, "and before the address is counted or written to");

@@ -18,6 +18,7 @@ import { lookColours } from "@/lib/store-look";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
 import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
 import { tokensFor } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
@@ -84,6 +85,20 @@ export function monthlyAllowance(store: Store, nowSeconds = Date.now() / 1000): 
 /** Whether the store is still in its free trial, when the smaller allowance applies. */
 export function inTrial(store: Store, nowSeconds = Date.now() / 1000): boolean {
   return store.trialEnds > nowSeconds;
+}
+
+/**
+ * The emails the month has used, read exactly, for what decides whether an email may go (lib/broadcasts.ts): GET
+ * answers the counter's text, which a give-back can take below zero, or nil before the first one is counted. Any
+ * other answer throws (CX-123 rule 24), never an untouched month.
+ */
+export async function usedThisMonthExact(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
+  if (!listId || !window || !isRedisConfigured()) return 0;
+  const replies = repliesFor(await redisPipeline([["GET", usedKey(listId, window)]]), 1);
+  const raw = replies?.[0];
+  if (replies && raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|-?[1-9][0-9]{0,14})$/.test(raw)) throw new UnknownReplyError("the month's emails used");
+  return Number(raw);
 }
 
 export async function usedThisMonth(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
@@ -426,7 +441,8 @@ export function render(
   // Said only in a sequence's email to somebody who allowed it, with the way to stop it.
   const counting = Boolean(readerKey && token && !door && tag?.medium === "sequence");
   const stopCounting = counting ? `${SITE_URL}/unsubscribe?l=${token}` : "";
-  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><body style="margin:0;padding:0;background:#f7f5f0">
+  // The subject as the document's title and the character set said, for an app or browser that opens the HTML on its own.
+  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title></head><body style="margin:0;padding:0;background:#f7f5f0">
 <div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
 <div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, store.look ? lookColours(store.look).accent : undefined)}</div>
 <div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:#57534e">
@@ -522,7 +538,7 @@ export async function sendTo(
   // A missing checkpoint is not evidence that this list is safe to send.
   if (pause === undefined) return { done, rest: emails, stopped: "retry" };
   if (pause) return { done, rest: emails, stopped: "paused", pause };
-  const tags = healthTags(store, true);
+  const tags = healthTags(store, true, tag?.campaign);
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
     if (room <= 0) return { done, rest: emails.slice(i), stopped: "day" };
@@ -538,7 +554,17 @@ export async function sendTo(
     }
     // In a sequence, those who allowed their link use to be seen get links that say so (lib/mail-clicks.ts).
     const counting = tag?.medium === "sequence" ? new Set<string>() : undefined;
-    const tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    // Who may still be written to, and their links, read in their exact shape (lib/contacts.ts tokensFor): an
+    // unknown answer is not "they all left", so nobody in this batch is counted as gone. Nothing went to the
+    // provider, so what was taken for it is given back and the batch is tried again later.
+    let tokens: Map<string, string>;
+    try {
+      tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    } catch {
+      await release(store, chunk.length);
+      await rampBack(watched, chunk.length);
+      return { done, rest: emails.slice(i), stopped: "retry" };
+    }
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
     const messages: BatchMessage[] = chunk
       .filter((email) => tokens.has(email))

@@ -27,7 +27,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
 type Command = (string | number)[];
 
-const suppressedKey = (listId: string) => `nl:erased:${listId}`;
+/** The store's hash of deleted people's prints, for a script that checks them where it writes (lib/store-readings.ts, lib/calendar-sync.ts). */
+export const suppressedKey = (listId: string) => `nl:erased:${listId}`;
 
 /** The fingerprint of one address for one store. */
 export function suppressionPrint(listId: string, email: string): string {
@@ -70,14 +71,68 @@ export function suppressedAmongCommand(listId: string, emails: string[]): Comman
   return ["HMGET", suppressedKey(listId), ...emails.map((e) => suppressionPrint(listId, e))];
 }
 
-/** Which of these addresses were deleted from this store, in one command. */
+/**
+ * A reply to suppressedAmongCommand, read only when it is whole: a list of
+ * exactly one entry for each address, each nothing (not deleted), text or a
+ * number (deleted). Anything else throws, so a print where nothing came back
+ * is never read as "not deleted" (Codex E on #2111): the caller fails closed.
+ */
+export function wholeErasedReply(reply: unknown, addresses: number): (string | number | null)[] {
+  if (!Array.isArray(reply) || reply.length !== addresses || !reply.every((v) => v === null || typeof v === "string" || typeof v === "number")) {
+    throw new Error("the store's deleted people could not be read whole");
+  }
+  return reply as (string | number | null)[];
+}
+
+/**
+ * A copy kept only when nobody it names was deleted from the store, in one
+ * step with the write (review of #2111): KEYS[1] the copy, KEYS[2] the
+ * store's prints; ARGV[1] the copy, ARGV[2] its seconds, ARGV[3..] the prints
+ * of who it names (at least one). One HMGET; any found: the copy goes and
+ * their places (1 for ARGV[3]) are answered; otherwise SET, and an empty
+ * list. Billed 1 + 2. Used for the readings (lib/store-readings.ts,
+ * READING_COPY) and the memberships' cache (lib/membership-numbers.ts);
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const KEEP_UNLESS_ERASED = `-- marktmorgen:reading-copy:v1
+local found = redis.call("HMGET", KEYS[2], unpack(ARGV, 3))
+local gone = {}
+for i = 1, #found do
+  if found[i] then gone[#gone + 1] = i end
+end
+if #gone > 0 then
+  redis.call("DEL", KEYS[1])
+  return gone
+end
+redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+return gone`;
+
+/**
+ * Keeps `text` at `key` for `seconds` unless one of `emails` (at least one)
+ * was deleted from the store, in one step (KEEP_UNLESS_ERASED): returns who
+ * was found, and then nothing is kept. Throws when the step cannot run or its
+ * reply is not a list of places among them: the caller keeps nothing.
+ */
+export async function keepUnlessErased(key: string, listId: string, text: string, seconds: number, emails: string[]): Promise<Set<string>> {
+  const names = [...new Set(emails)];
+  if (!names.length) throw new Error("nobody to look up");
+  const replies = await redisPipeline([["EVAL", KEEP_UNLESS_ERASED, 2, key, suppressedKey(listId), text, seconds, ...names.map((e) => suppressionPrint(listId, e))]]);
+  const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+  if (!Array.isArray(reply) || !reply.every((i) => Number.isInteger(i) && (i as number) >= 1 && (i as number) <= names.length)) {
+    throw new Error("the copy could not be checked where it is kept");
+  }
+  return new Set((reply as number[]).map((i) => names[i - 1]));
+}
+
+/** Which of these addresses were deleted from this store, in one command. Throws when the reply is not whole (wholeErasedReply). */
 export async function suppressedAmong(listId: string | null | undefined, emails: string[]): Promise<Set<string>> {
   const out = new Set<string>();
   if (!listId || !emails.length || !isRedisConfigured()) return out;
-  const [rows] = await redisPipeline([suppressedAmongCommand(listId, emails)]);
-  const list = Array.isArray(rows) ? rows : [];
+  const replies = await redisPipeline([suppressedAmongCommand(listId, emails)]);
+  if (!Array.isArray(replies) || replies.length !== 1) throw new Error("the store's deleted people could not be read whole");
+  const list = wholeErasedReply(replies[0], emails.length);
   emails.forEach((email, i) => {
-    if (list[i] !== null && list[i] !== undefined) out.add(email);
+    if (list[i] !== null) out.add(email);
   });
   return out;
 }

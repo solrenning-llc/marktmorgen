@@ -392,7 +392,7 @@ export function QuizEditor({
                       />
                       <button
                         type="button"
-                        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-soft transition hover:bg-sand hover:text-danger disabled:opacity-30"
+                        className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-ink-soft transition hover:bg-sand hover:text-danger disabled:opacity-30"
                         aria-label={`Remove answer ${ci + 1}`}
                         disabled={question.choices.length <= MIN_CHOICES}
                         onClick={() =>

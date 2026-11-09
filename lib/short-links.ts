@@ -23,8 +23,9 @@
  *   nl:slink:<code>             the link: its store and where it goes
  *   nl:slink:store:<statsId>    hash: <code> → the same, the store's links
  */
-import { randomBytes } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { CODE, CODE_LETTERS, MAX_LINKS, type ShortLink, linkName, linkPlace, readTarget } from "@/lib/short-link-rules";
 
 export { type LinkTarget, type ShortLink, shortUrl, landingUrl } from "@/lib/short-link-rules";
@@ -69,11 +70,11 @@ const confirmedCount = (raw: unknown) => raw === 0 || raw === 1;
 
 /** How many short links a store has made, in one command: what the path's post-link missions count (lib/path-facts.ts). */
 export async function countLinks(statsId: string | null): Promise<number> {
-  if (!statsId) return 0;
-  if (!isRedisConfigured()) throw new Error("Short link count is unavailable");
-  const raw = await one(["HLEN", storeKey(statsId)]);
-  const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN;
-  if (!Number.isSafeInteger(n) || n < 0) throw new Error("Short link count is unconfirmed");
+  if (!statsId || !isRedisConfigured()) return 0;
+  // Read exactly (CX-123 rule 24): an answer in any other shape throws, so the path keeps its last reading, never 0 links.
+  const [raw] = repliesFor(await redisPipeline([["HLEN", storeKey(statsId)]]), 1) ?? [undefined];
+  const n = countOf(raw);
+  if (n === null) throw new UnknownReplyError("a store's short links count");
   return n;
 }
 
@@ -121,7 +122,8 @@ export async function addLink(
   // One link to a name: two would add their results together on one row.
   if (links.some((l) => l.name === name)) return { ok: false, reason: "taken" };
   for (let tries = 0; tries < 5; tries += 1) {
-    const code = Array.from(randomBytes(6), (b) => ALPHABET[b % ALPHABET.length]).join("");
+    // randomInt draws each letter evenly; a byte taken modulo 31 would favour the first eight.
+    const code = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
     const kept: Kept = { code, name, place: linkPlace(input.place), target, made: now, sid: store.sid, statsId: store.statsId };
     const got = await one(["SET", linkKey(code), JSON.stringify(kept), "NX"]).catch(() => undefined);
     if (got === null) continue;

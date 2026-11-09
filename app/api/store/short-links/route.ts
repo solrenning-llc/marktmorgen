@@ -9,7 +9,8 @@ import { addLink, removeLink, retarget } from "@/lib/short-links";
  * work on its pages: `{ action: "add", name, place, target }` makes one,
  * `{ action: "target", code, target }` changes where it goes, and
  * `{ action: "remove", code }` ends it. A target is `{ kind: "store" }` or
- * `{ kind: "product", id }`. Answers the list as it is after.
+ * `{ kind: "product", id }` or a ready cart, `{ kind: "cart", ids, code? }`
+ * (624 [SZ8](23)). Answers the list as it is after.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "page", 1_000);

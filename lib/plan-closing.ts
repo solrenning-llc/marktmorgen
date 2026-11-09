@@ -78,7 +78,7 @@ import { PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { ENDED_INDEX, SETUP_STORAGE_BYTES, standingOf } from "@/lib/plan-standing";
 import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { onBreak } from "@/lib/plan-pause";
+import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
@@ -165,6 +165,21 @@ export function removalDay(endedAt: number): number {
 }
 
 /**
+ * Whether a break the creator chose holds the closing, as onBreak
+ * (lib/plan-pause.ts) answers it, except that a break that cannot be read,
+ * or is read in a shape we do not expect, throws. onBreak answers true then,
+ * which is right for the daily walk (nothing is removed on an unknown) but
+ * would have closingOf say the store is "not closing" about a store it could
+ * not check: its callers refuse or say they could not check instead.
+ */
+async function breakHolds(store: Store, nowSeconds: number): Promise<boolean> {
+  const view = await pauseView(store);
+  if (view.kind === "unknown") throw new Error("plan-closing: the store's break could not be read");
+  if (view.kind === "missing") return false;
+  return Boolean(view.record.funding) || view.record.until > nowSeconds;
+}
+
+/**
  * For the studio: the day what a store keeps would be removed, counted the
  * way the job counts it. Null when the store's plan has not ended, or when
  * what it kept has been removed already. Whether the store keeps more than
@@ -184,7 +199,7 @@ export async function closingOf(store: Store, now = Date.now()): Promise<{ ended
   const endedAt = Date.parse(store.planEndedAt);
   if (standingOf(store, now / 1000) !== "ended" || !Number.isFinite(endedAt) || !isRedisConfigured()) return null;
   // A break the creator chose keeps everything until it ends (lib/plan-pause.ts).
-  if (await onBreak(storeRef(store), now / 1000)) return null;
+  if (await breakHolds(store, now / 1000)) return null;
   const [raw] = await redisPipeline([["GET", stateKey(storeRef(store))]]);
   const read = parseState(raw);
   const state: State = read.of === endedAt ? read : {};
@@ -312,12 +327,16 @@ export type ClosingNews = {
   buyersBy: number | null;
   /** Addresses the store's closing emails did not cover: the creator is asked to tell them. */
   untold: number;
-  members: number;
-  /** "$120 and €40", or "" for none. */
+  /** Members who paid for time past the day, or null when that could not be read (the notice then says so, never "none"). */
+  members: number | null;
+  /** "$120 and €40", or "" for none or for a count that could not be read. */
   unused: string;
-  /** Members whose charges could not be paused yet (tried again every day), and those past the closing's limit (not paused). */
-  notHeld?: number;
-  overLimit?: number;
+  /**
+   * Members whose charges could not be paused yet (tried again every day), and those past the closing's limit (not paused).
+   * Null when the hold could not be read: the notice then says it could not be checked, never that every one is paused.
+   */
+  notHeld?: number | null;
+  overLimit?: number | null;
   /** Its payments were not all read within the closing's cap: some buyers may not be told. */
   capped?: boolean;
 };
@@ -344,19 +363,48 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
       ]
     : [];
   const unpaused = (news?.notHeld ?? 0) + (news?.overLimit ?? 0);
-  const holds = unpaused > 0
+  // Both counts read, and both none: the only case the notice may say nobody is charged again.
+  const allPaused = news?.notHeld === 0 && news?.overLimit === 0;
+  // What the closing day refunds is giveBackUnused (lib/closing-refunds.ts):
+  // only the members whose last payment was written down when their payments
+  // were paused, from the creator's own balance, within the closing's limit.
+  // A member whose payments were not paused may never be in it, so the
+  // creator is asked to refund that time; and the notice never says a refund
+  // is made that the code may not make.
+  // Not a list of reasons: the balance, the closing's limit, a disputed payment
+  // or one Stripe names no payment for each stop one (lib/closing-refunds.ts).
+  const notMade = "Some refunds may not go through (for example, when your Stripe balance is too low): after that day, please check your Stripe account and refund what is left yourself.";
+  const holds = news && (news.notHeld === null || news.overLimit === null)
+    ? [
+        "We could not check just now whether every membership's payments are paused.",
+        `Every membership ends on ${dateWords(day)}. If a member is charged before then, please refund them from Stripe.`,
+        `For a member whose payments were not paused, what they paid for after ${dateWords(day)} may not be refunded for you: after that day, please check your members in Stripe and refund that time yourself.`,
+        "",
+      ]
+    : unpaused > 0
     ? [
         `${unpaused} ${unpaused === 1 ? "membership's payments are" : "memberships' payments are"} not paused${news?.notHeld ? " yet: we try again every day" : ""}${news?.overLimit ? `${news?.notHeld ? ", and some are" : ":"} past this closing's limit` : ""}.`,
         `Every one of them ends on ${dateWords(day)}. If a member is charged before then, please refund them from Stripe.`,
+        unpaused === 1
+          ? `What this member paid for after ${dateWords(day)} may not be refunded for you: after that day, please check their membership in Stripe and refund that time yourself.`
+          : `What these members paid for after ${dateWords(day)} may not be refunded for you: after that day, please check each of them in Stripe and refund that time yourself.`,
         "",
       ]
     : [];
-  const members = news && news.members > 0 && news.unused
+  const members = news && news.members === null
+    ? [
+        `We could not check just now which members paid for time after ${dateWords(day)}.`,
+        `On ${dateWords(day)} we try to refund, from your own Stripe account, the unused part of the last payment of each member whose payments we paused.`,
+        notMade,
+        "Marktmorgen never pays it and never takes it.",
+        "",
+      ]
+    : news && news.members !== null && news.members > 0 && news.unused
     ? [
         `${news.members} ${news.members === 1 ? "member has" : "members have"} paid for time after ${dateWords(day)}: ${news.unused} in all.`,
-        `On ${dateWords(day)} each is given back the unused part of their last payment, from your own`,
-        "Stripe account, if its balance covers it. You can give it back sooner, after checking",
-        "each amount, from your studio. Marktmorgen never pays it and never takes it.",
+        `On ${dateWords(day)} we try to refund the unused part of each member's last payment, from your own Stripe account.`,
+        notMade,
+        "You can refund it sooner, after checking each amount, from your studio. Marktmorgen never pays it and never takes it.",
         "",
       ]
     : [];
@@ -366,7 +414,10 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
       `Your Marktmorgen plan for ${name} ended on ${dateWords(endedAt)}.`,
       "",
       kind === "ended" ? "Your store is still there and nothing has been removed." : "Nothing has been removed yet.",
-      "Since your plan ended, none of your members is charged again, and they keep their access.",
+      // Said only once every membership's payments are known to be paused
+      // (lib/closing-holds.ts): a member the hold did not reach, or could not
+      // pause, can still be charged, and the notice says so below.
+      allPaused ? "Since your plan ended, none of your members is charged again, and they keep their access." : "Your members keep their access until your store closes.",
       `On ${dateWords(day)}, ${CLOSING_DAYS} days after your plan ended, your store closes:`,
       "",
       "  - its files are removed: the files your products hand over, your lessons' videos and",
@@ -414,18 +465,68 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
   };
 }
 
-/** What a closing store's notice says of its buyers and members today, read from what was written down (no call to Stripe). */
+/** A count as written down: a whole number, never below zero. */
+const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+/**
+ * The hold's counts as `holdCounts` answers them, or null when the answer is
+ * not two counts. Null is said as "could not be checked", never as nothing
+ * left unpaused.
+ */
+export function readHoldCounts(value: unknown): { failed: number; over: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const { failed, over } = value as { failed?: unknown; over?: unknown };
+  return isCount(failed) && isCount(over) ? { failed, over } : null;
+}
+
+/**
+ * What members paid for past the day, as `unusedSummary` answers it, with its
+ * totals written as money; null when the answer is not a count with one
+ * total per currency to go with it (members but no total, a total but no
+ * members, more currencies than members, a currency twice in any case, an
+ * amount that is not money). Null is said as "could not be checked", never
+ * as no member at all.
+ */
+export function readUnusedSummary(value: unknown): { members: number; unused: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const { members, totals } = value as { members?: unknown; totals?: unknown };
+  if (!isCount(members) || !Array.isArray(totals)) return null;
+  const money = totals.every((t) => t && typeof t === "object" && typeof (t as { cur?: unknown }).cur === "string" && /^[a-z]{3}$/i.test((t as { cur: string }).cur) && isCount((t as { amount?: unknown }).amount) && (t as { amount: number }).amount > 0);
+  if (!money || (members > 0) !== (totals.length > 0) || totals.length > members) return null;
+  // One total per currency, whatever its case: a currency twice is not a summary we wrote.
+  if (new Set((totals as { cur: string }[]).map((t) => t.cur.toLowerCase())).size !== totals.length) return null;
+  try {
+    return { members, unused: (totals as { cur: string; amount: number }[]).map((t) => formatMoney(t.amount, t.cur)).join(" and ") };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a closing store's notice says of its buyers and members today, read
+ * from what was written down (no call to Stripe). A read that fails or
+ * answers in a shape we do not expect is carried as null, which the notice
+ * says it could not check: an unknown is never written as none.
+ */
 export async function closingNews(store: Store, endedAt: number, day: number, untold: number, capped = false): Promise<ClosingNews> {
-  const summary = await unusedSummary(store, day).catch(() => ({ members: 0, totals: [] as { cur: string; amount: number }[] }));
-  const counts = await holdCounts(await storeFolder(storeRef(store))).catch(() => ({ failed: 0, over: 0 }));
+  const summary = await unusedSummary(store, day).then(readUnusedSummary, (error) => {
+    console.error("plan-closing: the members who paid past a closing store's day could not be read for its notice", error);
+    return null;
+  });
+  const counts = await storeFolder(storeRef(store))
+    .then(holdCounts)
+    .then(readHoldCounts, (error) => {
+      console.error("plan-closing: a closing store's paused memberships could not be read for its notice", error);
+      return null;
+    });
   return {
-    notHeld: counts.failed,
-    overLimit: counts.over,
+    notHeld: counts ? counts.failed : null,
+    overLimit: counts ? counts.over : null,
     capped,
     buyersBy: tellsBuyers(endedAt) ? day - BUYER_NOTICE_DAYS * DAY_MS : null,
     untold,
-    members: summary.members,
-    unused: summary.totals.map((t) => formatMoney(t.amount, t.cur)).join(" and "),
+    members: summary ? summary.members : null,
+    unused: summary ? summary.unused : "",
   };
 }
 
@@ -830,7 +931,16 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     // No plan can be paid for it from here: its open plan checkouts are
     // expired, and its address is marked for after its records are gone.
     await markShut(store, next.day ?? day, endedAt);
-    await expirePlanCheckouts(store, store.stripeCustomerId ? [store.stripeCustomerId] : []);
+    // Not known in full: an open plan checkout could still be paid. Its members' renewals are still stopped
+    // below on this run (a renewal is a charge whose card fee never comes back); then the day is held, its
+    // `renewals` mark not written, so the next run reads the checkouts again (stopRenewals skips what is ended).
+    const checkoutsRead = await expirePlanCheckouts(store, store.stripeCustomerId ? [store.stripeCustomerId] : []).then(
+      () => true,
+      (error) => {
+        console.error("reading a closing store's open plan checkouts failed", error);
+        return false;
+      },
+    );
     try {
       const stopped = await stopRenewals(store, until);
       if (!stopped.done) return { key, state: "held", note: "the renewals it sold are not all stopped yet" };
@@ -838,6 +948,7 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       console.error("stopping a closing store's renewals failed", error);
       return { key, state: "held", note: "Stripe could not be asked to stop its renewals" };
     }
+    if (!checkoutsRead) return { key, state: "held", note: "its open plan checkouts could not all be read" };
     next = { ...next, renewals: now };
     await save(next);
   }

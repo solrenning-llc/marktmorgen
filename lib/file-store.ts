@@ -39,15 +39,27 @@ export async function deleteFile(pathnames: string | string[]): Promise<void> {
 
 /**
  * An address a browser can fetch the file from for `seconds`, straight from
- * its store. `saveAs` is honored by the store that can (lib/vault.ts): the
- * host's own signs a plain link and no more. Null when it could not be made.
+ * its store. Null when it could not be made.
+ *
+ * `saveAs` means the file is handed over to be saved, never opened in the
+ * tab, whichever store keeps it. The store that charges nothing to send
+ * (lib/vault.ts) saves it under that name. The host's own (Vercel Blob) is
+ * asked for a download with `download=1`, the switch the SDK's own
+ * `downloadUrl` uses (MM-SA-29); it saves the file under the last part of
+ * its path, not under `saveAs`. The switch sits outside the signed part, as
+ * the SDK's `cache=0` does, so the signature is the SDK's, untouched.
+ * Without `saveAs` (a lesson's video, a podcast episode) the address is for
+ * playing in place.
  */
 export async function fileUrl(pathname: string, seconds: number, saveAs?: string): Promise<string | null> {
   if (isVaultPath(pathname)) return vaultUrl(pathname, seconds, saveAs);
   try {
     const token = await blob.issueSignedToken({ pathname, operations: ["get"], validUntil: Date.now() + seconds * 1000 });
     const { presignedUrl } = await blob.presignUrl(token, { operation: "get", pathname, access: "private" });
-    return presignedUrl;
+    if (saveAs === undefined) return presignedUrl;
+    const url = new URL(presignedUrl);
+    url.searchParams.set("download", "1");
+    return url.toString();
   } catch (error) {
     console.error("signing a file's address failed", error);
     return null;

@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Only intercepted yearly offer settings; no email or subscription switch occurs. */
 export async function checkYearlyAcknowledgment({browser,LOCAL,fixture,is}){
  const draft="  10   Rue Étoile, Montréal  ",canonical="10 Rue Étoile, Montréal";
@@ -26,6 +28,7 @@ export async function checkYearlyAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("[data-yearly-ask-editor]");await section.waitFor();
    const check=section.locator("#yearly-ask-on"),address=section.locator("#yearly-ask-address");
+   await waitForReactChangeHandler(page,check);
    for(const on of [true,false]){
     await check.setChecked(on);await address.fill(draft);
     for(const scenario of cases){

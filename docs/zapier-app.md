@@ -66,9 +66,14 @@ requests of its plan (`API_RATE`, `takeAllowance`), which
 `tests/spend-floor.test.ts` already holds to the floor: one for a call that
 reads only the store, and more for a read that reads more than one request's
 worth (`lib/api-read-rules.ts`). The samples of events shown while a Zap is
-set up (`GET /api/v1/events`) read the newest deliveries at their most, so each
-counts as 5 (`1 + apiReadUnits(eventsWork())`), taken before it reads. The webhook endpoints a
-Zap adds use the store's own webhook deliveries, already counted and bounded.
+set up (`GET /api/v1/events`) read the newest deliveries. The measuring is
+set aside before it is done (`EVENTS_PROBE_MOST`); each delivery is then
+measured, set aside at its size with the room its tries may still write on it
+(`deliveryReadBound`), read only up to that, and the whole settled at what was
+read and sent,
+so each counts as 2 to 14 (`1 + apiReadUnits(eventsWork())` at the most, for
+messages made since 4 November 2026, bounded by `DELIVERY_MAX_BYTES`; while one kept from before is larger than that, the
+sample is not read and says it could not be read just now). The webhook endpoints a Zap adds use the store's own webhook deliveries, already counted and bounded.
 
 ## Before it is published (do not skip)
 

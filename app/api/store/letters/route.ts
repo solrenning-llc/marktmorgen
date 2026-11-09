@@ -11,6 +11,8 @@ import { letterIdFor, publishLetter, unpublishLetter } from "@/lib/letters";
  *   products: an array of the ids of this store's products that open its words, [] for
  *   everyone; left out, an email already kept for members stays so; anything else is refused.
  *   open: true, only to open an email already kept for members to everyone with products: []
+ *   preview: how many of its first parts everyone may see (1 to LETTER_PREVIEW_MAX, 0 for none),
+ *   only with products; left out, a kept preview stays when the products do; anything else is refused.
  *
  * Answers `{ ok, path? }` or `{ ok: false, error, message }`.
  */
@@ -26,7 +28,7 @@ export async function POST(request: NextRequest) {
     if (action === "publish") {
       const broadcast = await readBroadcast(id);
       if (!broadcast || broadcast.listId !== store.listId) return refuse("gone", "That email is not one of this store's. Reload the page.", 404);
-      const done = await publishLetter(store, broadcast, Date.now(), body.products, body.open === true);
+      const done = await publishLetter(store, broadcast, Date.now(), body.products, body.open === true, body.preview);
       if (!done.ok) return refuse(done.reason, done.message, done.reason === "unavailable" ? 503 : 409);
       return Response.json({ ok: true, path: `/@${store.handle}/letters/${done.letter.id}` });
     }

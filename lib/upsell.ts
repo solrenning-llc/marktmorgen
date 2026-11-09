@@ -454,8 +454,12 @@ export async function takeUpsell(input: {
 async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<void> {
   await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
   const reference = typeof pi.id === "string" ? pi.id : "";
-  const amountCents = typeof pi.amount === "number" ? pi.amount : 0;
-  const currency = typeof pi.currency === "string" && pi.currency ? pi.currency : store.currency;
+  // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+  // three-letter currency. Anything else is null, and the confirmation leaves its "Paid" line out (lib/purchase-email.ts
+  // offerConfirmationFor), never "$0" or the store's own currency.
+  const exact = Number.isSafeInteger(pi.amount) && Number(pi.amount) >= 0 && typeof pi.currency === "string" && /^[a-z]{3}$/.test(pi.currency);
+  const amountCents = exact ? Number(pi.amount) : null;
+  const currency = exact ? String(pi.currency) : null;
   // A bundle added this way: its products, from the list on its own payment.
   const listed = bundleFromMeta(pi.metadata as Record<string, string> | null, "bundle");
   const items = listed.length ? (await contentsOf(store, listed).catch(() => null))?.items : undefined;

@@ -362,7 +362,7 @@ export function orderBody(store: Store, product: Listing, cents: number, urls: {
  * and what the visit carried, as a Stripe checkout carries it in its
  * metadata: the channel (lib/visit-channel.ts), the affiliate and their
  * share (lib/affiliates.ts), and what the store sale (with its percent) or the
- * visitor's fair price (noted as meta.fair, "IN:50") took off.
+ * visitor's fair price (noted as meta.fair, its percent only, "50") took off.
  */
 type Opened = {
   s: string;
@@ -421,9 +421,10 @@ export async function openOrder(store: Store, product: Listing, origin: string, 
     const links = Array.isArray(made.links) ? (made.links as { rel?: unknown; href?: unknown }[]) : [];
     const approve = links.find((l) => l.rel === "payer-action" || l.rel === "approve");
     if (!ORDER_ID.test(order) || typeof approve?.href !== "string" || !approve.href.startsWith("https://")) return { ok: false, reason: "error" };
-    // Which discount it was, as a Stripe checkout notes it (metadata[sale] or metadata[fair]).
+    // Which discount it was, as a Stripe checkout notes it (metadata[sale] or metadata[fair]). A fair price keeps
+    // its percent only, never the country: the privacy policy (#fair-prices) says the country is not stored.
     const { sale: salePercent, fair: fairPercent } = payPalOff(store, product, at);
-    const fairNote: Record<string, string> = fairPercent > 0 ? { fair: `${store.visitorCountry}:${fairPercent}` } : {};
+    const fairNote: Record<string, string> = fairPercent > 0 ? { fair: String(fairPercent) } : {};
     const opened: Opened = {
       s: store.statsId,
       h: store.handle,

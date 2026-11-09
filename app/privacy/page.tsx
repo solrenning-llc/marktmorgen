@@ -618,7 +618,8 @@ export default function PrivacyPage() {
           page is drawn and when you start paying. It is not stored. When a
           lower price was given, the country and the percentage are written on
           that order on the creator&apos;s own Stripe account, so they can see
-          why it cost what it did.
+          why it cost what it did. On an order paid with PayPal, only the
+          percentage is kept, with that order&apos;s record, never the country.
         </p>
         <p id="team-places">
           <strong className="text-black">Bought for several people.</strong>{" "}

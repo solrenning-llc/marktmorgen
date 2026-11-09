@@ -84,7 +84,7 @@ async function refundPass(): Promise<void> {
   const before = Math.floor(Date.now() / 1000) - 3 * 86_400;
   const newer = before + 86_400;
   // A refund in full, newer than the anchor, readable: what moves the anchor when the page is read whole.
-  const fresh = { id: "re_LotTwoNewer001", object: "refund", status: "succeeded", created: newer, payment_intent: "pi_LotTwoPaid0001", charge: { id: "ch_LotTwo1", object: "charge", refunded: true, amount: 1000, amount_refunded: 1000, disputed: false } };
+  const fresh = { id: "re_LotTwoNewer001", object: "refund", status: "succeeded", amount: 1000, created: newer, payment_intent: "pi_LotTwoPaid0001", charge: { id: "ch_LotTwo1", object: "charge", refunded: true, amount: 1000, amount_refunded: 1000, disputed: false } };
   let refunds: unknown = null;
   handler = (method, path) => {
     if (method !== "GET") return null;

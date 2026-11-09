@@ -356,7 +356,7 @@ async function main(): Promise<void> {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.hostname === "api.stripe.com" && url.pathname === "/v1/refunds") {
-      const row = (n: number) => ({ id: `re_mix${n}`, created: Math.floor(Date.now() / 1000), status: "succeeded", payment_intent: `pi_mixrefund${n}0000`, charge: { object: "charge", refunded: true, amount: 2500, amount_refunded: 2500 } });
+      const row = (n: number) => ({ id: `re_mix${n}`, created: Math.floor(Date.now() / 1000), status: "succeeded", amount: 2500, payment_intent: `pi_mixrefund${n}0000`, charge: { object: "charge", id: `ch_mixrefund${n}0000`, refunded: true, amount: 2500, amount_refunded: 2500 } });
       return new Response(JSON.stringify({ object: "list", data: [row(0), row(1)], has_more: false }));
     }
     return refundsFetch(input, init);
@@ -372,7 +372,7 @@ async function main(): Promise<void> {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.hostname === "api.stripe.com" && url.pathname === "/v1/refunds") {
-      const row = (n: number) => ({ id: `re_mix${n}`, created: Math.floor(Date.now() / 1000), status: "succeeded", payment_intent: `pi_mixrefund${n}0000`, charge: { object: "charge", refunded: true, amount: 2500, amount_refunded: 2500 } });
+      const row = (n: number) => ({ id: `re_mix${n}`, created: Math.floor(Date.now() / 1000), status: "succeeded", amount: 2500, payment_intent: `pi_mixrefund${n}0000`, charge: { object: "charge", id: `ch_mixrefund${n}0000`, refunded: true, amount: 2500, amount_refunded: 2500 } });
       return new Response(JSON.stringify({ object: "list", data: [row(0), row(1)], has_more: false }));
     }
     return refundsFetch(input, init);

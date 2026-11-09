@@ -277,6 +277,72 @@ export function readDoor(get: (name: string) => string): Door | null {
 
 const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
 const REFUND_PAGES = 3;
+/**
+ * The refunds of one charge read in one run (one GET /refunds?charge= each, only for a refund that succeeded on a
+ * charge read refunded in full without covering the charge by itself): past it, the refund holds the anchor and is
+ * read in the next pass. A scheduled job bounded by its schedule, like REFUND_PAGES; Stripe bills no API call.
+ */
+const CHARGE_REFUND_LOOKUPS = 10;
+/**
+ * A refund still on its way this long is said in the log, and still marks nothing (the owner's decision 18, 9 November
+ * 2026: a refund pending for many days raises an alert, never a revocation). From the log alone: no store command.
+ */
+const REFUND_STUCK_SECONDS = 7 * 86_400;
+
+// The reading of a refund in parts below is a copy of the one on #2868 (lib/licence-keys.ts, wholeOnItsOwn and
+// chargeRefundsSettled) and on claude5/group-buy-cursor-account (lib/group-buy.ts), not yet on main: once they are, one
+// shared function in lib/refunds.ts should take the place of every copy.
+/** The most refunds of one charge read in one GET /refunds?charge= (one page; more than that is unknown). */
+const CHARGE_REFUNDS_PAGE = 100;
+const CHARGE_PATTERN = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+/** Statuses a refund still on its way has: it may yet fail, and Stripe already counts it in amount_refunded. */
+const REFUND_ON_ITS_WAY = new Set(["pending", "requires_action"]);
+const REFUND_STATUS_KNOWN = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const centsKnown = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/**
+ * Whether a succeeded refund whose charge reads refunded in full gave the whole charge back by itself: its own amount
+ * covers the charge's. Only then is no other refund of the charge needed to say the money went back for good.
+ */
+function wholeOnItsOwn(refund: Record<string, unknown>): boolean {
+  const charge = refund.charge;
+  if (!plainObject(charge)) return false;
+  const amount = ownField(charge, "amount");
+  return centsKnown(refund.amount) && centsKnown(amount) && amount > 0 && refund.amount >= amount;
+}
+
+/**
+ * A full refund made of several refunds of one charge, read from all of that charge's refunds (one GET /refunds?charge=,
+ * Stripe's own list): "held" while any is still on its way (it may still fail, and Stripe counts it in the charge's
+ * amount_refunded already), "through" when the ones that succeeded add up to the whole charge. Anything else (no
+ * charge id, a row or a list in another shape, more than one page, or succeeded refunds that do not add up although
+ * the charge reads refunded in full) throws StripeListUnreadable: never "nothing pending" (CX-123 rule 24).
+ */
+async function chargeRefundsSettled(account: string, refund: Record<string, unknown>): Promise<"held" | "through"> {
+  const charge = refund.charge;
+  const id = plainObject(charge) ? ownField(charge, "id") : undefined;
+  const amount = plainObject(charge) ? ownField(charge, "amount") : undefined;
+  if (typeof id !== "string" || !CHARGE_PATTERN.test(id) || !centsKnown(amount) || amount <= 0) {
+    throw new StripeListUnreadable("a refund's charge without its id or amount");
+  }
+  const legible = (row: Record<string, unknown>) => {
+    const status = ownField(row, "status");
+    const named = ownField(row, "charge");
+    const chargeId = typeof named === "string" ? named : plainObject(named) ? ownField(named, "id") : undefined;
+    return typeof status === "string" && REFUND_STATUS_KNOWN.has(status) && centsKnown(ownField(row, "amount")) && chargeId === id;
+  };
+  const listed = readStripePage(
+    await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`),
+    legible,
+  );
+  if (listed.unreadable > 0 || listed.hasMore) throw new StripeListUnreadable("a charge's refunds");
+  // The refund being read is one of them, as it now stands: if Stripe's list does not have it, the list proves nothing.
+  if (!listed.rows.some((row) => row.id === refund.id)) throw new StripeListUnreadable("a charge's refunds without the one read");
+  if (listed.rows.some((row) => REFUND_ON_ITS_WAY.has(ownField(row, "status") as string))) return "held";
+  const through = listed.rows.reduce((sum, row) => sum + (ownField(row, "status") === "succeeded" ? (ownField(row, "amount") as number) : 0), 0);
+  if (through >= amount) return "through";
+  throw new StripeListUnreadable("a charge read refunded in full whose succeeded refunds do not add up");
+}
 const anchorKey = (statsId: string) => `nl:rev:refunds:since:${statsId}`;
 const seenKey = (statsId: string) => `nl:rev:refunds:seen:${statsId}`;
 /**
@@ -340,6 +406,16 @@ export async function storeHasReviews(store: Store): Promise<boolean> {
  * marks every review a fully refunded payment paid for. A partial refund
  * changes nothing. Returns how many reviews it marked.
  *
+ * Only money gone back for good marks a review (the owner's decision 18,
+ * 9 November 2026: a full refund that succeeded, or a dispute lost). A refund
+ * still on its way (pending, or waiting on an action) may still fail: it
+ * marks nothing, is not taken as read, and keeps the anchor at or below its
+ * time, so the next pass reads it again; one on its way for more than seven
+ * days is said in the log, never taken for that. A refund that failed or was
+ * canceled marks nothing. A full refund made of parts marks the review only
+ * once the parts that succeeded add up to the charge (read from the charge's
+ * own refunds, as lib/licence-keys.ts does on #2868).
+ *
  * A run reads at most REFUND_PAGES pages. A pass from the anchor to the end of
  * the window may take several runs: where it stands is kept (passKey), so the
  * next run goes on from the last refund read instead of the newest one again
@@ -370,6 +446,48 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   const hold = (created: number) => {
     pass.floor = pass.floor === null ? created : Math.min(pass.floor, created);
   };
+  let lookups = CHARGE_REFUND_LOOKUPS;
+  /** Refunds read in this run still on their way after REFUND_STUCK_SECONDS, each said in the log once a run. */
+  const stuck = new Set<string>();
+  /**
+   * Whether a row may mark its reviews now: a lost dispute, or a refund that succeeded on a charge refunded in full. A
+   * refund still on its way marks nothing and, in the pass, holds the anchor at its time (the owner's decision 18); one
+   * that failed or was canceled, or a part, marks nothing.
+   */
+  const givesBackNow = (refund: Row, inPass: boolean): boolean => {
+    if (refund.object === "dispute") return rowGivesBack(refund);
+    if (REFUND_ON_ITS_WAY.has(refund.status as string)) {
+      const created = typeof refund.created === "number" ? refund.created : 0;
+      if (created <= now - REFUND_STUCK_SECONDS && !stuck.has(refund.id as string)) {
+        stuck.add(refund.id as string);
+        // An alert for whoever reads the logs, never a revocation: the review counts until the refund succeeded.
+        console.error("a refund for a reviewed purchase has been pending for more than seven days; its review counts until it succeeds", { store: store.handle, account, refund: refund.id, status: refund.status, created });
+      }
+      // The newest page a resuming run reads first never moves the pass: one of the pass's window is held when the pass
+      // reads it, and a newer one is in the next pass's window.
+      if (inPass) hold(created);
+      return false;
+    }
+    return refund.status === "succeeded" && refundedInFull(refund.charge);
+  };
+  /**
+   * A succeeded refund whose charge reads refunded in full (Stripe counts a refund still pending in amount_refunded)
+   * marks its reviews only once the charge's succeeded refunds add up to it: true when it covers the charge by itself
+   * or the charge's refunds say so; false while one of them is on its way, past the run's lookups, or when they do not
+   * read. A lost dispute needs no read.
+   */
+  const settled = async (refund: Row): Promise<boolean> => {
+    if (refund.object === "dispute" || wholeOnItsOwn(refund)) return true;
+    if (lookups <= 0) return false;
+    lookups -= 1;
+    try {
+      return (await chargeRefundsSettled(account, refund)) === "through";
+    } catch (error) {
+      if (!(error instanceof StripeListUnreadable) && !(error instanceof StripeError)) throw error;
+      console.error("reading the refunds of a refunded charge for reviews failed; held for the next pass", error);
+      return false;
+    }
+  };
 
   /**
    * Rows read: each that gives back in full, and that no earlier pass already took, marks its reviews and is then
@@ -379,11 +497,17 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
    */
   const take = async (rows: Row[], inPass: boolean): Promise<void> => {
     const full = rows
-      .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
-      .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
+      .filter((refund) => typeof refund.id === "string" && refund.id && givesBackNow(refund, inPass))
+      .map((refund) => ({ row: refund, id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
     const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
     for (const [i, refund] of full.entries()) {
       if (Number(seen[i]) !== 1) {
+        // A succeeded part of a charge not yet given back whole: not taken, and in the pass the anchor stays at or
+        // below it, so the next pass reads it again. Asked only of a payment that can have reviews.
+        if (INTENT_ID.test(refund.pi) && !(await settled(refund.row))) {
+          if (inPass) hold(refund.created);
+          continue;
+        }
         try {
           if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi);
         } catch (error) {

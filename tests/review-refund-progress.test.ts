@@ -74,8 +74,10 @@ const full = (id: string, pi: string, created: number): Row => ({
   object: "refund",
   created,
   status: "succeeded",
+  // The refund's own amount and its charge's id, as Stripe lists them (the owner's decision 18; rule 23).
+  amount: 2900,
   payment_intent: pi,
-  charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true },
+  charge: { object: "charge", id: `ch_${pi.slice(3)}`, amount: 2900, amount_refunded: 2900, refunded: true },
 });
 
 let store: Store;

@@ -43,7 +43,7 @@ function formsWithAction(html: string, value: string): string[] {
   return [...html.matchAll(/<form\b[^>]*>[\s\S]*?<\/form>/g)].map((m) => m[0]).filter((f) => f.includes(`name="action" value="${value}"`));
 }
 /** The closed disclosures (no `open`) holding a delete form: summary words, question, and the form. */
-function deleteAsks(html: string): { summary: string; question: string; button: string; form: string }[] {
+function deleteAsks(html: string): { summary: string; summaryTag: string; question: string; button: string; form: string }[] {
   return [...html.matchAll(/<details(?![^>]*\bopen\b)[^>]*>([\s\S]*?)<\/details>/g)]
     .map((m) => m[1])
     .filter((inner) => formsWithAction(inner, "delete").length === 1)
@@ -51,6 +51,7 @@ function deleteAsks(html: string): { summary: string; question: string; button: 
       const form = formsWithAction(inner, "delete")[0];
       return {
         summary: inner.match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/)?.[1] ?? "",
+        summaryTag: inner.match(/<summary\b[^>]*>/)?.[0] ?? "",
         question: form.match(/role="group" aria-label="([^"]+)"/)?.[1] ?? "",
         button: form.match(/<button type="submit"[^>]*>([\s\S]*?)<\/button>/)?.[1] ?? "",
         form,
@@ -84,6 +85,13 @@ async function main(): Promise<void> {
   ], [true, true, true, true, true]);
   is("a student sees no delete for someone else's comment", formsWithAction(student, "delete").some((f) => f.includes("cccccccccccc")), false);
   is("the button that sends is a 44 px target", /<button type="submit" class="[^"]*min-h-11/.test(asks[0]?.form ?? ""), true);
+  // The lesson page is not inside [data-store-layout], so the store front's summary rule does not reach it: the
+  // summary carries its own 44 px row (WCAG 2.5.5), by height and padding, and stays a list item (its triangle).
+  is("every delete summary is a 44 px row of its own, and keeps its disclosure triangle", asks.map((a) => [
+    /class="[^"]*\bmin-h-11\b/.test(a.summaryTag),
+    /padding-block:calc\(\(2\.75rem - 1lh\) \/ 2\)/.test(a.summaryTag),
+    /class="[^"]*\b(?:inline-)?flex\b/.test(a.summaryTag),
+  ]), asks.map(() => [true, true, false]));
 
   part("The creator: hiding stays one press (it can be undone), deleting asks");
   const creator = draw(CREATOR_AUTHOR);

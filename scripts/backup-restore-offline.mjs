@@ -115,8 +115,10 @@ function main() {
     const snapshot = json(open(PART, keys, blob).packed, PART_JSON_MAX);
     if (!snapshot || snapshot.version !== 1 || snapshot.capturedAt !== manifest.capturedAt || !Array.isArray(snapshot.rows) || snapshot.rows.length !== part.rows) stop(`part ${part.id} does not match its manifest`);
     for (const row of snapshot.rows) {
-      const fine = row && typeof row.key === "string" && row.key.startsWith("nl:") && !keysSeen.has(row.key)
-        && typeof row.dump === "string" && row.dump.length > 0 && BASE64.test(row.dump)
+      // The repository reader's checks (lib/backup-codec.ts validate): a key of at most 1,024 bytes, and a dump in
+      // canonical base64 only (Claude 2's LOW 2, 9 November 2026), so --out never writes a row it would refuse.
+      const fine = row && typeof row.key === "string" && row.key.startsWith("nl:") && Buffer.byteLength(row.key) <= 1024 && !keysSeen.has(row.key)
+        && typeof row.dump === "string" && row.dump.length > 0 && BASE64.test(row.dump) && Buffer.from(row.dump, "base64").toString("base64") === row.dump
         && (row.expiresAt === null || (whole(row.expiresAt) && row.expiresAt > manifest.capturedAt));
       if (!fine) stop(`part ${part.id} holds a row it cannot`);
       keysSeen.add(row.key);

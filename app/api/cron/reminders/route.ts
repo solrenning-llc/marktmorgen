@@ -57,9 +57,10 @@ async function passes(started: number): Promise<Response> {
     const counts = await sendReminders();
     const failed = await sendFailedPlanNotices();
     const breaks = PLAN_BREAKS_ENABLED ? await runBreaks() : { told: 0, restarted: 0, failed: 0, dropped: 0 };
-    // Trial nudges start no new nudge after 30 s and carry on the next day where they stopped (lib/trial-nudges.ts);
-    // a pass that fails is said, and the payment request reminders still run.
-    const nudges = await sendTrialNudges(undefined, started + 30_000).catch((error) => {
+    // Trial nudges start no new nudge after 30 s, or 10 s after the passes before them when those ran late, never
+    // after 40 s, and carry on the next day where they stopped (lib/trial-nudges.ts); a pass that fails is said,
+    // and the payment request reminders still run.
+    const nudges = await sendTrialNudges(undefined, Math.min(started + 40_000, Math.max(started + 30_000, Date.now() + 10_000))).catch((error) => {
       console.error("sending trial nudges failed", error);
       return { error: "failed" as const };
     });

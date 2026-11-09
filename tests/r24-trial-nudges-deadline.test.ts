@@ -4,11 +4,12 @@
  *   - it stops starting new work at its deadline, and the next run resumes
  *     where it stopped (a cursor), so every trial is reached and each nudge
  *     goes once;
- *   - a run killed after its mark was taken and before its send began does
- *     not lose the nudge: the mark is pending only for a short while, and the
- *     next run sends it under the same idempotency key, once; one killed while
- *     the provider had the email is never sent a second time (that key is not
- *     posted again by lib/resend-fallback-transport.ts);
+ *   - a run killed after its mark was taken and before it was kept does not
+ *     lose the nudge: the mark is pending only for a short while, and the next
+ *     run sends it under the same idempotency key, once; the mark is kept long
+ *     before the send, so one killed while the provider had the email, or
+ *     after it, is never sent a second time
+ *     (tests/r24-trial-nudge-mark-before-send.test.ts has the Amazon path);
  *   - an unreadable cursor starts the walk over from the first page (nothing
  *     skipped), and a walk that reaches the end lets the cursor go.
  *
@@ -172,23 +173,20 @@ test("a run killed after its mark and before its send began: the next run sends 
   assert.deepEqual([after.sent, sends.length], [0, 1], "and never twice");
 });
 
-test("a run killed after its send and before its mark was kept: the next run never posts it again", async () => {
+test("a run killed after its send: the next run never posts it again", async () => {
   const [email] = await trialStores(1);
   await redis.pipeline([["DEL", CURSOR]]);
   sends.length = 0;
   // The function is stopped after the provider took the email: the next Redis call it makes never answers.
   const original = redis.pipeline.bind(redis);
-  let marked = false;
   let reached!: () => void;
   const atKill = new Promise<void>((resolve) => { reached = resolve; });
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (marked) {
+    if (sends.length) {
       reached();
       return new Promise(() => {});
     }
-    const out = await original(commands);
-    if (commands.some((cmd) => cmd[0] === "SET" && String(cmd[1]).startsWith("nl:nudge:") && cmd.includes("NX"))) marked = true;
-    return out;
+    return original(commands);
   }) as typeof redis.pipeline;
   void sendTrialNudges(START + 3 * DAY, Date.now() + 15_000);
   await atKill;
@@ -197,8 +195,8 @@ test("a run killed after its send and before its mark was kept: the next run nev
   // A day passes before the next scheduled run.
   advance(DAY * 1000);
   const next = await sendTrialNudges(START + 4 * DAY, Date.now() + 15_000);
-  assert.deepEqual(sends.map((s) => s.to), [email], "the same key is not posted again: its receipt says it went");
-  assert.equal(next.sent, 1, "known as sent, from the receipt");
+  assert.deepEqual(sends.map((s) => s.to), [email], "not posted again: the mark was kept before the send");
+  assert.equal(next.sent, 0, "nothing asked again");
   advance(DAY * 1000);
   const after = await sendTrialNudges(START + 5 * DAY, Date.now() + 15_000);
   assert.deepEqual([after.sent, sends.length], [0, 1], "and never twice");

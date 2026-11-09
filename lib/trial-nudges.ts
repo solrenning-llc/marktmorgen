@@ -43,14 +43,17 @@ const DAY = 86_400;
 export const NUDGE_DAYS = [3, 9] as const;
 const MAX_PAGES = 50;
 const sentKey = (subscription: string, dayIndex: number) => `nl:nudge:${subscription}:${dayIndex}`;
-/** How long a nudge's mark lasts once its send has finished, sent or not known to be: never twice inside it. */
+/**
+ * How long a nudge's mark lasts once it is kept, from just before its send: longer than the whole trial, so no later
+ * run can ever see it lapse and post the nudge again. The transports' own once-only windows are shorter than the
+ * nudges' daily rhythm (Amazon's nl:ses:once: key lasts a day, lib/email.ts), so they are never what keeps a nudge
+ * from going twice (Claude 2 on #3342).
+ */
 const SENT_SECONDS = 60 * DAY;
 /**
- * How long a nudge's mark lasts before its send has finished: longer than any run can take (the cron's 60 s, and
- * its lock's 300 s), so a run never sees its own mark lapse, and short enough that a run killed between the mark
- * and the end of the send leaves it to lapse, and the nudge goes on a later run under the same idempotency key. A
- * key the email transport already posted is never posted again (lib/resend-fallback-transport.ts: an accepted one
- * reads as sent from its receipt, one not known stays not known), so the later run sends only what never left.
+ * How long a nudge's mark lasts from its claim to its keep, just before the send: longer than any run can take (the
+ * cron's 60 s, and its lock's 300 s), so a run never sees its own mark lapse, and short enough that a run killed
+ * before the send leaves it to lapse, and the nudge, never posted, goes on a later run.
  */
 const PENDING_SECONDS = 600;
 /** The last trial a run that stopped at its deadline handled (a subscription id); the next run starts after it. */
@@ -171,7 +174,7 @@ async function claimNudge(keys: string[], which: number): Promise<string | null>
   if (!counts || counts.some((count) => count !== 0 && count !== 1)) throw new UnknownReplyError("the trial nudges sent");
   if (counts.slice(which).some((count) => count === 1)) return null;
   const mine = claimValue();
-  // Pending until the send has finished (keepNudge): a run killed before then does not lose the nudge.
+  // Pending until it is kept just before the send (keepNudge): a run killed before then does not lose the nudge.
   const claimed = await claimMark(keys[which], PENDING_SECONDS, mine);
   if (claimed === "ours") return mine;
   if (claimed === "taken") return null;
@@ -180,9 +183,10 @@ async function claimNudge(keys: string[], which: number): Promise<string | null>
 }
 
 /**
- * Once the send has finished (sent, refused or not known), the mark is kept SENT_SECONDS, only while it still holds
- * this run's value (lib/redis-lock.ts, one script). Tried twice; when neither answers exactly 1 the mark lapses at
- * PENDING_SECONDS and a later run asks again under the same idempotency key, which the transport never posts twice.
+ * Just before the send, the mark is kept SENT_SECONDS, only while it still holds this run's value (lib/redis-lock.ts,
+ * one script), so it outlives every window in which the nudge could be posted again. Tried twice; when neither
+ * answers exactly 1 nothing is sent: the mark lapses at PENDING_SECONDS and a later run sends the nudge, or, when a
+ * hold landed with its reply lost, it stands and the nudge goes at most once (CX-123 rule 24).
  */
 async function keepNudge(key: string, mine: string): Promise<boolean> {
   const held = { key, token: mine, ttlSeconds: SENT_SECONDS };
@@ -304,6 +308,12 @@ async function nudgeOne(
     return "done";
   }
   if (!claimed) return "done";
+  // Kept long before the send, never after it: a failed keep sends nothing, so a nudge can never go twice.
+  if (!(await keepNudge(keys[due.which], claimed))) {
+    console.error("keeping a trial nudge's mark failed; nothing sent, a later run sends it once", id);
+    counts.failed += 1;
+    return "done";
+  }
   const { subject, text } = nudgeEmail(store, nextStep(store), due.left, due.which);
   const ok = await sendEmail({
     meter: { by: "company" },
@@ -314,11 +324,8 @@ async function nudgeOne(
     replyTo: SUPPORT_EMAIL,
     idempotencyKey: `nl-trial-nudge:${id}:${due.which}`,
   }).catch(() => false);
-  // false is refused or unknown alike (the provider may have taken it and the reply been lost), so the mark is
-  // kept: a nudge goes at most once, never twice (CX-123 rule 24; Claude 6 audit on #2898).
-  if (!(await keepNudge(keys[due.which], claimed))) {
-    console.error("keeping a trial nudge's mark failed; it lapses and a later run sends it under the same key", id);
-  }
+  // false is refused or unknown alike (the provider may have taken it and the reply been lost), so the mark, kept
+  // before the send, stays: a nudge goes at most once, never twice (CX-123 rule 24; Claude 6 audit on #2898).
   if (ok) counts.sent += 1;
   else counts.failed += 1;
   return "done";

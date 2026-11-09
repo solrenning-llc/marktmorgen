@@ -9,8 +9,11 @@
  *   in another shape is never taken as passed over; the anchor does not move past the event.
  * - A passed-over event's own mark and its parts' marks (GET, text or null): another shape is unknown, never "already
  *   told" nor "already sent"; nothing is marked, the event stays where it is, and a later visit tells the creator.
- * - Every delivery line written (SET NX: "OK" written, null already there; SET: "OK"): another reply is unknown and is
- *   never counted as stored: the event's mark is let go or never set, so the line is written when it comes again.
+ * - Every delivery line written (SET NX: "OK" written, null already there; SET: "OK"): another reply, or a call that
+ *   fails, is read back once (GET, text or null). A line that is there goes in the log, once, and the event goes on
+ *   as written (a caller that emits only once still has its delivery in the creator's log); a line that is not there
+ *   is never counted as stored: the event's mark is let go or never set, and a message not kept gives its day's count
+ *   back, so the line is written, and counted once, when it comes again. A read back in another shape stays unknown.
  * - The store's log, read before a line is put in it (LRANGE, a list of text): another shape is unknown, never an
  *   empty log, so no line is put in it twice.
  *
@@ -22,7 +25,7 @@ import { createHash } from "node:crypto";
 import { MESSAGE_TEXT_MAX } from "@/lib/webhook-limits";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { GIVEN_UP_LINES_PER_DAY, SKIPPED_LINES_PER_DAY, STRIPE_WAIT_RUNS, TOO_LARGE_WORDS, addEndpoint, emitEvent, eventIdFor, recentMessages, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
+import { GIVEN_UP_LINES_PER_DAY, QUEUE_KEY, SKIPPED_LINES_PER_DAY, STRIPE_WAIT_RUNS, TOO_LARGE_WORDS, addEndpoint, emitEvent, eventIdFor, recentMessages, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -55,18 +58,31 @@ type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
 /** While set, a command it answers for is not run: this is its reply. Every other command runs. */
 let swap: ((command: Command) => { reply: unknown } | undefined) | null = null;
+/** A reply standing for a pipeline that fails after its commands ran (the connection closed). */
+const FAILS = Symbol("the call fails");
+/** While set, a command it answers for is run, and then this is its reply (FAILS: the pipeline fails after it ran). */
+let landed: ((command: Command) => { reply: unknown } | undefined) | null = null;
 /** While set, a pipeline writing this key fails, as a store that is down (a failure of our own handling of an event). */
 let breakKey = "";
 redis.pipeline = (async (commands: Command[]) => {
   // The queue's lease is not taken here, so no delivery is tried (no network either way).
   if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes('redis.call("ZSCORE", KEYS[1], ARGV[1])')) return [0];
   if (breakKey && commands.some((c) => c[0] === "SET" && c[1] === breakKey)) throw new Error("synthetic store failure");
-  if (!swap) return real(commands);
+  if (!swap && !landed) return real(commands);
   const replies: unknown[] = [];
+  let fails = false;
   for (const command of commands) {
-    const swapped = swap(command);
-    replies.push(swapped ? swapped.reply : (await real([command]))[0]);
+    const swapped = swap?.(command);
+    if (swapped) {
+      replies.push(swapped.reply);
+      continue;
+    }
+    const reply = (await real([command]))[0];
+    const after = landed?.(command);
+    if (after?.reply === FAILS) fails = true;
+    replies.push(after ? after.reply : reply);
   }
+  if (fails) throw new Error("the connection closed after the write");
   return replies;
 }) as typeof redis.pipeline;
 
@@ -118,6 +134,9 @@ const logIds = async () => (await real([["LRANGE", `nl:hooks:log:${statsId}`, 0,
 
 const OFF_SHAPES: [string, unknown][] = [["42", 42], ["true", true], ['["x"]', ["x"]], ["an object", { x: 1 }], ["undefined", undefined]];
 const OFF_WRITES: [string, unknown][] = [['"QUEUED"', "QUEUED"], ["1", 1], ["true", true], ['["OK"]', ["OK"]], ["undefined", undefined]];
+/** The same, and a call that fails after the write ran. */
+const LANDED: [string, unknown][] = [...OFF_WRITES, ["a call that fails", FAILS]];
+const skipCount = async () => Number(await get(`nl:hooks:wait:${statsId}:skip:large:${Math.floor(Date.now() / 86_400_000)}`));
 
 async function main(): Promise<void> {
   part("The Stripe watch's stores and place: another shape is unknown; nothing is read and the place does not move");
@@ -218,6 +237,16 @@ async function main(): Promise<void> {
     is(`${name}: the next exact visit writes the line`, [await givenUpLines(s.store, s.about), await get(anchorKey())], [1, s.id]);
   }
 
+  part("A passed-over event's line that landed with a reply in another shape is read back: in the log once, the event marked");
+  for (const [name, value] of LANDED) {
+    const s = await stuck((n += 1));
+    landed = (c) => (c[0] === "SET" && isDelivery(c) && nx(c) ? { reply: value } : undefined);
+    await watchStripe(Date.now() + 10_000);
+    landed = null;
+    is(`${name}: its line in the log once, the event marked, the anchor moved on`,
+      [await givenUpLines(s.store, s.about), typeof (await get(givenUpMarkKey(s.id))), await get(anchorKey())], [1, "string", s.id]);
+  }
+
   part("The day's summary line: its read and its write in another shape are unknown");
   const day = Math.floor(Date.now() / 86_400_000);
   const summed = async () => {
@@ -243,6 +272,14 @@ async function main(): Promise<void> {
     await watchStripe(Date.now() + 10_000);
     is(`written as ${name}: the next exact visit writes it`, [typeof (await get(s.summary)), await get(anchorKey())], ["string", s.id]);
   }
+  for (const [name, value] of LANDED) {
+    const s = await summed();
+    landed = (c) => (c[0] === "SET" && c[1] === s.summary ? { reply: value } : undefined);
+    await watchStripe(Date.now() + 10_000);
+    landed = null;
+    is(`written as ${name}, and it landed: read back, in the log, the event marked`,
+      [typeof (await get(s.summary)), (await logIds()).includes(s.summary.slice("nl:hooks:d:".length)), typeof (await get(givenUpMarkKey(s.id))), await get(anchorKey())], ["string", true, "string", s.id]);
+  }
   const summary = await summed();
   await watchStripe(Date.now() + 10_000);
   is("control: exact replies write the summary line and mark the event", [typeof (await get(summary.summary)), typeof (await get(givenUpMarkKey(summary.id))), await get(anchorKey())], ["string", "string", summary.id]);
@@ -260,6 +297,31 @@ async function main(): Promise<void> {
   }
   store = await setup();
   is("control: exact replies write it once", [await emitEvent(store, "sale.completed", "cs_Emit01", { amount_cents: 4900 }), (await logIds()).length], [1, 1]);
+
+  part("An event's deliveries that landed with a reply in another shape are read back: queued, in the log once, emitted once");
+  for (const [name, value] of LANDED) {
+    store = await setup();
+    landed = (c) => (c[0] === "SET" && isDelivery(c) && nx(c) ? { reply: value } : undefined);
+    const first = await outcome(emitEvent(store, "sale.completed", "cs_Landed01", { amount_cents: 4900 }));
+    landed = null;
+    const ids = await logIds();
+    const member = `${statsId}|${ids[0] ?? ""}`;
+    is(`${name}: done, the line kept, queued and in the log once, the event's mark kept`,
+      [first, ids.length, typeof (await get(`nl:hooks:d:${ids[0] ?? ""}`)), (await real([["ZSCORE", QUEUE_KEY, member]]))[0] !== null, typeof (await get(saleMarkKey("cs_Landed01")))],
+      ["done", 1, "string", true, "string"]);
+    is(`${name}: emitted again, nothing more`, [await emitEvent(store, "sale.completed", "cs_Landed01", { amount_cents: 4900 }), (await logIds()).length], [0, 1]);
+  }
+  for (const [name, value] of [["42", 42], ['["x"]', ["x"]]] as [string, unknown][]) {
+    store = await setup();
+    landed = (c) => (c[0] === "SET" && isDelivery(c) && nx(c) ? { reply: "QUEUED" } : undefined);
+    swap = (c) => (c[0] === "GET" && isDelivery(c) ? { reply: value } : undefined);
+    const first = await outcome(emitEvent(store, "sale.completed", "cs_Unsure01", { amount_cents: 4900 }));
+    landed = null;
+    swap = null;
+    is(`read back as ${name} too: unknown, and the event's mark let go`, [first, await get(saleMarkKey("cs_Unsure01"))], ["unknown", null]);
+    await emitEvent(store, "sale.completed", "cs_Unsure01", { amount_cents: 4900 });
+    is(`read back as ${name} too: noticed again, its line in the log once`, (await logIds()).length, 1);
+  }
 
   part("A message not kept: its line written in another shape is never counted as stored");
   const tooLarge = { notes: Array.from({ length: 300 }, () => "x".repeat(MESSAGE_TEXT_MAX)) };
@@ -281,6 +343,24 @@ async function main(): Promise<void> {
       await emitEvent(store, "sale.completed", "cs_Large01", tooLarge);
       const words = await lineWords();
       is(`${label} as ${name}: noticed again, its line is written`, [words.length, overflow ? words[0]?.includes("too large") : words[0] === TOO_LARGE_WORDS], [1, true]);
+      is(`${label} as ${name}: the message counted once for the day`, await skipCount(), overflow ? SKIPPED_LINES_PER_DAY + 1 : 1);
+    }
+  }
+
+  part("A message not kept: its line that landed with a reply in another shape is read back, in the log once, counted once");
+  for (const overflow of [false, true]) {
+    for (const [name, value] of LANDED) {
+      store = await setup();
+      await real([["SET", `nl:hooks:wait:${statsId}:skip:large:${day}`, overflow ? SKIPPED_LINES_PER_DAY : SKIPPED_LINES_PER_DAY - 1]]);
+      landed = (c) => (c[0] === "SET" && isDelivery(c) && nx(c) !== overflow ? { reply: value } : undefined);
+      const first = await outcome(emitEvent(store, "sale.completed", "cs_LandedLarge01", tooLarge));
+      landed = null;
+      const label = overflow ? "the day's count line" : "its own line";
+      const words = await lineWords();
+      is(`${label} as ${name}: done, the event's mark kept, its line in the log once`,
+        [first, typeof (await get(saleMarkKey("cs_LandedLarge01"))), words.length, overflow ? words[0]?.includes("too large") : words[0] === TOO_LARGE_WORDS], ["done", "string", 1, true]);
+      is(`${label} as ${name}: emitted again, nothing more`, [await emitEvent(store, "sale.completed", "cs_LandedLarge01", tooLarge), (await lineWords()).length], [0, 1]);
+      is(`${label} as ${name}: counted once`, await skipCount(), overflow ? SKIPPED_LINES_PER_DAY + 1 : SKIPPED_LINES_PER_DAY);
     }
   }
 

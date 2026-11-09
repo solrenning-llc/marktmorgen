@@ -20,11 +20,23 @@ export const PREVIEW_PLAYS_PER_STORE_WINDOW = 30;
 export const PLAY_REQUEST_UNITS = 2;
 /**
  * How long the ticket a press leaves for the page it sends the browser back to lasts, and is taken once; a signed-in
- * person's token, still good, is given again on their next press of the same lesson with no new hold.
+ * person's token, still good, is given again on their next press of the same lesson with no new hold, and their press
+ * of another lesson in the store gets a token for it ending with that one, with no new hold either.
  */
 export const PLAY_TICKET_SECONDS = 2 * 60;
 /** A token given again only while it has at least this long left. */
 export const PLAY_REUSE_MIN_SECONDS = 2 * 60;
+/**
+ * One live hold a person a store (review of #3402, security M1: a student pressing different lessons held a block
+ * each, and so the store's whole video time, without watching). A signed-in person's press with no live token first
+ * claims their place for at most PLAY_CLAIM_SECONDS (SET NX), so presses at once cannot each hold a block; a press
+ * that finds the place claimed waits for the other's token PLAY_CLAIM_POLL_MS at a time, at most PLAY_CLAIM_WAIT_MS
+ * (PLAY_CLAIM_READS reads), and is given it, or says the video could not be loaded.
+ */
+export const PLAY_CLAIM_SECONDS = 60;
+export const PLAY_CLAIM_POLL_MS = 250;
+export const PLAY_CLAIM_WAIT_MS = 750;
+export const PLAY_CLAIM_READS = PLAY_CLAIM_WAIT_MS / PLAY_CLAIM_POLL_MS;
 /**
  * The most a press of Play holds and signs for, its token's life (the owner's decision 16, relayed by Claude 1 on
  * 9 November 2026: on the Store's video hours, a shorter time for each lesson opened, the worst month's cost and the

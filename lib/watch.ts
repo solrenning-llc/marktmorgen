@@ -14,14 +14,15 @@
  *   nl:watch:sec:<folder>:<month>   seconds watched, added up, that month
  *   nl:watch:folders:<month>        the stores that had any, that month
  *   nl:watch:due                    which stores to read, and when
- *   nl:watch:opened:<folder>        when a lesson video of theirs last opened
+ *   nl:watch:opened:<folder>        when a lesson video of theirs last got a token
  *   nl:watch:hold:<folder>          the time player tokens still out may be watched for
+ *   nl:watch:anon:<folder>:<month>  the seconds held that month for anonymous previews
  *
- * Read by the hour, and only where somebody is watching. A lesson page that
- * frames a video says so (opened), which puts the store in line to be read
- * ten minutes on and every hour after, until nothing of its has been opened
- * for longer than a player's token lasts. A store nobody watches is never
- * asked about.
+ * Read by the hour, and only where somebody is watching. A press of Play
+ * that gets a token says so (the opened mark, written with its hold), which
+ * puts the store in line to be read ten minutes on and every hour after,
+ * until no token of its was signed for longer than a player's token can last
+ * and an hour (WATCHING_FOR_MS). A store nobody watches is never asked about.
  *
  * What this errs toward. A video that is deleted takes with it whatever was
  * watched since its last reading, at most an hour's worth: never counted,
@@ -56,12 +57,22 @@ const secondsKey = (folder: string, month: string) => `nl:watch:sec:${folder}:${
 const foldersKey = (month: string) => `nl:watch:folders:${month}`;
 const openedKey = (folder: string) => `nl:watch:opened:${folder}`;
 const holdKey = (folder: string) => `nl:watch:hold:${folder}`;
+const anonKey = (folder: string, month: string) => `nl:watch:anon:${folder}:${month}`;
 const DUE = "nl:watch:due";
 
 /** A month's figures are kept long enough to be billed, asked about and answered for. */
 const KEEP_SECONDS = 400 * 24 * 60 * 60;
-/** After a lesson was last opened, how long its store goes on being read: a token's life, and an hour over. */
+/**
+ * After a lesson's token was last signed, how long its store goes on being read: the longest a token is ever good
+ * for, and an hour over. Not the half-hour block a press signs (lib/lesson-play-rules.ts, PLAY_BLOCK_SECONDS):
+ * whether the video service stops a video already playing when its token runs out is not verified (an OPEN item of
+ * tests/plan-cost-registry.ts), so watching past the block is read, not left until somebody presses Play again.
+ */
 const WATCHING_FOR_MS = (PLAYER_SECONDS + 3600) * 1000;
+/** How long the opened mark is kept: past WATCHING_FOR_MS, so its absence means no token for that long. */
+const OPENED_KEEP_SECONDS = 7 * 24 * 60 * 60;
+/** How long a window's anonymous seconds are kept: past the longest window (31 days), refreshed by each press. */
+const ANON_KEEP_SECONDS = 40 * 24 * 60 * 60;
 /** A reading that failed is made again this soon. */
 const AGAIN_MS = 15 * 60 * 1000;
 
@@ -78,7 +89,7 @@ export async function opened(folder: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !FOLDER_PATTERN.test(folder)) return;
   try {
     await redisPipeline([
-      ["SET", openedKey(folder), String(now), "EX", 7 * 24 * 60 * 60],
+      ["SET", openedKey(folder), String(now), "EX", OPENED_KEEP_SECONDS],
       // NX: a store already in line keeps its place.
       ["ZADD", DUE, "NX", now + MEASURE_SOON_MS, folder],
     ]);
@@ -169,7 +180,11 @@ export type HoldAnswer = number | "paused" | "kept" | { busy: number } | null;
  * with the moment unused time is back by: the earliest of those tokens' end,
  * HOLD_SETTLE_MS, a reading's interval (MEASURE_EVERY_MS) and the five-minute
  * job's margin (MEASURE_SOON_MS); "kept" when `keepBps` (an anonymous preview:
- * PREVIEW_KEEP_BPS) would be crossed; null when anything could not be read,
+ * PREVIEW_KEEP_BPS) would be crossed, at this moment (that share of what the
+ * window has left) or over the window (anonymous previews are held at most
+ * the rest of the plan's `limit`, all of the window's presses together: review
+ * of #3402, M2, where the share of what was left halved at each cycle of
+ * watching); null when anything could not be read,
  * and then no token is signed (CX-123 rule 24: unknown is never room; what may
  * have been written stays held, and goes at a reading).
  *
@@ -183,13 +198,24 @@ export type HoldAnswer = number | "paused" | "kept" | { busy: number } | null;
  * while any unit is held (measureDue), so held units are always read back: a
  * hold nobody reads would keep the room forever. A unit whose line was not
  * joined for certain signs no token, and the next opening with room joins it.
+ * A grant writes the opened mark in that step, and signs nothing unless it was
+ * written: the store is then read for WATCHING_FOR_MS after the token, not
+ * only while its units are held (review of #3402, money M1).
+ *
+ * An anonymous preview's seconds (`keepBps` above 0) are added to the
+ * window's anonymous count with the units, before the measured figure is
+ * read, and what was not granted is taken back in the same step as the units:
+ * so two presses at once can only both fall short of the window's anonymous
+ * budget, never both pass it. Counted at the units held, watched or not.
  */
 export async function holdPlayback(folder: string, month: string, limit: number, wanted: number, now = Date.now(), keepBps = 0): Promise<HoldAnswer> {
   if (!isRedisConfigured() || !FOLDER_PATTERN.test(folder) || !WINDOW_ID.test(month)) return null;
   if (!Number.isSafeInteger(limit) || limit < 0 || !Number.isSafeInteger(wanted) || wanted < 1) return null;
   if (!Number.isSafeInteger(keepBps) || keepBps < 0 || keepBps > 10_000) return null;
   const units = Math.min(Math.ceil(wanted / HOLD_UNIT_SECONDS), Math.floor(PLAYER_SECONDS / HOLD_UNIT_SECONDS), HOLD_UNITS_MOST);
-  const runsOut = now + units * HOLD_UNIT_SECONDS * 1000;
+  const asked = units * HOLD_UNIT_SECONDS;
+  const anonymous = keepBps > 0;
+  const runsOut = now + asked * 1000;
   const mark = randomBytes(6).toString("hex");
   const slots = Array.from({ length: units }, (_, i) => `${mark}:${i}`);
   let replies: unknown[];
@@ -198,38 +224,50 @@ export async function holdPlayback(folder: string, month: string, limit: number,
     replies = await redisPipeline([
       ["ZADD", holdKey(folder), ...slots.flatMap((slot) => [runsOut, slot])],
       ["ZCARD", holdKey(folder)],
+      ...(anonymous ? [["INCRBY", anonKey(folder, month), asked], ["EXPIRE", anonKey(folder, month), ANON_KEEP_SECONDS]] : []),
       ["GET", secondsKey(folder, month)],
     ]);
   } catch (error) {
     console.error("could not hold a lesson video's playback; no player", error);
     return null;
   }
-  if (!Array.isArray(replies) || replies.length !== 3) return null;
+  if (!Array.isArray(replies) || replies.length !== (anonymous ? 5 : 3)) return null;
   const added = replies[0];
   const count = replies[1];
-  const measured = textCountOf(replies[2]);
+  const anonAfter = anonymous ? replies[2] : asked;
+  const measured = textCountOf(replies[replies.length - 1]);
   if (measured === null || added !== units || typeof count !== "number" || !Number.isSafeInteger(count) || count < units) return null;
+  if (typeof anonAfter !== "number" || !Number.isSafeInteger(anonAfter) || anonAfter < asked) return null;
   const used = measured === "absent" ? 0 : measured;
   // The seconds this window has left by what was measured, and those other tokens still out leave of them:
   // their units counted whole, so this errs toward holding more, never less.
   const left = limit - used;
   const free = left - (count - units) * HOLD_UNIT_SECONDS;
-  // What this opening may take: an anonymous preview leaves its share of `left` to the store's students.
-  const open = free - Math.ceil(Math.max(0, left) * keepBps / 10_000);
-  const granted = open >= HOLD_MIN_SECONDS ? Math.min(units * HOLD_UNIT_SECONDS, open) : 0;
+  // What this opening may take: an anonymous preview leaves its share of `left` to the store's students, and takes
+  // no more of the window than its anonymous budget has left, in whole units (review of #3402, M2).
+  const anonRoom = Math.floor((limit * (10_000 - keepBps)) / 10_000) - (anonAfter - asked);
+  const nowOpen = free - Math.ceil((Math.max(0, left) * keepBps) / 10_000);
+  const open = anonymous ? Math.min(nowOpen, Math.floor(Math.max(0, anonRoom) / HOLD_UNIT_SECONDS) * HOLD_UNIT_SECONDS) : nowOpen;
+  const granted = open >= HOLD_MIN_SECONDS ? Math.min(asked, open) : 0;
   const keep = Math.ceil(granted / HOLD_UNIT_SECONDS);
   const back = slots.slice(keep);
   const writes: (string | number)[][] = [];
-  if (back.length) writes.push(["ZREM", holdKey(folder), ...back]);
+  const write = (command: (string | number)[]) => writes.push(command) - 1;
+  const backAt = back.length ? write(["ZREM", holdKey(folder), ...back]) : -1;
   // A part grant's units run out with its token, not with the time first asked for, so they go back on time.
-  const rescore = keep > 0 && granted < units * HOLD_UNIT_SECONDS;
-  if (rescore) writes.push(["ZADD", holdKey(folder), "XX", ...slots.slice(0, keep).flatMap((slot) => [now + granted * 1000, slot])]);
+  const rescore = keep > 0 && granted < asked;
+  const movedAt = rescore ? write(["ZADD", holdKey(folder), "XX", ...slots.slice(0, keep).flatMap((slot) => [now + granted * 1000, slot])]) : -1;
+  // An anonymous press counts what it holds, whole units, and gives back the rest it added.
+  const anonBack = anonymous ? asked - keep * HOLD_UNIT_SECONDS : 0;
+  const anonAt = anonBack > 0 ? write(["DECRBY", anonKey(folder, month), anonBack]) : -1;
+  // A token about to be signed keeps the store in line for WATCHING_FOR_MS (measureDue), whatever its units.
+  const openedAt = keep > 0 ? write(["SET", openedKey(folder), String(now), "EX", OPENED_KEEP_SECONDS]) : -1;
   // In line to be read whenever a unit may be held past this step: always but when the hours measured are used,
   // where nothing is kept and the store has nothing to be read for. NX: a store already in line keeps its place.
-  if (left >= HOLD_MIN_SECONDS) writes.push(["ZADD", DUE, "NX", now + MEASURE_SOON_MS, folder]);
+  if (left >= HOLD_MIN_SECONDS) write(["ZADD", DUE, "NX", now + MEASURE_SOON_MS, folder]);
   // Refused because other tokens hold the room: when the earliest of them is read back.
   const busy = keep === 0 && left >= HOLD_MIN_SECONDS && free < HOLD_MIN_SECONDS;
-  if (busy) writes.push(["ZRANGEBYSCORE", holdKey(folder), "-inf", "+inf", "WITHSCORES", "LIMIT", 0, 1]);
+  if (busy) write(["ZRANGEBYSCORE", holdKey(folder), "-inf", "+inf", "WITHSCORES", "LIMIT", 0, 1]);
   let done: unknown[] = [];
   if (writes.length) {
     try {
@@ -239,10 +277,12 @@ export async function holdPlayback(folder: string, month: string, limit: number,
       return null;
     }
     // Units not taken back or moved for certain stay held, and no token is signed on them; nor on a line not joined
-    // for certain (the next opening joins it, and the reading gives them back).
-    if (!Array.isArray(done) || done.length !== writes.length || (back.length && done[0] !== back.length)) return null;
-    const moved = rescore ? done[back.length ? 1 : 0] : 0;
-    if (typeof moved !== "number" || !Number.isSafeInteger(moved) || moved < 0) return null;
+    // for certain (the next opening joins it, and the reading gives them back); nor without the opened mark.
+    // An anonymous count not given back for certain stays counted: fewer previews, never more.
+    if (!Array.isArray(done) || done.length !== writes.length || (backAt >= 0 && done[backAt] !== back.length)) return null;
+    const whole = (at: number) => at < 0 || (typeof done[at] === "number" && Number.isSafeInteger(done[at]) && (done[at] as number) >= 0);
+    if (!whole(movedAt) || !whole(anonAt)) return null;
+    if (openedAt >= 0 && done[openedAt] !== "OK") return null;
   }
   if (keep > 0) return granted;
   if (left < HOLD_MIN_SECONDS) return "paused";
@@ -381,8 +421,9 @@ export async function measureDue(deadline: number, now = Date.now()): Promise<{ 
     // its watching go unread (audit SG2, CX-123 rule 24). Since 9 November
     // 2026 a lesson's token is held for (holdPlayback): the store is read
     // while any of it is held, which a reading an interval after the last
-    // token ran out gives back; the opened mark stays for the tokens signed
-    // before, and is read the same way.
+    // token ran out gives back, and while the opened mark its grant wrote is
+    // younger than WATCHING_FOR_MS: a half-hour token's video may go on past
+    // its end (not verified; review of #3402, money M1), and that is read.
     const [openedReply, heldReply] = repliesFor(await redisPipeline([["GET", openedKey(folder)], ["ZCARD", holdKey(folder)]]), 2) ?? [];
     const openedAt = textCountOf(openedReply);
     const held = textCountOf(heldReply);

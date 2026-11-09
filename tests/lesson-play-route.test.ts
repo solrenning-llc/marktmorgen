@@ -218,9 +218,11 @@ async function main(): Promise<void> {
     const units = LIMIT / HOLD_UNIT_SECONDS;
     await redis.pipeline([["DEL", HOLDS], ["ZADD", HOLDS, ...Array.from({ length: units }, (_, i) => [now + 30 * 60 * 1000, `other:${i}`]).flat()]]);
     // Half an hour of token left, a settling interval, a reading's and the job's margin: back within about 3 hours.
-    const busy = await press("student", "lesson000001", "198.51.100.77");
+    // Rule 23 (review of #3402, M1): was the first student, who now has a live token in this store from the parts
+    // above, and so is given a token ending with it (one live hold a person a store); a student with none is refused.
+    const busy = await press("second", "lesson000001", "198.51.100.77");
     is("a student's press while others hold every hour: busy, about three hours", busy.play, "busy-3");
-    const said = await page("student", "lesson000001", { play: busy.play });
+    const said = await page("second", "lesson000001", { play: busy.play });
     is("the page says other viewers hold the time and it comes back within about 3 hours", said.includes(inHtml(w.playBusyRest(3))) && !said.includes(inHtml(w.videoNotLoaded)), true);
   }
 

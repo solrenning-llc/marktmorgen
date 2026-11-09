@@ -15,7 +15,7 @@ import { seesDrafts } from "@/lib/draft-view";
 import { folderFromPathname } from "@/lib/delivery";
 import { videoLimitFor } from "@/lib/plan-standing";
 import { windowId } from "@/lib/allowance-window";
-import { keepPlayTicket, keepPlaying, keptPlaying } from "@/lib/lesson-play";
+import { type LivePlayer, claimPlaying, dropPlayingClaim, keepPlayTicket, keepPlaying } from "@/lib/lesson-play";
 import {
   PLAYS_PER_CONNECTION_WINDOW,
   PLAYS_PER_LEARNER_WINDOW,
@@ -31,8 +31,8 @@ import {
  * 32 hours (pre-review of 9 November 2026). The press is a plain form, so it
  * works with no script; in this order it:
  *
- *   1. paces the connection (PLAYS_PER_CONNECTION_WINDOW), before anything of
- *      the store is read for it;
+ *   1. paces the connection (PLAYS_PER_CONNECTION_WINDOW), and refuses one
+ *      past it before anything of the store is read for it;
  *   2. checks the lesson is open to the one pressing, as the page does: a
  *      draft only for its students and the store's people, a lesson that is
  *      not a preview only for a student whose module has opened and whom no
@@ -40,9 +40,12 @@ import {
  *   3. paces the signed-in person (PLAYS_PER_LEARNER_WINDOW) or, for anybody
  *      else, the store's anonymous previews (PREVIEW_PLAYS_PER_STORE_WINDOW);
  *   4. takes PLAY_REQUEST_UNITS of the store's public requests;
- *   5. gives a signed-in person's token for this video again while it is good,
- *      or else holds the playback and signs a token (lib/learn.ts, lessonVideo:
- *      an anonymous press never takes the window below PREVIEW_KEEP_BPS);
+ *   5. one live hold a person a store (review of #3402, M1): gives a signed-in
+ *      person's live token again for the same video, or for another lesson a
+ *      token ending with it, holding nothing; or else, with their place claimed
+ *      so that presses at once cannot each hold, holds the playback and signs a
+ *      token (lib/learn.ts, lessonVideo: an anonymous press never takes the
+ *      window below PREVIEW_KEEP_BPS, nor previews past their window's half);
  *   6. sends the browser back to the lesson with a ticket for the player, taken
  *      once, or with what kept it from playing, in words the page says.
  *
@@ -67,6 +70,11 @@ export async function POST(request: NextRequest) {
   if (!ITEM_ID_PATTERN.test(lessonId)) return new Response("Not found.", { status: 404 });
 
   const paced = await essentialLimitState("lesson-play-ip", clientAddress(request), PLAYS_PER_CONNECTION_WINDOW, PLAY_WINDOW_SECONDS);
+  // Refused before the store is read (review of #3402, L3): back to the lesson asked for, its parts encoded.
+  if (paced !== "within") {
+    const asked = `${origin}/@${encodeURIComponent(handle)}/course/${encodeURIComponent(productId)}/${lessonId}`;
+    return new Response(null, { status: 303, headers: { Location: `${asked}?play=${paced === "exceeded" ? "many" : "error"}#video`, "Cache-Control": "no-store" } });
+  }
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("Not found.", { status: 404 });
   const product = await readCourseListing(store, productId);
@@ -74,7 +82,6 @@ export async function POST(request: NextRequest) {
   const base = `${origin}/@${store.handle}/course/${product.id}`;
   const lessonAt = `${base}/${lessonId}`;
   const back = (play: string) => new Response(null, { status: 303, headers: { Location: `${lessonAt}?play=${play}#video`, "Cache-Control": "no-store" } });
-  if (paced !== "within") return back(paced === "exceeded" ? "many" : "error");
 
   const jar = await cookies();
   const access = await courseAccess(store, product, jar);
@@ -105,12 +112,27 @@ export async function POST(request: NextRequest) {
   // Public requests: on the buyers' side, or the public's for a preview pressed by somebody else (lib/buyer-actions.ts).
   if (!(await takePublicRequest(store, anonymous ? "public" : "buyer", Date.now(), PLAY_REQUEST_UNITS))) return restingAway(origin, store);
 
-  const again = who ? await keptPlaying(who, video.pathname) : null;
-  const got = again ? { kind: "stream" as const, ...again } : await lessonVideo(video, videoLimitFor(store), windowId(store), store, { anonymous });
+  // One live hold a person a store: their live token, or their place claimed for this press (lib/lesson-play.ts).
+  let live: LivePlayer | null = null;
+  let claim: string | null = null;
+  if (who) {
+    const place = folder ? await claimPlaying(who, folder) : null;
+    if (!place) return back("error");
+    if ("live" in place) live = place.live;
+    else claim = place.claim;
+  }
+  const same = live !== null && live.pathname === video.pathname;
+  const got = live && same
+    ? { kind: "stream" as const, ...live.player }
+    : live
+      ? await lessonVideo(video, videoLimitFor(store), windowId(store), store, { until: live.expires })
+      : await lessonVideo(video, videoLimitFor(store), windowId(store), store, { anonymous });
+  if (claim && got?.kind !== "stream") await dropPlayingClaim(who, folder ?? "", claim);
   switch (got?.kind) {
     case "stream": {
       const player = { src: got.src, width: got.width, height: got.height };
-      if (who && !again) await keepPlaying(who, video.pathname, player);
+      // Their live token is now this one (a moved token ends with the one before); a claim not replaced is let go.
+      if (who && folder && !same && !(await keepPlaying(who, folder, video.pathname, player)) && claim) await dropPlayingClaim(who, folder, claim);
       const ticket = await keepPlayTicket(video.pathname, player);
       return back(ticket ?? "error");
     }

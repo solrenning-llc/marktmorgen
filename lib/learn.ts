@@ -773,7 +773,12 @@ export function lessonTokenSeconds(videoSeconds: number): number {
  * and a draw that held time let page loads take a store's hours (pre-review of
  * 9 November 2026). `how.anonymous` is a press by somebody who is not the
  * course's student nor the store's: it never takes the window below
- * PREVIEW_KEEP_BPS of what it has left.
+ * PREVIEW_KEEP_BPS of what it has left, nor anonymous previews past the rest
+ * of the plan's hours over the window. `how.until` (a second) is a signed-in
+ * person's press of another lesson while a token of theirs in this store is
+ * live (lib/lesson-play.ts, claimPlaying): nothing is held, and the token
+ * ends with theirs, at most PLAY_BLOCK_SECONDS on, since their hold covers it
+ * (one live hold a person a store, review of #3402, M1).
  *
  * One kept by the video service (lib/stream.ts) is framed with a token good
  * for the playback held for it in the store's window (lib/watch.ts,
@@ -787,7 +792,7 @@ export function lessonTokenSeconds(videoSeconds: number): number {
  * including for paid plans. Missing, invalid or unreadable limits never mint
  * a player token. This meter does not bound provider bytes, replay or buffering.
  */
-export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store, how: { anonymous?: boolean } = {}): Promise<LessonVideo | null> {
+export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store, how: { anonymous?: boolean; until?: number } = {}): Promise<LessonVideo | null> {
   // The creator contract funds each new media admission before signing a URL or querying a player.
   if (store?.period?.funded === true && !(await reservePaidResourceWindow(store))) return null;
   if (!isStreamPath(file.pathname)) {
@@ -802,6 +807,19 @@ export async function lessonVideo(file: ProductFile, limit: number | null = null
     // token lets anyone watch is held against the window's room, read with
     // the hold in one step, before it is signed, and the token is good for no
     // longer than that.
+    if (how.until !== undefined) {
+      // The person's live hold covers it: no new hold, and a token that ends with theirs.
+      const at = Date.now();
+      const until = how.until;
+      const moved = await playerFor(file.pathname, at, async () => {
+        const seconds = until - Math.floor(at / 1000);
+        return Number.isSafeInteger(seconds) && seconds >= 1 && seconds <= PLAY_BLOCK_SECONDS ? seconds : null;
+      });
+      if (!moved) return null;
+      if (moved.state === "failed") return { kind: "failed" };
+      if (!moved.src) return { kind: "preparing" };
+      return { kind: "stream", src: moved.src, width: moved.width, height: moved.height };
+    }
     let held: HoldAnswer = null;
     const player = await playerFor(file.pathname, Date.now(), async (record) => {
       // A block of PLAY_BLOCK_SECONDS at most (the owner's decision 16): the next press goes on.

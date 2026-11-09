@@ -113,7 +113,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
   "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
   "nl:voice:", "nl:voice:lock:", "nl:watch:due", "nl:watch:folders:", "nl:watch:monthly:",
-  "nl:watch:hold:", "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
+  "nl:watch:anon:", "nl:watch:hold:", "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
   "nl:weekly:lock", "nl:weekly:off", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:",
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
@@ -427,7 +427,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:voice:": E, "nl:voice:lock:": E,
   // A product's AI summary of its reviews (lib/review-ai-summary.ts): kept eight days, and goes with the store.
   "nl:rsum:": E, "nl:rsum:last:": E, "nl:rsum:lock:": E, "nl:rsum:ver:": E,
-  "nl:watch:due": I, "nl:watch:folders:": I, "nl:watch:hold:": E, "nl:watch:last:": E, "nl:watch:monthly:": C, "nl:watch:opened:": E, "nl:watch:sec:": E,
+  "nl:watch:anon:": E, "nl:watch:due": I, "nl:watch:folders:": I, "nl:watch:hold:": E, "nl:watch:last:": E, "nl:watch:monthly:": C, "nl:watch:opened:": E, "nl:watch:sec:": E,
   "nl:wb:": E, "nl:wb:cursor": C, "nl:wb:link:": T("nl:erase:ix:", 60), "nl:wb:n:": E, "nl:wb:once:": E,
   "nl:weekly:lock": C, "nl:weekly:off": I, "nl:weekly:sent:": Cr(14), "nl:weekly:to:": { how: "erase", by: "handle" },
   "nl:wf:abandoned:": X(2), "nl:wf:day:": E, "nl:wf:held:": E, "nl:wf:log:": E, "nl:wf:run:": E, "nl:wf:runs:": E,

@@ -199,7 +199,12 @@ async function main(): Promise<void> {
     await measureDue(Date.now() + 60_000, start + 11 * 60 * 1000);
     is("read before its token ran out: still in line, the hold kept", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [true, 5]);
     await measureDue(Date.now() + 60_000, start + 3 * 3600 * 1000);
-    is("read an interval after it ran out: given back, and out of line", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [false, 0]);
+    // Rule 23 (review of #3402, money M1): was [false, 0], out of line once given back. Whether a token's end stops a
+    // video already playing is not verified (OPEN item video-playback-past-hold), so a grant keeps the store read for
+    // a player's whole life and an hour (WATCHING_FOR_MS); it leaves the line after that.
+    is("read an interval after it ran out: given back, still in line to be read", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [true, 0]);
+    await measureDue(Date.now() + 60_000, start + 6 * 3600 * 1000);
+    is("read past a player's whole life and an hour: out of line", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [false, 0]);
     // A count of what is held that cannot be read keeps the store in line (rule 24), never takes it out.
     await redis.pipeline([["ZADD", "nl:watch:due", 0, FOLDER]]);
     const pipeline = redis.pipeline.bind(redis);
@@ -207,7 +212,8 @@ async function main(): Promise<void> {
       const replies = await pipeline(commands);
       return commands.map((c, i) => (c[0] === "ZCARD" && c[1] === HOLDS ? "not a count" : replies[i]));
     }) as typeof redis.pipeline;
-    await measureDue(Date.now() + 60_000, start + 3 * 3600 * 1000);
+    // Rule 23 (review of #3402, money M1): was read at 3 h, when the opened mark now keeps it in line by itself.
+    await measureDue(Date.now() + 60_000, start + 6 * 3600 * 1000);
     redis.pipeline = pipeline;
     is("a count of what is held that cannot be read keeps the store in line", await due(), true);
   }

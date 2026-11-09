@@ -67,6 +67,9 @@ async function main(): Promise<void> {
   is("today's amount, the regular price after it, and that the discount may go on",
     paidLine(store, code), "Paid: $10 today, with your discount. Each charge after this one: $20 a month, less your discount for as long as it lasts.");
 
+  is("with no price before the discount on the checkout, no catalog price is put in its place",
+    paidLine(store, { ...code, amount_subtotal: undefined }), "Paid: $10 today, with your discount. Each charge after this one is at the membership's regular price, less your discount for as long as it lasts.");
+
   part("The store sale (its coupon comes off the first charge only)");
   const sale = { ...half, id: "cs_test_paidline0sale0001", metadata: { store: "harbor", product: club.product.id, sale: "50" } };
   is("today's amount, then the regular price", paidLine(store, sale), "Paid: $10 today, with your discount. Each charge after this one: $20 a month.");

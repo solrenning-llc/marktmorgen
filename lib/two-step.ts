@@ -791,7 +791,7 @@ export async function finishSetup(
       console.error("logging out what an earlier app opened failed", error);
       return "sessions" as const;
     }
-    return (await writeHeld(held, email, { s: pending.s as string, since: now, codes: codes.map((c) => codeHash(c)), last: step, reset: 0, backup: "" }, { absent: true })) ? ("made" as const) : ("already" as const);
+    return (await writeHeld(held, email, { s: pending.s as string, since: now, codes: codes.map((c) => codeHash(c)), last: step, reset: 0, backup: "", f: 0 }, { absent: true })) ? ("made" as const) : ("already" as const);
   });
   if (made !== "made") return made;
   // The account's recovery address from now on, for losing the email too (lib/recovery-address.ts).

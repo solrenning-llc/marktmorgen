@@ -26,7 +26,13 @@ import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 const SLOW_MS = 300;
-const mail = installSesMailFixture({ onSes: async () => (await new Promise((r) => setTimeout(r, SLOW_MS)), undefined) });
+// A provider that takes SLOW_MS to accept each email, then accepts it as SES does.
+const mail = installSesMailFixture({
+  onSes: async () => {
+    await new Promise((r) => setTimeout(r, SLOW_MS));
+    return Response.json({ MessageId: "slow-provider" });
+  },
+});
 mail.configure();
 const ORIGIN = "https://marktmorgen.com";
 let net = 1;

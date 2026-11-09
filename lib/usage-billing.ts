@@ -129,7 +129,7 @@ async function carryOut(meter: Meter, folder: string, month: string, adding: Add
   try {
     const sign = mark(meter, folder, month, adding.from);
     // A request made before may have gone through without our hearing of it.
-    if (await findInvoiceLine(adding.customerId, sign, Math.floor(adding.at / 1000) - 60)) return true;
+    if (await findInvoiceLine(adding.customerId, sign, Math.floor(adding.at / 1000) - 60, { subscriptionId: adding.subscriptionId, cents: adding.to - adding.from })) return true;
     await addToNextInvoice({
       customerId: adding.customerId,
       subscriptionId: adding.subscriptionId,

@@ -420,12 +420,16 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
   if (!store.listId || !isRedisConfigured()) return `${rows.join("\r\n")}\r\n`;
 
   const key = leadsKey(store.listId);
+  // By address: HSCAN may hand the same field back twice during a walk, and the file holds each address once, as
+  // last read (null when that reading is not one the file holds).
+  const byEmail = new Map<string, string | null>();
   let cursor = "0";
   // Bounded, so a cursor that never comes back to zero cannot hold the
   // function forever; a list not read to its end by then is unknown.
-  const pages = MAX_LEADS / 500 + 10;
+  const pages = Math.ceil(MAX_LEADS / 500) + 10;
   for (let page = 0; ; page += 1) {
-    if (page === pages) throw new UnknownReplyError(`a list's HSCAN, not at its end after ${pages} pages,`);
+    // At or past it, a whole number of pages whatever MAX_LEADS is (review of #3134, L4).
+    if (page >= pages) throw new UnknownReplyError(`a list's HSCAN, not at its end after ${pages} pages,`);
     const read = scanPage(await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]));
     if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("a list's HSCAN");
     cursor = read.next;
@@ -434,8 +438,12 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
       const email = flat[i];
       const lead = parseContact(flat[i + 1]);
       if (!lead) continue;
-      if (onlyAgreed && !mailable(lead)) continue;
-      rows.push(
+      if (onlyAgreed && !mailable(lead)) {
+        byEmail.set(email, null);
+        continue;
+      }
+      byEmail.set(
+        email,
         [
           email,
           lead.agreed ? "yes" : "no",
@@ -456,5 +464,6 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
     }
     if (cursor === "0") break;
   }
+  for (const row of byEmail.values()) if (row !== null) rows.push(row);
   return `${rows.join("\r\n")}\r\n`;
 }

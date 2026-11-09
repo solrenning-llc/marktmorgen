@@ -24,7 +24,8 @@ export async function GET(request: NextRequest) {
   if (creator instanceof Response) return creator;
   const { store } = creator;
   try {
-    const book = await readBook(store);
+    // The file names no product (batchFile), so nothing is read for the names.
+    const book = await readBook(store, undefined, { titles: false });
     // The file is paid from as it is: while refunds or chargebacks could not
     // be read from Stripe in full, what is owed is not known, so no file is
     // handed out, as "Mark as paid" below and payWithPayPal refuse too.

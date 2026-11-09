@@ -15,6 +15,11 @@
  * INCRBY (one or more) and EXPIRE (0 or 1) replies exactly too and throw otherwise; their callers already log the throw
  * and go on, so the healthy path is unchanged.
  *
+ * A move left half-written (its key kept while both its reply and the read-back came in another shape, so the move
+ * was refused and the diary kept the old time) is finished by a retry of the same move: the diary, the confirmed mark,
+ * the reminders, the emails and a team's host claim end at the new time, the move counted once; a retry whose new time
+ * was taken since is refused as taken, never booked twice (Claude 2's LOW 1 on #3303).
+ *
  * Controls: a healthy move is written, the diary and readMoves agree, the reminders are planned at the new time and
  * the emails go out; planning the same reminders twice (ZADD 0) is fine.
  */
@@ -25,6 +30,8 @@ import { type CallListing, holdAndCheckout, moveBooking } from "@/lib/calls";
 import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
 import { REMINDER_QUEUE, markBookingsChanged, movedKey, planCheck, planReminders, readMoves } from "@/lib/call-records";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { writeTeam } from "@/lib/team-booking";
+import { hostId, readClaims } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -120,10 +127,14 @@ function weekdayAt(days: number, minute: number): number {
 type World = { store: Store; call: CallListing; full: Product & { call: CallSetup } };
 
 async function callStore(email: string, handle: string, account: string): Promise<World> {
+  return callStoreAs(email, handle, account, "creator");
+}
+
+async function callStoreAs(email: string, handle: string, account: string, tier: "creator" | "pro"): Promise<World> {
   await claimHandle(email, handle, `${handle} studio`, "");
   await ensureStatsId(email);
   await setStripeAccount(email, account, true);
-  await setSubscription(email, { customerId: `cus_${handle}00001`, subscriptionId: `sub_${handle}00001`, active: true, tier: "creator", period: paidPeriod() });
+  await setSubscription(email, { customerId: `cus_${handle}00001`, subscriptionId: `sub_${handle}00001`, active: true, tier, period: paidPeriod() });
   const made = await addProduct(email, "Strategy call", "", "120", null);
   if (!made.ok) throw new Error("no product");
   await setProductCall(email, made.product.id, weekly);
@@ -140,6 +151,24 @@ async function sellSession(w: World, start: number): Promise<string> {
 }
 
 const diaryOf = (w: World) => `nl:call:busy:${w.store.callsId}`;
+
+/** Every diary entry written for a session, whatever its field, as its start and `until`. */
+async function diaryOfSession(w: World, session: string): Promise<{ s: number; until: number }[]> {
+  const [flat] = await run([["HGETALL", diaryOf(w)]]);
+  const rows = flat as string[];
+  const out: { s: number; until: number }[] = [];
+  for (let i = 0; i + 1 < rows.length; i += 2) {
+    const entry = JSON.parse(rows[i + 1]) as { s?: number; until: number; session?: string };
+    if (entry.session === session) out.push({ s: entry.s ?? Number(rows[i]), until: entry.until });
+  }
+  return out.sort((a, b) => a.s - b.s);
+}
+
+/** The start of a session's one diary entry (null when it has none or more than one). */
+async function diaryStart(w: World, session: string): Promise<number | null> {
+  const rows = await diaryOfSession(w, session);
+  return rows.length === 1 ? rows[0].s : null;
+}
 const lockOf = (w: World) => `nl:call:lock:${w.store.callsId}`;
 
 /** The reminder queue's members for a session. */
@@ -180,6 +209,7 @@ async function main(): Promise<void> {
     [`|1|${A + 3 * HOUR}`, `|24|${A + 3 * HOUR}`].map((tail) => `${w.store.callsId}|movewrite|${healthy}${tail}`),
   );
   is("the move emails go out", mails > sent, true);
+  const firstMoveMails = mails - sent;
 
   part("A move's SET answered in another shape is not written, and nothing after it happens");
   const shapes: [string, unknown][] = [
@@ -232,6 +262,77 @@ async function main(): Promise<void> {
   unswap();
   is("a SET and its read-back both in another shape: the move is refused", unreadMove, { ok: false, reason: "error" });
   is("…with no email, and the diary as it was", [mails - sent, (await run([["HGET", diaryOf(w), unread]]))[0]], [0, unreadBefore]);
+
+  part("A move left half-written (the move kept, the diary not) is finished by a retry of the same move, once");
+  // Claude 2's LOW 1 on #3303: the SET landed while it and its read-back both answered in another shape. The move
+  // was refused, readMoves already gave the new time and the diary the old one; a retry answered "same" for good.
+  const H = days[0] + 4 * HOUR;
+  const half = await sellSession(w, H);
+  await run([["DEL", lockOf(w)]]);
+  swap.landed = { value: undefined };
+  swap.get = { value: ["x"] };
+  const refused = await move(half, H, H + 2 * HOUR);
+  unswap();
+  is("half-written: the first try is refused", refused, { ok: false, reason: "error" });
+  is("half-written: readMoves gives the new time, the diary the old one", [(await readMoves([half])).get(half), (await diaryStart(w, half))], [{ s: H + 2 * HOUR, e: H + 3 * HOUR, n: 1 }, H]);
+  await run([["DEL", lockOf(w)]]);
+  sent = mails;
+  const retried = await move(half, H, H + 2 * HOUR);
+  const retryMails = mails - sent;
+  is("the retry is not answered \"same\": it finishes the move, counted once", retried.ok ? [retried.start, retried.end, retried.moves] : retried, [H + 2 * HOUR, H + 3 * HOUR, 1]);
+  is("the move is still counted once in readMoves", (await readMoves([half])).get(half), { s: H + 2 * HOUR, e: H + 3 * HOUR, n: 1 });
+  is("the diary holds this booking once, at the new time, and the old time is let go", await diaryOfSession(w, half), [{ s: H + 2 * HOUR, until: 0 }]);
+  is("the booking is marked confirmed, so no \"Booked\" email for the old time follows", (await run([["EXISTS", `nl:call:confirmed:${half}`]]))[0], 1);
+  is(
+    "the reminders are for the new time only",
+    (await queued(half)).filter((m) => !m.includes("|c|")),
+    [`|1|${H + 2 * HOUR}`, `|24|${H + 2 * HOUR}`].map((tail) => `${w.store.callsId}|movewrite|${half}${tail}`),
+  );
+  is("the move emails go out once, as many as a healthy move sends", retryMails, firstMoveMails);
+  await run([["DEL", lockOf(w)]]);
+  sent = mails;
+  is("a further retry, the move now whole, is \"same\" and sends nothing", [await move(half, H, H + 2 * HOUR), mails - sent], [{ ok: false, reason: "same" }, 0]);
+
+  part("A half-written move whose new time was taken since is refused by its retry, never booked twice");
+  const T = days[1] + 4 * HOUR;
+  const halfTaken = await sellSession(w, T);
+  await run([["DEL", lockOf(w)]]);
+  swap.landed = { value: undefined };
+  swap.get = { value: ["x"] };
+  await move(halfTaken, T, T + 2 * HOUR);
+  unswap();
+  await run([["DEL", lockOf(w)]]);
+  const other = await sellSession(w, T + 2 * HOUR);
+  await run([["DEL", lockOf(w)]]);
+  sent = mails;
+  is("the retry is refused as taken", await move(halfTaken, T, T + 2 * HOUR), { ok: false, reason: "taken" });
+  is(
+    "…with no email, this booking still at its old time only and the other buyer's alone at the new one",
+    [mails - sent, (await diaryOfSession(w, halfTaken)).map((e) => e.s), (await diaryOfSession(w, other)).map((e) => e.s)],
+    [0, [T], [T + 2 * HOUR]],
+  );
+
+  part("A team booking's half-written move: the retry keeps the hosts' claim at the new time only");
+  const team = await callStoreAs("movewriteteam@example.com", "movewriteteam", "acct_1MoveWriteTeam", "pro");
+  await writeTeam(team.store, team.call.id, { mode: "round_robin", hosts: [{ email: "movewriteteam@example.com", tz: NY, weekly: WEEKDAYS, bufferMinutes: 0, noticeHours: 1, dailyCap: 4 }], createdAt: "2026-10-05T00:00:00.000Z" });
+  const teamCall = (await readListing(team.store, team.call.id)) as CallListing;
+  const M = days[2] + 4 * HOUR;
+  const teamSession = await sellSession({ ...team, call: teamCall }, M);
+  const hostClaims = async () => ((await readClaims([hostId("movewriteteam@example.com")])).get(hostId("movewriteteam@example.com")) ?? []).map((c) => c.start).sort();
+  is("the hold claims its host at the time bought", await hostClaims(), [M]);
+  const teamMove = () =>
+    moveBooking({ store: team.store, product: teamCall, session: teamSession, booked: { start: M, end: M + HOUR, email: "buyer@example.com", buyerTz: NY }, start: M + 2 * HOUR, origin: "https://marktmorgen.com" });
+  swap.landed = { value: undefined };
+  swap.get = { value: ["x"] };
+  is("half-written: the first try is refused", await teamMove(), { ok: false, reason: "error" });
+  unswap();
+  await run([["DEL", lockOf(team)]]);
+  sent = mails;
+  const teamRetried = await teamMove();
+  is("the retry finishes the move, counted once", teamRetried.ok ? [teamRetried.start, teamRetried.moves] : teamRetried, [M + 2 * HOUR, 1]);
+  is("the host is claimed at the new time only", await hostClaims(), [M + 2 * HOUR]);
+  is("the diary holds the booking once, at the new time, with its host", (await diaryOfSession(team, teamSession)).map((e) => [e.s, e.until]), [[M + 2 * HOUR, 0]]);
+  is("the move emails go out", mails > sent, true);
 
   part("Reminders: ZADD read exactly");
   const S = "cs_test_movewritereminders0001";

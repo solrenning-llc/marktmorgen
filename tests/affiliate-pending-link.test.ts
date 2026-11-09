@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { NO_AFFILIATES, RECURRING_OPTIONS, parseAffiliateSetting, viaCookieValue } from "@/lib/affiliate-setting";
 import {
   PENDING_LINK_SECONDS,
+  notePayPalPendings,
   pendingNotice,
   VIA_PENDING_META,
   attributionFor,
@@ -35,6 +36,9 @@ import {
   pendingChannel,
 } from "@/lib/affiliates";
 import { giveCode } from "@/lib/affiliate-codes";
+import { REFUSED_TRIES } from "@/lib/refused-tries";
+import { CONFIRM_WITHIN_SECONDS } from "@/lib/purchase-email";
+import type { SendOutcome } from "@/lib/email";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -62,6 +66,14 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
     return swapped === undefined ? reply : swapped;
   });
 }) as typeof redis.pipeline;
+
+// What the email service answers, chosen by each check; every call is counted.
+let answer: SendOutcome = "sent";
+let sends = 0;
+const send = async () => {
+  sends += 1;
+  return answer;
+};
 
 const person = (id: string, email: string, code: string, over: Record<string, unknown> = {}) =>
   JSON.stringify({ id, email, code, status: "approved", appliedAt: (NOW - 30 * 86_400) * 1000, decidedAt: 1, note: "", ...over });
@@ -173,7 +185,8 @@ async function main(): Promise<void> {
   part("Past the deadline with no answer: the creator is told, once");
   const late = order("cs_pend4", "mo@example.com", { [VIA_PENDING_META]: `ana.${NOW - 9_000}~ana.${NOW - 9_000}~-` }, NOW - PENDING_LINK_SECONDS - 120);
   odd = weirdCodes;
-  counts = await notePendingLinks(store, [late], NOW);
+  // Regra 23: the email service is now handed in (send); "sent" is what makes the notice final.
+  counts = await notePendingLinks(store, [late], NOW, undefined, undefined, send);
   is("still unknown past PENDING_LINK_SECONDS: told", counts.told, 1);
   // Regra 23: the three checks below read the email's words from pendingNotice, the one place tellPending takes them
   // from, and the mark it takes before sending; they were read off a stubbed Resend, which this world never reaches.
@@ -183,7 +196,7 @@ async function main(): Promise<void> {
   is("naming the order and the affiliate code it came through", /cs_pend4/.test(notice.text) && /\bana\b/.test(notice.text), true);
   is("and saying no commission was counted on it", /not credited/.test(notice.subject) && /no commission/i.test(notice.text), true);
   odd = null;
-  counts = await notePendingLinks(store, [late], NOW + 300);
+  counts = await notePendingLinks(store, [late], NOW + 300, undefined, undefined, send);
   is("once told, a later read that answers credits nothing automatically", (await sales()).has("cs_pend4"), false);
   // Regra 23: was mails.length 1; told again would count here.
   is("and the creator is not told twice", [counts.told, await mark("cs_pend4")], [0, "told"]);
@@ -195,23 +208,91 @@ async function main(): Promise<void> {
   is("a program that credits no renewals: nothing to credit, nobody told", [counts.none, counts.told, await mark("cs_sub1")], [1, 0, "none"]);
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...store.affiliates, recurring: RECURRING_OPTIONS.find((n) => n > 0) }));
   store = (await storeForEmail(OWNER))!;
-  counts = await notePendingLinks(store, [member("cs_sub2")], NOW);
+  counts = await notePendingLinks(store, [member("cs_sub2")], NOW, undefined, undefined, send);
   is("one that does: its renewals cannot be credited afterwards, so the creator is told at once", [counts.told, await mark("cs_sub2")], [1, "told"]);
   is("and nothing is written as a sale", (await sales()).has("cs_sub2"), false);
 
-  part("PayPal: the same mark, decided at the hand-over");
-  const paid = (order: string, meta: Record<string, string>) => ({
-    store: "oven", order, capture: `CAP${order}`, email: "pp@example.com", product: "prod01", cents: 4_000, currency: "USD", at: NOW - 60, handle: "oven", meta,
+  part("An email refused for certain: tried again at the next passes, REFUSED_TRIES at most, never credited");
+  is("every try fits inside the day the sweep reads the order", PENDING_LINK_SECONDS + REFUSED_TRIES * 300 < CONFIRM_WITHIN_SECONDS, true);
+  const refusedSale = order("cs_pend5", "ref@example.com", { [VIA_PENDING_META]: `ana.${NOW - 9_000}~ana.${NOW - 9_000}~-` }, NOW - PENDING_LINK_SECONDS - 120);
+  answer = "refused";
+  sends = 0;
+  odd = weirdCodes;
+  counts = await notePendingLinks(store, [refusedSale], NOW, undefined, undefined, send);
+  is("refused: not told, and the notice stays due", [counts.told, await mark("cs_pend5")], [0, "tell:unread"]);
+  odd = null;
+  counts = await notePendingLinks(store, [refusedSale], NOW + 300, undefined, undefined, send);
+  is("the next pass tries again, though the read answers now: never credited past the deadline", [sends, (await sales()).has("cs_pend5")], [2, false]);
+  counts = await notePendingLinks(store, [refusedSale], NOW + 600, undefined, undefined, send);
+  is("at REFUSED_TRIES refusals it stops, said in the counts", [sends, counts.untold, await mark("cs_pend5")], [REFUSED_TRIES, 1, "untold"]);
+  await notePendingLinks(store, [refusedSale], NOW + 900, undefined, undefined, send);
+  is("and is never tried again, nor credited", [sends, (await sales()).has("cs_pend5")], [REFUSED_TRIES, false]);
+  answer = "refused";
+  sends = 0;
+  const thenSent = order("cs_pend6", "ref2@example.com", { [VIA_PENDING_META]: `ana.${NOW - 9_000}~ana.${NOW - 9_000}~-` }, NOW - PENDING_LINK_SECONDS - 120);
+  await notePendingLinks(store, [thenSent], NOW, undefined, undefined, send);
+  answer = "sent";
+  counts = await notePendingLinks(store, [thenSent], NOW + 300, undefined, undefined, send);
+  is("refused once, sent at the next pass: told, final", [counts.told, await mark("cs_pend6"), sends], [1, "told", 2]);
+
+  part("An email whose send is not known is never sent again blindly");
+  answer = "uncertain";
+  sends = 0;
+  const unsure = order("cs_pend7", "uns@example.com", { [VIA_PENDING_META]: `ana.${NOW - 9_000}~ana.${NOW - 9_000}~-` }, NOW - PENDING_LINK_SECONDS - 120);
+  counts = await notePendingLinks(store, [unsure], NOW, undefined, undefined, send);
+  is("uncertain: marked so, counted", [counts.uncertain, await mark("cs_pend7")], [1, "uncertain"]);
+  await notePendingLinks(store, [unsure], NOW + 300, undefined, undefined, send);
+  is("the next pass sends nothing and credits nothing", [sends, (await sales()).has("cs_pend7")], [1, false]);
+  is("and the default sender is the repository's three-way one", /sendEmailOutcome/.test(readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8")), true);
+  answer = "sent";
+
+  part("A booking's lead, where the store pays per booked call");
+  await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...store.affiliates, lead: { kind: "booking", cents: 500, hold: 30, daily: 10, budget: 50_000 } }));
+  store = (await storeForEmail(OWNER))!;
+  const callEnd = (NOW + 86_400) * 1000;
+  const booking = order("cs_call1", "caller@example.com", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-`, kind: "call", start: String(callEnd - 1_800_000), end: String(callEnd) });
+  odd = weirdCodes;
+  await notePendingLinks(store, [booking], NOW, undefined, undefined, send);
+  const leads = async () => JSON.stringify((await real([["HGETALL", `nl:aff:${statsId}:leads`]]))[0] ?? []);
+  is("while the link is pending, no lead is written", (await leads()).includes("cs_call1"), false);
+  odd = null;
+  await notePendingLinks(store, [booking], NOW + 300, undefined, undefined, send);
+  is("confirmed later, the booking's lead is written for the affiliate, as a link that read would have", (await leads()).includes("cs_call1") && (await leads()).includes(ANA), true);
+  is("the book route still carries a lead only from a link that read", /lead: store\.affiliates\.lead\.kind === "booking" \? via\?\.aff \?\? null : null/.test(readFileSync(join(process.cwd(), "app/api/store/book/route.ts"), "utf8")), true);
+
+  part("PayPal: the same mark, decided at the hand-over and by the sweep after it");
+  const paid = (order: string, meta: Record<string, string>, at = NOW - 60) => ({
+    store: "oven", order, capture: `CAP${order}`, email: "pp@example.com", product: "prod01", cents: 4_000, currency: "USD", at, handle: "oven", meta,
   });
   await creditPayPalSale(store, paid("PPORDER1", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-` }), "Sourdough course");
   const pp = (await sales()).get("paypal:PPORDER1");
   is("a pending PayPal order whose read answers is credited to the affiliate", [pp?.aff, pp?.rate], [ANA, 30]);
+  // Regra 23: was "told at its hand-over"; an unknown read at the hand-over now waits for the sweep, as a Stripe
+  // order does, and the creator is told past PENDING_LINK_SECONDS, with the same retries.
+  const p2 = paid("PPORDER0000002", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-` });
+  await real([["SET", `nl:ppsell:paid:${p2.order}`, JSON.stringify(p2)]]);
   odd = weirdCodes;
-  await creditPayPalSale(store, paid("PPORDER2", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-` }), "Sourdough course");
+  await creditPayPalSale(store, p2, "Sourdough course", send);
+  is("one still unknown at its hand-over is not credited, and waits", [(await sales()).has("paypal:PPORDER0000002"), await mark("paypal:PPORDER0000002")], [false, null]);
+  await notePayPalPendings(store, NOW + 300, send);
+  is("the sweep reads it again: still unknown, still waiting", [(await sales()).has("paypal:PPORDER0000002"), await mark("paypal:PPORDER0000002")], [false, null]);
   odd = null;
-  is("one still unknown at its hand-over is not credited", (await sales()).has("paypal:PPORDER2"), false);
-  // Regra 23: was mails.length 2; the mark tellPending takes before sending.
-  is("and its creator is told", await mark("paypal:PPORDER2"), "told");
+  await notePayPalPendings(store, NOW + 600, send);
+  is("answered at a later pass: credited once", (await sales()).get("paypal:PPORDER0000002")?.aff, ANA);
+  const p3 = paid("PPORDER0000003", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-` });
+  await real([["SET", `nl:ppsell:paid:${p3.order}`, JSON.stringify(p3)]]);
+  odd = weirdCodes;
+  await creditPayPalSale(store, p3, "Sourdough course", send);
+  answer = "refused";
+  sends = 0;
+  await notePayPalPendings(store, NOW + PENDING_LINK_SECONDS, send);
+  is("past the deadline, refused: due again", [sends, await mark("paypal:PPORDER0000003")], [1, "tell:unread"]);
+  answer = "sent";
+  odd = null;
+  await notePayPalPendings(store, NOW + PENDING_LINK_SECONDS + 300, send);
+  is("sent at the next pass: told, and never credited", [sends, await mark("paypal:PPORDER0000003"), (await sales()).has("paypal:PPORDER0000003")], [2, "told", false]);
+  await notePayPalPendings(store, NOW + PENDING_LINK_SECONDS + 600, send);
+  is("and not tried again", sends, 2);
 
   part("Every checkout route keeps the sale and the pending click");
   for (const file of ["app/api/store/checkout/route.ts", "app/api/store/cart/route.ts", "app/api/store/book/route.ts", "app/api/store/paypal/checkout/route.ts"]) {
@@ -221,6 +302,7 @@ async function main(): Promise<void> {
   }
   const sweep = readFileSync(join(process.cwd(), "lib/checkout-sweep.ts"), "utf8");
   is("the five-minute sweep decides the pending links", /notePendingLinks\(/.test(sweep), true);
+  is("and the PayPal ones", /notePayPalPendings\(/.test(sweep), true);
 }
 
 main().then(done, (error) => {

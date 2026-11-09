@@ -7,7 +7,8 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { EMPTY_PAGE, MAX_BLOCKS, type SalesPage, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { claimNewPictures, keptPageBytes, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { PageReadMeter } from "@/lib/page-read-units";
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
@@ -137,7 +138,10 @@ export async function POST(request: NextRequest) {
 /**
  * Another product's page of this store, to start a page from: `?id=<product>`.
  * Its blocks with fresh ids and without its pictures (lib/sales-page.ts,
- * copyOfPage); nothing is saved here.
+ * copyOfPage); nothing is saved here. A page is kept at up to
+ * MAX_STORED_PAGE_BYTES bytes: it is measured first, and what reading it and
+ * sending its copy move past this request's own fifty kilobytes is taken
+ * from the studio's requests before each (lib/page-read-units.ts).
  */
 export async function GET(request: NextRequest) {
   const access = await jsonAccess(request, "products");
@@ -145,9 +149,24 @@ export async function GET(request: NextRequest) {
   const id = (request.nextUrl.searchParams.get("id") ?? "").slice(0, 40);
   const store = access.store;
   if (!store || !id || productIdFor(store, id) !== id) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+  const meter = new PageReadMeter(store);
+  let kept: number;
   try {
-    const copy = copyOfPage(await readPage(store.statsId, id));
-    return Response.json({ ok: true, ...copy }, { headers: { "Cache-Control": "private, no-store" } });
+    kept = await keptPageBytes(store.statsId, id);
+  } catch (error) {
+    // A size not known is never none: nothing is read.
+    console.error("measuring a page to copy failed", error);
+    return unread();
+  }
+  const refused = await meter.take(kept);
+  if (refused) return refused;
+  try {
+    const page = await readPage(store.statsId, id);
+    // Grown since it was measured (a save in another tab): the rest is taken before anything is sent.
+    const more = await meter.take(Buffer.byteLength(JSON.stringify(page), "utf8") - kept);
+    if (more) return more;
+    const copy = copyOfPage(page);
+    return meter.send({ ok: true, ...copy });
   } catch (error) {
     // Never a copy started from an empty page that was not.
     console.error("reading a page to copy failed", error);

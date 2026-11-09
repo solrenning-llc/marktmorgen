@@ -25,7 +25,7 @@ import { MAX_PRODUCTS, MAX_PRODUCT_BYTES, type Product, productIds, readProducts
 import { type Store, accountStores, addCopiedProducts, appendSitePages, applyCopiedSetup, storeForId, storeRef } from "@/lib/store";
 import { readAboutExact, writeAbout, MAX_ABOUT_LENGTH } from "@/lib/product-about";
 import { readPage, writePage } from "@/lib/sales-page-store";
-import { MAX_PAGE_BYTES, type SalesPage } from "@/lib/sales-page";
+import { MAX_STORED_PAGE_BYTES, type SalesPage } from "@/lib/sales-page";
 import { MAX_SITE_PAGES, type SitePage, siteKey, slugProblem } from "@/lib/site-page-rules";
 import { freeSlug } from "@/lib/funnel-types";
 import { MAX_FORMS } from "@/lib/forms";
@@ -117,9 +117,13 @@ async function weights(from: Store, ids: string[]): Promise<Map<string, Weight>>
   return out;
 }
 
-/** What a product (or page) and what comes with it weigh, given what its read says it has. */
+/**
+ * What a product (or page) and what comes with it weigh, given what its read says it has. A page whose weight is not
+ * known is taken at all a kept record may weigh, in bytes (lib/sales-page.ts, MAX_STORED_PAGE_BYTES); a version's own
+ * limit counts UTF-16 units, a third of its bytes in a three-byte script (Claude 5, 7 November 2026).
+ */
 const weightOf = (w: Weight | undefined, has: { about: boolean; page: boolean }) =>
-  (w?.record ?? MAX_PRODUCT_BYTES) + (has.about ? w?.about ?? MAX_ABOUT_LENGTH * 4 : 0) + (has.page ? w?.page ?? MAX_PAGE_BYTES : 0);
+  (w?.record ?? MAX_PRODUCT_BYTES) + (has.about ? w?.about ?? MAX_ABOUT_LENGTH * 4 : 0) + (has.page ? w?.page ?? MAX_STORED_PAGE_BYTES : 0);
 
 /** Everything a copy reads from the first store before it writes, and what it would need in the other one. */
 type Source = {
@@ -161,7 +165,7 @@ async function readSource(from: Store, sizes: Map<string, Weight>, pageSizes: Ma
     return why ? [{ title: p.title, why }] : [];
   });
   const copyable = products.filter((p) => copyableSet.has(p.id)).map((p) => p.id);
-  const pageBytes = [...pageSizes.values()].reduce((sum, w) => sum + (w.page ?? MAX_PAGE_BYTES), 0);
+  const pageBytes = [...pageSizes.values()].reduce((sum, w) => sum + (w.page ?? MAX_STORED_PAGE_BYTES), 0);
   const forms = await readForms(from.statsId);
   const funnels = await readPageFunnelsStrict(from.statsId);
   const byId = new Map(products.map((p) => [p.id, p]));
@@ -357,7 +361,7 @@ export async function copyStep(from: Store, to: Store, copyId: string, setup: bo
     } else if (p.phase === "pages") {
       const pages = from.sitePages;
       const sizes = await weights(from, pages.map((page) => siteKey(page.id)));
-      const charged = await charge(to, unitsFor(COPY_COMMANDS.step + COPY_COMMANDS.pagesWrite + pages.length * COPY_COMMANDS.page, 2 * [...sizes.values()].reduce((s, w) => s + (w.page ?? MAX_PAGE_BYTES), 0)));
+      const charged = await charge(to, unitsFor(COPY_COMMANDS.step + COPY_COMMANDS.pagesWrite + pages.length * COPY_COMMANDS.page, 2 * [...sizes.values()].reduce((s, w) => s + (w.page ?? MAX_STORED_PAGE_BYTES), 0)));
       if (!charged.ok) return { ok: false, error: "studio_used", message: charged.message };
       const have = new Set(to.sitePages.map((page) => page.id));
       const taken = new Set(to.sitePages.map((page) => page.slug));

@@ -68,7 +68,7 @@ import { BATCH_BYTES, MAX_REPORT_ROWS } from "@/lib/imports";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
-import { MAX_PAGE_BYTES } from "@/lib/sales-page";
+import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { SYNC_SECONDS } from "@/lib/host-calendar";
@@ -1039,8 +1039,8 @@ export const COST_LINES: CostLine[] = [
       return a.checks * request("heavy", 8 + 6, BATCH_BYTES)
         + a.buyerChecks * request("heavy", 506 + 6, BATCH_BYTES)
         + a.pageReads * request("heavy", 4, 2 * MAX_TRIMMED_PAGE_CHARS)
-        + a.funnelChecks * request("heavy", 29, 10 * MAX_PAGE_BYTES)
-        + a.funnelSaves * request("write", 200, 30 * MAX_PAGE_BYTES);
+        + a.funnelChecks * request("heavy", 29, 10 * MAX_STORED_PAGE_BYTES)
+        + a.funnelSaves * request("write", 200, 30 * MAX_STORED_PAGE_BYTES);
     },
     sources: [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES"] },
@@ -1058,11 +1058,11 @@ export const COST_LINES: CostLine[] = [
       const kept = (l.shares * 2 * l.bundleBytes + l.savedBlocks * MAX_SECTION_BYTES) * DB_BYTE_MONTH;
       // A link's reads by other stores are counted by the calendar month: a billing month touches two.
       const linkReads = 2 * l.shares * (IMPORTS_PER_SHARE_MONTH * request("light", 6, l.bundleBytes) + PREVIEWS_PER_SHARE_MONTH * request("light", 4, 20_000));
-      const own = l.importsPerMonth * request("write", 300, l.bundleBytes + 30 * MAX_PAGE_BYTES)
+      const own = l.importsPerMonth * request("write", 300, l.bundleBytes + 30 * MAX_STORED_PAGE_BYTES)
         + l.previewsPerMonth * request("light", 30, 50_000)
-        + l.appliesPerMonth * request("write", MAX_APPLY_PAGES * 10, MAX_APPLY_PAGES * 4 * MAX_PAGE_BYTES)
-        + l.sharesPerMonth * request("write", 60, 10 * MAX_PAGE_BYTES + 3 * l.bundleBytes)
-        + l.exportsPerMonth * request("write", 40, 10 * MAX_PAGE_BYTES + l.bundleBytes);
+        + l.appliesPerMonth * request("write", MAX_APPLY_PAGES * 10, MAX_APPLY_PAGES * 4 * MAX_STORED_PAGE_BYTES)
+        + l.sharesPerMonth * request("write", 60, 10 * MAX_STORED_PAGE_BYTES + 3 * l.bundleBytes)
+        + l.exportsPerMonth * request("write", 40, 10 * MAX_STORED_PAGE_BYTES + l.bundleBytes);
       return kept + linkReads + own;
     },
     sources: [
@@ -1222,6 +1222,14 @@ export const COST_LINES: CostLine[] = [
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
+      // A product's page is kept at up to MAX_STORED_PAGE_BYTES bytes, and five versions of it: copying one to start a
+      // page, and listing or bringing back its versions, take pageReadUnits more studio requests for what they read
+      // (measured first, the versions at MAX_VERSION_BYTES each) and send, before each (Claude 5's proof on main
+      // 0ade0faf; tests/page-bytes-cap.test.ts measures it through the routes).
+      { file: "lib/page-read-units.ts", names: ["class PageReadMeter", "pageReadUnits", "ledgerUnits(db) + sentUnits(sent)", "countUnits(this.store, due)"] },
+      { file: "lib/sales-page-store.ts", names: ["MAX_VERSION_BYTES = MAX_STORED_PAGE_BYTES + 32", "keptPageBytes", "readVersionsMeasured"] },
+      { file: "app/api/store/page/route.ts", names: ["new PageReadMeter(store)", "keptPageBytes(store.statsId, id)", "meter.take(kept)", "meter.send({ ok: true, ...copy })"] },
+      { file: "app/api/store/page-versions/route.ts", names: ["new PageReadMeter(store)", "countVersions(store.statsId, id)", "meter.take(most + page)", "meter.take(bytes - most)"] },
     ],
     basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
   },

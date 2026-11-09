@@ -75,10 +75,19 @@ export const MAX_CELL = 80;
 /** What a cell holds to be drawn as a tick or a cross rather than as words. */
 export const CELL_YES = "\u2713";
 export const CELL_NO = "\u2717";
-/** The most a page's record may weigh, in bytes: well past thirty full blocks. A second version tested against it may weigh as much again. */
+/**
+ * The most a page's record may weigh as its JSON's length, in UTF-16 units (not bytes): well past thirty full
+ * blocks. A second version tested against it may weigh as much again. A page that moves is priced in bytes at
+ * MAX_STORED_PAGE_BYTES, never at this.
+ */
 export const MAX_PAGE_BYTES = 120_000;
-/** The most a stored record is read at: the page and a second version, with room to spare. */
-export const MAX_STORED_PAGE_BYTES = MAX_PAGE_BYTES * 3;
+/**
+ * The most a stored record weighs, in UTF-8 bytes, the page and a second version together (oversized holds every
+ * record to it): all the studio's save takes, whose body is held to 420,000 bytes (app/api/store/page/route.ts), with
+ * room for what keeping it adds. Until 7 November 2026 it was 360,000 held against a length in UTF-16 units, so a
+ * record in a three-byte script was kept at up to 420 kB (Claude 5's proof on main 0ade0faf).
+ */
+export const MAX_STORED_PAGE_BYTES = 450_000;
 /** Things said about it elsewhere, in one block; the words of one, the name beside it, and its link. */
 export const MAX_QUOTES = 6;
 export const MAX_QUOTE = 400;
@@ -697,8 +706,9 @@ export function asVersion(page: SalesPage, version: "a" | "b"): SalesPage {
   return page;
 }
 
-/** Whether a page, and a second version of it, each weigh no more than a page may. */
+/** Whether a page, and a second version of it, each weigh no more than a page may, and their record together no more than MAX_STORED_PAGE_BYTES bytes. */
 export function oversized(page: SalesPage): boolean {
+  if (new TextEncoder().encode(JSON.stringify(page)).length > MAX_STORED_PAGE_BYTES) return true;
   if (JSON.stringify({ ...page, variant: null }).length > MAX_PAGE_BYTES) return true;
   return page.variant !== null && JSON.stringify(page.variant).length > MAX_PAGE_BYTES;
 }

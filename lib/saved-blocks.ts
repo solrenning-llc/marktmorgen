@@ -24,6 +24,7 @@ import {
   MAX_BLOCKS,
   SAVED_BLOCK_ID,
   newBlockId,
+  oversized,
   parsePage,
   picturesOf,
   type BlockKind,
@@ -191,7 +192,10 @@ export function withSection(page: SalesPage, section: Pick<SavedSection, "id" | 
     blocks.push(block);
   }
   if (blocks.length > MAX_BLOCKS) return null;
-  return { ...page, blocks };
+  // Never past what a page may weigh: a section changed to more words, put on every run of it, could grow a page
+  // past MAX_STORED_PAGE_BYTES, and then no read would take it (Claude 5, 7 November 2026).
+  const next = { ...page, blocks };
+  return oversized(next) ? null : next;
 }
 
 export const SECTION_WHY: Record<"pictures" | "test" | "gone", string> = {

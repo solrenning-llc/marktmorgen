@@ -266,7 +266,8 @@ export async function readPageExact(statsId: string, productId: string): Promise
   if (!Array.isArray(reply) || reply.length !== 1) throw new Error("the page could not be read");
   const raw = reply[0];
   if (raw === null) return { page: null, bytes: 0 };
-  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) throw new Error("the page could not be read");
+  // Held in bytes, which is what read_sales_page paid for (lib/api-read-rules.ts, PAGE_BYTES), never in UTF-16 units.
+  if (typeof raw !== "string" || !raw || Buffer.byteLength(raw, "utf8") > MAX_STORED_PAGE_BYTES) throw new Error("the page could not be read");
   return { page: pageRecordExact(raw, "the page could not be read"), bytes: Buffer.byteLength(raw, "utf8") };
 }
 
@@ -310,12 +311,38 @@ export async function readVersionsExact(statsId: string, productId: string): Pro
 }
 
 export async function readVersions(statsId: string | null, productId: string): Promise<PageVersion[]> {
-  if (!statsId || !isRedisConfigured()) return [];
+  return (await readVersionsMeasured(statsId, productId)).versions;
+}
+
+/**
+ * The most one kept version weighs, in bytes: when it was saved over, a newline and the page as it was, a record a
+ * save holds to MAX_STORED_PAGE_BYTES (lib/sales-page.ts, oversized). What a studio read of the versions takes
+ * before it reads them (app/api/store/page-versions/route.ts).
+ */
+export const MAX_VERSION_BYTES = MAX_STORED_PAGE_BYTES + 32;
+
+/**
+ * The bytes a product's page is kept at (STRLEN), 0 when none is, so a studio read of it is paid for before it is
+ * made (lib/page-read-units.ts). Any answer that is not one whole number from zero up throws UnknownReplyError.
+ */
+export async function keptPageBytes(statsId: string | null, productId: string): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const replies = repliesFor(await redisPipeline([["STRLEN", pageKey(statsId, productId)]]), 1);
+  const bytes = replies ? replies[0] : null;
+  if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) throw new UnknownReplyError("a page's size");
+  return bytes;
+}
+
+/** readVersions, with the bytes every kept version it read weighs, readable or not. */
+export async function readVersionsMeasured(statsId: string | null, productId: string): Promise<{ versions: PageVersion[]; bytes: number }> {
+  if (!statsId || !isRedisConfigured()) return { versions: [], bytes: 0 };
   const [list] = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
-  if (!Array.isArray(list)) return [];
+  if (!Array.isArray(list)) return { versions: [], bytes: 0 };
   const out: PageVersion[] = [];
+  let bytes = 0;
   for (const entry of list) {
     if (typeof entry !== "string") continue;
+    bytes += Buffer.byteLength(entry, "utf8");
     const cut = entry.indexOf("\n");
     const at = Number(entry.slice(0, cut));
     if (cut < 1 || !Number.isFinite(at)) continue;
@@ -325,7 +352,7 @@ export async function readVersions(statsId: string | null, productId: string): P
       // A version that cannot be read is left out, never shown half.
     }
   }
-  return out;
+  return { versions: out, bytes };
 }
 
 /**

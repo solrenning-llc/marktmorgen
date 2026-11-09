@@ -9,7 +9,7 @@
  * or ad platform heard of the sale. The same pages fed the abandoned-checkout
  * reminders, which a crowd of open checkouts (a launch, or bots) hid the same way.
  *
- * The stand-in for Stripe answers GET /v1/checkout/sessions as Stripe does:
+ * The stand-in for Stripe (tests/stripe-sessions-stand-in.ts) answers GET /v1/checkout/sessions as Stripe does:
  * newest first, `limit`, `created[gte]`, `status` and `starting_after` honored,
  * and an unknown `starting_after` refused.
  *
@@ -26,26 +26,15 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { listCheckoutSessions, type StandInSession } from "./stripe-sessions-stand-in";
 
-type Session = Record<string, unknown> & { id: string; created: number; status: string };
+type Session = StandInSession;
 let sessions: Session[] = [];
 const listCalls: string[] = [];
 
 function listSessions(url: URL): Response {
   listCalls.push(url.search);
-  const limit = Math.min(100, Number(url.searchParams.get("limit") ?? 10));
-  const status = url.searchParams.get("status");
-  const since = Number(url.searchParams.get("created[gte]") ?? 0);
-  const after = url.searchParams.get("starting_after");
-  const order = (a: Session, b: Session) => b.created - a.created || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
-  const all = [...sessions].sort(order);
-  let rows = all.filter((row) => row.created >= since && (!status || row.status === status));
-  if (after) {
-    const anchor = all.find((row) => row.id === after);
-    if (!anchor) return new Response(JSON.stringify({ error: { type: "invalid_request_error", message: `No such checkout.session: '${after}'` } }), { status: 400 });
-    rows = rows.filter((row) => order(anchor, row) < 0);
-  }
-  return new Response(JSON.stringify({ object: "list", data: rows.slice(0, limit), has_more: rows.length > limit }));
+  return listCheckoutSessions(sessions, url);
 }
 
 const mail = installSesMailFixture({

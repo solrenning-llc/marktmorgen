@@ -219,7 +219,13 @@ export async function addSpend(
   const known = (before.some((s) => s.id === id) ? before : [...before, { id, ...read.spend }]).sort(byDay);
   const keep = known.slice(-MAX_SPEND_ENTRIES);
   const drop = known.slice(0, known.length - keep.length).map((s) => s.id);
-  if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
+  // The line is saved by now: a prune that fails is logged, never answered "not saved" (Claude 5 on #2924, LEVE B).
+  // Reading cuts the list to the newest MAX_SPEND_ENTRIES, and the next add prunes again.
+  if (drop.length) {
+    await redisPipeline([["HDEL", key(statsId), ...drop]]).catch((error: unknown) => {
+      console.error("pruning the oldest ad spend lines failed", error);
+    });
+  }
   try {
     return { ok: true, ...(await readSpendLines(statsId)) };
   } catch (error) {

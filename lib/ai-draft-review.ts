@@ -44,34 +44,11 @@ export function aiDraftHold(checks: readonly boolean[] | null): string | null {
 export type SensitiveTopic = "health" | "money" | "law";
 
 /**
- * Whole words only, any case: "lawn", "outlaw", "treaty" or "curious" are never
- * taken for one. A warning, not a refusal, so a broad list does no harm.
+ * What a draft is about: its subjects, or "unread" when it is written in a
+ * language the word lists below do not read, so the warning is the general
+ * one rather than none (Claude 6's review of #3436).
  */
-const TOPIC_WORDS: Record<SensitiveTopic, RegExp> = {
-  health: /\b(health|medical|medicine|medication|doctors?|nurses?|diagnos(e|is|ed|ing)|disease|illness|symptoms?|cur(e|es|ed|ing)|treat(s|ed|ing|ment|ments)?|therapy|therapist|diet|weight loss|pregnan(cy|t)|supplements?|anxiety|depression|injur(y|ies))\b/i,
-  money: /\b(invest(s|ed|ing|ment|ments|or|ors)?|trading|stocks?|crypto|bitcoin|forex|income|profits?|earn(s|ed|ing|ings)?|retire(d|ment)?|savings|loans?|debts?|mortgage|tax(es)?|credit score|passive income)\b/i,
-  law: /\b(law|laws|legal(ly)?|lawyers?|attorneys?|contracts?|lawsuits?|sue|court|visa|immigration|copyright|trademark|licen[cs]e)\b/i,
-};
-
-const TOPIC_ORDER: SensitiveTopic[] = ["health", "money", "law"];
-
-/** The subjects a draft's text is about, in a fixed order; none for anything else. */
-export function sensitiveTopics(text: string): SensitiveTopic[] {
-  return TOPIC_ORDER.filter((topic) => TOPIC_WORDS[topic].test(text));
-}
-
-const TOPIC_WORDS_SAID: Record<SensitiveTopic, string> = { health: "health", money: "money", law: "the law" };
-
-/** What the checks say about those subjects, or null when there are none. */
-export function sensitiveWarning(topics: readonly SensitiveTopic[]): string | null {
-  if (!topics.length) return null;
-  const words = topics.map((topic) => TOPIC_WORDS_SAID[topic]);
-  const list = words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
-  return `This draft is about ${list}. Before you publish, have someone who knows ${list} read it, and do not promise a result.`;
-}
-
-/** The badge drawn by the page beside each number in an AI draft that the creator did not give (756 [STN3], unit 3). */
-export const ESTIMATE_BADGE = "Estimate";
+export type DraftTopics = readonly SensitiveTopic[] | "unread";
 
 /** Every piece of text a draft holds, at any depth; numbers and keys are settings, never claims, so they are left out. */
 export function draftStrings(value: unknown): string[] {
@@ -80,6 +57,68 @@ export function draftStrings(value: unknown): string[] {
   if (value && typeof value === "object") return Object.values(value).flatMap(draftStrings);
   return [];
 }
+
+/**
+ * Whole words only, any case: "lawn", "outlaw", "treaty" or "curious" are never
+ * taken for one. Words that mostly mean something else in a product draft are
+ * left out or read only in the phrase that is about the subject: "treats"
+ * (dog treats), "cured" (cured meats), "stock" (stock photos, chicken stock),
+ * "earn" (earn a certificate), "license" (a font's commercial license),
+ * "court" (a basketball court), "money-back" (a guarantee).
+ */
+const TOPIC_WORDS: Record<SensitiveTopic, RegExp> = {
+  health: /\b(health|medical|medicine|medications?|doctors?|nurses?|diagnos(e|es|is|ed|ing)|diseases?|illness(es)?|disorders?|symptoms?|cures?|treat(ed|ing|ments?)|therap(y|ies)|therapists?|diet(s|ing)?|weight[- ]loss|pregnan(cy|t)|supplements?|anxiety|depression|injur(y|ies)|cancer|(chronic|back|joint|neck) pain|pain relief|heal(s|ed|ing)|trauma)\b/i,
+  money: /\b(money(?![- ]back)|financ(e|es|ial|ially)|invest(s|ed|ing|ment|ments|or|ors)?|trading|stocks|stock (market|trading)|crypto|bitcoin|forex|income|profits?|earnings|retire(d|ment)?|savings|loans?|debts?|mortgages?|tax(es|ed|ing)?|credit scores?|passive income)\b/i,
+  law: /\b(law|laws|legal(ly)?|lawyers?|attorneys?|contracts?|lawsuits?|sue|sued|suing|(in|to|before) court|courtrooms?|court (case|order|date|hearing)s?|visas?|immigration|copyrights?|trademarks?)\b/i,
+};
+
+const TOPIC_ORDER: SensitiveTopic[] = ["health", "money", "law"];
+
+/** The subjects a text, or any one of several, is about, in a fixed order; none for anything else. */
+export function sensitiveTopics(text: string | readonly string[]): SensitiveTopic[] {
+  const texts = typeof text === "string" ? [text] : text;
+  return TOPIC_ORDER.filter((topic) => texts.some((one) => TOPIC_WORDS[topic].test(one)));
+}
+
+/**
+ * The store languages the word lists read. A draft is written in the store's
+ * language (lib/ai.ts, storeLanguage); lists in the other store languages
+ * would miss their own wording without a native reader to write them, so a
+ * draft in any of those, or in a language not said, gets the general warning.
+ */
+const READ_LANGUAGES: ReadonlySet<string> = new Set(["en"]);
+
+/** What a draft's own strings are about, read in its language (756 [STN3], unit 2). */
+export function draftTopics(texts: readonly string[], language: string | null | undefined): DraftTopics {
+  if (!language || !READ_LANGUAGES.has(language)) return "unread";
+  return sensitiveTopics(texts);
+}
+
+const TOPIC_WORDS_SAID: Record<SensitiveTopic, string> = { health: "health", money: "money", law: "the law" };
+const TOPIC_READER: Record<SensitiveTopic, string> = { health: "a doctor", money: "an accountant", law: "a lawyer" };
+
+const listed = (words: readonly string[], last: "and" | "or") =>
+  words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} ${last} ${words[words.length - 1]}`;
+
+/** The label drawn before the warning, in bold. */
+export function sensitiveLabel(topics: DraftTopics): string {
+  return topics === "unread" ? "Health, money or the law:" : "Sensitive topic:";
+}
+
+/** What the checks say about those subjects, or null when there are none. */
+export function sensitiveWarning(topics: DraftTopics): string | null {
+  if (topics === "unread") {
+    return "If this draft is about health, money or the law, have someone who knows the subject read it before you publish, such as a doctor, an accountant or a lawyer, and do not promise a result. We look for these subjects only in drafts written in English.";
+  }
+  if (!topics.length) return null;
+  const subjects = listed(topics.map((topic) => TOPIC_WORDS_SAID[topic]), "and");
+  const readers = listed(topics.map((topic) => TOPIC_READER[topic]), "or");
+  const subject = topics.length === 1 ? "the subject" : "each subject";
+  return `This draft is about ${subjects}. Before you publish, have someone who knows ${subject} read it, such as ${readers}, and do not promise a result.`;
+}
+
+/** The badge drawn by the page beside each number in an AI draft that the creator did not give (756 [STN3], unit 3). */
+export const ESTIMATE_BADGE = "Estimate";
 
 /** A number as written: a currency sign, digits with commas or a decimal point, a percent sign. */
 const NUMBER = /[$€£]?\d[\d,]*(?:\.\d+)?%?/g;

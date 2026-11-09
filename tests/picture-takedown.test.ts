@@ -12,6 +12,8 @@
  *
  * What this cannot show: copies a shared cache made before the takedown (see the PR). Synthetic data only.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { GET as servePicture } from "@/app/api/image/[folder]/[file]/route";
 import { addProduct, claimHandle, ensureStatsId, imageFolder, setProductFunnel, setProductHidden, setProductImage, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -203,6 +205,50 @@ async function main(): Promise<void> {
   const strays = [...kept.keys()].filter((p) => p.startsWith(`images/${folder}/`) && !live.has(p));
   is("no copy is left behind for a picture nobody shows", strays, []);
 
+  part("The creator attaches the same picture with another smaller copy while the takedown runs: the old address does not stay served");
+  const swapped = await pictured("Texture pack", 11);
+  const otherSmall = `images/${folder}/${hex(1111, 32)}.jpg`;
+  kept.set(otherSmall, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 11, 8]));
+  // As the studio does on a new picture: the file the record no longer names is deleted.
+  const reattach = async (id: string, image: ProductImage) => {
+    const done = await setProductImage(OWNER, id, image);
+    if (done.ok && done.removed?.small && done.removed.small.path !== image.small?.path) kept.delete(done.removed.small.path);
+  };
+  hooks.onCopy = async () => { await reattach(swapped.id, { ...swapped.image, small: { path: otherSmall, width: 700, bytes: 6 } }); };
+  is("the takedown goes through", await press(report, swapped.id), 'The product "Texture pack", now unpublished');
+  const swappedNow = (await now(swapped.id)).listing.image;
+  is("the record names copies under new names, the creator's new smaller copy among them", [swappedNow?.path !== swapped.image.path, swappedNow?.small?.path !== otherSmall, swappedNow?.small?.width], [true, true, 700]);
+  is("the old address answers not found", servedYear(await fetchPicture(swapped.image.path)), gone);
+  is("so does the address of the smaller copy the creator attached", servedYear(await fetchPicture(otherSmall)), gone);
+  is("the copies hold the creator's bytes", [swappedNow ? (await fetchPicture(swappedNow.path))[2] : "", swappedNow?.small ? (await fetchPicture(swappedNow.small.path))[2] : ""], ["ffd8ffe00b010203", "ffd8ffe00b08"]);
+  is("the creator is told once", sent.filter((m) => m.text.includes("Texture pack")).length, 1);
+  const swappedLive = await liveNames();
+  is("no copy is left behind for a picture nobody shows", [...kept.keys()].filter((p) => p.startsWith(`images/${folder}/`) && !swappedLive.has(p)), []);
+
+  part("The smaller copy keeps changing on every try: the takedown is not reported done while the old address answers");
+  const restless = await pictured("Grain pack", 12);
+  let swaps = 0;
+  const swap = async () => {
+    swaps += 1;
+    const path = `images/${folder}/${hex(1200 + swaps, 32)}.jpg`;
+    kept.set(path, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 12, swaps]));
+    const current = (await now(restless.id)).listing.image;
+    if (current) await reattach(restless.id, { ...current, small: { path, width: 700, bytes: 6 } });
+    if (swaps < 10) hooks.onCopy = swap;
+  };
+  hooks.onCopy = swap;
+  const restlessPress = await press(report, restless.id);
+  hooks.onCopy = null;
+  is("the press throws", restlessPress, "threw");
+  is("the creator is not told yet", sent.filter((m) => m.text.includes("Grain pack")).length, 0);
+  const restlessNow = (await now(restless.id)).listing.image;
+  is("every file the product shows is still there", [restlessNow ? kept.has(restlessNow.path) : false, restlessNow?.small ? kept.has(restlessNow.small.path) : false], [true, true]);
+  is("the next press finishes the takedown", await press(report, restless.id), 'The product "Grain pack", now unpublished');
+  is("the old address answers not found", servedYear(await fetchPicture(restless.image.path)), gone);
+  is("and the creator is told once", sent.filter((m) => m.text.includes("Grain pack")).length, 1);
+  const restlessLive = await liveNames();
+  is("no copy is left behind for a picture nobody shows", [...kept.keys()].filter((p) => p.startsWith(`images/${folder}/`) && !restlessLive.has(p)), []);
+
   part("A picture whose files the file store says are gone: the takedown is not held up by it");
   const lost = await pictured("Icon set", 6);
   kept.delete(lost.image.path);
@@ -235,6 +281,28 @@ async function main(): Promise<void> {
   const coverNow = (await now(cover.id)).listing.image;
   is("its picture moved to a new name", coverNow !== null && coverNow.path !== cover.image.path, true);
   is("the offer is still made, with no picture: the new name is not given out", await offerImage("cs_test_picturefunnel0002"), [target, null]);
+
+  part("An offer after paying whose picture comes from a draft: shown, as the editor's preview shows it");
+  const sketch = await pictured("Sketch pack draft", 10);
+  await setProductHidden(OWNER, sketch.id, true);
+  const draftFront = await sell("Inking course");
+  const draftTarget = await sell("Inking workbook");
+  const draftFunnel = await setProductFunnel(OWNER, draftFront, { steps: [{ id: "draft1", productId: draftTarget, priceCents: 1900, headline: "", text: "", imageFrom: sketch.id, yes: null, no: null }] });
+  is("the funnel is accepted, its picture from a draft", draftFunnel.ok, true);
+  const draftView = async (session: string) => {
+    const { store, listing } = await now(draftFront);
+    const view = await funnelView({ store, session, product: listing, alsoOwned: [], eligible: true, created: Math.floor(Date.now() / 1000) - 60, secret: browser.secret, upsellKey: browser.fingerprint });
+    return [view.offer?.target.id ?? null, view.offer?.image?.path ?? null];
+  };
+  is("the offer shows the draft's picture, as before", await draftView("cs_test_picturefunnel0003"), [draftTarget, sketch.image.path]);
+  const givesOut = (await import("@/lib/product-image") as Record<string, unknown>).picturedFrom;
+  is("one rule decides what both the offer and the editor show", typeof givesOut, "function");
+  const rule = typeof givesOut === "function" ? (givesOut as (p: { hidden: boolean; image: ProductImage | null }) => boolean) : () => null;
+  is("the rule: a draft's picture yes, a picture moved after a notice no, no picture no", [rule((await now(sketch.id)).listing), rule((await now(cover.id)).listing), rule({ hidden: false, image: null })], [true, false, false]);
+  is("a picture moved after a notice is marked so on the record", (await now(cover.id)).listing.image?.withdrawn, true);
+  is("a draft's picture is not", (await now(sketch.id)).listing.image?.withdrawn, undefined);
+  const studioSource = readFileSync(join(process.cwd(), "app/studio/funnels/page.tsx"), "utf8");
+  is("the editor's picture choices use the same rule", /\.filter\(\(p\) => picturedFrom\(p\)\)/.test(studioSource), true);
 
   part("A product with no picture: taken down as before, nothing asked of the file store");
   const bare = await addProduct(OWNER, "Plain guide", "", "9", null);

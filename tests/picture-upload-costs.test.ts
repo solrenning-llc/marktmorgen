@@ -3,9 +3,10 @@
  * C4-20261106-1120-TODOS-63): a picture, a link's picture or a page's picture is put through its own upload request,
  * and attaching it is one more; each is a studio request (studioAccess, countStudio), so at most the plan's studio
  * figure of them a month, a hard ceiling. Each request is counted at its dearest, from the official prices read on
- * 6 November 2026 (vercel.com/docs/vercel-blob/usage-and-pricing): one put (an Advanced Operation), five Simple
- * Operations (the head that checks a name is free; a head and a read of the picture and of its smaller copy) and the
- * read of both copies' whole bytes. The read is counted whole because no official page says the Blob honors a byte
+ * 6 November 2026 (vercel.com/docs/vercel-blob/usage-and-pricing): its put and its signing request (Advanced
+ * Operations) with every try the SDK may send, three heads with every try and two reads (Simple Operations: the head
+ * that checks a name is free; a head and a read of the picture and of its smaller copy), each read a CDN request, and
+ * both copies' whole bytes at Blob and Fast Origin Transfer. The read is counted whole because no official page says the Blob honors a byte
  * range with 206 or bills only the bytes sent (lib/uploaded-image.ts, firstBytes reads a stream it cancels): unknown is
  * never zero.
  *
@@ -15,7 +16,8 @@
  */
 import { readFileSync } from "node:fs";
 import * as registry from "./plan-cost-registry";
-import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_TRANSFER_PER_BYTE } from "./plan-cost-registry";
+import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_TRANSFER_PER_BYTE, ORIGIN_PER_BYTE } from "./plan-cost-registry";
+import { CDN_PER_REQUEST } from "./traffic-cost";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { done, is, part } from "./check";
@@ -42,14 +44,33 @@ is("the SDK's get is one plain fetch, never tried again", /await fetch\(/.test(b
 const headTries = (registry as Record<string, unknown>).BLOB_HEAD_TRIES;
 is("a head counted with every try, as a put is", headTries, tries);
 
+part("The signing request is tried as a put is, and the reads cross from the file store (Claude 1 on #2803, 6708192310)");
+// Every upload request asks the Blob for a signed token (issueSignedToken); in the installed SDK that is
+// requestApi("/signed-token", POST), the same request a put or a head goes through, so it is tried again as often.
+// No official page says a signed-token request is free: unknown is never zero, so it is counted as a put, at the
+// dearer Advanced Operation, with every try.
+const route = readFileSync("app/api/store/image/upload/route.ts", "utf8");
+const signBody = sdk.slice(sdk.indexOf("async function issueSignedToken("), sdk.indexOf("\n}", sdk.indexOf("async function issueSignedToken(")));
+is("the upload route asks for a signed token on every request", /await issueSignedToken\(/.test(route), true);
+is("the SDK's signing goes through requestApi, so it is tried again", /requestApi\(\s*"\/signed-token"/.test(signBody), true);
+const signTries = (registry as Record<string, unknown>).BLOB_SIGN_TRIES;
+is("a signing request counted with every try, as a put is", signTries, tries);
+is("the line names the signing call among its sources", Boolean(COST_LINES.find((each) => each.id === "picture-uploads")?.sources.some((source) => source.file === "app/api/store/image/upload/route.ts" && source.names.includes("issueSignedToken"))), true);
+// firstBytes fetches a private blob; the official page prices that as Blob Data Transfer plus Fast Origin Transfer on
+// a cache miss, and one CDN request for the URL. The line counts each read as a miss (a Simple Operation each), so the
+// bytes cross at both rates, as PICTURE_READ prices a private picture read.
+is("the basis says the reads pay Fast Origin Transfer and a CDN request", /Fast Origin Transfer/.test(COST_LINES.find((each) => each.id === "picture-uploads")?.basis ?? "") && /CDN request/.test(COST_LINES.find((each) => each.id === "picture-uploads")?.basis ?? ""), true);
+
 part("Every studio picture upload's Blob operations, at the plan's studio ceiling");
 const line = COST_LINES.find((each) => each.id === "picture-uploads");
 is("a line of its own", Boolean(line), true);
 is("it says which pictures it covers: a product's, a link's and a page's (a review's photo and an email's picture are reported apart)", /product's, a link's and a page's/.test(line?.feature ?? "") && !/^Pictures uploaded \(a product's/.test(line?.feature ?? ""), true);
 for (const tier of ["creator", "pro", "scale"] as const) {
-  // A put; three heads (the name, then the picture and its smaller copy); two reads, of those two copies.
+  // A put and a signing request, each with every try; three heads (the name, then the picture and its smaller copy);
+  // two reads, of those two copies, each a CDN request whose whole bytes cross at Blob and Fast Origin Transfer.
   const put = typeof tries === "number" ? tries : Number.NaN, heads = typeof headTries === "number" ? headTries : Number.NaN;
-  const perRequest = put * BLOB_ADVANCED_OP + (3 * heads + 2) * BLOB_SIMPLE_OP + 2 * MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE;
+  const sign = typeof signTries === "number" ? signTries : Number.NaN;
+  const perRequest = (put + sign) * BLOB_ADVANCED_OP + (3 * heads + 2) * BLOB_SIMPLE_OP + 2 * CDN_PER_REQUEST + 2 * MAX_IMAGE_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE);
   is(`${tier}: the studio figure, each request at its dearest`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
 is("its source and date are said, and why the read is counted whole", (line?.basis ?? "").includes("Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);

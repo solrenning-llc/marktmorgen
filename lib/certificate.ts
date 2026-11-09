@@ -277,14 +277,24 @@ export async function issueCertificate(input: {
   return { ok: true, certificate, fresh: true };
 }
 
-/** Every certificate issued for a course, newest first, withdrawn ones included. */
-export async function certificatesFor(courseId: string): Promise<{ list: Certificate[]; total: number }> {
+/**
+ * Every certificate issued for a course, newest first, withdrawn ones
+ * included; null when Redis answered in a shape that cannot be read (rule 24),
+ * so the studio never says "No certificates yet" while some were issued. Only
+ * Redis's own empty set is none; a certificate that is gone (nil) or whose
+ * record is itself malformed is skipped, as before, so one broken record
+ * never hides the rest.
+ */
+export async function certificatesFor(courseId: string): Promise<{ list: Certificate[]; total: number } | null> {
   if (!isRedisConfigured()) return { list: [], total: 0 };
-  const [raw] = await redisPipeline([["SMEMBERS", allKey(courseId)]]);
-  const ids = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-  const valid = ids.filter((id) => CERT_ID_PATTERN.test(id));
+  const read = plainList(await redisPipeline([["SMEMBERS", allKey(courseId)]]));
+  if (!read || read.length !== 1) return null;
+  const members = plainList(read[0]);
+  if (!members || members.some((id) => typeof id !== "string")) return null;
+  const valid = (members as string[]).filter((id) => CERT_ID_PATTERN.test(id));
   if (valid.length === 0) return { list: [], total: 0 };
-  const rows = await redisPipeline(valid.map((id) => ["GET", certKey(id)]));
+  const rows = plainList(await redisPipeline(valid.map((id) => ["GET", certKey(id)])));
+  if (!rows || rows.length !== valid.length || rows.some((row) => row !== null && typeof row !== "string")) return null;
   const list = rows
     .map(parseCertificate)
     .filter((c): c is Certificate => c !== null && c.courseId === courseId)

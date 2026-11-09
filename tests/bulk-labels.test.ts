@@ -153,9 +153,11 @@ async function main(): Promise<void> {
   let casSeen = 0;
   // `replyLost`: the next atomic write is made, as the script would, and then its answer is lost (then the read after it too, with `readLost`).
   // `readFails`: the next read of the list fails, before anything is written.
+  // `writeFails`: the next atomic write fails before it is applied (set from `beforeWrite`).
   let replyLost = false;
   let readLost = false;
   let readFails = false;
+  let writeFails = false;
   redis.pipeline = async (commands: (string | number)[][]) => {
     const [first] = commands;
     if (readFails && first[0] === "HMGET" && first[1] === leadsKey(list)) {
@@ -184,6 +186,10 @@ async function main(): Promise<void> {
         beforeWrite = null;
         await hook();
       }
+      if (writeFails) {
+        writeFails = false;
+        throw new Error("injected: the write failed");
+      }
     }
     if (roomAnswers && commands.length === 1 && first[0] === "EVAL" && String(first[1]).includes("marktmorgen:store-data:v1") && roomAnswers.length) return [[roomAnswers.shift(), 0]];
     return pipeline(commands);
@@ -201,8 +207,8 @@ async function main(): Promise<void> {
   is("1,000 of the longest addresses fit in the text", jsonBytes(thousand.join("\n")) <= MAX_BULK_TEXT_BYTES && thousand.every((email) => email.length === 254), true);
 
   // 2 and 8. Undoing a removal of 1,000 of the longest addresses of any script, each label of the longest kind.
-  // The stand-in (lib/redis-memory.ts, reserved by Codex, #1502) does not model the CAS_HSET script yet, so every
-  // write here runs casWrite's fallback (HMGET, then HSET); one atomic EVAL per batch is held by the EVALs sent.
+  // The stand-in (lib/redis-memory.ts) runs the CAS_HSET script itself, as Upstash does: one atomic EVAL per batch,
+  // held by the EVALs sent.
   const wide = Array.from({ length: MAX_BULK_ADDRESSES }, (_, i) => `${String(i).padStart(4, "0")}${"日".repeat(254 - 4 - "@example.com".length)}@example.com`);
   is("1,000 of the longest addresses of any script fit in the text", [wide.every((email) => email.length === 254), jsonBytes(wide.join("\n")) <= MAX_BULK_TEXT_BYTES, readBulk({ change: "add", label: "a", text: wide.join("\n") }).ok], [true, true, true]);
   is("an address JSON would write as \\u (a control character) is skipped, never sent", readBulk({ change: "add", label: "a", text: "a\u0001b@example.com ann@example.com" }), { ok: true, ask: { label: "a", change: "add", emails: ["ann@example.com"], skipped: 1 } });
@@ -452,6 +458,7 @@ async function main(): Promise<void> {
   // The write fails and so does the read just after it (casWrite throws); a read after that shows nothing landed.
   await put("nothing-landed@example.com", []);
   beforeWrite = async () => {
+    writeFails = true;
     readFails = true;
   };
   const failBefore = contactsSlot();

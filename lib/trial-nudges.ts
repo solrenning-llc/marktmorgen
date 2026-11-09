@@ -14,7 +14,8 @@
  *
  *   - On NUDGE_DAYS of the trial, counted from its first day: one email each,
  *     never twice for the same subscription, and none once the store has sold
- *     (lib/yearly-offer.ts, firstSaleAt) or the trial is set to stop.
+ *     (lib/yearly-offer.ts, its first-sale mark read exactly here; none either
+ *     while that is not known) or the trial is set to stop.
  *   - Each names one step, the first that is missing, in the order a store
  *     can sell: something to sell, the creator's Stripe account, then the
  *     store coach's weightiest missing check, and last the address shared.
@@ -23,6 +24,8 @@
  *     is a third email the trial already has.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { listSubscriptions } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -32,7 +35,7 @@ import { productCount } from "@/lib/catalog";
 import { nextChecks, storeChecks } from "@/lib/store-coach";
 import { studioPath } from "@/lib/studio-route";
 import { type Store, storeForHandle } from "@/lib/store";
-import { firstSaleAt } from "@/lib/yearly-offer";
+import { firstSaleKey } from "@/lib/yearly-offer";
 
 const DAY = 86_400;
 /** The days of the trial an email goes on: the fourth and the tenth, counted from the first. */
@@ -117,6 +120,48 @@ export function dueNudge(subscription: Record<string, unknown>, nowSeconds: numb
   return null;
 }
 
+/**
+ * When the store first sold, read exactly (CX-123 rule 24; Claude 6 audit on #2898): its seconds, 0 only when GET
+ * answers that nothing is kept, null when the read failed or the reply is in any other shape. lib/yearly-offer.ts
+ * writes the seconds, or (since Claude 5 on #2722) the milliseconds of claimValue with a point and a random part; any
+ * positive whole number before the point is a sale. firstSaleAt there reads an unknown as 0, which here would tell a
+ * store that sold that it has not, so it is not used.
+ */
+async function firstSaleKnown(store: Pick<Store, "sid" | "handle">): Promise<number | null> {
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(await redisPipeline([["GET", firstSaleKey(store)]]), 1);
+  } catch {
+    return null;
+  }
+  if (!replies) return null;
+  const [raw] = replies;
+  if (raw === null) return 0;
+  if (typeof raw !== "string" || !/^[1-9][0-9]{0,15}(\.[0-9]+)?$/.test(raw)) return null;
+  return Math.floor(Number(raw));
+}
+
+/**
+ * Whether this run sends nudge `which`, and its mark's own value if so: none of it or a later one sent (EXISTS
+ * answering exactly 0 each), and its mark taken here (lib/claim-mark.ts). A SET NX that landed with its reply lost is
+ * read back as ours, so the nudge goes once and is never lost (Codex Q and Claude 5 on #2898); null when one was sent
+ * (EXISTS 1, or the mark holding another value, the "1" of marks from before included). Any other answer is unknown:
+ * the mark is let go only while it holds this run's value, and it throws (CX-123 rule 24), so a nudge is never sent
+ * twice, nor sent without knowing, and goes on the next run.
+ */
+async function claimNudge(keys: string[], which: number): Promise<string | null> {
+  const seen = repliesFor(await redisPipeline(keys.map((key) => ["EXISTS", key])), keys.length);
+  const counts = seen?.map(countOf);
+  if (!counts || counts.some((count) => count !== 0 && count !== 1)) throw new UnknownReplyError("the trial nudges sent");
+  if (counts.slice(which).some((count) => count === 1)) return null;
+  const mine = claimValue();
+  const claimed = await claimMark(keys[which], 60 * DAY, mine);
+  if (claimed === "ours") return mine;
+  if (claimed === "taken") return null;
+  await releaseMark(keys[which], mine);
+  throw new UnknownReplyError("a trial nudge's mark");
+}
+
 /** The daily pass over every trial. Safe to run as often as it is called. */
 export async function sendTrialNudges(nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ sent: number; failed: number; seen: number }> {
   const counts = { sent: 0, failed: 0, seen: 0 };
@@ -133,20 +178,40 @@ export async function sendTrialNudges(nowSeconds = Math.floor(Date.now() / 1000)
       const store = await storeForHandle(handle);
       // Only the store this subscription is written down on, and only one that has not sold.
       if (!store || store.subscriptionId !== id || !store.email) continue;
-      if ((await firstSaleAt(store)) > 0) continue;
+      // Not known whether it sold (CX-123 rule 24): no "has not sold yet" email, and the store is said as failed.
+      const sold = await firstSaleKnown(store);
+      if (sold === null) {
+        console.error("reading a trialing store's first sale failed", id);
+        counts.failed += 1;
+        continue;
+      }
+      if (sold > 0) continue;
       // A later nudge stands for an earlier one that was missed: never two in one day.
       const keys = NUDGE_DAYS.map((_, i) => sentKey(id, i));
-      const seen = await redisPipeline(keys.map((key) => ["EXISTS", key]));
-      if (seen.slice(due.which).some((v) => Number(v) === 1)) continue;
-      const [claimed] = await redisPipeline([["SET", keys[due.which], "1", "NX", "EX", 60 * DAY]]);
-      if (claimed === null) continue;
-      const { subject, text } = nudgeEmail(store, nextStep(store), due.left, due.which);
-      const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: store.email, subject, text, replyTo: SUPPORT_EMAIL }).catch(() => false);
-      if (ok) counts.sent += 1;
-      else {
+      let claimed: string | null;
+      try {
+        claimed = await claimNudge(keys, due.which);
+      } catch (error) {
+        // Not known whether it was sent (CX-123 rule 24): nothing is sent, and the store is said as failed.
+        console.error("reading whether a trial nudge was sent failed", id, error);
         counts.failed += 1;
-        await redisPipeline([["DEL", keys[due.which]]]).catch(() => {});
+        continue;
       }
+      if (!claimed) continue;
+      const { subject, text } = nudgeEmail(store, nextStep(store), due.left, due.which);
+      const ok = await sendEmail({
+        meter: { by: "company" },
+        from: NIMBUS_FROM,
+        to: store.email,
+        subject,
+        text,
+        replyTo: SUPPORT_EMAIL,
+        idempotencyKey: `nl-trial-nudge:${id}:${due.which}`,
+      }).catch(() => false);
+      // false is refused or unknown alike (the provider may have taken it and the reply been lost), so the mark is
+      // kept: a nudge goes at most once, never twice (CX-123 rule 24; Claude 6 audit on #2898).
+      if (ok) counts.sent += 1;
+      else counts.failed += 1;
     }
     const last = data[data.length - 1];
     if (!hasMore || typeof last?.id !== "string") break;

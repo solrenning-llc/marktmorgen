@@ -275,6 +275,8 @@ export async function sendPush(
       body,
       headers,
       maxBytes: 8_192,
+      // Only the status is read (tests/web-push-big-answer.test.ts).
+      statusOnly: true,
       timeoutMs: SEND_TIMEOUT_MS,
       ...(options.hooks ?? {}),
     });

@@ -565,6 +565,9 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
       method: "POST",
       body: delivery.body,
       maxBytes: 16_384,
+      // Only the status decides a delivery: a 2xx with a long page is a
+      // delivery, never a failure tried again (tests/webhooks-big-answer.test.ts).
+      statusOnly: true,
       timeoutMs: ATTEMPT_TIMEOUT_MS,
       headers: {
         "Content-Type": "application/json",

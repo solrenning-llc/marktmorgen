@@ -76,6 +76,15 @@ export type SafeFetchOptions = {
   body?: string | Buffer;
   /** The largest answer read, in bytes. */
   maxBytes: number;
+  /**
+   * The caller needs the status and headers only (a webhook delivery, a
+   * push): they come back however large the body is, the body is not read
+   * at all (an empty buffer) and the connection is closed. Without it a 2xx
+   * with a body over maxBytes was refused as too big and the caller took a
+   * delivered message for a failed one (Claude 5 outbound audit, 9 Nov 2026,
+   * MEDIUM 1; tests/webhooks-big-answer.test.ts).
+   */
+  statusOnly?: boolean;
   /** The whole exchange, redirects included, in milliseconds. */
   timeoutMs: number;
   /** Redirects followed on a GET. A POST follows none. */
@@ -289,6 +298,21 @@ function once(
         lookup: pinnedLookup(pinned),
       },
       (response) => {
+        const headers: Record<string, string> = {};
+        for (const [name, value] of Object.entries(response.headers)) {
+          if (typeof value === "string") headers[name] = value;
+          else if (Array.isArray(value)) headers[name] = value.join(", ");
+        }
+        if (options.statusOnly) {
+          // The answer is settled before the body is touched; closing the
+          // connection then drops the body unread, whatever its size. The
+          // listener keeps the "aborted" error that follows from going
+          // unhandled; the promise is already settled.
+          resolvePromise({ status: response.statusCode ?? 0, headers, body: Buffer.alloc(0) });
+          response.on("error", () => undefined);
+          request.destroy();
+          return;
+        }
         const declared = Number(response.headers["content-length"] ?? "0");
         if (declared > options.maxBytes) {
           request.destroy(new SafeFetchError("too_big", "The answer is larger than we read."));
@@ -296,19 +320,27 @@ function once(
         }
         const chunks: Buffer[] = [];
         let size = 0;
+        // Set when a piece goes over the cap: headers, that piece and the end
+        // can arrive in one read, and the end then fires before the
+        // destroy's error, so "end" must refuse too, never resolve with what
+        // was kept (Claude 5 outbound audit, 9 Nov 2026, LOW 2;
+        // tests/safe-fetch-status-only.test.ts).
+        let over = false;
         response.on("data", (chunk: Buffer) => {
+          if (over) return;
           size += chunk.length;
           if (size > options.maxBytes) {
+            over = true;
+            chunks.length = 0;
             request.destroy(new SafeFetchError("too_big", "The answer is larger than we read."));
             return;
           }
           chunks.push(chunk);
         });
         response.on("end", () => {
-          const headers: Record<string, string> = {};
-          for (const [name, value] of Object.entries(response.headers)) {
-            if (typeof value === "string") headers[name] = value;
-            else if (Array.isArray(value)) headers[name] = value.join(", ");
+          if (over) {
+            reject(new SafeFetchError("too_big", "The answer is larger than we read."));
+            return;
           }
           let raw = Buffer.concat(chunks);
           const encoding = (headers["content-encoding"] ?? "").toLowerCase();

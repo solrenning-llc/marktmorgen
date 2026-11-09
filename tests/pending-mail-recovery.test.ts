@@ -494,10 +494,15 @@ test('recovery descriptors preserve the original closing fallback for unknown su
 });
 
 // The original confirmation's ID hashes a random nonce, so the unsupported
-// source that must sort before it is searched for, not hard-coded.
-function sessionPreceding(statsId:string,id:string):string{
- for(let i=0;i<1000;i++){const candidate='cs_test_uncoveredPrefix00000'+i;if(shipmentMailId(statsId,candidate)<id)return candidate;}
- return '';
+// source that must sort before it is searched for, not hard-coded. A fixed
+// candidate count missed every ID below its lowest hash (~0.073% of runs);
+// the search now continues, in the same order, until a candidate precedes the
+// ID. Only an ID below every hash up to the ceiling (about1 in4.2 million
+// runs) fails, loudly, never with an empty session.
+const PRECEDING_SEARCH_CEILING=1<<22;
+function sessionPreceding(statsId:string,id:string,ceiling=PRECEDING_SEARCH_CEILING):string{
+ for(let i=0;i<ceiling;i++){const candidate='cs_test_uncoveredPrefix00000'+i;if(shipmentMailId(statsId,candidate)<id)return candidate;}
+ throw Error(`No unsupported source among ${ceiling} sessions sorts before original ${id}; rerun, the ID is random`);
 }
 
 test('the unsupported prefix search finds a preceding source even for a very low original ID', ()=>{
@@ -505,6 +510,8 @@ test('the unsupported prefix search finds a preceding source even for a very low
  const low='0000ffff'+'f'.repeat(56),session=sessionPreceding('continuation_uncovered',low);
  assert.notEqual(session,'','a low random original ID must still get a preceding unsupported source');
  assert.ok(shipmentMailId('continuation_uncovered',session)<low);
+ // Nothing can precede the all-zero ID: the search stops at its ceiling with a clear error.
+ assert.throws(()=>sessionPreceding('continuation_uncovered','0'.repeat(64),1000),/No unsupported source among 1000 sessions sorts before original 0{64}/);
 });
 
 test('small funded successor grants compose both normal workers through an unsupported prefix to the original paid confirmation', {skip:redisOptIn}, async()=>{

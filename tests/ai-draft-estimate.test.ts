@@ -102,4 +102,24 @@ is("the group is described by it", described.includes(`aria-describedby="${listI
 const both = renderToStaticMarkup(createElement(AiDraftReview, { checks: [false, false, false], onToggle: () => {}, topics: ["money"], estimates: ["20"] }));
 is("with a warning too, both describe it", /aria-describedby="[^" ]+ [^" ]+"/.test(both), true);
 
+part("A link and common wording are not figures (Claude 6 focal return on #3437, LOW 1 and LOW 2)");
+// The email box sends the product's own page, ".../p/<id>" (lib/checkout-recovery.ts, productLink).
+const link = (productId: string) => `https://marktmorgen.com/@bakery/p/${productId}`;
+is("the product link's id is not a given 5", safely(() => unsourcedNumbers(["5 tips for better bread"], ["", ...givenTexts({ kind: "email", link: link(id) })])), ["5"]);
+is("the product link's id is not a given 53", safely(() => unsourcedNumbers(["53 bakers joined"], ["", ...givenTexts({ kind: "email", link: link("53a9c10b7d24f8e9a61c0d3b2f47e851") })])), ["53"]);
+is("a store on its own domain: the link is not given either", safely(() => unsourcedNumbers(["7 loaves"], ["", ...givenTexts({ kind: "email", link: "https://shop.example.com/p/7c3a9c10b7d24f8e9a61c0d3b2f47e85" })])), ["7"]);
+is("a link the creator typed without https is not a figure", safely(() => unsourcedNumbers(["8 loaves"], "see shop.example.com/p/8b1a2c3d")), ["8"]);
+is("a link in the draft is not an invented figure", safely(() => unsourcedNumbers([`Read more at ${link(id)}`], "")), []);
+is("the rest of what was sent is still given", safely(() => unsourcedNumbers(["40 recipes"], ["", ...givenTexts({ kind: "email", subject: "40 recipes", link: link(id) })])), []);
+is("'10m' is the 10 minutes the creator gave", safely(() => unsourcedNumbers(["Book a 10m call"], "a 10 minute call")), []);
+is("'10m' with nothing given is still listed as written", safely(() => unsourcedNumbers(["Book a 10m call"], "")), ["10m"]);
+is("'$10m' is still ten million", safely(() => unsourcedNumbers(["Raised $10m"], "10 minutes")), ["$10m"]);
+is("'10M' is still ten million", safely(() => unsourcedNumbers(["10M views"], "10 minutes")), ["10M"]);
+is("'3D printing' is not a 3", safely(() => unsourcedNumbers(["3D printing basics"], "")), []);
+is("an ordinal is not a figure, like 'second' in words", safely(() => unsourcedNumbers(["In the 2nd week, the 1st draft, the 3rd and the 4th"], "")), []);
+is("'Double chocolate' is a flavor, not twice", safely(() => unsourcedNumbers(["Double chocolate cookies and triple berry jam"], "")), []);
+is("'double your' and 'triple the' still claim a number", safely(() => unsourcedNumbers(["Double your sales and triple the reach"], "")), ["Double", "triple"]);
+is("'0.125' is not the 125 the creator gave (nit)", safely(() => unsourcedNumbers(["0.125 inch thick"], "125 pages")), ["0.125"]);
+is("'1.250' in a European draft is still 1250", safely(() => unsourcedNumbers(["1.250 Rezepte"], "1250 recipes", "de")), []);
+
 done();

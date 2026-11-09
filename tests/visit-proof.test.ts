@@ -82,6 +82,10 @@ async function main(): Promise<void> {
   const beacon = readFileSync("components/store-beacon.tsx", "utf8");
   is("the check guards the count's own address, for a POST", /initBotId\(\{ protect: \[\{ path: "\/api\/store\/hit", method: "POST" \}\] \}\)/.test(beacon), true);
   is("the count goes by fetch, which the check signs, never by sendBeacon, which it cannot", [/via\("\/api\/store\/hit", \{ method: "POST"/.test(beacon) && /send\(fetch\)/.test(beacon), /navigator\.sendBeacon/.test(beacon)], [true, false]);
+  // A count retried without the check from a page being left starts a request that never ends (the signup matrix's
+  // reload waited for the network forever), and a visit, a page or a funnel step without the check counts as nothing.
+  is("only a link's count is ever sent again without the check", /const retryUnsigned = payload\.k === "l"/.test(beacon), true);
+  is("and never from a page being left", /addEventListener\("pagehide"/.test(beacon) && /retryUnsigned && unsigned && !leaving/.test(beacon), true);
 
   done();
 }

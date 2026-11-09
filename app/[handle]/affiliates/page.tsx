@@ -17,6 +17,7 @@ import { codeOwners } from "@/lib/affiliate-codes";
 import { listCodes } from "@/lib/discount";
 import { speech } from "@/lib/buyer-words";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
+import { commissionShown } from "@/lib/affiliate-commission-view";
 import {
   MAX_NOTE_LENGTH,
   affiliateCookieName,
@@ -434,7 +435,8 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                                   : a.saleLine(day(line.at), money(line.base, line.currency), line.rate, line.status === "earned" ? "" : a.lineStatus[line.status] ?? line.status)}
                             </span>
                           </span>
-                          <span className="font-semibold tabular-nums">{money(line.commission, line.currency)}</span>
+                          {/* A held sale shows no amount as earned (lib/affiliates.ts, holdLine). */}
+                          <span className="font-semibold tabular-nums">{commissionShown(line, money, a.heldAmount)}</span>
                         </li>
                       ))}
                     </ul>

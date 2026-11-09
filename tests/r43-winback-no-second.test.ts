@@ -12,7 +12,7 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWinBack, storeForEmail } from "@/lib/store";
 import { openWinBack } from "@/lib/winback-send";
 import { membershipWords } from "@/lib/buyer-words/membership";
-import RenewPage from "@/app/[handle]/renew/[product]/page";
+import RenewPage, { generateMetadata } from "@/app/[handle]/renew/[product]/page";
 import { redisPipeline, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -32,6 +32,8 @@ const searchBody = new Map<string, unknown>();
 const subsBody = new Map<string, unknown>();
 const checkouts: URLSearchParams[] = [];
 let stripeReads = 0;
+/** Checkouts Stripe refuses next, with a 500, before one opens. */
+let failCheckouts = 0;
 
 const list = (data: unknown[], hasMore = false) => ({ object: "list", data, has_more: hasMore });
 const sub = (id: string, status: string) => list([{ id, status, metadata: { store: HANDLE, product } }]);
@@ -43,8 +45,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const answer = (body: unknown) =>
     body === 500 ? new Response(JSON.stringify({ error: { message: "synthetic provider error" } }), { status: 500 }) : new Response(JSON.stringify(body));
   if (path === "/checkout/sessions" && method === "POST") {
+    if (failCheckouts > 0) {
+      failCheckouts -= 1;
+      return answer(500);
+    }
     checkouts.push(new URLSearchParams(String(init?.body)));
-    return new Response(JSON.stringify({ id: `cs_test_${"n".repeat(20)}${checkouts.length}`, url: "https://checkout.stripe.com/c/pay/test" }));
+    const id = `cs_test_${"n".repeat(20)}${checkouts.length}`;
+    return new Response(JSON.stringify({ id, url: `https://checkout.stripe.com/c/pay/${id}` }));
   }
   if (method === "GET") stripeReads += 1;
   if (path === "/customers") {
@@ -90,6 +97,11 @@ async function main(): Promise<void> {
     const before = checkouts.length;
     const opened = await openWinBack(store, product, await comeBackLink(statsId, email), "https://marktmorgen.com", TEST_CONSENT);
     return [opened.ok ? "opened" : opened.reason, checkouts.length - before];
+  };
+  /** One press of the button on a link's page: what it answered, and the checkout's address when it opened one. */
+  const press = async (token: string) => {
+    const opened = await openWinBack(store, product, token, "https://marktmorgen.com", TEST_CONSENT);
+    return opened.ok ? opened.url : opened.reason;
   };
 
   part("Control: a member whose membership ended and who has not come back");
@@ -161,6 +173,67 @@ async function main(): Promise<void> {
   );
   is("the renew page shows them in its status note, with no come-back button", [html.includes(m.offerNotices.member ?? "\u0000"), html.includes('action="/api/store/come-back/open"')], [true, false]);
   for (const language of ["es", "fr", "de", "it", "nl", "pt"]) is(`the words exist in ${language}`, typeof membershipWords(language).offerNotices.member === "string", true);
+
+  part("The page that refuses as a member's does not invite a second membership (Claude 5's first review of #3482)");
+  const page = async (search: Record<string, string>) =>
+    renderToStaticMarkup(await RenewPage({ params: Promise.resolve({ handle: `@${HANDLE}`, product }), searchParams: Promise.resolve(search) }));
+  const samLink = await comeBackLink(statsId, "sam@example.com");
+  const asMember = await page({ back: samLink, status: "member" });
+  is("no full-price checkout beside 'you already have a membership'", asMember.includes('action="/api/store/checkout"'), false);
+  is("no renew button or link of any kind", [asMember.includes(">Renew"), asMember.includes(`>${m.renewTitle("The Inner Circle")}<`)], [false, false]);
+  is("it does not say the membership ended or is no longer running", [asMember.includes(m.endedTitle), asMember.includes("no longer running")], [false, false]);
+  is("its heading says the membership is still running", asMember.includes(`>${m.runningTitle}</h1>`), true);
+  is("the browser tab says so too", String((await generateMetadata({ params: Promise.resolve({ handle: `@${HANDLE}`, product }), searchParams: Promise.resolve({ back: samLink, status: "member" }) })).title).startsWith(m.runningTitle), true);
+  is("no 'did it end because a payment failed' sentence beside it", asMember.includes(m.failedBefore), false);
+  // Control: a refusal that is not a member's still offers the usual price, as before.
+  const refusedPage = await page({ back: samLink, status: "refused" });
+  is("control: 'refused' still says it ended and offers the usual price", [refusedPage.includes(m.endedTitle), refusedPage.includes('action="/api/store/checkout"')], [true, true]);
+  // "member" in the address without a working link says nothing by itself.
+  const noLink = await page({ back: "f".repeat(40), status: "member" });
+  is("control: 'member' with no working link reads as before", [noLink.includes(m.endedTitle), noLink.includes(m.runningTitle)], [true, false]);
+  for (const language of ["es", "fr", "de", "it", "nl", "pt"]) {
+    const words = membershipWords(language);
+    is(`the still-running words exist in ${language}`, [typeof words.runningTitle, typeof words.manageLink, typeof words.offerNotices.opening], ["string", "string", "string"]);
+  }
+
+  part("One link, one checkout: a second press hands back the checkout already open (Claude 5's first review of #3482)");
+  customerEmail.set("cus_ZoeOld000001", "zoe@example.com");
+  subsBody.set("cus_ZoeOld000001", sub("sub_ZoeEnded0001", "canceled"));
+  const zoeLink = await comeBackLink(statsId, "zoe@example.com");
+  const before = checkouts.length;
+  const first = await press(zoeLink);
+  const second = await press(zoeLink);
+  is("Zoe: the second press (another tab) gets the same checkout", [typeof first === "string" && first.startsWith("https://checkout.stripe.com/"), second], [true, first]);
+  is("Zoe: one checkout opened at Stripe, not two", checkouts.length - before, 1);
+  const [ttl] = await redisPipeline([["TTL", `nl:wb:open:${zoeLink}`]]);
+  is("Zoe: the open checkout is handed back for less than the day Stripe keeps it open", Number(ttl) > 0 && Number(ttl) < DAY, true);
+  // Paid in the first tab: the membership is there, so a press refuses as a member's, nothing opened.
+  customerEmail.set("cus_ZoeNew000001", "zoe@example.com");
+  subsBody.set("cus_ZoeNew000001", sub("sub_ZoeLive00001", "active"));
+  is("Zoe: once paid, a press refuses as a member's", [await press(zoeLink), checkouts.length - before], ["member", 1]);
+  // Two presses at the same moment: one opens, the other is told it is opening, never a second checkout.
+  customerEmail.set("cus_YanOld000001", "yan@example.com");
+  subsBody.set("cus_YanOld000001", sub("sub_YanEnded0001", "canceled"));
+  const yanLink = await comeBackLink(statsId, "yan@example.com");
+  const atOnce = checkouts.length;
+  const both = await Promise.all([press(yanLink), press(yanLink)]);
+  is("Yan: two presses at once open one checkout", checkouts.length - atOnce, 1);
+  is("Yan: the other press is told it is opening, or handed the same one", both.filter((r) => r === "opening" || r === both.find((x) => x.startsWith("https://"))).length, 2);
+  is("Yan: a later press hands back that one", await press(yanLink), both.find((x) => x.startsWith("https://")));
+  // A checkout Stripe did not open leaves nothing held: the next press opens one.
+  customerEmail.set("cus_XiaOld000001", "xia@example.com");
+  subsBody.set("cus_XiaOld000001", sub("sub_XiaEnded0001", "canceled"));
+  const xiaLink = await comeBackLink(statsId, "xia@example.com");
+  failCheckouts = 1;
+  const failed = checkouts.length;
+  is("Xia: a checkout Stripe refuses opens nothing", [await press(xiaLink), checkouts.length - failed], ["refused", 0]);
+  const retried = await press(xiaLink);
+  is("Xia: the next press opens one", [retried.startsWith("https://checkout.stripe.com/"), checkouts.length - failed], [true, 1]);
+  // A press told to wait, or to try again, sees the offer's button again beside the words.
+  for (const status of ["opening", "limited"]) {
+    const retry = await page({ back: zoeLink, status });
+    is(`the page after "${status}" shows the offer's button again, with its words`, [retry.includes('action="/api/store/come-back/open"'), retry.includes(m.offerNotices[status] ?? "\u0000")], [true, true]);
+  }
   done();
 }
 

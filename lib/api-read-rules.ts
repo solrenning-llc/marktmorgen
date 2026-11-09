@@ -176,6 +176,7 @@ export const BOOK_PAYPAL_REFUNDS = 500;
 /**
  * One answer of the PayPal refunds kept for good (lib/paypal-sales.ts, backKey), read for one PayPal payment of the
  * book: null, or a time of up to 12 digits, with its framing; the payment named in the command is the entry's own.
+ * Two are read for each payment: its refund in full and its partial refund (partlyRefundedField).
  */
 export const BOOK_KEPT_REFUND_BYTES = 32;
 /** A PayPal sale's record, read for its refund: the order, the payment, the buyer, what the visit carried. */
@@ -200,7 +201,7 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
     // With anything credited, one more: the PayPal refunds kept for good, read for the book's PayPal payments (an HMGET,
     // at most one answer per entry, BOOK_KEPT_REFUND_BYTES each).
     commands: 8 + 7 + (any ? 2 + paypal : 0) + moveReads(moves) + products,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? 2 * s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,

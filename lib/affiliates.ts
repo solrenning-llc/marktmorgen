@@ -3053,9 +3053,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         if (typeof p.capture !== "string" || p.capture === "") refundsChecked = false;
         else partlyHeld.set(paypalPaymentId(p.capture), Math.min(p.at, partlyHeld.get(paypalPaymentId(p.capture)) ?? p.at));
       }
-      for (const order of paypal.partGone) {
-        const pi = paypalOrders.get(order);
-        if (pi) partlyHeld.add(pi);
+      for (const entry of paypal.partGone) {
+        const pi = paypalOrders.get(entry.order);
+        if (pi) partlyHeld.set(pi, Math.min(entry.at, partlyHeld.get(pi) ?? entry.at));
       }
       for (const r of paypal.rows) {
         const named = typeof r.capture === "string" && r.capture !== "";
@@ -3077,14 +3077,23 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       // And the refunds kept for good (lib/paypal-sales.ts, backKey), read for the book's own PayPal payments only: the
       // lines are kept for good, the set and the records are not, so a refunded sale is never paid again once they
       // expire (P3). The one reply read exactly, a list of one answer per payment, each null or text; anything else
-      // leaves what is owed unknown (rule 24).
+      // leaves what is owed unknown (rule 24). With each payment, its partial refund kept for good (partlyRefundedField):
+      // its sale stays held, or paid if it was paid before (paidBeforeHold, from the time kept), once the set and the
+      // record expire; a time that is not a whole positive number of seconds is unknown.
       const pis = [...paypalSales.keys()];
       if (pis.length) {
-        const read = repliesFor(await redisPipeline([["HMGET", paypalBackKey(statsId), ...pis]]), 1);
+        const fields = pis.flatMap((pi) => [pi, `part:${pi}`]);
+        const read = repliesFor(await redisPipeline([["HMGET", paypalBackKey(statsId), ...fields]]), 1);
         const kept = read?.[0];
-        if (!Array.isArray(kept) || kept.length !== pis.length || !kept.every((v) => v === null || typeof v === "string")) refundsChecked = false;
+        if (!Array.isArray(kept) || kept.length !== fields.length || !kept.every((v) => v === null || typeof v === "string")) refundsChecked = false;
         else {
-          for (const [i, pi] of pis.entries()) if (kept[i] !== null) refundedInFull(pi);
+          for (const [i, pi] of pis.entries()) {
+            if (kept[2 * i] !== null) refundedInFull(pi);
+            const part = kept[2 * i + 1];
+            if (part === null) continue;
+            if (typeof part !== "string" || !/^[1-9]\d{0,11}$/.test(part)) refundsChecked = false;
+            else partlyHeld.set(pi, Math.min(Number(part), partlyHeld.get(pi) ?? Number(part)));
+          }
         }
       }
       // Refunded in full since, by whichever reading saw it: its amount is the whole sale's, never held.

@@ -13,5 +13,7 @@
 import type { Need } from "@/lib/studio-route";
 
 export const STUDIO_PAGE_UNITS = 4;
+/** RED stub: 766 [STN13] unit 1. */
+export const STUDIO_SEARCH_UNITS = 0;
 export const ESSENTIAL_NEEDS: readonly Need[] = ["billing", "delete", "export", "member"];
 export const ESSENTIAL_PER_DAY = 10;

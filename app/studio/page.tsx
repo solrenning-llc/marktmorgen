@@ -65,7 +65,8 @@ import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
 import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
 import { productsInStats, reachProducts, readAllTimeSales, resultsByCampaign, studioStats } from "@/lib/stats";
-import { ReadingFailed, ReadingsUsed, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
+import { ReadingFailed, ReadingsUsed, STORE_READINGS_PER_DAY, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
+import { UtcAndLocal } from "@/components/local-clock";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
 import { readSpends } from "@/lib/ad-spend";
@@ -860,9 +861,12 @@ export default async function StudioPage({
     live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId)) : null,
     pause: store && isBillingConfigured() ? early(pauseView(store)) : null,
     list: store && may("export") ? early(listSize(store)) : null,
-    callProducts: store ? early(readKind(store, "call")) : null,
+    // A product read that failed (one past the catalog's head is read from its own record) is "unread" here, inside
+    // the early read, so the rest of the studio still renders and the place of what it feeds says it could not be read
+    // (VR 2), never an empty list and never the page's error.
+    callProducts: store ? early(readKind(store, "call").catch(() => "unread" as const)) : null,
     meet: store && meetOn && (may("products") || may("orders")) ? early(meetView(store.statsId, store, arrivedZoom).catch(() => null)) : null,
-    shelf: store ? early(studioShelf(store, params)) : null,
+    shelf: store ? early(studioShelf(store, params).catch(() => "unread" as const)) : null,
     removing,
     mayAdd,
     liveStep,
@@ -978,7 +982,8 @@ export default async function StudioPage({
     calendar: current
       ? early(
           (async () => {
-            const callProducts = firstReads.callProducts ? await firstReads.callProducts : [];
+            const callRead = firstReads.callProducts ? await firstReads.callProducts : [];
+            const callProducts = callRead === "unread" ? [] : callRead;
             if (callProducts.length > 0 && may("settings")) await ensureFeedToken(current).catch(() => {});
             return Promise.all([
               callProducts.length > 0 && may("settings") ? calendarView(current).catch(() => null) : Promise.resolve(null),
@@ -1001,7 +1006,13 @@ export default async function StudioPage({
   const statsRead = current && answered
     ? early(Promise.all([
         // Kept for every page that shows them, and read again only from the store's own daily budget (lib/store-readings.ts).
-        answered.then(() => keptStats(current, undefined, freshNumbers)).then((kept) => kept, () => null),
+        // Not shown is said why (VR 2), from what this read already answered, with no read of its own: "used" when the
+        // day's readings are used and none is kept (ReadingsUsed), "unread" when the reading failed or its replies were
+        // not whole (lib/stats.ts readStats answers null then). Null only for a store with nothing to read, as before.
+        answered.then(() => keptStats(current, undefined, freshNumbers)).then(
+          (kept) => (kept && kept.value === null ? ("unread" as const) : kept),
+          (error: unknown) => (error instanceof ReadingsUsed ? ("used" as const) : ("unread" as const)),
+        ),
         readsSales(current)
           ? answered.then(() => keptSales(current, undefined, freshNumbers)).then(
               (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true, unnamed: kept.unnamed === true }),
@@ -1125,7 +1136,10 @@ export default async function StudioPage({
   const givesAway = store ? sellsAny(store, "free") : false;
   // Booked calls are read from the creator's Stripe account, the ledger, and
   // only asked for when the store sells calls at all.
-  const callProducts = firstReads.callProducts ? await firstReads.callProducts : [];
+  const callRead = firstReads.callProducts ? await firstReads.callProducts : [];
+  // Call products that could not be read: none is used below, and the calls' place says so (callsUnread).
+  const callsUnread = callRead === "unread";
+  const callProducts = callRead === "unread" ? [] : callRead;
   const paidRead =
     current && current.stripeAccountId && callProducts.length > 0 && may("orders")
       ? await paidCallsRead(current).catch(() => null)
@@ -1166,7 +1180,10 @@ export default async function StudioPage({
   if (current && paidList && paidList.length) after(() => catchUpBookings(current, paidList, SITE_URL));
   // Visits from Redis and sales from the creator's Stripe, read side by side,
   // with the creator's own notes on the chart and what they spent on ads.
-  const [visitsKept, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = statsRead ? await statsRead : [null, null, [], [], false, { week: 0, last: null }, []];
+  const [visitsRead, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = statsRead ? await statsRead : [null, null, [], [], false, { week: 0, last: null }, []];
+  // The visits not shown, and why: the day's readings used, or a reading that failed (said in the panel's place).
+  const visitsOut = visitsRead === "used" || visitsRead === "unread" ? visitsRead : null;
+  const visitsKept = visitsRead === "used" || visitsRead === "unread" ? null : visitsRead;
   const visits = visitsKept?.value ?? null;
   // When the numbers shown were read, whether the day still has a reading to read them again, and when the
   // day's readings come back: said on the panel, the kept copy shown as it is (inbox C4-33 (2), (3)).
@@ -1236,7 +1253,17 @@ export default async function StudioPage({
   const todayScreen = current ? todayView(todayCounts, may) : null;
   // The list of products: all of a short one, a page of a long one, found by
   // name when the creator searched (lib/catalog.ts reads only that page in full).
-  const shelf = firstReads.shelf ? await firstReads.shelf : null;
+  // "unread" when it could not be read: the products' place says so, never an empty list (VR 2).
+  const shelfRead = firstReads.shelf ? await firstReads.shelf : null;
+  const shelfUnread = shelfRead === "unread";
+  const shelf = shelfRead === "unread" ? null : shelfRead;
+  // Said where the products go, with no count and no editor drawn from a list that is not all there.
+  const shelfNotice = shelfUnread ? (
+    <div className="notice notice-warn mt-4" role="status">
+      <p className="font-bold text-ink">We could not read all of your products just now</p>
+      <p className="mt-1 text-sm text-ink-soft">So they are not shown here, and none of them was changed. Reload this page in a moment to check again.</p>
+    </div>
+  ) : null;
   // Asked of Stripe each time, because the setup is the creator's and lives there.
   // Stripe's answers about the creator's own account, asked side by side: the
   // tax setup, the ways to pay it offers, and the currencies it can charge in.
@@ -1404,7 +1431,7 @@ export default async function StudioPage({
             <StudioNav
               items={[
                 { href: "#details", label: "Store" },
-                ...(numbers || numbersUnread ? [{ href: "#numbers", label: "Numbers" }] : []),
+                ...(numbers || numbersUnread || visitsOut ? [{ href: "#numbers", label: "Numbers" }] : []),
                 ...(may("page") ? [{ href: "#look", label: "Look" }] : []),
                 ...(may("products") ? [{ href: "#products", label: "Products" }] : []),
                 ...(calendar ? [{ href: "#calendar", label: "Calendar" }] : []),
@@ -1729,6 +1756,26 @@ export default async function StudioPage({
                   <p className="mt-1 text-sm text-ink-soft">Your visits and sales are shown with your products&rsquo; names, and those could not be read. Nothing was changed. Reload this page in a moment to check again.</p>
                 </div>
               </div>
+            ) : visitsOut === "used" ? (
+              <div id="numbers" className="scroll-mt-32">
+                {troubleNotice}
+                <div className="notice notice-warn mt-8" role="status">
+                  <p className="font-bold text-ink">Today&rsquo;s readings of your numbers are used</p>
+                  <p className="mt-1 text-sm text-ink-soft">
+                    {`Your store can read its numbers ${STORE_READINGS_PER_DAY} times a day, and today\u2019s are used. Your numbers can be read again at `}
+                    <UtcAndLocal ms={readingsBackAt()} />
+                    {". Nothing was changed."}
+                  </p>
+                </div>
+              </div>
+            ) : visitsOut === "unread" ? (
+              <div id="numbers" className="scroll-mt-32">
+                {troubleNotice}
+                <div className="notice notice-warn mt-8" role="status">
+                  <p className="font-bold text-ink">We could not read your numbers just now</p>
+                  <p className="mt-1 text-sm text-ink-soft">Your visits could not be read. Nothing was changed. Reload this page in a moment to check again.</p>
+                </div>
+              </div>
             ) : null}
 
             {may("page") ? (
@@ -1769,7 +1816,14 @@ export default async function StudioPage({
               />
             ) : null}
 
-            {may("products") ? (
+            {may("products") && shelfUnread ? (
+              <section id="products" className="card mt-8 scroll-mt-32 p-6 sm:p-8" aria-labelledby="products-unread-title">
+                <h2 id="products-unread-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                  Products
+                </h2>
+                {shelfNotice}
+              </section>
+            ) : may("products") ? (
               <div id="products" className="scroll-mt-32">
                 {(async () => {
                   const newComments = early(newCommentsFor(shelf?.products ?? []));
@@ -1816,6 +1870,8 @@ export default async function StudioPage({
                 <p className="mt-2 text-sm text-ink-soft">For answering buyers. Your role reads the products; it does not edit them.</p>
                 {productCount(store) === 0 ? (
                   <p className="mt-4 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">Nothing listed yet.</p>
+                ) : shelfUnread ? (
+                  shelfNotice
                 ) : (
                   <>
                     <ul className="mt-4 divide-y divide-line">
@@ -1845,6 +1901,18 @@ export default async function StudioPage({
                 )}
               </section>
             )}
+
+            {callsUnread && (may("orders") || may("settings")) ? (
+              <section className="card mt-8 p-6 sm:p-8" aria-labelledby="calls-title">
+                <h2 id="calls-title" className="scroll-mt-32 text-lg font-semibold tracking-[-0.02em] text-ink">
+                  Upcoming calls
+                </h2>
+                <div className="notice notice-warn mt-4" role="status">
+                  <p className="font-bold text-ink">We could not read your call products just now</p>
+                  <p className="mt-1 text-sm text-ink-soft">So your upcoming calls and your calendar are not shown here. Nothing was changed. Reload this page in a moment to check again.</p>
+                </div>
+              </section>
+            ) : null}
 
             {callProducts.length > 0 && may("orders") ? (
               <section className="card mt-8 p-6 sm:p-8" aria-labelledby="calls-title">

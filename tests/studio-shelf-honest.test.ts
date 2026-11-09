@@ -120,7 +120,8 @@ const status = (needle: string) => statuses.find((one) => one.includes(needle)) 
 const SHELF_UNREAD = "We could not read all of your products just now";
 const CALLS_UNREAD = "We could not read your call products just now";
 const NUMBERS_UNREAD = "We could not read your numbers just now";
-const READINGS_USED = "Today's readings of your numbers are used";
+// The page writes its apostrophe as typeset (&rsquo;), as the notices beside it do.
+const READINGS_USED = "Today\u2019s readings of your numbers are used";
 const RELOAD = "Reload this page in a moment to check again.";
 const TROUBLE_SHOWN = "Stripe would not open a checkout once in the last 7 days";
 

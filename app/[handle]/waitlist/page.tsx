@@ -58,7 +58,7 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
   // product, and the button's own request (app/api/store/waitlist/leave)
   // checks the token.
   const removal = !token && (leave !== "" || status === "left" || status === "expired");
-  const resting = await isResting(store, Date.now(), removal ? "buyer" : "public");
+  const resting = await isResting(store, undefined, removal ? "buyer" : "public");
   if (resting && !removal) return <StoreResting store={store} />;
   const grant = resting ? null : token && WAIT_TOKEN.test(token) ? await readWaitToken(token) : leave && WAIT_TOKEN.test(leave) ? await readWaitToken(leave) : null;
   const productId = resting ? "" : (grant?.p ?? read("product"));

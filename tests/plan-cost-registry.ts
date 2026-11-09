@@ -1137,7 +1137,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/[slug]/page.tsx", names: ["isResting(at.store)", "siteFormUnits(askedForms.length)"] },
       // The sign-up box's and the wait list's own pages are one of them each, before a link's token or a product is read; the way off a wait list on the buyers' share.
       { file: "app/[handle]/join/page.tsx", names: ["isResting(store)"] },
-      { file: "app/[handle]/waitlist/page.tsx", names: ['isResting(store, Date.now(), removal ? "buyer" : "public")'] },
+      { file: "app/[handle]/waitlist/page.tsx", names: ['isResting(store, undefined, removal ? "buyer" : "public")'] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },

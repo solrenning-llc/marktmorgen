@@ -6,7 +6,8 @@
  *
  *   - a confirmed session stays spent when its call's mark is gone, on Redis's clock alone and on both clocks
  *     with nothing read in between;
- *   - a session whose time ran out unpaid still comes back, while its mark could still be there;
+ *   - a session whose time ran out unpaid still comes back, while its mark could still be there, and for good once
+ *     a reading has been sure it was never confirmed (Claude 6 on #3487);
  *   - an answer that is neither 1 nor 0 about a mark is not known, so the session stays spent (rule 24);
  *   - the record of spent sessions never expires before its package, and is among the package's keys a closing
  *     store deletes.
@@ -124,6 +125,36 @@ async function main(): Promise<void> {
     is("one used, one left unpaid: two left", (await packageState((await readBought(PAID))!)).left, 2);
     moveBothClocks(200 * DAY);
     is("200 days on: still two left", (await packageState((await readBought(PAID))!)).left, 2);
+    moveBothClocks(231 * DAY);
+    is("431 days on, read with certainty before: the unpaid hold is still free", (await packageState((await readBought(PAID))!)).left, 2);
+  }
+
+  part("A hold left unpaid, read for sure only within its first days, then confirmed late: spent");
+  {
+    const { store, product } = await setUp();
+    const PAID = checkoutId("f");
+    await buy(store, product, PAID, 0);
+    await holdSession(store, PAID, sessionId("f", 0), nowSeconds() - 3_600);
+    moveBothClocks(10 * DAY);
+    is("ten days on, never confirmed: three left", (await packageState((await readBought(PAID))!)).left, 3);
+    confirm(sessionId("f", 0));
+    is("confirmed after all: two left", (await packageState((await readBought(PAID))!)).left, 2);
+    moveBothClocks(431 * DAY);
+    is("and still two left once its mark is gone", (await packageState((await readBought(PAID))!)).left, 2);
+  }
+
+  part("A reading at the moment a closing store deletes the package leaves nothing behind for good");
+  {
+    const { store, product } = await setUp();
+    const PAID = checkoutId("g");
+    const bought = await buy(store, product, PAID, 0);
+    await holdSession(store, PAID, sessionId("g", 0), nowSeconds() - 3_600);
+    confirm(sessionId("g", 0));
+    const record = (await readBought(PAID))!;
+    // The closing store deletes the package's keys between the reading and what it writes down.
+    for (const key of packageKeys(PAID, bought.token)) redis.run(["DEL", key]);
+    await packageState(record);
+    is("no key of the package is left without an expiry", redis.keys().filter((key) => key.startsWith("nl:pkg:") && !key.startsWith("nl:pkg:s:") && Number(redis.run(["TTL", key])) === -1), []);
   }
 
   part("An answer about a mark that is neither 1 nor 0 is not known: the session stays spent");

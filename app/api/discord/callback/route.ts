@@ -4,7 +4,7 @@ import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { noticeCreator } from "@/lib/account-notice";
 import { exchange, isDiscordConfigured, leaveServer, whoIs } from "@/lib/discord";
 import { joinServer } from "@/lib/discord-access";
-import { forgetServer, readServer, saveServer, takeTrip } from "@/lib/discord-store";
+import { forgetServer, readServerOrThrow, saveServer, takeTrip } from "@/lib/discord-store";
 import { storeKey } from "@/lib/learn";
 import { logTeam } from "@/lib/team";
 import { PERMISSION_WORDS } from "@/lib/team-roles";
@@ -61,13 +61,40 @@ export async function GET(request: NextRequest) {
   // marked creator contract before exchanging credentials or replacing a server.
   // Cancellation and existing buyer access above remain separate.
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return back("discord=funding");
+  // The server kept so far, read exactly (CX-123 rule 24) before the code is spent: only the exact null is "none".
+  // An unknown read never counts as "nothing connected", which would write the new server over the old one while
+  // the old one's roles and members (with buyers' addresses) stayed on the store and the bot stayed in it.
+  const room = storeKey(store);
+  let before: Awaited<ReturnType<typeof readServerOrThrow>>;
+  try {
+    before = await readServerOrThrow(room);
+  } catch (error) {
+    console.error("reading the connected Discord server before a connection failed", error);
+    return back("discord=unchecked");
+  }
   const granted = await exchange(code, trip.redirect);
   if (!granted?.serverId) return back("discord=error");
-  const room = storeKey(store);
-  const before = await readServer(room);
   // Another server than the one connected: the old one is let go, with whoever it gave roles to.
+  // A failed forget switches nothing only when it changed nothing: the kept server is read again, exactly. Still the
+  // old one (a thrown read, or an exact read that throws UnknownReplyError, before the DEL): the new server is not
+  // saved, the bot stays in the old one, and the creator is told nothing was changed. Exactly none (the DEL ran and
+  // only its reply was lost): the forget happened, so the switch finishes. Anything else, or a failed read: the
+  // outcome is unknown and the creator is told so, never "Nothing was changed" (Claude 4's focal return on #2976).
   if (before && before.id !== granted.serverId) {
-    await forgetServer(room, store.sid);
+    try {
+      await forgetServer(room, store.sid);
+    } catch (error) {
+      console.error("forgetting the old Discord server before a switch failed", error);
+      let now: Awaited<ReturnType<typeof readServerOrThrow>>;
+      try {
+        now = await readServerOrThrow(room);
+      } catch (again) {
+        console.error("reading the connected Discord server after a failed forget failed", again);
+        return back("discord=unconfirmed");
+      }
+      if (now?.id === before.id) return back("discord=unchecked");
+      if (now !== null) return back("discord=unconfirmed");
+    }
     await leaveServer(before.id).catch(() => false);
   }
   await saveServer(room, {

@@ -23,7 +23,12 @@
  *                                next refresh deletes one a stopped refresh left
  *   nl:aff:<statsId>:book:lock   a random token: one refresh at a time
  *   nl:aff:<statsId>:book:ver    raised each time a person is deleted; a
- *                                refresh that read before it keeps nothing
+ *                                refresh that read before it keeps nothing.
+ *                                When its keep ran out it starts again from
+ *                                the deletion's instant in ms, never from
+ *                                nothing, so it never repeats a value a
+ *                                refresh read before (an INCR from nothing
+ *                                did: 1, then 2, as eight days before)
  *   nl:aff:<statsId>:book:tries  paid refreshes in a row that kept no complete
  *                                book: raised before each one reads, set back
  *                                by a complete one
@@ -272,9 +277,14 @@ redis.call("HSET", KEYS[4], unpack(ARGV, 5))
 redis.call("EXPIRE", KEYS[4], ARGV[3])
 ${WRITTEN}
 return 1`;
-/** Deletes the book (KEYS[1]) and the draft named (KEYS[2]) and raises the version (KEYS[3]); 2 when the draft named changed meanwhile (KEYS[4] no longer ARGV[1]). */
+/**
+ * Deletes the book (KEYS[1]) and the draft named (KEYS[2]) and raises the version (KEYS[3]) as raiseVersion does,
+ * from the deletion's instant in ms (ARGV[3]) when it is not there; 2 when the draft named changed meanwhile (KEYS[4]
+ * no longer ARGV[1]).
+ */
 export const BOOK_FORGET = `if (redis.call("GET", KEYS[4]) or "") ~= ARGV[1] then return 2 end
 redis.call("DEL", KEYS[1], KEYS[2])
+redis.call("SET", KEYS[3], ARGV[3], "NX", "EX", ARGV[2])
 redis.call("INCR", KEYS[3])
 redis.call("EXPIRE", KEYS[3], ARGV[2])
 return 1`;
@@ -294,6 +304,19 @@ async function bookVersion(statsId: string): Promise<string> {
 }
 
 /**
+ * Raises the version, kept BOOK_KEEP_SECONDS, with plain commands each done in
+ * one step, so a Redis that cannot run the scripts raises it too: when it is
+ * not there (never set, or its keep ran out) it starts from `now` (ms), then
+ * one more. It only grows while it is kept; a value read before it ran out
+ * began from an instant at least BOOK_KEEP_SECONDS earlier, so meeting it
+ * again would take more deletions in one keep than there are milliseconds in
+ * eight days: a refresh that read it keeps nothing.
+ */
+function raiseVersion(version: string, now: number): (string | number)[][] {
+  return [["SET", version, now, "NX", "EX", BOOK_KEEP_SECONDS], ["INCR", version], ["EXPIRE", version, BOOK_KEEP_SECONDS]];
+}
+
+/**
  * Deletes the whole kept book and any draft being written, so the next load
  * works it out again, and raises the version first, so a refresh that began
  * before keeps nothing it read: when a person is deleted
@@ -308,13 +331,14 @@ export async function forgetBookSnapshot(statsId: string): Promise<void> {
   const book = snapshotKey(statsId);
   const version = versionKey(statsId);
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const [, , seen, exists] = await redisPipeline([["INCR", version], ["EXPIRE", version, BOOK_KEEP_SECONDS], ["GET", pointerKey(statsId)], ["EXISTS", book]]);
+    const now = Date.now();
+    const [, , , seen, exists] = await redisPipeline([...raiseVersion(version, now), ["GET", pointerKey(statsId)], ["EXISTS", book]]);
     const token = typeof seen === "string" ? seen : "";
     if (!token && Number(exists) === 0) return;
     const draft = token ? draftKey(statsId, token) : book;
     let done: number;
     try {
-      done = await script(BOOK_FORGET, [book, draft, version, pointerKey(statsId)], [token, BOOK_KEEP_SECONDS]);
+      done = await script(BOOK_FORGET, [book, draft, version, pointerKey(statsId)], [token, BOOK_KEEP_SECONDS, now]);
     } catch (error) {
       await redisPipeline([["DEL", book, draft]]).catch(() => undefined);
       throw error;

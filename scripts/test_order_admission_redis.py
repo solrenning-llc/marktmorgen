@@ -160,8 +160,10 @@ def main():
     root = Path(__file__).resolve().parents[1]
     admit = script(root / "lib/order-admission.ts", "ADMIT_ORDERS")
     settle = script(root / "lib/order-admission.ts", "SETTLE_ADMITTED")
+    move = script(root / "lib/order-admission.ts", "MOVE_HELD_ORDERS")
     prefix = "marktmorgen:integration:orders:" + uuid.uuid4().hex + ":"
     count, held, room, holding = prefix + "n", prefix + "open", prefix + "data", prefix + "open:b"
+    pending = prefix + "pending"
     hour = 500_000
     keep = 26 * 3600
     redis = Redis()
@@ -242,8 +244,53 @@ def main():
         redis.command("HSET", room, "#", "x")
         assert take(redis) == -1
         print("PASS: an unreadable data room admits nothing")
+
+        def shift(client, keep=400 * 86400):
+            return client.command("EVAL", move, 2, pending, count, keep)
+
+        redis.command("DEL", held, holding, pending)
+        redis.command("HDEL", room, "#")
+        assert shift(redis) == 0
+        redis.command("SET", count, 8)
+        redis.command("SET", pending, 2)
+        assert shift(redis) == 2 and int(redis.command("GET", count)) == 10 and redis.command("EXISTS", pending) == 0
+        assert 0 < redis.command("TTL", count) <= 400 * 86400
+        assert shift(redis) == 0 and int(redis.command("GET", count)) == 10
+        redis.command("DEL", count)
+        redis.command("SET", pending, 3)
+        assert shift(redis) == 3 and int(redis.command("GET", count)) == 3
+        print("PASS: the orders held for an unknown window move into its count in one step, once")
+
+        redis.command("SET", count, 5)
+        for bad in ("x", "-1", "007", "1.5", "1" * 16):
+            redis.command("SET", pending, bad)
+            assert shift(redis) == -1 and redis.command("GET", pending) == bad and int(redis.command("GET", count)) == 5
+        redis.command("SET", pending, 2)
+        redis.command("SET", count, "not-a-number")
+        assert shift(redis) == -1 and int(redis.command("GET", pending)) == 2 and redis.command("GET", count) == "not-a-number"
+        redis.command("DEL", count)
+        redis.command("HSET", count, "f", 1)
+        try:
+            shift(redis)
+            raise AssertionError("a count of another type must fail the script")
+        except RuntimeError:
+            pass
+        assert int(redis.command("GET", pending)) == 2
+        redis.command("DEL", count)
+        redis.command("SET", count, 5)
+        assert shift(redis, keep=0) == -1 and int(redis.command("GET", pending)) == 2 and int(redis.command("GET", count)) == 5
+        print("PASS: nothing is moved, and nothing is lost, when either key is not a count")
+
+        redis.command("DEL", held, holding)
+        redis.command("SET", count, 8)
+        redis.command("SET", pending, 2)
+        # Every checkout moves what is held, then is admitted: the held orders fill the figure for all of them.
+        results = race(lambda client, _: (shift(client), take(client)))
+        assert sum(moved for moved, _ in results) == 2 and all(admitted == 0 for _, admitted in results)
+        assert int(redis.command("GET", count)) == 10 and redis.command("EXISTS", pending) == 0
+        print("PASS: concurrent checkouts never pass the figure on orders still being moved")
     finally:
-        redis.command("DEL", count, held, room, holding)
+        redis.command("DEL", count, held, room, holding, pending)
         redis.close()
     tax_observations(root)
 

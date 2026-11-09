@@ -3,7 +3,7 @@ import { withinStore } from "@/lib/metered-limits";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
-import { isStorePeople } from "@/lib/visit";
+import { isStorePeopleExact } from "@/lib/visit";
 import { ID_PATTERN, SHA_PATTERN, readSignedName } from "@/lib/agreement-rules";
 import { signAgreement } from "@/lib/agreement-store";
 import { agreementSigned } from "@/lib/agreement-flow-trigger";
@@ -44,8 +44,15 @@ export async function POST(request: NextRequest) {
   const room = await withinStore("agreement-sign", `${ip}|${store.handle}`, 10, 600, store, "buyer").catch(unknownLimit);
   if (room === "unknown") return back("error");
   if (!room) return back("limited");
-  // The store's own people can't sign for the person it was sent to.
-  if (await isStorePeople(request, store)) return back("studio");
+  // The store's own people can't sign for the person it was sent to; not knowing whether this is them signs nothing (rule 24).
+  let ownPeople: boolean;
+  try {
+    ownPeople = await isStorePeopleExact(request, store);
+  } catch (error) {
+    console.error("whether an agreement's signer is the store's own people is unknown; nothing signed", error);
+    return back("error");
+  }
+  if (ownPeople) return back("studio");
   const signed = await signAgreement(store, fields.id, { n, sha256: fields.sha, name: fields.name, email: fields.email, consent: fields.agree === "yes", ip }, readSignedName(fields.name));
   if (!signed.ok) return back(signed.reason === "busy" ? "error" : signed.reason);
   // The signed copies, each one of the store's emails for the month; the signature stands whether or not they go.

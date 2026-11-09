@@ -112,7 +112,7 @@ async function main(): Promise<void> {
   await seedPerson(w, PERSON, null);
   await others(statsId, w.plain, now);
   let store = (await storeForEmail(OWNER))!;
-  const gathered = await gatherVoice(store, now);
+  const { items: gathered } = await gatherVoice(store, now);
   is(`enough to read (at least ${MIN_TEXTS}), with the person's review among them`, [gathered.length >= MIN_TEXTS, gathered.some((g) => g.text === THEIR_WORDS)], [true, true]);
 
   part("The erasure takes the kept summary with it");

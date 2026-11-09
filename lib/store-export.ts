@@ -30,6 +30,8 @@ import { readPages } from "@/lib/sales-page-store";
 import { EXPORT_PAGES, salesCsv, readsSales } from "@/lib/stats";
 import { allPosts, readPosts } from "@/lib/store-blog";
 import { type Store } from "@/lib/store";
+import { standingOf } from "@/lib/plan-standing";
+import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 import { readThanksNotes } from "@/lib/thanks-note-store";
 
 /**
@@ -150,6 +152,14 @@ export function storeExport(store: Store, now = Date.now()): ReadableStream<Uint
     },
     async () => `,"notIncluded":"Nothing else is in this file. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio. Download files and videos from their own pages in your studio."}\n`,
   ];
+  // A store whose plan runs downloads again from its studio's figure, so "download again" is true for it. A store
+  // whose plan has ended has ENDED_STORE_EXPORTS of this file, taken before it streams (app/api/store/export/route.ts):
+  // the words never promise it a download the route then refuses (VR item 2). Its turn is not given back here, since a
+  // part that always fails would make its exports unbounded past the closing cost priced in tests/plan-cost-registry.ts.
+  const unreadWords =
+    standingOf(store) === "ended"
+      ? `This part could not be read just now, so it is not in this file. A store whose plan has ended downloads this file ${ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`}, and starting a plan again lets you download it again.`
+      : "This part could not be read just now. Download the file again in a few minutes.";
   let at = 0;
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -164,7 +174,7 @@ export function storeExport(store: Store, now = Date.now()): ReadableStream<Uint
         text = await part();
       } catch (error) {
         console.error("a part of a store's export could not be read", error);
-        text = at === 1 ? `{"exportedAt":${JSON.stringify(new Date(now).toISOString())}` : `,"unreadPart${at}":"This part could not be read just now. Download the file again in a few minutes."`;
+        text = at === 1 ? `{"exportedAt":${JSON.stringify(new Date(now).toISOString())}` : `,"unreadPart${at}":${JSON.stringify(unreadWords)}`;
       }
       controller.enqueue(encoder.encode(text));
     },

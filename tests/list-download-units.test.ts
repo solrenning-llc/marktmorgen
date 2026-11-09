@@ -19,13 +19,21 @@ import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmai
 import { importContactRows, leadsKey } from "@/lib/contacts";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { allowanceUsed, forceAllowance } from "@/lib/store-allowance";
-import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import * as closingRules from "@/lib/plan-closing-rules";
+import { personKey } from "@/lib/person-key";
+import { writeFields } from "@/lib/crm";
+import { MAX_CONTACT_NAME, MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
+import { MAX_CRM_FIELDS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
+import { DATA_ROOM_BYTES } from "@/lib/store-data-rules";
+import { MAX_STORE_BYTES } from "@/lib/store";
 import { GET as leadsGet } from "@/app/api/store/leads/route";
 import { GET as audienceGet } from "@/app/api/store/audience/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
-import { ORIGIN_PER_BYTE, UNIT_COST, request } from "./plan-cost-registry";
+import * as registry from "./plan-cost-registry";
+import { ORIGIN_PER_BYTE, UNIT_COST, closureCost, request } from "./plan-cost-registry";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { LIST_CONTACTS_PER_COMMAND, LIST_READ_BYTES_PER_CONTACT, LIST_SENT_BYTES_PER_CONTACT, listDownloadHeld, listDownloadUnits } from "@/lib/list-download";
 
@@ -34,7 +42,7 @@ const N = 3_000;
 type Store = NonNullable<Awaited<ReturnType<typeof storeForEmail>>>;
 type Route = (request: NextRequest) => Promise<Response>;
 
-async function storeWith(owner: string, handle: string, contacts: number): Promise<{ store: Store; session: string }> {
+async function storeWith(owner: string, handle: string, contacts: number, ended = false): Promise<{ store: Store; session: string }> {
   await claimHandle(owner, handle, "R31 List", "");
   await ensureStatsId(owner);
   await ensureListId(owner);
@@ -42,7 +50,35 @@ async function storeWith(owner: string, handle: string, contacts: number): Promi
   const store = (await storeForEmail(owner))!;
   const rows = Array.from({ length: contacts }, (_, i) => ({ email: `person${i}@example.com`, name: `Person Number ${i}`, tags: ["webinar", "spring"], consent: "agreed" as const }));
   for (let i = 0; i < rows.length; i += 500) await importContactRows(store.listId!, rows.slice(i, i + 500), store);
+  // A plan that ended: the store keeps its list, and the studio figure of a store whose plan has ended.
+  if (ended) await setSubscription(owner, { customerId: `cus_${handle}`, subscriptionId: `sub_${handle}`, active: false });
   return { store: (await storeForEmail(owner))!, session: await openSession(owner) };
+}
+
+/**
+ * A list of `contacts` people none of whom agreed to emails, each record at every cap a contact has (its name, its
+ * labels, MAX_TITLES products asked for), with the store's MAX_CRM_FIELDS fields each holding a value at its cap:
+ * what the agreed-only file and the buyers audience read for every person they leave out.
+ */
+async function storeAtCaps(owner: string, handle: string, contacts: number): Promise<{ store: Store; session: string }> {
+  const { store, session } = await storeWith(owner, handle, 0);
+  const fields = Array.from({ length: MAX_CRM_FIELDS }, (_, i) => ({ id: `fld${String(i).padStart(3, "0")}`, name: `Field ${i}`, type: "text" as const, options: [] }));
+  await writeFields(store.statsId!, fields);
+  const now = new Date().toISOString();
+  const record = (i: number) =>
+    JSON.stringify({
+      agreed: false, agreedAt: "", firstAt: now, lastAt: now,
+      titles: Array.from({ length: 20 }, (_, k) => `${k}`.padEnd(120, "t")),
+      ids: Array.from({ length: 20 }, (_, k) => `prod${i}x${k}`.padEnd(24, "i")),
+      source: "buyer", unsub: false, unsubAt: "", t: "a".repeat(40),
+      name: "N".repeat(MAX_CONTACT_NAME), tags: Array.from({ length: MAX_CONTACT_TAGS }, (_, k) => `${k}`.padEnd(MAX_TAG_LENGTH, "g")), importedAt: now,
+    });
+  for (let i = 0; i < contacts; i += 500) {
+    const page = Array.from({ length: Math.min(500, contacts - i) }, (_, k) => i + k);
+    await redis.pipeline([["HSET", leadsKey(store.listId!), ...page.flatMap((n) => [`capped${n}@example.com`, record(n)])]]);
+    await redis.pipeline(fields.map((f) => ["HSET", `nl:crm:v:${store.statsId}:${f.id}`, ...page.flatMap((n) => [personKey(store.statsId!, `capped${n}@example.com`), "v".repeat(MAX_FIELD_VALUE)])]));
+  }
+  return { store, session };
 }
 
 /** One download, with what it read from the database (commands, bytes, whether the list was walked) and what it sent. */
@@ -61,10 +97,11 @@ async function download(route: Route, path: string, store: Store, session: strin
   const before = await allowanceUsed(store, "studio");
   try {
     const response = await route(new NextRequest(`https://marktmorgen.com${path}`, { headers: { host: "marktmorgen.com", "x-nimbus-store": store.sid, cookie: `${SESSION_COOKIE}=${session}` } }));
-    const body = new TextEncoder().encode(await response.text()).length;
+    const text = await response.text();
+    const body = new TextEncoder().encode(text).length;
     redis.pipeline = pipeline;
     const taken = (await allowanceUsed(store, "studio")) - before;
-    return { status: response.status, commands, bytes, sent: body, walked, taken };
+    return { status: response.status, commands, bytes, sent: body, walked, taken, text };
   } finally {
     redis.pipeline = pipeline;
   }
@@ -112,6 +149,84 @@ async function main(): Promise<void> {
     console.log(`${contacts} contacts: ${units} units ($${(units * UNIT_COST.studio).toFixed(5)}) for $${cost.toFixed(5)}; held first ${listDownloadHeld(contacts)}`);
     is(`${contacts} contacts: the units pay for it`, units * UNIT_COST.studio >= cost, true);
     is(`${contacts} contacts: what is held first is never less`, listDownloadHeld(contacts) >= units, true);
+  }
+
+  part("A list download when the studio figure has some room left, but less than the download needs");
+  {
+    redis.clear();
+    const { store, session } = await storeWith("r31-words@example.com", "rthirtyonewords", N);
+    const needs = listDownloadHeld(N);
+    await forceAllowance(store, "studio", STORE_ALLOWANCES.creator.studio - 5);
+    const short = await download(leadsGet, "/api/store/leads", store, session);
+    const words = short.text;
+    console.log(`needs ${needs}; answered: ${words}`);
+    is("refused as too many", short.status, 429);
+    is("the list is never walked", short.walked, false);
+    is("it says how many the download needs and how many are left, never that the figure is used", [words.includes(`needs ${needs} of your studio requests`), words.includes("only 5 are left"), /are used/.test(words)], [true, true, false]);
+  }
+
+  part("A list download whose take from the studio figure comes back in a shape Redis does not give");
+  {
+    redis.clear();
+    const { store, session } = await storeWith("r31-unknown@example.com", "rthirtyoneunknown", N);
+    const odd = await download(leadsGet, "/api/store/leads", store, session, (c) => (c[0] === "INCRBY" && String(c[1]).startsWith("nl:allow:studio:") ? "9" : undefined));
+    is("refused as a count that could not be read (503), not as too many (429)", odd.status, 503);
+    is("the list is never walked", odd.walked, false);
+  }
+
+  part("The people a file leaves out are read all the same: the agreed-only file and the buyers audience pay for them");
+  {
+    redis.clear();
+    const capped = await storeAtCaps("r31-capped@example.com", "rthirtyonecapped", N);
+    for (const [name, route, path] of [
+      ["agreed-only file", leadsGet, "/api/store/leads?who=agreed"],
+      ["buyers audience", audienceGet, "/api/store/audience"],
+    ] as const) {
+      const got = await download(route, path, capped.store, capped.session);
+      console.log(`${name}: status ${got.status}; commands ${got.commands}; bytes read ${got.bytes} (${Math.round(got.bytes / N)} a person); bytes sent ${got.sent}; units ${got.taken} ($${(got.taken * UNIT_COST.studio).toFixed(6)}) for $${costOf(got.commands, got.bytes, got.sent).toFixed(6)}`);
+      is(`${name}: (setup) answered with a file of nobody`, [got.status, got.walked, got.sent < 1_000], [200, true, true]);
+      is(`${name}: the studio units it takes pay for every person it read, sent or not`, got.taken * UNIT_COST.studio >= costOf(got.commands, got.bytes, got.sent), true);
+    }
+  }
+
+  part("A store whose plan has ended downloads its list, however large, from an allowance of its own");
+  {
+    const endedLists = (closingRules as Record<string, unknown>).ENDED_LIST_DOWNLOADS;
+    is("a store whose plan has ended has its own list downloads (ENDED_LIST_DOWNLOADS, at least one)", typeof endedLists === "number" && endedLists >= 1, true);
+    const allowed = typeof endedLists === "number" && endedLists >= 1 ? endedLists : 1;
+    redis.clear();
+    const { store, session } = await storeWith("r31-ended@example.com", "rthirtyoneended", N, true);
+    // Counted as a list of 50,000: what a store that had a larger plan may still hold.
+    const large = (c: (string | number)[]) => (c[0] === "HLEN" && c[1] === leadsKey(store.listId!) ? 50_000 : undefined);
+    is("(setup) its studio figure is the ended store's, smaller than such a list needs", NON_PAYING_ALLOWANCES.ended.studio < listDownloadHeld(50_000), true);
+    const routes = [[leadsGet, "/api/store/leads"], [audienceGet, "/api/store/audience"], [leadsGet, "/api/store/leads?who=agreed"]] as const;
+    for (let i = 0; i < allowed; i += 1) {
+      const [route, path] = routes[i % routes.length];
+      const got = await download(route, path, store, session, large);
+      is(`download ${i + 1} of ${allowed} (${path}): answered with the file`, got.status, 200);
+      is(`download ${i + 1} of ${allowed}: nothing taken from the ended store's studio figure`, got.taken, 0);
+    }
+    const past = await download(leadsGet, "/api/store/leads", store, session, large);
+    const words = past.status === 200 ? "(a file)" : past.text;
+    console.log(`past the allowance: ${past.status}: ${words}`);
+    is("past its allowance: refused, the list never walked", [past.status, past.walked], [429, false]);
+    is("and it says so: downloaded since the plan ended, never that requests are used", [/since your plan ended/.test(words), /are used/.test(words)], [true, false]);
+
+    redis.clear();
+    const other = await storeWith("r31-ended-odd@example.com", "rthirtyoneendedodd", N, true);
+    const odd = await download(leadsGet, "/api/store/leads", other.store, other.session, (c) => (c[0] === "INCR" && String(c[1]).includes(":list-ended:") ? "1" : undefined));
+    is("its own count read in a shape Redis does not give: refused as unknown (503), the list never walked", [odd.status, odd.walked], [503, false]);
+  }
+
+  part("Those downloads are priced with the store's closing, as its whole exports are (tests/plan-cost-registry.ts, closure)");
+  {
+    const endedLists = (closingRules as Record<string, unknown>).ENDED_LIST_DOWNLOADS;
+    const listCost = (registry as Record<string, unknown>).endedListDownloadCost;
+    for (const tier of ["creator", "pro", "scale"] as const) {
+      const closure = closureCost(tier) as ReturnType<typeof closureCost> & { lists?: number };
+      const priced = typeof listCost === "function" && typeof endedLists === "number" ? endedLists * (listCost as (bytes: number) => number)(DATA_ROOM_BYTES[tier] + MAX_STORE_BYTES) : NaN;
+      is(`${tier}: the closing carries ENDED_LIST_DOWNLOADS list downloads, each at the largest list its room can hold`, [typeof closure.lists === "number" && closure.lists > 0, closure.lists === priced, closure.total >= closure.deletes + closure.follows + closure.exports + closure.prepare + (closure.lists ?? NaN)], [true, true, true]);
+    }
   }
 
   part("Control: an empty list still downloads, for a unit or two");

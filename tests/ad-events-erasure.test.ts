@@ -15,9 +15,17 @@
  *     same pipeline, so a write is never left without its way to be deleted);
  *   - a record kept for a checkout with no address (nothing could find it);
  *   - a record kept for an address already deleted from the store.
+ *
+ * And what a checkout opened with the yes keeps for its sale
+ * (nl:adsrv:ctx:<token>, four days, written before the address is known):
+ *   - a sale or a lead of a deleted address still sent to an ad platform,
+ *     from the thanks page or from the five-minute pass;
+ *   - what the checkout kept left in place once its sale is known, whether
+ *     it was sent or its buyer was deleted.
  */
 import { normaliseEmail } from "@/lib/auth";
-import { sendRenewals, sendServerPurchase, setServerToken, subKey } from "@/lib/ad-events";
+import { newLeadId, sendPaidOrders, sendRenewals, sendServerLead, sendServerPurchase, setServerToken, subKey } from "@/lib/ad-events";
+import { adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
 import { erasePerson } from "@/lib/person-erasure";
 import { NO_PIXELS } from "@/lib/pixels";
 import { ensureListId, setAdsServer, setPixels, storeForEmail } from "@/lib/store";
@@ -56,7 +64,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   return json({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
-const paid = (id: string, email: string | null, sub: string) => ({
+const paid = (id: string, email: string | null, sub: string, ads?: string) => ({
   id,
   status: "complete",
   payment_status: "paid",
@@ -65,7 +73,15 @@ const paid = (id: string, email: string | null, sub: string) => ({
   created: SEC - 120,
   ...(email ? { customer_details: { email } } : {}),
   subscription: sub,
-  metadata: { store: "erase-shop", product: "club000001" },
+  metadata: { store: "erase-shop", product: "club000001", ...(ads ? { ads } : {}) },
+});
+
+const ctxKey = (token: string) => `nl:adsrv:ctx:${token}`;
+const keepCtx = (token: string) =>
+  redis.run(["SET", ctxKey(token), JSON.stringify({ ip: "203.0.113.7", userAgent: "Mozilla/5.0", url: "https://marktmorgen.com/@erase-shop/club", cookies: { _fbp: "fb.1.1.ctx" } }), "EX", 4 * 86_400]);
+const asking = (cookies: Record<string, string>) => ({
+  headers: new Headers({ "x-forwarded-for": "203.0.113.8", "user-agent": "Mozilla/5.0" }),
+  cookies: { get: (name: string) => (name in cookies ? { value: cookies[name] } : undefined) },
 });
 
 const renewal = (id: string, email: string, sub: string) => ({
@@ -150,6 +166,41 @@ async function main(): Promise<void> {
   sessions = [paid("cs_test_gone00000001", "gone@example.com", GONE)];
   await sendServerPurchase(store, "cs_test_gone00000001", buyer, NOW);
   is("an address already deleted keeps nothing for renewals", redis.run(["GET", subKey(GONE)]), null);
+
+  part("A sale of a person deleted before it was sent goes to no ad platform, and what its checkout kept goes");
+  const LATE = "late@example.com";
+  const T1 = "c".repeat(24);
+  const T2 = "d".repeat(24);
+  keepCtx(T1);
+  keepCtx(T2);
+  sessions = [paid("cs_test_late00000001", LATE, "sub_Late00000001", T1), paid("cs_test_late00000002", LATE, "sub_Late00000002", T2)];
+  is("the person is deleted", (await erasePerson(store, LATE, { kind: "person" })).ok, true);
+  toMeta = 0;
+  is("the thanks page sends nothing", await sendServerPurchase(store, "cs_test_late00000001", buyer, NOW), "off");
+  is("the five-minute pass sends nothing", await sendPaidOrders(store, [sessions[1]], NOW), 0);
+  is("Meta asked nothing", toMeta, 0);
+  is("what either checkout kept is gone", [redis.run(["GET", ctxKey(T1)]), redis.run(["GET", ctxKey(T2)])], [null, null]);
+  is("and nothing is kept for renewals", [redis.run(["GET", subKey("sub_Late00000001")]), redis.run(["GET", subKey("sub_Late00000002")])], [null, null]);
+
+  part("A lead of a deleted address goes to no ad platform");
+  const yes = { [adsCookieName("erase-shop")]: nextAdsCookie(undefined, "?fbclid=IwAR0abc", SEC - 3600), _fbp: "fb.1.1.lead" };
+  toMeta = 0;
+  is("not sent", await sendServerLead(store, asking(yes), { id: newLeadId(), email: LATE, product: "guide00001" }, NOW), false);
+  is("Meta asked nothing", toMeta, 0);
+  is("a lead of somebody not deleted still goes", await sendServerLead(store, asking(yes), { id: newLeadId(), email: "lead@example.com", product: "guide00001" }, NOW), true);
+  is("to Meta", toMeta, 1);
+
+  part("What a checkout kept goes once its sale is sent: the address is known then, and nothing reads it after");
+  const T3 = "e".repeat(24);
+  const T4 = "f".repeat(24);
+  keepCtx(T3);
+  keepCtx(T4);
+  sessions = [paid("cs_test_kept00000001", "kept@example.com", "sub_Kept00000001", T3), paid("cs_test_kept00000002", "kept@example.com", "sub_Kept00000002", T4)];
+  toMeta = 0;
+  is("the thanks page sends it", await sendServerPurchase(store, "cs_test_kept00000001", buyer, NOW), "sent");
+  is("the five-minute pass sends the other", await sendPaidOrders(store, [sessions[1]], NOW), 1);
+  is("both to Meta", toMeta, 2);
+  is("what either checkout kept is gone", [redis.run(["GET", ctxKey(T3)]), redis.run(["GET", ctxKey(T4)])], [null, null]);
 
   done();
 }

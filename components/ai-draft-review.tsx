@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, reviewDone } from "@/lib/ai-draft-review";
+import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, reviewDone, sensitiveWarning, type SensitiveTopic } from "@/lib/ai-draft-review";
 
 /**
  * The "AI draft" badge and the three checks drawn under every draft the
@@ -10,15 +10,30 @@ import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, reviewDone } from "@/lib/ai-draft-revi
  * works by keyboard and is read by a screen reader. The form that saves finds
  * the first one left by `data-ai-review`.
  */
-export function AiDraftReview({ checks, onToggle }: { checks: readonly boolean[]; onToggle: (index: number, ticked: boolean) => void }) {
+export function AiDraftReview({
+  checks,
+  onToggle,
+  topics = [],
+}: {
+  checks: readonly boolean[];
+  onToggle: (index: number, ticked: boolean) => void;
+  /** What the draft is about that needs a reader who knows it: health, money, the law (756 [STN3], unit 2). */
+  topics?: readonly SensitiveTopic[];
+}) {
   const base = useId();
   const done = reviewDone(checks);
+  const warning = sensitiveWarning(topics);
   return (
     <fieldset className="rounded-xl border border-line bg-white p-3" data-ai-review>
       <legend className="flex flex-wrap items-center gap-2 px-1 text-sm font-semibold text-ink">
         <span className="rounded-full border border-ink px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-ink">{AI_DRAFT_BADGE}</span>
         <span>Before you save it, check:</span>
       </legend>
+      {warning ? (
+        <p className="mt-1 text-sm text-ink">
+          <strong>Sensitive topic:</strong> {warning}
+        </p>
+      ) : null}
       <ul className="mt-1 space-y-1">
         {AI_DRAFT_CHECKS.map((check, index) => (
           <li key={check.id}>

@@ -155,6 +155,14 @@ type Listed = { data?: unknown };
  * be read whole is kept too once another holds one, so the page reads it again and says it cannot list rather
  * than leave it out; `more` says customers past the one page read may hold more.
  *
+ * Stripe's hosted checkout keeps the address as the buyer typed it, and the `email` filter of Stripe's customer list
+ * is case-sensitive, so "Ana@Example.com" and "ana@example.com" are two customers no one exact read finds together.
+ * The address is read as typed and in small letters (one read when they are the same), never by sweeping the
+ * account's customers; both together stay within MANAGE_CUSTOMERS_MAX customers, past which `more` says so. A
+ * customer counts only when its own address is the one typed, ignoring capitals: any other row proves nothing and
+ * keeps "no membership" from being said (Claude 5, the residue of R43 F1 on #2985). A spelling neither read nor
+ * typed ("ANA@example.com" behind "Ana@Example.com") is not found: Stripe has no case-blind exact filter.
+ *
  * Asked of the creator's own Stripe account. A membership counts when it was
  * sold by this store under any address the store has used.
  */
@@ -168,17 +176,35 @@ export async function findMembers(store: Store, email: string): Promise<{ custom
   // was read to its end with every row readable. Anything else throws StripeListUnreadable, so the form says
   // something went wrong (the route's "error"), never "sent" with no email behind it.
   let unknown = false;
-  const customers = readStripePage(
-    await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MANAGE_CUSTOMERS_MAX}`),
-    () => true,
-    CUSTOMER_PATTERN,
-  );
-  if (customers.unreadable > 0 || customers.hasMore) unknown = true;
-  const more = customers.unreadable > 0 || customers.hasMore;
+  const typed = email.trim();
+  const lower = normaliseEmail(typed);
+  const spellings = typed === lower ? [lower] : [typed, lower];
+  const sameAddress = (row: Record<string, unknown>) => {
+    const own = ownField(row, "email");
+    return typeof own === "string" && own.toLowerCase() === lower;
+  };
+  const pages = await Promise.all(spellings.map(async (spelling) =>
+    readStripePage(
+      await onAccount("GET", account, `/customers?email=${encodeURIComponent(spelling)}&limit=${MANAGE_CUSTOMERS_MAX}`),
+      sameAddress,
+      CUSTOMER_PATTERN,
+    ),
+  ));
+  if (pages.some((page) => page.unreadable > 0 || page.hasMore)) unknown = true;
+  // Both spellings' customers, newest first, each once, within the one ceiling: what is past it is said by `more`.
+  const createdOf = (row: Record<string, unknown>) => {
+    const at = ownField(row, "created");
+    return typeof at === "number" ? at : 0;
+  };
+  const seen = new Set<string>();
+  const all = pages.flatMap((page) => page.rows).filter((row) => !seen.has(row.id) && Boolean(seen.add(row.id)));
+  all.sort((x, y) => createdOf(y) - createdOf(x));
+  if (all.length > MANAGE_CUSTOMERS_MAX) unknown = true;
+  const more = unknown;
 
   const holding = new Map<string, number>();
   const unread: string[] = [];
-  for (const customer of customers.rows) {
+  for (const customer of all.slice(0, MANAGE_CUSTOMERS_MAX)) {
     const subs = readStripePage(
       await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`),
       (row) => typeof ownField(row, "status") === "string" && plainObject(ownField(row, "metadata")),
@@ -276,7 +302,8 @@ export async function requestManageLink(input: {
   if (!(await within(await ipKey(ip, store.handle), IP_LIMIT))) return "limited";
   if (!(await within(await addressKey(email), ADDRESS_LIMIT))) return "limited";
 
-  const found = await findMembers(store, email);
+  // The address as typed, so a customer Stripe holds with its capitals is found too (findMembers); sent in small letters.
+  const found = await findMembers(store, raw);
   if (!found.customers.length) return "sent";
 
   const token = randomToken();

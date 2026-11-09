@@ -1139,7 +1139,10 @@ export const COST_LINES: CostLine[] = [
       // A member's page and each action on it read one list of memberships for each customer of the address its link holds, side by side,
       // at most MANAGE_CUSTOMERS_MAX, the link's record within MANAGE_GRANT_BYTES (inside LINK_BYTES of tests/store-data-registry.ts):
       // Stripe bills no API call and no store command or byte is added, so the request's own cost is unchanged (R43 F1 on #2985, 9 November 2026).
-      { file: "lib/membership-manage.ts", names: ["MANAGE_CUSTOMERS_MAX = 20", "MANAGE_GRANT_BYTES = 700", "Promise.allSettled(customersOf(grant)"] },
+      // Asking for the link reads the address's customers as typed and in small letters (one read when they are the same; Stripe's filter is
+      // case-sensitive), side by side, both within the one MANAGE_CUSTOMERS_MAX: one more Stripe list at most, no API charge, no store command or
+      // byte, the request's own cost unchanged (the residue of R43 F1 on #2985, 9 November 2026).
+      { file: "lib/membership-manage.ts", names: ["MANAGE_CUSTOMERS_MAX = 20", "MANAGE_GRANT_BYTES = 700", "Promise.allSettled(customersOf(grant)", "const spellings = typed === lower ? [lower] : [typed, lower];", "all.slice(0, MANAGE_CUSTOMERS_MAX)"] },
       // A signed proposal or agreement takes one more before the workflows that start on signing are checked (635 [GL3], 2 November 2026).
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // An opening of a buyer's orders page takes ORDERS_OPEN_UNITS before anything is read, and its meter more before each read

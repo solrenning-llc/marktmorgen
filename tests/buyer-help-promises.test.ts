@@ -26,7 +26,8 @@ async function main(): Promise<void> {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.hostname === "api.stripe.com") {
-      if (url.pathname.endsWith("/customers")) return Response.json({ data: [{ id: "cus_Member000001", created: 1 }], has_more: false });
+      // Each customer row with its own address, the one asked for, as Stripe's exact filter gives it (rule 23: fixture only; findMembers counts a customer only when its own address is the one typed, ignoring capitals, since manage-email-case).
+      if (url.pathname.endsWith("/customers")) return Response.json({ data: [{ id: "cus_Member000001", created: 1, email: url.searchParams.get("email") }], has_more: false });
       // Each row with its id, as Stripe gives it (rule 23: fixture only; findMember reads lists exactly since sweep APP2).
       if (url.pathname.endsWith("/subscriptions")) return Response.json({ data: [{ id: "sub_Member0000001", status: "active", metadata: { store: "help-promise0" }, created: 1 }], has_more: false });
     }

@@ -30,7 +30,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname !== "api.stripe.com") throw new Error("Unexpected external request");
   const path = url.pathname.replace(/^\/v1/, ""), body = new URLSearchParams(String(init?.body ?? ""));
   calls.push({ path, body });
-  if (method === "GET" && path === "/customers") return json({ object: "list", data: [{ id: customer, created: 1 }], has_more: false });
+  // Each customer row with its own address, the one asked for, as Stripe's exact filter gives it (rule 23: fixture only; findMembers counts a customer only when its own address is the one typed, ignoring capitals, since manage-email-case).
+  if (method === "GET" && path === "/customers") return json({ object: "list", data: [{ id: customer, created: 1, email: url.searchParams.get("email") }], has_more: false });
   if (method === "GET" && path === `/customers/${customer}`) return json({ id: customer, email: "member@example.test" });
   if (method === "GET" && path === "/subscriptions") return json({ object: "list", data: [row()], has_more: false });
   if (method === "POST" && path === "/prices") return json({ id: "price_CX1Target0001" });

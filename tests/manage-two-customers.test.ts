@@ -67,7 +67,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const body = new URLSearchParams(init?.body ? String(init.body) : "");
   calls.push({ method, path, query: url.searchParams, body });
   if (method === "GET" && path === "/customers") {
-    return json({ object: "list", has_more: false, data: CUSTOMERS[url.searchParams.get("email") ?? ""] ?? [] });
+    // Each row with its own address, the one asked for, as Stripe's exact filter gives it (rule 23: fixture only; findMembers counts a customer only when its own address is the one typed, ignoring capitals, since manage-email-case).
+    const email = url.searchParams.get("email") ?? "";
+    return json({ object: "list", has_more: false, data: (CUSTOMERS[email] ?? []).map((c) => ({ ...c, email })) });
   }
   if (method === "GET" && path.startsWith("/customers/")) return json({ id: path.split("/")[2], email: "dana@example.com" });
   if (method === "GET" && path === "/subscriptions") {

@@ -56,7 +56,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (customersShape === "no-data") return answer({ object: "list", has_more: false });
     if (customersShape === "no-has-more") return answer({ object: "list", data: [] });
     if (customersShape === "row-without-id") return answer({ object: "list", has_more: false, data: [{ created: 1 }] });
-    return answer({ object: "list", has_more: false, data: (url.searchParams.get("email") ?? "").startsWith("member") ? [{ id: "cus_Member000001", created: 1 }] : [] });
+    // Each row with its own address, the one asked for, as Stripe's exact filter gives it (rule 23: fixture only; findMembers counts a customer only when its own address is the one typed, ignoring capitals, since manage-email-case).
+    const email = url.searchParams.get("email") ?? "";
+    return answer({ object: "list", has_more: false, data: email.startsWith("member") ? [{ id: "cus_Member000001", created: 1, email }] : [] });
   }
   if (path === "/subscriptions" && method === "GET") {
     if (subsShape === "no-data") return answer({ object: "list", has_more: false });

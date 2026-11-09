@@ -7,7 +7,6 @@
  * (lib/studio-allowance-rules.ts, STUDIO_PAGE_UNITS).
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Breadcrumb, StudioTrail } from "@/components/breadcrumb";
@@ -33,6 +32,7 @@ const links = [...deep.matchAll(/<a [^>]*class="([^"]*)"/g)].map((m) => m[1]);
 is("every link is a 44px target with its words centered in it (AX274 2.5.5)", links.every((c) => /\binline-flex\b/.test(c) && /\bmin-h-11\b/.test(c) && /\bitems-center\b/.test(c)), true);
 is("every link is underlined, so it is never told by color alone", links.length === 2 && links.every((c) => /\bunderline\b/.test(c)), true);
 is("a long name wraps instead of running off a phone screen", /<li [^>]*class="[^"]*\[overflow-wrap:anywhere\][^"]*"[^>]*aria-current="page"/.test(deep) || /aria-current="page"[^>]*class="[^"]*\[overflow-wrap:anywhere\]/.test(deep), true);
+is("the first step can go back to a part of the studio instead of its top", /<a [^>]*href="\/studio\?store=s1#closing"[^>]*>Studio<\/a>/.test(renderToStaticMarkup(createElement(StudioTrail, { store, home: "/studio?store=s1#closing", here: "Refund unused time" }))), true);
 is("a name is shown as text, never as markup", renderToStaticMarkup(createElement(StudioTrail, { store, here: "<b>Mine</b> & co" })).includes("&lt;b&gt;Mine&lt;/b&gt; &amp; co"), true);
 is("a blank name draws nothing rather than an empty item", renderToStaticMarkup(createElement(StudioTrail, { store, here: "  " })), "");
 is("the generic trail draws the same way from its own first step", /<a [^>]*href="\/help"[^>]*>Help<\/a>/.test(renderToStaticMarkup(createElement(Breadcrumb, { path: [{ label: "Help", href: "/help" }], here: "Buyers" }))), true);
@@ -76,7 +76,7 @@ is("a page with the trail has it in each of its screens", all.filter((p) => read
 is("no trail is made by hand outside the list", all.filter((p) => !PENDING.includes(p) && read(p).includes('aria-label="Breadcrumb"')), []);
 const moved = ["funnels", "bundles", "blog", "site", "podcast/[product]"].map((p) => `app/studio/${p}/page.tsx`);
 is("on these pages the trail takes the place of the small heading above the title", moved.filter((p) => read(p).includes('className="eyebrow"')), []);
-is("and says what that heading said", moved.map((p) => /<StudioTrail [^>]*here=\{?"([^"]+)"/.exec(read(p))?.[1] ?? /<StudioTrail [^>]*here=\{([^}]+)\}/.exec(read(p))?.[1] ?? null), ["Funnels", "Bundles", "Blog", "Your pages", "product.title"]);
-is("the closing refunds page keeps its way back to the closing part of the studio", /<StudioTrail [^>]*path=\{\[\{ label: "Studio", href: back \}\]\}/.test(read("app/studio/closing-refunds/page.tsx")), true);
+is("and says what that heading said", moved.map((p) => /<StudioTrail [^>]*here="([^"]+)"/.exec(read(p))?.[1] ?? null), ["Funnels", "Bundles", "Blog", "Your pages", "Private podcast"]);
+is("the closing refunds page keeps its way back to the closing part of the studio", /<StudioTrail [^>]*home=\{back\}/.test(read("app/studio/closing-refunds/page.tsx")), true);
 
 done();

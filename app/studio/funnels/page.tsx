@@ -8,6 +8,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
 import { canBeBumped } from "@/lib/product-extras";
@@ -195,7 +196,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Funnels</p>
+        <StudioTrail store={store} here="Funnels" />
         <h1 className="t-h2 mt-3">Funnels</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Pages walked in order from one address, and the offers a buyer meets right after paying.

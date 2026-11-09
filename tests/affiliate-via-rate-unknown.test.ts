@@ -4,8 +4,10 @@
  * sale (rule 24; Claude 5, round 30). Before, `Number(meta.via_rate) || 0`
  * wrote it down at 0% with HSETNX, once and for good: the affiliate was owed
  * their share and the book said nothing was earned. Now nothing is written,
- * neither paid nor zeroed: noteSession and noteCharge throw, so the checkout
- * sweep keeps the order for its next run (failOrder), and the commission waits.
+ * neither paid nor zeroed: noteSession and noteCharge throw. A checkout is kept
+ * by the sweep for its next run (failOrder) while it is inside the sweep's window;
+ * a one-click offer's charge is only logged (lib/upsell.ts catches it), so its
+ * commission is not written at all rather than written at 0%.
  *
  * Every writer of `via_rate` writes `String(rate)` beside `via` (lib/store-checkout.ts,
  * lib/cart-checkout.ts, lib/calls.ts, lib/upsell.ts, lib/stats.ts), "0" included, so

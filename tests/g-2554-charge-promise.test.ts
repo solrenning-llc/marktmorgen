@@ -35,7 +35,7 @@ async function main(): Promise<void> {
       const store = { ...made, stripeAccountId: "acct_gproof0001" };
       const endedAt = Date.now() - 2 * 86_400_000;
       const day = removalDay(endedAt);
-      await startCallBudget(await storeFolder(storeRef(store)), budget);
+      await startCallBudget(await storeFolder(storeRef(store)), budget, endedAt);
       const hold = await holdCharges(store, endedAt, Number.POSITIVE_INFINITY);
       is(`budget ${budget}: real hold finished listing with one unpaused member`, [hold.done, hold.failed, hold.over, posts], budget === 0 ? [true, 0, 1, 0] : [true, 1, 0, 1]);
       is(`budget ${budget}: synthetic provider member remains chargeable`, [sub.pause_collection, chargeable(sub)], [null, true]);

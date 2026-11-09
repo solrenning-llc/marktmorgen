@@ -805,7 +805,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     const cap = buyerNoticeCap(store.tier, paidBefore(store));
     await forgetTold(folder);
     await startClosingCredit(folder, cap * EMAILS_PER_BUYER_PER_ENDING);
-    await startCallBudget(folder, cap * STRIPE_CALLS_PER_MEMBER);
+    await startCallBudget(folder, cap * STRIPE_CALLS_PER_MEMBER, endedAt);
     Object.assign(state, { holdFrom: now });
     await save(state);
   }

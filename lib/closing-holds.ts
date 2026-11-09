@@ -33,8 +33,8 @@
  *
  *   nl:closing:paid:<folder>   hash  subscription -> its last payment (PaidPeriod), from the hold to the closing
  *   nl:closing:work:<folder>   hash  where the hold and the release stopped, the members not held yet
- *                                    ("f:<sub>"), those past the call budget ("o:<sub>"), and what is
- *                                    left of the budget ("calls")
+ *                                    ("f:<sub>"), those past the call budget ("o:<sub>"), what is
+ *                                    left of the budget ("calls") and the ending it was set for ("of")
  *   nl:closing:held            sorted set  a store's key -> when its plan ended, while its members are held
  *   nl:closing:final           sorted set  a store's key -> when its plan ended, from its closing day's start to its end
  *
@@ -167,9 +167,39 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
   return false;
 }
 
-/** Sets the closing's budget of calls to the creator's Stripe account, once an ending, before any is made. */
-export async function startCallBudget(folder: string, calls: number): Promise<void> {
-  await redisPipeline([["DEL", workKey(folder)], ["HSET", workKey(folder), "calls", Math.max(0, Math.floor(calls))]]);
+/**
+ * KEYS[1] the closing's work hash; ARGV[1] the calls, ARGV[2] the ending
+ * (its plan's end, in ms). Sets the budget only when the hash is not already
+ * this ending's: 1 when set now (an earlier ending's work cleared first), 0
+ * when it was set for this ending already (its balance, cursors and set-aside
+ * calls kept), -1 when the key is not a hash (nothing deleted).
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const CALL_BUDGET_ONCE = `-- marktmorgen:closing-call-budget:v1
+local t = redis.call("TYPE", KEYS[1]).ok
+if t ~= "hash" and t ~= "none" then return -1 end
+if redis.call("HGET", KEYS[1], "of") == ARGV[2] then return 0 end
+redis.call("DEL", KEYS[1])
+redis.call("HSET", KEYS[1], "calls", ARGV[1], "of", ARGV[2])
+return 1`;
+
+/**
+ * Sets the closing's budget of calls to the creator's Stripe account, once an
+ * ending, before any is made. The budget is owned by its ending ("of", Codex S
+ * on #3309): two overlapping closeOne runs that both read no holdFrom start it
+ * once, and a late start never puts back calls already taken. Resolves when
+ * the script answers exactly 1 (set now) or 0 (set for this ending already);
+ * anything else (-1 for a key that is not a hash, text, null, a missing or an
+ * extra reply) throws UnknownReplyError (CX-123 rule 24): closeOne
+ * (lib/plan-closing.ts) then writes no holdFrom, so the budget is set the next
+ * day, never taken as set when it may not be there (every takeCalls would be
+ * refused, and no member held).
+ */
+export async function startCallBudget(folder: string, calls: number, ending: number): Promise<void> {
+  if (!Number.isSafeInteger(ending) || ending < 0) throw new Error("a closing's budget of Stripe calls needs the ending it is for");
+  const replies = repliesFor(await redisPipeline([["EVAL", CALL_BUDGET_ONCE, 1, workKey(folder), Math.max(0, Math.floor(calls)), String(ending)]]), 1);
+  const set = replies?.[0];
+  if (set !== 1 && set !== 0) throw new UnknownReplyError("a closing's budget of Stripe calls");
 }
 
 /**

@@ -485,7 +485,7 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
 If that was you, keep working: everything else is open.
 
 If it was not you, somebody can read your email: log in with your app's code or a passkey, or open your studio in a browser that is still logged in and press Cancel. That logs them out and keeps two-step login on. Then change your email password.`;
-  // Told to the recovery address too: this path assumes somebody else may hold the sign-in inbox (MM-SA-19).
+  // Told to the recovery address too (MM-SA-19), read above before the login was spent.
   await tell(
     email,
     first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",
@@ -641,8 +641,15 @@ export async function resetIfDue(email: string, now = Date.now()): Promise<boole
   const backup = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0 || now < record.reset) return null;
-    // Read before the record goes: an account from before kept its recovery address on it.
-    const kept = await backupOf(email, record);
+    // Read before the record goes: an account from before kept its recovery address on it. One that cannot be read
+    // (UnknownReplyError) is never taken for none: two-step login stays on and the day waits for a read that
+    // answers, so the turn-off is never told only to the sign-in inbox (MM-SA-19; VR2 audit).
+    const kept = await backupOf(email, record).catch((error: unknown) => {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      console.error("reading the recovery address before turning two-step login off failed", error);
+      return null;
+    });
+    if (kept === null) return null;
     return (await deleteHeld(held, [recordKey(email), lockedSetKey(email)])) ? kept : null;
   });
   if (backup === null) return false;

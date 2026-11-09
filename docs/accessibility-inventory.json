@@ -1483,6 +1483,7 @@
     "components/pause-editor.tsx",
     "components/payment-comparison.tsx",
     "components/payment-mix.tsx",
+    "components/payment-received.tsx",
     "components/payment-requests-studio.tsx",
     "components/payments-panel.tsx",
     "components/paypal-payouts.tsx",

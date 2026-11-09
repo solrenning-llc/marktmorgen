@@ -11,15 +11,24 @@
  * amount of a partial refund is unknown, and unknown is never zero (CX-123
  * rule 24): the partial refund is written down as a mark beside the refunds
  * in full (same key, same reading, same cost count), and every reader of
- * PayPal's refunds then says its reading is not whole, so no commission is
- * paid on that sale and no number says "after refunds" without it. A later
+ * PayPal's refunds then says its reading is not whole, so no number says
+ * "after refunds" without it. In the affiliate book the hold is by sale (the
+ * coordinator's review, 9 November 2026): that sale's commission, and a
+ * second tier on it, are held out of every payment, shown as held on the
+ * creator's list, the affiliate's page and the spreadsheet, and the rest of
+ * the book stays checked and payable. Only a mark whose payment cannot be
+ * named leaves the whole book unchecked (unknown is never payable). A later
  * refund in full supersedes it with its known amount, counted once. Access
  * and the hand-over are untouched: a partial refund keeps the purchase.
  *
  * Synthetic only: the Redis stub and a stand-in for PayPal's API, answering
  * only the token and the capture's status, the one field the code reads.
  */
-import { creditPayPalSale, bookSize, readBook } from "@/lib/affiliates";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { type Affiliate, type Line, bookCsv, creditPayPalSale, bookSize, readBook, tierLines } from "@/lib/affiliates";
+import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
+import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { readPayPalRefundsWithCoverage, refundSeen, type Paid, watchPayPal } from "@/lib/paypal-sales";
 import { payableLines } from "@/lib/paypal-payouts";
@@ -110,15 +119,39 @@ async function main(): Promise<void> {
   is("the book is checked", healthy.checked, true);
   is("30% of US$49 offered", healthy.through, 1470);
 
-  part("A sale refunded in part: its commission is never paid whole");
+  part("A sale refunded in part: its commission is held, never paid whole");
   await setup();
   captures.set(CAPTURE, "PARTIALLY_REFUNDED");
   const watched = await watch();
   is("PayPal was asked for the capture", captureReads > 0, true);
   const partly = await offered();
-  // The amount given back is not read anywhere (only the capture's status): unknown, never zero, so nothing is paid on it.
-  is("the book's refunds are not taken as checked", partly.checked, false);
+  // The amount given back is not read anywhere (only the capture's status): unknown, never zero, so nothing is paid on
+  // that sale. Rule 23: before the coordinator's review the whole book was left unchecked here (false); the hold is
+  // now by sale, so the book stays checked and the sale alone is held.
+  is("the book stays checked", partly.checked, true);
   is("no commission passes the refund guard", partly.through, 0);
+  const heldBook = await readBook(store);
+  const heldLine = heldBook.lines.find((l) => l.ref === `paypal:${ORDER}`);
+  is("the line says held, not earned", heldLine?.status, "held");
+  is("it earns nothing payable while held", heldLine?.commission, 0);
+  is("the affiliate's row owes nothing for it", heldBook.rows[0]?.owed, 0);
+
+  part("The creator and the affiliate are told it is held, and why");
+  const csv = bookCsv(heldBook, heldBook.rows.map((r) => r.affiliate));
+  const csvRow = csv.split("\n").find((row) => row.includes(`paypal:${ORDER}`)) ?? "";
+  is("the spreadsheet says held, with the refund and the commission unknown, never 0.00", [csvRow.includes("held: partly refunded, amount unknown"), csvRow.includes("unknown,30,unknown"), csvRow.includes("0.00")], [true, true, false]);
+  const studio = renderToStaticMarkup(createElement(AffiliateCommissionHistory, { who: new Map([[AFF, { email: "affiliate@example.com" }]]), refundsChecked: true, invoicesChecked: true, lines: heldBook.lines, total: heldBook.lines.length }));
+  is("the creator's list says held, not an amount earned", [studio.includes("Held"), studio.includes("$0.00")], [true, false]);
+  is("and says why, and that it stays held", studio.includes("PayPal refunded part of this payment. The amount refunded is not known here, so no commission is paid on it. It stays held."), true);
+  is("the affiliate's page has the words in every language", Object.values(AFFILIATES_WORDS).every((w) => typeof w.lineStatus.held === "string" && w.lineStatus.held.length > 0), true);
+  is("in English", AFFILIATES_WORDS.en.lineStatus.held, "held: partly refunded, amount unknown");
+
+  part("A second tier on a held sale is held too, never paid in full");
+  const recruit = { id: "bbbbbbbbbbbb", status: "approved", by: { id: AFF, percent: 10 } } as unknown as Affiliate;
+  const inviter = { id: AFF, status: "approved", by: null } as unknown as Affiliate;
+  const heldSale: Line = { ref: "paypal:x", pi: `paypal:${CAPTURE}`, aff: recruit.id, at: NOW, product: "", title: "", base: 4900, total: 4900, currency: "usd", rate: 30, self: false, how: "click", refunded: 0, commission: 0, status: "held" };
+  const tier = tierLines([inviter, recruit], [heldSale], new Map());
+  is("one second-tier line, held, earning nothing payable", tier.map((l) => [l.how, l.status, l.commission]), [["tier2", "held", 0]]);
   part("A partial refund keeps the purchase");
   is("nothing taken back", watched.revoked, 0);
   is("not seen as a refund in full (the hand-over is not stopped)", await refundSeen(SID, ORDER), false);
@@ -151,6 +184,27 @@ async function main(): Promise<void> {
   const whole = await readPayPalRefundsWithCoverage(SID, 0);
   is("the reading is whole again", whole.partial, false);
   is("one refund in full", whole.rows.map((r) => r.capture), [CAPTURE]);
+
+  part("Another sale of the same affiliate, not refunded, is paid as usual beside the held one");
+  await setup();
+  const kept: Paid = { ...paid, order: "8O190127TN3647108", capture: "8C679366HH908708", email: "kept@example.com" } as Paid;
+  await creditPayPalSale(store, kept, "Synthetic course");
+  await redis.pipeline([["SET", `nl:ppsell:paid:${kept.order}`, JSON.stringify(kept)]]);
+  captures.set(CAPTURE, "PARTIALLY_REFUNDED");
+  await watch();
+  const beside = await offered();
+  is("the book stays checked", beside.checked, true);
+  is("only the other sale's commission is offered", beside.through, 1470);
+
+  part("A partial refund whose payment cannot be named: the whole book is unknown, nothing is paid");
+  await setup();
+  await redis.pipeline([
+    ["SET", `nl:ppsell:paid:${OTHER_ORDER}`, JSON.stringify({ ...other, capture: "" })],
+    ["ZADD", `nl:ppsell:refunded:${SID}`, String(NOW), `part:${OTHER_ORDER}`],
+  ]);
+  const unnamed = await offered();
+  is("the book is not checked", unnamed.checked, false);
+  is("nothing passes the refund guard", unnamed.through, 0);
 
   part("Control: another sale refunded in part, with no affiliate on it, leaves this commission payable");
   await setup();

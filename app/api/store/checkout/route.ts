@@ -36,6 +36,8 @@ import { listedReturn, listedSite } from "@/lib/embed-sites";
 import { assistReminderOffered, keepAssistReminder } from "@/lib/assistant-reminder";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type DigitalConsent, DigitalConsentMissing, consentFromForm, deliversDigitally } from "@/lib/digital-consent";
+import { ACCESS_END_FIELD, readCourseForSale, readShownAccessEnd } from "@/lib/course-access-end";
+import { accessEndAhead } from "@/lib/course";
 
 /** The checkout this browser last opened for a limited product. */
 const HOLD_COOKIE = "nl_stock_hold";
@@ -99,6 +101,9 @@ export async function POST(request: NextRequest) {
   let digitalConsent: DigitalConsent | null = null;
   // The page the form was on, when it is not the product's own (renew, course): only those two words count.
   let from: "renew" | "course" | "" = "";
+  // The course's end the page showed beside this form (24 [E7], lib/course-access-end.ts): undefined when the form
+  // drew none (the sale then carries no end), null for "none", or the end; "bad" for any other value.
+  let shownEnd: number | null | undefined | "bad" = undefined;
   try {
     const form = await (await limited(request, 8_000)).formData();
     digitalConsent = consentFromForm(form);
@@ -136,10 +141,11 @@ export async function POST(request: NextRequest) {
     remind = form.get("remind") === "yes";
     remindEmail = remind ? normaliseEmail(read("remind_email", MAX_EMAIL_LENGTH + 1)) : "";
     remindVersion = remind ? read("remind_v", 40) : "";
+    shownEnd = readShownAccessEnd(form.get(ACCESS_END_FIELD));
   } catch {
     return new Response("Bad request", { status: 400 });
   }
-  if (!handle || !productId) return new Response("Bad request", { status: 400 });
+  if (!handle || !productId || shownEnd === "bad") return new Response("Bad request", { status: 400 });
 
   const store = await storeForHandle(handle);
   if (!store) return new Response("No such store.", { status: 404 });
@@ -195,6 +201,20 @@ export async function POST(request: NextRequest) {
     ? `/@${store.handle}/${from}/${product.id}?consent=needed`
     : `/@${store.handle}/p/${product.id}?consent=needed${giftTo.trim() && !preorder ? "&gift=consent#gift" : people.trim() && !preorder ? "&group=consent#group" : preorder ? "#preorder" : "#buy"}`;
   if (!digitalConsent && deliversDigitally(product, optionId || null)) return away(consentBack);
+
+  // A course's end date (24 [E7]): only a buyer who was shown it is held to it. A form that drew the date sends the
+  // end it showed; the course is read again, exactly, and a sale whose end is no longer the one shown is refused, back
+  // to the page, before anything is written down or held. The one shown is stamped on the Stripe session, which the
+  // learner's gate reads (lib/learn.ts courseAccess). A gift, a group, a pre-order and a membership carry none.
+  let accessEnd: number | null = null;
+  if (shownEnd !== undefined && product.course && !product.recurring && !giftTo.trim() && !people.trim() && !preorder) {
+    const read = await readCourseForSale(product.course.id);
+    if (read.unread) return away(`/@${store.handle}?status=error`);
+    accessEnd = read.course ? accessEndAhead(read.course) : null;
+    if (accessEnd !== shownEnd) {
+      return away(from === "course" ? `/@${store.handle}/course/${product.id}?terms=changed` : `/@${store.handle}/p/${product.id}?terms=changed#buy`);
+    }
+  }
 
   // A gift: written down before its checkout opens, and its checkout is one
   // plain payment with nothing added and no offer after it.
@@ -291,7 +311,14 @@ export async function POST(request: NextRequest) {
         // And, with the buyer's yes to ad measurement, where the request that
         // opened it is kept, so the purchase is sent to the creator's ad
         // platforms when it is paid (lib/ad-events.ts).
-        channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...ads },
+        //
+        // With them, the course's end the buyer was shown (24 [E7]): written on the session as metadata, as these are.
+        // A membership never carries one (above), so it never reaches a subscription either.
+        channel: {
+          ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays),
+          ...ads,
+          ...(accessEnd !== null ? { [ACCESS_END_FIELD]: String(accessEnd) } : {}),
+        },
         // A code that came in a link to this store (lib/code-link.ts), applied
         // by Stripe only if it is one of the creator's live codes.
         code: readLinkCode(request.cookies.get(codeCookieName(store.handle))?.value) || undefined,

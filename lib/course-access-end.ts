@@ -4,7 +4,8 @@
  * never moves when the page is read in another time zone.
  */
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
-import { type Course, accessEndAhead } from "@/lib/course";
+import { type Course, accessEndAhead, readCourseExact } from "@/lib/course";
+import { UnknownReply } from "@/lib/redis-exact";
 import { coursesWords } from "@/lib/buyer-words/courses";
 
 /** "February 14, 2027, 8:00 AM UTC" in English; the same moment written the store's language's way. */
@@ -19,15 +20,58 @@ export function accessEndWhen(seconds: number, language: unknown): string {
 
 /**
  * The line the sales page says under the title before anyone pays (24 [E7]): the course's end date while it is still
- * ahead, in the buyer's words, or null. Null for no date, for a date already passed (whoever buys then has no end,
- * lib/course.ts accessEndFor) and for a course record the page could not read: the line is then left out, and the
- * course's own page and the learner's gate still read the record exactly.
+ * ahead, in the buyer's words, or null for no date and for a date already passed (whoever buys then is stamped with
+ * none and has no end).
  */
-export function accessEndFact(
-  course: Pick<Course, "accessEndsAt" | "accessEndsSetAt"> | null,
-  language: unknown,
-  nowSeconds?: number,
-): string | null {
+export function accessEndFact(course: Pick<Course, "accessEndsAt"> | null, language: unknown, nowSeconds?: number): string | null {
   const endsAt = course ? accessEndAhead(course, nowSeconds) : null;
   return endsAt === null ? null : coursesWords(language).accessEndsFact.replace("{when}", accessEndWhen(endsAt, language));
+}
+
+/**
+ * The buy form's field that says which end the page showed (24 [E7]): the end in seconds, or "none". Only the forms
+ * that draw the line send it (the course's sales page and course page); the checkout refuses a sale whose course no
+ * longer has that end and stamps the one shown on the Stripe session under the same name.
+ */
+export const ACCESS_END_FIELD = "access_end";
+
+/** What a buy form sends for the end it showed: "none", or the end. */
+export function shownAccessEnd(course: Pick<Course, "accessEndsAt">, nowSeconds?: number): string {
+  const end = accessEndAhead(course, nowSeconds);
+  return end === null ? "none" : String(end);
+}
+
+/**
+ * The end a buy form says it showed: undefined when the form did not send the field (it drew no date, so the sale
+ * carries no end), null for "none", the end in seconds, or "bad" for anything else, which the checkout refuses.
+ */
+export function readShownAccessEnd(value: FormDataEntryValue | null): number | null | undefined | "bad" {
+  if (value === null) return undefined;
+  if (value === "none") return null;
+  return typeof value === "string" && /^[1-9]\d{0,11}$/.test(value) ? Number(value) : "bad";
+}
+
+/**
+ * The end a Stripe session was stamped with at checkout, or null for none (24 [E7]). Only the exact shape the
+ * checkout writes counts: anything else is no end, never a guessed one (rule 24), the side that never takes a course
+ * away from somebody who paid for it.
+ */
+export function accessEndStamp(meta: Record<string, string | undefined> | null | undefined): number | null {
+  const raw = meta?.[ACCESS_END_FIELD];
+  return typeof raw === "string" && /^[1-9]\d{0,11}$/.test(raw) ? Number(raw) : null;
+}
+
+/**
+ * The course record as the sales page reads it to sell (24 [E7], C2 M1 on #3445): read exactly, because the end it
+ * says is a term of the sale. `unread` when the reply could not be read: the page then draws no way to buy the course
+ * (the buy box says buying is not available just now), never a buy box without the date. `course` null for no record.
+ */
+export async function readCourseForSale(id: string): Promise<{ course: Course | null; unread: boolean }> {
+  try {
+    return { course: await readCourseExact(id), unread: false };
+  } catch (error) {
+    // A reply that did not read, or Redis not answering at all: both are a term not known, so nothing is sold on it.
+    if (!(error instanceof UnknownReply)) console.error("reading a course to sell it failed", error);
+    return { course: null, unread: true };
+  }
 }

@@ -164,6 +164,18 @@ export default function TermsPage() {
           pay for sign-ups or bookings that people did not make themselves. If you run a community, what is posted in it is
           yours to moderate, and the rules in section 4 apply to it.
         </p>
+        <p id="course-access-end" className="scroll-mt-24">
+          <strong className="text-black">A course&apos;s end date.</strong>{" "}
+          You may set a day when access to a course ends. The course&apos;s
+          own page and its sales page show the date and time before anyone
+          pays, and the date applies only to people who buy the course there
+          while it is shown. People who bought before it was set, or another
+          way (your store page, the cart, a bundle, a gift, a group or a
+          pre-order), keep the course with no end. You can move the date later
+          or remove it, but not earlier, and doing either reaches everyone it
+          applied to. A course sold as a membership has no end date: members
+          keep it while they pay.
+        </p>
         <p id="instant-access" className="scroll-mt-24">
           <strong className="text-black">Starting before the 14 days end.</strong>{" "}
           In the European Union, the United Kingdom and some other places, a

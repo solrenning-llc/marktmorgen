@@ -246,7 +246,7 @@ export default async function StudioCoursePage({
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
             <CourseStart productId={product.id} startsAt={course.startsAt} />
-            <CourseAccessEnd productId={product.id} endsAt={course.accessEndsAt ?? null} passed={course.accessEndsAt !== undefined && accessEndAhead(course) === null} />
+            <CourseAccessEnd productId={product.id} endsAt={course.accessEndsAt ?? null} passed={course.accessEndsAt !== undefined && accessEndAhead(course) === null} membership={product.recurring !== null} />
             <CertificateSwitch productId={product.id} on={course.certificate} />
             {course.certificate ? <CertificateValidity productId={product.id} months={course.certificateMonths ?? null} /> : null}
             {course.certificate ? (

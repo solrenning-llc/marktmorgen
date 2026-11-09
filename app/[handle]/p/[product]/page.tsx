@@ -77,9 +77,9 @@ import { breadcrumbData, faqData } from "@/lib/page-structured-data";
 import { PictureViewer } from "@/components/picture-viewer";
 import { featuredCards } from "@/lib/featured-cards";
 import { ProductAbout } from "@/components/product-about-view";
-import { readCourse } from "@/lib/course";
+import { coursesWords } from "@/lib/buyer-words/courses";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
-import { accessEndFact } from "@/lib/course-access-end";
+import { accessEndFact, readCourseForSale, shownAccessEnd } from "@/lib/course-access-end";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -320,13 +320,20 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // How many times it was bought, when the creator chose to say so (lib/sold-count.ts).
     readSoldCounts(store).catch(() => null),
     // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
-    // And when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays. A record
-    // that cannot be read here shows no line, as it shows no video total; the course's own page and the learner's
-    // gate read it exactly (lib/learn.ts courseAccess).
-    product.course ? readCourse(product.course.id).then(async (course) => (course ? { facts: await readCourseFacts(course), accessEndLine: accessEndFact(course, store.language) } : null)).catch(() => null) : Promise.resolve(null),
+    // And when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays: a term
+    // of the sale, so the record is read exactly. When it cannot be read, no way to buy the course is drawn (the buy
+    // box says buying is not available just now), never a buy box without the date. The video total stays lenient.
+    product.course ? readCourseForSale(product.course.id).then(async ({ course, unread }) => ({
+          facts: course ? await readCourseFacts(course).catch(() => null) : null,
+          accessEndLine: course && !product.recurring ? accessEndFact(course, store.language) : null,
+          // What the buy form sends back (24 [E7]): the end this page says, or "none"; never for a membership.
+          shownEnd: course && !product.recurring ? shownAccessEnd(course) : product.recurring ? null : "none",
+          unread,
+        })) : Promise.resolve(null),
   ]);
-  const videoLine = courseFacts?.facts.videoSeconds != null ? videoTotalLine(courseFacts.facts.videoSeconds, store.language) : null;
+  const videoLine = courseFacts?.facts?.videoSeconds != null ? videoTotalLine(courseFacts.facts.videoSeconds, store.language) : null;
   const accessEndLine = courseFacts?.accessEndLine ?? null;
+  const courseUnread = courseFacts?.unread === true;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -440,7 +447,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} />
+      {query.terms === "changed" && product.course ? <p className="st-note mt-4 text-sm" role="alert">{coursesWords(store.language).accessEndChanged}</p> : null}
+      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} />
       {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (

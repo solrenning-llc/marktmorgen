@@ -51,7 +51,8 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
 import { readKind, readListing } from "@/lib/catalog";
-import { type Course, type CourseModule, accessEndFor, accessEndState, lessonsInOrder, opensAt, readCourse, readCourseExact } from "@/lib/course";
+import { type Course, type CourseModule, accessEndState, lessonsInOrder, opensAt, readCourse, readCourseExact, stampedAccessEnd } from "@/lib/course";
+import { accessEndStamp } from "@/lib/course-access-end";
 import { UnknownReply } from "@/lib/redis-exact";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -219,6 +220,11 @@ type Ledger = {
    * sale written down on the thanks page does not outlive its refund.
    */
   refunded: Set<string>;
+  /**
+   * For each course in `paid`, the end its purchases were stamped with at checkout (24 [E7]): the most generous of
+   * them, so null as soon as one purchase carries no end, else the latest stamp. Read by courseAccess.
+   */
+  ends: Map<string, number | null>;
 };
 
 /** Asks the creator's Stripe account what this address paid for here. */
@@ -226,11 +232,12 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   const found = new Map<string, number>();
   const ended = new Set<string>();
   const refunded = new Set<string>();
+  const ends = new Map<string, number | null>();
   const account = store.stripeAccountId;
-  if (!account) return { paid: found, ended, refunded };
+  if (!account) return { paid: found, ended, refunded, ends };
   const handles = saleHandles(store);
   const courses = new Map((await readKind(store, "course")).filter((p) => p.course).map((p) => [p.id, p]));
-  if (courses.size === 0) return { paid: found, ended, refunded };
+  if (courses.size === 0) return { paid: found, ended, refunded, ends };
 
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
@@ -269,6 +276,12 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
         const created = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
         const before = found.get(product.id);
         if (before === undefined || created < before) found.set(product.id, created);
+        // The end this purchase's buyer was shown (24 [E7]): only on the course bought on its own page, never on a
+        // course that came in a bundle or a ticked box, and never on a membership, which is open while it is paid.
+        // With several purchases the most generous counts: one with no end means no end.
+        const stamp = product.id === meta.product && !product.recurring ? accessEndStamp(meta) : null;
+        const had = ends.get(product.id);
+        ends.set(product.id, had === undefined ? stamp : had === null || stamp === null ? null : Math.max(had, stamp));
       }
     }
   }
@@ -278,7 +291,7 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
     ended.delete(id);
     refunded.delete(id);
   }
-  return { paid: found, ended, refunded };
+  return { paid: found, ended, refunded, ends };
 }
 
 /** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
@@ -287,18 +300,29 @@ function wholeSeconds(value: unknown): number | null {
   return typeof value === "string" && /^\d{1,15}$/.test(value) ? Number(value) : null;
 }
 
-/** The cached answer, in the shape written before ended memberships were kept too. */
+/**
+ * The cached answer, with each course's stamped end (24 [E7], `e`, only the stamped ones). An answer kept before `e`
+ * existed has none, rightly: no purchase was stamped before the stamp existed. Ends that do not read are asked of
+ * Stripe again, never read as "no end" (rule 24).
+ */
 function parseLedger(cached: string): Ledger | null {
   try {
     const value = JSON.parse(cached) as Record<string, unknown>;
-    if (value && typeof value.p === "object" && value.p !== null) {
-      return {
-        paid: new Map(Object.entries(value.p as Record<string, number>)),
-        ended: new Set(Array.isArray(value.x) ? (value.x as string[]) : []),
-        refunded: new Set(Array.isArray(value.r) ? (value.r as string[]) : []),
-      };
+    if (!value || typeof value.p !== "object" || value.p === null) return null;
+    if (value.e !== undefined && (typeof value.e !== "object" || value.e === null || Array.isArray(value.e))) return null;
+    const ends = new Map<string, number | null>();
+    for (const [id, end] of Object.entries((value.e ?? {}) as Record<string, unknown>)) {
+      if (!(Number.isSafeInteger(end) && (end as number) > 0)) return null;
+      ends.set(id, end as number);
     }
-    return { paid: new Map(Object.entries(value as Record<string, number>)), ended: new Set(), refunded: new Set() };
+    const paid = new Map(Object.entries(value.p as Record<string, number>));
+    for (const id of paid.keys()) if (!ends.has(id)) ends.set(id, null);
+    return {
+      paid,
+      ended: new Set(Array.isArray(value.x) ? (value.x as string[]) : []),
+      refunded: new Set(Array.isArray(value.r) ? (value.r as string[]) : []),
+      ends,
+    };
   } catch {
     return null;
   }
@@ -313,10 +337,17 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
   return (await courseLedger(store, email)).paid;
 }
 
-/** The same answer, with the memberships that ended kept apart. */
-async function courseLedger(store: Store, email: string): Promise<Ledger> {
+/**
+ * Each open course's end (24 [E7]): null for none, the stamped end, or "unknown" when Stripe could not be asked just
+ * now and the course stands on a sale written down here, whose stamp is only on the Stripe session.
+ */
+type CourseEnds = Map<string, number | null | "unknown">;
+
+/** The same answer, with the memberships that ended kept apart and each course's stamped end. */
+async function courseLedger(store: Store, email: string): Promise<Omit<Ledger, "ends"> & { ends: CourseEnds }> {
   const result = new Map<string, number>();
-  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set() };
+  const ends: CourseEnds = new Map();
+  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), ends };
   // A store that brought buyers over from another platform reads theirs in
   // the same round trip (lib/imported-purchases.ts); any other asks nothing more.
   const imported = importedRead(store, email);
@@ -326,14 +357,19 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     ...(imported ? [imported] : []),
   ]);
   let asked: Ledger | null = typeof cached === "string" ? parseLedger(cached) : null;
+  // Stripe could not be asked: a course written down here still opens, and its end is unknown (24 [E7]).
+  let stripeUnread = false;
   if (!asked) {
     try {
       asked = await paidAtStripe(store, email);
-      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
+      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded], // Only the stamped ends are kept: a course without one in `e` has none, which keeps the answer as short
+      // as it was for the stores whose courses have no end date.
+      e: Object.fromEntries([...asked.ends].filter(([, end]) => end !== null)) });
       await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
     } catch (error) {
       console.error("reading course purchases failed", error);
-      asked = { paid: new Map(), ended: new Set(), refunded: new Set() };
+      asked = { paid: new Map(), ended: new Set(), refunded: new Set(), ends: new Map() };
+      stripeUnread = true;
     }
   }
   const fromStripe = asked.paid;
@@ -372,7 +408,16 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
       ? fromStripe.get(product.id)
       : recorded.get(product.id) ?? fromStripe.get(product.id);
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));
-    if (opens !== undefined && Number.isFinite(opens)) result.set(product.id, opens);
+    if (opens !== undefined && Number.isFinite(opens)) {
+      result.set(product.id, opens);
+      // Its end (24 [E7]): only a Stripe purchase stamped at checkout has one. Brought over from another platform, or
+      // written down here with no Stripe purchase of its own (a gift, a pre-order, a group place, a PayPal sale): none.
+      const stamped = asked.ends.get(product.id);
+      ends.set(
+        product.id,
+        given.has(product.id) && !product.recurring ? null : stamped !== undefined ? stamped : stripeUnread && recorded.has(product.id) ? "unknown" : null,
+      );
+    }
   }
 
   // A course the creator hands over at a community level (lib/community-points.ts),
@@ -384,6 +429,8 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
       for (const product of courses) {
         const at = earned.get(product.id);
         if (product.course && !result.has(product.id) && at !== undefined) result.set(product.id, at);
+        // Reached at a level: no end, whatever else the member bought (24 [E7]).
+        if (product.course && at !== undefined) ends.set(product.id, null);
       }
     } catch (error) {
       console.error("reading courses earned by level failed", error);
@@ -404,12 +451,17 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
       if (taken[i] === 1) result.delete(p.id);
     });
   }
-  return { paid: result, ended: asked.ended, refunded: asked.refunded };
+  for (const id of [...ends.keys()]) if (!result.has(id)) ends.delete(id);
+  return { paid: result, ended: asked.ended, refunded: asked.refunded, ends };
 }
 
 export type CourseAccess =
-  /** `endsAt`: when this learner's access ends (24 [E7]), or null for never; the page says it. */
-  | { state: "open"; learner: Learner; start: number; endsAt: number | null }
+  /**
+   * `endsAt`: when this learner's access ends (24 [E7]), or null for never; the page says it. `stamp`: the end their
+   * purchase was stamped with at checkout, or null for none, which the page keeps with the student (touchStudent) so
+   * the drip emails stop with their access.
+   */
+  | { state: "open"; learner: Learner; start: number; endsAt: number | null; stamp: number | null }
   | { state: "preview"; learner: Learner | null }
   | { state: "closed"; learner: Learner | null }
   /** A membership that gave this course has ended: said as such, with the way back. */
@@ -421,18 +473,24 @@ export type CourseAccess =
 
 /**
  * Whether this browser may take this course, and from when. `course` is the course record when the caller has it
- * already; without it (or with null), it is read here, so every gate holds the course's end date (24 [E7]) whoever
- * calls it.
+ * already; without it (or with null), it is read here when the learner's purchase has an end to hold (24 [E7]), so no
+ * caller can skip the date.
+ *
+ * An end applies only to a purchase stamped at checkout with the end its buyer was shown, as the later of that stamp
+ * and the course's date now (lib/course.ts stampedAccessEnd); any purchase with no end keeps the course open.
  */
 export async function courseAccess(store: Store, product: Listing, cookies: CookieJar, course?: Course | null): Promise<CourseAccess> {
   const learner = await learnerFrom(store, cookies);
   if (!learner || !product.course) return { state: "closed", learner };
-  if (learner.owner) return { state: "open", learner, start: Math.floor(Date.now() / 1000) - 400 * 86_400, endsAt: null };
+  if (learner.owner) return { state: "open", learner, start: Math.floor(Date.now() / 1000) - 400 * 86_400, endsAt: null, stamp: null };
   if (learner.scope !== "all" && !learner.scope.includes(product.course.id)) return { state: "closed", learner };
-  const { paid, ended } = await courseLedger(store, learner.email);
+  const { paid, ended, ends } = await courseLedger(store, learner.email);
   const start = paid.get(product.id);
   if (start === undefined) return ended.has(product.id) ? { state: "ended", learner } : { state: "closed", learner };
-  // The course's end date, from the record itself: an unreadable one is a check not made, never a lesson given or
+  const stamp = ends.get(product.id) ?? null;
+  // No end shown at purchase: open, with nothing more to read.
+  if (stamp === null) return { state: "open", learner, start, endsAt: null, stamp: null };
+  // The course's date now, from the record itself: an unreadable one is a check not made, never a lesson given or
   // refused on a guess. A course with no record left has no end date to hold.
   let record: Course | null;
   try {
@@ -442,13 +500,15 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
     if (error instanceof UnknownReply) return { state: "unchecked", learner };
     throw error;
   }
-  if (!record) return { state: "open", learner, start, endsAt: null };
-  const now = Date.now() / 1000;
-  const state = accessEndState(record, start, now);
+  if (!record) return { state: "open", learner, start, endsAt: null, stamp: null };
+  // Stripe could not be asked and the sale stands on our own record: an end is possible only while the course has a
+  // date, and then it is a check not made; with no date there is none to hold.
+  if (stamp === "unknown") return record.accessEndsAt === undefined ? { state: "open", learner, start, endsAt: null, stamp: null } : { state: "unchecked", learner };
+  const state = accessEndState(record, stamp, Date.now() / 1000);
   if (state === "unknown") return { state: "unchecked", learner };
-  const endsAt = accessEndFor(record, start);
+  const endsAt = stampedAccessEnd(record, stamp);
   if (state === "ended") return { state: "expired", learner, endedAt: endsAt! };
-  return { state: "open", learner, start, endsAt };
+  return { state: "open", learner, start, endsAt, stamp };
 }
 
 // ------------------------------------------------------------ progress
@@ -456,30 +516,53 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
 const doneKey = (courseId: string, email: string) => `nl:course:${courseId}:done:${emailKey(email)}`;
 
-type StudentRow = { e: string; s: number; l: number };
+/** `x` (24 [E7]): the end the student's purchase was stamped with at checkout, kept only when there is one. */
+type StudentRow = { e: string; s: number; l: number; x?: number };
+
+/** What `x` adds to a row at most: `,"x":` and twelve digits, taken from the store's room before it is written. */
+const STAMP_BYTES = ',"x":000000000000'.length;
 
 /**
  * Notes that a student opened the course, keeping when they began. A new
  * student's row takes its room in the store's data room first
  * (lib/store-data.ts); when there is none it is not written, and the course
  * opens all the same: the row is what the studio shows, not their access.
+ *
+ * `stamp` (24 [E7]): the end their purchase was stamped with as the gate read it just now (CourseAccess), null for
+ * none, so the drip emails stop with their access (sendDripEmails); undefined keeps what the row says (a caller that
+ * did not read the gate). A stamp new to an existing row takes its few bytes first; without room it is left off, and
+ * the drip emails go on as before for that student.
  */
-export async function touchStudent(courseId: string, email: string, startSeconds: number, room: DataStore): Promise<void> {
+export async function touchStudent(courseId: string, email: string, startSeconds: number, room: DataStore, stamp?: number | null): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = studentsKey(courseId);
   const field = emailKey(email);
   const [raw] = await redisPipeline([["HGET", key, field]]);
   let row: StudentRow = { e: normaliseEmail(email), s: Math.floor(startSeconds), l: 0 };
+  let had: number | undefined;
   if (typeof raw === "string") {
     try {
       const old = JSON.parse(raw) as StudentRow;
       row = { e: old.e || row.e, s: Math.min(old.s || row.s, row.s), l: 0 };
+      had = stampOf(old.x) ?? undefined;
     } catch {}
   }
+  const next = stamp === undefined ? had : stamp === null ? undefined : stampOf(stamp) ?? undefined;
+  if (next !== undefined) row.x = next;
   row.l = Math.floor(Date.now() / 1000);
-  const json = JSON.stringify(row);
-  if (typeof raw !== "string" && !(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes: dataBytes([field, json, "0000000000"], 1) }])).ok) return;
-  await redisPipeline([["HSET", key, field, json]]);
+  if (typeof raw !== "string") {
+    // A new row's room, with the stamp's bytes always counted so a later stamp needs nothing more.
+    const bytes = dataBytes([field, JSON.stringify({ ...row, x: undefined }), "0000000000"], 1) + STAMP_BYTES;
+    if (!(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes }])).ok) return;
+  } else if (row.x !== undefined && had === undefined && !(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes: STAMP_BYTES }])).ok) {
+    delete row.x;
+  }
+  await redisPipeline([["HSET", key, field, JSON.stringify(row)]]);
+}
+
+/** A stamp as kept on a student row: a whole number of seconds after 1970, or null. */
+function stampOf(value: unknown): number | null {
+  return Number.isSafeInteger(value) && (value as number) > 0 ? (value as number) : null;
 }
 
 /**
@@ -621,6 +704,8 @@ export type Student = {
   lastSeen: number;
   done: number;
   blocked: boolean;
+  /** The end their purchase was stamped with, as last read by the gate (24 [E7]); absent for none or not known. */
+  stamp?: number;
 };
 
 /**
@@ -670,6 +755,7 @@ export async function studentsOf(course: Course, limit = 500): Promise<{ student
       lastSeen: row.l,
       done: (doneLists[i] as string[]).filter((id) => lessonIds.has(id)).length,
       blocked: blocked.has(emailKey(row.e)),
+      ...(stampOf(row.x) !== null ? { stamp: row.x } : {}),
     })),
   };
 }
@@ -981,9 +1067,12 @@ export async function sendDripEmails(
     const { students } = read;
     for (const student of students) {
       if (student.blocked) continue;
+      // The end the gate holds for this student (24 [E7]): no email for a module that opens once their access ended.
+      const end = student.stamp === undefined ? null : stampedAccessEnd(course, student.stamp);
       for (const unit of dripping) {
         const at = opensAt(course, unit, student.since);
         if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;
+        if (end !== null && at >= end) continue;
         const [claimed] = await redisPipeline([["SET", dripMailKey(course.id, student.email, unit.id), "1", "NX", "EX", 400 * 86_400]]);
         if (claimed === null) continue;
         const ok = await sendDripEmail(store, product, unit, student.email, origin);

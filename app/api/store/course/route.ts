@@ -332,11 +332,13 @@ export async function POST(request: NextRequest) {
       /*
         When access to the course ends (24 [E7]), or null to take it off: a moment the studio worked out as the close
         of the day the creator picked, in their own zone. The clock is the server's, never the browser's, so "after now"
-        and "never earlier" (lib/course.ts) are judged the same way for every creator.
+        and "never earlier" (lib/course.ts) are judged the same way for every creator. Only a number or null is read:
+        a string, a missing value or anything else is refused as not a date, never turned into one. A membership course
+        never takes an end (members keep it while they pay).
       */
       if (action === "access-end") {
-        const at = body.at === null ? null : Number(body.at);
-        const result = editCourse(course, { op: "access-end", at, now: Math.floor(Date.now() / 1000) });
+        const at = body.at === null ? null : typeof body.at === "number" ? body.at : Number.NaN;
+        const result = editCourse(course, { op: "access-end", at, now: Math.floor(Date.now() / 1000), membership: product.recurring !== null });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         return Response.json({ ok: true, course: result.course });

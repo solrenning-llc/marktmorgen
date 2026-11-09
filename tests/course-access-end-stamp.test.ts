@@ -32,7 +32,7 @@ import {
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { readProduct } from "@/lib/catalog";
 import type { Listing } from "@/lib/store";
-import { courseAccess, emailKey, mintPass, passCookieName, recordEnrollment, registerDrip, sendDripEmails, touchStudent } from "@/lib/learn";
+import { courseAccess, emailKey, mintPass, storeKey, passCookieName, recordEnrollment, registerDrip, sendDripEmails, touchStudent } from "@/lib/learn";
 import { type Course, editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { paidPeriod } from "./billing-period-fixture";
 import { withConsent } from "./digital-consent-fixture";
@@ -79,7 +79,7 @@ async function shop(handle: string, recurring = false): Promise<{ store: Store; 
   const owner = `${handle}@example.test`;
   if (!(await claimHandle(owner, handle, "Course end shop", "")).ok) throw new Error("store");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_TestAccessEndStamp1", true);
+  await setStripeAccount(owner, "acct_TestStamp1", true);
   await setSubscription(owner, { customerId: `cus_${handle}01`, subscriptionId: `sub_${handle}01`, active: true, tier: "creator", period: paidPeriod() });
   const made = await addProduct(owner, "Course with an end", "Lessons", "49", recurring ? { interval: "month", trialDays: 0, payments: 0 } : null);
   if (!made.ok) throw new Error("product");
@@ -122,6 +122,18 @@ async function main(): Promise<void> {
   is("the same, before the date: open, and the page says when it ends", await gate(a.store, a.product, course, "a1-stamped2@example.test", END - DAY).then((x) => [x.state, x.state === "open" ? x.endsAt : null]), ["open", END]);
   listed = [session(a.store, { product: a.product.id, access_end: "soon" }, SET_AT + DAY)];
   is("a stamp that does not read is never an end (rule 24): open", (await gate(a.store, a.product, course, "a1-bad@example.test", LATER)).state, "open");
+
+  part("the ten-minute cache of what Stripe said");
+  // Kept with no expiry here: the gate's clock is moved to after the date, and the in-memory Redis expires by it.
+  const cacheKey = (email: string) => `nl:learn:paid:${storeKey(a.store)}:${emailKey(email)}`;
+  listed = [session(a.store, { product: a.product.id, access_end: String(END) }, SET_AT + DAY)];
+  await redis.pipeline([["SET", cacheKey("cache-bad@example.test"), JSON.stringify({ p: { [a.product.id]: SET_AT + DAY }, x: [], r: [], e: { [a.product.id]: "soon" } })]]);
+  is("a cached end that does not read is asked of Stripe again, never read as no end", (await gate(a.store, a.product, course, "cache-bad@example.test", LATER)).state, "expired");
+  await redis.pipeline([["SET", cacheKey("cache-old@example.test"), JSON.stringify({ p: { [a.product.id]: SET_AT + DAY }, x: [], r: [] })]]);
+  is("an answer cached before stamps existed: no stamp, so no end", (await gate(a.store, a.product, course, "cache-old@example.test", LATER)).state, "open");
+  await gate(a.store, a.product, course, "cache-new@example.test", LATER);
+  const kept = JSON.parse(String((await redis.pipeline([["GET", cacheKey("cache-new@example.test")]]))[0])) as { e?: Record<string, number> };
+  is("what is cached now keeps the stamped end", kept.e?.[a.product.id], END);
 
   part("A2: a pre-order or a group place, handed over after the date was set, has no end");
   listed = [];

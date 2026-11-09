@@ -148,7 +148,8 @@ async function main(): Promise<void> {
     delete proto.maxParts;
     delete proto.maxRunBytes;
     is("a field added to Object.prototype is never read into the copy", polluted, true);
-    is("a retention of 3 days is admitted", validReview({ ...review, retentionDays: 3 }), true);
+    // The shortest: the bucket lock's 7 days and two (review of 9 November 2026; tests/bk1-bucket-lock.test.ts).
+    is("a retention of 9 days is admitted", validReview({ ...review, retentionDays: 9 }), true);
     const { proxy, revoke } = Proxy.revocable(review, {});
     revoke();
     is("a revoked proxy: refused as a result, never an exception", [(() => {
@@ -168,6 +169,8 @@ async function main(): Promise<void> {
     // hours) says so.
     ["a retention of 1 day", { ...review, retentionDays: 1 }],
     ["a retention of 2 days", { ...review, retentionDays: 2 }],
+    // The bucket lock outlives it: the prune could not keep it (Claude 2's MEDIUM, Claude 6's LOW 1, 9 November 2026).
+    ["a retention of 8 days", { ...review, retentionDays: 8 }],
     ["a storage ceiling the kept copies could pass", { ...review, maxStoredBytes: 30 * 1_000_000 }],
     // One byte short of retention + 2 sets (inbox C4-53): no room for the day's set over a full retention and a day.
     ["a storage ceiling one byte short of retention + 2 + 3 sets", { ...review, maxStoredBytes: 35 * SET_BOUND - 1 }],
@@ -434,20 +437,20 @@ async function main(): Promise<void> {
     writtenAt.clear();
     wipe();
     redis.run(["SET", "nl:store:one", "a shop"]);
-    const short = { ...review, retentionDays: 3 };
+    const short = { ...review, retentionDays: 9 };
     // October's copy first (1 October), so the good copy of the next day is a daily one, kept only for the retention.
     at(T0 + 699 * DAY);
     await runBackup({ now: clock, review: short, store, key });
     at(T0 + 700 * DAY);
     const good = await runBackup({ now: clock, review: short, store, key });
     const goodIds = good.ok ? [good.id, ...openManifest(objects.get(good.id)!, key).parts.map((p) => folderOf(good.id) + p.id)] : [];
-    at(T0 + 704 * DAY);
+    at(T0 + 710 * DAY);
     const refusing: BackupBucket = { ...store, putNew: async () => { throw new Error("write refused"); } };
     deletes.length = 0;
     const failed = await runBackup({ now: clock, review: short, store: refusing, key });
-    is("day 4, the first write refused: a failure, nothing deleted, the good copy of day 0 whole", [failed.ok, deletes.length, goodIds.length > 1 && goodIds.every((id) => objects.has(id))], [false, 0, true]);
+    is("day 10, the first write refused: a failure, nothing deleted, the good copy of day 0 whole", [failed.ok, deletes.length, goodIds.length > 1 && goodIds.every((id) => objects.has(id))], [false, 0, true]);
     // Past the bucket lock too (BACKUP_BUCKET_LOCK_DAYS and its hour), or the old copy may not be deleted yet.
-    at(T0 + 709 * DAY);
+    at(T0 + 711 * DAY);
     const next = await runBackup({ now: clock, review: short, store, key });
     is("the next good copy is written, and only then is the old one, past the retention, deleted", [next.ok, goodIds.every((id) => !objects.has(id))], [true, true]);
   }
@@ -469,7 +472,9 @@ async function main(): Promise<void> {
     at(T0 + 111 * DAY);
     const kept = objects.size;
     const none = await runBackup({ now: clock, review, store, key });
-    is("the others deleted, the last verified copy kept, and still no room: room_error, nothing written", [none, objects.has(partId), objects.has("bbbbbbbb-bbbb-4bbb-8bbb-000000000001"), objects.size, (await backupLastFailure())?.reason], [{ ok: false, reason: "room_error" }, true, false, kept - 1, "room_error"]);
+    // Nothing is asked to go when the others cannot make room (Claude 6's LOW 2, 9 November 2026): before, the other
+    // copy was deleted first and the run still found no room.
+    is("the others cannot make room with the last verified copy kept: room_error, nothing deleted, nothing written", [none, objects.has(partId), objects.has("bbbbbbbb-bbbb-4bbb-8bbb-000000000001"), objects.size, (await backupLastFailure())?.reason], [{ ok: false, reason: "room_error" }, true, true, kept, "room_error"]);
   }
 
   part("A listing longer than the ceiling allows: nothing written, said so");
@@ -614,7 +619,7 @@ async function main(): Promise<void> {
   {
     objects.clear();
     writtenAt.clear();
-    const short = { ...review, retentionDays: 3 };
+    const short = { ...review, retentionDays: 9 };
     at(T0 + 400 * DAY);
     const good = await runBackup({ now: clock, review: short, store, key });
     const kept = [...objects.keys()];

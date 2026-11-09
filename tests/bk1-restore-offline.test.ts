@@ -10,11 +10,13 @@
  * Keys are read from standard input, never from the command line. Synthetic data only.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { copyInParts } from "@/lib/backup-parts";
-import { backupKeyFingerprint } from "@/lib/backup-codec";
+import { copyInParts, sealManifest } from "@/lib/backup-parts";
+import { backupKeyFingerprint, openBackup, sealWithKid } from "@/lib/backup-codec";
 import type { BackupObjectStore } from "@/lib/backup-roundtrip";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -76,6 +78,37 @@ async function main(): Promise<void> {
     is("a part missing: refused", run(RESTORE, [dir, manifestId], keys).status !== 0, true);
     is("a manifest id that is not one: refused", run(RESTORE, [dir, "../etc/passwd"], keys).status !== 0, true);
     is("a key on the command line is never taken", run(RESTORE, [dir, manifestId, oldKey.toString("base64")], "").status !== 0, true);
+
+    part("A row the repository's reader refuses, the offline tool refuses too (Claude 2's LOW 2, 9 November 2026)");
+    {
+      // Hand-sealed under the owner's own key, as nothing in the code would write them: the part format's literals.
+      const format = { magicV1: Buffer.from("MMBK1"), aadV1: Buffer.from("marktmorgen/backup/v1"), magic: Buffer.from("MMBK2"), aad: Buffer.from("marktmorgen/backup/v2") };
+      const odd: [string, { key: string; dump: string; expiresAt: null }][] = [
+        ["a dump in non-canonical base64 (QR==)", { key: "nl:synthetic:odd", dump: "QR==", expiresAt: null }],
+        ["a key past 1,024 bytes", { key: `nl:${"k".repeat(1_022)}`, dump: "QQ==", expiresAt: null }],
+      ];
+      for (const [name, row] of odd) {
+        const capturedAt = Date.now();
+        const sealed = sealWithKid(format, oldKey, gzipSync(JSON.stringify({ version: 1, capturedAt, rows: [row] })));
+        const partId = randomUUID();
+        const setId = randomUUID();
+        const oddDir = join(dir, setId);
+        mkdirSync(oddDir);
+        writeFileSync(join(oddDir, `${partId}.mmbk`), sealed);
+        writeFileSync(join(oddDir, `${setId}.mmbk`), sealManifest({ version: 1, capturedAt, parts: [{ id: partId, rows: 1, bytes: sealed.length, sha256: createHash("sha256").update(sealed).digest("hex") }], rows: 1 }, oldKey));
+        const library = (() => {
+          try {
+            openBackup(sealed, oldKey);
+            return "opened";
+          } catch {
+            return "refused";
+          }
+        })();
+        const outOdd = join(oddDir, "odd.json");
+        const tool = run(RESTORE, [oddDir, setId, "--out", outOdd], keys);
+        is(`${name}: refused by the repository's reader and by the offline tool, nothing written`, [library, tool.status !== 0, existsSync(outOdd)], ["refused", true, false]);
+      }
+    }
 
     part("The fingerprint, from standard input");
     const printed = run(FINGERPRINT, [], `${newKey.toString("base64")}\n`);

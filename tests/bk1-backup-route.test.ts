@@ -9,10 +9,12 @@
  *   - vercel.json without the backup route twice a day, hours apart;
  *   - the alarm's sign of life sent after anything but a clean success, or no failure signal on prune_*, room_* and
  *     last_good_copy_lost; an alarm address that is not https or carries credentials taken as on; a monitor's failure
- *     thrown.
+ *     thrown; an alarm address with a query taken as on (Claude 5, 9 November 2026);
+ *   - the cost model pricing a route duration other than the route's maxDuration, or still saying no route runs.
  */
 import { readFileSync } from "node:fs";
 import { BACKUP_COST_REVIEW, BACKUP_LOCK_MS, BACKUP_RUN_CUTOFF_MS, type BackupRunResult } from "@/lib/backup-run";
+import * as backupCost from "@/lib/backup-cost";
 import { BACKUP_ALARM_CRITICAL_HOURS, BACKUP_ALARM_WARN_HOURS, backupAlarmConfig, backupAlarmSignal, sendBackupAlarm } from "@/lib/backup-alarm";
 import { REDIS_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { GET as backupRoute, maxDuration } from "@/app/api/cron/backup/route";
@@ -32,6 +34,9 @@ async function main(): Promise<void> {
   is("the lock still outlives the cutoff and the admission's two requests", BACKUP_LOCK_MS >= BACKUP_RUN_CUTOFF_MS + 2 * REDIS_TIMEOUT_MS + 60_000, true);
   is("the route's maxDuration: 800 s, explicit", maxDuration, 800);
   is("no reviewed cost ceiling exists: the backup is off", BACKUP_COST_REVIEW, null);
+  // Claude 5's LOW (6732278950, 6732268011): the cost model prices the route this PR built, at its own maxDuration.
+  is("the cost model's route duration is the route's maxDuration", (backupCost as Record<string, unknown>).BACKUP_ROUTE_SECONDS, maxDuration);
+  is("no open unknown still says no route runs the backup", backupCost.BACKUP_COST_UNKNOWNS.filter((u) => u.includes("no route runs the backup yet")), []);
   {
     const env = process.env as Record<string, string | undefined>;
     const was = { secret: env.CRON_SECRET, node: env.NODE_ENV, alarm: env.BACKUP_ALARM_PING_URL };
@@ -69,7 +74,7 @@ async function main(): Promise<void> {
     is(`a copy with ${state}: a failure signal, never alive`, backupAlarmSignal(ok(state)), { kind: "fail", reason: state });
   }
   is("a copy that found the last good copy lost: a failure signal", backupAlarmSignal(ok("done", { note: "last_good_copy_lost" })), { kind: "fail", reason: "last_good_copy_lost" });
-  for (const reason of ["room_error", "room_pages", "room_cutoff", "room_unverified", "room_locked", "verify", "export_error", "mark_error"]) {
+  for (const reason of ["room_error", "room_pages", "room_cutoff", "room_unverified", "room_locked", "room_shrunk", "verify", "export_error", "mark_error"]) {
     is(`a failed run (${reason}): a failure signal`, backupAlarmSignal({ ok: false, reason } as BackupRunResult), { kind: "fail", reason });
   }
   for (const reason of ["off_review", "off_store", "off_key", "already_ran", "busy"]) {
@@ -83,6 +88,12 @@ async function main(): Promise<void> {
     is("not https: off", backupAlarmConfig(), null);
     env.BACKUP_ALARM_PING_URL = "https://user:pw@monitor.example.test/ping/abc";
     is("with credentials in the address: off", backupAlarmConfig(), null);
+    // Claude 5's MEDIUM (6732278950): "/fail" added to an address with a query lands in the query, and a monitor that
+    // reads the path takes the failure as a sign of life. Such an address is no address (rule 24: unknown fails closed).
+    env.BACKUP_ALARM_PING_URL = "https://hc-ping.example.test/abc-uuid?rid=1";
+    is("an address with a query: off, never a failure sent to the sign of life's path", backupAlarmConfig(), null);
+    env.BACKUP_ALARM_PING_URL = "https://hc-ping.example.test/abc-uuid?";
+    is("an address with an empty query: off", backupAlarmConfig(), null);
     env.BACKUP_ALARM_PING_URL = "https://monitor.example.test/ping/abc";
     const config = backupAlarmConfig();
     is("an https address: on", config !== null, true);

@@ -41,7 +41,11 @@ export function backupAlarmSignal(result: BackupRunResult): BackupAlarmSignal | 
   return SILENT.has(result.reason) ? null : { kind: "fail", reason: result.reason };
 }
 
-/** The owner's monitor address; null while it is missing, not https, or carries a name or password. */
+/**
+ * The owner's monitor address; null while it is missing, not https, or carries a name, a password, a fragment or a
+ * query. A query is refused (Claude 5's MEDIUM, 9 November 2026): "/fail" added to it would land in the query, and a
+ * monitor that reads the path would take the failure for a sign of life.
+ */
 export function backupAlarmConfig(): BackupAlarmConfig | null {
   const raw = (process.env.BACKUP_ALARM_PING_URL ?? "").trim();
   if (!raw) return null;
@@ -51,7 +55,7 @@ export function backupAlarmConfig(): BackupAlarmConfig | null {
   } catch {
     return null;
   }
-  if (url.protocol !== "https:" || url.username || url.password || url.hash) return null;
+  if (url.protocol !== "https:" || url.username || url.password || url.hash || url.search || url.href.includes("?")) return null;
   return { url: url.toString().replace(/\/+$/, "") };
 }
 

@@ -19,7 +19,7 @@
  * for ten minutes, in which a read builds nothing and the page says the list could not be checked. Each part below
  * that checks a failure path starts with the mark dropped, so the failure it sees is its own.
  */
-import { DIRECTORY_BUILD, DIRECTORY_CACHE, listedCount, listedStores, rememberListing } from "@/lib/directory-index";
+import { DIRECTORY_BUILD, DIRECTORY_BUILDS, DIRECTORY_CACHE, listedCount, listedStores, rememberListing } from "@/lib/directory-index";
 import * as directory from "@/lib/affiliate-directory";
 import { readDirectory } from "@/lib/affiliate-directory";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -55,9 +55,12 @@ async function mark(): Promise<[unknown, unknown]> {
   return [value, ttl];
 }
 
-/** Drops the build mark, so the part that follows sees its own failure, not the last part's window. */
+/**
+ * Drops the build mark and the window's count, so the part that follows sees its own failure, not the last part's
+ * window (one build an hour since C1-20261109-1603-TODOS-71: without it, the last part's build spent the hour).
+ */
 async function unmarked(): Promise<void> {
-  await original([["DEL", DIRECTORY_BUILD]]);
+  await original([["DEL", DIRECTORY_BUILD], ["DEL", DIRECTORY_BUILDS]]);
 }
 
 /** Every command whose first word is `word` answers `reply` instead of the stub's own answer. */
@@ -141,7 +144,7 @@ async function main(): Promise<void> {
   await selling("baker@example.com", "breadhouse", "Bread House");
   await selling("yoga@example.com", "yogaroom", "Yoga Room");
   is("healthy, both programs are listed", (await readDirectory()).map((row) => row.handle).sort(), ["breadhouse", "yogaroom"]);
-  await original([["DEL", DIRECTORY_CACHE]]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   let storeReads = 0;
   redis.pipeline = (async (commands: Commands) => {
     const [word, key] = commands[0] ?? [];
@@ -159,7 +162,7 @@ async function main(): Promise<void> {
   redis.clear();
   await selling("baker@example.com", "breadhouse", "Bread House", true);
   is("healthy, the row has its numbers", (await readDirectory())[0]?.numbers !== null, true);
-  await original([["DEL", DIRECTORY_CACHE]]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   redis.pipeline = (async (commands: Commands) => {
     if (commands[0]?.[0] === "HGETALL") throw new Error("synthetic network failure");
     return original(commands);
@@ -180,7 +183,7 @@ async function main(): Promise<void> {
   await selling("yoga@example.com", "yogaroom", "Yoga Room");
   const [listed] = (await original([["SMEMBERS", "nl:dir:listed"]])) as [string[]];
   const [first, second] = [...listed].sort();
-  await original([["DEL", DIRECTORY_CACHE]]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   let walk = 0;
   redis.pipeline = (async (commands: Commands) => {
     if (commands[0]?.[0] === "SSCAN") return ++walk === 1 ? [["5", [first, first, second]]] : [["0", [second, first]]];
@@ -197,7 +200,7 @@ async function main(): Promise<void> {
   for (const [label, cursor] of [["empty", ""], ["letters", "abc"], ["negative", "-1"], ["a fraction", "1.5"], ["a space before", " 0"], ["a newline after", "0\n"]] as const) {
     answering("SSCAN", [cursor, []]);
     is(`SSCAN with a cursor ${label} throws`, await failure(() => listedStores()), "UnknownReplyError");
-    await original([["DEL", DIRECTORY_CACHE]]);
+    await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
     await unmarked();
     // The bad cursor once, then an exact last page, so a walk that took it as a cursor ends instead of looping here.
     let scan = 0;
@@ -221,7 +224,7 @@ async function main(): Promise<void> {
   const HARNESS_STOP = 200;
   /** SSCAN answers `page(n)` for its n-th call; past HARNESS_STOP the harness stops a walk that would not end. */
   async function walking(page: (n: number) => unknown): Promise<{ outcome: string; scans: number; kept: unknown }> {
-    await original([["DEL", DIRECTORY_CACHE]]);
+    await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
     await unmarked();
     let n = 0;
     redis.pipeline = (async (commands: Commands) => {
@@ -275,7 +278,7 @@ async function main(): Promise<void> {
   redis.clear();
   for (const name of SHOPS) await selling(`${name}@example.com`, name, name, true);
   is("control: three programs are listed, each with its numbers", (await readDirectory()).map((row) => [row.handle, row.numbers !== null]), SHOPS.map((name) => [name, true]));
-  await original([["DEL", DIRECTORY_CACHE]]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   const victimStore = await storeForEmail("alphashop@example.com");
   const victim = `nl:store:id:${victimStore?.sid}`;
   const storeFails = (commands: Commands) => {
@@ -295,7 +298,12 @@ async function main(): Promise<void> {
   is("five minutes later still no build", [seen.SSCAN ?? 0, outcomes.every((o) => o === "UnknownReplyError")], [0, true]);
   advance(300_001);
   seen = await counted(async () => void (outcomes = await visits(3)), storeFails);
-  is("ten minutes after the failure, one build again, and failing, the next ten minutes again", [seen.SSCAN, outcomes[0]?.startsWith("other:"), outcomes.slice(1).every((o) => o === "UnknownReplyError")], [1, true, true]);
+  // One build an hour (C1-20261109-1603-TODOS-71): the failed build spent the hour's place, so ten minutes later the
+  // mark has ended but nothing is built; the visits are shown the control's last good build, checked.
+  is("ten minutes after the failure, nothing is built inside the hour: the last good build is shown", [seen.SSCAN ?? 0, outcomes.every((o) => o === "answered"), seen.SMISMEMBER], [0, true, 6]);
+  advance(3_000_000);
+  seen = await counted(async () => void (outcomes = await visits(3)), storeFails);
+  is("an hour after the failure, one build again, and failing, the next ten minutes again", [seen.SSCAN, outcomes[0]?.startsWith("other:"), outcomes.slice(1).every((o) => o === "UnknownReplyError")], [1, true, true]);
   is("a save of a program in the window drops the kept page, not the mark", await (async () => {
     const store = await storeForEmail("bravoshop@example.com");
     if (store) await rememberListing(store);
@@ -339,15 +347,16 @@ async function main(): Promise<void> {
   const baker = await storeForEmail("baker@example.com");
   if (baker) await rememberListing(baker);
   seen = await counted(async () => void (await readDirectory()));
-  is("after a save drops the kept page, the next read builds at once (no mark held)", [seen.SSCAN, typeof (await kept()), (await mark())[0]], [1, "string", null]);
-  await original([["DEL", DIRECTORY_CACHE]]);
+  // One build an hour (C1-20261109-1603-TODOS-71): inside it, the next read is the last good build, checked.
+  is("after a save drops the kept page, the next read inside the hour builds nothing and holds no mark", [seen.SSCAN ?? 0, seen.SMISMEMBER, await kept(), (await mark())[0]], [0, 1, null, null]);
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
   await original([["SET", DIRECTORY_BUILD, "building", "EX", 60]]);
   seen = await counted(async () => void (outcomes = await visits(1)));
   is("a build mark held (another build running): reads build nothing", [seen.SSCAN ?? 0, outcomes], [0, ["UnknownReplyError", "UnknownReplyError"]]);
   advance(60_001);
   is("a build cut short holds the page at most 60 seconds", (await readDirectory()).length, 2);
   for (const [label, reply] of [["QUEUED", "QUEUED"], ["a number", 1], ["missing", undefined]] as const) {
-    await original([["DEL", DIRECTORY_CACHE]]);
+    await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
     await unmarked();
     let sscans = 0;
     redis.pipeline = (async (commands: Commands) => {

@@ -808,7 +808,8 @@ function Terms({
                 marktmorgen.com/affiliate-programs
               </Link>
               : your store&apos;s name and address, your share, your window, your payment day and up to four products that earn,
-              each with what one sale earns, and a link to apply. It shows while your store can take payments. Uncheck this and save,
+              each with what one sale earns, and a link to apply. It shows while your store can take payments. A new listing, or a
+              change to your program or products, can take up to an hour to show there. Uncheck this and save,
               and it leaves the page at once.
             </span>
           </span>

@@ -21,7 +21,8 @@ export async function openReservedVault(input: Parameters<typeof openVaultUpload
   } catch (error) {
     // No path or signatures have reached the browser at this point.
     if (opened?.ok) await retireVaultSession(opened.upload.pathname, opened.sessionId).catch(() => false);
-    await releaseStorage(input.folder, entry.id).catch(() => undefined);
+    // Not let go of: the bytes stay counted, never freed in silence (rule 24), and the log says so.
+    await releaseStorage(input.folder, entry.id).catch(failure => console.error("storage reservation retained", failure));
     throw error;
   }
 }

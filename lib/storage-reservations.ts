@@ -1,13 +1,12 @@
 import { readVaultPath } from "@/lib/vault-rules";
 import { redisPipeline } from "@/lib/redis";
-import { takeLock, type Held } from "@/lib/redis-lock";
+import { releaseLock, takeLock, type Held } from "@/lib/redis-lock";
 
 export type StorageReservation = { id: string; bytes: number; at: number; pathname?: string; uploadId?: string };
 const key = (folder: string) => {
   if (!/^[a-f0-9]{32}$/.test(folder)) throw new Error("storage_folder");
   return "nl:storage:pending:" + folder;
 };
-const RELEASE = 'if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
 const WRITE = 'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end redis.call("SET", KEYS[2], ARGV[2]) return 1';
 
 function decode(raw: unknown): StorageReservation[] {
@@ -42,7 +41,8 @@ async function change<T>(folder: string, work: (rows: StorageReservation[]) => P
     if (written !== 1) throw new Error("storage_lease_lost");
     return result;
   } finally {
-    await redisPipeline([["EVAL", RELEASE, 1, held.key, held.token]]).catch(() => undefined);
+    // releaseLock reads its one reply exactly and logs a failure; the lease then runs out at its own expiry (rule 24).
+    await releaseLock(held);
   }
 }
 

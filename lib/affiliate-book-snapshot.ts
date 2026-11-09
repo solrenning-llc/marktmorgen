@@ -65,6 +65,8 @@ import { maskEmail } from "@/lib/affiliate-lead-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import type { Store } from "@/lib/store";
+// On its own line, apart from the redis import above (#3269 adds one beside it).
+import { repliesFor as dropReplies } from "@/lib/redis-reply";
 
 /** How long a complete kept book is shown before a load works it out again: a day (owner's decision through the coordinator, 4 November 2026; six hours spent too much of a Store window). */
 export const BOOK_FRESH_SECONDS = 24 * 60 * 60;
@@ -340,7 +342,7 @@ export async function forgetBookSnapshot(statsId: string): Promise<void> {
     try {
       done = await script(BOOK_FORGET, [book, draft, version, pointerKey(statsId)], [token, BOOK_KEEP_SECONDS, now]);
     } catch (error) {
-      await redisPipeline([["DEL", book, draft]]).catch(() => undefined);
+      await dropKeys([book, draft], "an affiliate book being erased");
       throw error;
     }
     if (done === 1) return;
@@ -411,7 +413,7 @@ async function write(statsId: string, book: Book, at: number, held: Held, versio
     .map(({ row, slice }) => [row.affiliate.id, JSON.stringify({ at, book: keptSlice(slice) })] as const);
   const bytes = parts.reduce((sum, [id, value]) => sum + utf8(id) + utf8(value), 0);
   const thrownAway = async () => {
-    await redisPipeline([["DEL", draft]]).catch(() => undefined);
+    await dropKeys([draft], "an affiliate book's draft thrown away");
     return null;
   };
   const markOnly = async () => {
@@ -470,4 +472,21 @@ export async function refreshBook(store: Store, at: number, held: Held, tries: n
 /** The version a refresh starting now would read: for checks that write a book directly. */
 export async function readBookVersion(store: Store): Promise<string> {
   return store.statsId ? bookVersion(store.statsId) : "";
+}
+
+/**
+ * Deletes `keys` in one DEL whose one reply is read exactly (rule 24): a count from 0 to the number of keys is done.
+ * A failure or any other answer is logged and never taken for deleted; the keys run out at their own expiry (every
+ * book, draft and version is written with one). Never throws: the caller already has its own answer to give.
+ */
+async function dropKeys(keys: string[], what: string): Promise<boolean> {
+  try {
+    const replies = dropReplies(await redisPipeline([["DEL", ...keys]]), 1);
+    const count = replies ? replies[0] : undefined;
+    if (typeof count === "number" && Number.isSafeInteger(count) && count >= 0 && count <= keys.length) return true;
+    console.error(`deleting ${what} gave an answer in another shape; it runs out at its own expiry`);
+  } catch (error) {
+    console.error(`deleting ${what} failed; it runs out at its own expiry`, error);
+  }
+  return false;
 }

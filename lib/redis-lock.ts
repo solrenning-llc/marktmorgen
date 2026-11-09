@@ -79,12 +79,28 @@ export async function takeLock(key: string, ttlSeconds: number, waitMs: number):
   }
 }
 
+/** What letting go of a lock did: deleted ours, found it no longer ours (it ran out), or could not tell. */
+export type LockRelease = "released" | "not-held" | "unknown";
+
 /**
  * Lets go of a lock, only if it is still ours, in one script. When the script cannot run, the lock is left to run
- * out at its own expiry: never read and deleted as two steps (Codex G on #2721). Never throws.
+ * out at its own expiry: never read and deleted as two steps (Codex G on #2721). Never throws. The script's one
+ * reply is read exactly (rule 24): 1 is "released", 0 "not-held"; a failure or any other answer is "unknown",
+ * logged (without the key, which can name an address), and never taken for released.
  */
-export async function releaseLock(held: Held): Promise<void> {
-  await script(RELEASE, [held.key], [held.token]).catch(() => 0);
+export async function releaseLock(held: Held): Promise<LockRelease> {
+  let reply: unknown;
+  try {
+    const replies = repliesFor(await redisPipeline([["EVAL", RELEASE, 1, held.key, held.token]]), 1);
+    reply = replies ? replies[0] : undefined;
+  } catch (error) {
+    console.error("letting go of a lock failed; it runs out at its own expiry", error);
+    return "unknown";
+  }
+  if (reply === 1) return "released";
+  if (reply === 0) return "not-held";
+  console.error("letting go of a lock gave an answer in another shape; it runs out at its own expiry");
+  return "unknown";
 }
 
 /**

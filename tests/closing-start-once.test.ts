@@ -9,10 +9,11 @@
  * credit and marks the buyers it told; B resumes and starts it again. The credit went back to its full amount and
  * the told marks were gone, so buyers could be emailed twice and more emails sent than the cap allows.
  *
- * Now one script, CLOSING_START (`-- marktmorgen:closing-start:v1`), does the three writes atomically, and only when
+ * Now one script, CLOSING_START (`-- marktmorgen:closing-start:v1`, now v2), does the three writes atomically, and only when
  * the work hash is not already this ending's ("of"): 1 when started now, 0 when already started for this ending
  * (credit, marks, budget and cursors kept), -1 when a key is of another type (nothing written). Any reply but the
- * exact 1 or 0 throws UnknownReplyError (CX-123 rule 24), so closeOne writes no holdFrom.
+ * exact 1 or 0 throws UnknownReplyError (CX-123 rule 24), so closeOne writes no holdFrom. Since v2 a reply of 2 means
+ * a newer ending started already (tests/closing-start-older-ending.test.ts).
  *
  * Synthetic data only: the in-memory Redis (tests/redis-stub.ts), with pipelines swapped, a measure stand-in that
  * pauses, and a Stripe and email stand-in that answers nothing (no real service is reached).
@@ -34,7 +35,7 @@ const pipeline = redis.pipeline.bind(redis);
 
 /** The closing's start for `folder`: the one script on its three keys. */
 const isStart = (commands: Commands, folder: string): boolean =>
-  commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:closing-start:v1\n") && commands[0]?.[5] === workKey(folder);
+  commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:closing-start:v2\n") && commands[0]?.[5] === workKey(folder);
 
 /** Replies swapped for the start of `folder`: with `run`, the script runs first (the write landed, the reply was lost). */
 let swap: { folder: string; reply: unknown; run: boolean } | null = null;
@@ -50,8 +51,8 @@ redis.pipeline = (async (commands: Commands) => {
 globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 })) as typeof fetch;
 
 /** The function under test, read by name so this file builds before it exists. */
-const startClosing = (folder: string, emails: number, calls: number, ending: number): Promise<void> =>
-  (closing as unknown as { startClosing: (folder: string, emails: number, calls: number, ending: number) => Promise<void> }).startClosing(folder, emails, calls, ending);
+const startClosing = (folder: string, emails: number, calls: number, ending: number): Promise<unknown> =>
+  (closing as unknown as { startClosing: (folder: string, emails: number, calls: number, ending: number) => Promise<unknown> }).startClosing(folder, emails, calls, ending);
 
 /** "UnknownReplyError" or "rejected" when the promise rejects, otherwise what it resolved to. */
 async function outcome<T>(run: () => Promise<T>): Promise<T | "UnknownReplyError" | "rejected"> {
@@ -130,23 +131,23 @@ async function main(): Promise<void> {
   part("The same ending started twice: credit, told marks, budget and cursors are kept");
   {
     const folder = "start-same";
-    is("first start: resolves", await outcome(() => startClosing(folder, 10, 16, ENDING)), undefined);
+    is("first start: resolves as started", await outcome(() => startClosing(folder, 10, 16, ENDING)), "started");
     is("first start: credit, no marks, budget, owned by its ending", await held(folder), ["10", null, "16", String(ENDING)]);
     await takeCredit(folder, 4);
     await takeCalls(folder, 5);
     await pipeline([["HSET", toldKey(folder), BUYER, String(ENDING)], ["HSET", workKey(folder), "hc", "{\"h\":1,\"p\":\"page_2\"}", "rcalls", 3]]);
-    is("second start of the same ending: resolves", await outcome(() => startClosing(folder, 10, 16, ENDING)), undefined);
+    is("second start of the same ending: resolves as kept", await outcome(() => startClosing(folder, 10, 16, ENDING)), "kept");
     is("second start of the same ending: nothing set back", await held(folder), ["6", String(ENDING), "11", String(ENDING)]);
     is("second start of the same ending: its cursor and set-aside calls kept", [await get(["HGET", workKey(folder), "hc"]), await get(["HGET", workKey(folder), "rcalls"])], ["{\"h\":1,\"p\":\"page_2\"}", "3"]);
     swap = { folder, reply: [0], run: false };
-    is("a reply of 0 is read as started already", await outcome(() => startClosing(folder, 10, 16, ENDING)), undefined);
+    is("a reply of 0 is read as started already", await outcome(() => startClosing(folder, 10, 16, ENDING)), "kept");
     swap = null;
 
     part("A new ending resets all three");
-    is("a new ending: resolves", await outcome(() => startClosing(folder, 12, 24, NEXT_ENDING)), undefined);
+    is("a new ending: resolves as started", await outcome(() => startClosing(folder, 12, 24, NEXT_ENDING)), "started");
     is("a new ending: its own credit and budget, the earlier marks gone", await held(folder), ["12", null, "24", String(NEXT_ENDING)]);
     is("a new ending: the earlier cursor and set-aside calls are cleared", [await get(["HGET", workKey(folder), "hc"]), await get(["HGET", workKey(folder), "rcalls"])], [null, null]);
-    is("a new ending, 0 emails and 0 calls: both 0, never absent", [await outcome(() => startClosing("start-zero", 0, 0, ENDING)), await get(["GET", creditKey("start-zero")]), await get(["HGET", workKey("start-zero"), "calls"]), await takeCredit("start-zero", 1), await takeCalls("start-zero", 1)], [undefined, "0", "0", false, false]);
+    is("a new ending, 0 emails and 0 calls: both 0, never absent", [await outcome(() => startClosing("start-zero", 0, 0, ENDING)), await get(["GET", creditKey("start-zero")]), await get(["HGET", workKey("start-zero"), "calls"]), await takeCredit("start-zero", 1), await takeCalls("start-zero", 1)], ["started", "0", "0", false, false]);
   }
 
   part("A key of another type: refused, and nothing written");
@@ -169,7 +170,8 @@ async function main(): Promise<void> {
   part("Any reply but the exact 1 or 0 is refused as unknown");
   const BAD: [string, unknown][] = [
     ["-1 (another type)", [-1]],
-    ["2", [2]],
+    ["3", [3]],
+    ["\"2\"", ["2"]],
     ["\"1\"", ["1"]],
     ["\"0\"", ["0"]],
     ["\"OK\"", ["OK"]],

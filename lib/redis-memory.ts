@@ -1150,8 +1150,8 @@ export class MemoryRedis {
           this.run(["HSET", work, "calls", calls, "of", ending]);
           return 1;
         }
-        // lib/plan-closing.ts CLOSING_START: a closing's told marks, email credit and call budget, started once per ending, step for step (Codex G on #3299).
-        if (key.startsWith("-- marktmorgen:closing-start:v1\n") && args[0] === "3" && args.length === 7) {
+        // lib/plan-closing.ts CLOSING_START: a closing's told marks, email credit and call budget, started once per ending, the endings compared as numbers, step for step (Codex G on #3299, G112).
+        if (key.startsWith("-- marktmorgen:closing-start:v2\n") && args[0] === "3" && args.length === 7) {
           const [, told, credit, work, emails, calls, ending] = args;
           for (const one of [told, credit, work]) {
             this.live(one);
@@ -1160,7 +1160,17 @@ export class MemoryRedis {
           }
           const [t, c, w] = [told, credit, work].map((one) => this.run(["TYPE", one]));
           if ((t !== "hash" && t !== "none") || (c !== "string" && c !== "none") || (w !== "hash" && w !== "none")) return -1;
-          if (this.run(["HGET", work, "of"]) === ending) return 0;
+          // The script's ms(): a whole number of ms in decimal digits, no sign or leading zero, at most 15, else nil.
+          const ms = (text: unknown): number | null => (typeof text === "string" && (text === "0" || (text.length <= 15 && /^[1-9][0-9]*$/.test(text))) ? Number(text) : null);
+          const end = ms(ending);
+          if (end === null) return -1;
+          const of = this.run(["HGET", work, "of"]);
+          if (of !== null) {
+            const was = ms(of);
+            if (was === null) return -1;
+            if (was === end) return 0;
+            if (was > end) return 2;
+          }
           this.run(["DEL", told]);
           this.run(["SET", credit, emails]);
           this.run(["DEL", work]);

@@ -45,7 +45,7 @@ globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: 
 
 const creditSet = (commands: (string | number)[][]) => commands[0]?.[0] === "SET" && String(commands[0]?.[1]).startsWith("nl:closing:credit:");
 /** closeOne's start of a closing (lib/plan-closing.ts CLOSING_START), which now sets the told marks, credit and budget in one script. */
-const closingStart = (commands: (string | number)[][]) => commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:closing-start:v1\n");
+const closingStart = (commands: (string | number)[][]) => commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:closing-start:v2\n");
 
 /** Replies a SET must never be read as done from. */
 const BAD_REPLIES: [string, unknown][] = [

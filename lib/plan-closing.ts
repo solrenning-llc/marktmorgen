@@ -688,18 +688,33 @@ function unusedOfRow(row: PaidPeriod, day: number): number {
 /**
  * KEYS[1] the addresses told (hash), KEYS[2] the email credit (string),
  * KEYS[3] the closing's work (hash); ARGV[1] the emails, ARGV[2] the calls,
- * ARGV[3] the ending (its plan's end, in ms). Starts a closing once an ending:
- * 1 when started now (the earlier ending's marks, credit, budget and cursors
- * replaced), 0 when started for this ending already (everything kept), -1
- * when a key is of another type (nothing written). lib/redis-memory.ts runs
- * it the same way.
+ * ARGV[3] the ending (its plan's end, in ms). Starts a closing once an ending,
+ * the endings compared as numbers: 1 when started now (no ending or an older
+ * one written down: its marks, credit, budget and cursors replaced), 0 when
+ * started for this ending already (everything kept), 2 when a newer ending
+ * has started already (nothing written: this run's ending is stale), -1 when
+ * a key is of another type or either ending is not a whole number of ms in
+ * decimal digits, with no sign or leading zero and at most 15 of them
+ * (nothing written). lib/redis-memory.ts runs it the same way.
  */
-export const CLOSING_START = `-- marktmorgen:closing-start:v1
+export const CLOSING_START = `-- marktmorgen:closing-start:v2
 local t = redis.call("TYPE", KEYS[1]).ok
 local c = redis.call("TYPE", KEYS[2]).ok
 local w = redis.call("TYPE", KEYS[3]).ok
 if (t ~= "hash" and t ~= "none") or (c ~= "string" and c ~= "none") or (w ~= "hash" and w ~= "none") then return -1 end
-if redis.call("HGET", KEYS[3], "of") == ARGV[3] then return 0 end
+local function ms(s)
+  if s == "0" or (#s <= 15 and string.match(s, "^[1-9][0-9]*$")) then return tonumber(s) end
+  return nil
+end
+local ending = ms(ARGV[3])
+if not ending then return -1 end
+local of = redis.call("HGET", KEYS[3], "of")
+if of then
+  local was = ms(of)
+  if not was then return -1 end
+  if was == ending then return 0 end
+  if was > ending then return 2 end
+end
 redis.call("DEL", KEYS[1])
 redis.call("SET", KEYS[2], ARGV[1])
 redis.call("DEL", KEYS[3])
@@ -713,17 +728,23 @@ return 1`;
  * script owned by the ending (Codex S on #3309, Codex G on #3299). Two
  * overlapping closeOne runs that both read no holdFrom start it once: a late
  * start never puts back credit or calls already spent, nor forgets a buyer
- * already told. Resolves on the exact 1 or 0; anything else (-1 for a key of
- * another type, text, null, a missing or an extra reply) throws
- * UnknownReplyError (CX-123 rule 24), and closeOne writes no holdFrom, so it
- * is started the next day.
+ * already told, and a run paused on an older ending never starts it again
+ * over a newer one (Codex G's G112, "G3299-EPOCH"). Resolves "started" on the
+ * exact 1, "kept" on 0 and "newer" on 2 (closeOne then stops for this
+ * store and saves nothing); anything else (-1 for a key of another type or
+ * an ending written down that is not a whole number of ms, text, null, a
+ * missing or an extra reply) throws UnknownReplyError (CX-123
+ * rule 24), and closeOne writes no holdFrom, so it is started the next day.
  */
-export async function startClosing(folder: string, emails: number, calls: number, ending: number): Promise<void> {
+export async function startClosing(folder: string, emails: number, calls: number, ending: number): Promise<"started" | "kept" | "newer"> {
   if (!Number.isSafeInteger(ending) || ending < 0) throw new Error("a closing's start needs the ending it is for");
   const whole = (n: number) => Math.max(0, Math.floor(n));
   const replies = repliesFor(await redisPipeline([["EVAL", CLOSING_START, 3, toldKey(folder), creditKey(folder), workKey(folder), whole(emails), whole(calls), String(ending)]]), 1);
   const started = replies?.[0];
-  if (started !== 1 && started !== 0) throw new UnknownReplyError("a closing's start");
+  if (started === 1) return "started";
+  if (started === 0) return "kept";
+  if (started === 2) return "newer";
+  throw new UnknownReplyError("a closing's start");
 }
 
 export type Closing = {
@@ -845,7 +866,10 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // this one's emails and calls to Stripe are capped before any is spent
     // (lib/closing-credit.ts, lib/closing-holds.ts).
     const cap = buyerNoticeCap(store.tier, paidBefore(store));
-    await startClosing(folder, cap * EMAILS_PER_BUYER_PER_ENDING, cap * STRIPE_CALLS_PER_MEMBER, endedAt);
+    // A newer ending has started while this run was on its older snapshot:
+    // nothing of it is saved, and the next day reads the newer one.
+    const start = await startClosing(folder, cap * EMAILS_PER_BUYER_PER_ENDING, cap * STRIPE_CALLS_PER_MEMBER, endedAt);
+    if (start === "newer") return { key, state: "held", note: "a newer ending of this store already started" };
     Object.assign(state, { holdFrom: now });
     await save(state);
   }

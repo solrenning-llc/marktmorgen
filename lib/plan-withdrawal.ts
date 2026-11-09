@@ -42,7 +42,8 @@
  *
  * Kept, under planWithdrawKey (the store's id and the subscription), a hash: the first
  * statement's time ("at", ms), receipts tried ("tries"), whether one went
- * ("sent"), whether the refund was taken in hand ("r"), and, when support is
+ * ("sent"), whether one may have gone unconfirmed ("u": never tried again,
+ * audit of uncertain sends, 9 November 2026), whether the refund was taken in hand ("r"), and, when support is
  * owed a note, why ("h"), the notes tried ("ht") and whether one went ("hd").
  * The name and the email are not kept: they travel in the receipt. Every read
  * is exact (CX-123): a reply that does not read is an error, never "not
@@ -51,7 +52,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
-import { NIMBUS_FROM, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, type SendOutcome, sendEmail, sendEmailOutcome } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_NAMES } from "@/lib/plan";
 import { type PlanRefundReading, readPlanRefund } from "@/lib/plan-refund";
@@ -83,31 +84,32 @@ export function planWithdrawWindow(reading: PlanRefundReading | null, nowSeconds
 }
 
 /**
- * One plan withdrawal's record: the first statement (ms), receipts tried, whether one went, whether its refund was
- * taken in hand, and the note support is owed: why (null when none is owed), notes tried, whether one went.
+ * One plan withdrawal's record: the first statement (ms), receipts tried, whether one went, whether one may have gone
+ * unconfirmed (`unsure`: a timeout or a server error; never tried again), whether its refund was taken in hand, and
+ * the note support is owed: why (null when none is owed), notes tried, whether one went.
  */
-export type PlanWithdrawRecord = { at: number | null; tries: number; sent: boolean; refund: boolean; support: string | null; supportTries: number; told: boolean };
+export type PlanWithdrawRecord = { at: number | null; tries: number; sent: boolean; unsure: boolean; refund: boolean; support: string | null; supportTries: number; told: boolean };
 
 const countField = (raw: unknown) => (raw === null ? 0 : typeof raw === "string" && /^\d{1,6}$/.test(raw) ? Number(raw) : Number.NaN);
 
 async function readRecord(key: string): Promise<PlanWithdrawRecord> {
-  const replies = repliesFor(await redisPipeline([["HMGET", key, "at", "tries", "sent", "r", "h", "ht", "hd"]]), 1);
+  const replies = repliesFor(await redisPipeline([["HMGET", key, "at", "tries", "sent", "r", "h", "ht", "hd", "u"]]), 1);
   const fields = replies?.[0];
-  if (!Array.isArray(fields) || fields.length !== 7) throw new Error("a plan withdrawal record does not read");
-  const [rawAt, rawTries, rawSent, rawRefund, rawWhy, rawSupportTries, rawTold] = fields as unknown[];
+  if (!Array.isArray(fields) || fields.length !== 8) throw new Error("a plan withdrawal record does not read");
+  const [rawAt, rawTries, rawSent, rawRefund, rawWhy, rawSupportTries, rawTold, rawUnsure] = fields as unknown[];
   if (rawAt === null) {
     if (fields.some((field) => field !== null)) throw new Error("a plan withdrawal record does not read");
-    return { at: null, tries: 0, sent: false, refund: false, support: null, supportTries: 0, told: false };
+    return { at: null, tries: 0, sent: false, unsure: false, refund: false, support: null, supportTries: 0, told: false };
   }
   const at = typeof rawAt === "string" && /^\d{1,16}$/.test(rawAt) ? Number(rawAt) : Number.NaN;
   const tries = countField(rawTries);
   const supportTries = countField(rawSupportTries);
   const flag = (raw: unknown) => raw === null || raw === "1";
   const why = rawWhy === null || (typeof rawWhy === "string" && rawWhy.length > 0 && rawWhy.length <= WHY_MAX) ? rawWhy : undefined;
-  if (!Number.isSafeInteger(at) || at <= 0 || !Number.isSafeInteger(tries) || !Number.isSafeInteger(supportTries) || !flag(rawSent) || !flag(rawRefund) || !flag(rawTold) || why === undefined) {
+  if (!Number.isSafeInteger(at) || at <= 0 || !Number.isSafeInteger(tries) || !Number.isSafeInteger(supportTries) || !flag(rawSent) || !flag(rawUnsure) || !flag(rawRefund) || !flag(rawTold) || why === undefined) {
     throw new Error("a plan withdrawal record does not read");
   }
-  return { at, tries, sent: rawSent === "1", refund: rawRefund === "1", support: why, supportTries, told: rawTold === "1" };
+  return { at, tries, sent: rawSent === "1", unsure: rawUnsure === "1", refund: rawRefund === "1", support: why, supportTries, told: rawTold === "1" };
 }
 
 /** This store's plan withdrawal record; throws when it cannot be read (never "not withdrawn" on a guess). */
@@ -124,11 +126,13 @@ export async function planWithdrawal(store: Pick<Store, "sid" | "subscriptionId"
  *   - support owed a note that did not go: "pending" (it is tried again on
  *     the next statement), "unreached" (it was tried the most times);
  *   - made again: "resent" (the receipt went this time), "unsent" (it did not
- *     go again), "already" (it went before, or was tried the most times);
+ *     go again), "unsure" (it may have gone, unconfirmed: never tried again),
+ *     "already" (it went before, may have gone before, or was tried the most
+ *     times);
  *   - "closed": not inside the period; "error": nothing could be read or
  *     written as it must be.
  */
-export type PlanWithdrawOutcome = "refunded" | "ending" | "handled" | "pending" | "unreached" | "resent" | "unsent" | "already" | "closed" | "error";
+export type PlanWithdrawOutcome = "refunded" | "ending" | "handled" | "pending" | "unreached" | "resent" | "unsent" | "unsure" | "already" | "closed" | "error";
 
 const unknownReading: PlanRefundReading = { refund: { kind: "unknown", reason: "stripe_unread" } };
 
@@ -157,7 +161,7 @@ export async function withdrawFromPlan(store: Store, statement: WithdrawalStatem
     // The statement is recorded once HSETNX answered; an expiry that did not set does not undo it (Claude 5's LEVE 2
     // on #2849). It is set again on the next statement, and the record is never read as "not withdrawn" for it.
     if (countOf(written?.[1]) !== 1) console.error(`plan-withdraw: the record of store ${store.sid}'s withdrawal has no expiry set`);
-    if (made === 1) record = { at: nowMs, tries: 0, sent: false, refund: false, support: null, supportTries: 0, told: false };
+    if (made === 1) record = { at: nowMs, tries: 0, sent: false, unsure: false, refund: false, support: null, supportTries: 0, told: false };
     else {
       try {
         record = await readRecord(key);
@@ -176,21 +180,22 @@ export async function withdrawFromPlan(store: Store, statement: WithdrawalStatem
   const ack = acknowledgement(statement, `${PLAN_NAMES[store.tier] ?? "Marktmorgen"} for ${store.name || store.handle}`, "Marktmorgen", at, PLAN_ACK_WORDS);
 
   // The receipt: each try counted before it is made, so none is ever tried past the ceiling.
-  let receipt: "sent" | "unsent" | "before" = "before";
-  if (!record.sent && record.tries < PLAN_WITHDRAW_ACK_SENDS) {
+  // A receipt that may have gone unconfirmed is never tried again: a second copy would reach the creator.
+  let receipt: "sent" | "unsent" | "unsure" | "before" = "before";
+  if (!record.sent && !record.unsure && record.tries < PLAN_WITHDRAW_ACK_SENDS) {
     const counted = repliesFor(await redisPipeline([["HINCRBY", key, "tries", 1]]), 1);
     const tries = counted ? countOf(counted[0]) : null;
     if (tries === null || tries < 1) return "error";
     if (tries <= PLAN_WITHDRAW_ACK_SENDS) {
-      const sent = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: statement.email, replyTo: SUPPORT_EMAIL, subject: ack.subject, text: ack.text }).catch(() => false);
-      receipt = sent ? "sent" : "unsent";
-      if (sent) {
-        const marked = repliesFor(await redisPipeline([["HSET", key, "sent", "1"]]).catch(() => null), 1);
-        if (!marked || countOf(marked[0]) === null) console.error("a plan withdrawal's receipt went but could not be marked sent");
+      const outcome = await sendEmailOutcome({ meter: { by: "company" }, from: NIMBUS_FROM, to: statement.email, replyTo: SUPPORT_EMAIL, subject: ack.subject, text: ack.text }).catch((): SendOutcome => "uncertain");
+      receipt = outcome === "sent" ? "sent" : outcome === "uncertain" ? "unsure" : "unsent";
+      if (receipt !== "unsent") {
+        const marked = repliesFor(await redisPipeline([["HSET", key, receipt === "sent" ? "sent" : "u", "1"]]).catch(() => null), 1);
+        if (!marked || countOf(marked[0]) === null) console.error(`a plan withdrawal's receipt ${receipt === "sent" ? "went" : "may have gone"} but could not be marked so`);
       }
     }
   }
-  const again = receipt === "sent" ? "resent" : receipt === "unsent" ? "unsent" : "already";
+  const again = receipt === "sent" ? "resent" : receipt === "unsent" ? "unsent" : receipt === "unsure" ? "unsure" : "already";
 
   // The note to support, owed from the moment the refund is not made at once: the reason is kept before the first
   // try, each try is counted before it is made, and it is "handled" only once the note went. Each try has its own

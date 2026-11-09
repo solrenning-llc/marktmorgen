@@ -15,7 +15,7 @@
  */
 import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { isHouseStore } from "@/lib/house-store";
@@ -33,7 +33,12 @@ export function contactOpen(store: Store): boolean {
   return store.contact.on && !store.suspended && !isHouseStore(store) && isSenderConfigured() && isRedisConfigured() && Boolean(store.email);
 }
 
-export type ContactResult = "sent" | "email" | "short" | "limited" | "closed" | "error";
+/**
+ * "kept": the email to the creator may have gone, unconfirmed, and the message is in the studio's inbox; "unsure": it
+ * may have gone, and it could not be filed. Neither is said as an error to send again, which could reach the creator
+ * twice (audit of uncertain sends, 9 November 2026).
+ */
+export type ContactResult = "sent" | "kept" | "unsure" | "email" | "short" | "limited" | "closed" | "error";
 
 /** A line with no line breaks or control characters, for a name or a subject. */
 function line(text: string, max: number): string {
@@ -54,7 +59,7 @@ export async function sendContact(input: { store: Store; name: string; email: st
   if (!(await withinLimit("contact-ip", `${who}:${input.ip}`, 3, 3_600))) return "limited";
   if (!(await withinLimit("contact-store", who, MAX_PER_DAY, 86_400))) return "limited";
   const from = name || email;
-  const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  const outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
     to: store.email,
     replyTo: email,
@@ -69,8 +74,15 @@ export async function sendContact(input: { store: Store; name: string; email: st
       "Their address was typed by them and is not checked. Marktmorgen sent nothing to it.",
     ].join("\n"),
     idempotencyKey: `contact-${who}-${sha(`${email}|${message}`).slice(0, 24)}`,
+  }).catch((): SendOutcome => "uncertain");
+  // Refused for certain: nothing reached the creator, and the visitor may send it again.
+  if (outcome === "refused") return "error";
+  // Filed in the studio's inbox too (lib/inbox.ts), so it can be answered there with the rest. Also when the email may
+  // have gone unconfirmed: the inbox is then where the creator is sure to find it.
+  const filed = await fileContact({ store, email, name, text: message }).catch((error) => {
+    console.error("filing a contact message failed", error);
+    return false;
   });
-  // Filed in the studio's inbox too (lib/inbox.ts), so it can be answered there with the rest.
-  if (sent) await fileContact({ store, email, name, text: message }).catch((error) => console.error("filing a contact message failed", error));
-  return sent ? "sent" : "error";
+  if (outcome === "sent") return "sent";
+  return filed ? "kept" : "unsure";
 }

@@ -25,6 +25,8 @@ export async function POST(request: NextRequest) {
   try {
     const result = await fileReport(read.report, clientAddress(request), originFrom(request));
     if (result === "sent") return Response.json({ ok: true });
+    // Kept, but its copy to the support inbox was not confirmed either way: never "try again", which would send it twice.
+    if (result === "unsure") return Response.json({ ok: true, kept: true }, { status: 202 });
     return Response.json({ ok: false, error: result }, { status: result === "limited" ? 429 : 503 });
   } catch (error) {
     console.error("filing a notice failed", error);

@@ -52,9 +52,12 @@ async function main(): Promise<void> {
 
   part("The linked flow knows acceptance, not receipt or a future reply");
   const source = readFileSync("lib/store-contact.ts", "utf8");
-  is("success starts with the sender's boolean answer", source.includes("const sent = await sendEmail("), true);
-  is("filing in the store inbox is best effort after sender acceptance", source.includes("if (sent) await fileContact(") && source.includes("filing a contact message failed"), true);
-  is("the public result follows acceptance and has no delivery-status read", [source.includes('return sent ? "sent" : "error"'), /deliveryStatus|delivery_status|GET[\s\S]*email/i.test(source)], [true, false]);
+  // Rule 23 (uncertain sends, 9 Nov 2026): the sender's answer is now sent / refused / uncertain (sendEmailOutcome), and
+  // the inbox filing also runs when it is uncertain ("kept"); a certain refusal still files nothing and says "error".
+  // Acceptance, not receipt, is still what "sent" means (tests/uncertain-send-rights-contact-erasure.test.ts).
+  is("success starts with the sender's answer", source.includes("const outcome = await sendEmailOutcome("), true);
+  is("filing in the store inbox is best effort, never after a certain refusal", source.includes('if (outcome === "refused") return "error";') && source.includes("const filed = await fileContact(") && source.includes("filing a contact message failed"), true);
+  is("the public result follows acceptance and has no delivery-status read", [source.includes('if (outcome === "sent") return "sent";'), /deliveryStatus|delivery_status|GET[\s\S]*email/i.test(source)], [true, false]);
   done();
 }
 

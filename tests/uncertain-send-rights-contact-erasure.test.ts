@@ -73,7 +73,7 @@ async function main(): Promise<void> {
     const result = await sendContact({ store, name: "Dana", email: "dana@example.com", message, ip: "1.1.1.1" });
     sender = "ok";
     is("said as kept, never as an error to send again", result, "kept");
-    is("the message is in the creator's inbox", JSON.stringify(await readInbox(store.statsId!)).includes("cookbook"), true);
+    is("the message is in the creator's inbox", JSON.stringify(await readInbox(store.statsId!)).includes("dana@example.com"), true);
     for (const [language, words] of Object.entries(CONTACT_WORDS)) {
       is(`${language}: words for a kept message and for one not confirmed`, [Boolean(words.notices.kept?.title), Boolean(words.notices.unsure?.title)], [true, true]);
     }
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
     sender = "refused";
     const refused = await sendContact({ store, name: "Lee", email: "lee@example.com", message: "A second, different question about the cookbook pages.", ip: "2.2.2.2" });
     sender = "ok";
-    is("control: a certain refusal stays an error and is not filed", [refused, JSON.stringify(await readInbox(store.statsId!)).includes("second, different")], ["error", false]);
+    is("control: a certain refusal stays an error and is not filed", [refused, JSON.stringify(await readInbox(store.statsId!)).includes("lee@example.com")], ["error", false]);
   }
 
   part("A deletion link that may have gone stays alive, and no other store sends a second (lib/erasure-request.ts:208)");

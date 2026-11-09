@@ -1,13 +1,14 @@
 import { REPORT_PROBLEMS } from "@/lib/takedown-rules";
 
-export type ReportAnswer = { ok: true } | { ok: false; message: string };
+/** `kept`: the notice is saved, but the server could not confirm it reached the team (lib/takedown.ts, "unsure"). */
+export type ReportAnswer = { ok: true; kept?: true } | { ok: false; message: string };
 const UNCONFIRMED = "It could not be sent just now. Try again in a moment, or email support@marktmorgen.com.";
 
 /** Only confirmed receipt may replace the person's notice with a success screen. */
 export function reportAnswer(httpOK: boolean, raw: unknown): ReportAnswer {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, message: UNCONFIRMED };
   const data = raw as Record<string, unknown>;
-  if (httpOK && data.ok === true && data.error === undefined && data.problem === undefined) return { ok: true };
+  if (httpOK && data.ok === true && data.error === undefined && data.problem === undefined) return data.kept === true ? { ok: true, kept: true } : { ok: true };
   if (data.ok === false && data.error === "problem" && typeof data.problem === "string" && Object.hasOwn(REPORT_PROBLEMS, data.problem)) {
     return { ok: false, message: REPORT_PROBLEMS[data.problem as keyof typeof REPORT_PROBLEMS] };
   }

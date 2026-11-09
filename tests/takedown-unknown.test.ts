@@ -198,9 +198,11 @@ async function main(): Promise<void> {
   senderDown = "unknown";
   const maybe = await answer({ type: "kit" });
   senderDown = false;
-  is("the provider answered 500: not Done, the kit stays down", [maybe.status, maybe.error, (await store()).kit.on], [500, "notice_unsent", false]);
+  // Rule 23 (uncertain sends, 9 Nov 2026): the error was "notice_unsent" ("press again"); a 500 may follow acceptance,
+  // so it is now "notice_unsure", which no press sends again. Not Done, the kit down and one post stay as they were.
+  is("the provider answered 500: not Done, the kit stays down", [maybe.status, maybe.error, (await store()).kit.on], [500, "notice_unsure", false]);
   const maybeAgain = await answer({ type: "kit" });
-  is("pressed again: still not Done and not \"already down\", and the email is not posted a second time", [maybeAgain.status, maybeAgain.error, tried.length, sent.length], [500, "notice_unsent", 1, 0]);
+  is("pressed again: still not Done and not \"already down\", and the email is not posted a second time", [maybeAgain.status, maybeAgain.error, tried.length, sent.length], [500, "notice_unsure", 1, 0]);
 
   part("Published again and taken down again under the same notice: a new notice, under a new key");
   // Claude 6's focal review of #3087, LEVE 2: the second takedown reused the first one's idempotency key,

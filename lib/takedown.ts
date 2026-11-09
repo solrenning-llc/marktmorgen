@@ -20,6 +20,7 @@
  */
 import { countNotice, countStep } from "@/lib/transparency";
 import { createHash, randomBytes } from "node:crypto";
+import { type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -41,7 +42,12 @@ const tokenKey = (token: string) => `nl:report:t:${sha(`nimbus-takedown:${token}
 
 export type Report = ReportInput & { id: string; at: string; handle: string };
 
-export type FileResult = "sent" | "limited" | "error";
+/**
+ * "unsure": the notice is kept, but the sender did not confirm whether its copy reached the support inbox (a timeout,
+ * a server error). It is counted and never said as an error to send again: a second notice would reach the inbox
+ * twice (audit of uncertain sends, 9 November 2026).
+ */
+export type FileResult = "sent" | "unsure" | "limited" | "error";
 
 /** Keeps a notice and sends it to the support inbox with the link that acts on it. */
 export async function fileReport(input: ReportInput, ip: string, origin: string): Promise<FileResult> {
@@ -54,7 +60,7 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
     ["SET", reportKey(id), JSON.stringify(report), "EX", REPORT_SECONDS],
     ["SET", tokenKey(token), id, "EX", TOKEN_SECONDS],
   ]);
-  const sent = await sendEmail({ meter: { by: "company" },
+  const outcome = await sendEmailOutcome({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
     replyTo: report.email,
@@ -82,11 +88,13 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
       .filter((line) => line !== "")
       .join("\n"),
     idempotencyKey: `report-${id}`,
-  }).catch(() => false);
+  }).catch((): SendOutcome => "uncertain");
   // The public transparency page counts it (624 [SZ8](47)); nothing about who sent it or which store.
-  // Only once it reached the inbox: a try that failed is sent again, and must not count twice.
-  if (sent) await countNotice(report.kind);
-  return sent ? "sent" : "error";
+  // Not when it was refused for certain: that sender is told to try again, and it must not count twice. A send that
+  // may have gone is counted: the notice is kept, and its sender is told not to send it again.
+  if (outcome === "refused") return "error";
+  await countNotice(report.kind);
+  return outcome === "sent" ? "sent" : "unsure";
 }
 
 /** The product a notice's address points at (/@handle/p/<product>), when it points at one of this store's. */
@@ -128,11 +136,11 @@ export async function openReport(token: string): Promise<{ report: Report; store
  * shape (rule 24; Claude 6 on #3087): a read that fails or answers in another shape throws, so an unknown is never
  * "nothing owed".
  */
-export async function unsentNotices(report: Pick<Report, "id">, store: Store): Promise<{ action: TakedownAction; what: string; up?: true }[]> {
+export async function unsentNotices(report: Pick<Report, "id">, store: Store): Promise<{ action: TakedownAction; what: string; up?: true; unsure?: true }[]> {
   const replies = repliesFor(await redisPipeline([["SMEMBERS", owedKey(report.id)]]), 1);
   const members = replies ? stringList(replies[0]) : null;
   if (!members) throw new UnknownReplyError("a notice's owed takedowns");
-  const owed: { action: TakedownAction; what: string; up?: true }[] = [];
+  const owed: { action: TakedownAction; what: string; up?: true; unsure?: true }[] = [];
   for (const part of members.slice().sort().slice(0, MAX_OWED)) {
     const action = actionOfPart(part);
     if (!action || (action.type === "store" && !action.on)) continue;
@@ -142,7 +150,9 @@ export async function unsentNotices(report: Pick<Report, "id">, store: Store): P
     if (!steps.applied && (await stillUp(store, action, ""))) continue;
     // Only a note for the operator: when whether it is up cannot be read, the page claims nothing about it.
     const up = steps.applied && (await stillUp(store, action, "").then(Boolean, () => false));
-    owed.push(up ? { action, what: steps.what, up: true } : { action, what: steps.what });
+    // A notice whose send was not confirmed either way stays listed, marked `unsure`: it may have gone, so the page
+    // offers no send for it (TakedownNoticeUnsure).
+    owed.push({ action, what: steps.what, ...(up ? { up: true as const } : {}), ...(steps.unsure ? { unsure: true as const } : {}) });
   }
   return owed;
 }
@@ -178,6 +188,19 @@ export class TakedownNoticeUnsent extends Error {
 }
 
 /**
+ * The email that tells the creator what was taken down may have gone, but the sender did not confirm it (a timeout, a
+ * server error): it is never sent again, by this press or a later one, because the provider's key lasts only a day
+ * and a later send would reach the creator twice (audit of uncertain sends, 9 November 2026). The takedown stays
+ * listed as not confirmed, and the operator writes to the creator if they did not get it.
+ */
+export class TakedownNoticeUnsure extends Error {
+  constructor() {
+    super("the takedown notice to the creator may have gone, unconfirmed");
+    this.name = "TakedownNoticeUnsure";
+  }
+}
+
+/**
  *   nl:report:<id>:n:<action>  JSON  what one takedown of that notice took down and which of its steps are done,
  *                                    400 days, like the notice itself (the same company family, nl:report:)
  *
@@ -198,8 +221,10 @@ const MAX_OWED = 50;
 /**
  * `applied`: the content was confirmed taken down (apply returned true and this mark was confirmed). Steps written
  * before this field existed have none, and are read as not confirmed.
+ * `unsure`: the notice to the creator was asked for and the sender did not confirm whether it went; it is never sent
+ * again (TakedownNoticeUnsure). Steps written before this field existed have none, and are read as false.
  */
-type Steps = { what: string; howLong: string; at: string; applied: boolean; noted: boolean; counted: boolean; sent: boolean };
+type Steps = { what: string; howLong: string; at: string; applied: boolean; noted: boolean; counted: boolean; sent: boolean; unsure: boolean };
 
 /**
  * A takedown's steps, or null only when Redis itself answers null (no steps). A pipeline that answers nothing, or a
@@ -214,10 +239,11 @@ async function readSteps(key: string): Promise<Steps | null> {
   const value: unknown = JSON.parse(raw);
   const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   if (!v || typeof v.what !== "string" || !v.what || typeof v.howLong !== "string" || typeof v.at !== "string" || !/^\d+$/.test(v.at) ||
-      (v.applied !== undefined && typeof v.applied !== "boolean") || typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean") {
+      (v.applied !== undefined && typeof v.applied !== "boolean") || typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean" ||
+      (v.unsure !== undefined && typeof v.unsure !== "boolean")) {
     throw new Error("a takedown's steps could not be read");
   }
-  return { what: v.what, howLong: v.howLong, at: v.at, applied: v.applied === true, noted: v.noted, counted: v.counted, sent: v.sent };
+  return { what: v.what, howLong: v.howLong, at: v.at, applied: v.applied === true, noted: v.noted, counted: v.counted, sent: v.sent, unsure: v.unsure === true };
 }
 
 /**
@@ -383,7 +409,7 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
   const up = await stillUp(store, action, origin);
   let steps: Steps;
   if (up) {
-    steps = { ...up, at: String(Date.now()), applied: false, noted: false, counted: false, sent: false };
+    steps = { ...up, at: String(Date.now()), applied: false, noted: false, counted: false, sent: false, unsure: false };
     // The recovery record first, each write confirmed, so nothing is taken down without it (Codex P on #3087).
     await writeSteps(key, steps);
     // Owed from here until its notice goes out, so a page opened again can still send it (unsentNotices).
@@ -434,7 +460,13 @@ async function complete(report: Report, store: Store, action: Exclude<TakedownAc
     await writeSteps(key, steps);
     await countStep(report, action.type);
   }
-  const sent = await sendEmail({ meter: { by: "company" },
+  // Asked for before and not confirmed either way: it may have reached the creator, so it is never asked for again.
+  if (steps.unsure) throw new TakedownNoticeUnsure();
+  // Marked before the send, so a press that dies during it, or whose answer is not known, never sends it again. A
+  // certain refusal takes the mark back off, and the next press sends it.
+  steps = { ...steps, unsure: true };
+  await writeSteps(key, steps);
+  const outcome = await sendEmailOutcome({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: store.email,
     replyTo: SUPPORT_EMAIL,
@@ -466,9 +498,19 @@ async function complete(report: Report, store: Store, action: Exclude<TakedownAc
     // The same key on every try of this takedown, so a notice the provider took is never sent twice; a later
     // takedown of the same content under the same notice has its own `at`, so its notice is a new email.
     idempotencyKey: `takedown-${report.id}-${part}-${steps.at}`,
-  }).catch(() => false);
-  if (!sent) throw new TakedownNoticeUnsent();
-  await writeSteps(key, { ...steps, sent: true });
+  }).catch((): SendOutcome => "uncertain");
+  if (outcome === "uncertain") throw new TakedownNoticeUnsure();
+  if (outcome === "refused") {
+    // Known not sent: the mark comes off, so pressing again sends it. If that write fails the mark stays, and the
+    // takedown is said as not confirmed: never a second email, only a notice the operator sends by hand.
+    try {
+      await writeSteps(key, { ...steps, unsure: false });
+    } catch {
+      throw new TakedownNoticeUnsure();
+    }
+    throw new TakedownNoticeUnsent();
+  }
+  await writeSteps(key, { ...steps, sent: true, unsure: false });
   // No longer owed. If this fails the steps say it was sent, and unsentNotices reads the steps, not the set alone.
   await redisPipeline([["SREM", owedKey(report.id), part]]).catch(() => {});
   return what;

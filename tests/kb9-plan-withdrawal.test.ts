@@ -70,7 +70,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (subject.includes("withdrawal")) receiptTries += 1;
     if (refuse > 0) {
       refuse -= 1;
-      return new Response(JSON.stringify({ message: "unavailable" }), { status: 500 });
+      // Rule 23 (uncertain sends, 9 Nov 2026): a certain refusal (422); a 5xx may follow acceptance and is now never sent again (tests/uncertain-send-rights-withdrawal.test.ts, -plan-withdrawal.test.ts).
+      return new Response(JSON.stringify({ message: "unavailable" }), { status: 422 });
     }
   }
   return realFetch(input, init);

@@ -83,7 +83,7 @@ async function logged<T>(work: () => Promise<T>): Promise<{ value: T | Error; li
   }
 }
 
-const members = (key: string) => redis.run(["ZRANGE", key, 0, -1]) as string[];
+const members = (key: string) => redis.run(["ZRANGEBYSCORE", key, "-inf", "+inf"]) as string[];
 
 test("a change to another review: the damaged record is set aside and the product shows stars from the others", async () => {
   await setup();
@@ -155,9 +155,9 @@ test("a person's erasure finds their record set aside, its photo too, and leaves
   await setup();
   const path = await reviewPhotoPath("quarantine-owner@example.test", "image/jpeg");
   assert.equal(typeof (await setReviewPhoto(STATS, P1, idA, { path, width: 1200, height: 900 })), "object");
-  // A's record damaged too, cut short after its photo: what a record keeps still says whose photo it is.
+  // A's record damaged too, its last character cut: what the record keeps still says whose photo it is.
   const rawA = redis.run(["HGET", productKey, idA]) as string;
-  redis.run(["HSET", productKey, idA, rawA.slice(0, rawA.indexOf('"photo"') + 80)]);
+  redis.run(["HSET", productKey, idA, rawA.slice(0, -1)]);
   await logged(() => setHidden(STATS, P1, idC, true, REASON));
   assert.equal(typeof redis.run(["GET", badKey(idA)]), "string", "A's record was set aside");
   assert.equal(typeof redis.run(["GET", badKey(idB)]), "string", "B's record was set aside");

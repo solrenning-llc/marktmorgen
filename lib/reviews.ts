@@ -41,6 +41,7 @@
  *   nl:rev:pay:<s>            -> hash: payment -> the reviews it paid for (refunds)
  *   nl:rev:stores             -> set of statsIds with any review (the refund pass, the daily recount)
  *   nl:rev:recount:at         -> where the daily recount of numbers left waiting stopped (a SSCAN cursor)
+ *   nl:rev:bad:<s>:<p>:<id>   -> a damaged review record set aside, as it was, for REVIEW_QUARANTINE_DAYS
  */
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
@@ -81,6 +82,7 @@ const allKey = (s: string) => `nl:rev:all:${s}`;
 const newKey = (s: string) => `nl:rev:new:${s}`;
 const payKey = (s: string) => `nl:rev:pay:${s}`;
 const lockKey = (s: string, p: string) => `nl:rev:lock:${s}:${p}`;
+const badKey = (s: string, p: string, id: string) => `nl:rev:bad:${s}:${p}:${id}`;
 export const REVIEW_STORES_KEY = "nl:rev:stores";
 
 /**
@@ -359,49 +361,78 @@ async function locked<T>(statsId: string, productId: string, work: () => Promise
 }
 
 /**
- * A product's reviews as HGETALL answers them, only in their exact shape (CX-123 rule 24): a flat list of strings,
- * each field a review's id and each value that review, readable, of this product. Null for anything else: a reply
- * lost or cut short, a field without its value, a stored review that does not read or one under another's id.
+ * A product's review records as HGETALL answers them, for counting or dropping them (CX-123 rule 24): null when the
+ * reply is not a flat list of texts with each field a review's id (unknown: nothing is counted or dropped). Otherwise
+ * every field's id, the reviews that read as this product's under their own id, and the records that do not
+ * (damaged: their ids, and each with its text as it was, for setting it aside).
  */
-function exactReviews(reply: unknown, productId: string): Review[] | null {
-  const flat = stringList(reply);
-  if (!flat || flat.length % 2 !== 0) return null;
-  const reviews: Review[] = [];
-  for (let i = 0; i < flat.length; i += 2) {
-    const review = parseReview(flat[i + 1]);
-    if (!review || review.id !== flat[i] || review.productId !== productId) return null;
-    reviews.push(review);
-  }
-  return reviews;
-}
-
-/**
- * A product's review records as HGETALL answers them, for dropping them (CX-123 rule 24): null when the reply is not a
- * flat list of texts with each field a review's id (unknown: nothing is dropped). Otherwise every field's id, the
- * reviews that read as this product's under their own id, and the ids of the records that do not (damaged).
- */
-function recordsOf(reply: unknown, productId: string): { ids: string[]; reviews: Review[]; unreadable: string[] } | null {
+function recordsOf(reply: unknown, productId: string): { ids: string[]; reviews: Review[]; unreadable: string[]; damaged: [string, string][] } | null {
   const flat = stringList(reply);
   if (!flat || flat.length % 2 !== 0) return null;
   const ids: string[] = [];
   const reviews: Review[] = [];
   const unreadable: string[] = [];
+  const damaged: [string, string][] = [];
   for (let i = 0; i < flat.length; i += 2) {
     if (!REVIEW_ID_PATTERN.test(flat[i])) return null;
     ids.push(flat[i]);
     const review = parseReview(flat[i + 1]);
     if (review && review.id === flat[i] && review.productId === productId) reviews.push(review);
-    else unreadable.push(flat[i]);
+    else {
+      unreadable.push(flat[i]);
+      damaged.push([flat[i], flat[i + 1]]);
+    }
   }
-  return { ids, reviews, unreadable };
+  return { ids, reviews, unreadable, damaged };
+}
+
+/**
+ * How long a damaged review record is kept where it was set aside (setAside), in days: gone by itself after, as the
+ * buyer's own delete or erasure takes it at once. It is never read as a review again; it is kept only so a record
+ * damaged by a fault is not lost the moment it is found (owner's decision 11, 9 November 2026: quarantine and recount).
+ */
+export const REVIEW_QUARANTINE_DAYS = 30;
+
+/**
+ * Sets a product's damaged review records aside (owner's decision 11, 9 November 2026: quarantine and recount): each
+ * is written as it was under a key of its own (nl:rev:bad:<store>:<product>:<id>, REVIEW_QUARANTINE_DAYS), and only
+ * once every one of those writes is confirmed is it taken out of the product's hash, page list, studio list and queue,
+ * with the AI summary that may have counted it (no date known: more taken away than counted, never less). Its room
+ * stays counted (its size is unknown: more than used, never less), and the payment's list keeps its id, which then
+ * reads as gone. Called under the product's lock (every recount is), so no change writes the record meanwhile; it is
+ * read once more first, and set aside only when it answers the same text again, so one reply damaged on its way is
+ * never taken for a damaged record. True when done; false when it read otherwise or answered in another shape, and
+ * the caller leaves the product unread (its mark): the record is then in its place, or in both places, and the next
+ * recount sets it aside again (each step is the same twice).
+ */
+async function setAside(statsId: string, productId: string, damaged: [string, string][]): Promise<boolean> {
+  const again = repliesFor(await redisPipeline([["HMGET", productKey(statsId, productId), ...damaged.map(([id]) => id)]]), 1);
+  const same = again ? repliesFor(again[0], damaged.length) : null;
+  if (!same || same.some((raw, i) => raw !== damaged[i][1])) return false;
+  const aside: (string | number)[][] = damaged.map(([id, raw]) => ["SET", badKey(statsId, productId, id), raw, "EX", REVIEW_QUARANTINE_DAYS * 86_400]);
+  if (!exactWriteReplies(await redisPipeline(aside), aside)) return false;
+  const ids = damaged.map(([id]) => id);
+  const members = ids.map((id) => `${productId}|${id}`);
+  const out: (string | number)[][] = [
+    ["HDEL", productKey(statsId, productId), ...ids],
+    ["ZREM", visibleKey(statsId, productId), ...ids],
+    ["ZREM", allKey(statsId), ...members],
+    ["ZREM", newKey(statsId), ...members],
+    ...summaryGone(statsId, productId, 0),
+  ];
+  if (!exactWriteReplies(await redisPipeline(out), out)) return false;
+  console.error(`reviews: ${damaged.length} damaged review record(s) of product ${productId} set aside for ${REVIEW_QUARANTINE_DAYS} days (${members.join(", ")}); its numbers are counted from the others`);
+  return true;
 }
 
 /**
  * Counts a product's numbers again from its reviews, and keeps them. Read exactly (CX-123 rule 24): only an exact
  * empty hash is a product with no reviews, whose numbers go. A read lost or in another shape writes nothing: the
- * numbers are never deleted and never counted without a review that did not read; the recount is left for the daily
+ * numbers are never deleted and never counted without a review that did not answer; the recount is left for the daily
  * pass (recountWaiting) or the product's next change ("unsure"), and the log says so. So is a write of the numbers
- * answered in another shape.
+ * answered in another shape. A record that answered as text but does not read as its review (damaged: waiting never
+ * changes it) is set aside first (setAside) and the product counted from the others (owner's decision 11, 9 November
+ * 2026); one that cannot be set aside leaves the recount "unsure", as above.
  * Every caller has already marked the numbers as waiting (numbersPending, in the same request as its change), so what
  * stays meanwhile is that mark (no stars, said as unread), never the numbers from before the change. `mark` is that
  * mark, known before the reviews are read (written by the change, or read by the daily pass): the numbers are written
@@ -410,11 +441,18 @@ function recordsOf(reply: unknown, productId: string): { ids: string[]; reviews:
  */
 async function recount(statsId: string, productId: string, mark: string): Promise<Summary | "unsure"> {
   const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1);
-  const reviews = read ? exactReviews(read[0], productId) : null;
-  if (!reviews) {
+  const records = read ? recordsOf(read[0], productId) : null;
+  if (!records) {
     console.error(`reviews: the numbers of product ${productId} were not counted again (its reviews read in an unknown shape); left waiting for the daily recount or its next change`);
     return "unsure";
   }
+  // A damaged record (text that does not read as its review) never changes by waiting: it is set aside, and the
+  // product is counted from the others (owner's decision 11). Set aside unconfirmed leaves the product unread.
+  if (records.damaged.length && !(await setAside(statsId, productId, records.damaged))) {
+    console.error(`reviews: the damaged review records of product ${productId} could not be set aside (an answer in an unknown shape); its numbers are left waiting`);
+    return "unsure";
+  }
+  const reviews = records.reviews;
   const summary = summarise(reviews);
   const written = repliesFor(
     await redisPipeline([["EVAL", WRITE_NUMBERS_IF, 1, summaryKey(statsId), productId, mark, reviews.length ? JSON.stringify(summary) : ""]]),
@@ -650,10 +688,19 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
   const what = "a buyer's review (its deletion)";
   const result = await locked(statsId, productId, async () => {
     // Read exactly (CX-123 rule 24): only a confirmed absent field is "missing". A reply in another shape throws, so the
-    // review is kept and its deletion is never said as done. A damaged record is deleted (ownRecord).
-    const read = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+    // review is kept and its deletion is never said as done. A damaged record is deleted (ownRecord), in the product's
+    // hash or where a recount set it aside (setAside, owner's decision 11): read in the same request, deleted with it.
+    const read = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id], ["GET", badKey(statsId, productId, id)]]), 2);
     if (!read) throw new UnknownReplyError(what);
+    const aside = ownRecord(read[1], productId, id, what);
     const own = ownRecord(read[0], productId, id, what);
+    if (!own && aside) {
+      // Only the record set aside: it was never counted since, so the numbers stay as they are (counted without it).
+      const drop: (string | number)[][] = [["DEL", badKey(statsId, productId, id)]];
+      if (!exactWriteReplies(await redisPipeline(drop), drop)) throw new UnknownReplyError(what);
+      console.error(`reviews: a damaged review record set aside (${productId}|${id}) was deleted for its buyer; its room stays counted${aside.photo === undefined ? "; its photo could not be found" : ""}`);
+      return { state: "deleted" as const, photo: aside.photo ?? null, photoFound: aside.photo !== undefined, damaged: true, recounted: true };
+    }
     if (!own) return "missing" as const;
     const gone = own.review;
     const mark = newMark();
@@ -667,6 +714,8 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
       ...(!gone ? summaryGone(statsId, productId, 0) : counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
       // Its numbers wait for their recount from the same request: never shown counting the review just deleted.
       numbersPending(statsId, productId, mark),
+      // An older record of the same buyer set aside as damaged goes with it.
+      ...(aside ? [["DEL", badKey(statsId, productId, id)]] : []),
     ];
     // Every reply in its exact shape, or the deletion is unknown: no room given back, and the field is read again
     // (below) before it is said as deleted or thrown.
@@ -1148,9 +1197,16 @@ export async function forgetReviewsPerson(
   // A reply in another shape throws, so the erasure is never said as done while the review (name, words, photo) is
   // still there. A damaged record under the person's own id is theirs (the field is their id): it is erased too,
   // its photo and payment looked for where a record keeps them (ownRecord); another person's record is never read.
-  const raws = wanted.length ? repliesFor(await redisPipeline(wanted.map((p, i) => ["HGET", productKey(statsId, p), ids[i]])), wanted.length) : [];
+  // A record set aside as damaged (setAside, owner's decision 11) is read in the same request, under the key the
+  // person's own id names, and erased the same way when the product's hash has none (deleteOwnReview finds it there).
+  const raws = wanted.length
+    ? repliesFor(await redisPipeline([...wanted.map((p, i) => ["HGET", productKey(statsId, p), ids[i]]), ...wanted.map((p, i) => ["GET", badKey(statsId, p, ids[i])])]), wanted.length * 2)
+    : [];
   if (!raws) throw new UnknownReplyError(what);
-  const found = raws.map((raw, i) => ownRecord(raw, wanted[i], ids[i], what));
+  const found = wanted.map((p, i) => {
+    const aside = ownRecord(raws[wanted.length + i], p, ids[i], what);
+    return ownRecord(raws[i], p, ids[i], what) ?? aside;
+  });
   let records = 0;
   const photos: string[] = [];
   for (let i = 0; i < wanted.length; i += 1) {

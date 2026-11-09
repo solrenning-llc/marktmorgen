@@ -68,7 +68,11 @@ function mangleOnce(matches: (commands: Command[]) => boolean, mangle: (replies:
   }) as typeof redis.pipeline;
 }
 
-const readsReviews = (commands: Command[]) => commands.length > 0 && commands.every((c) => c[0] === "HGET" && String(c[1]).startsWith(`nl:rev:${STATS}:`));
+// Rule 23 (owner's decision 11, 9 November 2026): the read was HGETs of the product's hash only; it now also reads, in
+// the same request, where a recount set the person's damaged record aside (GET nl:rev:bad:...). Same request, same checks.
+const readsReviews = (commands: Command[]) =>
+  commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith(`nl:rev:${STATS}:`)) &&
+  commands.every((c) => (c[0] === "HGET" && String(c[1]).startsWith(`nl:rev:${STATS}:`)) || (c[0] === "GET" && String(c[1]).startsWith(`nl:rev:bad:${STATS}:`)));
 const readsPay = (commands: Command[]) => commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === payKey;
 const writesPay = (commands: Command[]) => commands.length === 1 && (commands[0][0] === "HSET" || commands[0][0] === "HDEL") && commands[0][1] === payKey;
 const deletesReview = (commands: Command[]) => commands.some((c) => c[0] === "HDEL" && String(c[1]).startsWith(`nl:rev:${STATS}:`));

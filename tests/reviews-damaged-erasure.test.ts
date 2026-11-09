@@ -177,8 +177,13 @@ test("another person's damaged record is never touched by this person's erasure"
   const before = { b1: stored(P1, idB1), b2: stored(P2, idB2), payB: pay(PI_B) };
   const { value } = await logged(() => reviews.forgetReviewsPerson(STATS, [P1, P2], A, ROOM));
   assert.deepEqual(value, { records: 2, photos: [] });
-  assert.deepEqual({ b1: stored(P1, idB1), b2: stored(P2, idB2), payB: pay(PI_B) }, before);
-  assert.notEqual(redis.run(["ZSCORE", allKey, `${P1}|${idB1}`]), null, "B's studio entry stays");
+  // Rule 23 (owner's decision 11, 9 November 2026: quarantine and recount): B's damaged record stayed in P1's hash and
+  // in the studio's list, and P1's numbers stayed unread for good. The recount after A's deletion now sets it aside, as
+  // it was (never deleted, never rewritten, never erased with A), out of the lists, and counts P1 from the others.
+  assert.deepEqual({ b2: stored(P2, idB2), payB: pay(PI_B) }, { b2: before.b2, payB: before.payB });
+  assert.equal(stored(P1, idB1), null, "B's damaged record left P1's hash");
+  assert.equal(redis.run(["GET", `nl:rev:bad:${STATS}:${P1}:${idB1}`]), before.b1, "set aside as it was, never deleted or rewritten");
+  assert.equal(redis.run(["ZSCORE", allKey, `${P1}|${idB1}`]), null, "B's studio entry left with it (it no longer reads)");
 });
 
 test("the buyer's own delete of their damaged record: deleted, counted again after, the AI summary goes, no room given back", async () => {
@@ -196,16 +201,20 @@ test("the buyer's own delete of their damaged record: deleted, counted again aft
   assert.equal(await reviews.deleteReview(STATS, P1, idA1, ROOM), "missing");
 });
 
-test("the buyer's own delete when another record of the product is damaged too: deleted, and said as not counted again", async () => {
+// Rule 23 (owner's decision 11, 9 November 2026: quarantine and recount): "said as not counted again" (recounted false)
+// and B's damaged record left in P1's hash. The recount now sets B's record aside, as it was, and counts P1 from C's.
+test("the buyer's own delete when another record of the product is damaged too: deleted, the other set aside, counted again", async () => {
   assert.equal(typeof deleteOwnReview, "function");
   await setup();
   damage(P1, idA1, () => "{not json");
   damage(P1, idB1, () => "{B's record, damaged");
-  const value = await deleteOwnReview!(STATS, P1, idA1, ROOM);
+  const { value } = await logged(() => deleteOwnReview!(STATS, P1, idA1, ROOM));
   assert.equal(typeof value, "object");
-  assert.equal((value as Exclude<Own, string>).recounted, false, "the numbers could not be counted again, and the answer says so");
+  assert.equal((value as Exclude<Own, string>).recounted, true, "counted again from the record that reads");
+  assert.equal(numbers(P1), 1, "C's review alone is counted");
   assert.equal(stored(P1, idA1), null);
-  assert.equal(typeof stored(P1, idB1), "string", "B's damaged record is never touched");
+  assert.equal(stored(P1, idB1), null, "B's damaged record left P1's hash");
+  assert.equal(redis.run(["GET", `nl:rev:bad:${STATS}:${P1}:${idB1}`]), "{B's record, damaged", "set aside as it was, never deleted with A's");
 });
 
 test("a healthy delete answers its photo, found, from the record it deleted", async () => {

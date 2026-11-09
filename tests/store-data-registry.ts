@@ -835,9 +835,13 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rev:stop:@lib/review-requests.ts": { what: "A review ask's stop link: one for each address, the same in every email", parts: [kept(LINK_BYTES, "Review asks go to buyers: one a buyer, kept while they are asked.")] },
   "nl:rev:@lib/reviews.ts": { what: "Reviews and their lists", room: ["lib/reviews.ts", "lib/store.ts"], parts: [kept(MARK, "A payment's reviews, for refunds.")] },
   "nl:rev:all:@lib/reviews.ts": { what: "Every review, for the studio", room: ["lib/reviews.ts"] },
+  // A damaged record set aside by a recount (owner's decision 11, 9 November 2026): the record's own bytes, moved out of
+  // nl:rev:, still counted in the room where the review took them (never given back), gone by itself in 30 days.
+  "nl:rev:bad:@lib/reviews.ts": { what: "A damaged review record set aside, thirty days", room: ["lib/reviews.ts"] },
   "nl:rev:lock:@lib/reviews.ts": short("A product's reviews being written", "buyer", 1, 128),
   "nl:rev:new:@lib/reviews.ts": { what: "Reviews not seen yet", room: ["lib/reviews.ts"] },
   "nl:rev:pay:@lib/reviews.ts": { what: "The reviews a payment paid for", parts: [kept(MARK, "One a payment.")] },
+  "nl:rev:recount:at@lib/reviews.ts": company("Where the daily review recount stopped", "One cursor for every store, eight days (RECOUNT_CURSOR_SECONDS)."),
   "nl:rev:stores@lib/reviews.ts": company("Stores with any review", "One set for every store."),
   "nl:rev:sum:@lib/reviews.ts": { what: "The numbers a product's pages show of its reviews: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:rev:vis:@lib/reviews.ts": { what: "The reviews on a page", room: ["lib/reviews.ts"] },

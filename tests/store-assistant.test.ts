@@ -26,7 +26,7 @@ import { addProduct, claimHandle, ensureStatsId, setAssistant, setAssistantPlan,
 import { readListing } from "@/lib/catalog";
 import { parsePage } from "@/lib/sales-page";
 import { readInbox } from "@/lib/inbox";
-import { ANTHROPIC_RATES, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
+import { AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { assessCustomerWorstCase } from "@/lib/net-margin-rules";
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { CURRENT_COMMERCIAL_TERMS } from "@/lib/commercial-margin";
@@ -271,7 +271,9 @@ async function main(): Promise<void> {
   next = { status: 529 };
   is("a provider error answers nothing", (await askAssistant({ store, text: "Is it a PDF?", facts, now })).ok, false);
   const afterError = await poolOf(store.statsId!, window.id);
-  is("and was not billed: the whole reservation is given back", [afterError.held, afterError.spent, afterError.n], [0, lost.spent, lost.n]);
+  // Rule 23 (9 Nov 2026, second pre-review MEDIUM 3): was [0, lost.spent, lost.n], the whole reservation given back. The
+  // call was made and waited on, so it is settled at its own cost and the message's extra, as an answer is.
+  is("and was not billed: only the call's own cost and the message's extra are spent, the rest given back", [afterError.held, afterError.spent, afterError.n], [0, lost.spent + AI_CALL_INFRA_MICRO_USD + assistantMessageExtraMicroUsd(), lost.n + 1]);
   next = "lost";
   is("a lost connection answers nothing", (await askAssistant({ store, text: "Is it a PDF?", facts, now })).ok, false);
   const afterLost = await poolOf(store.statsId!, window.id);

@@ -48,7 +48,7 @@ One payment of $69 at full use (`assistantMonthWorst()`), all in whole cents rou
 
 Net after 27.5%: **60.40%**. At $49 it kept 59.06%, $0.46 short; the owner set the price instead of cutting the replies or the input a buyer's answer reads (18 October 2026, 11:21: "preço: o que maximiza o meu lucro", docs/value-presentation-2026-10-18.md). $69 is the lowest round price above its floor with room ($65.90); the 39¢ left is too little for a round step in replies, so the 700 stay. So `assistantMeetsFloor()` is true, and the add-on is still not on sale, because `ASSISTANT_ON_SALE` also needs `PLANS_ON_SALE`, which the tax gate and the EU art. 9a gate keep false. Under the most-tax reading (VAT 27% inside the price, US 37%, California 13.3%, Brazil 27.5% and IOF without credit, ISS 5% of revenue) it keeps about 12%: it fails like everything else.
 
-Emails and inbox messages a hand-over makes are taken from the plan's own figures (`inbox`, `store-email` lines of `tests/plan-cost-registry.ts`) and refused past them, so a plan's worst month is unchanged by the add-on. Non-AI requests of the chat (read, delete, hand-over) are public requests of the store's window (`withinStore`).
+Emails and inbox messages a hand-over makes are taken from the plan's own figures (`inbox`, `store-email` lines of `tests/plan-cost-registry.ts`) and refused past them, so a plan's worst month is unchanged by the add-on. Every request of the chat is a public request of the store's window (`withinStore`): a question asked (`ask`, counted before the model is asked), and the non-AI ones (read, delete, hand-over).
 
 The registry line is `ADD_ON_LINES` → `store-assistant` in `tests/plan-cost-registry.ts`; `OPEN` stays `[]`. The terms are bound into `CURRENT_COMMERCIAL_TERMS.storeAssistant` (schema 19), so any change invalidates an earlier review.
 
@@ -56,9 +56,10 @@ The registry line is `ADD_ON_LINES` → `store-assistant` in `tests/plan-cost-re
 
 `nl:assist:pool:<statsId>:<add-on period start>` holds the month in micro-USD (`ASSISTANT_POOL`, one Lua script, real-Redis test `scripts/test_assistant_pool_redis.py`):
 
-- `reserve` this request's own worst cost before the fetch; refused (0) when the pool cannot hold it → the chat becomes the creator form, no AI cost;
-- `settle` at what the model billed (its `usage` token counts at the same rates and allowance, plus the fixed parts), giving back the rest;
-- `release` whole when the provider answered with an error status (not billed); a timeout or lost connection may have been billed, so it is settled at the full hold;
+- `reserve` a message's worst cost (`assistantMessageWorstMicroUsd`: the model at every cap and the message's own reads, writes and keeping) before anything of the store's products or pages is read; refused (0) when the pool cannot hold it → the chat becomes the creator form, with no catalog read and no AI cost;
+- the reads are paid from that reservation: a message stopped before the model (its request too large, or the catalog read failing) is settled at the message's extra (`assistantMessageExtraMicroUsd`), and given back whole only when the facts were read by the caller;
+- `settle` at what the model billed (its `usage` token counts at the same rates and allowance, plus the call's own cost `AI_CALL_INFRA_MICRO_USD` and the message's extra), giving back the rest;
+- when the provider answered with an error status (not billed), the call was still made and waited on: settled at the call's own cost and the message's extra, as an answer is, the rest given back; a timeout or lost connection may have been billed, so it is settled at the full hold;
 - the cap a month opened with is kept and only ever lowered; the key expires 40 days after it opened.
 
 The window is the add-on's own paid month (`assistantWindow`), with the same two-day renewal grace as `lib/allowance-window.ts`; unknown is closed. Only `status: active` answers (no grace for an unpaid month of AI). Burst limits: 10 per visitor in 10 minutes, 40 a day, 20 per store a minute.

@@ -21,7 +21,7 @@
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
-import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
+import { AI_CALL_INFRA_MICRO_USD, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { modelKeySet, postToModel } from "@/lib/ai";
 import { deliveryWords, priceWords } from "@/lib/answers";
 import { readListings, visibleIds } from "@/lib/catalog";
@@ -380,9 +380,11 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
 
   const answered = await postToModel(request.body, ASSISTANT_TIMEOUT_MS);
   if (!answered.ok) {
-    // Refused with an error status: the model billed nothing, but the reads were made. Otherwise it may have billed: kept.
-    if (answered.billed) await pool("settle", statsId, window.id, hold, hold);
-    else await readOnly();
+    // Refused with an error status: the model billed nothing, but the call was made and waited on and the reads were
+    // made, so both are spent as a settled answer's are (its own cost and the message's extra). Otherwise it may have
+    // billed: kept whole (second pre-review of 9 November 2026, MEDIUM 3).
+    const spent = answered.billed ? hold : Math.min(hold, AI_CALL_INFRA_MICRO_USD + assistantMessageExtraMicroUsd());
+    await pool("settle", statsId, window.id, hold, spent);
     return { ok: false, reason: "failed" };
   }
   const settled = Math.min(hold, assistantSettledMicroUsd(answered.data.usage));

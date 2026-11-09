@@ -288,6 +288,25 @@ const remiseAsDiscount = (elision: string) =>
   ")(?!\\p{L}))";
 const REMISE_AS_DISCOUNT = remiseAsDiscount("de l['’](?: )?");
 const REMISE_AS_DISCOUNT_JOINED = remiseAsDiscount("de l(?:['’](?: )?)?");
+/**
+ * Money near a word, in the same sentence, folded: a currency sign, a
+ * percentage, or a word of price, cost, payment or money in a store
+ * language. "Double", "save" and "cheaper" are a deal only there ("double
+ * your money", "save $20"), never in "double the recipe", "saving the dough"
+ * or "cheaper than buying bread" (second pre-review of 9 November 2026).
+ * Written with no space, so termSource leaves it as it is; each term
+ * wrapped has no choice at its top, so its anchor is still read (anchorOf).
+ */
+const MONEY_CUE =
+  "(?:\\p{Sc}|\\d\\s?%|(?<!\\p{L})(?:prices?|pricing|priced|costs?|costing|pay|pays|paying|paid|payments?|money|discounts?|deals?|dollars?|euros?|bucks|fees?|budget|spend|spending|cash|percent|earnings?|income|profits?|revenue|investment|precios?|costes?|costos?|pagar|pago|dinero|descuentos?|prix|couts?|payer|argent|preis|preise|preisen|kosten|zahlen|geld|prezz[oi]|soldi|denaro|pagare|prijs|prijzen|betalen|preco|precos|custos?|dinheiro|reais)(?!\\p{L}))";
+const aboutMoney = (term: string) => `(?:(?<=${MONEY_CUE}[^.!?\\n]{0,80})|(?=[^.!?\\n]{0,80}${MONEY_CUE}))${term}`;
+/** Things a recipe, a course or a file is free of ("sugar free", "ad free"): there, "free" is no price. */
+const FREE_OF = [
+  "sugar", "gluten", "dairy", "nut", "egg", "fat", "lactose", "soy", "grain", "wheat", "caffeine", "alcohol", "stress", "hassle", "worry", "ad",
+  "hand", "cruelty", "plastic", "waste", "chemical", "toxin", "salt", "meat", "carb", "distraction", "clutter", "jargon", "error", "pain",
+  "guilt", "mess", "bpa", "scent", "fragrance", "oil", "yeast", "knead", "allergen", "preservative", "additive", "paraben", "sulfate", "spam",
+  "noise", "smoke", "latex", "sodium", "calorie", "drama", "tracking", "corn", "peanut", "fish", "shellfish", "animal", "bug", "lag", "screen",
+].join("|");
 const DEAL_TERMS = [
   // English
   "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|u?v\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
@@ -317,26 +336,31 @@ const DEAL_TERMS = [
   // (audit ALTO 1: "half price", "free today" and "double their savings" were shown). Each term's longest run of
   // letters is one it cannot match without (anchorOf), so its quick check never skips it; a term the facts hold is allowed.
   // English
-  "free(?<![\\p{L}\\p{N}][\\-\\u2010\\u2011]free)(?<!feel free)(?! to )", "complimentary", "no charge", "no extra cost", "at no cost", "half[- ]?price",
-  "half[- ]?off", "bonus(?:es)?", "doubl(?:e|es|ed|ing)(?![- ]?(?:check|click|tap)\\p{L}*)", "tripl(?:e|es|ed|ing)", "twice (?:as|the|your|their)",
-  "save up to", "save over", "save more", "save money", "save big", "save on", "savings?", "cheap(?:er|est)", "lowest price", "special (?:offers?|prices?|deals?)",
+  // "Free" as a price; not "sugar-free" nor "sugar free", "feel free", "free time", "free of additives", "free to", "free from".
+  `free(?<![\\p{L}\\p{N}][\\-\\u2010\\u2011]free)(?<!feel free)(?<!(?<!\\p{L})(?:${FREE_OF})s?\\s+free)(?!\\s+(?:time|of(?!\\s+(?:any\\s+)?(?:charge|cost|payment))|from|to|will|hand|throw|kick|style|form|range|spirit|speech|play|period|verse)(?!\\p{L}))`,
+  "complimentary", "no charge", "no extra cost", "at no cost", "half[- ]?price",
+  "half[- ]?off", "bonus(?:es)?", aboutMoney("doubl(?:e|es|ed|ing)(?![- ]?(?:check|click|tap)\\p{L}*)"), aboutMoney("tripl(?:e|es|ed|ing)"),
+  aboutMoney("twice (?:as|the|your|their)"), "half (?:(?:of )?the )?(?:usual |normal |regular |original |full |list |retail |standard )?(?:price|cost)s?",
+  "(?:a )?fraction of the (?:usual |normal |regular |original |full )?(?:price|cost)",
+  "\\d+[/\\u2044]\\d+ (?:(?:of )?the )?(?:usual |normal |regular |original |full )?(?:price|cost|off)", "save up to", "save money", "save big", "savings",
+  aboutMoney("sav(?:e|es|ed|ing)"), aboutMoney("cheap(?:er|est)"), "lowest price", "special (?:offers?|prices?|deals?)",
   "flash sales?", "clearance", "bogo", "buy one get one", "limited offers?", "limited editions?", "limited spots", "limited seats", "limited places",
   "limited stock", "limited availability", "limited supply", "few left", "only one left", "almost gone", "selling out", "while supplies last",
   "while stocks? lasts?", "while (?:it|they) lasts?", "before it'?s gone", "now or never", "price (?:goes|will go) up", "won't last",
   // Spanish
   "gratis", "gratuit(?:o|a|os|as|amente)", "sin costo", "sin coste", "sin cargo", "mitad de precio", "medio precio", "bonificacion(?:es)?",
-  "de regalo", "ahorr\\p{L}*", "el doble", "doble de", "ofertas? especial(?:es)?", "por tiempo limitado", "quedan pocos?", "pocas unidades",
+  "de regalo", aboutMoney("ahorr\\p{L}*"), aboutMoney("el doble"), aboutMoney("doble de"), "(?:la )?mitad del (?:precio|coste|costo)", "ofertas? especial(?:es)?", "por tiempo limitado", "quedan pocos?", "pocas unidades",
   // French
-  "gratuit\\p{L}*", "moitie prix", "en cadeau", "economis\\p{L}*", "le double", "offres? speciales?", "prix special", "duree limitee", "stock limite",
+  "gratuit\\p{L}*", "moitie prix", "en cadeau", aboutMoney("economis\\p{L}*"), aboutMoney("le double"), "(?:la )?moitie du prix", "offres? speciales?", "prix special", "duree limitee", "stock limite",
   // German
-  "kostenlos\\p{L}*", "umsonst", "halbe[nr]? preis\\p{L}*", "geschenkt", "spar(?:en|e|st|t)", "verdopp\\p{L}*", "doppelt so", "sonderpreis\\p{L}*",
+  "kostenlos\\p{L}*", "umsonst", "halbe[nr]? preis\\p{L}*", "geschenkt", aboutMoney("spar(?:en|e|st|t)"), aboutMoney("verdopp\\p{L}*"), aboutMoney("doppelt so"), "(?:die )?halfte des preises", "sonderpreis\\p{L}*",
   "nur fur kurze zeit", "begrenzt\\p{L}*",
   // Italian
-  "omaggio", "in regalo", "meta prezzo", "risparmi\\p{L}*", "il doppio", "raddoppi\\p{L}*", "prezzo speciale", "offerta speciale", "tempo limitato",
+  "omaggio", "in regalo", "meta prezzo", aboutMoney("risparmi\\p{L}*"), aboutMoney("il doppio"), aboutMoney("raddoppi\\p{L}*"), "(?:la )?meta del prezzo", "prezzo speciale", "offerta speciale", "tempo limitato",
   // Dutch
-  "kosteloos", "halve prijs", "voor de helft", "bespaar\\p{L}*", "besparing\\p{L}*", "verdubbel\\p{L}*", "speciale prijs", "beperkte tijd", "op is op",
+  "kosteloos", "halve prijs", "voor de helft", aboutMoney("bespaar\\p{L}*"), aboutMoney("besparing\\p{L}*"), aboutMoney("verdubbel\\p{L}*"), "(?:de )?helft van de prijs", "speciale prijs", "beperkte tijd", "op is op",
   // Portuguese
-  "sem custo", "metade do preco", "meio preco", "brindes?", "de presente", "economiz\\p{L}*", "o dobro", "dobr(?:a|am|ar|e|ou)", "preco especial",
+  "sem custo", "metade do preco", "meio preco", "brindes?", "de presente", aboutMoney("economiz\\p{L}*"), aboutMoney("o dobro"), aboutMoney("dobr(?:a|am|ar|e|ou)"), "(?:a )?metade do preco", "preco especial",
 ].filter((term, i, all) => all.indexOf(term) === i);
 /** Between the words of a term: any run of spaces (a line break, a no-break space) or a hyphen of any kind. */
 const BETWEEN = "[\\s\\-\\u2010-\\u2015]+";
@@ -433,6 +457,34 @@ const TERMS_TERMS = [
 ].filter((term, i, all) => all.indexOf(term) === i);
 const TERMS_WORDS = new RegExp(`${WORD_EDGE_BEFORE}(?:${TERMS_TERMS.map(termSource).join("|")})${WORD_EDGE_AFTER}`, "u");
 /**
+ * Words that multiply the number before them, or stand for it alone: a
+ * dozen, a million, a billion and the collective counts ("une centaine",
+ * "un millier", "decenas"), folded, in the seven store languages. A plural
+ * alone ("millions", "dozens", "centinaia") is a count no fact can hold
+ * (INDEFINITE_COUNTS).
+ */
+const COUNT_MULTIPLIERS: Record<string, number> = {
+  dozen: 12, dozens: 12, docena: 12, docenas: 12, douzaine: 12, douzaines: 12, dutzend: 12, dutzende: 12, dozzina: 12, dozzine: 12,
+  dozijn: 12, dozijnen: 12, duzia: 12, duzias: 12,
+  dizaine: 10, dizaines: 10, decena: 10, decenas: 10, decina: 10, decine: 10, dezena: 10, dezenas: 10, tiental: 10, tientallen: 10,
+  centaine: 100, centaines: 100, centenar: 100, centenares: 100, centinaio: 100, centinaia: 100, centena: 100, centenas: 100,
+  hunderte: 100, honderden: 100,
+  millier: 1_000, milliers: 1_000, millar: 1_000, millares: 1_000, miles: 1_000, migliaio: 1_000, migliaia: 1_000, milhar: 1_000,
+  milhares: 1_000, tausende: 1_000, duizenden: 1_000,
+  million: 1_000_000, millions: 1_000_000, millionen: 1_000_000, millon: 1_000_000, millones: 1_000_000, milione: 1_000_000,
+  milioni: 1_000_000, miljoen: 1_000_000, miljoenen: 1_000_000, milhao: 1_000_000, milhoes: 1_000_000, mio: 1_000_000,
+  billion: 1_000_000_000, billions: 1_000_000_000, milliard: 1_000_000_000, milliarde: 1_000_000_000, milliarden: 1_000_000_000,
+  milliards: 1_000_000_000, miliardo: 1_000_000_000, miliardi: 1_000_000_000, miljard: 1_000_000_000, miljarden: 1_000_000_000,
+  bilhao: 1_000_000_000, bilhoes: 1_000_000_000, mrd: 1_000_000_000,
+};
+/** Plurals that say "many" rather than a number: alone, a count no fact holds. */
+const INDEFINITE_COUNTS = new Set([
+  "hundreds", "thousands", "millions", "billions", "dozens", "docenas", "douzaines", "dutzende", "dozzine", "dozijnen", "duzias",
+  "dizaines", "decenas", "decine", "dezenas", "tientallen", "centaines", "centenares", "centinaia", "centenas", "hunderte", "honderden",
+  "milliers", "millares", "miles", "migliaia", "milhares", "tausende", "duizenden", "millionen", "millones", "milioni", "miljoenen",
+  "milhoes", "milliarden", "milliards", "miliardi", "miljarden", "bilhoes", "cientos", "milles",
+]);
+/**
  * Numbers written as words, folded, in the seven store languages: every
  * word from one to nineteen, every ten, a hundred and a thousand, and the
  * pieces a language glues into one word ("dieci" in "diciassette", "vent" in
@@ -444,7 +496,7 @@ const TERMS_WORDS = new RegExp(`${WORD_EDGE_BEFORE}(?:${TERMS_TERMS.map(termSour
  * count only inside such a number, never alone, so "a week of dinners" is no
  * deadline.
  */
-const NUMBER_PIECES = [
+const NUMBER_PIECES: string[] = [
   // English
   "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
   "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fourty", "fifty", "sixty", "seventy", "eighty", "ninety",
@@ -470,6 +522,9 @@ const NUMBER_PIECES = [
   "dois", "duas", "quatro", "sete", "oito", "dez", "onze", "doze", "treze", "catorze", "dezesseis", "dezasseis", "dezessete", "dezassete",
   "dezoito", "dezenove", "dezanove", "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta", "oitenta", "noventa",
   "cem", "cento", "duzentos", "duzentas", "trezentos", "trezentas", "quinhentos", "quinhentas",
+  // Dozens, millions and billions, and the collective counts, in every store language (second pre-review of 9 November 2026:
+  // "a million students", "a dozen lessons" and "dozens of bakers" were shown)
+  ...Object.keys({ ...COUNT_MULTIPLIERS }),
 ].filter((word, i, all) => all.indexOf(word) === i);
 /** The articles that are also the number one: a number only joined to another piece ("treinta y un", "einundzwanzig"). */
 const NUMBER_ARTICLES = ["un", "une", "una", "ein", "eine", "een", "um", "uma"];
@@ -522,12 +577,36 @@ export function speaksOfTerms(text: string): boolean {
   return [folded, hyphenJoined(folded), foldedText(text, "l"), foldedText(text, "i")].some((reading) => TERMS_WORDS.test(reading) || DURATION.test(reading));
 }
 
-const NUMBERS = /\d+(?:[.,]\d+)*/g;
-/** A number as digits, and without decimals that are all zeros: "$27.00" and "$27" are the same price. */
+/**
+ * A number in digits: its groups and decimals, a fraction with the fraction
+ * slash ("½" is "1⁄2" folded; "lessons 1/2" are two lessons), and a "k" or
+ * "m" glued after it ("10k", "1.5m").
+ */
+const NUMBERS = /\d+(?:[.,]\d+)*(?:\u2044\d+(?:[.,]\d+)*)?(?:[km](?![\p{L}\p{N}]))?/gu;
+/**
+ * A number in digits as its value, written one way: a separator followed by
+ * exactly three digits groups thousands ("1,000", "10.000"), any other is
+ * the decimal point ("4.9", "4,9"), decimals that are all zeros are dropped
+ * ("$27.00" is "$27"). So "4.9" is never the price 49 (second pre-review of
+ * 9 November 2026: the digits were glued).
+ */
+function decimalForm(n: string): string {
+  const parts = n.split(/[.,]/);
+  const decimals = parts.length > 1 && parts.at(-1)!.length !== 3 ? parts.pop()! : "";
+  const whole = parts.join("").replace(/^0+(?=\d)/, "");
+  const fraction = decimals.replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+/** The value of a number in digits (NUMBERS): a fraction as "a/b", a "k" or "m" multiplied out; "?" when it cannot be. */
 function numberForms(n: string): string[] {
-  const digits = n.replace(/[.,]/g, "");
-  const whole = /^(.*)[.,]0{1,2}$/.exec(n);
-  return whole ? [digits, whole[1].replace(/[.,]/g, "")] : [digits];
+  const scale = n.endsWith("k") ? 1_000 : n.endsWith("m") ? 1_000_000 : 1;
+  const digits = scale === 1 ? n : n.slice(0, -1);
+  const [top, bottom] = digits.split("\u2044");
+  if (bottom !== undefined) return [`${decimalForm(top)}/${decimalForm(bottom)}`];
+  const value = decimalForm(top);
+  if (scale === 1) return [value];
+  const scaled = Number(value) * scale;
+  return [Number.isFinite(scaled) ? String(Math.round(scaled * 1_000) / 1_000) : "?"];
 }
 /**
  * What each number word is worth, folded, in the seven store languages: a
@@ -567,14 +646,17 @@ const PIECE_VALUES: Record<string, number> = {
 const MULTIPLIERS: Record<string, number> = {
   hundred: 100, hundreds: 100, ciento: 100, cientos: 100, cent: 100, cents: 100, hundert: 100, cento: 100, honderd: 100,
   thousand: 1_000, thousands: 1_000, mil: 1_000, mille: 1_000, milles: 1_000, tausend: 1_000, mila: 1_000, duizend: 1_000,
+  ...COUNT_MULTIPLIERS,
 };
 /**
  * Pieces that are also a common word of another store language ("once" in
  * English, "due" and "sei" in English and Italian, "neuf" for new, "cent" in
  * "per cent"): a figure only inside a number of several pieces or next to a
- * unit (a price, a period, a percentage), never alone.
+ * unit (a price, a period, a percentage), never alone. "Mille" is also the
+ * French "mille mercis" (a thousand thanks), "mio" the Italian "my", "miles" the
+ * English distance.
  */
-const AMBIGUOUS_PIECES = new Set(["once", "due", "sei", "neuf", "cent", "cents", "vent"]);
+const AMBIGUOUS_PIECES = new Set(["once", "due", "sei", "neuf", "cent", "cents", "vent", "mille", "mio", "miles"]);
 /** Every word a number in words is made of, longest first, and the joins between them. */
 const NUMBER_TOKENS = [...new Set([...Object.keys(PIECE_VALUES), ...Object.keys(MULTIPLIERS), ...NUMBER_JOINS])].sort((a, b) => b.length - a.length);
 /** The number words a piece of folded text is made of, in order, joins and separators left out; null when they cannot be told apart. */
@@ -596,16 +678,19 @@ function numberTokens(text: string, from = 0, tried = new Map<number, string[] |
 }
 /**
  * The value of a number in words, as one figure, or null when it cannot be
- * read: pieces are added, a hundred multiplies what comes before it, a
- * thousand closes a group ("deux mille trois cents" is 2,300), and the
- * French "quatre-vingt" is four twenties.
+ * read: pieces are added, a dozen or a hundred multiplies what comes before
+ * it, a thousand or a million closes a group ("deux mille trois cents" is
+ * 2,300), and the French "quatre-vingt" is four twenties.
  */
 function numberValue(tokens: string[]): number | null {
+  // "Millions", "dozens" alone: many, not a number any fact can hold.
+  if (tokens.length === 1 && INDEFINITE_COUNTS.has(tokens[0])) return null;
   let total = 0, current = 0;
   tokens.forEach((token, i) => {
     const multiplier = MULTIPLIERS[token];
-    if (multiplier === 100) current = (current || 1) * 100;
-    else if (multiplier === 1_000) { total += (current || 1) * 1_000; current = 0; }
+    // A dozen or a hundred multiplies what comes before it; a thousand or a million closes a group.
+    if (multiplier !== undefined && multiplier < 1_000) current = (current || 1) * multiplier;
+    else if (multiplier !== undefined) { total += (current || 1) * multiplier; current = 0; }
     else if ((token === "vingt" || token === "vingts") && tokens[i - 1] === "quatre") current += 80 - 4;
     else current += PIECE_VALUES[token] ?? Number.NaN;
   });
@@ -613,9 +698,31 @@ function numberValue(tokens: string[]): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 const NUMBER_WORDS_FOUND = new RegExp(`${WORD_EDGE_BEFORE}${NUMBER_WORD}${WORD_EDGE_AFTER}`, "gu");
-/** A figure's unit, read from the words around it: money, a percentage, a unit of time, or none ("plain"). */
-const MONEY_BEFORE = /(?:\p{Sc}|(?<![\p{L}\p{N}])(?:usd|eur|gbp|brl|chf|cad|aud))\s?$/u;
-const MONEY_AFTER = /^\s?(?:\p{Sc}|(?:dollars?|bucks|usd|euros?|eur|pounds?|gbp|reais|real|brl|francs?|chf|cad|aud|dolares|dolar|pfund|sterlin[ae]|centavos?|centimos?|centimes?|cents?)(?![\p{L}\p{N}]))/u;
+/**
+ * A figure's unit, read from the words around it: money in a currency
+ * ("money:dollar", "money:cent", "money:euro"...), a percentage, a unit of
+ * time, or none ("plain"). Money is told apart by its currency and its
+ * scale, so "49 cents" or "forty-nine euros" is never the store's "$49"
+ * (second pre-review of 9 November 2026: only "money" was compared).
+ */
+const CURRENCY_WORDS: [string, RegExp][] = [
+  ["cent", /^(?:cents?|centavos?|centimos?|centimes?|centesimi|centesimo|penny|pennies|pence)(?![\p{L}\p{N}])/u],
+  ["dollar", /^(?:dollars?|dollari|dollaro|bucks|usd|cad|aud|dolares|dolar)(?![\p{L}\p{N}])/u],
+  ["euro", /^(?:euros?|eur)(?![\p{L}\p{N}])/u],
+  ["pound", /^(?:pounds?|gbp|pfund|sterlin[ae]|sterling|libras?)(?![\p{L}\p{N}])/u],
+  ["real", /^(?:reais|real|brl)(?![\p{L}\p{N}])/u],
+  ["franc", /^(?:francs?|franken|franchi|franco|chf)(?![\p{L}\p{N}])/u],
+];
+const SIGNS: Record<string, string> = { $: "dollar", "\u00a2": "cent", "\u20ac": "euro", "\u00a3": "pound" };
+/** The currency a sign or a word names, or null. */
+function currencyOf(text: string, signBefore = ""): string | null {
+  const sign = /^\p{Sc}/u.exec(text)?.[0];
+  if (sign) return sign === "$" && /r$/.test(signBefore) ? "real" : SIGNS[sign] ?? sign;
+  for (const [currency, find] of CURRENCY_WORDS) if (find.test(text)) return currency;
+  return null;
+}
+const MONEY_BEFORE = /(?:(\p{Sc})|(?<![\p{L}\p{N}])(usd|eur|gbp|brl|chf|cad|aud))\s?$/u;
+const MONEY_AFTER = /^\s?(\p{Sc}|\p{L}+)/u;
 const PERCENT_AFTER = /^\s?(?:%|(?:percent|per[\s-]?cent|por[\s-]?ciento|pour[\s-]?cent|prozent|per[\s-]?cento|procent|por[\s-]?cento|pct)(?![\p{L}\p{N}]))/u;
 /** Units of time (TIME_UNITS) by what they measure, so "14 days" is never "14 weeks". */
 const TIME_KINDS: [string, RegExp][] = [
@@ -627,9 +734,15 @@ const TIME_KINDS: [string, RegExp][] = [
   ["minute", /^(?:minutes?|minutos?|minuten?|minuti|minuut)(?![\p{L}\p{N}])/u],
 ];
 function figureKind(folded: string, start: number, end: number): string {
-  if (MONEY_BEFORE.test(folded.slice(Math.max(0, start - 5), start))) return "money";
+  const before = MONEY_BEFORE.exec(folded.slice(Math.max(0, start - 6), start));
+  if (before) {
+    const ahead = folded.slice(0, start - before[0].length);
+    return `money:${before[1] ? currencyOf(before[1], ahead) : currencyOf(before[2])}`;
+  }
   const after = folded.slice(end, end + 24);
-  if (MONEY_AFTER.test(after)) return "money";
+  const word = MONEY_AFTER.exec(after);
+  const currency = word && currencyOf(word[1]);
+  if (currency) return `money:${currency}`;
   if (PERCENT_AFTER.test(after)) return "percent";
   const unit = after.replace(/^[\s\-\u2010-\u2015]+/u, "");
   for (const [kind, find] of TIME_KINDS) if (find.test(unit)) return kind;
@@ -664,9 +777,39 @@ function figuresIn(folded: string): Figure[] {
   }
   return figures;
 }
-/** Whether a text writes a figure, in digits or in words of any store language (the reminder's line may write none). */
+/**
+ * A Roman numeral of two letters or more, in capitals ("XII", "IV"), as a
+ * whole word: a count the facts must hold like any other. Capitals that are
+ * words or abbreviations ("CV", "DC", "MIX", "XL") are not read as one.
+ */
+const ROMAN = /(?<![\p{L}\p{N}])(?=[MDCLXVI]{2,}(?![\p{L}\p{N}]))M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})(?![\p{L}\p{N}])/gu;
+const NOT_ROMAN = new Set(["CV", "CD", "DC", "MD", "CC", "MC", "CL", "ML", "DL", "XL", "XXL", "XXXL", "MM", "MIX", "MI", "CI", "LI", "DI", "DIV", "VC", "IC", "CM", "LCD", "DVD", "CIV", "MIL", "MDC"]);
+const ROMAN_VALUES: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1_000 };
+function romanValue(numeral: string): number {
+  let total = 0;
+  for (let i = 0; i < numeral.length; i += 1) {
+    const value = ROMAN_VALUES[numeral[i]], next = ROMAN_VALUES[numeral[i + 1]] ?? 0;
+    total += value < next ? -value : value;
+  }
+  return total;
+}
+/** The French "très" (very), with its accent: never the Spanish "tres" (three) it folds to. */
+const TRES = /(?<!\p{L})tr[\u00e8\u00c8]s(?!\p{L})/giu;
+/** Every figure a text writes: in digits, in words of a store language (figuresIn) and in Roman numerals. */
+function figuresOf(text: string): Figure[] {
+  const plain = text.normalize("NFC").replace(TRES, "very").normalize("NFKC");
+  const folded = foldedText(plain);
+  const figures = figuresIn(folded);
+  const lower = plain.toLowerCase();
+  for (const m of plain.matchAll(ROMAN)) {
+    if (!m[0] || NOT_ROMAN.has(m[0])) continue;
+    figures.push({ forms: [String(romanValue(m[0]))], kind: lower.length === plain.length ? figureKind(lower, m.index, m.index + m[0].length) : "plain" });
+  }
+  return figures;
+}
+/** Whether a text writes a figure, in digits, in words of any store language or in Roman numerals (the reminder's line may write none). */
 export function writesAFigure(text: string): boolean {
-  return figuresIn(foldedText(text)).length > 0;
+  return figuresOf(text).length > 0;
 }
 const LINK = /\b(?:https?:\/\/|www\.)\S+/i;
 
@@ -919,6 +1062,74 @@ const sitesIn = (text: string) => {
 };
 
 /**
+ * The short words every sentence of a store language is built of (articles,
+ * prepositions, pronouns, "is", "yes"), folded: a reply with several words
+ * of its own and almost none of these is not in a language the store speaks,
+ * and its numbers cannot be read (second pre-review of 9 November 2026:
+ * "Kursen kostar femtio dollar" was shown for a $49 course).
+ */
+const STORE_LANGUAGE_WORDS = new Set([
+  // English
+  "the", "a", "an", "and", "or", "is", "are", "was", "it", "its", "to", "of", "in", "on", "for", "with", "you", "your", "this", "that", "yes",
+  "no", "can", "will", "be", "as", "at", "by", "from", "has", "have", "not", "i", "we", "our", "they", "there", "here", "what", "which", "how",
+  "if", "all", "any", "each", "after", "before", "do", "does", "my", "me", "so", "but", "also", "just", "only", "more", "about", "into",
+  // Spanish
+  "el", "la", "los", "las", "un", "una", "y", "o", "es", "son", "de", "del", "en", "con", "por", "para", "que", "se", "su", "sus", "si",
+  "al", "lo", "como", "mas", "muy", "tiene", "hay", "este", "esta", "puede", "puedes", "usted", "pero", "tambien", "cuando", "donde", "sin", "sobre",
+  "entre", "hasta", "desde", "ya", "le", "les", "mi", "tu", "te", "nos", "yo",
+  // French
+  "le", "les", "une", "des", "du", "et", "ou", "est", "sont", "dans", "pour", "avec", "sur", "qui", "il", "elle", "vous", "votre", "vos",
+  "ce", "cette", "oui", "non", "pas", "ne", "au", "aux", "tres", "plus", "c", "l", "d", "j", "n", "s", "qu", "mais", "aussi", "par", "sans",
+  "nous", "je", "tu", "on", "ils", "leur", "mon", "ma", "mes", "son", "sa", "ses", "bien", "tout", "tous", "toutes", "peut", "pouvez",
+  // German
+  "der", "die", "das", "den", "dem", "ein", "eine", "einen", "einem", "und", "oder", "ist", "sind", "mit", "fur", "von", "zu", "im",
+  "auf", "sie", "ihr", "ihre", "ihrem", "ihren", "ja", "nein", "nicht", "auch", "sehr", "hat", "haben", "wird", "kann", "konnen", "wie", "was",
+  "aber", "nach", "bei", "aus", "uber", "nur", "noch", "ich", "du", "wir", "es", "sich", "kein", "keine", "alle", "dein", "deine", "ihnen",
+  // Italian
+  "lo", "gli", "uno", "e", "di", "da", "che", "sono", "ha", "hanno", "della", "dei", "delle", "alla", "molto", "anche", "tu", "puoi",
+  "ma", "nel", "nella", "sul", "senza", "tra", "fra", "io", "mi", "ti", "ci", "vi", "suo", "sua", "tuo", "tua", "questo", "questa", "puo",
+  // Dutch
+  "het", "een", "zijn", "van", "op", "met", "voor", "je", "jij", "u", "uw", "nee", "niet", "ook", "er", "dat", "dit", "heeft", "hebben",
+  "kunt", "wordt", "bij", "naar", "te", "als", "maar", "nog", "wel", "zo", "al", "geen", "meer", "wat", "hoe", "waar", "ze", "hij", "zij", "we",
+  "wij", "ik", "mij", "jullie", "deze", "aan", "uit", "over", "door", "tot", "om", "dan",
+  // Portuguese
+  "os", "as", "um", "uma", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas", "com", "sim", "nao", "voce", "seu", "sua", "tem",
+  "sao", "muito", "ao", "pode", "mas", "tambem", "sem", "pelo", "pela", "eu", "ele", "ela", "voces", "este", "esta", "isso", "isto", "meu",
+  "minha", "teu", "tua", "quando", "onde", "ja",
+]);
+/** Scripts read as one ("Pythonコースは初心者向けです" mixes Han and Katakana): a reply may write in a script the facts write in. */
+const SCRIPTS = [
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u, /\p{Script=Hangul}/u, /\p{Script=Cyrillic}/u, /\p{Script=Greek}/u, /\p{Script=Arabic}/u,
+  /\p{Script=Hebrew}/u, /\p{Script=Thai}/u, /\p{Script=Devanagari}/u, /\p{Script=Bengali}/u, /\p{Script=Tamil}/u, /\p{Script=Georgian}/u,
+  /\p{Script=Armenian}/u, /\p{Script=Ethiopic}/u,
+];
+/** A unit a figure is counted in: a currency sign or word, a percentage, a unit of time. */
+const unitWord = (word: string) => CURRENCY_WORDS.some(([, find]) => find.test(word)) || TIME_KINDS.some(([, find]) => find.test(word)) || PERCENT_AFTER.test(word);
+/**
+ * Whether a reply is written in a language the store speaks. A letter of
+ * another script is allowed only where the facts write in that script (a
+ * title in Japanese, a description in Arabic), a letter of a script not
+ * listed only where the facts have it. And a reply in Latin letters that
+ * speaks of money, a percentage or time with four words of its own or more
+ * (not in the facts, not a number, not a short word), or any reply with
+ * eight, has at least one short word of a store language (STORE_LANGUAGE_WORDS)
+ * in seven of those and the short words together. Numbers are read only in
+ * the store's languages, so a price in another one is never shown.
+ */
+function inStoreLanguage(folded: string, factsFolded: string): boolean {
+  for (const letter of new Set(folded.match(/(?:(?!\p{Script=Latin})\p{L})/gu) ?? [])) {
+    const script = SCRIPTS.find((find) => find.test(letter));
+    if (script ? !script.test(factsFolded) : !factsFolded.includes(letter)) return false;
+  }
+  const factWords = new Set(factsFolded.match(/\p{L}+/gu) ?? []);
+  const words = (folded.match(/\p{L}+/gu) ?? []).filter((word) => !(word in PIECE_VALUES) && !(word in MULTIPLIERS));
+  const short = words.filter((word) => STORE_LANGUAGE_WORDS.has(word)).length;
+  const own = words.filter((word) => !STORE_LANGUAGE_WORDS.has(word) && !factWords.has(word)).length;
+  const counted = /[\p{Sc}%]/u.test(folded) || words.some(unitWord);
+  return own < (counted ? 4 : 8) || short * 7 >= short + own;
+}
+
+/**
  * Whether a reply says only what the store published: every number in it
  * (prices, percentages, days, counts) appears in the facts, every deal or
  * pressure word too, and it carries no link, nor an email address or a
@@ -939,6 +1150,7 @@ export function heldToFacts(raw: string, facts: string): boolean {
   // A page cut short may have left out the condition of a promise it tells: then no reply speaks of terms at all.
   if (facts.includes(PAGE_GOES_ON) && speaksOfTerms(raw)) return false;
   const factsFolded = store.folded;
+  if (!inStoreLanguage(folded, factsFolded)) return false;
   const factEmails = new Set(emailsIn(factsFolded));
   for (const email of emailsIn(folded)) {
     if (!factEmails.has(email)) return false;
@@ -950,11 +1162,11 @@ export function heldToFacts(raw: string, facts: string): boolean {
   // Every figure, in digits or in words, is one the facts hold: the same value, and the same unit when the reply gives
   // one, so "14 days" in the facts allows "fourteen days" but never "$14" nor "14 weeks".
   const factFigures = new Map<string, Set<string>>();
-  for (const figure of figuresIn(factsFolded)) {
+  for (const figure of figuresOf(facts)) {
     // A number in words the facts hold but that cannot be read ("?") allows nothing.
     for (const form of figure.forms) if (form !== "?") factFigures.set(form, (factFigures.get(form) ?? new Set<string>()).add(figure.kind));
   }
-  for (const figure of figuresIn(folded)) {
+  for (const figure of figuresOf(raw)) {
     if (!figure.forms.some((form) => { const kinds = factFigures.get(form); return kinds !== undefined && (figure.kind === "plain" || kinds.has(figure.kind)); })) return false;
   }
   const held = dealWordsOf(reply, store);

@@ -160,15 +160,26 @@ export function inboxOrder(list: Conversation[]): Conversation[] {
   return [...list].sort((a, b) => (a.status === b.status ? b.lastAt - a.lastAt : a.status === "open" ? -1 : 1));
 }
 
-/** Common top-level domains: a bare name ending in one, written in small letters ("mysite.com/deal"), is a link; "great.It" starts a sentence. */
-const BARE_SITE = /(?<![\p{L}\p{N}@.\-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|co|app|dev|shop|store|xyz|info|biz|me|ly|link|site|online|top|club|live|page|tech|us|uk|de|fr|es|it|nl|pt|br|eu|ca|au|ch|in|academy|courses|school|email|blog|website|space|digital)(?![\p{L}\p{N}])(?:\/\S*)?/gu;
+/** Common top-level domains: a bare name ending in one, in any case ("mysite.com/deal", "MySite.Com"), is a link. */
+const SITE_TLDS = "com|net|org|io|co|app|dev|shop|store|xyz|info|biz|me|ly|link|site|online|top|club|live|page|tech|us|uk|de|fr|es|it|nl|pt|br|eu|ca|au|ch|in|academy|courses|school|email|blog|website|space|digital";
+const BARE_SITE = new RegExp(`(?<![\\p{L}\\p{N}@.\\-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+(${SITE_TLDS})(?![\\p{L}\\p{N}])(\\/\\S*)?`, "giu");
+/** Top-level domains that are also a word starting a sentence after a dot with no space ("great.It helps", "aula.Eu gostei"). */
+const SENTENCE_TLDS = new Set(["it", "in", "me", "us", "es", "de", "eu", "ca", "au", "co", "top", "live", "page", "site", "online", "space"]);
+/** An address spelled out in words: "jane.doe at example dot com", "jane (at) example [dot] com", with a common top-level domain. */
+const spelled = (words: string) => `(?:\\s+|\\s*[([]\\s*)(?:${words})(?:\\s+|\\s*[)\\]]\\s*)`;
+const SPELLED_EMAIL = new RegExp(
+  `(?<![\\p{L}\\p{N}._%+\\-])[\\p{L}\\p{N}._%+\\-]+${spelled("at|arroba")}[\\p{L}\\p{N}\\-]+(?:${spelled("dot|punto|ponto|point|punkt|punt")}[\\p{L}\\p{N}\\-]+)*?${spelled("dot|punto|ponto|point|punkt|punt")}(?:${SITE_TLDS})(?![\\p{L}\\p{N}])`,
+  "giu",
+);
 
-/** A text as it may go to the writing help: addresses (an at sign of any width), phone numbers and links (a bare domain too) taken out. Pure. */
+/** A text as it may go to the writing help: addresses (an at sign of any width, or spelled out), phone numbers and links (a bare domain too, in any case) taken out. Pure. */
 export function forAi(value: string, max = MAX_MESSAGE): string {
   return value
     .replace(/[^\s@\uFF20\uFE6B]+[@\uFF20\uFE6B][^\s@\uFF20\uFE6B]+[.\uFF0E\u3002][^\s@\uFF20\uFE6B]+/g, "[email]")
+    .replace(SPELLED_EMAIL, "[email]")
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
-    .replace(BARE_SITE, "[link]")
+    // "great.It helps": a capitalized word after a dot, with no path, starts a sentence.
+    .replace(BARE_SITE, (site: string, tld: string, path: string | undefined) => (!path && /^[A-Z][a-z]+$/.test(tld) && SENTENCE_TLDS.has(tld.toLowerCase()) ? site : "[link]"))
     .replace(/\+?\d[\d\s().-]{7,}\d/g, "[number]")
     .slice(0, max);
 }

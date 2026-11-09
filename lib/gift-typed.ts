@@ -1,12 +1,13 @@
 /**
- * What a buyer typed into a product page's gift form, kept in their own
- * browser tab while the server checks it, so a refusal never makes them type
- * it again (WCAG 3.3.7; audit 21, MEDIUM D). The form posts to
- * app/api/store/checkout/route.ts, which either opens Stripe's page or sends
- * the buyer back with `?gift=<reason>#gift`; the page is then drawn anew, so
- * without this every field came back empty.
+ * What a buyer typed into a product page's gift form, or its form to buy for
+ * several people, kept in their own browser tab while the server checks it,
+ * so a refusal never makes them type it again (WCAG 3.3.7; audit 21, MEDIUM
+ * D). Both forms post to app/api/store/checkout/route.ts, which either opens
+ * Stripe's page or sends the buyer back with `?gift=<reason>#gift` or
+ * `?group=<reason>#group`; the page is then drawn anew, so without this every
+ * field came back empty.
  *
- * Kept in the tab's sessionStorage only, under one key per store and product,
+ * Kept in the tab's sessionStorage only, under one key per form, store and product,
  * never used after GIFT_TYPED_KEEP_MS, removed as soon as it is read back and
  * whenever the page opens with no refusal to answer. A browser may give a
  * reopened tab its storage back, so closing the tab is not counted on: every
@@ -22,8 +23,16 @@ export const GIFT_TYPED_FIELDS = ["option", "gift_to", "gift_from", "gift_messag
 export type GiftTypedField = (typeof GIFT_TYPED_FIELDS)[number];
 export type GiftTyped = Record<GiftTypedField, string>;
 
-/** At most what each field itself takes (components/store-product.tsx, EmailField's 254). */
-const CAPS: Record<GiftTypedField, number> = { option: 64, gift_to: 254, gift_from: 60, gift_message: 500 };
+/** The group form's own fields (GroupBox): which option, and how many people. */
+export const GROUP_TYPED_FIELDS = ["option", "people"] as const;
+export type GroupTypedField = (typeof GROUP_TYPED_FIELDS)[number];
+export type GroupTyped = Record<GroupTypedField, string>;
+
+/**
+ * At most what each field itself takes (components/store-product.tsx, EmailField's 254), or, for how many people,
+ * what the route reads of it (app/api/store/checkout/route.ts, `read("people", 12)`).
+ */
+const CAPS: Record<GiftTypedField | GroupTypedField, number> = { option: 64, gift_to: 254, gift_from: 60, gift_message: 500, people: 12 };
 
 /** Long enough to read the reason and fix one field; short enough not to linger in a shared tab. */
 export const GIFT_TYPED_KEEP_MS = 30 * 60_000;
@@ -32,6 +41,14 @@ export const GIFT_TYPED_PREFIX = "mm:gift-typed:";
 
 export function giftTypedKey(handle: string, productId: string): string {
   return `${GIFT_TYPED_PREFIX}${handle}:${productId}`;
+}
+
+/**
+ * The group form's key: the gift form's with `:group` after it, so the two forms on one product page never read
+ * each other's, and the same sweep (sweepGiftTyped) and privacy section (#gift-typed) cover both.
+ */
+export function groupTypedKey(handle: string, productId: string): string {
+  return `${giftTypedKey(handle, productId)}:group`;
 }
 
 /**
@@ -60,18 +77,18 @@ export function isGiftReturnNotice(problem: string): problem is GiftReturnNotice
   return (GIFT_RETURN_NOTICES as readonly string[]).includes(problem);
 }
 
-/** The four fields only, each a string capped at what the form takes, with the time it was kept. */
-export function packGiftTyped(values: Partial<Record<string, unknown>>, now: number): string {
-  const v = {} as GiftTyped;
-  for (const field of GIFT_TYPED_FIELDS) {
+/** The given fields only, each a string capped at what the form takes, with the time it was kept. */
+function packTyped(fields: readonly (GiftTypedField | GroupTypedField)[], values: Partial<Record<string, unknown>>, now: number): string {
+  const v: Record<string, string> = {};
+  for (const field of fields) {
     const value = values[field];
     v[field] = typeof value === "string" ? value.slice(0, CAPS[field]) : "";
   }
   return JSON.stringify({ at: now, v });
 }
 
-/** What was kept, or null when there is nothing, it is not ours, it is from the future or it is too old. */
-export function unpackGiftTyped(raw: string | null, now: number): GiftTyped | null {
+/** What was kept of the given fields, or null when there is nothing, it is not ours, it is from the future or it is too old. */
+function unpackTyped(fields: readonly (GiftTypedField | GroupTypedField)[], raw: string | null, now: number): Record<string, string> | null {
   if (raw === null) return null;
   let parsed: unknown;
   try {
@@ -83,21 +100,40 @@ export function unpackGiftTyped(raw: string | null, now: number): GiftTyped | nu
   const { at, v } = parsed as { at?: unknown; v?: unknown };
   if (typeof at !== "number" || !Number.isFinite(at) || at > now || now - at > GIFT_TYPED_KEEP_MS) return null;
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
-  const out = {} as GiftTyped;
-  for (const field of GIFT_TYPED_FIELDS) {
-    const value = (v as Record<string, unknown>)[field];
+  const out: Record<string, string> = {};
+  for (const field of fields) {
+    const value = Object.hasOwn(v, field) ? (v as Record<string, unknown>)[field] : undefined;
     if (value !== undefined && typeof value !== "string") return null;
     out[field] = (value ?? "").slice(0, CAPS[field]);
   }
   return out;
 }
 
+/** The gift form's four fields only, each a string capped at what the form takes, with the time it was kept. */
+export function packGiftTyped(values: Partial<Record<string, unknown>>, now: number): string {
+  return packTyped(GIFT_TYPED_FIELDS, values, now);
+}
+
+/** What was kept of a gift form, or null when there is nothing, it is not ours, it is from the future or it is too old. */
+export function unpackGiftTyped(raw: string | null, now: number): GiftTyped | null {
+  return unpackTyped(GIFT_TYPED_FIELDS, raw, now) as GiftTyped | null;
+}
+
+/** The group form's two fields only, the same way. */
+export function packGroupTyped(values: Partial<Record<string, unknown>>, now: number): string {
+  return packTyped(GROUP_TYPED_FIELDS, values, now);
+}
+
+/** What was kept of a group form, the same way. */
+export function unpackGroupTyped(raw: string | null, now: number): GroupTyped | null {
+  return unpackTyped(GROUP_TYPED_FIELDS, raw, now) as GroupTyped | null;
+}
 
 /** The part of the tab's storage the sweep uses. */
 export type GiftTypedStorage = Pick<Storage, "length" | "key" | "getItem" | "removeItem">;
 
 /**
- * Removes the kept gift forms that can no longer be used (too old, from the
+ * Removes the kept gift and group forms that can no longer be used (too old, from the
  * future, or not ours), or, with `all`, every one of them: back from paying
  * (the thank-you page) or from the checkout (the store's front page), nothing
  * kept is needed any more. Other keys are never touched. A storage that
@@ -116,7 +152,9 @@ export function sweepGiftTyped(storage: GiftTypedStorage, now: number, all = fal
   let removed = 0;
   for (const key of keys) {
     try {
-      if (!all && unpackGiftTyped(storage.getItem(key), now) !== null) continue;
+      // Each read as the form it is from: a group form's key ends in ":group" (groupTypedKey).
+      const fields = key.endsWith(":group") ? GROUP_TYPED_FIELDS : GIFT_TYPED_FIELDS;
+      if (!all && unpackTyped(fields, storage.getItem(key), now) !== null) continue;
       storage.removeItem(key);
       removed++;
     } catch {
@@ -126,14 +164,3 @@ export function sweepGiftTyped(storage: GiftTypedStorage, now: number, all = fal
   return removed;
 }
 
-// RED stubs for tests/group-error-a11y.test.ts; the fix replaces them.
-export const GROUP_TYPED_FIELDS = [] as readonly string[];
-export function groupTypedKey(_handle: string, _productId: string): string {
-  return "";
-}
-export function packGroupTyped(_values: Partial<Record<string, unknown>>, _now: number): string {
-  return JSON.stringify({ at: _now, v: {} });
-}
-export function unpackGroupTyped(_raw: string | null, _now: number): Record<string, string> | null {
-  return null;
-}

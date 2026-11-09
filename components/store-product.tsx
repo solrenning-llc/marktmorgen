@@ -435,6 +435,13 @@ export function GroupBox({ store, product, problem = "", consentAgain = false }:
   const { w, money } = speech(store);
   const each = money(salePrice(product.priceCents, offNow(store, product)));
   const problems = w.teamProblems(MIN_PEOPLE, MAX_PEOPLE);
+  // The server's reason (?group=, from app/api/store/checkout/route.ts): the group's own, or the store's notice for a
+  // checkout refused after the group was written down (GIFT_RETURN_NOTICES, as for a gift). Read only as the words'
+  // own keys (Object.hasOwn), so ?group=__proto__ or ?group=constructor is no reason. The alert can take the focus
+  // (GiftTypedKeeper), which puts back what was typed (3.3.7).
+  const notice = isGiftReturnNotice(problem) && Object.hasOwn(w.notices, problem) ? w.notices[problem] : null;
+  const reason = Object.hasOwn(problems, problem) ? problems[problem] : notice ? `${notice.title}. ${notice.body}` : "";
+  const reasonId = `group-error-${product.id}`;
   return (
     <details id="group" className="mt-4 scroll-mt-24 rounded-2xl px-4 py-3" style={{ border: "1px solid var(--st-line)" }} open={Boolean(problem)}>
       <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold" style={{ color: "var(--st-text)" }}>
@@ -443,10 +450,10 @@ export function GroupBox({ store, product, problem = "", consentAgain = false }:
       <form action="/api/store/checkout" method="post" target="_top" className="mt-2 space-y-3 pb-1" data-checkout="">
         <input type="hidden" name="handle" value={store.handle} />
         <input type="hidden" name="product" value={product.id} />
-        {/* Read only as the words' own keys, so ?group=__proto__ or ?group=constructor is no reason (Object.hasOwn). */}
-        {Object.hasOwn(problems, problem) ? (
-          <p className="st-note text-sm" role="alert">{problems[problem]}</p>
+        {reason ? (
+          <p id={reasonId} className="st-note text-sm" role="alert" tabIndex={-1}>{reason}</p>
         ) : null}
+        <GiftTypedKeeper form="group" handle={store.handle} productId={product.id} problem={problem} reasonId={reason ? reasonId : undefined} />
         <GivenOptionPicker store={store} product={product} each />
         <label className="block">
           <span className="st-label">{w.howManyPeople}</span>

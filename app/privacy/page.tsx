@@ -487,6 +487,8 @@ export default function PrivacyPage() {
           in it (the option, their address, your name and your message), under{" "}
           <code>mm:gift-typed:</code> followed by the store and the product, so
           that if we send you back to fix something you do not have to type it again.
+          The form to buy for several people is kept the same way (the option and
+          how many people), under the same name followed by <code>:group</code>.
           It is kept only in this browser tab, never sent to us, never used after 30 minutes, and cleared when the order goes through.
         </p>
         <p id="instant-access" className="scroll-mt-24">

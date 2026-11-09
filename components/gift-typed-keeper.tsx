@@ -1,18 +1,21 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { GIFT_TYPED_FIELDS, giftTypedKey, packGiftTyped, unpackGiftTyped } from "@/lib/gift-typed";
+import { GIFT_TYPED_FIELDS, GROUP_TYPED_FIELDS, giftTypedKey, groupTypedKey, packGiftTyped, packGroupTyped, unpackGiftTyped, unpackGroupTyped } from "@/lib/gift-typed";
 
 /**
- * Drawn inside the gift form (components/store-product.tsx, GiftBox). Nothing
- * on screen; with scripts on it:
+ * Drawn inside the gift form (components/store-product.tsx, GiftBox), and,
+ * with `form="group"`, inside the form to buy for several people (GroupBox),
+ * each under its own key and with its own fields. Nothing on screen; with
+ * scripts on it:
  *
  *   - keeps what was typed in the tab's own storage as the form is sent
  *     (lib/gift-typed.ts), so a refusal from the server never makes the buyer
  *     type it again (3.3.7);
  *   - when the page opens with that refusal (`problem`), puts it back into
- *     each field that is still empty (never over what was typed since), then
- *     removes it;
+ *     each field that still holds what the page drew (empty, or, for how many
+ *     people, the number the form starts with), never over what was typed
+ *     since, then removes it;
  *   - moves the focus to the field in error (`focusId`), which reads its
  *     reason through aria-describedby, or, when no field can fix it, to the
  *     reason (`reasonId`), which is then the alert; only while the focus is
@@ -28,12 +31,14 @@ import { GIFT_TYPED_FIELDS, giftTypedKey, packGiftTyped, unpackGiftTyped } from 
  * of it back from paying (components/gift-typed-sweeper.tsx).
  */
 export function GiftTypedKeeper({
+  form: kind = "gift",
   handle,
   productId,
   problem,
   focusId,
   reasonId,
 }: {
+  form?: "gift" | "group";
   handle: string;
   productId: string;
   problem: string;
@@ -44,7 +49,9 @@ export function GiftTypedKeeper({
   useEffect(() => {
     const form = mark.current?.closest("form");
     if (!form) return;
-    const key = giftTypedKey(handle, productId);
+    const group = kind === "group";
+    const key = group ? groupTypedKey(handle, productId) : giftTypedKey(handle, productId);
+    const fields = group ? GROUP_TYPED_FIELDS : GIFT_TYPED_FIELDS;
     if (problem) {
       let raw: string | null = null;
       try {
@@ -53,16 +60,18 @@ export function GiftTypedKeeper({
       } catch {
         raw = null;
       }
-      const kept = unpackGiftTyped(raw, Date.now());
+      const now = Date.now();
+      const kept: Record<string, string> | null = group ? unpackGroupTyped(raw, now) : unpackGiftTyped(raw, now);
       if (kept) {
-        for (const name of GIFT_TYPED_FIELDS) {
+        for (const name of fields) {
           const field = form.elements.namedItem(name);
           const value = kept[name];
           if (!value) continue;
           if (field instanceof HTMLSelectElement) {
             const option = [...field.options].find((o) => o.value === value && !o.disabled);
             if (option && field.value === "") field.value = value;
-          } else if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && field.value === "") {
+          } else if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && field.value === field.defaultValue) {
+            // Still what the page drew: empty, or the number of people the group form starts with.
             field.value = value;
             // So a component that follows its field (EmailField's "Did you mean …?") sees the value.
             field.dispatchEvent(new Event("input", { bubbles: true }));
@@ -88,12 +97,12 @@ export function GiftTypedKeeper({
       if (event.target !== form) return;
       const data = new FormData(form);
       const values: Record<string, string> = {};
-      for (const name of GIFT_TYPED_FIELDS) {
+      for (const name of fields) {
         const value = data.get(name);
         if (typeof value === "string") values[name] = value;
       }
       try {
-        window.sessionStorage.setItem(key, packGiftTyped(values, Date.now()));
+        window.sessionStorage.setItem(key, group ? packGroupTyped(values, Date.now()) : packGiftTyped(values, Date.now()));
       } catch {
         // Storage refused: the form is still sent; only the refill is lost.
       }
@@ -105,6 +114,6 @@ export function GiftTypedKeeper({
       marked?.removeEventListener("input", unmark);
       marked?.removeEventListener("change", unmark);
     };
-  }, [handle, productId, problem, focusId, reasonId]);
+  }, [kind, handle, productId, problem, focusId, reasonId]);
   return <span ref={mark} hidden />;
 }

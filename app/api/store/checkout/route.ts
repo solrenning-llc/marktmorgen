@@ -217,10 +217,14 @@ export async function POST(request: NextRequest) {
   // For several people: written down before its checkout opens, like a gift.
   // The number typed is checked here and never corrected: a buyer who typed
   // one that cannot be sold is told on the page, not charged for another.
+  // Refused at any step, the buyer goes back to the group form with the reason, where what was typed is put back
+  // (GiftTypedKeeper, 3.3.7), never to the store's front page: a group that could not be written down reads as
+  // buying for several people being unavailable; from here on, the store's own notice, as for a gift.
+  const groupBack = (reason: GiftReturnNotice | "unavailable") => `/@${store.handle}/p/${product.id}?group=${reason}#group`;
   let group: { id: string; people: number } | undefined;
   if (!gift && !preorder && people.trim()) {
     const started = await startGroup(store, product, people, optionId).catch(() => null);
-    if (!started) return away(`/@${store.handle}?status=error`);
+    if (!started) return away(groupBack("unavailable"));
     if (!started.ok) return away(`/@${store.handle}/p/${product.id}?group=${started.reason}#group`);
     group = { id: started.group.id, people: started.group.people };
   }
@@ -314,7 +318,8 @@ export async function POST(request: NextRequest) {
         digitalConsent,
       }),
     );
-    if (!held.ok) return away(gift && held.reason === "busy" ? giftBack("busy") : `/@${store.handle}?status=${held.reason}`);
+    if (!held.ok)
+      return away(gift && held.reason === "busy" ? giftBack("busy") : group && held.reason === "busy" ? groupBack("busy") : `/@${store.handle}?status=${held.reason}`);
     // Written down before the buyer leaves, so the plan — or a membership that
     // ends after a set number of payments — is given its end whether or not
     // they come back from paying.
@@ -340,7 +345,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.
     if (error instanceof OrdersPausedError)
-      return away(gift ? giftBack(error.reason === "paused" ? "paused" : "error") : `/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
+      return away(gift ? giftBack(error.reason === "paused" ? "paused" : "error") : group ? groupBack(error.reason === "paused" ? "paused" : "error") : `/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked, or the page was from before its words
     // changed: back to the form it belongs to, said beside the box. Refused
     // before Stripe is reached, so nothing is charged and no unit is held.
@@ -348,6 +353,6 @@ export async function POST(request: NextRequest) {
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
-    return away(gift ? giftBack("error") : `/@${store.handle}?status=error`);
+    return away(gift ? giftBack("error") : group ? groupBack("error") : `/@${store.handle}?status=error`);
   }
 }

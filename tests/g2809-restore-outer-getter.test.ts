@@ -293,6 +293,9 @@ async function main(): Promise<void> {
   let watched = await watchPayPal(store, Date.now() + 10_000, on);
   is("PayPal took the lost one: handed over; the pending one waits", [watched.cleared, handed], [1, [`lost@example.com|${fifth.order}`]]);
   orders.set(fourth.order, completed(fourth.order, "49.00", "COMPLETED", "slow@example.com"));
+  // Its turn made to come now (assertion unchanged): since the pending backoff (Claude 2's MEDIUM on #3404) the sweep
+  // asks a kept order again only at its next look (nextPendingLook), five minutes on for one this new.
+  redis.run(["ZADD", `nl:ppsell:pending:${store.statsId}`, "1", fourth.order]);
   watched = await watchPayPal(store, Date.now() + 10_000, on);
   is("then the pending one, once PayPal completes it", [watched.cleared, handed.at(-1), await stillPending(store, fourth.order)], [1, `slow@example.com|${fourth.order}`, false]);
   is("asked again, nothing twice", (await watchPayPal(store, Date.now() + 10_000, on)).cleared, 0);

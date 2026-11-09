@@ -11,12 +11,13 @@
  *     orders whose turn has come are read, so the newer paid order is read and handed over on the next run;
  *   - while an order is pending its record is kept past its three days, never past thirty days from opening;
  *   - a record that cannot be read (another shape) is not taken for a record that ended: the order is kept;
+ *   - a run and an order's first day take no more than PAYPAL_PENDING_WATCH in tests/plan-cost-registry.ts says;
  *   - an order the return wrote down meanwhile is not put back in pending by the sweep (a guard: the old sweep wrote
  *     nothing for a kept order, so it passes before the change too).
  */
-import * as sales from "@/lib/paypal-sales";
-import { type Paid, watchPayPal } from "@/lib/paypal-sales";
+import { type Paid, nextPendingLook, watchPayPal } from "@/lib/paypal-sales";
 import type { Store } from "@/lib/store";
+import { PAYPAL_PENDING_WATCH } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -68,9 +69,6 @@ function open(order: string, age: number, takenAt: number): void {
   redis.run(["ZADD", PENDING, String(takenAt), order]);
 }
 
-// Not in lib/paypal-sales.ts before the change: read so the red run shows each failing check (NaN) instead of not building.
-const nextPendingLook = (sales as unknown as { nextPendingLook?: (openedAt: number, now: number) => number }).nextPendingLook ?? (() => NaN);
-
 const store = { statsId: STATS, paypalSeller: { merchant: SELLER, at: 1 } } as Store;
 
 async function main(): Promise<void> {
@@ -91,7 +89,18 @@ async function main(): Promise<void> {
   // Charged by PayPal; the return's step that writes it down never reached Redis, so it waits in pending (#3404).
   open(PAID_ORDER, 600, now - 600);
   answers.set(PAID_ORDER, completed(PAID_ORDER));
-  for (let run = 0; run < 3; run++) await sweep();
+  // The first run's own commands on the orders, their records and pending (the refund watch's list read is its own).
+  let counted = 0;
+  const countingPipeline = redis.pipeline;
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    counted += commands.filter((c) => /^nl:ppsell:(o|paid|pending):/.test(String(c[1]))).length;
+    return countingPipeline(commands);
+  };
+  await sweep();
+  redis.pipeline = countingPipeline;
+  const w = PAYPAL_PENDING_WATCH;
+  is("a run with every order kept takes the commands the cost registry names (PAYPAL_PENDING_WATCH)", counted, w.listReadsPerStoreRun + w.ordersPerStoreRun * w.ownCommandsPerOrderLook);
+  for (let run = 0; run < 2; run++) await sweep();
   is("the charged order is handed over within three runs", handed, [PAID_ORDER]);
   is("and is off pending", redis.run(["ZSCORE", PENDING, PAID_ORDER]), null);
   const stuckScores = Array.from({ length: 25 }, (_, i) => Number(redis.run(["ZSCORE", PENDING, stuckId(i + 1)])));
@@ -113,6 +122,9 @@ async function main(): Promise<void> {
     [1000 + 60 + 300, 1000 + 2 * 3600 + 1800, 1000 + 2 * DAY + 3 * 3600, 1000 + 20 * DAY + 6 * 3600],
   );
   is("a time in the future (a clock moved back) is read as just opened", nextPendingLook(5000, 1000), 1300);
+  let looks = 0;
+  for (let t = 0; t < DAY; t = nextPendingLook(0, t)) looks += 1;
+  is("at most as many looks in an order's first day as the cost registry names", looks, PAYPAL_PENDING_WATCH.looksPerOrderPerDayAtMost);
 
   part("A pending order's record is kept while it is pending, never past thirty days from opening");
   const slow = "5O190127TNSLOW0001";

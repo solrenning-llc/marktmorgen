@@ -142,6 +142,9 @@ async function main(): Promise<void> {
     is("still watched after a garbled read", await stillPending(store, order), true);
     orderRead = "real";
     orders.set(order, completed(order, "49.00"));
+    // Its turn made to come now (assertion unchanged): since the pending backoff (Claude 2's MEDIUM on #3404) the sweep
+    // asks a kept order again only at its next look (nextPendingLook).
+    redis.run(["ZADD", `nl:ppsell:pending:${store.statsId}`, "1", order]);
     await watchPayPal(store, Date.now() + 30_000, on);
     is("handed over once PayPal completes it", handed.filter((h) => h === order).length, 1);
   }
@@ -161,6 +164,9 @@ async function main(): Promise<void> {
     await watchPayPal(store, Date.now() + 30_000, on);
     is("still watched", await stillPending(store, order), true);
     orders.set(order, completed(order, "49.00"));
+    // Its turn made to come now (assertion unchanged): since the pending backoff (Claude 2's MEDIUM on #3404) the sweep
+    // asks a kept order again only at its next look (nextPendingLook).
+    redis.run(["ZADD", `nl:ppsell:pending:${store.statsId}`, "1", order]);
     await watchPayPal(store, Date.now() + 30_000, on);
     is("handed over once PayPal shows the capture", handed.filter((h) => h === order).length, 1);
   }

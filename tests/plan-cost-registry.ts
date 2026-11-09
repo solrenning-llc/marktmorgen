@@ -693,6 +693,30 @@ export const BUYER_LEDGER_BYTES = 2 * ALL_TIME_PAGES * 100 * 320;
 export const PAYPAL_LEDGER_BYTES = (ALL_TIME_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES;
 export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
 /**
+ * The PayPal sweep's pending orders (lib/paypal-sales.ts, watchPayPal and nextPendingLook; Claude 2's MEDIUM on the
+ * second money review of #3404), run by the five-minute job for a store with PayPal:
+ * - listReadsPerStoreRun: one ZRANGEBYSCORE of the store's pending orders whose turn has come;
+ * - ordersPerStoreRun: at most 25 of them read a run;
+ * - payPalReadsPerOrderLook: one GET of the order at PayPal (PayPal bills no API call; inside the job's deadline);
+ * - ownCommandsPerOrderLook: for an order kept, the record's GET, the paid record's GET and one pipeline of ZADD XX
+ *   (its next look) and EXPIREAT (its record, thirty days from opening at most); an order let go takes one ZREM in
+ *   place of those two, and one written down takes settle's own step, the order's (line orders);
+ * - looksPerOrderPerDayAtMost: every five minutes in its first hour and every half hour the rest of its first day
+ *   (12 + 46), then every three hours, then six, until its record ends (daysWatchedAtMost, from opening).
+ * Before this an order kept was read every run of the job (288 a day, two commands each): 576 commands an order a
+ * day, against 232 at most now. A scheduled job bounded by its schedule and the batch, a company fixed cost like
+ * HAND_OVER_BATCH; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.
+ * Held by tests/paypal-pending-backoff.test.ts.
+ */
+export const PAYPAL_PENDING_WATCH = {
+  listReadsPerStoreRun: 1,
+  ordersPerStoreRun: 25,
+  payPalReadsPerOrderLook: 1,
+  ownCommandsPerOrderLook: 4,
+  looksPerOrderPerDayAtMost: 58,
+  daysWatchedAtMost: 30,
+} as const;
+/**
  * The PayPal hand-over list (lib/paypal-sales.ts, handOverKey; lib/paypal-delivery.ts, handOverPayPal and
  * handOverAgain; #2909, Claude 5's LEVE 2), in Redis commands, each held to what the real return route and the real
  * sweep send by tests/paypal-handover-cost.test.ts:

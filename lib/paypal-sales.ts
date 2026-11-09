@@ -3,7 +3,7 @@
  * account, through PayPal's platform program (Multiparty), and nothing passes
  * through Marktmorgen.
  *
- *   nl:ppsell:o:<order>      an order opened: which store, which product, the price asked (3 days)
+ *   nl:ppsell:o:<order>      an order opened: which store, which product, the price asked (3 days; kept while pending, 30 from opening at most)
  *   nl:ppsell:paid:<order>   an order paid: the capture, the buyer's address (kept 400 days)
  *   nl:ppsell:watch:<stats>  paid orders inside PayPal's refund window, scored by when to ask next
  *   nl:ppsell:pending:<stats> orders whose payment PayPal holds as pending, until it completes or fails
@@ -97,7 +97,7 @@ const PAID_KEPT_SECONDS = 400 * 86_400;
 const orderKey = (order: string) => `nl:ppsell:o:${order}`;
 const paidKey = (order: string) => `nl:ppsell:paid:${order}`;
 const watchKey = (statsId: string) => `nl:ppsell:watch:${statsId}`;
-/** Orders whose payment PayPal holds as pending, scored by when they were taken. */
+/** Orders whose payment PayPal holds as pending, scored by when the sweep next asks about them (nextPendingLook). */
 const pendingKey = (statsId: string) => `nl:ppsell:pending:${statsId}`;
 /**
  * Paid orders still owed their hand-over (lib/paypal-delivery.ts), scored by when they were written down or last
@@ -729,6 +729,42 @@ export function nextLook(paidAt: number, now: number): number | null {
   return Math.min(now + every, paidAt + WATCH_SECONDS);
 }
 
+/** How long an order PayPal has not settled is kept for the sweep to ask about, from when it was opened (at most). */
+const PENDING_KEPT_SECONDS = 30 * 86_400;
+
+/**
+ * When an order still pending at PayPal is next asked about (Claude 2's MEDIUM on the second money review of #3404):
+ * every five minutes in its first hour, every half hour in its first day, every three hours in its first week, then
+ * every six hours, counted from when it was opened. Its score in pending is this time, and the sweep reads only the
+ * orders whose turn has come, so the orders PayPal does not answer for move back behind the others and can never hold
+ * the place of a newer one PayPal charged. A time ahead of now (a clock moved back) is read as just opened. Pure.
+ */
+export function nextPendingLook(openedAt: number, now: number): number {
+  const age = Math.max(0, now - openedAt);
+  const every = age < 3600 ? 300 : age < 86_400 ? 1800 : age < 7 * 86_400 ? 3 * 3600 : 6 * 3600;
+  return now + every;
+}
+
+/**
+ * An opened order's record read exactly, for the sweep (CX-123 rule 24): null only when Redis answered that there is
+ * none (its life ended); a reply in another envelope, text that is not JSON, or a record without its store, merchant
+ * and opening time is "unknown", never "ended", so a pending order is not dropped on a read that failed.
+ */
+async function readOpenedExact(order: string): Promise<Opened | null | "unknown"> {
+  const read = repliesFor(await redisPipeline([["GET", orderKey(order)]]), 1);
+  if (!read) return "unknown";
+  if (read[0] === null) return null;
+  if (typeof read[0] !== "string") return "unknown";
+  try {
+    const opened = JSON.parse(read[0]) as Opened | null;
+    return opened && typeof opened === "object" && typeof opened.s === "string" && typeof opened.m === "string" && Number.isSafeInteger(opened.at)
+      ? opened
+      : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 /**
  * What the sweep asks of PayPal for one store, a few orders at a time:
  *
@@ -753,11 +789,27 @@ export async function watchPayPal(
   const statsId = store.statsId;
   const now = Math.floor(Date.now() / 1000);
 
-  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", "+inf", "LIMIT", "0", "25"]]);
+  // Only the orders whose turn has come (their score is when they are next asked: nextPendingLook), oldest turn first.
+  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", String(now), "LIMIT", "0", "25"]]);
+  // A kept order is asked again later and later, and its record kept while it is pending, at most PENDING_KEPT_SECONDS
+  // from opening, so a payment PayPal took is not let go unread when the record's own three days end. XX: an order
+  // the return wrote down meanwhile (settle takes it off pending) is not put back. One pipeline of at most two commands.
+  const keep = async (order: string, opened: Opened): Promise<void> => {
+    const until = opened.at + PENDING_KEPT_SECONDS;
+    await redisPipeline([
+      ["ZADD", pendingKey(statsId), "XX", String(nextPendingLook(opened.at, now)), order],
+      ...(until > now ? [["EXPIREAT", orderKey(order), String(until)]] : []),
+    ]);
+  };
   for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
     if (Date.now() >= deadline) return result;
-    const opened = await readOpened(order);
-    // Thirty days without PayPal settling it: no longer asked about.
+    const opened = await readOpenedExact(order);
+    // A record that could not be read is not one that ended: asked again in an hour, its record left as it is.
+    if (opened === "unknown") {
+      await redisPipeline([["ZADD", pendingKey(statsId), "XX", String(now + 3600), order]]);
+      continue;
+    }
+    // Thirty days from opening without PayPal settling it (its record ended): no longer asked about.
     if (!opened || (await readPaid(order))) {
       await redisPipeline([["ZREM", pendingKey(statsId), order]]);
       continue;
@@ -767,6 +819,7 @@ export async function watchPayPal(
       done = await call("GET", `/v2/checkout/orders/${encodeURIComponent(order)}`, { merchant: opened.m });
     } catch (error) {
       console.error("reading a PayPal order failed", error);
+      await keep(order, opened);
       continue;
     }
     const { capture, payee, email } = captureIn(done);
@@ -774,12 +827,18 @@ export async function watchPayPal(
     // other answer (approved, created, saved, completed without its captures, no status) is kept and asked again
     // (CX-123 rule 24; review of Codex G on #2681). A kept order is let go when its record ends (30 days).
     if (!capture) {
-      if (done.status === "VOIDED") await redisPipeline([["ZREM", pendingKey(statsId), order]]);
+      await (done.status === "VOIDED" ? redisPipeline([["ZREM", pendingKey(statsId), order]]) : keep(order, opened));
       continue;
     }
-    if (capture.status === "PENDING" || typeof capture.status !== "string") continue;
+    if (capture.status === "PENDING" || typeof capture.status !== "string") {
+      await keep(order, opened);
+      continue;
+    }
     // Completed and what was asked, but without the buyer's address or the capture's id: paid, not yet readable.
-    if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) continue;
+    if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) {
+      await keep(order, opened);
+      continue;
+    }
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && email && typeof capture.id === "string") {
       const { paid, fresh } = await settle(order, opened, capture.id, email);
       if (fresh) {

@@ -131,4 +131,28 @@ for (const [what, text, want] of [
   ["the law", "What the law says about refunds", ["law"]],
 ] as const) is(what, safely(() => draftTopics([text], "en")), want);
 
+part("The sale wording left out is narrow: a real subject that shares its words is still found (Claude 6 focal return on #3436, review 5831979153, LOW)");
+for (const [what, text, want] of [
+  ["saving money as the subject", "Saving money: a 30-day plan", ["money"]],
+  ["save money on groceries", "How to save money on groceries", ["money"]],
+  ["savings on autopilot", "Grow your savings on autopilot", ["money"]],
+  ["put your savings on autopilot", "Put your savings on autopilot", ["money"]],
+  ["build big savings", "Build big savings fast", ["money"]],
+  ["taxing a side hustle", "Taxing your side hustle", ["money"]],
+  ["wounds treated to prevent infection", "Wounds treated to prevent infection", ["health"]],
+  ["patients treated like family", "Patients treated like family", ["health"]],
+  ["save money with the kit: still none", "Save money with this kit", []],
+  ["savings on your order: still none", "Savings on your order today", []],
+  ["big savings alone: still none", "Big savings!", []],
+  ["a taxing hill climb: still none", "A taxing hill climb", []],
+  ["treated to a free gift: still none", "Every buyer is treated to a free gift", []],
+  ["customers treated like royalty: still none", "Customers treated like royalty", []],
+  ["a mother-in-law is not the law", "Gifts for your mother-in-law", []],
+  ["Murphy's law is not the law", "A Murphy's law mug", []],
+  ["tax included is a price, not a subject", "Free shipping, tax included", []],
+  ["trading pins", "Trading pins for park fans", []],
+  ["in-law still finds the law nearby", "Your rights as an in-law in court", ["law"]],
+  ["sales tax as a subject", "Sales tax for online sellers", ["money"]],
+] as const) is(what, safely(() => draftTopics([text], "en")), want);
+
 done();

@@ -493,6 +493,20 @@ test('recovery descriptors preserve the original closing fallback for unknown su
  }
 });
 
+// The original confirmation's ID hashes a random nonce, so the unsupported
+// source that must sort before it is searched for, not hard-coded.
+function sessionPreceding(statsId:string,id:string):string{
+ for(let i=0;i<1000;i++){const candidate='cs_test_uncoveredPrefix00000'+i;if(shipmentMailId(statsId,candidate)<id)return candidate;}
+ return '';
+}
+
+test('the unsupported prefix search finds a preceding source even for a very low original ID', ()=>{
+ // Below0x002fe9, the lowest of the first thousand candidates (~0.073% of random IDs).
+ const low='0000ffff'+'f'.repeat(56),session=sessionPreceding('continuation_uncovered',low);
+ assert.notEqual(session,'','a low random original ID must still get a preceding unsupported source');
+ assert.ok(shipmentMailId('continuation_uncovered',session)<low);
+});
+
 test('small funded successor grants compose both normal workers through an unsupported prefix to the original paid confirmation', {skip:redisOptIn}, async()=>{
  await isolatedRecoveryProof(async(pipeline,pool,all)=>{
   const clock=Date.now,started=clock(),descriptor=Object.getOwnPropertyDescriptor(Date,'now')!;
@@ -522,8 +536,7 @@ test('small funded successor grants compose both normal workers through an unsup
   assert.equal((await runOrderConfirmationMail(clock()+30000,async()=> 'waiting',physical,id)).waiting,1);
   const original=await readConfirmationOrigin(id,physical);assert.ok(original?.payload.message);assert.equal(original.row.checks,1);
   const unsupported={...shipmentPolicy(),reviewId:'SYNTHETIC_UNCOVERED_STAYS',maximumChecks:1};
-  let session='';
-  for(let i=0;i<1000;i++){const candidate='cs_test_uncoveredPrefix00000'+i;if(shipmentMailId('continuation_uncovered',candidate)<id){session=candidate;break;}}
+  const session=sessionPreceding('continuation_uncovered',id);
   assert.notEqual(session,'','the deterministic unsupported source must precede the original confirmation');
   const input={statsId:'continuation_uncovered',session,authorizedAt:clock(),shipped:{at:Math.floor(clock()/1000),tracking:'https://example.test/track'},
    message:{from:'Store <mail@example.test>',to:'other@example.test',subject:'Uncovered original',text:'Do not send under another review',replyTo:'owner@example.test'}};

@@ -18,7 +18,7 @@ import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledger
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
 import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
 import {
-  API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
+  API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_INVOICES_KEPT_BYTES, BOOK_INVOICES_KEPT_LINES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
   codesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
@@ -590,6 +590,8 @@ test("an API reading that reads more than a page takes further requests that cov
   const book = read("lib/affiliates.ts");
   assert.ok(book.includes(`.slice(0, ${BOOK_MOVES})`) && book.includes(`const INVOICE_PAGES = ${BOOK_INVOICES / 100};`) && book.includes('limit: "100"'), "the book's moves and invoices");
   assert.ok(BOOK_STRIPE_PAGES >= BOOK_INVOICES / 100);
+  // The paid invoices the book keeps between readings (audit A1): the ceilings priced are the code's own.
+  assert.ok(book.includes(`export const INVOICES_KEPT_MAX_BYTES = ${BOOK_INVOICES_KEPT_BYTES.toLocaleString("en-US").replace(/,/g, "_")};`) && book.includes(`export const INVOICES_KEPT_MAX_LINES = ${BOOK_INVOICES_KEPT_LINES.toLocaleString("en-US").replace(/,/g, "_")};`), "the book's kept invoices");
   const stats = read("lib/stats.ts");
   assert.ok(stats.includes(`readPaidSales(store, sinceBefore, ${SALES_PAGES})`) && stats.includes(`readRenewals(store, since, now, ${RENEWAL_PAGES})`) && stats.includes(`readRefunds(store, since, ${REFUND_READ_PAGES})`) && stats.includes(`const DISPUTE_PAGES = ${DISPUTE_READ_PAGES};`), "the numbers' pages");
   assert.equal(stats.match(/= walk\("/g)?.length, 2, "the sales are two lists of pages");

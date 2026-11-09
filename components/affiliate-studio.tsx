@@ -77,6 +77,8 @@ const MESSAGES: Record<string, string> = {
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
+  invoices:
+    "Not every membership and plan payment could be read from Stripe just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",

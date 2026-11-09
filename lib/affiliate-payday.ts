@@ -75,6 +75,8 @@ export function paydayEmail(input: {
   waitingCents: number;
   hold: number;
   refundsChecked: boolean;
+  /** False when the membership and plan payments could not all be read (audit A1): the figures may be short. */
+  invoicesChecked: boolean;
   /** Of what is waiting, the leads in hold or waiting for the creator's approval (lib/affiliate-leads.ts). */
   leadsCents?: number;
 }): { subject: string; text: string } {
@@ -111,6 +113,12 @@ export function paydayEmail(input: {
     lines.push(
       "",
       "One thing first: we could not check every refund on your Stripe account just now, so these figures are not settled. Open the page and look before you pay — it will have checked again by then.",
+    );
+  }
+  if (!input.invoicesChecked) {
+    lines.push(
+      "",
+      "We could not check all the membership and plan payments on your Stripe account just now, so an affiliate may be owed more than these figures show. Open the page before you pay — it reads them again each time.",
     );
   }
   lines.push("", "— Marktmorgen");
@@ -159,6 +167,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
     "not-connected": "no PayPal app is connected",
     busy: "another payment was being sent at the same moment",
     refunds: "we could not check every refund on your Stripe account just now",
+    invoices: "we could not check every membership and plan payment on your Stripe account just now, so what your affiliates are owed is not known",
     nothing: "nobody is owed anything that has cleared",
     error: "PayPal could not be reached",
   };
@@ -193,7 +202,9 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   if (!(await claimMonth(store.statsId, month))) return false;
   // Paying by itself, from the creator's own PayPal (lib/paypal-payouts.ts):
   // the email then says what was sent, or why it could not be.
-  if (book.refundsChecked && (await paysAutomatically(store))) {
+  // Paid by itself only on a book read whole: refunds and disputes, and every membership and plan payment (audit A1).
+  // Otherwise the creator gets the email to pay by hand, which says what was not checked.
+  if (book.refundsChecked && book.invoicesChecked && (await paysAutomatically(store))) {
     const paid = await payWithPayPal(store);
     const { subject, text } = autoPayEmail(paid, book.currency);
     return sendEmail({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
@@ -207,6 +218,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     waitingCents: book.rows.reduce((sum, row) => sum + row.waiting, 0),
     hold: store.affiliates.hold,
     refundsChecked: book.refundsChecked,
+    invoicesChecked: book.invoicesChecked,
     leadsCents: book.lines.filter((l) => l.how === "lead" && l.status !== "approved" && l.currency === book.currency).reduce((sum, l) => sum + l.commission, 0),
   });
   return sendEmail({ meter: { by: "store", store: store, kind: "email" },

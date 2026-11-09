@@ -73,6 +73,8 @@ export async function POST(request: NextRequest) {
     // Refunds are read from Stripe: when that failed, what is owed is not yet
     // known, and writing payouts against a guess is how a book starts lying.
     if (!book.refundsChecked) return fail("refunds", 409);
+    // Nor while the membership and plan payments were not all read (audit A1): a payment left out is owed and unpaid.
+    if (!book.invoicesChecked) return fail("invoices", 409);
 
     const away = await onTheirWay(store);
     const lines = payableLines(book, away);

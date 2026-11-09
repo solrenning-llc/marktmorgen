@@ -181,6 +181,13 @@ export const BOOK_MOVES = 200;
 export const BOOK_INVOICES = 1_000;
 /** A product's listing, read for its title. */
 export const LISTING_BYTES = 16_384;
+/**
+ * The paid invoices readBook keeps between readings at the most (lib/affiliates.ts, INVOICES_KEPT_MAX_BYTES, audit
+ * A1): read whole and written back whole, once each, by a reading of a store with Stripe and affiliates.
+ */
+export const BOOK_INVOICES_KEPT_BYTES = 2_000_000;
+/** And the most invoices it keeps (lib/affiliates.ts, INVOICES_KEPT_MAX_LINES), each a line of the book at the most. */
+export const BOOK_INVOICES_KEPT_LINES = 5_000;
 
 /** What one reading of the affiliate program does (lib/affiliates.ts, readBook), counted from its sizes and the Stripe pages it may wait on. */
 export function bookWork(s: BookSizes, stripePages: number): ReadWork {
@@ -190,14 +197,16 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   const moves = Math.min(s.leads, BOOK_MOVES);
   const stripe = s.stripe && s.people > 0;
   const products = stripe ? Math.min(s.products, BOOK_INVOICES) : 0;
+  // The invoices kept between readings (BOOK_INVOICES_KEPT_BYTES): read, then written back, one command and one trip each.
+  const kept = stripe ? 1 : 0;
   return {
     // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below; the moves a hundred at an MGET.
-    commands: 8 + 7 + (any ? 1 + paypal : 0) + moveReads(moves) + products,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
+    commands: 8 + 7 + (any ? 1 + paypal : 0) + moveReads(moves) + products + 2 * kept,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + 2 * kept * BOOK_INVOICES_KEPT_BYTES,
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,
-    roundTrips: 2 + (any ? 1 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0),
+    roundTrips: 2 + (any ? 1 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0) + 2 * kept,
   };
 }
 

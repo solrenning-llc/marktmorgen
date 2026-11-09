@@ -271,7 +271,11 @@ export function batchBody(store: Store, lines: BatchLine[], senderBatchId: strin
 export type PayResult =
   | { ok: true; batch: string; people: number; cents: number }
   /** "unknown": the batch was sent and PayPal's answer is not known, so it may have been paid; nobody in it is sent again. */
-  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "funds" | "refused" | "busy" | "error" | "unknown" };
+  /**
+   * "refunds": refunds and disputes not all read from Stripe; "invoices": the membership and plan payments not all
+   * read (audit A1): either way what is owed is not known, so nothing is sent.
+   */
+  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "invoices" | "funds" | "refused" | "busy" | "error" | "unknown" };
 
 /**
  * Whether PayPal's answer to a batch says it was not made: a 4xx (other than
@@ -375,8 +379,10 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
   try {
     return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (): Promise<PayResult> => {
       const book = await readBook(store);
-      // What is owed is not known while refunds could not be read from Stripe.
+      // What is owed is not known while refunds could not be read from Stripe, nor while the membership and plan
+      // payments could not all be read (audit A1): one left out is a commission the affiliate earned and is not paid.
       if (!book.refundsChecked) return { ok: false, reason: "refunds" };
+      if (!book.invoicesChecked) return { ok: false, reason: "invoices" };
       const lines = payableLines(book, await onTheirWay(store));
       if (!lines.length) return { ok: false, reason: "nothing" };
       const auth = await bearer(store);
@@ -536,12 +542,12 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     if (!sent || sent.m === 1) return sent ? "manual" : "waiting";
     if (sent.t !== undefined && now - sent.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
     // The same request may make the batch now, if the first never reached PayPal, so it is sent only while the book
-    // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds that cannot be read: not known,
-    // wait (no try counted). A line no longer owed in full (refunded since, or the affiliate gone or no longer
+    // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds, or membership and plan payments,
+    // that cannot all be read: not known, wait (no try counted), never a line "no longer owed" (audit A1). A line no longer owed in full (refunded since, or the affiliate gone or no longer
     // approved), or a store whose currency changed: it cannot be told whether the first request paid it, so it is
     // left for the creator's own check and never sent.
     const book = await readBook(store);
-    if (!book.refundsChecked) return "waiting";
+    if (!book.refundsChecked || !book.invoicesChecked) return "waiting";
     const rows = new Map(book.rows.map((row) => [row.affiliate.id, row]));
     const lines: BatchLine[] = [];
     for (const line of sent.lines) {

@@ -138,6 +138,20 @@ async function main(): Promise<void> {
   is("an address in another question never is", sender({ refby1: TESS }), "");
   is("the same as the copy and the erasure read", respondentOf(emailQuestionIds(twoEmails), { email1: "not an address", email2: OLLY, refby1: TESS }), OLLY);
 
+  part("The deal's note never copies an address that is not the sender's");
+  // Claude 5's pre-review of this branch, LIGHT 3 (already on main): the note copied every answer, a friend's or a
+  // referrer's address included, and deleting that person deletes only the deals that name them as the contact, so the
+  // copy in another person's deal stayed. Now an answer that is an address other than the sender's never goes into the
+  // note; the sender's own address is the deal's contact, and deleting the sender deletes the deal.
+  const note = (answers: FormResponse["answers"]) => formDealDraft(twoEmails, response(1, answers)).note;
+  const known = note({ email1: "Ana@Example.com", email2: "Ana@example.com", refby1: "Tess@Example.com " });
+  is("a known sender: their address is kept, a referrer's is not", [known.includes("Friend's email: Ana@Example.com"), known.toLowerCase().includes(TESS)], [true, false]);
+  const friend = note({ email1: "", email2: OLLY, refby1: TESS });
+  is("an address in another question is left out, the sender's kept", [friend.includes("Your email: " + OLLY), friend.includes(TESS), friend.includes("Note:")], [true, false, false]);
+  const unknownNote = note({ email1: "Ana@Example.com", email2: OLLY, refby1: "Bring your laptop" });
+  is("the sender not known: no address at all, the other answers kept", [unknownNote.toLowerCase().includes("ana@example.com"), unknownNote.includes(OLLY), unknownNote.includes("Note: Bring your laptop")], [false, false, true]);
+  is("a text that is not only an address is the person's words, kept as typed", note({ email2: OLLY, refby1: "Ask tess@example.com too" }).includes("Note: Ask tess@example.com too"), true);
+
   part("A response that does not read and holds her address is deleted, never taken for somebody else's");
   const key = `nl:form:r:${STATS}:${join.id}`;
   await redis.pipeline([["RPUSH", key, `{"at":"later","answers":{"email1":"${TESS}"}}`, "not a response at all"]]);

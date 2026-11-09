@@ -23,7 +23,7 @@ import { AiPosts } from "@/components/ai-posts";
 import { PageCoach } from "@/components/page-coach";
 import { PageStylePicker } from "@/components/page-style-picker";
 import { BlockPicker } from "@/components/block-picker";
-import { addedSaying, chosenSaying, focusAfterRemoval, insertAt, insertionPlaces, movedSaying, offeredKinds, placeWords, removedSaying } from "@/lib/block-insert";
+import { addedSaying, chosenSaying, focusAfterRemoval, insertAt, insertionPlaces, itemAddId, itemFocusAfterRemoval, itemRemoveId, movedSaying, noStepSaying, offeredKinds, placeWords, removedSaying, stepSaying, stuckSaying, whyStuck, type StepBlock } from "@/lib/block-insert";
 import { browserFrames, focusWhenDrawn, groupEntry } from "@/lib/focus-when-drawn";
 import { SharePanel } from "@/components/share-panel";
 import { useLeaveGuard } from "@/components/leave-guard";
@@ -495,12 +495,20 @@ export function PageEditor({
     const from = direction === "back" ? h.past : h.future;
     const to = direction === "back" ? h.future : h.past;
     const step = from.pop();
-    if (!step) return;
-    to.push(h.last);
+    // The buttons stay focusable with nothing left that way (WCAG 2.4.3), so a press, or Ctrl+Z, says so.
+    if (!step) {
+      setSaid(noStepSaying(direction));
+      return;
+    }
+    const was = h.last;
+    to.push(was);
     h.last = step;
     setDrafts(step.drafts);
     setStyle(step.style);
     setStepsLeft({ back: h.past.length, forward: h.future.length });
+    // What came back or went is said, for a screen reader that cannot see the page change (WCAG 4.1.3).
+    const seen = (all: Draft[]): StepBlock[] => all.map((d) => ({ id: d.block.id, label: kindLabel(d.block.kind), draft: d }));
+    setSaid(stepSaying(direction, seen(was.drafts), seen(step.drafts), was.style !== step.style, from.length));
   }
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -763,7 +771,13 @@ export function PageEditor({
   function move(index: number, by: -1 | 1) {
     const to = index + by;
     const moving = drafts[index];
-    if (!moving || to < 0 || to >= drafts.length || moving.block.kind === "hero" || drafts[to].block.kind === "hero") return;
+    if (!moving) return;
+    // A press where the block cannot go says why, rather than nothing (WCAG 4.1.3).
+    const stuck = whyStuck(index, by, drafts.length, (i) => drafts[i].block.kind === "hero");
+    if (stuck) {
+      setSaid(stuckSaying(kindLabel(moving.block.kind), stuck, kindLabel("hero")));
+      return;
+    }
     setDrafts((all) => {
       if (to < 0 || to >= all.length) return all;
       if (all[index].block.kind === "hero" || all[to].block.kind === "hero") return all;
@@ -1088,6 +1102,7 @@ export function PageEditor({
           setOther(null);
           setOnB(false);
           setOpen(null);
+          focusAfterClear();
         } else if (data.page && unchangedSince(page)) {
           putVersions(data.page, onB);
           if (data.page.test) setTestHeadline(data.page.test.headline);
@@ -1105,6 +1120,24 @@ export function PageEditor({
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Clearing the page, from its Yes button, which keeps the focus while it clears (WCAG 2.4.3): a press while busy does nothing. */
+  function clearNow() {
+    if (busy) return;
+    void send(null, "Page cleared.");
+  }
+
+  /**
+   * The question about clearing goes with the page cleared, and the focus in it (WCAG 2.4.3): to Add a block once
+   * no block is drawn, or to the editor's heading where none is drawn (the preview).
+   */
+  function focusAfterClear() {
+    stopFocusNew.current?.();
+    stopFocusNew.current = focusWhenDrawn(() => {
+      if (document.querySelector('[id^="row-"]')) return null;
+      return document.querySelector<HTMLElement>('[data-place="0"]') ?? document.getElementById("page-title");
+    }, browserFrames());
   }
 
   /** Save, from a button that keeps the focus while it saves and after (WCAG 2.4.3): a press while it cannot save does nothing. */
@@ -1621,6 +1654,7 @@ export function PageEditor({
               folder={folder}
               items={block.items}
               room={Math.min(MAX_PICTURES, MAX_PAGE_PICTURES - elsewhere - onlyInOther)}
+              away={`${base}-h`}
               onChange={(items) => change(index, { items })}
             />
           </div>
@@ -1674,6 +1708,7 @@ export function PageEditor({
               folder={folder}
               items={block.picture ? [block.picture] : []}
               room={Math.max(0, Math.min(1, MAX_PAGE_PICTURES - elsewhere - onlyInOther))}
+              away={`${base}-h`}
               onChange={(items) => change(index, { picture: items[0] ?? null })}
             />
             <fieldset>
@@ -2068,7 +2103,7 @@ export function PageEditor({
     <section aria-labelledby="page-title" className="card min-w-0 p-5 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 id="page-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+          <h2 id="page-title" tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">
             {site ? product.title : `${kind} for ${product.title}`}
           </h2>
           <p className="mt-1 text-sm text-ink-soft">
@@ -2104,10 +2139,10 @@ export function PageEditor({
             id="undo-step"
             type="button"
             onClick={() => stepTo("back")}
-            disabled={stepsLeft.back === 0 && !dirty}
+            aria-disabled={(stepsLeft.back === 0 && !dirty) || undefined}
             title="Undo (Ctrl+Z)"
             aria-label="Undo the last change"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink disabled:opacity-35"
+            className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink"
           >
             <Icon name="undo" size={18} />
           </button>
@@ -2115,10 +2150,10 @@ export function PageEditor({
             id="redo-step"
             type="button"
             onClick={() => stepTo("forward")}
-            disabled={stepsLeft.forward === 0}
+            aria-disabled={stepsLeft.forward === 0 || undefined}
             title="Redo (Ctrl+Shift+Z)"
             aria-label="Redo"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink disabled:opacity-35"
+            className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft ring-1 ring-line transition-colors hover:text-ink"
           >
             <Icon name="redo" size={18} />
           </button>
@@ -2816,7 +2851,7 @@ export function PageEditor({
           confirmClear ? (
             <span className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
               Back to the plain page?
-              <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => send(null, "Page cleared.")}>
+              <button type="button" className="btn btn-danger btn-sm" aria-disabled={busy || undefined} onClick={clearNow}>
                 Yes, clear it
               </button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmClear(false)}>
@@ -3439,6 +3474,17 @@ function RowEditor({
   );
 }
 
+/**
+ * An item taken out of a block's list: its Remove button goes with the focus in it, so the focus goes to the item
+ * now in its place, or the one before it, or the list's Add button when none is left, once the list is drawn
+ * again (WCAG 2.4.3; lib/block-insert.ts, itemFocusAfterRemoval), or to `away` when no Add button is drawn.
+ */
+function focusItemAfterRemoval(base: string, at: number, count: number, away?: string) {
+  const { focus, gone } = itemFocusAfterRemoval(base, at, count);
+  // `away`: where it goes when that Add button is not drawn either (a pictures list with no room left on the page).
+  focusWhenDrawn(() => (document.getElementById(gone) ? null : document.getElementById(focus) ?? (away ? document.getElementById(away) : null)), browserFrames());
+}
+
 /** A list of one-line points. */
 /** The rows of a comparison: what is compared, and a cell for each column, with a tick and a cross a press away. */
 /** Things said elsewhere: the words, who said them, and where (lib/sales-page.ts, QuotesBlock). */
@@ -3457,7 +3503,11 @@ function QuotesEditor({ base, items, onChange }: { base: string; items: Quote[];
               <p className="text-xs font-bold uppercase tracking-[0.08em] text-ink-mute">{`Said elsewhere ${i + 1}`}</p>
               <button
                 type="button"
-                onClick={() => onChange(items.filter((_, j) => j !== i))}
+                id={itemRemoveId(base, i)}
+                onClick={() => {
+                  onChange(items.filter((_, j) => j !== i));
+                  focusItemAfterRemoval(base, i, items.length);
+                }}
                 className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
                 aria-label={`Remove what was said elsewhere ${i + 1}`}
               >
@@ -3520,7 +3570,7 @@ function QuotesEditor({ base, items, onChange }: { base: string; items: Quote[];
         );
       })}
       {items.length < MAX_QUOTES ? (
-        <button type="button" onClick={() => onChange([...items, { text: "", name: "", url: "" }])} className="btn btn-ghost btn-sm">
+        <button type="button" id={itemAddId(base)} onClick={() => onChange([...items, { text: "", name: "", url: "" }])} className="btn btn-ghost btn-sm">
           <Icon name="plus" size={15} />
           {`Add one (${items.length} of ${MAX_QUOTES})`}
         </button>
@@ -3577,7 +3627,11 @@ function CompareEditor({ base, rows, onChange }: { base: string; rows: CompareRo
             <p className="text-xs font-bold uppercase tracking-[0.08em] text-ink-mute">{`Row ${i + 1}`}</p>
             <button
               type="button"
-              onClick={() => onChange(rows.filter((_, j) => j !== i))}
+              id={itemRemoveId(base, i)}
+              onClick={() => {
+                onChange(rows.filter((_, j) => j !== i));
+                focusItemAfterRemoval(base, i, rows.length);
+              }}
               className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
               aria-label={`Remove row ${i + 1}`}
             >
@@ -3600,7 +3654,7 @@ function CompareEditor({ base, rows, onChange }: { base: string; rows: CompareRo
         </div>
       ))}
       {rows.length < MAX_COMPARE_ROWS ? (
-        <button type="button" onClick={() => onChange([...rows, { label: "", a: CELL_YES, b: CELL_NO }])} className="btn btn-ghost btn-sm">
+        <button type="button" id={itemAddId(base)} onClick={() => onChange([...rows, { label: "", a: CELL_YES, b: CELL_NO }])} className="btn btn-ghost btn-sm">
           <Icon name="plus" size={15} />
           {`Add a row (${rows.length} of ${MAX_COMPARE_ROWS})`}
         </button>
@@ -3638,7 +3692,11 @@ function ListEditor({
           />
           <button
             type="button"
-            onClick={() => onChange(items.filter((_, j) => j !== i))}
+            id={itemRemoveId(base, i)}
+            onClick={() => {
+              onChange(items.filter((_, j) => j !== i));
+              focusItemAfterRemoval(base, i, items.length);
+            }}
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
             aria-label={`Remove ${label.toLowerCase()} ${i + 1}`}
           >
@@ -3647,7 +3705,7 @@ function ListEditor({
         </div>
       ))}
       {items.length < max ? (
-        <button type="button" onClick={() => onChange([...items, ""])} className="btn btn-ghost btn-sm">
+        <button type="button" id={itemAddId(base)} onClick={() => onChange([...items, ""])} className="btn btn-ghost btn-sm">
           <Icon name="plus" size={15} />
           {`Add a ${label.toLowerCase()} (${items.length} of ${max})`}
         </button>
@@ -3688,7 +3746,11 @@ function PairEditor({
             <p className="text-xs font-bold uppercase tracking-[0.08em] text-ink-mute">{`${first.label} ${i + 1}`}</p>
             <button
               type="button"
-              onClick={() => onChange(items.filter((_, j) => j !== i))}
+              id={itemRemoveId(base, i)}
+              onClick={() => {
+                onChange(items.filter((_, j) => j !== i));
+                focusItemAfterRemoval(base, i, items.length);
+              }}
               className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
               aria-label={`Remove ${first.label.toLowerCase()} ${i + 1}`}
             >
@@ -3710,7 +3772,7 @@ function PairEditor({
         </div>
       ))}
       {items.length < max ? (
-        <button type="button" onClick={() => onChange([...items, ["", ""]])} className="btn btn-ghost btn-sm">
+        <button type="button" id={itemAddId(base)} onClick={() => onChange([...items, ["", ""]])} className="btn btn-ghost btn-sm">
           <Icon name="plus" size={15} />
           {`${addLabel} (${items.length} of ${max})`}
         </button>
@@ -3884,6 +3946,7 @@ function PicturesEditor({
   invalid = false,
   single = false,
   onSending,
+  away,
 }: {
   base: string;
   productId: string;
@@ -3905,6 +3968,11 @@ function PicturesEditor({
   single?: boolean;
   /** How many pictures it is sending now, told when sending starts and once more (0) when it ends, after onChange. */
   onSending?: (count: number) => void;
+  /**
+   * The id of the field the focus goes to when the last picture is removed and no Add button is drawn, the page
+   * having no room left for another (WCAG 2.4.3): the block's heading field.
+   */
+  away?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(0);
@@ -4032,7 +4100,16 @@ function PicturesEditor({
             <button type="button" onClick={() => swap(i, 1)} aria-disabled={i === items.length - 1 || undefined} className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink" aria-label={`Move picture ${i + 1} later`}>
               <Icon name="chevron-down" size={16} />
             </button>
-            <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove picture ${i + 1}`}>
+            <button
+              type="button"
+              id={itemRemoveId(base, i)}
+              onClick={() => {
+                onChange(items.filter((_, j) => j !== i));
+                focusItemAfterRemoval(base, i, items.length, away);
+              }}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+              aria-label={`Remove picture ${i + 1}`}
+            >
               <Icon name="close" size={16} />
             </button>
           </div>
@@ -4040,7 +4117,9 @@ function PicturesEditor({
         </div>
       ))}
       {left > 0 ? (
-        <button type="button" onClick={() => input.current?.click()} disabled={busy > 0} aria-busy={busy > 0} className="btn btn-secondary btn-sm">
+        // Off while it sends, but kept focusable (aria-disabled, drawn off by .btn[aria-disabled]): the focus sent here after
+        // a removal, or resting here as the send starts, never falls to the page's body (WCAG 2.4.3).
+        <button type="button" id={itemAddId(base)} onClick={() => (busy > 0 ? undefined : input.current?.click())} aria-disabled={busy > 0 || undefined} aria-busy={busy > 0} className="btn btn-secondary btn-sm">
           <Icon name="camera" size={15} />
           {busy > 0 ? `Sending ${busy} ${busy === 1 ? "picture" : "pictures"}…` : (words?.add ?? `Add pictures (${items.length} of ${room})`)}
         </button>

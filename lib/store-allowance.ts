@@ -22,7 +22,6 @@ import { planAboveSold } from "@/lib/larger-plan";
 import { poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
 import { type AllowanceKind, KIND_WORDS, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
@@ -241,13 +240,6 @@ function ownAllowanceReplies(reply: unknown, count: number): unknown[] | null {
   } catch { return null; }
 }
 
-/** GET returns text, or null only when the counter does not exist: nothing was taken in this window. */
-function allowanceCount(raw: unknown): number | null {
-  if (raw === null) return 0;
-  if (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw)) return null;
-  const n = Number(raw);
-  return Number.isSafeInteger(n) ? n : null;
-}
 
 /** Fixed-size own-data reply from the existing SET NX + INCRBY pipeline. */
 function acknowledgedAllowanceCount(reply: unknown, n: number): number | null {
@@ -279,8 +271,13 @@ export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonl
     if (!values) return null;
     const out: { kind: AllowanceKind; used: number; figure: number }[] = [];
     for (const [i, kind] of kinds.entries()) {
-      const n = allowanceCount(values[i]);
-      if (n === null) return null;
+      const raw: unknown = values[i];
+      // Only what INCRBY writes is a count: a confirmed none (null), its decimal text with no sign, space, point,
+      // exponent, base prefix or leading zero, or the same whole number. Number() would read "", " ", "0x0", "0.0"
+      // and "0e4" as 0, an unknown count taken for nothing used (Codex Z on #3169).
+      if (raw !== null && typeof raw !== "number" && !(typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw))) return null;
+      const n = raw === null ? 0 : Number(raw);
+      if (!Number.isSafeInteger(n) || n < 0) return null;
       out.push({ kind, used: n, figure: allowanceFor(store, kind, now / 1000) });
     }
     return out;
@@ -294,13 +291,20 @@ export function allowanceUsedWords(store: AllowanceStore, kind: AllowanceKind, n
   return usedWords(kind, allowanceFor(store, kind, now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
-/** Confirmed use in the store's window; an unreadable count throws before any dependent spending. */
+/**
+ * What has been taken of a kind in the store's window, read exactly (rule 24): null when it cannot be read (no
+ * window, no Redis, a lost or malformed reply), 0 only for a count never taken. Every decision that spends (a model
+ * call, an email) and every screen that says a figure reads this one, and a null is never room or "0 used".
+ */
+export async function allowanceUsedExact(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number | null> {
+  return (await allowancesUsedStrict(store, [kind], now))?.[0]?.used ?? null;
+}
+
+/**
+ * The same count with an unread one taken as 0. Kept only for the studio's main page (app/studio/page.tsx, held by
+ * another agent's unit; its "0 of N used" when the count is unread is still to be changed there) and for tests that
+ * measure what a call took. Never use it for a decision or a new screen: read allowanceUsedExact.
+ */
 export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {
-  const window = allowanceWindow(store, now);
-  const id = idOf(store);
-  if (!window || !id || !isRedisConfigured()) throw new UnknownReplyError("an allowance window");
-  const reply = ownAllowanceReplies(await redisPipeline([["GET", key(kind, id, window.id)]]), 1);
-  const n = reply ? allowanceCount(reply[0]) : null;
-  if (n === null) throw new UnknownReplyError("an allowance count");
-  return n;
+  return (await allowanceUsedExact(store, kind, now)) ?? 0;
 }

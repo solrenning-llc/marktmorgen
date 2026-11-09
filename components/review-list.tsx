@@ -136,6 +136,7 @@ export function ReviewsSection({
   preview = false,
   lang = DEFAULT_LANGUAGE,
   picked = [],
+  level = 2,
 }: {
   heading: string;
   summary: Summary;
@@ -149,14 +150,17 @@ export function ReviewsSection({
   lang?: LanguageCode;
   /** The reviews the creator picked to show first, marked as such. */
   picked?: string[];
+  /** 1 on the reviews' own page, where this heading is the page's (WCAG 1.3.1, 2.4.10); 2 inside a product page. */
+  level?: 1 | 2;
 }) {
   const rated = showsRating(summary);
+  const Heading = level === 1 ? "h1" : "h2";
   const { w, num } = said(lang);
   const hidden = summary.hidden ? w.hiddenByCreator(summary.hidden) : "";
   const shown = average(summary).toLocaleString(said(lang).lang.locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   return (
     <div id="reviews" className="scroll-mt-6">
-      <h2 className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] page-sm:text-[1.75rem]">{heading || w.reviews}</h2>
+      <Heading className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] page-sm:text-[1.75rem]">{heading || w.reviews}</Heading>
       {rated ? (
         <div className="rv-summary mt-5">
           <div>

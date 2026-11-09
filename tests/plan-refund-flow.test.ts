@@ -226,7 +226,7 @@ async function main() {
   part("The add-on");
   const ad = await paidShop();
   const asst = `sub_asst${n}0001`;
-  world.subs.set(asst, { id: asst, customer: `cus_flow${n}0001`, status: "active", cancel_at_period_end: false, metadata: { addon: "assistant", assistant_for: `flow${n}` } });
+  world.subs.set(asst, { id: asst, customer: `cus_flow${n}0001`, status: "active", cancel_at: null, cancel_at_period_end: false, metadata: { addon: "assistant", assistant_for: `flow${n}` }, items: { object: "list", data: [{ quantity: 1, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } });
   await setAssistantPlan((await ad.store()).email, { subscriptionId: asst, active: true, period: null, cancelsAtEnd: false, disputedAt: "" });
   world.postDownFor.add(asst);
   const withAddOn = await refundAndEndPlan(await ad.store(), NOW);

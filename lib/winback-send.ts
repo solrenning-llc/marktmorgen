@@ -244,11 +244,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         sent += 1;
         await redisPipeline([["INCR", countKey(statsId)]]);
       } else {
-        // Not sent: tried again on the next run, inside the same window.
-        // Only our own claims are let go (Revisor 1 on #2719); the offer's link is this run's alone.
-        await releaseMark(sentKey(account, subId), claim);
-        await releaseMark(onceKey(statsId, email, product.id), onceValue);
-        await redisPipeline([["DEL", linkKey(token)]]);
+        // false is refused or unknown alike (Amazon SES or Resend may have taken it and the reply been lost), so the
+        // marks and the offer's link are kept, as lib/trial-nudges.ts keeps its mark: the person is written to at most
+        // once, and the link in an email that may have arrived keeps working (CX-123 rule 24).
+        console.error("a come-back offer may not have gone; kept as sent", store.handle);
       }
     } catch (error) {
       console.error("sending a come-back offer failed", store.handle, error);

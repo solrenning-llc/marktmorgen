@@ -181,6 +181,65 @@ test("product update: a switch-off value that is not plainly on holds it too (ru
   assert.equal((await startUpdate({ ...shop, suspended: "unknown" }, product, "")).ok, false);
 });
 
+/** Moves a send's start back by `days`, as if that many days had passed since it was queued. */
+function ageJob(id: string, days: number) {
+  const raw = JSON.parse(String(redis.run(["GET", `nl:upd:job:${id}`])));
+  redis.run(["SET", `nl:upd:job:${id}`, JSON.stringify({ ...raw, createdAt: raw.createdAt - days * 86_400 }), "EX", 86_400]);
+}
+
+test("product update: a send held by the switch-off ends after its 60 days even while the store stays off, and never goes out after", async () => {
+  const { shop, product } = await updateStore();
+  const started = await startUpdate(shop, product, "A new chapter");
+  assert.ok(started.ok, JSON.stringify(started));
+  await noteTakedown(owner, null, true);
+  // Day 59: still within its 60 days, so it keeps waiting.
+  ageJob(started.job.id, 59);
+  const held = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  assert.deepEqual([held?.status, queued(started.job.id)], ["waiting", 1]);
+  // Day 61: its 60 days are over (the recipient list's own life ends with them).
+  ageJob(started.job.id, 2);
+  redis.run(["DEL", `nl:upd:job:${started.job.id}:to`]);
+  const ended = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  assert.deepEqual(
+    [ended?.status, ended?.done, ended?.sent, ended?.note, queued(started.job.id)],
+    ["failed", 0, 0, "The recipient list expired. Nothing more was sent.", 0],
+  );
+  // The store comes back on afterward: nothing goes out and the send stays ended.
+  await noteTakedown(owner, null, false);
+  const after = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  assert.deepEqual([after?.status, queued(started.job.id), toBuyer().length], ["failed", 0, 0]);
+});
+
+test("product update: a send past its 60 days ends even if its recipient list is somehow still there, sending nothing", async () => {
+  const { shop, product } = await updateStore();
+  const started = await startUpdate(shop, product, "A new chapter");
+  assert.ok(started.ok, JSON.stringify(started));
+  await noteTakedown(owner, null, true);
+  ageJob(started.job.id, 61);
+  const ended = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  assert.deepEqual([ended?.status, queued(started.job.id), redis.run(["EXISTS", `nl:upd:job:${started.job.id}:to`])], ["failed", 0, 0]);
+  await noteTakedown(owner, null, false);
+  await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
+  assert.equal(toBuyer().length, 0);
+});
+
+test("product update: a send waiting for a plan with email also ends after its 60 days", async () => {
+  const { shop, product } = await updateStore();
+  const started = await startUpdate(shop, product, "A new chapter");
+  assert.ok(started.ok, JSON.stringify(started));
+  const noMail = async (handle: string): Promise<Store | null> => {
+    const read = await storeForHandle(handle);
+    return read ? { ...read, mail: null } : null;
+  };
+  const waiting = await advanceUpdate(started.job.id, noMail, Date.now() + 20_000);
+  assert.deepEqual([waiting?.status, queued(started.job.id)], ["waiting", 1]);
+  assert.match(waiting?.note ?? "", /Your plan does not include email/);
+  ageJob(started.job.id, 61);
+  redis.run(["DEL", `nl:upd:job:${started.job.id}:to`]);
+  const ended = await advanceUpdate(started.job.id, noMail, Date.now() + 20_000);
+  assert.deepEqual([ended?.status, ended?.note, queued(started.job.id), toBuyer().length], ["failed", "The recipient list expired. Nothing more was sent.", 0, 0]);
+});
+
 // ------------------------------------------------------------------ call reminders
 
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];

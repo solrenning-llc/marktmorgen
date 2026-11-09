@@ -39,7 +39,7 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   store_full: "Your store has reached the most it can hold, so nothing was changed.",
   signed_out: "Your session ended. Log in again.",
-  unavailable: "Stores are not switched on yet, so nothing was saved.",
+  unavailable: "We could not check your store just now. Nothing was changed; try again in a few minutes.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
 };
 

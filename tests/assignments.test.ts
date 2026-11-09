@@ -29,8 +29,8 @@ import {
   review,
   saveTask,
   readTaskFor,
-  staleTaskUploads,
   submissionOf,
+  sweepTaskUploads,
   takeRoom,
   takeTaskUpload,
   waitingWork,
@@ -159,7 +159,9 @@ async function main(): Promise<void> {
   const now = Date.now();
   await noteTaskUpload("old.pdf", now - (DOOR_SECONDS + 60) * 1000);
   await noteTaskUpload("new.pdf", now);
-  is("the old one is found, the new one left", (await staleTaskUploads(now)).join(), "old.pdf");
+  const swept: string[] = [];
+  is("the old one is deleted, the new one left", (await sweepTaskUploads(async (paths) => void swept.push(...paths), now)).join(), "old.pdf");
+  is("and handed to the deletion once", swept.join(), "old.pdf");
   is("a door is used", await takeTaskUpload("new.pdf"), true);
   is("once", await takeTaskUpload("new.pdf"), false);
 

@@ -21,6 +21,7 @@
 import { GET as products } from "@/app/api/v1/products/route";
 import { POST as leadAdd } from "@/app/api/v1/leads/route";
 import { DELETE as codeStop } from "@/app/api/v1/codes/route";
+import { readFileSync } from "node:fs";
 import { POST as mcp } from "@/app/api/mcp/route";
 import { API_RATE, KEY_PAUSED_WORDS } from "@/lib/api-guard";
 import { makeKey } from "@/lib/api-keys";
@@ -116,6 +117,16 @@ async function main(): Promise<void> {
     is("and nothing of the month is taken", await usedCodes(), before);
     part("Making or switching off a discount code is named in the pause's sentence");
     is("both sentences name discount codes", Object.values(API_WRITE_PAUSED_WORDS).map((w) => /making or switching off discount codes/.test(w)), [true, true]);
+    is("both sentences name an AI assistant's prepared change, which waits the same way (apiAgent)", Object.values(API_WRITE_PAUSED_WORDS).map((w) => /having an AI assistant prepare a change for you to confirm/.test(w)), [true, true]);
+
+    part("The developers page says what the door now answers");
+    const page = readFileSync("app/developers/page.tsx", "utf8").replace(/\s+/g, " ");
+    const paused = page.slice(page.indexOf("Adding a lead, adding labels"), page.indexOf("as usual.", page.indexOf("Adding a lead, adding labels")));
+    is("its list of writes the unpaid pause stops names discount codes made or switched off", /making or switching off a discount code/.test(paused), true);
+    is("and an AI assistant's prepared change, refused with the same message", /propose_product_description/.test(paused), true);
+    is("a paused key is no longer said to hear 403 on every request", page.includes("Every request with it is answered 403"), false);
+    is("past its minute a paused key is said to hear 429 like any key", /past that, it hears 429 <code className="font-mono">rate_limited<\/code> like any key/i.test(page), true);
+    is("a minute's count that cannot be read is listed as 503 unavailable", page.includes('503  {"error": "unavailable", "message": "The store could not answer just now. Try again in a moment."}'), true);
 
     part("A key past its minute costs only its lookup and the counter, paused or live");
     const fourth = await storeOf("guard-limits-cost@example.com", "guard-limits-cost", "GuardLimitsCost");

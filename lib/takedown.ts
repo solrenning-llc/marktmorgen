@@ -30,6 +30,7 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
+import { withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
 const TOKEN_SECONDS = 60 * 86_400;
@@ -354,6 +355,8 @@ export async function sendOwedNotice(report: Report, store: Store, action: Exclu
       kept = { ...kept, applied: true };
       await writeSteps(key, kept);
     }
+    // The picture too, while the product is still off the store (R44); one the creator published again keeps it.
+    if (action.type === "product") await withdrawProductPicture(storeRef(now), action.id);
     return { done: await complete(report, now, action, origin, part, key, kept) };
   });
 }
@@ -406,6 +409,8 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
       await writeSteps(key, steps);
     }
   }
+  // A product's picture leaves the address its pages gave out before the creator is told it is down (R44).
+  if (action.type === "product") await withdrawProductPicture(ref, action.id);
   return complete(report, store, action, origin, part, key, steps);
 }
 

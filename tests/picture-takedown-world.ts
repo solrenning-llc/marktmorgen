@@ -2,23 +2,26 @@
  * @/lib/blob for tests/picture-takedown.test.ts: files kept in memory, nothing reaches Vercel Blob. A test can make
  * the next copies or deletes fail, and can act while a copy is being made (as a creator saving at the same moment).
  */
+import { BlobNotFoundError } from "@vercel/blob";
+
 export const kept = new Map<string, Uint8Array>();
 export const calls: string[] = [];
 export const faults = { copy: 0, del: 0 };
 export const hooks: { onCopy: null | (() => Promise<void>) } = { onCopy: null };
 
-class NotFound extends Error {
+/** The SDK's own error for a file that is not there, as the real store answers. */
+const NotFound = class extends BlobNotFoundError {
   constructor(pathname: string) {
-    super(`not found: ${pathname}`);
-    this.name = "BlobNotFoundError";
+    super();
+    this.message = `not found: ${pathname}`;
   }
-}
+};
 
 export async function get(pathname: string) {
   calls.push(`get ${pathname}`);
   const bytes = kept.get(pathname);
   if (!bytes) return null;
-  return { statusCode: 200, blob: { size: bytes.byteLength }, stream: new Blob([bytes]).stream() } as never;
+  return { statusCode: 200, blob: { size: bytes.byteLength }, stream: new Blob([new Uint8Array(bytes)]).stream() } as never;
 }
 export async function head(pathname: string) {
   calls.push(`head ${pathname}`);

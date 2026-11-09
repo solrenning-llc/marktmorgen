@@ -152,6 +152,15 @@ async function main(): Promise<void> {
   const strays = [...kept.keys()].filter((p) => p.startsWith(`images/${folder}/`) && !live.has(p));
   is("no copy is left behind for a picture nobody shows", strays, []);
 
+  part("A picture whose files the file store says are gone: the takedown is not held up by it");
+  const lost = await pictured("Icon set", 6);
+  kept.delete(lost.image.path);
+  kept.delete(lost.image.small!.path);
+  is("unpublished, and the creator told", [await press(report, lost.id), sent.filter((m) => m.text.includes("Icon set")).length], ['The product "Icon set", now unpublished', 1]);
+  is("its old address answers not found", servedYear(await fetchPicture(lost.image.path)), gone);
+  const shown = await liveNames();
+  is("nothing is copied for it", [...kept.keys()].filter((p) => p.startsWith(`images/${folder}/`) && !shown.has(p)), []);
+
   part("A product with no picture: taken down as before, nothing asked of the file store");
   const bare = await addProduct(OWNER, "Plain guide", "", "9", null);
   if (!bare.ok) throw new Error("no product");

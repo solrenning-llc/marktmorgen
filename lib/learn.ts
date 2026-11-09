@@ -183,13 +183,28 @@ export type EnrollmentOrigin = "stripe" | "paypal" | "gift" | "preorder" | "grou
 const ORIGIN_LETTER: Record<EnrollmentOrigin, string> = { stripe: "s", paypal: "p", gift: "g", preorder: "r", group: "l" };
 const ORIGIN_OF = new Map(Object.entries(ORIGIN_LETTER).map(([origin, letter]) => [letter, origin as EnrollmentOrigin]));
 
-/** Written when a purchase is confirmed: on the thanks page, or by the path that hands over a sale of another origin. */
+/**
+ * Written when a purchase is confirmed: on the thanks page, or by the path that hands over a sale of another origin.
+ * The first start written stays (HSETNX). So does the first origin, except that a sale of another source (PayPal, a
+ * gift, a pre-order, a group place) takes the place of a Stripe or old entry, keeping its start: that entry then
+ * stands for a sale a Stripe refund cannot take back, so courseLedger never takes it off the ledger for one (Claude
+ * 6's focal review of #3376, P7). Its own path takes it off (dropEnrollment).
+ */
 export async function recordEnrollment(store: Store, email: string, productId: string, startSeconds: number, origin: EnrollmentOrigin): Promise<void> {
   if (!isRedisConfigured()) return;
-  // Counted in the store's room at what it really adds: nothing for a course already there (lib/order-data.ts). The
-  // first origin written stays, as the start does (HSETNX).
+  const key = ledgerKey(store, email);
+  // Counted in the store's room at what it really adds: nothing for a course already there (lib/order-data.ts).
+  const [added] = await orderWrite(store, [
+    ["HSETNX", key, productId, `${Math.floor(startSeconds)}:${ORIGIN_LETTER[origin]}`],
+    ["DEL", paidCacheKey(store, email)],
+  ]);
+  if (added !== 0 || origin === "stripe") return;
+  const [held] = await redisPipeline([["HGET", key, productId]]);
+  const entry = writtenDown(held);
+  if (!entry || (entry.origin !== null && entry.origin !== "stripe")) return;
+  // The same start, this origin's letter: the room is charged the two bytes an old entry grows by.
   await orderWrite(store, [
-    ["HSETNX", ledgerKey(store, email), productId, `${Math.floor(startSeconds)}:${ORIGIN_LETTER[origin]}`],
+    ["HSET", key, productId, `${entry.began}:${ORIGIN_LETTER[origin]}`],
     ["DEL", paidCacheKey(store, email)],
   ]);
 }
@@ -338,54 +353,118 @@ const CONFIRMS_PER_READING = 5;
 
 const INTENT_ID = /^pi_[A-Za-z0-9]{8,255}$/;
 
-/** A refund row of GET /refunds in its exact shape (lib/refunds.ts), with its amount as whole cents. */
-const refundLegible = (row: Record<string, unknown>) => {
-  const amount = ownField(row, "amount");
-  return refundRowKnown(row) && typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0;
+const INVOICE_ID = /^in_[A-Za-z0-9]{8,255}$/;
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+
+/** A Stripe id, as text or on the expanded object; otherwise "". */
+const idOf = (value: unknown): string => {
+  const id = plainObject(value) ? ownField(value, "id") : value;
+  return typeof id === "string" ? id : "";
 };
 
 /**
- * Whether the money of one checkout read as refunded in full is back for good (owner decision 18,
- * C1-20261109-1029-C5-52): its charge's dispute lost, or its refunds, listed whole, succeeded for the whole charge.
- * A refund pending, needing action, failed or canceled is not; nor is anything that could not be read (a plan's
- * checkout, a list that did not read or did not end), so the course stays written down and is asked about again on
- * the next whole reading. A refund pending past REFUND_PENDING_ALERT_SECONDS is logged, never acted on.
+ * A refund row of GET /refunds in its exact shape (lib/refunds.ts refundRowKnown), with its amount as whole cents.
+ * Its charge comes as Stripe sends it unexpanded, an id (Claude 6's focal review of #3376, MEDIUM A: read only as
+ * null or an object, every real row was unreadable and no refund was ever confirmed), or expanded, or null.
  */
-async function moneyBack(account: string, session: Record<string, unknown>): Promise<boolean> {
-  if (session.mode !== "payment") return false;
-  const payment = session.payment_intent;
+const refundLegible = (row: Record<string, unknown>) => {
+  const amount = ownField(row, "amount");
+  const charge = ownField(row, "charge");
+  const known = typeof charge === "string" ? CHARGE_ID.test(charge) && refundRowKnown({ ...row, charge: null }) : refundRowKnown(row);
+  return known && typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0;
+};
+
+/** The most payments of a plan's first invoice read to confirm its refund; more is not confirmed here. */
+const PLAN_PAYMENTS = 3;
+
+/**
+ * Whether the money of one payment is back for good (owner decision 18, C1-20261109-1029-C5-52): a PaymentIntent
+ * with its latest charge expanded, its dispute lost, or its refunds, listed whole, succeeded for the whole charge. A
+ * refund pending, needing action, failed or canceled is not; nor is anything that does not read. A refund pending past
+ * REFUND_PENDING_ALERT_SECONDS is logged, never acted on. Throws when Stripe cannot be asked.
+ */
+async function paymentBack(account: string, payment: unknown): Promise<boolean> {
   if (!plainObject(payment)) return false;
   const intent = ownField(payment, "id");
   const charge = ownField(payment, "latest_charge");
   const amount = plainObject(charge) ? ownField(charge, "amount") : undefined;
   if (typeof intent !== "string" || !INTENT_ID.test(intent)) return false;
   if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) return false;
+  if (await disputeLost(account, payment)) return true;
+  const query = new URLSearchParams({ payment_intent: intent, limit: "100" });
+  const read = readStripePage(await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION), refundLegible);
+  if (read.unreadable > 0 || read.hasMore) return false;
+  let back = 0;
+  let waitingSince = Infinity;
+  for (const row of read.rows) {
+    if (row.payment_intent !== intent) continue;
+    if (row.status === "succeeded") back += row.amount as number;
+    else if (row.status === "pending" || row.status === "requires_action") waitingSince = Math.min(waitingSince, row.created as number);
+  }
+  if (back >= amount) return true;
+  if (Date.now() / 1000 - waitingSince > REFUND_PENDING_ALERT_SECONDS) {
+    console.warn("a course refund has been pending for more than seven days; the course stays open until it succeeds", { account, intent });
+  }
+  return false;
+}
+
+/** One payment of an invoice as GET /invoice_payments lists it: a status in text. Its PaymentIntent is read where used. */
+const invoicePaymentLegible = (row: Record<string, unknown>) => typeof ownField(row, "status") === "string";
+
+/**
+ * Whether the money of one checkout read as refunded in full is back for good: a one-off payment's, or, for a course
+ * bought on a payment plan, every paid payment of its first invoice's (the payment lib/refunds.ts planRefundedInFull
+ * judges), each by paymentBack. Anything that does not read, or a plan's first invoice with more than PLAN_PAYMENTS
+ * payments, is not confirmed: the course stays written down and is asked about again on the next whole reading.
+ */
+async function moneyBack(account: string, session: Record<string, unknown>): Promise<boolean> {
   try {
-    if (await disputeLost(account, payment)) return true;
-    const query = new URLSearchParams({ payment_intent: intent, limit: "100" });
-    const read = readStripePage(await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION), refundLegible);
-    if (read.unreadable > 0 || read.hasMore) return false;
-    let back = 0;
-    let waitingSince = Infinity;
-    for (const row of read.rows) {
-      if (row.payment_intent !== intent) continue;
-      if (row.status === "succeeded") back += row.amount as number;
-      else if (row.status === "pending" || row.status === "requires_action") waitingSince = Math.min(waitingSince, row.created as number);
+    if (session.mode === "payment") return await paymentBack(account, session.payment_intent);
+    const meta = ownField(session, "metadata");
+    if (session.mode !== "subscription" || !plainObject(meta) || ownField(meta, "kind") !== "plan") return false;
+    const invoice = idOf(session.invoice);
+    if (!INVOICE_ID.test(invoice)) return false;
+    const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`, undefined, STRIPE_LIST_VERSION);
+    const intents: string[] = [];
+    const direct = idOf(read.payment_intent);
+    if (INTENT_ID.test(direct)) intents.push(direct);
+    else {
+      const query = new URLSearchParams({ invoice, limit: String(PLAN_PAYMENTS) });
+      const listed = readStripePage(await onAccount("GET", account, `/invoice_payments?${query}`, undefined, STRIPE_LIST_VERSION), invoicePaymentLegible);
+      if (listed.unreadable > 0 || listed.hasMore) return false;
+      for (const row of listed.rows) {
+        if (row.status !== "paid") continue;
+        const payment = ownField(row, "payment");
+        const intent = plainObject(payment) ? idOf(ownField(payment, "payment_intent")) : "";
+        // A paid payment whose PaymentIntent does not read: not confirmed, never passed over.
+        if (!INTENT_ID.test(intent)) return false;
+        intents.push(intent);
+      }
     }
-    if (back >= amount) return true;
-    if (Date.now() / 1000 - waitingSince > REFUND_PENDING_ALERT_SECONDS) {
-      console.warn("a course refund has been pending for more than seven days; the course stays open until it succeeds", { account, intent });
+    if (intents.length === 0) return false;
+    for (const intent of intents) {
+      const payment = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, STRIPE_LIST_VERSION);
+      if (!(await paymentBack(account, payment))) return false;
     }
-    return false;
+    return true;
   } catch (error) {
     console.error("confirming a course refund failed", error);
     return false;
   }
 }
 
-/** Takes one course off an address's ledger, its reply read exactly (CX-123 rule 24): 0 or 1, or this throws. */
-async function takeOffLedger(store: Store, email: string, productId: string): Promise<void> {
-  const reply = repliesFor(await redisPipeline([["HDEL", ledgerKey(store, email), productId]]), 1)?.[0];
+/** Deletes one ledger field only while it still holds the value read (lib/redis-memory.ts models it). */
+const TAKE_OFF_IF = `-- marktmorgen:learn-take-off-if:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
+return 0`;
+
+/**
+ * Takes one course off an address's ledger, only while its entry is still the value this request read (Claude 6's
+ * focal review of #3376, LOW D): a sale written in between is never deleted with it. The reply is read exactly
+ * (CX-123 rule 24): 0 or 1, or this throws.
+ */
+async function takeOffLedger(store: Store, email: string, productId: string, held: string): Promise<void> {
+  const reply = repliesFor(await redisPipeline([["EVAL", TAKE_OFF_IF, 1, ledgerKey(store, email), productId, held]]), 1)?.[0];
   if (reply !== 0 && reply !== 1) throw new UnknownReplyError("taking a refunded course off a ledger");
 }
 
@@ -503,11 +582,13 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
   // Where each came from: a Stripe checkout, or no letter (written before origins were kept), is taken off here once
   // its refund is confirmed; every other origin by its own path.
   const origins = new Map<string, EnrollmentOrigin | null>();
+  const held = new Map<string, string>();
   for (const [field, value] of pairs) {
     const entry = writtenDown(value);
     if (typeof field !== "string" || entry === null) throw new UnknownReplyError("the courses written down for an address");
     recorded.set(field, entry.began);
     origins.set(field, entry.origin);
+    held.set(field, value as string);
   }
 
   // Brought over from another platform: the course itself, or a course in a
@@ -522,11 +603,12 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
 
   const courses = await readKind(store, "course");
 
-  // Owner decision 18 (C1-20261109-1029-C5-52): a course is taken away only once its money is back. A whole reading
-  // that found every purchase of a one-off course refunded in full shuts it (below); when the course was written
-  // down from that very checkout (its start is the checkout's time) and Stripe confirms the money is back for good
-  // (moneyBack), it is taken off the ledger, so it never opens again while Stripe cannot be read. A refund not yet
-  // confirmed takes nothing off: the course stays written down and is asked about again on the next whole reading.
+  // Owner decision 18 (C1-20261109-1029-C5-52): a course is taken away only once its money is back. When a whole
+  // reading finds every purchase of a one-off course refunded in full, the course was written down from that very
+  // checkout (its start is the checkout's time), and Stripe confirms the money is back for good (moneyBack), it is
+  // taken off the ledger: shut from then on, Stripe readable or not. A refund not yet confirmed (pending, needing
+  // action, failed, canceled, or not read) takes nothing off, and the course stays open (below; Claude 6's focal
+  // review of #3376, MEDIUM B); it is asked about again on the next whole reading.
   if (whole && refundedAt && store.stripeAccountId) {
     let confirms = 0;
     for (const product of courses) {
@@ -540,7 +622,7 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
       confirms += 1;
       if (!(await moneyBack(store.stripeAccountId, own.session))) continue;
       try {
-        await takeOffLedger(store, email, product.id);
+        await takeOffLedger(store, email, product.id, held.get(product.id)!);
         recorded.delete(product.id);
       } catch (error) {
         // Still written down: this whole reading shuts it all the same, and the next one tries again.
@@ -551,11 +633,9 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
 
   for (const product of courses) {
     if (!product.course) continue;
-    // A one-off sale written down on the thanks page stands on its own,
-    // unless a whole reading of Stripe now says it was refunded in full.
-    const start = product.recurring || (whole && asked.refunded.has(product.id))
-      ? fromStripe.get(product.id)
-      : recorded.get(product.id) ?? fromStripe.get(product.id);
+    // A one-off sale written down stands on its own until its refund is confirmed and takes it off the ledger
+    // (above): Stripe marking the charge refunded is not the money back (owner decision 18).
+    const start = product.recurring ? fromStripe.get(product.id) : recorded.get(product.id) ?? fromStripe.get(product.id);
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));
     if (opens !== undefined && Number.isFinite(opens)) result.set(product.id, opens);
   }

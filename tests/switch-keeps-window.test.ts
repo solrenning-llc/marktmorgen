@@ -515,6 +515,29 @@ async function main(): Promise<void> {
       }
     is("10f: 336 switches written over a stale record, none opens a window the caught-up record does not name", [staleSwept, staleOpened.length, staleOpened.slice(0, 3)], [336, 0, []]);
 
+    // 10g (focal review of #3396, MEDIUM A): a stop written only after the grace of an unpaid renewal, when the record
+    // never got the overdue period: no window could be open since the grace ended, so the anchor is left behind and a
+    // payment made later opens one window, its own, never two.
+    const swAtG = Date.UTC(2027, 0, 28, 11);
+    const moG = (k: number) => ({ start: addMonthsMs(swAtG, k) / 1000, end: addMonthsMs(swAtG, k + 1) / 1000, renews: true });
+    const baseG = { subscriptionActive: true, subscriptionId: SUB, trialEnds: 0, planEndedAt: "", cycle: "month" as const };
+    const yearlyOnG = { ...baseG, cycle: "year" as const, period: { start: Date.UTC(2027, 0, 1, 9) / 1000, end: Date.UTC(2028, 0, 1, 9) / 1000, renews: true } };
+    const monthlyOnG = { ...baseG, period: moG(0) };
+    const anchoredG = { ...monthlyOnG, allowanceAnchor: anchorAfter(yearlyOnG, monthlyOnG, swAtG) };
+    const lastPaidG = { ...anchoredG, period: moG(2) }; // 28 March to 28 April, written; 28 April never paid, never written
+    const stoppedAtG = Date.UTC(2027, 4, 1, 11);
+    const stopG = { ...lastPaidG, subscriptionActive: false, period: null, planEndedAt: new Date(stoppedAtG).toISOString() };
+    const afterStopG = { ...stopG, allowanceAnchor: anchorAfter(lastPaidG, stopG, stoppedAtG) };
+    const paidAgainG = { ...baseG, planEndedAt: "", period: moG(4) }; // 28 May to 28 June
+    const resumedAtG = Date.UTC(2027, 4, 28, 12);
+    const backG = { ...paidAgainG, allowanceAnchor: anchorAfter(afterStopG, paidAgainG, resumedAtG) };
+    is("10g: a stop seen after the grace of an unpaid renewal leaves the anchor behind", backG.allowanceAnchor ?? null, null);
+    is("10g: the payment made later opens one window, its own, for its whole month",
+      [Date.UTC(2027, 4, 28, 12), Date.UTC(2027, 5, 2, 12), Date.UTC(2027, 5, 27, 12)].map((at) => windowId(backG, at)), ["2027-05-28", "2027-05-28", "2027-05-28"]);
+    // A stopG written inside the grace, and one with no overdue period to read, keep the anchor as before.
+    const inGraceG = { ...lastPaidG, subscriptionActive: false, period: null, planEndedAt: new Date(Date.UTC(2027, 3, 29, 11)).toISOString() };
+    is("10g: a stop written inside the grace keeps the anchor", anchorAfter(lastPaidG, inGraceG, Date.UTC(2027, 3, 29, 11))?.subscriptionId, SUB);
+
     part("11. The worst month this keeps: one window per paid month, every limit used (the figures in the PR body)");
     // The repository's own model: a month's receipts after every fee and reserve (netOf, lib/receiving-costs.ts), less
     // every cost line at its limit (worstCost, tests/plan-cost-registry.ts), then the LC rule's taxes on that profit:

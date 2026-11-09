@@ -290,6 +290,8 @@ async function main(): Promise<void> {
   is("her event is not moved: it is deleted from her calendar", onMaya(mark), [`DELETE ${HOST_CALENDAR}`]);
   is("the meeting at the new time is the store's", [onStore(mark), (await readRecord(r.scope))?.host, (await readRecord(r.scope))?.start], [["POST"], "", R + 2 * HOUR]);
   is("the buyer's link is the store's", await r.link(R + 2 * HOUR), STORE_LINK);
+  // Added with the fix (rule 23: a new check, none changed): the new link is counted, so the move's calendar file replaces the one sent before.
+  is("the new link is counted as a replaced one", (await readRecord(r.scope))?.updates, 1);
   is("and the buyer's Moved email carries it", buyerMoved(sentMark, "ana@example.com").includes(STORE_LINK), true);
 
   const cove = await teamStore("cove@example.com", "cove", "acct_1TestCove00001", null);

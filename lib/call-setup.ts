@@ -501,9 +501,11 @@ export function parseSetup(raw: unknown): CallSetup | null {
 /**
  * One formatter per zone, made once: building an Intl.DateTimeFormat costs far
  * more than using one, and a calendar file's parse asks for the same zone on
- * every step (R27). Only zones Intl accepts get here (it throws first); the
- * map is emptied past ZONE_FORMATS_MAX, so names spelled in odd letter cases
- * cannot grow it without bound.
+ * every step (R27). Only zones Intl accepts get here (it throws first); past
+ * ZONE_FORMATS_MAX the oldest is let go, one at a time, so the map never grows
+ * without bound and never empties at once. A calendar file reads its times in
+ * at most MAX_FILE_ZONES named zones (lib/ics-parse.ts), and offsets with no
+ * formatter, so one reading never builds the same zone's formatter twice.
  */
 const ZONE_FORMATS_MAX = 512;
 const zoneFormats = new Map<string, Intl.DateTimeFormat>();
@@ -522,7 +524,10 @@ export function partsIn(ms: number, tz: string) {
       minute: "2-digit",
       weekday: "short",
     });
-    if (zoneFormats.size >= ZONE_FORMATS_MAX) zoneFormats.clear();
+    if (zoneFormats.size >= ZONE_FORMATS_MAX) {
+      const oldest = zoneFormats.keys().next();
+      if (!oldest.done) zoneFormats.delete(oldest.value);
+    }
     zoneFormats.set(tz, format);
   }
   const parts = format.formatToParts(new Date(ms));

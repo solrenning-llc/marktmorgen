@@ -168,7 +168,13 @@ function main(): void {
     };
     blockedFor("an event rule with 401 BYDAY entries", calendar(vevent(["UID:b", "DTSTART:20261110T090000Z", "DURATION:PT1H", `RRULE:FREQ=WEEKLY;BYDAY=${"MO,".repeat(400)}MO`])));
     blockedFor("an event rule longer than 2,048 characters", calendar(vevent(["UID:l", "DTSTART:20261110T090000Z", "DURATION:PT1H", `RRULE:FREQ=DAILY;X-PAD=${"A".repeat(2100)}`])));
-    refusedFor("an EXDATE property longer than 128 KiB", calendar(vevent(["UID:x", "DTSTART:20261110T090000Z", "DURATION:PT1H", "RRULE:FREQ=DAILY", `EXDATE:${"20261111T090000Z,".repeat(8000)}20261111T090000Z`])));
+    // Since the focal return on #3339: an EXDATE list past the cap is left out, not the file refused, so every
+    // time of the repeat blocks, the one it named included (tests/ics-event-bounds.test.ts).
+    {
+      const { parsed, error } = tryParse(calendar(vevent(["UID:x", "DTSTART:20261110T090000Z", "DURATION:PT1H", "RRULE:FREQ=DAILY", `EXDATE:${"20261111T090000Z,".repeat(8000)}20261111T090000Z`])), WINDOW);
+      const named = Date.UTC(2026, 10, 11, 9);
+      is("an EXDATE property longer than 128 KiB: read, left out, the time it named still busy", [error === null, parsed?.busy.some((b) => b.start <= named && b.end >= named + 3_600_000)], [true, true]);
+    }
   }
 
   part("LOW 4: an INTERVAL above 1e6 blocks from the event's first time to the end of the window, never a NaN time or a RangeError");

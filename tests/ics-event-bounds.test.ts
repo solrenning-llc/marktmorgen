@@ -126,7 +126,7 @@ function main(): void {
     ["STATUS", `STATUS:CANCELLED${" ".repeat(LONG)}`],
     ["TRANSP", `TRANSP:TRANSPARENT${" ".repeat(LONG)}`],
   ] as const) {
-    part(`A ${label} past the cap: read as neither cancelled nor free`);
+    part(`A ${label} past the cap: read as neither canceled nor free`);
     const got = read(calendar([own, vevent(["UID:st@example.org", `DTSTART:${stamp(outsideFirst)}`, "DURATION:PT1H", line])]));
     is("the file is read, and the event's time is busy", got !== "refused" && covers(got.busy, outsideFirst, outsideFirst + HOUR), true);
   }

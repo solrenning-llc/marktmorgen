@@ -468,12 +468,13 @@ async function readBusy(
 ): Promise<{ busy: TeamBusy[]; paid: PaidCall[]; blocked: Busy[]; sessions: Busy[] }> {
   const local = store.callsId && isRedisConfigured() ? await heldAndBooked(store, now) : [];
   let paid: PaidCall[] = [];
-  // Read alongside Stripe, and never a reason to fail: a calendar that does
-  // not answer blocks nothing.
+  // Read alongside Stripe. A calendar whose busy times are not known closes
+  // its window (calendarBusy, which does not throw); were the reading to
+  // throw, no time is offered (the throw below), never every time.
   const weekly = sellsAny(store, "weekly");
-  const calendar = weekly
-    ? calendarBusy(store, now).catch(() => ({ busy: [] as Busy[] }))
-    : Promise.resolve({ busy: [] as Busy[] });
+  const calendar = weekly ? calendarBusy(store, now) : Promise.resolve({ busy: [] as Busy[] });
+  // Awaited below; marked here so a failure while Stripe is being read is not left unheard.
+  calendar.catch(() => {});
   // The creator's dated sessions count against weekly hours only.
   const sessions = weekly ? readListings(store, idsOfKind(store, "call")).then((calls) => sessionTimes(calls, now)) : Promise.resolve([]);
   // Awaited below; marked here so a failure while Stripe is being read is not left unheard.

@@ -321,7 +321,9 @@ export async function readFeed(url: string, fallbackTz: string, now: number, fet
 export type FetchHooks = Pick<Parameters<typeof safeFetch>[1], "resolve" | "agent">;
 
 /**
- * The busy times from every calendar the creator added, never throwing. A
+ * The busy times from every calendar the creator added, never throwing: a
+ * read that fails on the way (the settings, the zone of all-day times, the
+ * kept readings, a lock) closes every window rather than reading as none. A
  * reading under CACHE_SECONDS old is used as it is; an older one is refreshed,
  * by one request at a time per calendar. A calendar whose busy times are not
  * known closes its whole window (unknownWindow): a file refused as too
@@ -344,14 +346,19 @@ export async function calendarBusy(
   }
   if (!config || !config.feeds.length) return { busy: [], failing: 0 };
   const feeds = config.feeds;
-  const fallbackTz = await homeZone(store);
+  // Every calendar's window closed: what answers when a read on the way fails (rule 24), never "nothing busy".
+  const allUnknown = () => ({ busy: asBusy(feeds.map(() => unknownWindow(now))), failing: feeds.length });
+  // The zone of all-day and floating times, from the call listing: a failed read leaves those times unknown.
+  const fallbackTz = await homeZone(store).catch(() => null);
+  if (fallbackTz === null) return allUnknown();
   // One MGET (one command) for every calendar's reading, good reading and failure, read exactly (rule 24).
   const keys = feeds.flatMap((f) => [busyKey(f.id), goodKey(f.id), errKey(f.id)]);
   const reply = await redisPipeline([["MGET", ...keys]]).catch(() => null);
   const outer = repliesFor(reply, 1);
   const cached = outer ? listSlots(outer[0]) : null;
-  if (!cached || cached.length !== keys.length) return { busy: asBusy(feeds.map(() => unknownWindow(now))), failing: feeds.length };
+  if (!cached || cached.length !== keys.length) return allUnknown();
   let failing = 0;
+  // A calendar's reading that throws on the way (its lock, its release) closes every window: this never rejects.
   const lists = await Promise.all(
     feeds.map(async (feed, i): Promise<[number, number][]> => {
       const [busyRaw, goodRaw, errRaw] = [cached[i * 3], cached[i * 3 + 1], cached[i * 3 + 2]];
@@ -401,7 +408,8 @@ export async function calendarBusy(
         await releaseMark(lockKey(feed.id), lock);
       }
     }),
-  );
+  ).catch(() => null);
+  if (!lists) return allUnknown();
   return { busy: asBusy(lists), failing };
 }
 

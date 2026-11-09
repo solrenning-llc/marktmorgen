@@ -46,6 +46,17 @@
  * its first time to the end of the window, since its later times are not
  * known, it is counted in `unreadable`, and the rest of the file is read.
  *
+ * So does one property past MAX_PROPERTY_CHARS inside an event (focal return
+ * on #3339), only ever toward busy time: an id is read as none, an EXDATE list
+ * is left out, a STATUS or TRANSP is read as neither cancelled nor free, a
+ * RECURRENCE-ID frees no time, and an RDATE list, a rule, an end or a length
+ * makes the event block from its first time to the end of the window. Such a
+ * property anywhere else, or as an event's own start, refuses the file.
+ *
+ * Zones (memory, the same review): a zone named as an offset (+05:30) is read
+ * as that fixed offset, with no formatter; a file may name at most
+ * MAX_FILE_ZONES other zones, so its formatters stay inside partsIn's cache.
+ *
  * The busy stretches kept are capped too (maxIntervals, 2,000), and that cut is
  * by time, never by the order of the file: every stretch before a cutoff is
  * kept exactly, and everything from the cutoff to the end of the window is
@@ -78,7 +89,8 @@ export type ParsedCalendar = {
   work: number;
 };
 
-type Prop = { name: string; params: Record<string, string>; value: string };
+/** `oversized`: a property past MAX_PROPERTY_CHARS, kept by its name only (its value and parameters are not read). */
+type Prop = { name: string; params: Record<string, string>; value: string; oversized?: true };
 
 /** How many times one repeating event is stepped through, at most. */
 const MAX_STEPS = 5000;
@@ -117,6 +129,18 @@ const MAX_RULE_CHARS = 2048;
 const MAX_RULE_ITEMS = 400;
 /** Units for each formatter built to look up a zone name (lib/call-setup.ts isTimeZone). */
 const ZONE_LOOKUP_UNITS = 10;
+/**
+ * The most named zones (offsets aside) one file's times may be read in: a real
+ * calendar names a handful. Under lib/call-setup.ts partsIn's 512 formatters,
+ * so one reading never empties them and builds them again; past it the file is
+ * refused (CalendarTooComplex).
+ */
+export const MAX_FILE_ZONES = 64;
+/**
+ * Properties that may be past MAX_PROPERTY_CHARS inside an event without
+ * refusing the file: each is read toward busy time (parseIcs, first pass).
+ */
+const OVERSIZED_IN_EVENT = new Set(["UID", "EXDATE", "RDATE", "RRULE", "DTEND", "DURATION", "RECURRENCE-ID", "STATUS", "TRANSP"]);
 
 /**
  * A calendar file that needs more work than ICS_MAX_WORK, or a repeat that
@@ -325,7 +349,8 @@ function readProp(line: string): Prop | null {
     end += 1;
   }
   if (end >= line.length || line.charCodeAt(end) === 34 || !READ_NAMES.has(line.slice(0, end).toUpperCase())) return null;
-  if (line.length > MAX_PROPERTY_CHARS) throw new CalendarTooComplex();
+  // Past the cap the value is never read: the first pass decides, by where it is, what the event makes of it.
+  if (line.length > MAX_PROPERTY_CHARS) return { name: line.slice(0, end).toUpperCase(), params: {}, value: "", oversized: true };
   // The value starts after the first colon that is not inside quotes.
   let quoted = false;
   let colon = -1;
@@ -380,7 +405,18 @@ type ZoneRule = {
  */
 type YearlyRule = { kind: "day"; month: number; day: number } | { kind: "nth"; month: number; nth: number; weekday: number } | { kind: "never" };
 
-type Zone = { kind: "iana"; tz: string } | { kind: "rules"; rules: ZoneRule[] } | { kind: "utc" };
+type Zone = { kind: "iana"; tz: string } | { kind: "rules"; rules: ZoneRule[] } | { kind: "utc" } | { kind: "fixed"; minutes: number };
+
+/**
+ * The zone a canonical name means: UTC, a fixed offset (Intl names one as
+ * "+05:30"), read with no formatter, or a named zone, read through partsIn.
+ */
+function zoneNamed(tz: string): Zone {
+  if (tz === "UTC") return { kind: "utc" };
+  const fixed = /^([+-])(\d{2}):(\d{2})$/.exec(tz);
+  if (fixed) return { kind: "fixed", minutes: (fixed[1] === "-" ? -1 : 1) * (Number(fixed[2]) * 60 + Number(fixed[3])) };
+  return { kind: "iana", tz };
+}
 
 /**
  * The IANA zone a name means, by its canonical name (one name for every
@@ -413,6 +449,7 @@ function ianaFrom(name: string, build: () => void): string | null {
 /** The offset, in minutes ahead of UTC, that a zone has at instant `ms`. */
 function offsetAt(zone: Zone, ms: number): number {
   if (zone.kind === "utc") return 0;
+  if (zone.kind === "fixed") return zone.minutes;
   if (zone.kind === "iana") {
     const p = partsIn(ms, zone.tz);
     const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
@@ -558,6 +595,8 @@ type EventProps = {
   recurrenceId: Prop | null;
   status: string;
   transp: string;
+  /** A property past MAX_PROPERTY_CHARS left its later times or its length unknown: it blocks from its first time on. */
+  unread: boolean;
 };
 
 /**
@@ -615,6 +654,22 @@ export function parseIcs(
   };
 
   for (const prop of props) {
+    if (prop.oversized) {
+      // Past MAX_PROPERTY_CHARS: inside an event, only that event is affected, and only toward busy time; anywhere
+      // else, or as the event's own start, the file is refused.
+      if (stack[stack.length - 1] !== "VEVENT" || !event || !OVERSIZED_IN_EVENT.has(prop.name)) throw new CalendarTooComplex();
+      // An id read as none: never taken for one of our bookings, and it moves no time of another event.
+      if (prop.name === "UID") event.uid = "";
+      else if (prop.name === "STATUS") event.status = "";
+      else if (prop.name === "TRANSP") event.transp = "";
+      // A moved copy whose time it replaces is not known: it blocks its own time and frees none.
+      else if (prop.name === "RECURRENCE-ID") event.recurrenceId = { name: "RECURRENCE-ID", params: {}, value: "" };
+      // Times left out: none is, so every time of the repeat blocks.
+      else if (prop.name === "EXDATE") continue;
+      // Later times or the length not known (RDATE, RRULE, DTEND, DURATION).
+      else event.unread = true;
+      continue;
+    }
     if (prop.name === "BEGIN") {
       const what = prop.value.trim().toUpperCase();
       if (stack.length >= MAX_DEPTH) throw new CalendarTooComplex();
@@ -625,7 +680,7 @@ export function parseIcs(
       } else if ((what === "STANDARD" || what === "DAYLIGHT") && stack.includes("VTIMEZONE")) {
         rulePart = { start: null, from: 0, to: 0, rule: null };
       } else if (what === "VEVENT") {
-        event = { uid: "", start: null, end: null, duration: null, rrule: null, rdates: [], exdates: [], recurrenceId: null, status: "", transp: "" };
+        event = { uid: "", start: null, end: null, duration: null, rrule: null, rdates: [], exdates: [], recurrenceId: null, status: "", transp: "", unread: false };
       }
       continue;
     }
@@ -695,10 +750,16 @@ export function parseIcs(
 
   // The last X-WR-TIMEZONE names the calendar's zone, as when each was looked up in turn.
   const calendarZone = calendarZoneName === null ? null : ianaFrom(calendarZoneName, lookUp);
-  const home: Zone = (() => {
-    const tz = calendarZone ?? (isTimeZone(options.fallbackTz) ? options.fallbackTz : "UTC");
-    return tz === "UTC" ? { kind: "utc" } : { kind: "iana", tz };
-  })();
+  // The named zones the file's times are read in, at most MAX_FILE_ZONES (offsets need no formatter).
+  const named = new Set<string>();
+  const capped = (zone: Zone): Zone => {
+    if (zone.kind === "iana" && !named.has(zone.tz)) {
+      named.add(zone.tz);
+      if (named.size > MAX_FILE_ZONES) throw new CalendarTooComplex();
+    }
+    return zone;
+  };
+  const home: Zone = capped(zoneNamed(calendarZone ?? (isTimeZone(options.fallbackTz) ? options.fallbackTz : "UTC")));
   const zoneCache = new Map<string, Zone>();
   const zoneOf = (stamp: Stamp): Zone => {
     if (stamp.utc) return { kind: "utc" };
@@ -707,7 +768,7 @@ export function parseIcs(
     if (cached) return cached;
     const iana = ianaFrom(stamp.tzid, lookUp);
     const found = defined.get(stamp.tzid);
-    const zone: Zone = iana ? (iana === "UTC" ? { kind: "utc" } : { kind: "iana", tz: iana }) : found ? { kind: "rules", rules: found } : home;
+    const zone: Zone = iana ? capped(zoneNamed(iana)) : found ? { kind: "rules", rules: found } : home;
     zoneCache.set(stamp.tzid, zone);
     return zone;
   };
@@ -756,6 +817,13 @@ export function parseIcs(
     const start = readStamp(e.start.value, e.start.params);
     if (!start) continue;
     const zone = zoneOf(start);
+    // A property past the cap left its later times or its length unknown: from its first time to the window's end.
+    if (e.unread) {
+      unreadable += 1;
+      const first = toUtc(zone, start.y, start.mo, start.d, start.date ? 0 : start.minute, start.date ? 0 : start.second);
+      add(first, Math.max(first + 1, options.to));
+      continue;
+    }
 
     // How long each time lasts: whole days for an all-day event, otherwise
     // the exact length between start and end.

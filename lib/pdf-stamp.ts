@@ -17,7 +17,8 @@
  * path derived from the sale and the file; every later download of the same
  * sale is served from it, so a buyer downloading three times costs one stamp.
  * A new file on the product means new copies, and the old ones are deleted
- * when the file they were made from is.
+ * when the file they were made from is, and each with its buyer when the
+ * buyer is deleted (forgetStampedPerson; audit R12, item 1).
  *
  * Two kinds of PDF are handed over as they were uploaded, and the creator is
  * told in the studio rather than the buyer being refused a file they paid for:
@@ -42,6 +43,7 @@ import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/pr
 import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
 import { type DataStore, keepFor } from "@/lib/store-data";
+import { noteForErasure, notedFor } from "@/lib/erasure-index";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -49,6 +51,11 @@ const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const COPY_RECORD_SECONDS = 400 * 24 * 60 * 60;
 /** What a stamped copy's record takes in the store's data room for the time it is kept. */
 export const COPY_RECORD_BYTES = 768;
+/**
+ * What its two notes for the buyer's erasure take beside it (lib/erasure-index.ts): the copy's path and the record's
+ * key, each a member of the address's sorted set with its score. Taken with the record, for the same time.
+ */
+export const COPY_NOTE_BYTES = 512;
 /** How long a note about a PDF that could not be stamped stays in the studio. */
 const PROBLEM_SECONDS = 60 * 24 * 60 * 60;
 
@@ -164,6 +171,24 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
 }
 
 /**
+ * Takes a new copy's room and notes it for its buyer's erasure: the copy's path, which forgetStampedPerson deletes,
+ * and its record's key, which forgetNoted deletes (lib/erasure-index.ts). True only when every reply is the one a
+ * done write gives (CX-123 rule 24): ZADD 0 or 1, ZREMRANGEBYSCORE a count, EXPIRE 1.
+ */
+async function keptAndNoted(store: DataStore, email: string, pathname: string, key: string): Promise<boolean> {
+  if (!isRedisConfigured() || !store.statsId) return false;
+  if (!(await keepFor(store, COPY_RECORD_BYTES + COPY_NOTE_BYTES, COPY_RECORD_SECONDS))) return false;
+  const notes = [...noteForErasure(store.statsId, email, pathname), ...noteForErasure(store.statsId, email, key)];
+  if (notes.length !== 6) return false;
+  const replies = repliesFor(await redisPipeline(notes), notes.length);
+  return Boolean(replies?.every((reply, i) => {
+    const count = countOf(reply);
+    const command = notes[i][0];
+    return count !== null && (command === "ZADD" ? count <= 1 : command === "EXPIRE" ? count === 1 : true);
+  }));
+}
+
+/**
  * The buyer's stamped copy of a PDF or an EPUB, made on the first download of a sale and
  * reused after. Null means hand over the original: stamping does not apply,
  * or it could not be done, and the reason is kept for the creator to see.
@@ -225,6 +250,10 @@ export async function stampedCopy(
     // beside the path, as it is for the original.
     const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
     const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
+    // The copy carries the buyer's address, so it is kept only once deleting the buyer can find it (audit R12, item 1):
+    // its record's room is taken and both are noted for the erasure before the file is written. Without room, a store to
+    // note it in, or a confirmed note, the original is handed over and no copy is kept.
+    if (!(await keptAndNoted(store, sale.email, pathname, key))) return null;
     await writeFileWhole(pathname, stamped, contentType);
     const copy: ProductFile = {
       pathname,
@@ -233,12 +262,8 @@ export async function stampedCopy(
       contentType,
       addedAt: new Date().toISOString(),
     };
-    // Its record is kept only while the store's data room has space for it
-    // (lib/store-data.ts): without it the buyer still gets this copy, and the
-    // next download stamps another.
-    if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
-      await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
-    }
+    // Its room in the store's data room was taken above (lib/store-data.ts).
+    await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
     // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
     // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
     // for a later try: emptying it now would delete the copy handed over below.
@@ -317,4 +342,26 @@ export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | 
     if (await noteDrop(folder)) console.error("could not delete stamped copies; put down to be tried again", error);
     else console.error(`could not delete stamped copies in ${folder}, and nothing will try again: the list could not be written`, error);
   }
+}
+
+/** One stamped copy, as stampedCopy names it: a folder of copyFolder, the sale's own folder, the file. */
+const COPY_FILE = new RegExp(`^(?:${VAULT_PREFIX}|stores)/[^/]+/stamped/[0-9a-f]{24}/[0-9a-f]{24}/[^/]+$`);
+
+/**
+ * Deletes every stamped copy made for this address in this store (audit R12, item 1), for lib/person-erasure.ts, and
+ * answers how many. It runs before forgetNoted, which deletes the notes it reads and each copy's record. Notes read in
+ * any shape but an exact list throw (rule 24) and nothing is deleted. A copy the file store does not delete is put in
+ * `files` before this throws: the erasure tries it once more at its end and, failing that, hands it to the daily job
+ * that deletes files nobody kept; the step is never answered done while a copy may be left.
+ */
+export async function forgetStampedPerson(statsId: string, email: string, files: string[]): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const copies = (await notedFor(statsId, email)).filter((entry) => COPY_FILE.test(entry));
+  try {
+    for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000));
+  } catch (error) {
+    files.push(...copies);
+    throw new Error(`${copies.length} stamped copies were not deleted yet; the erasure tries them again`, { cause: error });
+  }
+  return copies.length;
 }

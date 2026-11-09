@@ -111,7 +111,7 @@ function put(name: string, bytes: Uint8Array, contentType = "application/epub+zi
   return { pathname, name, bytes: bytes.byteLength, contentType, addedAt: `2026-11-03T12:00:0${n}.000Z` };
 }
 
-const store = { sid: "epub-stamp-download", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_1", trialEnds: 0, planEndedAt: "" };
+const store = { sid: "epub-stamp-download", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_1", trialEnds: 0, planEndedAt: "", statsId: "6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b" };
 const sale = { reference: "cs_test_a1B2c3D4e5F6", email: "maya@example.com", paidAt: Date.UTC(2026, 10, 3) / 1000 };
 
 async function main() {

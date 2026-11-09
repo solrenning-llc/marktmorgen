@@ -36,6 +36,18 @@ const indexKey = (statsId: string, email: string) =>
 const notesKey = (statsId: string, email: string) => `${indexKey(statsId, email)}:z`;
 
 /**
+ * Everything noted for this address in this store, read in its exact shape: for a step that must act on a noted
+ * entry before forgetNoted deletes the notes, such as a stamped copy's file (lib/pdf-stamp.ts), which is not a key.
+ * A confirmed absent or empty note is []; any other reply throws UnknownReplyError (CX-123 rule 24).
+ */
+export async function notedFor(statsId: string, email: string): Promise<string[]> {
+  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", notesKey(statsId, email), "-inf", "+inf"]]), 1);
+  const noted = stringList(replies?.[0]);
+  if (!noted) throw new UnknownReplyError("the notes of an address's records");
+  return noted;
+}
+
+/**
  * Commands that note a record made for this address, to send with the
  * command that writes it. A store with no stats id notes nothing: it has
  * none of these records.

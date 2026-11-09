@@ -94,6 +94,7 @@ import { forgetReviewsPerson } from "@/lib/reviews";
 import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
+import { forgetStampedPerson } from "@/lib/pdf-stamp";
 import { forgetRequestsPerson } from "@/lib/payment-request-store";
 import { forgetAgreementsPerson } from "@/lib/agreement-store";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
@@ -200,6 +201,8 @@ export const ERASERS: Eraser[] = [
   // The month's summary of what customers say quotes their reviews (rule 28): it goes after them, and a reading under way is not kept.
   { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
+  // A stamped copy carries their address on its pages; found through the notes, so it goes before them (audit R12, item 1).
+  { module: "lib/pdf-stamp.ts", run: (s, files) => forgetStampedPerson(s.statsId, s.email, files) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
   { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },
 ];

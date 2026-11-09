@@ -171,7 +171,7 @@ async function main() {
   const book = original("Workbook.pdf");
   world.files.set(book.pathname, pdf);
   const file: ProductFile = { ...book, bytes: pdf.byteLength };
-  const shop = { sid: "stamped-drop-retry", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_1", trialEnds: 0, planEndedAt: "" };
+  const shop = { sid: "stamped-drop-retry", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_1", trialEnds: 0, planEndedAt: "", statsId: "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a" };
   const sale = { reference: "cs_test_r9S7t5A3m1P0", email: "maya@example.com", paidAt: Date.UTC(2026, 10, 8) / 1000 };
   const copy = await stamp.stampedCopy(file, sale, shop);
   is("control: the buyer still gets the copy", [Boolean(copy), copy ? world.files.has(copy.pathname) : false], [true, true]);

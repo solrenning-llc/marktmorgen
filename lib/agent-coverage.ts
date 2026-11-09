@@ -88,6 +88,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST billing/checkout": row("money", never(MONEY)),
   "POST billing/pause": row("money", never(MONEY)),
   "POST billing/refund": row("money", never(MONEY)),
+  "POST billing/withdraw": row("money", never(MONEY)),
   "GET billing/return": row("money", never(BROWSER)),
   "POST billing/switch": row("money", never(MONEY)),
   "GET discord/callback": row("connections", never(BROWSER)),

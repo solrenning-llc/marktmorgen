@@ -160,7 +160,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
   // What a kind of funnel can be built with (lib/funnel-types.ts): every product, and what it is.
   const courseKinds = new Set(idsOfKind(store,"course"));
   const bundleKinds = new Set(idsOfKind(store,"bundle"));
-  const typeProducts: TypeProduct[] = [...cards.values()].map((p) => ({ id: p.id, title: p.title, free: free.has(p.id), call: calls.has(p.id), draft: drafts.has(p.id) }));
+  const typeProducts: TypeProduct[] = [...cards.values()].map((p) => ({ id: p.id, title: p.title, free: free.has(p.id), call: calls.has(p.id), bundle: bundleKinds.has(p.id), draft: drafts.has(p.id) }));
   // Copying, sharing and bringing in funnels (lib/funnel-bundle.ts): the store's links, never their codes.
   const canShare = can(view.role, "page");
   // The account's other stores, for its owner alone: where a funnel can be copied to (app/api/store/funnel-share).

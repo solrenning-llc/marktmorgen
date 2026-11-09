@@ -193,6 +193,13 @@ async function tryPlan(account: string, session: string): Promise<Outcome> {
     return Math.floor(Date.now() / 1000) >= end ? { state: "done" } : { state: "early", again: Math.min(cancelAt, end - 2 * DAY) };
   }
 
+  // Its own end already past (a plan stuck longer than its term, or a short one): an end in the past is not a time
+  // Stripe documents for cancel_at, and the buyer agreed to no payment after it, so the subscription is ended now,
+  // with nothing prorated or invoiced (the review of #3367, item 3). Settled only on its own answer saying canceled.
+  if (Math.floor(Date.now() / 1000) >= end) {
+    const ended = await onAccount("DELETE", account, `/subscriptions/${encodeURIComponent(view.subscription)}`, undefined, undefined, `plan-ended:${view.subscription}`);
+    return { state: isOwnReply(ended, view.subscription) && ended.status === "canceled" ? "done" : "unread" };
+  }
   const updated = await onAccount(
     "POST",
     account,
@@ -230,8 +237,9 @@ async function leave(member: string): Promise<void> {
  * (milliseconds since the epoch), every request given up by then; a plan not
  * reached stays where it is for the next run. New plans come from the pending
  * set; plans already tried and not settled wait in RETRY, the one due first
- * first, and are given at least half the run whenever they are due, so neither
- * line can keep the other waiting for ever. Safe to run as often as it is
+ * first, and are given at least half the run whenever they are due, the two
+ * lines taken in turn (one due, one new), so neither can keep the other
+ * waiting for ever, under the run's deadline too. Safe to run as often as it is
  * called: a plan already given its end is left as it is. No plan leaves the
  * lines without its end, its checkout unpaid or gone, or Stripe having
  * canceled it. A reply of unknown shape throws UnknownReplyError: it is not an
@@ -259,7 +267,15 @@ export async function settlePlans(
   const taken = new Set(fresh);
   const due = rawDue.filter((member) => !taken.has(member));
   const retries = Math.min(due.length, Math.max(Math.ceil(limit / 2), limit - fresh.length));
-  const members = [...fresh.slice(0, limit - retries), ...due.slice(0, retries)];
+  // Taken in turn, the one due first first, so under the run's deadline too neither line keeps the other waiting
+  // (the review of #3367, item 1: new plans first could fill the whole time budget, every run).
+  const firstNew = fresh.slice(0, limit - retries);
+  const firstDue = due.slice(0, retries);
+  const members: string[] = [];
+  for (let i = 0; i < Math.max(firstNew.length, firstDue.length); i += 1) {
+    if (i < firstDue.length) members.push(firstDue[i]);
+    if (i < firstNew.length) members.push(firstNew[i]);
+  }
   for (const member of members) {
     if (Date.now() >= deadline) break;
     const entry = entryOf(member);
@@ -325,6 +341,7 @@ export async function settlePlans(
     });
     if (said === "unsent") {
       await moveTo(told, at, member);
+      console.error(`a payment plan's account refused us for ${PLAN_GIVE_UP_DAYS} days: tried once a week from now on; its creator could not be emailed now, tried again at the next try`, account);
       continue;
     }
     if (said === "told") counts.told += 1;

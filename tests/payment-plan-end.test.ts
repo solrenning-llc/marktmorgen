@@ -77,6 +77,15 @@ const checkout = (id: string, meta: Record<string, string>, over: Record<string,
 
 async function main(): Promise<void> {
   redis.clear();
+  // Rule 23 (the review of #3367, item 3): these cases ran on the real clock, where every plan's own end (2026) was
+  // already past, so they sent Stripe a cancel_at in the past, which it documents as a future time; a plan past its
+  // own end is now ended at once (tests/payment-plan-stuck.test.ts). They now run the day after ANCHOR, before every
+  // plan's own end, and check the same ends.
+  const trueNow = Date.now;
+  const beforeEnds = () => {
+    Date.now = () => (ANCHOR + DAY) * 1000;
+  };
+  beforeEnds();
 
   part("Three monthly payments end with the third period");
   sessions.cs_test_plan00000001 = checkout("cs_test_plan00000001", { kind: "plan", plan_payments: "3", plan_interval: "month" });
@@ -140,9 +149,11 @@ async function main(): Promise<void> {
   // The buyer stopped it after the second payment: ending sooner never charges more, so it is left as it is.
   subscriptions.sub_soon00000001 = { id: "sub_soon00000001", status: "active", billing_cycle_anchor: ANCHOR, cancel_at: addPeriods(ANCHOR, "month", 2) };
   const before9 = updates.length;
-  // On this clock the plan's own end (April 2026) has come with the earlier end in place, so it is settled; before
-  // its own end an earlier one is "early" and watched (tests/payment-plan-stuck.test.ts, P2).
+  // On a clock after the plan's own end (April 2026), which has come with the earlier end in place, it is settled;
+  // before its own end an earlier one is "early" and watched (tests/payment-plan-stuck.test.ts, P2).
+  Date.now = () => (own + DAY) * 1000;
   is("the plan's own end, and an earlier one, are kept", [await finishPlan(ACCOUNT, "cs_test_same00000001"), await finishPlan(ACCOUNT, "cs_test_soon00000001"), updates.length - before9], ["done", "done", 0]);
+  beforeEnds();
 
   part("Plans that cannot be settled never keep a new one from its end");
   redis.clear();
@@ -255,6 +266,7 @@ async function main(): Promise<void> {
   is("the job keeps a plan whose read was answered with null and asks again", [fifth.failed, fifth.done, fifth.dropped, sixth.failed, sixth.dropped], [2, 0, 0, 2, 0]);
   raw.clear();
 
+  Date.now = trueNow;
   done();
 }
 

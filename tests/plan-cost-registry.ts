@@ -1028,8 +1028,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES", "IMPORT_WORST_COMMANDS_PER_ROW", "IMPORT_WORST_BYTES_PER_ROW", "IMPORT_MIN_ROWS_PER_UPLOAD"] },
       { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS"] },
       { file: "app/api/store/import/route.ts", names: ["import-start-month", "import-step-month", "import-report-month"] },
+      // The store's deleted people, checked where a chunk of past buyers or members is written (review of #3383).
+      { file: "lib/imported-purchases.ts", names: ["GRANT_UNLESS_ERASED", "grantUnlessErased"] },
+      { file: "lib/move-members.ts", names: ["INVITE_UNLESS_ERASED"] },
     ],
-    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails).",
+    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId).",
   },
   {
     id: "clickfunnels",
@@ -1282,7 +1285,7 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "API_WRITE_UNITS"] },
       { file: "lib/api-guard.ts", names: ["takeAllowance", "API_RATE"] },
-      { file: "lib/api-write.ts", names: ["ADDS_PER_DAY", "GIVES_PER_DAY", "monthly_limit"] },
+      { file: "lib/api-write.ts", names: ["ADDS_PER_DAY", "GIVES_PER_DAY", "monthly_limit", "notDeleted", "grantUnlessErased"] },
       // A course's students, the affiliates and the bookings take further requests for what they read, before reading it (4 November 2026).
       { file: "lib/api-read-rules.ts", names: ["API_UNIT_COMMANDS", "API_UNIT_BYTES", "API_UNIT_SENT_BYTES", "API_UNIT_STRIPE_PAGES", "API_UNIT_ROUND_TRIPS", "studentsPageWork", "bookWork", "bookingsWork"] },
       { file: "lib/api-read.ts", names: ["studentPage", "chargeBook", "bookingsWork"] },
@@ -1293,7 +1296,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["API_SALES_UNITS"] },
       { file: "lib/api-sales.ts", names: ["SALES_PAGE", "SALES_TITLE_IDS", "SALE_TEXT_LIMITS", "cutText"] },
     ],
-    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs, and a page of sales API_SALES_UNITS, more than API_SALES_READ, and the listings it reads for titles as further requests (held below). A reading that reads more than a page (a course's students, the affiliates, the bookings) takes further requests for its work before it reads, each priced above what it pays for at every size (apiReadCost, held below); refused, nothing more is read. The per-minute and daily limits only spread them.",
+    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs, and a page of sales API_SALES_UNITS, more than API_SALES_READ, and the listings it reads for titles as further requests (held below). A reading that reads more than a page (a course's students, the affiliates, the bookings) takes further requests for its work before it reads, each priced above what it pays for at every size (apiReadCost, held below); refused, nothing more is read. The per-minute and daily limits only spread them. A product given reads who was deleted from the store before (one HMGET), once more in the script that writes it (its EVAL and one HMGET, the same HSETNX) and, when it emails, once more before sending (one HMGET): inside the units a write takes.",
   },
   {
     id: "inbox",

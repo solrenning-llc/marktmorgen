@@ -1613,7 +1613,7 @@ export default async function StudioPage({
                 {(async () => {
                   const meta = metaView(store.statsId, store.currency).then((view) => (view ? { ...view, readPaused: costsPaused(store) } : view)).catch(() => null);
                   const voice = store ? readVoice(store).catch(() => null) : undefined;
-                  const chosen = team && store ? weeklyTeam(store.handle).catch(() => []) : null;
+                  const chosen = team && store ? weeklyTeam(store).catch(() => []) : null;
                   const goal = readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0 }));
                   const chat = may("settings") ? chatSetup(store.statsId).catch(() => null) : undefined;
                   return (

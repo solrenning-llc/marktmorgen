@@ -6,8 +6,7 @@ import { visitedFolders } from "@/lib/traffic";
 import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
-import { SITE_URL } from "@/lib/site-url";
-import { claimMonth, lastMonthOf, releaseMonth, monthlyMessage, readNumbers, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { claimMonth, lastMonthOf, releaseMonth, monthlyMessage, readNumbers, weeklyOff, weeklyStopUrl } from "@/lib/stats-report";
 import { UNKNOWN_SALES_GOAL_CENTS, goalForMonth, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
 import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
 
@@ -71,12 +70,11 @@ export async function GET(request: NextRequest) {
         out.failed += 1;
         continue;
       }
-      const token = weeklyToken(store.handle);
-      const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
+      const stopUrl = weeklyStopUrl(store);
       // Only a goal set by the month being reported is measured: one set on the 1st is for the month ahead.
       const kept = await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS, since: "" }));
       const goal = goalForMonth(kept, month);
-      const message = withGoalAvailability(token ? monthlyMessage(store, data, month, stopUrl, goal) : null, goal);
+      const message = withGoalAvailability(stopUrl ? monthlyMessage(store, data, month, stopUrl, goal) : null, goal);
       if (!message) {
         out.quiet += 1;
         continue;

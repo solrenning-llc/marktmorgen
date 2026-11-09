@@ -17,7 +17,7 @@
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, renameHandle, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { BUSY_FLOOR, maybeBusyAlert, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { BUSY_FLOOR, maybeBusyAlert, weeklyOff, weeklyStopUrl, weeklyToken } from "@/lib/stats-report";
 import { heardOff, recordHeard } from "@/lib/heard";
 import { POST as weeklyRoute } from "@/app/api/store/weekly/route";
 import { POST as releaseRoute } from "@/app/api/store/release/route";
@@ -64,10 +64,15 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
   return pipeline(commands);
 }) as typeof redis.pipeline;
 
-/** The stop link at the foot of a numbers email, for the address it was sent under. */
-function stopLink(handle: string, what: "off" | "on"): NextRequest {
+/**
+ * The stop link at the foot of a numbers email: since claude5/email-stop-by-sid-2 the one the emails carry, signed
+ * for the store's id (weeklyStopUrl); a string is a link signed for that address, as emails carried before (rule 23:
+ * this helper took only an address).
+ */
+function stopLink(sent: string | Store, what: "off" | "on"): NextRequest {
   const form = new URLSearchParams({ do: what });
-  return new NextRequest(`${ORIGIN}/api/store/weekly?h=${encodeURIComponent(handle)}&t=${encodeURIComponent(weeklyToken(handle))}`, {
+  const url = typeof sent === "string" ? `${ORIGIN}/api/store/weekly?h=${encodeURIComponent(sent)}&t=${encodeURIComponent(weeklyToken(sent))}` : weeklyStopUrl(sent);
+  return new NextRequest(url, {
     method: "POST",
     headers: { host: HOST, origin: ORIGIN, "content-type": "application/x-www-form-urlencoded" },
     body: form.toString(),
@@ -98,7 +103,8 @@ async function main(): Promise<void> {
     const owner = "crumb@example.com";
     let store = await paidStore(owner, "crumb", "Crumb Bakery");
     is("before any stop, a busy day's email goes", await busy(store), { said: true, emails: 1 });
-    is("the stop link is pressed", (await weeklyRoute(stopLink("crumb", "off"))).status, 200);
+    const firstEmail = store;
+    is("the stop link is pressed", (await weeklyRoute(stopLink(firstEmail, "off"))).status, 200);
     is("stopped under its first address", await weeklyOff(store), true);
     is("the store is renamed", (await renameHandle(owner, "crumbs")).ok, true);
     store = await fresh(owner);
@@ -108,10 +114,10 @@ async function main(): Promise<void> {
     store = await fresh(owner);
     is("renamed twice: still stopped", await weeklyOff(store), true);
     is("renamed twice: no busy-day email", await busy(store), { said: false, emails: 0 });
-    is("'Start it again' from the old email", (await weeklyRoute(stopLink("crumb", "on"))).status, 200);
+    is("'Start it again' from the old email", (await weeklyRoute(stopLink(firstEmail, "on"))).status, 200);
     is("started again: not stopped", await weeklyOff(store), false);
     is("started again: the busy-day email goes", await busy(store), { said: true, emails: 1 });
-    is("stopped from a newer email", (await weeklyRoute(stopLink("crumb-two", "off"))).status, 200);
+    is("stopped from a newer email", (await weeklyRoute(stopLink(store, "off"))).status, 200);
     is("renamed back to an address it owns", (await renameHandle(owner, "crumb")).ok, true);
     store = await fresh(owner);
     is("renamed back: still stopped", await weeklyOff(store), true);
@@ -146,7 +152,7 @@ async function main(): Promise<void> {
     is("let go: buyers are still not asked", await heardOff(store), true);
     is("let go: an answer is not counted", await recordHeard(store, "cs_test_StopBySid00000001", "friend"), "off");
     const stale = await weeklyRoute(stopLink("loaf", "on"));
-    is("a link under the address let go of changes nothing", [stale.status, /Nothing was changed/.test(await stale.text())], [404, true]);
+    is("a link signed for the address let go of changes nothing", [stale.status, /Nothing was changed/.test(await stale.text())], [404, true]);
     is("and the store is still stopped", await weeklyOff(store), true);
 
     // Thirty days on, the address is free, and another creator takes it.

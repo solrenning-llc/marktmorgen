@@ -8,7 +8,7 @@
  */
 import { NextRequest } from "next/server";
 import { POST as weeklyRoute } from "@/app/api/store/weekly/route";
-import { setWeeklyOff, setWeeklyTeam, weeklyMemberToken, weeklyOff, weeklyTeam, weeklyToken } from "@/lib/stats-report";
+import { setWeeklyOff, setWeeklyTeam, weeklyMemberStopUrl, weeklyOff, weeklyStopUrl, weeklyTeam } from "@/lib/stats-report";
 import { claimHandle, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -34,8 +34,9 @@ async function press(url: string, form?: Record<string, string>): Promise<{ stat
   }
 }
 
-const ownerUrl = () => `https://marktmorgen.com/api/store/weekly?h=${HANDLE}&t=${encodeURIComponent(weeklyToken(HANDLE))}`;
-const memberUrl = () => `https://marktmorgen.com/api/store/weekly?h=${HANDLE}&e=${encodeURIComponent(MEMBER)}&t=${encodeURIComponent(weeklyMemberToken(HANDLE, MEMBER))}`;
+// Rule 23 (claude5/email-stop-by-sid-2): the links the emails carry, signed for the store's id, not for HANDLE.
+const ownerUrl = () => weeklyStopUrl(store);
+const memberUrl = () => weeklyMemberStopUrl(store, MEMBER);
 const saysStopped = (page: string) => page.includes("<h1>Stopped</h1>");
 // The stop is kept by the store's id since finding 5 of the handles audit (lib/store-stop.ts): the link reaches a
 // store that exists, and "Start again" takes out its id and its address, two members, so it may answer up to 2.
@@ -99,13 +100,16 @@ async function main() {
 
   part("a team member's own stop: an unknown answer is never said as Stopped");
   redis.pipeline = real;
-  await setWeeklyTeam(HANDLE, [MEMBER]);
+  await setWeeklyTeam(store, [MEMBER]);
   pressed = await press(memberUrl());
   is("healthy member stop: 200 and Stopped", [pressed.status, saysStopped(pressed.page)], [200, true]);
-  is("healthy member stop: off the list", await weeklyTeam(HANDLE), []);
-  for (const [name, whole] of UNKNOWN) {
+  is("healthy member stop: off the list", await weeklyTeam(store), []);
+  // Rule 23 (claude5/email-stop-by-sid-2): the member's stop takes their address out of the list by the store's id
+  // and of one written before under its address, two SREMs, so "two replies" is a valid answer: three is not.
+  const MEMBER_UNKNOWN = UNKNOWN.map(([name, whole]): [string, unknown] => (name === "two replies for one command" ? ["three replies for two commands", [1, 1, 1]] : [name, whole]));
+  for (const [name, whole] of MEMBER_UNKNOWN) {
     redis.pipeline = real;
-    await setWeeklyTeam(HANDLE, [MEMBER]);
+    await setWeeklyTeam(store, [MEMBER]);
     answer("SREM", whole);
     pressed = await press(memberUrl());
     redis.pipeline = real;
@@ -115,17 +119,18 @@ async function main() {
 
   part("who on the team gets it: an unknown answer to the change is never taken as kept");
   redis.pipeline = real;
-  await setWeeklyTeam(HANDLE, [MEMBER]);
-  is("healthy set: kept", await weeklyTeam(HANDLE), [MEMBER]);
-  await setWeeklyTeam(HANDLE, []);
-  is("healthy empty set (DEL alone): nobody", await weeklyTeam(HANDLE), []);
+  await setWeeklyTeam(store, [MEMBER]);
+  is("healthy set: kept", await weeklyTeam(store), [MEMBER]);
+  await setWeeklyTeam(store, []);
+  is("healthy empty set (DEL alone): nobody", await weeklyTeam(store), []);
   const TEAM_UNKNOWN: [string, unknown][] = [
     ["no reply at all", []],
     ["one reply for two commands", [1]],
     ["three replies for two commands", [1, 1, 1]],
     ["DEL answered null", [null, 1]],
     ["DEL answered a string", ["1", 1]],
-    ["DEL answered two for one key", [2, 1]],
+    // Rule 23: the DEL takes the list by the id and one under the address together (two keys), so 2 is valid.
+    ["DEL answered three for two keys", [3, 1]],
     ["SADD answered undefined", [1, undefined]],
     ["SADD answered an object", [1, {}]],
     ["SADD answered minus one", [1, -1]],
@@ -133,11 +138,11 @@ async function main() {
   ];
   for (const [name, whole] of TEAM_UNKNOWN) {
     redis.pipeline = real;
-    await setWeeklyTeam(HANDLE, [MEMBER]);
+    await setWeeklyTeam(store, [MEMBER]);
     answer("DEL", whole);
     let refused = false;
     try {
-      await setWeeklyTeam(HANDLE, ["ben@example.com"]);
+      await setWeeklyTeam(store, ["ben@example.com"]);
     } catch {
       refused = true;
     }

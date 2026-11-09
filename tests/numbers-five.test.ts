@@ -24,7 +24,7 @@ import { channelForSale, channelMetadata, nextChannelCookie, readChannelCookie }
 import { countSearchMiss, readSales, readStats, studioStats, type StatsData } from "@/lib/stats";
 import { countDepth, depthField, readDepth } from "@/lib/page-depth";
 import { insightsFrom } from "@/lib/insights";
-import { leaveWeeklyTeam, setWeeklyTeam, weeklyMemberToken, weeklyMemberTokenOk, weeklyTeam, weeklyToken } from "@/lib/stats-report";
+import { leaveWeeklyTeam, setWeeklyTeam, weeklyMemberStopUrl, weeklyMemberToken, weeklyMemberTokenOk, weeklyStoreTokenOk, weeklyTeam, weeklyToken } from "@/lib/stats-report";
 import { claimHandle, ensureStatsId, setAdsServer, setPixels, setStripeAccount, storeForEmail } from "@/lib/store";
 import { NO_PIXELS } from "@/lib/pixels";
 import { store as redis } from "./redis-stub";
@@ -215,16 +215,24 @@ async function main(): Promise<void> {
   is("never more than asked for", insightsFrom(busy, "d7", [], 2).length, 2);
 
   part("The weekly email to the team");
-  await setWeeklyTeam("harbor", ["Ana@Example.com", "ben@example.com"]);
-  is("kept as addresses", await weeklyTeam("harbor"), ["ana@example.com", "ben@example.com"]);
+  // Rule 23 (claude5/email-stop-by-sid-2): the list is kept by the store's id, so it is set and read for a store.
+  const harbor = { sid: "0123456789abcdef0123456789abcdef", handle: "harbor", previousHandles: [] as string[] };
+  await setWeeklyTeam(harbor, ["Ana@Example.com", "ben@example.com"]);
+  is("kept as addresses", await weeklyTeam(harbor), ["ana@example.com", "ben@example.com"]);
   const anaToken = weeklyMemberToken("harbor", "ana@example.com");
   is("a member's link is theirs alone", [
     weeklyMemberTokenOk("harbor", "ana@example.com", anaToken),
     weeklyMemberTokenOk("harbor", "ben@example.com", anaToken),
     weeklyMemberTokenOk("harbor", "ana@example.com", weeklyToken("harbor")),
   ], [true, false, false]);
-  await leaveWeeklyTeam("harbor", "ana@example.com");
-  is("and stops only their copy", await weeklyTeam("harbor"), ["ben@example.com"]);
+  const anaLink = new URL(weeklyMemberStopUrl(harbor, "ana@example.com")).searchParams;
+  is("a member's link, signed for the store's id, is theirs alone", [
+    weeklyStoreTokenOk(harbor.sid, "harbor", anaLink.get("t")!, "ana@example.com"),
+    weeklyStoreTokenOk(harbor.sid, "harbor", anaLink.get("t")!, "ben@example.com"),
+    weeklyStoreTokenOk(harbor.sid, "harbor", anaLink.get("t")!),
+  ], [true, false, false]);
+  await leaveWeeklyTeam(harbor, "ana@example.com");
+  is("and stops only their copy", await weeklyTeam(harbor), ["ben@example.com"]);
 
   done();
 }

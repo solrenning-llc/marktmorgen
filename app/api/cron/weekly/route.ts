@@ -6,13 +6,12 @@ import { visitedFolders } from "@/lib/traffic";
 import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
-import { SITE_URL } from "@/lib/site-url";
-import { claimWeek, readNumbers, releaseWeek, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { claimWeek, readNumbers, releaseWeek, weeklyMessage, weeklyOff, weeklyStopUrl } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { readSpends } from "@/lib/ad-spend";
 import { recordSample } from "@/lib/benchmarks";
-import { weeklyMemberToken, weeklyTeam } from "@/lib/stats-report";
+import { weeklyMemberStopUrl, weeklyTeam } from "@/lib/stats-report";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 import { UNKNOWN_SALES_GOAL_CENTS, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
@@ -86,11 +85,10 @@ export async function GET(request: NextRequest) {
       }
       // Its rates, for the ranges stores its size are set beside (lib/benchmarks.ts): read here anyway.
       await recordSample(store, data);
-      const token = weeklyToken(store.handle);
-      const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
+      const stopUrl = weeklyStopUrl(store);
       const spends = await readSpends(store.statsId).catch(() => []);
       const goal = (await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS }))).cents;
-      const message = withGoalAvailability(token ? weeklyMessage(store, data, stopUrl, spends, goal) : null, goal);
+      const message = withGoalAvailability(stopUrl ? weeklyMessage(store, data, stopUrl, spends, goal) : null, goal);
       if (!message) {
         out.quiet += 1;
         continue;
@@ -116,13 +114,13 @@ export async function GET(request: NextRequest) {
       else out.failed += 1;
       // The same email to the team members the owner chose, while they are on
       // the team in a role that sees the numbers, each with their own stop link.
-      const chosen = await weeklyTeam(store.handle).catch(() => []);
+      const chosen = await weeklyTeam(store).catch(() => []);
       if (chosen.length && store.sid) {
         const team = await readTeam(store.sid).catch(() => null);
         for (const email of chosen) {
           const member = team?.members.find((m) => m.email.toLowerCase() === email);
           if (!member || !can(member.role, "stats")) continue;
-          const own = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&e=${encodeURIComponent(email)}&t=${encodeURIComponent(weeklyMemberToken(store.handle, email))}`;
+          const own = weeklyMemberStopUrl(store, email);
           const text = message.text.replace(stopUrl, own).replace("You get this every Monday while your store has visitors.", `You get this because the owner of @${store.handle} added you.`);
           await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: email, subject: message.subject, text, headers: { "List-Unsubscribe": `<${own}>` } }).catch(() => false);
         }

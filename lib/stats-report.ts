@@ -17,7 +17,7 @@ import { COHORT_AGES } from "@/lib/buyer-channel-rules";
 import { dailyCashflowRows } from "@/lib/daily-cashflow";
 import { campaignResultsFrom } from "@/lib/campaign-results";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { Store } from "@/lib/store";
+import { STORE_ID_PATTERN, type Store } from "@/lib/store";
 import { type StopOwner, readStop, stopCommand } from "@/lib/store-stop";
 import { type Ranked, type StatsData, readSales, readsSales, readStats, sourcesToday, studioStats, viewsBefore } from "@/lib/stats";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -30,7 +30,7 @@ import { insightsFrom } from "@/lib/insights";
 import type { AdSpend } from "@/lib/ad-spend-rules";
 import { SITE_URL } from "@/lib/site-url";
 import { goalProgress, moneyByDay, monthTitle } from "@/lib/sales-goal-rules";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 
 type Window = "d7" | "d30" | "d90";
 const WINDOWS: Window[] = ["d7", "d30", "d90"];
@@ -278,17 +278,82 @@ export function weekOf(now = Date.now()): string {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - back)).toISOString().slice(0, 10);
 }
 
-/** The token in a weekly email's stop link: the store's handle, signed with a key only this deployment has. */
+/**
+ * The token of a stop link signed for an address, as every numbers email carried until 9 November 2026 and a
+ * store without an id yet still does: the address, signed with a key only this deployment has. Such a link is
+ * honored only for a store known to have held that address since before then (addressLinkHolds).
+ */
 export function weeklyToken(handle: string): string {
-  const key = deriveKey("weekly-report");
-  if (!key) return "";
-  return createHmac("sha256", key).update(`weekly|${handle}`).digest("base64url").slice(0, 32);
+  return signed(`weekly|${handle}`);
 }
 
 export function weeklyTokenOk(handle: string, token: string): boolean {
-  const want = weeklyToken(handle);
-  if (!want || token.length !== want.length) return false;
-  return timingSafeEqual(Buffer.from(want), Buffer.from(token));
+  return sameToken(weeklyToken(handle), token);
+}
+
+const signed = (text: string): string => {
+  const key = deriveKey("weekly-report");
+  if (!key) return "";
+  return createHmac("sha256", key).update(text).digest("base64url").slice(0, 32);
+};
+
+const sameToken = (want: string, token: string): boolean =>
+  want !== "" && token.length === want.length && timingSafeEqual(Buffer.from(want), Buffer.from(token));
+
+/**
+ * The stop link of a numbers email, or "" when this deployment has no key to sign it (then no email goes).
+ * Signed for the store's id, with the address it had when the email went for the page to show (siblings of
+ * finding 5 of the handles audit, Claude 5): a link signed for an address stopped, or started again, the emails
+ * of whichever store held that address when it was pressed, so once a store let an address go and another took
+ * it after the quarantine, the old store's link changed the new store's emails. An address never holds ":", so
+ * the id's text is never read as an address's. A store without an id yet (one made before there were several,
+ * until its owner opens the studio) has only its address to sign.
+ */
+export function weeklyStopUrl(store: Pick<Store, "sid" | "handle">): string {
+  const sid = typeof store.sid === "string" && STORE_ID_PATTERN.test(store.sid) ? store.sid : null;
+  const token = sid ? signed(`weekly|sid:${sid}|${store.handle}`) : weeklyToken(store.handle);
+  if (!token) return "";
+  return `${SITE_URL}/api/store/weekly?${sid ? `s=${sid}&` : ""}h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
+}
+
+/** A team member's own stop link, which stops only their copy: the store's id, the address shown and theirs, signed. */
+export function weeklyMemberStopUrl(store: Pick<Store, "sid" | "handle">, email: string): string {
+  const address = email.trim().toLowerCase();
+  const sid = typeof store.sid === "string" && STORE_ID_PATTERN.test(store.sid) ? store.sid : null;
+  const token = sid ? signed(`weekly|sid:${sid}|${store.handle}|${address}`) : weeklyMemberToken(store.handle, address);
+  if (!token) return "";
+  return `${SITE_URL}/api/store/weekly?${sid ? `s=${sid}&` : ""}h=${encodeURIComponent(store.handle)}&e=${encodeURIComponent(address)}&t=${encodeURIComponent(token)}`;
+}
+
+/** Whether a link's token is the one signed for this store's id and the address it shows (and the member's address). */
+export function weeklyStoreTokenOk(sid: string, handle: string, token: string, email?: string): boolean {
+  if (!STORE_ID_PATTERN.test(sid)) return false;
+  return sameToken(signed(`weekly|sid:${sid}|${handle}${email === undefined ? "" : `|${email.trim().toLowerCase()}`}`), token);
+}
+
+/**
+ * From this moment every numbers email of a store with an id carries a link signed for the id (weeklyStopUrl), so
+ * a link signed for an address was sent before it. Set no later than the day the change was written: a store that
+ * took an address at or after it may have taken it from a store that let it go, and the link was not sent to it.
+ */
+export const ADDRESS_LINKS_END = Date.parse("2026-11-09T00:00:00.000Z");
+
+/**
+ * Whether a link signed for `handle` (weeklyToken, weeklyMemberToken) may change this store's emails: the store
+ * the address leads to now (storeForHandle: the current address or one it still owns, never one let go of), and
+ * known to have held it since before ADDRESS_LINKS_END, so the link was sent to it and not to a store that held
+ * the address before. Its current address since its last rename (renamedAt) or since it was made (createdAt);
+ * an address it used before, since before its last rename at the latest. A store without an id yet is only ever
+ * sent such links, and holds the address it had before ids. A time missing from a record older than the field is
+ * before; one that does not read is not known, and the link changes nothing (there is a newer link, and a reply).
+ * One case stays out of reach: an address let go of and taken again before ADDRESS_LINKS_END, as on main before.
+ */
+export function addressLinkHolds(store: Pick<Store, "sid" | "handle" | "previousHandles" | "createdAt" | "renamedAt">, handle: string): boolean {
+  const current = store.handle === handle;
+  if (!current && !(store.previousHandles ?? []).includes(handle)) return false;
+  if (!store.sid) return true;
+  const before = (at: unknown): boolean => at === "" || at === undefined || (typeof at === "string" && Date.parse(at) < ADDRESS_LINKS_END);
+  return current ? before(store.renamedAt ? store.renamedAt : store.createdAt) : before(store.renamedAt);
 }
 
 /** The set of stopped stores, for the step that carries a stop before an address is let go (lib/store-stop.ts). */
@@ -338,38 +403,85 @@ function confirmedWrite(replies: unknown, most: number[], what: string): void {
  * team, or whose role no longer sees the numbers, gets nothing; and each has
  * their own stop link, which stops only their copy.
  */
-const teamKey = (handle: string) => `nl:weekly:to:${handle}`;
+const teamKey = (sid: string) => `nl:weekly:team:${sid}`;
+/** Where the list was kept until 9 November 2026: under the store's address, so a rename lost it. Read, never written. */
+const addressTeamKey = (handle: string) => `nl:weekly:to:${handle}`;
 export const MAX_WEEKLY_TEAM = 5;
 
-export async function weeklyTeam(handle: string): Promise<string[]> {
+/** What names a store for its team list: its id, and the addresses it still owns, for a list written before. */
+export type TeamOwner = Pick<Store, "sid" | "handle" | "previousHandles">;
+
+const teamIdOf = (store: TeamOwner): string | null => (typeof store.sid === "string" && STORE_ID_PATTERN.test(store.sid) ? store.sid : null);
+const ownedAddresses = (store: TeamOwner): string[] =>
+  [...new Set([store.handle, ...[...(store.previousHandles ?? [])].reverse()].filter((h) => typeof h === "string" && h !== ""))];
+
+/**
+ * Who the owner chose, read exactly (CX-123 rule 24) in one pipeline of at most three commands: the list kept by
+ * the store's id; while there is none, a list written before under its current address; while there is neither,
+ * the ones under the addresses it still owns (SUNION). Never under an address it let go of: that one is carried
+ * to the id before it goes (carryWeeklyTeam). Any answer of another shape throws, never "nobody".
+ */
+export async function weeklyTeam(store: TeamOwner): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [members] = await redisPipeline([["SMEMBERS", teamKey(handle)]]);
-  return Array.isArray(members) ? (members as unknown[]).map(String).sort() : [];
+  const sid = teamIdOf(store);
+  const [current, ...before] = ownedAddresses(store).map(addressTeamKey);
+  const commands = [...(sid ? [["SMEMBERS", teamKey(sid)]] : []), ...(current ? [["SMEMBERS", current]] : []), ...(before.length ? [["SUNION", ...before]] : [])];
+  if (!commands.length) return [];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const lists = replies?.map(stringList);
+  if (!lists || lists.some((list) => list === null)) throw new UnknownReplyError("who gets the weekly email");
+  const chosen = (lists as string[][]).find((list) => list.length > 0) ?? [];
+  return [...new Set(chosen.map((e) => e.trim().toLowerCase()))].sort().slice(0, MAX_WEEKLY_TEAM);
 }
 
-export async function setWeeklyTeam(handle: string, emails: string[]): Promise<void> {
+/** The owner's choice, kept by the store's id; a list written before under any address it owns is taken out with it. */
+export async function setWeeklyTeam(store: TeamOwner, emails: string[]): Promise<void> {
   if (!isRedisConfigured()) return;
+  const sid = teamIdOf(store);
+  if (!sid) throw new Error("a store without an id keeps no team list");
   const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))].slice(0, MAX_WEEKLY_TEAM);
-  const replies = await redisPipeline([["DEL", teamKey(handle)], ...(clean.length ? [["SADD", teamKey(handle), ...clean]] : [])]);
-  confirmedWrite(replies, clean.length ? [1, clean.length] : [1], "who gets the weekly email");
+  const keys = [teamKey(sid), ...ownedAddresses(store).map(addressTeamKey)];
+  const replies = await redisPipeline([["DEL", ...keys], ...(clean.length ? [["SADD", teamKey(sid), ...clean]] : [])]);
+  confirmedWrite(replies, clean.length ? [keys.length, clean.length] : [keys.length], "who gets the weekly email");
 }
 
-export async function leaveWeeklyTeam(handle: string, email: string): Promise<void> {
+/** A member's own stop: their address out of the list, wherever the store's list is kept. */
+export async function leaveWeeklyTeam(store: TeamOwner, email: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  confirmedWrite(await redisPipeline([["SREM", teamKey(handle), email.trim().toLowerCase()]]), [1], "a team member's weekly email stop");
+  const sid = teamIdOf(store);
+  const keys = [...(sid ? [teamKey(sid)] : []), ...ownedAddresses(store).map(addressTeamKey)];
+  const address = email.trim().toLowerCase();
+  confirmedWrite(await redisPipeline(keys.map((key) => ["SREM", key, address])), keys.map(() => 1), "a team member's weekly email stop");
 }
 
-/** A team member's own stop link token: the store and their address, signed. */
+/**
+ * Before the store lets go of `handle` (app/api/store/release/route.ts): a list still kept under that address is
+ * carried to the store's id as the store reads it now, and every list under its addresses is taken out, so the
+ * store keeps it and the next store at the address does not inherit it. One EXISTS, and only when there is one,
+ * the read and one write. Any answer of another shape throws UnknownReplyError, so nothing is let go on it.
+ */
+export async function carryWeeklyTeam(store: TeamOwner, handle: string): Promise<void> {
+  if (!isRedisConfigured() || handle === store.handle || !(store.previousHandles ?? []).includes(handle)) return;
+  const there = repliesFor(await redisPipeline([["EXISTS", addressTeamKey(handle)]]), 1);
+  const flag = there ? countOf(there[0]) : null;
+  if (flag !== 0 && flag !== 1) throw new UnknownReplyError("a team list under an address about to be let go (EXISTS)");
+  if (flag === 0) return;
+  const sid = teamIdOf(store);
+  if (!sid) {
+    // No id, no team copy is sent (the weekly job sends to a team only with one): the address's list just goes.
+    confirmedWrite(await redisPipeline([["DEL", addressTeamKey(handle)]]), [1], "a team list under an address let go of");
+    return;
+  }
+  await setWeeklyTeam(store, await weeklyTeam(store));
+}
+
+/** A team member's stop link token signed for an address, as before 9 November 2026 (see weeklyToken). */
 export function weeklyMemberToken(handle: string, email: string): string {
-  const key = deriveKey("weekly-report");
-  if (!key) return "";
-  return createHmac("sha256", key).update(`weekly|${handle}|${email.trim().toLowerCase()}`).digest("base64url").slice(0, 32);
+  return signed(`weekly|${handle}|${email.trim().toLowerCase()}`);
 }
 
 export function weeklyMemberTokenOk(handle: string, email: string, token: string): boolean {
-  const want = weeklyMemberToken(handle, email);
-  if (!want || token.length !== want.length) return false;
-  return timingSafeEqual(Buffer.from(want), Buffer.from(token));
+  return sameToken(weeklyMemberToken(handle, email), token);
 }
 
 /**
@@ -637,8 +749,7 @@ export async function maybeBusyAlert(store: Store, today: number, now = Date.now
   if (!(await ownClaim(busyKey(store.handle, day), 2 * 86400))) return false;
 
   const top = (await sourcesToday(store, now)).filter((s) => s.name !== "direct")[0];
-  const token = weeklyToken(store.handle);
-  const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
+  const stopUrl = weeklyStopUrl(store);
   const lines = [
     `${store.name} is having a busy day: ${today.toLocaleString("en-US")} visits to your store page so far today${
       verdict.times >= 2 ? `, about ${verdict.times} times a usual day` : ", more than any day in the last two weeks"

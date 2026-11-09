@@ -903,7 +903,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:monthly:sent:@lib/stats-report.ts": company("A monthly report sent", "The company's email to a creator."),
   "nl:weekly:off@lib/stats-report.ts": company("Creators who switched the numbers emails off: by the store's id (sid:<id>), or the address an older stop was written under (lib/store-stop.ts)", "One set for every store, one member a store; the closing walk takes the id's out (lib/closed-store-data.ts, index)."),
   "nl:weekly:sent:@lib/stats-report.ts": company("A weekly report sent", "The company's email to a creator."),
-  "nl:weekly:to:@lib/stats-report.ts": { what: "Who on the team gets the weekly report", parts: [capped((MAX_TEAM + 1) * KEY, "The team.", src("lib/team.ts", "MAX_TEAM"))] },
+  "nl:weekly:team:@lib/stats-report.ts": { what: "Who on the team gets the weekly report, by the store's id", parts: [capped((MAX_TEAM + 1) * KEY, "The team.", src("lib/team.ts", "MAX_TEAM"))] },
+  "nl:weekly:to:@lib/stats-report.ts": { what: "Who on the team gets the weekly report, as written under the store's address before 9 November 2026: read, taken out at the next change or before the address is let go, never written", parts: [capped((MAX_TEAM + 1) * KEY, "The team.", src("lib/team.ts", "MAX_TEAM"))] },
   "nl:stats:@lib/stats.ts": {
     what: "The store's numbers: every day's counts and visitors, all time, who is on now, cached sales",
     parts: [

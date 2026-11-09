@@ -30,7 +30,7 @@ import { claimMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { weeklyOff, weeklyStopUrl } from "@/lib/stats-report";
 import { daysCounts } from "@/lib/stats";
 
 /** Days of sales the usual pace is read from. */
@@ -114,8 +114,7 @@ export async function checkQuiet(store: Store, now = Date.now()): Promise<QuietO
   const since = new Date(verdict.last).toISOString().slice(0, 10);
   const counts = store.statsId ? await daysCounts(store.statsId, since, day).catch(() => null) : null;
   const lastDay = new Date(verdict.last).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
-  const token = weeklyToken(store.handle);
-  const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
+  const stopUrl = weeklyStopUrl(store);
   const usual = verdict.perWeek >= 1 ? `about ${verdict.perWeek} sales a week` : `about ${Math.round(verdict.perWeek * 30)} sales a month`;
   const lines = [
     `${store.name} usually makes ${usual}, and has made none since ${lastDay}: ${verdict.days} days. A stretch that long happens less than once in a hundred times at your usual pace, so it is worth a look.`,

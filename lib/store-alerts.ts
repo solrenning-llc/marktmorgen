@@ -42,7 +42,7 @@ import { formatMoney } from "@/lib/money";
 import type { Store } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { type DayStats, type SalesStats, readSales, readStats } from "@/lib/stats";
-import { weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { weeklyOff, weeklyStopUrl } from "@/lib/stats-report";
 import { alertCreator } from "@/lib/phone-alerts";
 import { chatAddress, postToChat } from "@/lib/chat-summary";
 import { goalProgress, goalMoneyByDay, monthTitle } from "@/lib/sales-goal-rules";
@@ -230,7 +230,7 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
     );
     if (chat) await postToChat(chat, [alert.title, ...alert.lines].join("\n")).catch(() => false);
     if (emailing) {
-      const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(weeklyToken(store.handle))}`;
+      const stopUrl = weeklyStopUrl(store);
       await sendEmail({ meter: { by: "company" },
         from: NIMBUS_FROM,
         to: store.email,

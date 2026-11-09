@@ -124,7 +124,9 @@ async function main(): Promise<void> {
     let dock = await paidStore(owner, "dock", "Dock Prints");
     const link = await busyDayLink(dock);
     is("the busy-day email carries a stop link", link !== "", true);
-    is("the link names the store by its id, not its address", /[?&]s=[0-9a-f]{32}(&|$)/.test(link) && !/[?&]h=dock(&|$)/.test(link), true);
+    // The address rides along only for the page to show; the token is signed for the id with it (rule 23: the red
+    // version also required no address in the link).
+    is("the link names the store by its id", new URL(link).searchParams.get("s"), dock.sid);
     is("the store is renamed", (await renameHandle(owner, "dock-two")).ok, true);
     dock = await fresh(owner);
     is("the old address is let go", await letGo(owner, dock, "dock"), 200);

@@ -1218,14 +1218,26 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
 }
 
 /**
- * The store behind a public address, for a visitor (lib/store-lookup.ts): an
- * address that leads nowhere is paced by connection, remembered for a short
- * while and counted against the company's day, so made-up addresses are not
- * a read each with no ceiling. For a route answering the public outside a
- * page (an icon, the manifest); pages use storeForPage.
+ * The store behind a public address, for a visitor (lib/store-lookup.ts):
+ * the same index read and record read as storeForHandle, with an address that
+ * leads nowhere paced by connection, remembered for a short while and counted
+ * for the company's day, so made-up addresses are not reads nothing counts.
+ * The index alone decides whether a store is there, so a real store always
+ * opens. For a route answering the public outside a page (an icon, the
+ * manifest); pages use storeForPage. `at` is for tests.
  */
-export function storeForVisitor(handle: string): Promise<Store | null> {
-  return handleProblem(handle) ? Promise.resolve(null) : lookUpStore(handle, storeForHandle);
+export function storeForVisitor(handle: string, at: { now?: number; address?: string } = {}): Promise<Store | null> {
+  if (handleProblem(handle)) return Promise.resolve(null);
+  return lookUpStore(handle, {
+    look: storeForHandle,
+    indexKey: handleKey(handle),
+    // As storeForHandle reads it: a name that was let go is held, not owned.
+    holderOf: (value) => (typeof value === "string" && value && !value.startsWith(RELEASED_PREFIX) ? value : null),
+    open: async (holder, also) => {
+      const [raw] = await redisPipeline([["GET", await ownerKey(holder)], ...also]);
+      return parseStore(raw);
+    },
+  }, at);
 }
 
 /**
@@ -1234,7 +1246,7 @@ export function storeForVisitor(handle: string): Promise<Store | null> {
  * the one answer (storeForVisitor). Only for pages; anything that writes
  * reads afresh.
  */
-export const storeForPage = cache(storeForVisitor);
+export const storeForPage = cache((handle: string) => storeForVisitor(handle));
 
 /**
  * Whether Redis says, exactly, that no store has this id: the one EXISTS reply is 0. A reply missing, cut short or of

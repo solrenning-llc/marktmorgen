@@ -89,35 +89,47 @@ Traffic audit of 9 November 2026, MÉDIO 2. Every page and route under
 `app/[handle]` first asks the database which store an address belongs to. A
 real store's pages are then counted in its own window; an address with no
 store had nothing to count it in, so a loop over made-up addresses was a read
-each time with no ceiling. `lib/store-lookup.ts` now bounds it:
+each time that nothing counted or paced. `lib/store-lookup.ts` now handles it,
+and whether a store is there is decided only by the address's small index
+read (`nl:store:handle:<handle>`, the read `storeForHandle` makes before the
+store's record), never by a ceiling, so no count can take a real store off
+the air (coordinator's review, 9 November 2026):
 
+- an address a server lately found to lead nowhere is remembered for 30
+  seconds and reads nothing;
 - an address a server has not lately found a store behind is paced in that
   server's memory, `UNSEEN_STORE_LOOKUPS_PER_MINUTE` (30) a connection a
-  minute, before any read, at no cost;
-- "nothing here" is remembered for 30 seconds, so the same made-up address
-  asked again reads nothing;
-- each miss is counted for the UTC day (`nl:store-lookup:miss:<day>`, three
-  commands in one pipeline); past `STORE_MISSES_PER_DAY` (10,000) misses, or
-  past `STORE_MISSES_PER_CONNECTION_PER_DAY` (100) for one connection, a
-  server reads nothing more for unseen addresses (for that connection only,
-  in the second case) until the day turns, and the visitor meets the plain
-  not-found page. A count that cannot be read stops those reads for a minute.
+  minute, before any read, at no cost; past it, that connection alone meets
+  the not-found page until its minute turns;
+- otherwise the lookup is counted for the UTC day (`nl:store-lookup:miss:<day>`,
+  a number only) and the index read, in one round trip, the count first. When
+  the index names a holder, the store's record is read as `storeForHandle`
+  reads it and the count is given back in that round trip; when it names
+  nobody, the record is never read;
+- past `STORE_MISSES_PER_DAY` (10,000) counted misses, a server stops counting
+  until the day turns: its lookups send the index read alone, a real store
+  still opens and a made-up address still reads no record;
+- a reply that cannot be read is no answer: the address is looked up the
+  normal way, so a real store still opens.
 
-**Maximum per month, a company fixed cost covered from the minimum base:
-US$ 56.01**, at 10,000 misses a day for 31 days, each at its worst (the
-address's GET and a record's GET at `MAX_STORE_BYTES`, the count, three
-pipelines waited at their timeout, the CDN request, two calls, a second of
-CPU and the page out), plus at most US$ 0.0056 a month for each server's one
-miss in flight past the ceiling (`tests/unknown-store-ceiling.test.ts`, at the
-rates of `lib/spend-cost-table.ts` and `tests/traffic-cost.ts`). Unknown,
-never zero: the number of servers the host runs at once.
+**Maximum per month for the counted misses, a company fixed cost covered from
+the minimum base: US$ 27.21**, at 10,000 misses a day for 31 days, each at its
+worst (one round trip of three commands waited at its timeout, the index value
+at its largest, the CDN request, two calls, a second of CPU and the page out;
+`tests/unknown-store-ceiling.test.ts`, at the rates of `lib/spend-cost-table.ts`
+and `tests/traffic-cost.ts`).
 
-What it does not bound: each request is still a function call, refused or
-not; a flood from many machines is the host firewall's to stop (MM-SA-11,
-FW1, the owner's step still pending). Past the day's ceiling, a real store's
-address that a server has not seen in the last hour is not found by that
-server until the day turns: the per-connection share means one machine alone
-cannot cause it, and it takes at least 100 networks.
+What it does not bound: past the ceiling, each made-up address still costs
+one small read (US$ 0.00003146 at its worst, its timeout's memory included) on
+top of the function call every request is; one connection at its pace on one
+server can add at most US$ 42.13 a month of these reads. A flood from many
+machines is the host firewall's to stop (MM-SA-11, FW1, the owner's step still
+pending): no code here can tell a real store from a made-up address without
+the index read, and the owner's coordinator chose availability of real stores
+over a hard ceiling on those reads. A store whose record cannot be read is
+read in full each time its address is asked on a server where it is not
+remembered; that is one real address's record, not something a scan can
+multiply.
 
 ## What a store keeps in the database after its closing day
 

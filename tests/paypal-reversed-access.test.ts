@@ -10,6 +10,10 @@
  * stays watched past the 180 days until the paid record ends. Same rule for a pending order (rule 30): a status not
  * known here is waited on, never dropped.
  *
+ * Pre-review MEDIUM on C4-13: a payment taken back by another way than a refund is also written in its own mark
+ * (nl:ppsell:reversed:<stats>) before the refund mark, so the buyer's thanks page never says "refunded" of it
+ * (tests/pf1-paypal-thanks-honest.test.ts draws that page). A mark that cannot be written keeps the order watched.
+ *
  * Stand-in for PayPal derived from tests/paypal-sales.test.ts (and the audit proof built on it); all the code under
  * test is real.
  */
@@ -121,6 +125,7 @@ async function main(): Promise<void> {
   const product = (await readListing(store, added.product.id))!;
   const watchKey = `nl:ppsell:watch:${store.statsId}`;
   const refundedKey = `nl:ppsell:refunded:${store.statsId}`;
+  const reversedKey = `nl:ppsell:reversed:${store.statsId}`;
 
   const refunds: string[] = [];
   const on = {
@@ -162,6 +167,34 @@ async function main(): Promise<void> {
     const run = await watchPayPal(store, Date.now() + 10_000, on);
     const marked = (await redis.pipeline([["ZSCORE", refundedKey, bought.order]]))[0] !== null;
     is(`capture ${status}: taken back, marked as given back, off the watch`, [run.revoked, await held(email), marked, await watched(bought.order)], [1, 0, true, false]);
+    // Its own mark says it was not a refund, so nothing tells the buyer it was refunded; a refund has none.
+    const [reversedAt, ttl] = await redis.pipeline([["ZSCORE", reversedKey, bought.order], ["TTL", reversedKey]]);
+    is(`capture ${status}: ${status === "REFUNDED" ? "no taken-back mark" : "its taken-back mark, kept as long as the refund mark"}`, [reversedAt !== null, status === "REFUNDED" || Number(ttl) > 399 * 86_400], [status !== "REFUNDED", true]);
+  }
+
+  part("The taken-back mark cannot be written: nothing marked as given back, still watched");
+  {
+    const stuck = await buy("stuck@example.com");
+    captures.set(stuck.capture, "REVERSED");
+    await dueNow(stuck.order);
+    const real = redis.pipeline.bind(redis);
+    // The mark's writes answer out of their shape, as a reply that cannot be read does: never "written".
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands.some((c) => c[1] === reversedKey && c[0] !== "ZSCORE") ? commands.map(() => "OK") : real(commands)) as typeof redis.pipeline;
+    const logged = console.error;
+    console.error = () => undefined;
+    let run: Awaited<ReturnType<typeof watchPayPal>>;
+    try {
+      run = await watchPayPal(store, Date.now() + 10_000, on);
+    } finally {
+      redis.pipeline = real;
+      console.error = logged;
+    }
+    const marked = (await redis.pipeline([["ZSCORE", refundedKey, stuck.order]]))[0] !== null;
+    is("not written: nothing taken back, no refund mark, still watched", [run.revoked, await held("stuck@example.com"), marked, await watched(stuck.order)], [0, 1, false, true]);
+    await dueNow(stuck.order);
+    run = await watchPayPal(store, Date.now() + 10_000, on);
+    is("written at the next look: taken back with both marks", [run.revoked, await held("stuck@example.com"), (await redis.pipeline([["ZSCORE", reversedKey, stuck.order]]))[0] !== null], [1, 0, true]);
   }
   // Only a refund is told as one: "refund.issued" says fully_refunded, which a chargeback or a failed payment is not.
   is("only the REFUNDED capture is told as a refund", refunds.length, 1);

@@ -42,6 +42,8 @@ const BASE = "https://marktmorgen.com";
 const COULD_NOT_CHECK = "We could not check this payment just now";
 const HANDING_OVER = "Payment received, we&#x27;re handing it over";
 const NOT_FOUND_LINE = "If PayPal shows a payment to Kiln Works";
+/** What the page says of a payment PayPal took back by another way than a refund (pre-review MEDIUM on C4-13). */
+const TAKEN_BACK_BODY = "This payment was taken back through PayPal, so this purchase is no longer yours to open.";
 
 // The PayPal stand-in of tests/paypal-sales.test.ts, cut to what an order, its capture and its read need.
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
@@ -53,6 +55,8 @@ let captureWith: (order: string) => { status: number; body: Record<string, unkno
 let made = 0;
 /** Captures PayPal answers as refunded in full (the Claude 4 team's second money review of #2911). */
 const refundedCaptures = new Set<string>();
+/** Captures PayPal answers in another status than COMPLETED or REFUNDED: reversed, failed or declined (C4-13). */
+const capturesIn = new Map<string, string>();
 const orderId = (n: number) => `8P190127TN36471${String(n).padStart(2, "0")}`;
 
 function completed(order: string, value: string, status: string, email: string): Record<string, unknown> {
@@ -86,7 +90,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const read = /^\/v2\/checkout\/orders\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
   if (read && method === "GET") return orders.has(read) ? json(orders.get(read)) : json({ name: "RESOURCE_NOT_FOUND" }, 404);
   const cap = /^\/v2\/payments\/captures\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
-  if (cap && method === "GET") return json({ id: cap, status: refundedCaptures.has(cap) ? "REFUNDED" : "COMPLETED" });
+  if (cap && method === "GET") return json({ id: cap, status: refundedCaptures.has(cap) ? "REFUNDED" : (capturesIn.get(cap) ?? "COMPLETED") });
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);
 }) as typeof fetch;
 
@@ -459,17 +463,48 @@ async function main(): Promise<void> {
     is("the refund mark unread: could not check, never handing over, never refunded", [blindHtml.includes(COULD_NOT_CHECK), blindHtml.includes(HANDING_OVER), blindHtml.includes(THANKS_WORDS.en.ppRefunded)], [true, false, false]);
   }
 
+  part("Pre-review MEDIUM on C4-13: a payment reversed, failed or declined is never said to be refunded");
+  {
+    for (const status of ["REVERSED", "FAILED", "DECLINED"]) {
+      const back = `${status.toLowerCase()}@example.com`;
+      const opened = await openOrder(store, (await readListing(store, made.product.id))!, BASE, { digitalConsent: TEST_CONSENT });
+      if (!opened.ok) throw new Error(`no order: ${opened.reason}`);
+      captureWith = (o) => ({ status: 201, body: completed(o, "29.00", "COMPLETED", back) });
+      const taken = await captureOrder(store, opened.order);
+      if (!taken.ok) throw new Error(`not paid: ${taken.reason}`);
+      is(`${status}: control: handed over by the real hand-over`, await handOverPayPal(store, taken.paid), true);
+      capturesIn.set(taken.paid.capture, status);
+      await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "1", opened.order]]);
+      const watched = await watchPayPal(store, Date.now() + 10_000, { handOver: async () => {}, dropStart: async () => {} });
+      is(`${status}: control: the real watch took the purchase back`, watched.revoked, 1);
+      const after = await open(opened.order);
+      const html = after === "crashed" ? "" : after.html;
+      is(`${status}: the page is drawn`, after === "crashed" ? "crashed" : "drawn", "drawn");
+      is(`${status}: it never says the payment was refunded`, [html.includes(THANKS_WORDS.en.ppRefunded), html.includes("refunded in full"), html.includes("shows the refund")], [false, false, false]);
+      is(`${status}: it says the payment was taken back through PayPal`, html.includes(TAKEN_BACK_BODY), true);
+      is(`${status}: never handing over, no receipt, no link, no purchase event`, [html.includes(HANDING_OVER), html.includes("Refresh in a minute"), html.includes("Open what you bought"), after === "crashed" ? null : after.purchaseEvent], [false, false, false, false]);
+      // Its own mark that cannot be read is unknown: could not check, never "refunded" and never "taken back".
+      const undo = failReadsOf(`nl:ppsell:reversed:${store.statsId}`);
+      const blind = await open(opened.order);
+      undo();
+      const blindHtml = blind === "crashed" ? "" : blind.html;
+      is(`${status}: the taken-back mark unread: could not check, never refunded, never taken back`, [blindHtml.includes(COULD_NOT_CHECK), blindHtml.includes(THANKS_WORDS.en.ppRefunded), blindHtml.includes(TAKEN_BACK_BODY)], [true, false, false]);
+    }
+  }
+
   part("The new words exist in every buyer language");
   {
     const en = THANKS_WORDS.en as unknown as Record<string, unknown>;
     is("English: could not check", en.ppCouldNotCheck, "We could not check this payment just now");
     is("English: handing over", en.ppHandingOver, "Payment received, we're handing it over");
+    is("English: taken back, neutral and true for a reversal, a failure or a decline", [en.ppTakenBack, en.ppTakenBackBody], ["Payment taken back", TAKEN_BACK_BODY]);
+    is("English: the refund's own words stay as they were", en.ppRefundedBody, "This payment was refunded in full through PayPal, so this purchase is no longer yours to open. Your PayPal account shows the refund.");
     for (const [code, words] of Object.entries(THANKS_WORDS)) {
       const w = words as unknown as Record<string, unknown>;
       const body = typeof w.ppCouldNotCheckBody === "string" ? w.ppCouldNotCheckBody : "";
       const handing = typeof w.ppHandingOverBody === "function" ? String((w.ppHandingOverBody as (e: string) => string)(BUYER)) : "";
-      is(`${code}: every new line is written`, [typeof w.ppCouldNotCheck === "string" && (w.ppCouldNotCheck as string).length > 10, body.length > 20, typeof w.ppHandingOver === "string" && (w.ppHandingOver as string).length > 10, handing.includes(BUYER), typeof w.ppRefunded === "string" && (w.ppRefunded as string).length > 10, typeof w.ppRefundedBody === "string" && (w.ppRefundedBody as string).length > 20], [true, true, true, true, true, true]);
-      if (code !== "en") is(`${code}: written in its own language, not English`, [w.ppCouldNotCheck === en.ppCouldNotCheck, w.ppHandingOver === en.ppHandingOver, body === en.ppCouldNotCheckBody, w.ppRefunded === en.ppRefunded, w.ppRefundedBody === en.ppRefundedBody], [false, false, false, false, false]);
+      is(`${code}: every new line is written`, [typeof w.ppCouldNotCheck === "string" && (w.ppCouldNotCheck as string).length > 10, body.length > 20, typeof w.ppHandingOver === "string" && (w.ppHandingOver as string).length > 10, handing.includes(BUYER), typeof w.ppRefunded === "string" && (w.ppRefunded as string).length > 10, typeof w.ppRefundedBody === "string" && (w.ppRefundedBody as string).length > 20, typeof w.ppTakenBack === "string" && (w.ppTakenBack as string).length > 10, typeof w.ppTakenBackBody === "string" && (w.ppTakenBackBody as string).length > 20], [true, true, true, true, true, true, true, true]);
+      if (code !== "en") is(`${code}: written in its own language, not English`, [w.ppCouldNotCheck === en.ppCouldNotCheck, w.ppHandingOver === en.ppHandingOver, body === en.ppCouldNotCheckBody, w.ppRefunded === en.ppRefunded, w.ppRefundedBody === en.ppRefundedBody, w.ppTakenBack === en.ppTakenBack, w.ppTakenBackBody === en.ppTakenBackBody], [false, false, false, false, false, false, false]);
     }
   }
 

@@ -6,7 +6,10 @@
  *     is a creator's domain;
  *   - the old sign-in address is always told the move finished, not only when something failed;
  *   - a recovery address that could not be carried is not left keyed by the old sign-in address, where a future
- *     account there would inherit it.
+ *     account there would inherit it;
+ *   - a place taken off whose sweep of the API keys could not be finished (KeysNotSwept) has that sweep repeated,
+ *     so a key the old address made meanwhile is held for good; repeated in vain, the move is not said as complete,
+ *     and the store's owner and both addresses are told.
  *
  * Synthetic: the Redis stand-in, with chosen pipelines refused or answered wrong, and a fetch stub for the email
  * provider.
@@ -16,7 +19,9 @@ import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { openSession, sendMoveLink } from "@/lib/auth";
 import { keepRecoveryAddress } from "@/lib/recovery-address";
-import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
+import { KEY_PREFIX, makeKey, makerPrint, resolveKey } from "@/lib/api-keys";
+import { type Store, claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { memberStores, putMember, readLog, readTeam } from "@/lib/team";
 import type { TeamRole } from "@/lib/team-roles";
 import { resolveAccess } from "@/lib/studio-route";
@@ -236,6 +241,82 @@ async function main() {
     ["https://marktmorgen.com/studio?address=moved-no-recovery-no-teams", 2, "Your recovery address and team places did not move with your account"],
   );
 
+  part("third review of #3326: a removal whose key sweep could not be finished (KeysNotSwept) is repeated, never left");
+  // The old address already on the team as `admin`, the new as `support`: the old place is taken off (removeMember).
+  // A key the old address made while that removal was under way (after removeMember's first sweep, before its team
+  // write, so the making request's own check, afterMake, still found it on the team) is what the second sweep is for.
+  // That sweep's read of the store's keys is refused `refusals` times from the team write on.
+  const sweepRefused = async (refusals: number, onTeam: { from: TeamRole; to?: TeamRole } = { from: "admin", to: "support" }, extra: Fault[] = []) => {
+    let key = "";
+    let armed = false;
+    let left = refusals;
+    const out = await move(
+      null,
+      (from, _t, sid) => {
+        let made = false;
+        const makeMidway: Fault = (commands) =>
+          !made && commands.some((c) => c[0] === "SET" && c[1] === `nl:team:${sid}`)
+            ? ((made = true),
+              makeKey(sid, "Made during the move", Date.now(), false, "none", { owner: false, by: makerPrint(sid, from), step: false })
+                .then((result) => {
+                  key = result.ok ? result.key : "";
+                  return real(commands);
+                })
+                .then((replies) => ((armed = true), replies)))
+            : null;
+        const refuseSweep: Fault = (commands) =>
+          armed && left > 0 && commands.length === 3 && commands[0][0] === "HGETALL" && commands[0][1] === `nl:api:keys:${sid}`
+            ? ((left -= 1), Promise.reject(new Error("the second sweep's read was refused")))
+            : null;
+        return [...extra, makeMidway, refuseSweep];
+      },
+      false,
+      "",
+      onTeam,
+    );
+    const now = await resolveKey(key);
+    // An account made at the old address later and invited to the team: the key the old address made must not work again.
+    const store = (await storeForIdExactly(out.sid)) as Store;
+    await putMember(store, out.from, "admin");
+    const reinvited = await resolveKey(key);
+    return { ...out, key, why: now?.why ?? null, reinvitedPaused: reinvited?.paused ?? null };
+  };
+  const sweptOnRepeat = await sweepRefused(1);
+  is("the key was made during the move (the test's own premise)", sweptOnRepeat.key.startsWith(KEY_PREFIX), true);
+  is(
+    "the sweep refused once: the move repeats it, the key the old address made is held for good, and the place is said as carried",
+    [sweptOnRepeat.why, sweptOnRepeat.reinvitedPaused, sweptOnRepeat.location, sweptOnRepeat.toRole],
+    ["left", true, "https://marktmorgen.com/studio?address=moved", "support"],
+  );
+  // The place stayed on the old address (its restrictions could not be read), so the move's clean-up takes it off, with
+  // the old address still on the team: the same unfinished sweep there is repeated too.
+  let pipelineRead = false;
+  const stayedSwept = await sweepRefused(1, { from: "admin" }, [
+    (commands) => (!pipelineRead && commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:crm:pacc:")) ? ((pipelineRead = true), Promise.reject(new Error("refused once"))) : null),
+  ]);
+  is(
+    "the place stayed and the clean-up's sweep refused once: repeated there too, the key held for good, the old address off the team, the place said as not carried",
+    [stayedSwept.why, stayedSwept.reinvitedPaused, stayedSwept.location, stayedSwept.members.includes(stayedSwept.from)],
+    ["left", true, "https://marktmorgen.com/studio?address=moved-no-teams", false],
+  );
+  const sweepStuck = await sweepRefused(2);
+  is(
+    "the repeat refused too: the move is not said as complete there, on the page it lands on",
+    sweepStuck.location,
+    "https://marktmorgen.com/studio?address=moved-keys-open",
+  );
+  const ownerMail = sweepStuck.mails.find((m) => m.subject.startsWith("Some API keys for") && m.subject.endsWith("may still work"));
+  is(
+    "the store's owner is emailed and the team's log says it, and both sign-in addresses are told to ask that owner",
+    [
+      Boolean(ownerMail?.text.includes(sweepStuck.from)),
+      sweepStuck.log.some((what) => what.includes(sweepStuck.from) && what.includes("may still work")),
+      sweepStuck.toldFrom.includes("may still work"),
+      sweepStuck.mails.find((m) => m.to === sweepStuck.to)?.text.includes("may still work") ?? false,
+    ],
+    [true, true, true, true],
+  );
+
   part("the studio's notices that ask for action: a status, a heading, a link that says where it goes");
   const studio = readFileSync("app/studio/page.tsx", "utf8");
   const shown = studio.slice(studio.indexOf("{actionNotice ? ("), studio.indexOf(") : notice ? (", studio.indexOf("{actionNotice ? (")));
@@ -246,7 +327,8 @@ async function main() {
       shown.includes('<h2 id="action-notice-title"'),
       shown.includes("<a href={action.href}") && shown.includes("min-h-11"),
       studio.includes('{ href: "#account-recovery", label: "Check your recovery address" }'),
-      studio.includes("const flags = /^moved(-sessions-open)?(-no-recovery)?(-no-teams)?$/.exec(key);"),
+      // Changed (rule 23, Claude 2's third review of #3326): "-keys-open" says a removal's key sweep was left unfinished.
+      studio.includes("const flags = /^moved(-sessions-open)?(-no-recovery)?(-no-teams)?(-keys-open)?$/.exec(key);"),
       studio.includes('id="account-recovery"') || readFileSync("components/recovery-address-manager.tsx", "utf8").includes('id="account-recovery"'),
       studio.includes('<form id="log-out-everywhere" action="/api/auth/signout-all"'),
     ],

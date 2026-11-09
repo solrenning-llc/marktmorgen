@@ -156,7 +156,8 @@ async function main() {
     "each status is a notice, and both say to check the recovery address and add one again",
     [
       // Changed (rule 23, finding 5): the statuses may also end in -no-teams.
-      studio.includes("const flags = /^moved(-sessions-open)?(-no-recovery)?(-no-teams)?$/.exec(key);"),
+      // Changed again (rule 23, Claude 2's third review of #3326): and in -keys-open, a removal's key sweep left unfinished.
+      studio.includes("const flags = /^moved(-sessions-open)?(-no-recovery)?(-no-teams)?(-keys-open)?$/.exec(key);"),
       studio.includes('{ href: "#account-recovery", label: "Check your recovery address" }'),
       (studio.match(/We could not confirm that your recovery address came along\. Check it, and add one again if none is shown\./g) ?? []).length,
     ],

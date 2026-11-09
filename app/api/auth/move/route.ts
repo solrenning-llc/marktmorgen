@@ -17,6 +17,7 @@ import {
 } from "@/lib/auth";
 import { moveAccount, storeForEmail } from "@/lib/store";
 import { dropMemberships, moveMemberships } from "@/lib/team";
+import type { Role } from "@/lib/team-roles";
 import { MoveSplitError, discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { holdsSecondStep } from "@/lib/second-step-gate";
 import { repairMove } from "@/lib/move-repair";
@@ -163,6 +164,12 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
   let carried = true;
   // Whether every place on another store's team is known to have come along; the same.
   let teams = true;
+  // Whether every API key the old address made on another store's team is known to be held, once its place there was
+  // taken off (lib/team.ts dropMemberships); never said as held when a sweep could not be finished, even repeated.
+  let keys = true;
+  // Stores where the old address's place was taken off but the sweep of its API keys was not finished (KeysNotSwept),
+  // with the role it had: filled by moveMemberships as it goes, so a carry that throws later does not lose them.
+  const unswept = new Map<string, Role>();
   try {
     const result = await moveAccount(from, to);
     if (!result.ok) {
@@ -182,7 +189,7 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
         () => true,
         (error) => (console.error("carrying the recovery address failed", error), false),
       ),
-      moveMemberships(from, to).then(
+      moveMemberships(from, to, unswept).then(
         (stayed) => stayed.length === 0,
         (error) => (console.error("carrying the places on other teams failed", error), false),
       ),
@@ -193,12 +200,18 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
     // failed before writing, or a value that could not be read): an account made at `from` later would otherwise
     // inherit it as its own way back in. Tried twice; still unanswered, it is logged, the person is told anyway.
     if (!carried && !(await forgetLeftRecovery(from))) console.error("a recovery address may be left under an address an account moved away from", { from });
-    // Likewise a place on a team not carried: an account made at `from` later would otherwise be on that team.
-    if (!teams && !(await dropMemberships(from).catch(() => false))) console.error("a place on a team may be left under an address an account moved away from", { from });
+    // Likewise a place on a team not carried: an account made at `from` later would otherwise be on that team. And a
+    // place taken off whose sweep of the API keys was not finished has it repeated there, as `from` has no role left
+    // on that team to be taken off for (Claude 2's third review of #3326). Unanswered, the keys are not known as held.
+    if (!teams || unswept.size) {
+      const dropped = await dropMemberships(from, unswept).catch(() => null);
+      if (!dropped?.settled) console.error("a place on a team, or an API key made from one, may be left under an address an account moved away from", { from });
+      keys = dropped !== null && dropped.unswept.length === 0;
+    }
     // The old address is told the move finished every time, now, before anything else can stop it: the notice when
     // the move was asked for (lib/auth.ts sendMoveLink) says only that it may happen, and a move nobody there made is
     // learned of while there is still somebody to ask for help.
-    await tellMoved(from, to, link, { recovery: !carried, teams: !teams });
+    await tellMoved(from, to, link, { recovery: !carried, teams: !teams, keys: !keys });
     // Phones follow once the memberships have: an owner's stay the owner's,
     // a team member's become the new address's (lib/phone-alerts.ts).
     await movePhoneDevices(from, to).catch((error) => console.error("moving phone devices failed", error));
@@ -224,7 +237,7 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
     return away("/signin?status=move-error");
   }
 
-  const response = away(`/studio?address=${closed ? "moved" : "moved-sessions-open"}${carried ? "" : "-no-recovery"}${teams ? "" : "-no-teams"}`);
+  const response = away(`/studio?address=${closed ? "moved" : "moved-sessions-open"}${carried ? "" : "-no-recovery"}${teams ? "" : "-no-teams"}${keys ? "" : "-keys-open"}`);
   response.headers.append("Set-Cookie", sessionCookie(sessionId));
   return response;
 }
@@ -238,7 +251,7 @@ async function forgetLeftRecovery(from: string): Promise<boolean> {
 }
 
 /** What did not come along with a move, said in its notices and on the page it lands on. */
-type LeftBehind = { recovery: boolean; teams: boolean };
+type LeftBehind = { recovery: boolean; teams: boolean; keys: boolean };
 
 /**
  * The notices at the end of a move. The old sign-in address is always told that the account now logs in with the new
@@ -252,18 +265,22 @@ async function tellMoved(from: string, to: string, link: string, left: LeftBehin
   const send = (address: string, subject: string, lines: string[]) =>
     sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: address, replyTo: "support@marktmorgen.com", subject, text: lines.join("\n") }).catch(() => false);
   // Not "may have none": a carry whose answer was lost may still have written it, and the studio shows which.
-  const lostFor = (whose: "its" | "your", invite: string) => [
+  const lostFor = (whose: "its" | "your", invite: string, made: string) => [
     ...(left.recovery ? [`We could not confirm that ${whose} recovery address came along.`] : []),
     ...(left.teams ? [`We could not carry ${whose} places on other stores' teams. Ask each store's owner to invite ${invite} again.`] : []),
+    // The move is not complete on that team: only its owner can revoke the keys, and we emailed them where we could.
+    ...(left.keys ? [`Some API keys made with ${made} on another store's team may still work. Ask that store's owner to revoke the ones you no longer use.`] : []),
   ];
-  const lost = lostFor("its", to);
+  const lost = lostFor("its", to, "this address");
   const todo = left.recovery ? ", then check Recovery address in your studio and add a recovery address again if none is shown" : "";
   const subject =
     left.recovery && left.teams
       ? "Your recovery address and team places did not move with your account"
       : left.teams
         ? "Your places on other teams did not move with your account"
-        : "Your recovery address did not move with your account";
+        : left.recovery
+          ? "Your recovery address did not move with your account"
+          : "Some API keys from your old address may still work";
   await Promise.all([
     send(from, "The email your Marktmorgen account logs in with changed", [
       `The Marktmorgen account that logged in with this address now logs in with ${to}. This address no longer logs in to it.`,
@@ -281,7 +298,7 @@ async function tellMoved(from: string, to: string, link: string, left: LeftBehin
           send(to, subject, [
             "Your Marktmorgen account now logs in with this address, but not everything came along with it.",
             "",
-            ...lostFor("your", "this address"),
+            ...lostFor("your", "this address", from),
             "",
             when,
             "",

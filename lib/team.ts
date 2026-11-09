@@ -741,9 +741,14 @@ export async function dropTeam(store: Store): Promise<void> {
  *     team, and raising it would hand that address a power nobody granted to it. The old address's restrictions and
  *     API keys go with its place (held "left"; the owner is emailed which), as merging them into the new address's
  *     own would decide for the owner. The team's log says which role the old place had, so the owner can raise it.
- *     A removal that cannot be finished keeps the store as stayed.
+ *     A removal that cannot be finished keeps the store as stayed. One whose second sweep of the API keys could not be
+ *     finished (KeysNotSwept: the old place is off the team, but a key it made meanwhile may not be held) is not
+ *     stayed, as the place is gone and the new address keeps its own; it is put in `unswept`, with the old place's
+ *     role, for the move's clean-up to repeat that sweep (dropMemberships), which nothing else would do: the old
+ *     address has no role there any more, so it reads as nothing to take off (Claude 2's third review of #3326).
+ *     `unswept` is filled as each store is done, so a later store that throws does not lose it.
  */
-export async function moveMemberships(from: string, to: string): Promise<string[]> {
+export async function moveMemberships(from: string, to: string, unswept: Map<string, Role> = new Map()): Promise<string[]> {
   if (!isRedisConfigured()) return [];
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
@@ -802,9 +807,15 @@ export async function moveMemberships(from: string, to: string): Promise<string[
       try {
         await removeMember(store, before);
       } catch (error) {
-        console.error("taking a moved address off a team its new address is already on failed; the move's clean-up takes it off", error);
-        stayed.push(sid);
-        continue;
+        if (error instanceof KeysNotSwept) {
+          // Off the team, its sweep to be repeated by the move's clean-up (dropMemberships), which is told the role it had.
+          console.error("a moved address was taken off a team, but its API keys could not all be paused; the move's clean-up repeats it", error);
+          unswept.set(sid, outcome.taken);
+        } else {
+          console.error("taking a moved address off a team its new address is already on failed; the move's clean-up takes it off", error);
+          stayed.push(sid);
+          continue;
+        }
       }
       await logTeam(sid, {
         who: after,
@@ -838,14 +849,26 @@ export async function moveMemberships(from: string, to: string): Promise<string[
  * after this they are on that team at neither address, so it is never left open on a guess; the owner is emailed
  * the keys by name and may turn each back on at once. Pausing only the person's recorded keys would leave theirs
  * among the unrecorded ones working for somebody no longer on the team.
+ *
+ * A removal whose second sweep of the API keys could not be finished (KeysNotSwept), here or in moveMemberships
+ * (`unswept`, with the role the place had), is repeated once, as the team route repeats one when the owner presses
+ * Remove again (removeMember with `repeat`): the address has no role there any more, but a key it made while it was
+ * being taken off may not be held, and would work again for an account made at that address later and invited back
+ * (Claude 2's third review of #3326). A repeat that cannot be finished either leaves that store in the answer's
+ * `unswept`: the move is not said as complete there, the team's log says it, and the store's owner is emailed to
+ * revoke what they do not recognize (lib/api-key-pause.ts tellOwnerOfUnswept). `settled` is true only when the index
+ * and every store on it were read and settled, and no sweep was left unfinished.
  */
-export async function dropMemberships(email: string): Promise<boolean> {
-  if (!isRedisConfigured()) return true;
+export async function dropMemberships(email: string, unswept: ReadonlyMap<string, Role> = new Map()): Promise<{ settled: boolean; unswept: string[] }> {
+  if (!isRedisConfigured()) return { settled: true, unswept: [] };
   const address = normaliseEmail(email);
   const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
   if (!ids) throw new UnknownReplyError("a teammate's stores");
   let settled = true;
-  for (const sid of ids.filter((id) => STORE_ID_PATTERN.test(id))) {
+  const open: string[] = [];
+  // The index and the stores whose sweep is to be repeated: the latter may be out of the index already (its SREM ran,
+  // and forgetting the pipeline access after it failed).
+  for (const sid of [...new Set([...ids, ...unswept.keys()])].filter((id) => STORE_ID_PATTERN.test(id))) {
     try {
       const store = await storeForId(sid);
       // Not found, or not known: kept in the index for memberStores to drop on a confirmed absence, and said as unsettled.
@@ -854,14 +877,50 @@ export async function dropMemberships(email: string): Promise<boolean> {
         continue;
       }
       const role = await roleIn(store, address);
-      if (!role || role === "owner") continue;
-      if (await removeMember(store, address)) {
-        await logTeam(sid, { who: address, role, what: "Taken off the team: they moved their sign-in to another address, and their place could not go with it" });
+      if (role === "owner") continue;
+      const was = role ?? unswept.get(sid);
+      // No role and no unfinished sweep: nothing of theirs there (a place carried, or taken off whole).
+      if (!was) continue;
+      const out = await takeOffSwept(store, address, role === null);
+      if (out.removed) {
+        await logTeam(sid, { who: address, role: was, what: "Taken off the team: they moved their sign-in to another address, and their place could not go with it" });
       }
+      if (out.swept) continue;
+      settled = false;
+      open.push(sid);
+      await logTeam(sid, { who: address, role: was, what: `Some API keys ${address} made may still work: not all could be paused when they left the team. Revoke any you do not recognize` });
+      const { tellOwnerOfUnswept } = await import("@/lib/api-key-pause");
+      await tellOwnerOfUnswept(store, address).catch((error: unknown) => console.error("telling the owner that a former teammate's API keys may still work failed", error));
     } catch (error) {
       console.error("taking a moved address off a team failed", error);
       settled = false;
     }
   }
-  return settled;
+  return { settled, unswept: open };
+}
+
+/**
+ * removeMember for an address that moved away, with its sweep of the API keys repeated once when it could not be
+ * finished (KeysNotSwept), as the team route does on the owner's second press. `again`: the address is off the team
+ * already and only the sweep is repeated. `removed`: it was on the team and is off it now; `swept`: a sweep after
+ * that finished. Any other failure of the first removal throws, as nothing was done.
+ */
+async function takeOffSwept(store: Store, address: string, again: boolean): Promise<{ removed: boolean; swept: boolean }> {
+  let removed = false;
+  if (!again) {
+    try {
+      return { removed: await removeMember(store, address), swept: true };
+    } catch (error) {
+      if (!(error instanceof KeysNotSwept)) throw error;
+      console.error("a moved address was taken off a team, but its API keys could not all be paused; repeated once", error);
+      removed = true;
+    }
+  }
+  try {
+    await removeMember(store, address, { repeat: true });
+    return { removed, swept: true };
+  } catch (error) {
+    console.error("repeating the sweep of a moved address's API keys failed", error);
+    return { removed, swept: false };
+  }
 }

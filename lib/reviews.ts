@@ -39,12 +39,13 @@
  *   nl:rev:all:<s>            -> sorted set of "<product>|<id>", by date (studio)
  *   nl:rev:new:<s>            -> sorted set of the same, not seen yet (the queue)
  *   nl:rev:pay:<s>            -> hash: payment -> the reviews it paid for (refunds)
- *   nl:rev:stores             -> set of statsIds with any review (the refund pass)
+ *   nl:rev:stores             -> set of statsIds with any review (the refund pass, the daily recount)
+ *   nl:rev:recount:at         -> where the daily recount of numbers left waiting stopped (a SSCAN cursor)
  */
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
@@ -88,7 +89,9 @@ export const REVIEW_STORES_KEY = "nl:rev:stores";
  * be done (its read lost, thrown or in another shape, or a damaged record in the product's hash) leaves it there, so
  * the product shows no stars and says its numbers could not be read (UNREAD_NUMBERS), never the numbers kept from
  * before the change, which may still count a review hidden, refunded or deleted (rule 24; VR item 2). It is not the
- * numbers' exact shape (exactSummary), so every reader takes it as unread.
+ * numbers' exact shape (exactSummary), so every reader takes it as unread. A mark left by a failure that passes is
+ * counted again by the daily pass (recountWaiting), never by a page that reads it: a recount on a public read would
+ * cost every visit and race the change that wrote the mark.
  */
 const RECOUNT_PENDING = "recount";
 const numbersPending = (statsId: string, productId: string): (string | number)[] => ["HSET", summaryKey(statsId), productId, RECOUNT_PENDING];
@@ -312,14 +315,16 @@ export async function readReview(statsId: string, productId: string, id: string)
 
 /**
  * Runs `work` holding the product's lock, so two changes at once cannot count
- * the numbers from two different moments. "busy" when it could not be had.
+ * the numbers from two different moments. "busy" when it could not be had
+ * within `waitMs` (the daily recount does not wait: a change holding the lock
+ * counts the numbers itself).
  */
-async function locked<T>(statsId: string, productId: string, work: () => Promise<T>): Promise<T | "busy"> {
+async function locked<T>(statsId: string, productId: string, work: () => Promise<T>, waitMs = 1_600): Promise<T | "busy"> {
   // Under a token of this call's own, let go of in one step (lib/redis-lock.ts): a lock that ran out and was taken
   // by another call is never let go of by this one.
   let held;
   try {
-    held = await takeLock(lockKey(statsId, productId), 10, 1_600);
+    held = await takeLock(lockKey(statsId, productId), 10, waitMs);
   } catch (error) {
     if (error instanceof LockBusyError) return "busy";
     throw error;
@@ -372,8 +377,9 @@ function recordsOf(reply: unknown, productId: string): { ids: string[]; reviews:
 /**
  * Counts a product's numbers again from its reviews, and keeps them. Read exactly (CX-123 rule 24): only an exact
  * empty hash is a product with no reviews, whose numbers go. A read lost or in another shape writes nothing: the
- * numbers are never deleted and never counted without a review that did not read; the recount is left for the
- * product's next change ("unsure"), and the log says so. So is a write of the numbers answered in another shape.
+ * numbers are never deleted and never counted without a review that did not read; the recount is left for the daily
+ * pass (recountWaiting) or the product's next change ("unsure"), and the log says so. So is a write of the numbers
+ * answered in another shape.
  * Every caller has already marked the numbers as waiting (numbersPending, in the same request as its change), so what
  * stays meanwhile is that mark (no stars, said as unread), never the numbers from before the change.
  */
@@ -381,7 +387,7 @@ async function recount(statsId: string, productId: string): Promise<Summary | "u
   const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1);
   const reviews = read ? exactReviews(read[0], productId) : null;
   if (!reviews) {
-    console.error(`reviews: the numbers of product ${productId} were not counted again (its reviews read in an unknown shape); kept as they were until its next change`);
+    console.error(`reviews: the numbers of product ${productId} were not counted again (its reviews read in an unknown shape); left waiting for the daily recount or its next change`);
     return "unsure";
   }
   const summary = summarise(reviews);
@@ -389,7 +395,7 @@ async function recount(statsId: string, productId: string): Promise<Summary | "u
     reviews.length ? ["HSET", summaryKey(statsId), productId, JSON.stringify(summary)] : ["HDEL", summaryKey(statsId), productId],
   ];
   if (!exactWriteReplies(await redisPipeline(change), change)) {
-    console.error(`reviews: the numbers of product ${productId} were written with an answer in an unknown shape; counted again at its next change`);
+    console.error(`reviews: the numbers of product ${productId} were written with an answer in an unknown shape; counted again by the daily recount or at its next change`);
     return "unsure";
   }
   return summary;
@@ -754,7 +760,7 @@ export function setReply(statsId: string, productId: string, id: string, text: s
  * Marks as refunded every review a payment paid for, once Stripe says the
  * payment was given back in full. Returns how many changed.
  */
-export async function markRefunded(statsId: string, pi: string): Promise<number> {
+export async function markRefunded(statsId: string, pi: string, onDamaged?: (productId: string) => void): Promise<number> {
   if (!STATS_ID_PATTERN.test(statsId) || !pi) return 0;
   // Read exactly (CX-123 rule 24): only an exact nil is a payment that paid for no review. A reply lost or in another
   // shape throws, so the refund is not taken as seen and the next pass tries again.
@@ -771,6 +777,8 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
   // marked (not in the count returned) and never rewritten from a guess; the log names it by its ids, never anything
   // personal; and its product's numbers are marked as waiting for a recount (no stars, said as unread), and its AI
   // summary taken away, since they may count it. A mark that cannot be written is thrown as the others, so the next pass tries again.
+  // `onDamaged` is told its product, so the caller refreshes what quotes the store page keeps (a quote of the damaged
+  // record would otherwise stay on top of the store, since nothing was said as marked).
   let failed: unknown = null;
   for (const member of members) {
     const [productId, id] = member.split("|");
@@ -790,6 +798,7 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
         failed ??= error;
         continue;
       }
+      onDamaged?.(productId);
       // The AI summary that may have counted it goes in the same request, as a damaged record's own deletion does
       // (no date known): more taken away than counted, never less.
       const mark = [numbersPending(statsId, productId), ...summaryGone(statsId, productId, 0)];
@@ -818,6 +827,104 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
 export async function markOneRefunded(statsId: string, productId: string, id: string): Promise<void> {
   const done = await creatorChange(statsId, productId, id, (review) => ({ ...review, refunded: true }), null);
   if (done === "busy") throw new Error("a review is busy; its refund is marked on the next try");
+}
+
+/**
+ * The daily recount of numbers left waiting (RECOUNT_PENDING): a change marks its product's numbers in the same
+ * request and its own recount replaces the mark, but a recount that fails for a moment (a read lost, a timeout) left
+ * the mark until the product's next change, which may never come, and the product showed no stars, said as unread, for
+ * good. Once a day the hourly recount job (app/api/cron/recount, at REVIEW_RECOUNT_HOUR_UTC) walks the stores with
+ * reviews (nl:rev:stores, by SSCAN from where the last pass stopped), reads each store's numbers in one request per
+ * page of stores, and counts again, under the product's lock and without waiting for it, each product still marked.
+ *
+ * Bounded before it reads (a company job, its cost in tests/plan-cost-registry.ts, NOT_A_COST): at most
+ * REVIEW_RECOUNT_STORES_PER_DAY stores' numbers read, REVIEW_RECOUNTS_PER_DAY products tried (recounted, unsure or
+ * busy) and RECOUNT_PAGES pages of the walk a pass, inside the deadline the job gives it. The mark is replaced only by recount(): numbers read whole from
+ * the product's reviews in their exact shape; a read lost or in another shape, a damaged record, a store's numbers in
+ * another shape, a busy lock or a thrown request leave the mark (no stars, said as unread), never numbers made up. A
+ * page cut short by the deadline is read again next pass; one cut by a cap goes on from the next page, so a product
+ * that never counts (a damaged record) cannot hold the walk on one page; the others wait for the walk's next round.
+ */
+export const REVIEW_RECOUNT_HOUR_UTC = 4;
+export const REVIEW_RECOUNTS_PER_DAY = 50;
+export const REVIEW_RECOUNT_STORES_PER_DAY = 500;
+const RECOUNT_SCAN_COUNT = 100;
+/** Pages of the walk a pass reads at the most, so pages with no store on them (SSCAN may give some) cannot fill it. */
+const RECOUNT_PAGES = 20;
+const RECOUNT_CURSOR_KEY = "nl:rev:recount:at";
+const RECOUNT_CURSOR_SECONDS = 8 * 86_400;
+
+export type WaitingPass = { stores: number; recounted: number; unsure: number; busy: number; capped: boolean; complete: boolean };
+
+export async function recountWaiting(deadline: number): Promise<WaitingPass> {
+  const out: WaitingPass = { stores: 0, recounted: 0, unsure: 0, busy: 0, capped: false, complete: false };
+  if (!isRedisConfigured() || Date.now() >= deadline) return out;
+  // Where the last pass stopped, read exactly: only an exact nil is a walk not started (or run out); anything else
+  // that is not a cursor stops the pass, never a walk from the top taken for a kept place.
+  const at = repliesFor(await redisPipeline([["GET", RECOUNT_CURSOR_KEY]]), 1);
+  const kept = at?.[0];
+  if (!at || (kept !== null && (typeof kept !== "string" || !/^[0-9]+$/.test(kept)))) throw new UnknownReplyError("the daily review recount's place");
+  let cursor: string = kept ?? "0";
+  const tried = () => out.recounted + out.unsure + out.busy;
+  for (let pages = 0; Date.now() < deadline; pages += 1) {
+    if (pages >= RECOUNT_PAGES || out.stores >= REVIEW_RECOUNT_STORES_PER_DAY || tried() >= REVIEW_RECOUNTS_PER_DAY) {
+      out.capped = true;
+      break;
+    }
+    const page = scanPage(await redisPipeline([["SSCAN", REVIEW_STORES_KEY, cursor, "COUNT", RECOUNT_SCAN_COUNT]]));
+    if (!page) throw new UnknownReplyError("a page of the stores with reviews");
+    const room = REVIEW_RECOUNT_STORES_PER_DAY - out.stores;
+    const stores = page.items.filter((id) => STATS_ID_PATTERN.test(id));
+    // A page larger than what is left is read whole by the next pass; only a pass's first page is cut to the cap
+    // (its rest waits for the walk's next round), so the walk always moves.
+    if (stores.length > room && out.stores > 0) {
+      out.capped = true;
+      break;
+    }
+    if (stores.length > room) out.capped = true;
+    const ended = await recountStores(stores.slice(0, room), deadline, out);
+    if (ended === "late") break;
+    cursor = page.next;
+    if (ended === "capped") out.capped = true;
+    if (cursor === "0") {
+      out.complete = !out.capped;
+      break;
+    }
+  }
+  const place: (string | number)[][] = [["SET", RECOUNT_CURSOR_KEY, cursor, "EX", RECOUNT_CURSOR_SECONDS]];
+  if (!exactWriteReplies(await redisPipeline(place), place)) console.error("reviews: the daily recount's place was written with an answer in an unknown shape; the next pass may read the same stores again");
+  return out;
+}
+
+/** One page of stores: their numbers in one request, then each product still marked, while the caps and the deadline allow. */
+async function recountStores(stores: string[], deadline: number, out: WaitingPass): Promise<"done" | "late" | "capped"> {
+  if (!stores.length) return "done";
+  const read = repliesFor(await redisPipeline(stores.map((statsId) => ["HGETALL", summaryKey(statsId)])), stores.length);
+  if (!read) throw new UnknownReplyError("the numbers of a page of stores");
+  out.stores += stores.length;
+  for (const [i, statsId] of stores.entries()) {
+    const flat = stringList(read[i]);
+    if (!flat || flat.length % 2 !== 0 || flat.some((field, j) => j % 2 === 0 && !PRODUCT_ID_PATTERN.test(field))) {
+      console.error(`reviews: a store's numbers (${statsId}) read in an unknown shape; none of its products counted again this pass`);
+      continue;
+    }
+    for (let j = 0; j < flat.length; j += 2) {
+      if (flat[j + 1] !== RECOUNT_PENDING) continue;
+      if (Date.now() >= deadline) return "late";
+      if (out.recounted + out.unsure + out.busy >= REVIEW_RECOUNTS_PER_DAY) return "capped";
+      const productId = flat[j];
+      try {
+        const done = await locked(statsId, productId, () => recount(statsId, productId), 0);
+        if (done === "busy") out.busy += 1;
+        else if (done === "unsure") out.unsure += 1;
+        else out.recounted += 1;
+      } catch (error) {
+        out.unsure += 1;
+        console.error(`reviews: the daily recount of product ${productId} failed; its numbers stay waiting`, error);
+      }
+    }
+  }
+  return "done";
 }
 
 /** Takes reviews out of the creator's queue: those named, or all of them. */

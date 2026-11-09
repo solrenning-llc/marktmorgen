@@ -300,6 +300,9 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   const since = Math.max(0, anchor - 300);
   let newest = anchor;
   let marked = 0;
+  // A refund whose review record is damaged is not said as marked (lib/reviews.ts, markRefunded), but a quote of that
+  // record may still be on top of the store: the quotes are refreshed for it too.
+  let damaged = false;
   let after = "";
   let complete = false;
   // A failed or unfinished read of the lost disputes keeps the anchor.
@@ -339,7 +342,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
       for (const [i, refund] of full.entries()) {
         if (Number(seen[i]) !== 1) {
-          if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi);
+          if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi, () => void (damaged = true));
           // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
           await redisPipeline([
             ["SADD", seenKey(statsId), refund.id],
@@ -359,7 +362,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   } finally {
     // A refunded review leaves "What buyers say" on the store page (lib/store-quotes.ts), also when a busy review
     // stopped the pass after others were marked.
-    if (marked > 0) await refreshStoreQuotes(store);
+    if (marked > 0 || damaged) await refreshStoreQuotes(store);
   }
   // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
   // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed

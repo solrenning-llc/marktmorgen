@@ -302,7 +302,10 @@ async function main(): Promise<void> {
   redis.pipeline = realPipe;
   is("and leaves the lock another call took to it", (await redis.pipeline([["GET", lockOf]]))[0], "another-call");
   await redis.pipeline([["DEL", lockOf]]);
-  is("the reviews' lock is lib/redis-lock.ts's, let go of in one step", [readFileSync("lib/reviews.ts", "utf8").includes("held = await takeLock(lockKey(statsId, productId), 10, 1_600);"), readFileSync("lib/reviews.ts", "utf8").includes("await releaseLock(held);")], [true, true]);
+  // Rule 23 (claude5/reviews-recount-exact, 9 November 2026): the wait is now a parameter, 1_600 ms by default, so the
+  // daily recount of numbers left waiting (recountWaiting) can try the lock once without waiting; the lock is the same.
+  const reviewsSource = readFileSync("lib/reviews.ts", "utf8");
+  is("the reviews' lock is lib/redis-lock.ts's, let go of in one step", [reviewsSource.includes("held = await takeLock(lockKey(statsId, productId), 10, waitMs);") && reviewsSource.includes("waitMs = 1_600"), reviewsSource.includes("await releaseLock(held);")], [true, true]);
 
   // A refund that finds its review busy is not taken as seen: thrown, so the sweep tries it again.
   await redis.pipeline([["SET", lockOf, "held-by-a-test", "EX", 10]]);

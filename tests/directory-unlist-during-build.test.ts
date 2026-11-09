@@ -2,7 +2,7 @@
  * Claude 6's money review of #3118 (MÉDIO): a creator who unchecks "List my program" while a build is running leaves
  * the page at once, as the help says. Before, the build read the store before the save; the save's SREM and DEL of
  * the kept page landed next; then the build's SET wrote the store back, and the kept page (served with one GET and no
- * SMISMEMBER) showed it for the whole window, up to 15 minutes. Now the build, right after its SETs, asks the listed
+ * SMISMEMBER) showed it for the whole window, up to an hour (C1-20261109-1603-TODOS-71). Now the build, right after its SETs, asks the listed
  * set once (SMISMEMBER) for the sids it kept: a 0 drops the kept page, and so does a reply in any other shape (then
  * the build is unknown and says so). Against the save's SREM-then-DEL this is linearizable. Synthetic data only.
  */
@@ -19,6 +19,8 @@ globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", da
 const original = redis.pipeline.bind(redis);
 type Commands = (string | number)[][];
 const MINUTE = 60_000;
+/** The owner's build window, written here rather than read from the code under test. */
+const HOUR = 60 * MINUTE;
 
 async function attempt(): Promise<string[] | string> {
   try {
@@ -73,13 +75,13 @@ async function main(): Promise<void> {
   const built = await buildWith(() => program("cakes@example.com", false));
   is("the build's own answer leaves the unlisted store out", built, ["breadhouse"]);
   is("the kept page does not hold the unlisted store", ((await keptHandles()) ?? []).includes("cakeshop"), false);
-  for (const [step, at] of [[1, 1], [9, 10], [4, 14]]) {
+  for (const [step, at] of [[1, 1], [29, 30], [29, 59]]) {
     advance(step * MINUTE);
     is(`a visit at minute ${at} after the build does not show it`, ((await attempt()) as string[]).includes("cakeshop"), false);
   }
 
   part("The listed set answered in another shape right after the build: the kept page is dropped, the build unknown");
-  advance(MINUTE);
+  advance(HOUR);
   await program("cakes@example.com", true);
   redis.pipeline = (async (commands: Commands) => (commands[0]?.[0] === "SMISMEMBER" ? [["x", 1]] : original(commands))) as typeof redis.pipeline;
   const unknown = await attempt();
@@ -88,7 +90,7 @@ async function main(): Promise<void> {
   is("and keeps no page from it", await kept(), null);
 
   part("Control: a build with nobody leaving keeps the page with both");
-  advance(15 * MINUTE);
+  advance(HOUR);
   is("both are listed", await attempt(), ["breadhouse", "cakeshop"]);
   is("and kept", await keptHandles(), ["breadhouse", "cakeshop"]);
   done();

@@ -51,8 +51,10 @@
  *     the new period's day, which would be a second allowance in one month;
  *     never a longer one, which would take allowance away. Only another
  *     subscription, or a skipped renewal (a later period paid after the
- *     record's own ended and its grace ran out, whether or not the stop was
- *     recorded), leaves it behind. An anchor that cannot be read lets in to
+ *     record's own ended and its grace ran out, beginning on one of its
+ *     renewals, whether or not the stop was recorded), leaves it behind; a
+ *     switch written over a stale record begins off them and keeps it. An
+ *     anchor that cannot be read lets in to
  *     nothing, like a period that is not known.
  *
  * Nothing here touches the network: pages that print when an allowance
@@ -333,15 +335,29 @@ function anchorFrom(subscriptionId: string, window: AllowanceWindow): AllowanceA
 }
 
 /**
- * Whether the new period begins after the record's own period ended and its renewal's grace ran out: a renewal was
- * skipped (not paid, and a later period paid), whatever the record says about a stop. The stop may never have reached
- * the record (a lost webhook, the daily job not run), or a Stripe read made before it may have landed after it and
- * wiped its day (setSubscription clears planEndedAt on an active write). The anchor's months after that end were
- * never paid for: the period's own months come back, one window for one payment. A renewal written in its grace,
- * or a period that begins inside the record's own (a switch), is no skip.
+ * Whether the new period begins after the record's own period ended and its renewal's grace ran out, exactly on one of
+ * the renewals that follow it (anchorOf, the boundary Stripe gives, to the millisecond as periodWindow reads it): a
+ * renewal was skipped (not paid, and a later period paid), whatever the record says about a stop. The stop may never
+ * have reached the record (a lost webhook, the daily job not run), or a Stripe read made before it may have landed after
+ * it and wiped its day (setSubscription clears planEndedAt on an active write). The anchor's months after that end were
+ * never paid for: the period's own months come back, one window for one payment. A renewal written in its grace, a
+ * period that begins inside the record's own, and one that begins off the renewals' chain (a switch made after a
+ * renewal that was paid but not written, Stripe beginning the new period at the moment of the change) are no skip:
+ * the anchor goes on, so the window open then, perhaps already used, is never opened whole again days after it
+ * (focal review of #3396).
  */
 function skippedRenewal(previous: WindowFields, next: WindowFields): boolean {
-  return isPeriod(previous.period) && isPeriod(next.period) && next.period.start > previous.period.end + RENEW_GRACE_SECONDS;
+  if (!isPeriod(previous.period) || !isPeriod(next.period) || !(next.period.start > previous.period.end + RENEW_GRACE_SECONDS)) return false;
+  return onRenewalChain(previous.period, previous.cycle === "year", next.period.start * 1000);
+}
+
+/** Whether `startMs` is exactly the start of one of the periods that follow a renewing `period` (anchorOf). */
+function onRenewalChain(period: BillingPeriod, yearly: boolean, startMs: number): boolean {
+  const { anchor, offset, step } = anchorOf(period, yearly);
+  const from = new Date(anchor), at = new Date(startMs);
+  // addMonthsMs keeps the month it lands in, so the only candidate is the calendar months between.
+  const months = (at.getUTCFullYear() - from.getUTCFullYear()) * 12 + at.getUTCMonth() - from.getUTCMonth();
+  return months >= offset && (months - offset) % step === 0 && addMonthsMs(anchor, months) === startMs;
 }
 
 /**

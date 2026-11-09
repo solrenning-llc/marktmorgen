@@ -428,8 +428,8 @@ export default function TermsPage() {
           month of every figure. A yearly plan&apos;s figures are monthly too,
           each month beginning on the day of the month your year began. If you
           switch between monthly and yearly, your billing month keeps the day
-          it had before the switch. If your plan stops over an unpaid renewal
-          and you then pay a later one, it can go back to the day your plan
+          it had before the switch. If your plan stops because a renewal was
+          not paid and you then pay a later one, it can go back to the day your plan
           renews. A free trial&apos;s figures are counted for the trial as a whole, and a
           store with no plan, before one starts or after one ends, counts them
           by calendar month (UTC). Until we have read your plan&apos;s billing

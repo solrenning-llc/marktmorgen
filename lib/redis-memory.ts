@@ -23,6 +23,34 @@ import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/pat
 
 type Entry = string | string[] | Map<string, string> | Set<string> | { score: number; member: string }[];
 
+/**
+ * A sorted set's order, as Redis keeps it: by score, then members of the same score by their bytes (memcmp of UTF-8),
+ * not by the locale's collation (which puts "C3|Z" after "c2|a"; Redis puts it first).
+ */
+const encoder = new TextEncoder();
+/** A score times its weight, as ZUNIONSTORE / ZINTERSTORE weigh it: inf x 0 is 0 in Redis, never NaN. */
+const weighed = (score: number, weight: number): number => {
+  const product = score * weight;
+  return Number.isNaN(product) ? 0 : product;
+};
+/**
+ * Redis's zunionInterAggregate: SUM adds and turns NaN into 0; MIN / MAX keep the target unless the value is lesser /
+ * greater (so a NaN value never wins).
+ */
+const aggregate = (how: string, target: number, value: number): number => {
+  if (how === "MIN") return value < target ? value : target;
+  if (how === "MAX") return value > target ? value : target;
+  const sum = target + value;
+  return Number.isNaN(sum) ? 0 : sum;
+};
+function zsetOrder(a: { score: number; member: string }, b: { score: number; member: string }): number {
+  if (a.score !== b.score) return a.score - b.score;
+  const left = encoder.encode(a.member);
+  const right = encoder.encode(b.member);
+  for (let i = 0; i < Math.min(left.length, right.length); i += 1) if (left[i] !== right[i]) return left[i] - right[i];
+  return left.length - right.length;
+}
+
 export class MemoryRedis {
   private data = new Map<string, Entry>();
   /** When a key stops existing, in ms since the epoch. */
@@ -82,6 +110,12 @@ export class MemoryRedis {
     const made = new Set<string>();
     this.data.set(key, made);
     return made;
+  }
+
+  /** A sorted set read without making it: a missing key stays missing (EXISTS 0), as a read leaves it in Redis. */
+  private zsetSeen(key: string): { score: number; member: string }[] {
+    const held = this.data.get(key);
+    return Array.isArray(held) && (held.length === 0 || typeof held[0] === "object") ? (held as { score: number; member: string }[]) : [];
   }
 
   private zset(key: string): { score: number; member: string }[] {
@@ -838,7 +872,7 @@ export class MemoryRedis {
           const most = Number(rawMost), entry = Number(rawEntry), step = Number(rawStep);
           if (![most, entry, step].every(Number.isSafeInteger) || most < 1 || entry < 0 || step < 1) return [-1, 0];
           if (root.r === null) {
-            const ids = this.zset(lesson).slice().sort((a, b) => a.score - b.score || a.member.localeCompare(b.member)).slice(0, most + 1).map(row => row.member);
+            const ids = this.zset(lesson).slice().sort((a, b) => zsetOrder(a, b)).slice(0, most + 1).map(row => row.member);
             if (ids.length > most) return [-1, 0];
             for (const id of ids) {
               const value = this.run(["HGET", comments, id]);
@@ -1533,7 +1567,7 @@ export class MemoryRedis {
             added += 1;
           }
         }
-        z.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
+        z.sort((a, b) => zsetOrder(a, b));
         return set.has("CH") ? added + changed : added;
       }
       case "ZREM": {
@@ -1543,6 +1577,8 @@ export class MemoryRedis {
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) { z.splice(at, 1); gone += 1; }
         }
+        // Redis deletes a sorted set left empty: EXISTS then answers 0.
+        if (z.length === 0) this.data.delete(key);
         return gone;
       }
       case "ZREMRANGEBYSCORE": {
@@ -1643,21 +1679,24 @@ export class MemoryRedis {
         const [firstKey, ...restKeys] = sources;
         for (const one of sources) this.live(one);
         const held = new Map<string, number>();
-        for (const entry of this.zset(firstKey ?? "")) held.set(entry.member, entry.score * weights[0]);
+        for (const entry of this.zsetSeen(firstKey ?? "")) held.set(entry.member, weighed(entry.score, weights[0]));
         for (const [index, other] of restKeys.entries()) {
-          const theirs = new Map(this.zset(other).map((e) => [e.member, e.score * weights[index + 1]]));
+          // A later set's score is weighed as it is (Redis turns NaN into 0 only in the sum, or keeps the target).
+          const theirs = new Map(this.zsetSeen(other).map((e) => [e.member, e.score * weights[index + 1]]));
           for (const [member, score] of [...held]) {
             const found = theirs.get(member);
             if (found === undefined) {
               held.delete(member);
               continue;
             }
-            held.set(member, how === "MAX" ? Math.max(score, found) : how === "MIN" ? Math.min(score, found) : score + found);
+            held.set(member, aggregate(how, score, found));
           }
         }
+        // A result with no member deletes the destination, as Redis does.
         const made = [...held].map(([member, score]) => ({ score, member }));
-        made.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
-        this.data.set(key, made);
+        made.sort((a, b) => zsetOrder(a, b));
+        if (made.length) this.data.set(key, made);
+        else this.data.delete(key);
         this.until.delete(key);
         // Redis answers with how many are in the set it just made, which is
         // what the search reads its total from.
@@ -1671,7 +1710,7 @@ export class MemoryRedis {
         const score = (at >= 0 ? z[at].score : 0) + by;
         if (at >= 0) z[at].score = score;
         else z.push({ score, member });
-        z.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
+        z.sort((a, b) => zsetOrder(a, b));
         this.data.set(key, z);
         return String(score);
       }
@@ -1686,15 +1725,17 @@ export class MemoryRedis {
         const held = new Map<string, number>();
         for (const [index, one] of sources.entries()) {
           this.live(one);
-          for (const entry of this.zset(one)) {
-            const score = entry.score * weights[index];
+          for (const entry of this.zsetSeen(one)) {
+            const score = weighed(entry.score, weights[index]);
             const before = held.get(entry.member);
-            held.set(entry.member, before === undefined ? score : how === "MAX" ? Math.max(before, score) : how === "MIN" ? Math.min(before, score) : before + score);
+            held.set(entry.member, before === undefined ? score : aggregate(how, before, score));
           }
         }
+        // A result with no member deletes the destination, as Redis does.
         const made = [...held].map(([member, score]) => ({ score, member }));
-        made.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
-        this.data.set(key, made);
+        made.sort((a, b) => zsetOrder(a, b));
+        if (made.length) this.data.set(key, made);
+        else this.data.delete(key);
         this.until.delete(key);
         return made.length;
       }
@@ -1702,6 +1743,16 @@ export class MemoryRedis {
         const z = [...this.zset(key)].reverse();
         const at = z.findIndex((e) => e.member === args[0]);
         return at >= 0 ? at : null;
+      }
+      case "ZRANGE": {
+        // By rank only (no BYSCORE / BYLEX / REV): from the lowest score, members of a score by their bytes.
+        const z = this.zset(key);
+        const [from, to] = [Number(args[0]), Number(args[1])];
+        const start = from < 0 ? Math.max(0, z.length + from) : from;
+        const end = to < 0 ? z.length + to : to;
+        const page = z.slice(start, end + 1);
+        if (args.slice(2).map((a) => a.toUpperCase()).includes("WITHSCORES")) return page.flatMap((e) => [e.member, String(e.score)]);
+        return page.map((e) => e.member);
       }
       case "ZREVRANGE": {
         const z = [...this.zset(key)].reverse();

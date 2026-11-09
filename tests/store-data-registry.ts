@@ -676,6 +676,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:meet:user:@lib/meet-connect.ts": company("The stores a Zoom user connected", "Per Zoom user, for Zoom's uninstall notice."),
   "nl:meet:lock:@lib/meet-links.ts": short("A meeting being made", "integration", 1, 128),
   "nl:meet:stores@lib/meet-links.ts": company("Stores with meetings to tidy", "One sorted set for every store."),
+  // Pre-review of claude5/call-refund-stores-cursor: the meetings' refund job's rotation, the list's members again.
+  "nl:meet:refund-turns@lib/call-meetings.ts": company("When each store with meetings to come last had its refunds read", "One sorted set for every store: one member a member of nl:meet:stores (the same <callsId>|<handle>, under 100 bytes) with a time each, kept in step with it every run, so a store that leaves the list leaves it within a run; it doubles the list's members, priced as the job's (MEET_REFUND_TURN_COMMANDS in tests/plan-cost-registry.ts)."),
+  "nl:meet:refund-turns:said@lib/call-meetings.ts": company("A turn of the meetings' refund job that waited more than a day was said today", "One key for every store, a day."),
   "nl:meet:q@lib/meet-records.ts": company("Meeting records due", "One sorted set for every store: each a booked call's or an event's."),
   "nl:meet:r:@lib/meet-records.ts": short("A meeting's record: a booked call's (a group call's time keeps its guests), until 60 days after it", "call", 430, 1536),
   "nl:health:@lib/member-health.ts": { what: "Members' scores, cached", parts: [capped(512 * KB, "One cached view.")] },

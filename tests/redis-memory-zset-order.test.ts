@@ -4,8 +4,8 @@
  *
  *   - members of one score are kept by their bytes, not by the locale's collation ("C3|Z" before "c1|b");
  *   - ZUNIONSTORE / ZINTERSTORE whose result has no member delete the destination (EXISTS 0), as does a ZREM that
- *     takes the last member out;
- *   - a weight of 0 on an infinite score gives 0, not NaN;
+ *     takes the last member out, and a missing source stays missing;
+ *   - a weight of 0 on an infinite score gives 0, not NaN, and a later set's NaN never wins a MAX;
  *   - ZADD GT / LT move a member only up / down, and refuse NX with them;
  *   - ZRANGE by rank, with or without WITHSCORES.
  */
@@ -38,6 +38,8 @@ async function main(): Promise<void> {
   is("ZUNIONSTORE deletes the destination", text(run(["EXISTS", "D"])), "0");
   run(["ZREM", "S", "c1|b", "c2|a", "C3|Z", "c4|_"]);
   is("a ZREM that takes the last member out deletes the set", [text(run(["EXISTS", "S"])), text(run(["DEL", "S"]))], ["0", "0"]);
+  run(["ZUNIONSTORE", "D", 2, "S", "none3", "WEIGHTS", 1, 0]);
+  is("reading a missing set as a source does not make it", [text(run(["EXISTS", "S"])), text(run(["EXISTS", "none3"]))], ["0", "0"]);
 
   part("Weights");
   run(["DEL", "A", "B", "D"]);

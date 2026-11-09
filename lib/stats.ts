@@ -1098,6 +1098,9 @@ export function payPalSale(paid: Paid): Sale {
     total_details: { amount_discount: paid.off ?? 0, amount_tax: 0 },
     payment_intent: paypalPaymentId(paid.capture),
     metadata: meta,
+    // What the order's own record says of it, for the Path (lib/path-facts.ts, soldOf; 12 [D9]): taken through
+    // PayPal's live API or not, by which PayPal account, and whether PayPal refunded part of it or reversed it.
+    paypal: { live: paid.live === true, merchant: typeof paid.merchant === "string" ? paid.merchant : null, taken_off: typeof paid.takenOff === "string" ? paid.takenOff : null },
   };
   return {
     created: paid.at * 1000,

@@ -153,8 +153,18 @@ policy says so (`/privacy#path`).
    either a walk of the list or a new counter on the confirmation; not built.
 2. **PayPal sales** count toward Day 7 and the levels only when the store's own
    server captured them through PayPal's live API, less the refunds PayPal
-   confirmed in full (12 [D9] unit 1). A sandbox order is neither a real sale nor
-   a test purchase, and refunds that cannot all be read leave the money unknown.
+   confirmed in full (12 [D9] unit 1). Whether an order was taken on the live API
+   is written on its own paid record when it is captured, never read from the
+   deployment that reads it later; a sandbox order, or one paid before that field
+   existed, is neither a real sale nor a test purchase. A PayPal sale counts only
+   while its refunds can be seen: the platform is a PayPal partner and the store
+   is still connected to the PayPal account that took it; otherwise it is left
+   out. A sale PayPal reports as refunded in part or reversed is taken off whole,
+   since the amount kept is not read. Refunds that cannot all be read, or a reply
+   off its shape, leave the money unknown. A PayPal refund of a sale the Path did
+   not count is never taken off another sale. A reading takes PATH_READ_UNITS
+   studio requests, which cover the PayPal records it can move (the money reviews
+   on #3443).
 
 ## 7. What it will not do
 
@@ -236,7 +246,9 @@ The second mission is named "Prepare your first digital product" because its
 completion fact is a listed deliverable, not a paid order. The sale mission is
 explicitly a real Stripe sale. Its promotion step waits for live checkout;
 writing to a list is conditional on marketing consent. The studio also says
-that Path counts Stripe sales and live PayPal sales, less refunds, matching section 6.
+that Path counts Stripe sales and live PayPal sales, less refunds, toward the
+first sale and the levels (the growth missions stay on live Stripe checkouts),
+matching section 6.
 
 No additional provider read, data record, quota or price is introduced.
 The notice is checked with the Path page's existing mobile/desktop accessibility

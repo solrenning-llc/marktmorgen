@@ -42,6 +42,7 @@ import type { Store } from "@/lib/store";
 import { dataBytes, contentRoomFor } from "@/lib/store-data-rules";
 import { dataKey, monthOf } from "@/lib/store-data";
 import { type PathAnswers, AUDIENCES, LEVELS, MINUTES, cleanLine, MAX_SKILLS, MAX_SUBJECT, localDay, validTimeZone, hasPathReturnGap, withCheckin, levelKept, type PathFacts } from "@/lib/path-rules";
+import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { type PathCounts, type PathMoney, PATH_REFUND_PAGES, PATH_SALE_PAGES, countsFresh, factsFrom, moneyFresh, readPathCounts, readPathMoney } from "@/lib/path-facts";
 import { countStudio } from "@/lib/studio-route";
 import { readGoal } from "@/lib/sales-goal-rules";
@@ -69,12 +70,21 @@ export type PathRecord = {
 };
 
 /**
+ * The PayPal records one reading of the money moves at the most (Claude 6's M4 on #3443): PATH_SALE_PAGES hundred
+ * sales (readPaidSales) and PAYPAL_REFUNDS_READ refunds (readPayPalRefundsWithCoverage), each at MAX_PAID_BYTES.
+ */
+const PATH_PAYPAL_BYTES = (PATH_SALE_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES;
+/** Bytes of those records one studio request covers. */
+const PATH_PAYPAL_BYTES_PER_UNIT = 2_000_000;
+
+/**
  * Studio requests one reading of the money and the counts takes: its
  * PATH_SALE_PAGES and PATH_REFUND_PAGES pages of Stripe, waited on one list
  * after the other at EXPORT_PAGE_SECONDS each (lib/store-export.ts), at the
- * studio request's 1.5 seconds; tests/plan-cost-registry.test.ts holds it.
+ * studio request's 1.5 seconds, and its PayPal records at two megabytes a
+ * request; tests/plan-cost-registry.test.ts holds it.
  */
-export const PATH_READ_UNITS = Math.ceil(((PATH_SALE_PAGES + PATH_REFUND_PAGES) * 2) / 1.5);
+export const PATH_READ_UNITS = Math.ceil(((PATH_SALE_PAGES + PATH_REFUND_PAGES) * 2) / 1.5) + Math.ceil(PATH_PAYPAL_BYTES / PATH_PAYPAL_BYTES_PER_UNIT);
 
 function parseCounts(raw: unknown): PathCounts | null {
   if (!raw || typeof raw !== "object") return null;

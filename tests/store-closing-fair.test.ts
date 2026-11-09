@@ -615,7 +615,7 @@ async function main() {
   const half = await closeOne(ned, N + CLOSING_DAYS * DAY + 60_000, failing, Number.POSITIVE_INFINITY);
   console.error = real;
   is("the day began: its membership ended, the store not removed yet", [half.state, world.subs.get("sub_nedmonth")!.status], ["held", "canceled"]);
-  const lateNed = { id: "sub_nedlate001", status: "active", created: S(N + CLOSING_DAYS * DAY), customer: { id: "cus_ned0001", email: ned }, metadata: { store: "ned" }, items: { data: [{ quantity: 1, current_period_start: S(N + CLOSING_DAYS * DAY), current_period_end: S(N + (CLOSING_DAYS + 31) * DAY), price: { lookup_key: "nimbus_creator_month", unit_amount: 6900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } };
+  const lateNed = { id: "sub_nedlate001", status: "active", created: S(N + CLOSING_DAYS * DAY), customer: { id: "cus_ned0001", email: ned }, metadata: { store: "ned" }, cancel_at: null, cancel_at_period_end: false, items: { data: [{ quantity: 1, current_period_start: S(N + CLOSING_DAYS * DAY), current_period_end: S(N + (CLOSING_DAYS + 31) * DAY), price: { lookup_key: "nimbus_creator_month", unit_amount: 6900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } };
   world.plans.push(lateNed);
   world.failPlanSearch = true;
   const listsBefore = world.planListReads, lateWrites = world.writes.length;
@@ -652,7 +652,7 @@ async function main() {
   console.error = real;
   const ninaDay = (await closingOf((await storeForEmail(nina))!, Ni + (CLOSING_DAYS - 1) * DAY + 60_000))!.day;
   const paidAt = S(ninaDay) - 180;
-  world.plans.push({ id: "sub_ninaplan02", object: "subscription", status: "active", created: paidAt, customer: { id: "cus_nina0001", email: nina }, metadata: { store: "nina", tier: "creator" }, cancel_at_period_end: false, items: { data: [{ quantity: 1, current_period_start: paidAt, current_period_end: paidAt + 30 * 86_400, price: { unit_amount: PLAN_PRICES.creator.month, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } });
+  world.plans.push({ id: "sub_ninaplan02", object: "subscription", status: "active", created: paidAt, customer: { id: "cus_nina0001", email: nina }, metadata: { store: "nina", tier: "creator" }, cancel_at: null, cancel_at_period_end: false, items: { data: [{ quantity: 1, current_period_start: paidAt, current_period_end: paidAt + 30 * 86_400, price: { unit_amount: PLAN_PRICES.creator.month, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } });
   const ninaBefore = sent.length;
   const ninaWrites = world.writes.length;
   clockAt(ninaDay + 60_000);

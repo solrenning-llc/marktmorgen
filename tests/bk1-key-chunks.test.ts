@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import * as parts from "@/lib/backup-parts";
 import * as codec from "@/lib/backup-codec";
-import { runBackup, type BackupCostReview } from "@/lib/backup-run";
+import { backupPeakSets, runBackup, type BackupCostReview } from "@/lib/backup-run";
 import { backupAlarmSignal } from "@/lib/backup-alarm";
 import type { BackupBucket, BackupObjectStore } from "@/lib/backup-roundtrip";
 import { redisPipelineBase64 } from "@/lib/redis";
@@ -216,7 +216,7 @@ async function main(): Promise<void> {
     };
     const maxParts = 20;
     const maxRunBytes = 64 * 1024 * 1024;
-    const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxParts, maxRunBytes, maxStoredBytes: 32 * parts.runStoredBound({ maxParts, maxRunBytes }), reviewedAt: "2026-11-09", source: "synthetic test review, not a real one" };
+    const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxParts, maxRunBytes, maxStoredBytes: backupPeakSets(30) * parts.runStoredBound({ maxParts, maxRunBytes }), reviewedAt: "2026-11-09", source: "synthetic test review, not a real one" };
     const first = await runBackup({ now: clock, review, store: bucket, key, previousKeys: [] });
     // 23: the 21 keys and the run's own lock and day count (nl:backup:*), which are keys of ours too.
     is("day one: the 8 MB book copied, the copy verified", [first.ok, first.ok && first.keys], [true, 23]);

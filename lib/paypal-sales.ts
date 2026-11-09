@@ -134,6 +134,8 @@ class PayPalError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    /** The request PayPal answered with it: a refused partner token is not the seller account's refusal. */
+    readonly path = "",
   ) {
     super(`PayPal ${status} ${code}`);
   }
@@ -171,11 +173,11 @@ async function call(
     const data = (object ? parsed : {}) as Record<string, unknown>;
     // A success whose answer is not a JSON object is not known (CX-123 rule 24): money may have moved, so it is
     // never read as an empty answer. Every caller handles it as it handles a lost answer.
-    if (response.ok && !object) throw new PayPalError(response.status, "UNREADABLE");
+    if (response.ok && !object) throw new PayPalError(response.status, "UNREADABLE", path);
     if (!response.ok) {
       const details = Array.isArray(data.details) ? (data.details as { issue?: unknown }[]) : [];
       const code = typeof details[0]?.issue === "string" ? details[0].issue : typeof data.name === "string" ? data.name : "UNKNOWN";
-      throw new PayPalError(response.status, code);
+      throw new PayPalError(response.status, code, path);
     }
     return data;
   } finally {
@@ -732,8 +734,24 @@ export async function deliverPayPal(input: {
   await countOrder(store, `paypal:${paid.order}`, paid.cents);
 }
 
-/** How long after PayPal's refund window a capture PayPal did not answer about is still asked about, once a day. */
+/** How long after PayPal's refund window a capture the account refused to show is still asked about, once a day. */
 const UNANSWERED_GRACE_SECONDS = 30 * 86_400;
+
+/**
+ * PayPal's answers to a capture read that are the seller account's own refusal (Payments v2 errors, as `call` reads
+ * them: the first issue, or the name when there is none): 403 NOT_AUTHORIZED / PERMISSION_DENIED, the account withdrew
+ * the platform's grant; 404 INVALID_RESOURCE_ID, the account has no such capture. Nothing else is: a 5xx, a timeout or
+ * network error, a 429, an unreadable answer or the partner's own token refused is a fault that passes.
+ */
+const ACCOUNT_REFUSALS: ReadonlyMap<number, ReadonlySet<string>> = new Map([
+  [403, new Set(["NOT_AUTHORIZED", "PERMISSION_DENIED"])],
+  [404, new Set(["INVALID_RESOURCE_ID"])],
+]);
+
+/** Whether a failed read of `path` is PayPal's answer that the account refuses it, from that request itself. */
+function accountRefused(error: unknown, path: string): boolean {
+  return error instanceof PayPalError && error.path === path && (ACCOUNT_REFUSALS.get(error.status)?.has(error.code) ?? false);
+}
 
 /**
  * When a paid order is next asked about: often while refunds are likely, then
@@ -827,13 +845,19 @@ export async function watchPayPal(
     // PayPal's answer about the capture is not known (a failed read, or no status): never taken for "not refunded"
     // nor for "refunded". It is asked again on the watch's own schedule (nextLook: hourly in the first week, then
     // less), never more often, moved back so it cannot hold the place of the orders behind it. Once PayPal's refund
-    // window has closed, a last look that failed is asked again once a day for UNANSWERED_GRACE_SECONDS, so a passing
-    // fault there does not miss a refund made inside the window; after that it leaves the watch, its purchase kept and
-    // never marked refunded, so a capture PayPal will never answer about (an account that withdrew its grant) is not
-    // asked about for ever (Claude 6's MEDIUM 3 in audit 18): at most the schedule's looks and thirty more an order.
-    const askLater = async (why: string): Promise<void> => {
-      const next = nextLook(paid.at, now) ?? (now - paid.at < WATCH_SECONDS + UNANSWERED_GRACE_SECONDS ? now + 86_400 : null);
-      if (next === null) console.error("PayPal never answered about a capture inside its refund window; no longer watched, purchase kept, refund unknown", statsId, order, why);
+    // window has closed, a last look that failed is asked again once a day. Only the account's own refusal of the read
+    // (accountRefused: it withdrew its grant, or has no such capture) ends the watch, after UNANSWERED_GRACE_SECONDS,
+    // so a capture PayPal will never show is not asked about for ever (Claude 6's MEDIUM 3 in audit 18). Any other
+    // failure (a PayPal outage, a timeout, the partner's token refused) is asked about once a day until the paid record
+    // ends (PAID_KEPT_SECONDS; readPaidExact then answers no record and the order leaves), so a refund made inside the
+    // window is still seen once PayPal answers again (pre-review MEDIUM on this branch). Either way the purchase is
+    // kept and never marked refunded without PayPal's word: at most the schedule's looks and one a day from day 180 to
+    // day 400 an order (about 220, against the thirty before).
+    const path = `/v2/payments/captures/${encodeURIComponent(paid.capture)}`;
+    const askLater = async (why: string, refused: boolean): Promise<void> => {
+      const ended = refused && now - paid.at >= WATCH_SECONDS + UNANSWERED_GRACE_SECONDS;
+      const next = nextLook(paid.at, now) ?? (ended ? null : now + 86_400);
+      if (next === null) console.error("the account that took a capture refused to show it past its refund window; no longer watched, purchase kept, refund unknown", statsId, order, why);
       await redisPipeline([next === null ? ["ZREM", watchKey(statsId), order] : ["ZADD", watchKey(statsId), String(next), order]]).catch(() => undefined);
     };
     let status = "";
@@ -841,15 +865,15 @@ export async function watchPayPal(
       // Asked as the account that took the payment (Paid.merchant), never as the one connected today: after a move
       // from account A to B, PayPal does not show B a capture A took. An order paid before the account was kept has
       // only today's account to ask as.
-      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: paid.merchant ?? store.paypalSeller.merchant });
+      const capture = await call("GET", path, { merchant: paid.merchant ?? store.paypalSeller.merchant });
       if (typeof capture.status !== "string" || !capture.status) {
-        await askLater("no status");
+        await askLater("no status", false);
         continue;
       }
       status = capture.status;
     } catch (error) {
       console.error("reading a PayPal capture failed", error);
-      await askLater(error instanceof PayPalError ? error.code : "error");
+      await askLater(error instanceof PayPalError ? `${error.status} ${error.code}` : "error", accountRefused(error, path));
       continue;
     }
     if (status !== "REFUNDED") {

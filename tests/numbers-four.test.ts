@@ -146,7 +146,7 @@ async function main(): Promise<void> {
   await send({ t: tokenFor("prod000001"), k: "d", p: "prod000001", b: "blok0002" });
   await send({ t: tokenFor("prod000001"), k: "d", p: "prod000002", b: "blok0001" });
   await send({ t: tokenFor("prod000001"), k: "d", p: "prod000001", b: "blok0001" }, "Googlebot/2.1");
-  is("a sales page's furthest block, for its own page, never a robot's", await readDepth(statsId, "prod000001"), { visitors: 2, stopped: { blok0001: 1, blok0002: 1 }, whyNot: {}, videos: {}, time: {} });
+  is("a sales page's furthest block, for its own page, never a robot's", await readDepth(statsId, "prod000001"), { visitors: 2, stopped: { blok0001: 1, blok0002: 1 }, whyNot: {}, videos: {}, time: {}, timeUnread: false });
   is("and none for a page the token is not for", (await readDepth(statsId, "prod000002")).visitors, 0);
   await countDepth(statsId, "prod000001", "blok0002");
   is("the visitors are the blocks added up", (await readDepth(statsId, "prod000001")).visitors, 3);

@@ -427,13 +427,15 @@ async function main(): Promise<void> {
 
   part("What the creator is told");
   is("readings within the ceiling, or none: nothing said", [await readingsPartial(suspendedShop), await readingsPartial(store)], [null, null]);
-  const partial = await readingsPartial(shop);
+  // A reading that is not a partial window ("unknown" or null) fails the checks below as it did before.
+  const known = (value: Awaited<ReturnType<typeof readingsPartial>>) => (typeof value === "object" ? value : null);
+  const partial = known(await readingsPartial(shop));
   is("past it: the window is partial, and how many were counted", partial, { counted: shopCeiling, opens: shopWindow.end });
   is("the window is marked once it went past, with the ceiling it passed", redis.run(["GET", `${readsKey(shop.statsId!, shopWindow.id)}:over`]), String(shopCeiling));
   // The plan grown since: its ceiling is now above what was counted, but the window still went past the old one.
   const grown = { ...shop, tier: "scale" as const };
-  is("a plan grown later in the window still says the window is partial, with the readings counted then", readCeiling(grown) > shopCeiling && (await readingsPartial(grown))?.counted === shopCeiling, true);
-  const grownPartial = await readingsPartial(grown);
+  is("a plan grown later in the window still says the window is partial, with the readings counted then", readCeiling(grown) > shopCeiling && known(await readingsPartial(grown))?.counted === shopCeiling, true);
+  const grownPartial = known(await readingsPartial(grown));
   is("and that counting went on after the change, so the figure is the ceiling reached, not every visit counted", grownPartial?.resumed, true);
   const grownWords = readingsPartialWords(grownPartial!.counted, grownPartial!.opens, grownPartial!.resumed === true);
   is("said so: the visits left out are the ones before the change", [grownWords.includes(`Your earlier plan counted up to ${shopCeiling.toLocaleString("en-US")} measured visits`), grownWords.includes("before your plan changed are not counted"), grownWords.includes("Counting went on after the change."), grownWords.includes("until")], [true, true, true, false]);

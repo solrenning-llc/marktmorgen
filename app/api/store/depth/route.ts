@@ -20,7 +20,8 @@ export async function GET(request: NextRequest) {
     // What stops visitors, and how far a video is watched, are about the product, not one of two pages: said either way.
     // How long measured visitors stayed (639 [GL7](25)) is about the product too, so it is said either way.
     // Whether this month's readings reached their ceiling, so these are partial (lib/page-read.ts, readingsPartial).
-    const extra = { whyNot: depth.whyNot, videos: depth.videos, asking: store.askWhyNot, time: timeShares(depth.time), partial };
+    // A time record that could not be read is said as such (rule 24), never as no stays.
+    const extra = { whyNot: depth.whyNot, videos: depth.videos, asking: store.askWhyNot, time: timeShares(depth.time), timeUnread: depth.timeUnread, partial };
     if (page.variant) return Response.json({ ok: true, shares: {}, visitors: 0, ...extra }, { headers: { "Cache-Control": "private, no-store" } });
     const result = reachShares(page.blocks.map((b) => b.id), depth.stopped, depth.visitors);
     return Response.json({ ok: true, ...result, ...extra }, { headers: { "Cache-Control": "private, no-store" } });

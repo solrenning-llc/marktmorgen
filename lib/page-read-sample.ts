@@ -21,6 +21,11 @@ export const READ_TOKEN_SECONDS = 2 * 3600;
  * how many were, and when counting starts again. No figure is made up for
  * the visits not counted.
  */
+/** What the studio says when whether this month is counted in full cannot be read (readingsPartial gave "unknown"). */
+export function readingsUnknownWords(): string {
+  return "Whether this month is counted in full can't be checked right now, so the time on page and how far people read may be missing some visits. Reload the page to try again.";
+}
+
 export function readingsPartialWords(counted: number, opens: number, resumed = false): string {
   const day = new Date(opens).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" });
   if (resumed) return `Only part of this month is counted. Your earlier plan counted up to ${counted.toLocaleString("en-US")} measured visits a month for time on page and how far people read, and that number was reached. Visits measured after that and before your plan changed are not counted. Counting went on after the change.`;

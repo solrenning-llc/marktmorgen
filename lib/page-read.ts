@@ -419,31 +419,36 @@ export type ReadingsPartial = { counted: number; opens: number; resumed?: true }
  * ceiling, for the studio to say that the window's time on page and reading
  * depth are partial: from then on nothing more is counted (a server that saw
  * it asks nothing more, readingsFull), so only the first `counted` readings
- * were. One command; null when they did not, or when it cannot be told.
+ * were. One command; null when they did not; "unknown" when it cannot be
+ * told (a reply off its shape, or no reply), never read as "complete" (rule 24).
  * Compared with the ceiling of the store's plan now, and with the mark the
  * reading that reached the ceiling left: a window that reached it stays
  * partial if the plan grows later in it.
  */
-export async function readingsPartial(store: WindowFields & { tier?: Tier; statsId: string | null }, now = Date.now()): Promise<ReadingsPartial | null> {
+export async function readingsPartial(store: WindowFields & { tier?: Tier; statsId: string | null }, now = Date.now()): Promise<ReadingsPartial | "unknown" | null> {
   const statsId = store.statsId;
   const window = allowanceWindow(store, now);
   const cap = readCeiling(store, now);
   if (!statsId || !STATS_ID.test(statsId) || !window || cap <= 0 || !isRedisConfigured()) return null;
   try {
     const key = readsKey(statsId, window.id);
-    const [both] = await redisPipeline([["MGET", key, `${key}:over`]]);
-    const [raw, over] = Array.isArray(both) ? both : [null, null];
-    if (raw === null || raw === undefined) return null;
-    const n = Number(raw);
-    const passed = Number(over);
+    const reply = await redisPipeline([["MGET", key, `${key}:over`]]);
+    // Exactly one reply, and it is the pair of texts or nulls MGET gives: anything else cannot be told.
+    if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0]) || reply[0].length !== 2) return "unknown";
+    const [raw, over] = reply[0] as unknown[];
+    const count = (value: unknown) => (typeof value === "string" && /^(0|[1-9][0-9]{0,15})$/.test(value) ? Number(value) : null);
+    if ((raw !== null && count(raw) === null) || (over !== null && count(over) === null)) return "unknown";
+    if (raw === null) return null;
+    const n = count(raw) as number;
+    const passed = over === null ? 0 : (count(over) as number);
     // At the ceiling now, or once this window (the mark keeps the ceiling reached, if the plan grew since).
-    if (!Number.isSafeInteger(n)) return null;
+    if (!Number.isSafeInteger(n)) return "unknown";
     if (n >= cap) return { counted: cap, opens: window.end };
     // A mark left before the plan grew: the ceiling then was reached, and counting went on after the change.
     if (Number.isSafeInteger(passed) && passed > 0) return n > passed ? { counted: passed, opens: window.end, resumed: true } : { counted: n, opens: window.end };
     return null;
   } catch {
-    return null;
+    return "unknown";
   }
 }
 

@@ -61,7 +61,9 @@ async function main(): Promise<void> {
     is(`a time reply off its shape (${what}) is unread, never an empty record`, [hits, read!.timeUnread, read!.time], [1, true, {}]);
     is(`and the blocks are still read (${what})`, read!.visitors, 2);
   }
-  const unread = renderToStaticMarkup(createElement(PageTime, { ranges: [], least: 20, unread: true }));
+  // React writes an apostrophe as &#x27;: read back as the words a person sees.
+  const said = (html: string) => html.replaceAll("&#x27;", "'");
+  const unread = said(renderToStaticMarkup(createElement(PageTime, { ranges: [], least: 20, unread: true })));
   is("the screen says it can't be read now, never 0 so far", [unread.includes("can't be read right now"), unread.includes("so far")], [true, false]);
   is("the route says it too", readFileSync("app/api/store/depth/route.ts", "utf8").includes("timeUnread"), true);
   is("and the editor passes it on", readFileSync("components/page-editor.tsx", "utf8").includes("unread={"), true);
@@ -101,7 +103,7 @@ async function main(): Promise<void> {
   is("the words for it say it cannot be told now", readingsUnknownWords().includes("can't be checked right now"), true);
   const panel = readFileSync("components/stats-panel.tsx", "utf8");
   is("the store page's numbers say it", panel.includes("readingsUnknownWords()"), true);
-  const unknownTime = renderToStaticMarkup(createElement(PageTime, { ranges: [{ words: "Under 10 seconds", count: 30, share: 100 }], least: 20, partial: "unknown" }));
+  const unknownTime = said(renderToStaticMarkup(createElement(PageTime, { ranges: [{ words: "Under 10 seconds", count: 30, share: 100 }], least: 20, partial: "unknown" })));
   is("and the sales page editor's time does", unknownTime.includes("can't be checked right now"), true);
 
   part("A block named constructor");

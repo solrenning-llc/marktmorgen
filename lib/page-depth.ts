@@ -99,7 +99,8 @@ export function reachShares(order: string[], stopped: Record<string, number>, vi
   const shares: Record<string, number> = {};
   let below = 0;
   for (let i = order.length - 1; i >= 0; i -= 1) {
-    below += stopped[order[i]] ?? 0;
+    // Only the record's own counts: a block id like "constructor" is never read off Object.prototype.
+    below += Object.hasOwn(stopped, order[i]) ? stopped[order[i]] : 0;
     shares[order[i]] = visitors > 0 ? Math.round((Math.min(below, visitors) / visitors) * 100) : 0;
   }
   return { shares, visitors };
@@ -109,36 +110,42 @@ export function reachShares(order: string[], stopped: Record<string, number>, vi
 export async function readDepth(
   statsId: string | null,
   productId: string,
-): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach>; time: Record<string, number> }> {
-  if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {}, time: {} };
+): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach>; time: Record<string, number>; timeUnread: boolean }> {
+  if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {}, time: {}, timeUnread: false };
   const [raw, rawTime] = await redisPipeline([["HGETALL", key(statsId, productId)], ["HGETALL", timeKey(statsId, productId)]]);
-  const pairs: Record<string, string> = {};
-  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs[String(raw[i])] = String(raw[i + 1]);
-  else if (raw && typeof raw === "object") Object.assign(pairs, raw);
-  const stopped: Record<string, number> = {};
-  const whyNot: Partial<Record<WhyNot, number>> = {};
-  const videos: Record<string, VideoReach> = {};
-  const time: Record<string, number> = {};
+  // Counted in Maps, never on plain objects: any visitor can send a block id
+  // such as "constructor", which must be a block of its own and write nothing
+  // onto Object (tests/proto-keys.test.ts). Given back as own properties.
+  const pairs = new Map<string, string>();
+  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs.set(String(raw[i]), String(raw[i + 1]));
+  else if (raw && typeof raw === "object") for (const [field, value] of Object.entries(raw)) pairs.set(field, String(value));
+  const stopped = new Map<string, number>();
+  const whyNot = new Map<WhyNot, number>();
+  const videos = new Map<string, VideoReach>();
+  const time = new Map<string, number>();
   const timeFields = new Set<string>(TIME_RANGES.map((range) => range.field));
-  const timePairs: Record<string, string> = {};
-  if (Array.isArray(rawTime)) for (let i = 0; i + 1 < rawTime.length; i += 2) timePairs[String(rawTime[i])] = String(rawTime[i + 1]);
-  else if (rawTime && typeof rawTime === "object") Object.assign(timePairs, rawTime);
-  for (const [field, value] of Object.entries(timePairs)) if (timeFields.has(field) && Number(value) > 0) time[field] = Number(value);
+  // The time record's reply read exactly (rule 24): a list of field and value
+  // texts, or a record of them. Anything else is unread, said as such by the
+  // studio, never an empty record shown as "0 so far".
+  const timePairs = hashPairs(rawTime);
+  const timeUnread = timePairs === null;
+  for (const [field, value] of timePairs ?? []) if (timeFields.has(field) && Number(value) > 0) time.set(field, Number(value));
   let visitors = 0;
-  for (const [field, value] of Object.entries(pairs)) {
+  for (const [field, value] of pairs) {
     if (field === "_n" || !(Number(value) > 0)) continue;
     // A time field left in the blocks' record by an earlier build is never a visitor of its own.
     if (timeFields.has(field)) continue;
     const n = Number(value);
     const [head, video] = field.split("!");
     const [block, answer] = head.split("?");
-    stopped[block] = (stopped[block] ?? 0) + n;
-    if (isWhyNot(answer)) whyNot[answer] = (whyNot[answer] ?? 0) + n;
+    stopped.set(block, (stopped.get(block) ?? 0) + n);
+    if (isWhyNot(answer)) whyNot.set(answer, (whyNot.get(answer) ?? 0) + n);
     if (video) {
       const [videoBlock, step] = video.split(".");
       const at = VIDEO_STEPS.indexOf(step as VideoStep);
       if (at >= 0) {
-        const row = (videos[videoBlock] ??= { played: 0, quarter: 0, half: 0, threeQuarters: 0, end: 0 });
+        let row = videos.get(videoBlock);
+        if (!row) videos.set(videoBlock, (row = { played: 0, quarter: 0, half: 0, threeQuarters: 0, end: 0 }));
         row.played += n;
         if (at >= 1) row.quarter += n;
         if (at >= 2) row.half += n;
@@ -150,5 +157,27 @@ export async function readDepth(
   }
   // Every visitor counted stopped at exactly one block, so the blocks add up
   // to the visitors; "_n", written until 11 October 2026, said the same.
-  return { visitors, stopped, whyNot, videos, time };
+  return {
+    visitors,
+    stopped: Object.fromEntries(stopped),
+    whyNot: Object.fromEntries(whyNot) as Partial<Record<WhyNot, number>>,
+    videos: Object.fromEntries(videos),
+    time: Object.fromEntries(time),
+    timeUnread,
+  };
+}
+
+/** A hash reply's field and value pairs, or null when it is not one: a list of texts of even length, or a record of texts. */
+function hashPairs(reply: unknown): [string, string][] | null {
+  if (Array.isArray(reply)) {
+    if (reply.length % 2 !== 0 || !reply.every((item) => typeof item === "string")) return null;
+    const out: [string, string][] = [];
+    for (let i = 0; i < reply.length; i += 2) out.push([reply[i] as string, reply[i + 1] as string]);
+    return out;
+  }
+  if (reply && typeof reply === "object" && Object.getPrototypeOf(reply) === Object.prototype) {
+    const entries = Object.entries(reply);
+    return entries.every(([, value]) => typeof value === "string") ? (entries as [string, string][]) : null;
+  }
+  return null;
 }

@@ -463,7 +463,7 @@ export type Stats = {
   /** Everything since `since`, or null when it could not be read. */
   life: (WindowStats & { since: string }) | null;
   /** Whether this window's page readings went past their ceiling, so time on page and reading depth are partial (lib/page-read.ts). */
-  readsPartial?: ReadingsPartial | null;
+  readsPartial?: ReadingsPartial | "unknown" | null;
 };
 
 const ranked = (map: Map<string, number>): Ranked =>
@@ -2108,7 +2108,7 @@ export type StatsData = {
    */
   reach: Record<"d7" | "d30" | "d90", { visitors: number; rows: ReachItem[] }>;
   /** Set when this month's page readings reached their ceiling: only the first `counted` were counted (lib/page-read.ts, readingsPartial). */
-  readsPartial?: ReadingsPartial | null;
+  readsPartial?: ReadingsPartial | "unknown" | null;
   /**
    * The stretch of days just before each window, to set the window beside:
    * the 7 days before the last 7, and so on. Sales and money are null where

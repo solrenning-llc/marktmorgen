@@ -1,4 +1,4 @@
-import { readingsPartialWords } from "@/lib/page-read-sample";
+import { readingsPartialWords, readingsUnknownWords } from "@/lib/page-read-sample";
 
 /**
  * How long measured visitors stayed on a sales page (639 [GL7](25),
@@ -7,7 +7,18 @@ import { readingsPartialWords } from "@/lib/page-read-sample";
  * average made up from ranges. Shown once enough visitors were measured for
  * a share to mean something; nothing about who they were.
  */
-export function PageTime({ ranges, least, partial = null }: { ranges: { words: string; count: number; share: number }[]; least: number; partial?: { counted: number; opens: number; resumed?: boolean } | null }) {
+export function PageTime({
+  ranges,
+  least,
+  partial = null,
+  unread = false,
+}: {
+  ranges: { words: string; count: number; share: number }[];
+  least: number;
+  partial?: { counted: number; opens: number; resumed?: boolean } | "unknown" | null;
+  /** The time record could not be read (lib/page-depth.ts, readDepth): said, never shown as 0. */
+  unread?: boolean;
+}) {
   const measured = ranges.reduce((sum, range) => sum + range.count, 0);
   return (
     <section aria-labelledby="page-time-title" className="card mt-6 p-5 sm:p-6">
@@ -15,12 +26,14 @@ export function PageTime({ ranges, least, partial = null }: { ranges: { words: s
         How long visitors stay
       </h2>
       {partial ? (
-        // This month's readings reached their ceiling (lib/page-read.ts, readingsPartial): said, never made up.
+        // This month's readings reached their ceiling (lib/page-read.ts, readingsPartial), or whether they did cannot be told: said, never made up.
         <p className="notice notice-info mt-2 text-sm" role="note">
-          {readingsPartialWords(partial.counted, partial.opens, partial.resumed === true)}
+          {partial === "unknown" ? readingsUnknownWords() : readingsPartialWords(partial.counted, partial.opens, partial.resumed === true)}
         </p>
       ) : null}
-      {measured < least ? (
+      {unread ? (
+        <p className="mt-2 text-sm text-ink-soft">How long visitors stay can&apos;t be read right now. Reload the page to try again.</p>
+      ) : measured < least ? (
         <p className="mt-2 text-sm text-ink-soft">{`Shown once ${least} visitors have been measured; ${measured} so far. One visitor in eight is measured, with no cookie and nothing about who they are.`}</p>
       ) : (
         <>

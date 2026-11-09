@@ -9,6 +9,7 @@
  * Browser-safe: plain data and small functions, nothing from the server.
  */
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
+import { communityWords } from "@/lib/buyer-words/community";
 
 export type CommunityNamesUnreadWords = {
   /** Names that did not read, shown as "A member" in their place. */
@@ -65,4 +66,18 @@ export const COMMUNITY_NAMES_UNREAD_WORDS: Record<LanguageCode, CommunityNamesUn
 
 export function communityNamesUnreadWords(language: unknown): CommunityNamesUnreadWords {
   return COMMUNITY_NAMES_UNREAD_WORDS[parseLanguage(language)];
+}
+
+/**
+ * The members page's privacy promise on its own ("Only the name each chose is
+ * shown; nobody's email address is, ever."), for when the listed count did not
+ * read: the promise is true whatever the count, so it is never hidden with it.
+ * Taken from the count's own words (listedTotal is "<count>. <promise>" in every
+ * language), so the two can never say different things; no new words.
+ */
+export function listedPrivacy(language: unknown): string {
+  const whole = communityWords(language).listedTotal(1);
+  const at = whole.indexOf(". ");
+  if (at < 0) throw new Error("listedTotal no longer reads as '<count>. <promise>'");
+  return whole.slice(at + 2);
 }

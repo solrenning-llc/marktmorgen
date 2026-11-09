@@ -13,6 +13,7 @@ import { levelOf, pointsOf } from "@/lib/community-points";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { NamesUnread } from "@/components/community-names-unread";
+import { listedPrivacy } from "@/lib/buyer-words/community-names-unread";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -83,11 +84,10 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
       <CommunityBar store={store} config={viewer.config} tab="members" signedIn />
       <main id="content" className="mx-auto max-w-3xl px-4 pb-16 pt-6">
         <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] sm:text-3xl">{w.tabMembers}</h1>
-        {total !== null ? (
-          <p className="st-muted mt-2">
-            {w.listedTotal(total)}
-          </p>
-        ) : null}
+        {/* The privacy promise is true whatever the count: an unread count hides its number, never the promise. */}
+        <p className="st-muted mt-2">
+          {total !== null ? w.listedTotal(total) : listedPrivacy(store.language)}
+        </p>
         {!viewer.owner ? (
           <p className="st-muted mt-1 text-sm">
             {listed ? w.youListed : w.youNotListed}{" "}

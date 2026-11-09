@@ -50,7 +50,15 @@ globalThis.fetch = async (input, init) => {
   return nativeFetch(input, { ...init, headers });
 };
 try {
-  const { redisPipeline, isRedisConfigured } = await import(redisUrl);
+  const { redisPipeline, isRedisConfigured, redisOutcomeOf } = await import(redisUrl);
+  const outcomeOf = async (work) => {
+    try {
+      await work;
+    } catch (error) {
+      return redisOutcomeOf(error);
+    }
+    assert.fail("the call was expected to throw");
+  };
   const { withCutoff } = await import(timeoutUrl);
   assert.equal(isRedisConfigured(), true);
   const key = (name) => prefix + "node-" + name;
@@ -59,9 +67,12 @@ try {
   assert.equal(isRedisConfigured(), false);
   const beforeMissingConfig = requests;
   await assert.rejects(redisPipeline([["INCR", key("counter")]]), /Redis is not configured/);
+  assert.deepEqual(await outcomeOf(redisPipeline([["INCR", key("counter")]])), { kind: "not-sent" });
   assert.equal(requests, beforeMissingConfig);
   process.env.UPSTASH_REDIS_REST_TOKEN = "invalid-synthetic-token";
   await assert.rejects(redisPipeline([["INCR", key("counter")]]), /status 401/);
+  // An HTTP status is never read as a refusal (what each Upstash status means is not read in lib/redis.ts).
+  assert.deepEqual(await outcomeOf(redisPipeline([["INCR", key("counter")]])), { kind: "maybe-applied" });
   process.env.UPSTASH_REDIS_REST_TOKEN = token;
   assert.deepEqual(await redisPipeline([["GET", key("counter")]]), [null]);
   console.log("PASS: actual Redis client rejects missing/invalid configuration without mutation");
@@ -83,16 +94,23 @@ try {
   console.log("PASS: actual Redis client preserves ordered Unicode/null results and TTLs");
 
   const beforePartial = requests;
-  await assert.rejects(redisPipeline([
-    ["GET", key("hash")], ["INCR", key("counter")],
-  ]), /Redis error: Synthetic Redis command error/);
+  const partial = redisPipeline([["GET", key("hash")], ["INCR", key("counter")]]);
+  await assert.rejects(partial, /Redis error: Synthetic Redis command error/);
+  // Redis refused the GET and applied the INCR: a pipeline is not a transaction, and each answer says which.
+  assert.deepEqual(await outcomeOf(partial), {
+    kind: "refused",
+    answers: [{ applied: false, error: "Synthetic Redis command error" }, { applied: true, result: 1 }],
+  });
   assert.equal(requests, beforePartial + 1);
   assert.deepEqual(await redisPipeline([["GET", key("counter")]]), ["1"]);
   console.log("PASS: actual Redis client surfaces partial pipeline error without replay");
 
   const beforeUnknown = requests;
   loseNextAck = true;
-  await assert.rejects(redisPipeline([["INCR", key("ack")]]), TypeError);
+  const lostAck = redisPipeline([["INCR", key("ack")]]);
+  await assert.rejects(lostAck, TypeError);
+  // The write landed though its answer was lost: never "not-sent" or "refused".
+  assert.deepEqual(await outcomeOf(lostAck), { kind: "maybe-applied" });
   assert.equal(loseNextAck, false);
   assert.equal(requests, beforeUnknown + 1);
   assert.deepEqual(await redisPipeline([["GET", key("ack")]]), ["1"]);
@@ -103,6 +121,7 @@ try {
     withCutoff(Date.now() - 1, () => redisPipeline([["INCR", key("cutoff")]])),
     /fetch failed/,
   );
+  assert.deepEqual(await outcomeOf(withCutoff(Date.now() - 1, () => redisPipeline([["INCR", key("cutoff")]]))), { kind: "not-sent" });
   assert.equal(requests, beforeCutoff);
   assert.deepEqual(await redisPipeline([["GET", key("cutoff")]]), [null]);
   console.log("PASS: actual timeout helper rejects expired work before any HTTP request");

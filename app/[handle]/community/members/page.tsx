@@ -6,7 +6,8 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { CREATOR, directory, directorySize } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
-import { mayMessage, pairOf } from "@/lib/community-dm";
+import { mayMessage } from "@/lib/community-dm";
+import { aliasOf } from "@/lib/community-alias";
 import { DIRECTORY_PAGE } from "@/lib/community-text";
 import { CommunityBar, CreatorBadge, Face, LevelBadge } from "@/components/community-parts";
 import { levelOf, pointsOf } from "@/lib/community-points";
@@ -55,10 +56,12 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
   // Nothing is drawn for yourself, and nothing where the answer would be no:
   // an offer that leads to a refusal is worse than no offer.
   const writeTo = (who: string) => {
-    if (who === key || mayMessage(config.dm, key, who)) return null;
+    // Named by their alias, never their key (lib/community-alias.ts, audit N2).
+    const alias = aliasOf(id, who);
+    if (!alias || who === key || mayMessage(config.dm, key, who)) return null;
     return (
       <p className="mt-1">
-        <Link href={`${home}/messages/${pairOf(key, who)}`} className="cm-quiet-link cm-mini text-xs font-semibold">
+        <Link href={`${home}/messages/${alias}`} className="cm-quiet-link cm-mini text-xs font-semibold">
           {w.messageLink}
         </Link>
       </p>
@@ -97,8 +100,8 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
             </li>
           ) : null}
           {page.members.map((m) => (
-            <li key={m.k} className="st-card flex items-center gap-3 p-4">
-              <Face store={store} author={m.k} name={m.n} size={44} />
+            <li key={aliasOf(id, m.k)} className="st-card flex items-center gap-3 p-4">
+              <Face store={store} author={aliasOf(id, m.k)} name={m.n} size={44} />
               <div className="min-w-0">
                 <p className="flex flex-wrap items-center gap-2 font-bold">
                   <span className="break-words">{m.n}</span>

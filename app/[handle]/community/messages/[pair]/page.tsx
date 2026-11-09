@@ -6,7 +6,8 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { CREATOR, readMembers } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
-import { MAX_MESSAGE_TEXT, mayMessage, otherIn, thread } from "@/lib/community-dm";
+import { MAX_MESSAGE_TEXT, mayMessage, pairOf, thread } from "@/lib/community-dm";
+import { aliasOf, memberOfAlias } from "@/lib/community-alias";
 import { CommunityBar, Face, PostText, authorName, communityNotices, storeWhen } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
@@ -24,18 +25,18 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return { title: `${communityWords(store?.language).messageLink} — Marktmorgen`, robots: { index: false, follow: false } };
 }
 
-const PAIR = /^(creator|[0-9a-f]{12,64})\.(creator|[0-9a-f]{12,64})$/;
-
 /**
  * One conversation.
  *
- * Reachable only by somebody in it: the address carries both people, and a
- * viewer who is not one of them is answered exactly as they would be for a
+ * Reachable only by somebody in it: the address carries the other person, by
+ * their alias in this community and never their key (lib/community-alias.ts,
+ * audit N2), and the conversation is always the viewer's own with them. An
+ * address that is no alias of this community is answered exactly as one for a
  * conversation that does not exist. There is no moderator's view of this page
  * and no way to build one from here.
  */
 export default async function MessageThreadPage({ params, searchParams }: Params) {
-  const { handle: raw, pair } = await params;
+  const { handle: raw, pair: alias } = await params;
   const decoded = decodeURIComponent(raw);
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
@@ -47,11 +48,11 @@ export default async function MessageThreadPage({ params, searchParams }: Params
   if (viewer.state !== "in") redirect(home);
   const { config, owner, key, canWrite } = viewer;
   if (!config.dm.on) redirect(`${home}?n=dmoff`);
-  if (!PAIR.test(pair)) redirect(`${box}?n=gone`);
-
-  const other = otherIn(pair, key);
-  if (!other) redirect(`${box}?n=gone`);
   const id = store.community.id;
+  const other = memberOfAlias(id, alias);
+  if (!other || other === key) redirect(`${box}?n=gone`);
+  const pair = pairOf(key, other);
+  const shown = aliasOf(id, other);
   // No messages yet is not a missing conversation: it is one about to start,
   // opened from somebody's name in the members list. It is only refused when
   // these two may not write to each other at all.
@@ -79,7 +80,7 @@ export default async function MessageThreadPage({ params, searchParams }: Params
         {notice ? <p className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p> : null}
 
         <header className="flex items-center gap-3">
-          <Face store={store} author={other} name={name} size={44} />
+          <Face store={store} author={shown} name={name} size={44} />
           <div className="min-w-0">
             <h1 className="font-display truncate text-xl font-semibold tracking-[-0.02em]">{name}</h1>
             <p className="st-muted text-sm">{w.privateTwo}</p>
@@ -96,13 +97,13 @@ export default async function MessageThreadPage({ params, searchParams }: Params
               <form action="/api/store/community/messages" method="post">
                 <input type="hidden" name="handle" value={store.handle} />
                 <input type="hidden" name="action" value="accept" />
-                <input type="hidden" name="pair" value={pair} />
+                <input type="hidden" name="with" value={shown} />
                 <button type="submit" className="btn st-btn">{w.accept}</button>
               </form>
               <form action="/api/store/community/messages" method="post">
                 <input type="hidden" name="handle" value={store.handle} />
                 <input type="hidden" name="action" value="decline" />
-                <input type="hidden" name="pair" value={pair} />
+                <input type="hidden" name="with" value={shown} />
                 <button type="submit" className="cm-quiet-link cm-mini cm-danger text-sm font-semibold">
                   {w.declineForGood}
                 </button>
@@ -139,7 +140,7 @@ export default async function MessageThreadPage({ params, searchParams }: Params
           <form action="/api/store/community/messages" method="post" className="mt-6">
             <input type="hidden" name="handle" value={store.handle} />
             <input type="hidden" name="action" value="send" />
-            <input type="hidden" name="to" value={other} />
+            <input type="hidden" name="to" value={shown} />
             <label htmlFor="dm-text" className="sr-only">{w.writeTo(name)}</label>
             <textarea
               id="dm-text"

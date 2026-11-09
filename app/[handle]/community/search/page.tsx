@@ -5,7 +5,8 @@ import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { postNumbers, readMembers, readPosts } from "@/lib/community";
-import { SEARCH_CONVERSATIONS, SEARCH_MESSAGES, mayMessage, pairOf, requestCount, searchMessages, searchedConversations } from "@/lib/community-dm";
+import { SEARCH_CONVERSATIONS, SEARCH_MESSAGES, mayMessage, requestCount, searchMessages, searchedConversations } from "@/lib/community-dm";
+import { aliasOf } from "@/lib/community-alias";
 import { readLessonRef } from "@/lib/community-index";
 import { checkUnits, searchUnits } from "@/lib/community-read-rules";
 import { takePublicRequest } from "@/lib/traffic";
@@ -336,14 +337,15 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
             {tab === "member" ? (
               <ul className="mt-5 grid gap-3 sm:grid-cols-2">
                 {people.map((person) => (
-                  <li key={person.k} className="st-card flex items-center gap-3 p-4">
-                    <Face store={store} author={person.k} name={person.n} size={44} />
+                  // By their alias, never their key (lib/community-alias.ts, audit N2).
+                  <li key={aliasOf(id, person.k)} className="st-card flex items-center gap-3 p-4">
+                    <Face store={store} author={aliasOf(id, person.k)} name={person.n} size={44} />
                     <div className="min-w-0">
                       <p className="cm-text font-bold">{person.n}</p>
                       {person.h ? <p className="st-muted text-xs font-semibold">{`@${person.h}`}</p> : null}
-                      {person.k !== key && !mayMessage(config.dm, key, person.k) ? (
+                      {person.k !== key && aliasOf(id, person.k) && !mayMessage(config.dm, key, person.k) ? (
                         <p className="mt-1">
-                          <Link href={`${home}/messages/${pairOf(key, person.k)}`} className="cm-quiet-link cm-mini text-xs font-semibold">
+                          <Link href={`${home}/messages/${aliasOf(id, person.k)}`} className="cm-quiet-link cm-mini text-xs font-semibold">
                             {w.messageLink}
                           </Link>
                         </p>
@@ -373,7 +375,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
             {tab === "dm" ? (
               <ul className="mt-5 space-y-3">
                 {mine.map((h) => (
-                  <li key={`${h.pair}.${h.message.at}.${h.message.a}`} className="st-card p-4">
+                  <li key={`${aliasOf(id, h.other)}.${h.message.at}.${aliasOf(id, h.message.a)}`} className="st-card p-4">
                     <p className="text-xs font-bold">
                       {h.message.a === key ? w.youTo(nameOf(h.other)) : nameOf(h.message.a)}
                     </p>
@@ -381,7 +383,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
                     <p className="st-muted mt-1 text-xs font-semibold">
                       {at(h.message.at)}
                       {" · "}
-                      <Link href={`${home}/messages/${h.pair}`} className="cm-quiet-link underline underline-offset-4">{w.openConversation}</Link>
+                      <Link href={`${home}/messages/${aliasOf(id, h.other)}`} className="cm-quiet-link underline underline-offset-4">{w.openConversation}</Link>
                     </p>
                   </li>
                 ))}

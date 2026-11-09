@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { withAliases } from "@/lib/community-alias";
 import { shareFor } from "@/lib/chat-pace";
 import { passFits } from "@/lib/chat-pass";
 import { room } from "@/lib/community-chat";
@@ -40,7 +41,8 @@ export async function GET(request: NextRequest) {
   try {
     const page = await room(id, since);
     return Response.json(
-      { ok: true, messages: page.messages, cursor: page.cursor },
+      // Each author by their alias, never their key (lib/community-alias.ts, audit N2).
+      { ok: true, messages: withAliases(id, page.messages), cursor: page.cursor },
       { headers: { "Cache-Control": `public, max-age=0, s-maxage=${shareFor(pace)}` } },
     );
   } catch (error) {

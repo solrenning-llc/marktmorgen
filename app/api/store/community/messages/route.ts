@@ -3,14 +3,15 @@ import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { CREATOR, within } from "@/lib/community";
+import { CREATOR, readMember, within } from "@/lib/community";
+import { aliasOf, memberOfAlias } from "@/lib/community-alias";
 import { communityViewer } from "@/lib/community-access";
 import {
   MAX_MESSAGE_TEXT,
   accept,
   decline,
+  inConversation,
   mayMessage,
-  otherIn,
   pairOf,
   send,
   unblock,
@@ -22,10 +23,6 @@ import { communityWords } from "@/lib/buyer-words/community";
 /** How far a request got before something failed: the store's language once read, and whether a write had begun. */
 type Progress = { language?: unknown; writing: boolean };
 
-/** A member key, or the creator. */
-const WHO = /^(creator|[0-9a-f]{12,64})$/;
-const PAIR = /^(creator|[0-9a-f]{12,64})\.(creator|[0-9a-f]{12,64})$/;
-
 /**
  * Private messages: writing one, and answering a request for one.
  *
@@ -36,6 +33,13 @@ const PAIR = /^(creator|[0-9a-f]{12,64})\.(creator|[0-9a-f]{12,64})$/;
  * messages happen in this community at all, whether these two may write to
  * each other, whether the sender is muted, and how much they may send. A page
  * that draws no box is a courtesy; this is the door.
+ *
+ * The other person is named by their alias in this community, never by their
+ * key (lib/community-alias.ts, audit N2), and only somebody the sender could
+ * find is written to: a member who is in, not removed, and listed in the
+ * directory, or one already in a conversation with them; any member for the
+ * creator. Everybody else (unlisted, removed, never a member, or no alias of
+ * this community at all) gets the same answer, so it tells nobody which.
  */
 export async function POST(request: NextRequest) {
   const progress: Progress = { writing: false };
@@ -76,6 +80,9 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
   const id = store.community.id;
   const { config, owner, key } = viewer;
   const action = field("action", 20);
+  // The other person, from their alias: "" for anything that is not one of this community's.
+  const other = memberOfAlias(id, field(action === "send" ? "to" : "with", 40));
+  const where = (who: string) => `${box}/${aliasOf(id, who)}`;
 
   // Off here means off: no page, no form and no back door.
   if (!config.dm.on) return back(home, "dmoff");
@@ -83,8 +90,8 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
   if (!(await takeBuyerAction(store, owner ? "owner" : "buyer"))) return restingAway(origin, store);
 
   if (action === "send") {
-    const to = field("to", 70);
-    if (!WHO.test(to)) return back(box, "gone");
+    const to = other;
+    if (!to) return back(box, "gone");
     const allowed = mayMessage(config.dm, key, to);
     if (allowed) return back(box, allowed.reason === "between" ? "dmbetween" : "dmoff");
     // A muted member reads what was said to them and writes nothing. The
@@ -93,7 +100,9 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     if (!owner && !viewer.member?.n) return back(`${home}/you`, "name");
     if (!owner && !(await within(id, key, "dm"))) return back(box, "slow");
     const text = field("text", MAX_MESSAGE_TEXT);
-    if (!text) return back(`${box}/${pairOf(key, to)}`, "empty");
+    if (!text) return back(where(to), "empty");
+    // Only somebody the sender could find, read after the buyer action that pays for it.
+    if (!(await mayReach(id, key, to, owner))) return back(box, "gone");
     // Starting a conversation is limited harder than continuing one: the cost
     // of a stranger is in the opening, not in the tenth message of a talk
     // somebody chose to have.
@@ -106,7 +115,7 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
       sent = await send(id, config.dm, key, to, text, store, { mayAsk: owner || started });
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).
-      if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");
+      if (error instanceof DataRoomError) return back(where(to), "noroom");
       throw error;
     }
     if (!sent.ok) {
@@ -125,25 +134,40 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
       // "declined" answers exactly as success does, on purpose: somebody who
       // was turned down learns that their message went, and nothing else.
       // Telling them they were declined turns a quiet no into an argument.
-      return back(why === "dmsent" || why === "slow" ? box : `${box}/${pairOf(key, to)}`, why);
+      return back(why === "dmsent" || why === "slow" ? box : where(to), why);
     }
-    return sent.asked ? back(box, "dmasked") : back(`${box}/${pairOf(key, to)}`, "dmsent");
+    return sent.asked ? back(box, "dmasked") : back(where(to), "dmsent");
   }
 
-  const pair = field("pair", 140);
-  if (!PAIR.test(pair) || !otherIn(pair, key)) return back(box, "gone");
+  if (!other || other === key) return back(box, "gone");
+  const pair = pairOf(key, other);
 
   progress.writing = true;
   if (action === "accept") {
-    return (await accept(id, key, pair)) ? back(`${box}/${pair}`, "dmaccepted") : back(box, "gone");
+    return (await accept(id, key, pair)) ? back(where(other), "dmaccepted") : back(box, "gone");
   }
   if (action === "decline") {
     return (await decline(id, key, pair, store)) ? back(box, "dmdeclined") : back(box, "gone");
   }
   if (action === "unblock") {
-    const other = otherIn(pair, key);
-    if (other && other !== CREATOR) await unblock(id, key, other, store);
+    if (other !== CREATOR) await unblock(id, key, other, store);
     return back(box, "dmunblocked");
   }
   return back(box, "gone");
+}
+
+/**
+ * Whether this sender may reach this person at all: the creator, always; for
+ * the creator, any member still in; for a member, one who is in, not removed
+ * and listed in the directory, or one already in a conversation with them
+ * (the pair in the other person's own list: they wrote in it or accepted it).
+ * Each read exactly (CX-123 rule 24): an answer in no known shape throws, and
+ * the route answers 503 with nothing written.
+ */
+async function mayReach(id: string, from: string, to: string, owner: boolean): Promise<boolean> {
+  if (to === CREATOR) return true;
+  const member = await readMember(id, to);
+  if (!member || member.removed) return false;
+  if (owner || (member.dir && member.n)) return true;
+  return inConversation(id, to, pairOf(from, to));
 }

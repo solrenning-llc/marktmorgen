@@ -7,6 +7,7 @@ import { lookStyle } from "@/lib/store-look";
 import { CREATOR, readMembers } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
 import { type Conversation, inbox } from "@/lib/community-dm";
+import { aliasOf } from "@/lib/community-alias";
 import { CommunityBar, Face, authorName, communityNotices, storeWhen } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
@@ -58,9 +59,10 @@ export default async function MessagesPage({ params, searchParams }: Params) {
   const list = (rows: Conversation[], request: boolean) => (
     <ul className="mt-3 space-y-2">
       {rows.map((c) => (
-        <li key={c.pair}>
-          <Link href={`${home}/messages/${c.pair}`} className="cm-dm-row">
-            <Face store={store} author={c.other} name={nameOf(c.other)} size={40} />
+        // The other person by their alias, never their key (lib/community-alias.ts, audit N2).
+        <li key={aliasOf(id, c.other)}>
+          <Link href={`${home}/messages/${aliasOf(id, c.other)}`} className="cm-dm-row">
+            <Face store={store} author={aliasOf(id, c.other)} name={nameOf(c.other)} size={40} />
             <span className="min-w-0 flex-1">
               <span className="flex flex-wrap items-center gap-x-2">
                 <span className="truncate font-bold">{nameOf(c.other)}</span>
@@ -79,13 +81,13 @@ export default async function MessagesPage({ params, searchParams }: Params) {
               <form action="/api/store/community/messages" method="post">
                 <input type="hidden" name="handle" value={store.handle} />
                 <input type="hidden" name="action" value="accept" />
-                <input type="hidden" name="pair" value={c.pair} />
+                <input type="hidden" name="with" value={aliasOf(id, c.other)} />
                 <button type="submit" className="cm-pill">{w.accept}</button>
               </form>
               <form action="/api/store/community/messages" method="post">
                 <input type="hidden" name="handle" value={store.handle} />
                 <input type="hidden" name="action" value="decline" />
-                <input type="hidden" name="pair" value={c.pair} />
+                <input type="hidden" name="with" value={aliasOf(id, c.other)} />
                 <button type="submit" className="cm-quiet-link cm-mini cm-danger text-xs font-semibold">
                   {w.declineForGood}
                 </button>

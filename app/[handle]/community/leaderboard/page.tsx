@@ -5,6 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { readMembers } from "@/lib/community";
+import { aliasOf } from "@/lib/community-alias";
 import { communityVisitor } from "@/lib/community-page";
 import { LEVELS, type Period, board, levelOf, pointsOf, readRewards, toNextLevel } from "@/lib/community-points";
 import { readListings } from "@/lib/catalog";
@@ -127,9 +128,10 @@ export default async function CommunityLeaderboardPage({ params, searchParams }:
               const member = members.get(s.key);
               const name = member?.n || w.aMember;
               return (
-                <li key={s.key} className={`st-card flex items-center gap-3 px-4 py-3 ${s.key === key ? "cm-me" : ""}`}>
+                // By their alias, never their key (lib/community-alias.ts, audit N2).
+                <li key={aliasOf(id, s.key)} className={`st-card flex items-center gap-3 px-4 py-3 ${s.key === key ? "cm-me" : ""}`}>
                   <span className="w-7 shrink-0 text-center font-bold tabular-nums">{i + 1}</span>
-                  <Face store={store} author={s.key} name={name} size={36} />
+                  <Face store={store} author={aliasOf(id, s.key)} name={name} size={36} />
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-2 font-bold">
                       <span className="break-words">{s.key === key ? w.nameYou(name) : name}</span>

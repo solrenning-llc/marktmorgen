@@ -24,6 +24,7 @@ import { parseDmSetting, pairOf, requestCount, accept } from "@/lib/community-dm
 import { award } from "@/lib/community-points";
 import { emailKey, mintPass, passCookieName } from "@/lib/learn";
 import { roomPass } from "@/lib/chat-pass";
+import { MEMBER_ALIAS, aliasOf, memberOfAlias } from "@/lib/community-alias";
 import { POST as messagesRoute } from "@/app/api/store/community/messages/route";
 import { GET as chatGet, POST as chatPost } from "@/app/api/store/community/chat/route";
 import { GET as chatNew } from "@/app/api/store/community/chat/new/route";
@@ -68,7 +69,7 @@ async function sent(node: unknown, out: string[] = []): Promise<string[]> {
   }
   if (node instanceof Promise) return sent(await node, out);
   if (typeof node !== "object" || !("$$typeof" in node)) return out;
-  const element = node as { type: unknown; key: unknown; props: Record<string, unknown> };
+  const element = node as unknown as { type: unknown; key: unknown; props: Record<string, unknown> };
   if (element.key !== null && element.key !== undefined) out.push(String(element.key));
   const { children, ...rest } = element.props ?? {};
   out.push(JSON.stringify(rest, (_name, value) => (typeof value === "function" ? undefined : value)));
@@ -189,9 +190,42 @@ async function main(): Promise<void> {
   is("the list carries no key", leaks(list), []);
   const threadLink = [...list.matchAll(/\/community\/messages\/([^"\\?#\s]+)/g)].map((m) => m[1])[0] ?? "";
   is("control: the list links to the conversation", threadLink !== "", true);
-  const thread = await page(() => ThreadPage(params({ pair: threadLink })));
+  const thread = await page(() => ThreadPage({ ...params(), params: Promise.resolve({ handle: `@${club.handle}`, pair: threadLink }) }));
   is("control: the conversation shows what was said", thread.includes("still here?"), true);
   is("the conversation (its reply form's 'to' included) carries no key", leaks(thread), []);
+
+  part("A request is answered by the other person's alias, from the form the page draws");
+  is("control: an unlisted member may still write to a listed one", (await send(UNLISTED, aliasOf(cid, emailKey(ME)), "may I ask?")).endsWith("n=dmasked"), true);
+  as(ME);
+  const asked = await page(() => MessagesPage(params()));
+  const answerWith = /name="with" value="([^"]+)"|"name":"with","value":"([^"]+)"/.exec(asked);
+  const withAlias = answerWith?.[1] ?? answerWith?.[2] ?? "";
+  is("the decline form carries the asker's alias", withAlias, aliasOf(cid, emailKey(UNLISTED)));
+  const declined = await messagesRoute(
+    new NextRequest(`${ORIGIN}/api/store/community/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN, Host: "marktmorgen.com", cookie: cookies.get(ME)! },
+      body: new URLSearchParams({ handle: club.handle, action: "decline", with: withAlias }).toString(),
+    }),
+  );
+  is("declined: the request is gone", [declined.headers.get("location")?.endsWith("n=dmdeclined"), await requestCount(cid, emailKey(ME))], [true, 0]);
+
+  part("The alias: one per member and community, turned back only on the server, unknown fails closed");
+  const mine = aliasOf(cid, emailKey(ME));
+  const elsewhere = aliasOf("0123456789abcdef0123456789abcdef", emailKey(ME));
+  is("an alias has its own form, never a key's", MEMBER_ALIAS.test(mine) && !mine.includes(emailKey(ME)), true);
+  is("it turns back into the member's key in its own community", memberOfAlias(cid, mine), emailKey(ME));
+  is("another community knows the same person by another alias", elsewhere !== mine && elsewhere !== "", true);
+  is("and that alias is nobody here", memberOfAlias(cid, elsewhere) === emailKey(ME), false);
+  is("the creator is 'creator' both ways", [aliasOf(cid, "creator"), memberOfAlias(cid, "creator")], ["creator", "creator"]);
+  is("a raw key, a pair or rubbish is no alias", [memberOfAlias(cid, emailKey(ME)), memberOfAlias(cid, pairOf(emailKey(ME), emailKey(LISTED))), memberOfAlias(cid, "m12")], ["", "", ""]);
+  const secret = process.env.NIMBUS_DATA_KEY;
+  const stripe = process.env.STRIPE_SECRET_KEY;
+  delete process.env.NIMBUS_DATA_KEY;
+  delete process.env.STRIPE_SECRET_KEY;
+  is("without the deployment's secret there is no alias either way", [aliasOf(cid, emailKey(ME)), memberOfAlias(cid, mine)], ["", ""]);
+  process.env.NIMBUS_DATA_KEY = secret;
+  if (stripe !== undefined) process.env.STRIPE_SECRET_KEY = stripe;
 
   part("The leaderboard and the live room hand the browser no key");
   as(ME);

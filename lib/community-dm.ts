@@ -603,3 +603,16 @@ export async function dmCount(id: string, who: string): Promise<number> {
   const [mine, asked] = await redisPipeline([["ZCARD", inboxKey(id, who)], ["ZCARD", askedKey(id, who)]]);
   return (Number(mine) || 0) + (Number(asked) || 0);
 }
+
+/**
+ * Whether a conversation is in this person's own list: they have written in
+ * it, or accepted it. Read exactly (CX-123 rule 24): a score in text is yes, an
+ * exact none is no, and anything else throws UnknownReplyError, so the
+ * messages route answers 503 and writes nothing rather than take an unknown
+ * answer for either.
+ */
+export async function inConversation(id: string, who: string, pair: string): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["ZSCORE", inboxKey(id, who), pair]]), 1)?.[0];
+  if (reply === undefined || !scoreOrNone(reply)) throw new UnknownReplyError("whether a member is in a conversation");
+  return reply !== null;
+}

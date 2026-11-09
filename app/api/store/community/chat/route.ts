@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { aliasKeyed, aliasOf, withAliases } from "@/lib/community-alias";
 import { fromAnotherSite, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { limited } from "@/lib/request-guard";
@@ -60,7 +61,8 @@ export async function GET(request: NextRequest) {
     given = await grantRoom(store, id, { key: viewer.key, owner: viewer.owner }, want === "live", talking);
   }
   return Response.json(
-    { ok: true, messages: page.messages, cursor: page.cursor, names, grant: given === "resting" ? null : given, resting: given === "resting" },
+    // Each author by their alias, never their key (lib/community-alias.ts, audit N2).
+    { ok: true, messages: withAliases(id, page.messages), cursor: page.cursor, names: aliasKeyed(id, names), grant: given === "resting" ? null : given, resting: given === "resting" },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
@@ -118,7 +120,7 @@ async function act(request: NextRequest): Promise<Response> {
     if (!said.ok) {
       return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : said.reason === "unknown" ? 503 : 400 });
     }
-    return Response.json({ ok: true, message: said.message, name });
+    return Response.json({ ok: true, message: { ...said.message, a: aliasOf(id, said.message.a) }, name });
   }
 
   // Taking something out, and emptying the room: the creator's alone.

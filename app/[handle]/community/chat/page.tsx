@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { aliasKeyed, aliasOf, withAliases } from "@/lib/community-alias";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
@@ -87,10 +88,10 @@ export default async function CommunityChatPage({ params }: Params) {
           leave={given === "resting" ? null : given}
           resting={given === "resting"}
           quiet={quiet}
-          first={page.messages}
-          names={names}
+          first={withAliases(id, page.messages)}
+          names={aliasKeyed(id, names)}
           cursor={page.cursor}
-          me={key}
+          me={aliasOf(id, key)}
           canWrite={canWrite || owner}
           owner={owner}
           creatorOnly={config.chat.creatorOnly}

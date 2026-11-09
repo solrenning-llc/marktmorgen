@@ -20,8 +20,10 @@
  *   - a store with more objects than its pages can list called complete;
  *   - a call past the day's reviewed pages, or one whose count could not be
  *     read, that reaches the provider;
- *   - R2 or bunny answered as a listing while their provider details are
- *     unconfirmed, and deletion records answered while none are kept.
+ *   - bunny answered as a listing while its zone and its originals are
+ *     unconfirmed; R2 asked while its own read-only key is unset (or is the
+ *     site's read-write key); an R2 entry without its ETag answered as a
+ *     page; deletion records answered while none are kept.
  */
 import * as route from "@/app/api/backup/files/route";
 import { BACKUP_FILES_PAGES_PER_STORE, BACKUP_FILES_URL_SECONDS, parseFilesPage, type BackupFilesPage } from "@/lib/backup-files-contract";
@@ -194,12 +196,64 @@ async function main(): Promise<void> {
   is("a database that cannot be reached: 503, nothing listed", [answer.status, blobWorld.listCalls.length], [503, 0]);
   redis.pipeline = (async (list: unknown[][]) => { commands.push(...list); return realPipeline(list as (string | number)[][]); }) as typeof redis.pipeline;
 
-  part("sources whose provider details are unconfirmed stay off; deletion records are not kept yet");
+  part("bunny stays off (its zone and its originals are unconfirmed); R2 is off until its own read-only key is set");
   reset();
-  for (const source of ["r2", "bunny"]) {
-    answer = await call(`?source=${source}&store=${STORE}`);
-    is(`${source}: 503 source_off, nothing listed or counted`, [answer.status, (answer.json as { error?: string }).error, blobWorld.listCalls.length, commands.length], [503, "source_off", 0, 0]);
-  }
+  const fetched: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    fetched.push(String(input));
+    throw new Error("TEST: no provider may be asked here");
+  }) as typeof fetch;
+  answer = await call(`?source=bunny&store=${STORE}`);
+  is("bunny: 503 source_off, why its zone and originals are unconfirmed, nothing listed or counted", [answer.status, answer.json, blobWorld.listCalls.length, commands.length, fetched.length], [503, { version: 1, error: "source_off", source: "bunny", why: "bunny_zone_and_original_unconfirmed" }, 0, 0, 0]);
+  answer = await call(`?source=r2&store=${STORE}`);
+  is("r2 without its read-only key: 503 source_off, nothing listed or counted", [answer.status, answer.json, commands.length, fetched.length], [503, { version: 1, error: "source_off", source: "r2", why: "r2_read_key_unset" }, 0, 0]);
+  const R2_ACCOUNT = "0123456789abcdef0123456789abcdef";
+  const r2Env = {
+    R2_ACCOUNT_ID: R2_ACCOUNT,
+    R2_BUCKET: "marktmorgen-files",
+    R2_ACCESS_KEY_ID: "site-read-write-key-id-0000",
+    R2_SECRET_ACCESS_KEY: "site-read-write-secret-0000000000000000",
+    BACKUP_FILES_R2_READ_KEY_ID: "route-read-only-key-id-0000",
+    BACKUP_FILES_R2_READ_SECRET: "route-read-only-secret-00000000000000000",
+  };
+  Object.assign(process.env, r2Env, { BACKUP_FILES_R2_READ_KEY_ID: r2Env.R2_ACCESS_KEY_ID });
+  answer = await call(`?source=r2&store=${STORE}`);
+  is("r2 whose read key is the site's read-write key: still source_off, nothing asked", [answer.status, (answer.json as { why?: string }).why, commands.length, fetched.length], [503, "r2_read_key_unset", 0, 0]);
+
+  part("R2 with its read-only key: listed with each object's ETag, each signed for 15 minutes");
+  reset();
+  Object.assign(process.env, r2Env);
+  const R2_PREFIX = `vault/${STORE}/`;
+  const r2Calls: { method: string; url: string; auth: string }[] = [];
+  let r2Body = "";
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    r2Calls.push({ method: init?.method ?? "GET", url: String(input), auth: new Headers(init?.headers).get("authorization") ?? "" });
+    return new Response(r2Body, { status: 200 });
+  }) as typeof fetch;
+  const r2Entry = (key: string, size: number, etag: string) => `<Contents><Key>${key}</Key><LastModified>2026-11-08T00:00:00.000Z</LastModified><ETag>&quot;${etag}&quot;</ETag><Size>${size}</Size><StorageClass>STANDARD</StorageClass></Contents>`;
+  const r2Result = (inner: string, next = "") =>
+    `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>marktmorgen-files</Name><Prefix>${R2_PREFIX}</Prefix><MaxKeys>1000</MaxKeys><IsTruncated>${next ? "true" : "false"}</IsTruncated>${next ? `<NextContinuationToken>${next}</NextContinuationToken>` : ""}${inner}</ListBucketResult>`;
+  r2Body = r2Result(r2Entry(`${R2_PREFIX}owner/a.pdf`, 10, "0123abcd") + r2Entry(`${R2_PREFIX}owner/b.pdf`, 20, "ffff-2"), "tok1");
+  const r2Before = Date.now();
+  answer = await call(`?source=r2&store=${STORE}`);
+  const r2Page = parseFilesPage(answer.json) as BackupFilesPage;
+  is("answered 200, two entries, more to come", [answer.status, r2Page.source, r2Page.entries.length, r2Page.complete, r2Page.reason, r2Page.cursor !== null], [200, "r2", 2, false, "more", true]);
+  is("each entry: its key, its ETag without quotes, its size", r2Page.entries.map((e) => [e.source, e.key, e.etag, e.size]), [["r2", `${R2_PREFIX}owner/a.pdf`, "0123abcd", 10], ["r2", `${R2_PREFIX}owner/b.pdf`, "ffff-2", 20]]);
+  const signedUrl = new URL(r2Page.entries[0].url);
+  is("each URL a presigned GET of that object, 900 s, with the read-only key", [signedUrl.origin, signedUrl.pathname, signedUrl.searchParams.get("X-Amz-Expires"), signedUrl.searchParams.get("X-Amz-Credential")?.startsWith("route-read-only-key-id-0000/"), signedUrl.searchParams.has("X-Amz-Signature")], [`https://${R2_ACCOUNT}.r2.cloudflarestorage.com`, `/marktmorgen-files/${R2_PREFIX}owner/a.pdf`, "900", true, true]);
+  is("each expires within 15 minutes", r2Page.entries.every((e) => e.expiresAt > r2Before && e.expiresAt <= Date.now() + BACKUP_FILES_URL_SECONDS * 1000), true);
+  is("one provider call: a signed ListObjectsV2 of the store's folder with the read-only key", r2Calls.map((c) => [c.method, new URL(c.url).searchParams.get("list-type"), new URL(c.url).searchParams.get("prefix"), c.auth.startsWith("AWS4-HMAC-SHA256 Credential=route-read-only-key-id-0000/")]), [["GET", "2", R2_PREFIX, true]]);
+  is("no secret of the site or of the route in the answer", [r2Env.R2_SECRET_ACCESS_KEY, r2Env.BACKUP_FILES_R2_READ_SECRET, r2Env.R2_ACCESS_KEY_ID, SECRET].map((s) => answer.text.includes(s)), [false, false, false, false]);
+  is("the database: the day's count only", commands.map((c) => c[0]), ["SET", "INCRBY"]);
+  r2Body = r2Result(`<Contents><Key>${R2_PREFIX}owner/c.pdf</Key><Size>1</Size></Contents>`);
+  answer = await call(`?source=r2&store=${STORE}&cursor=${r2Page.cursor}`);
+  is("an entry without its ETag: 503, never a page", [answer.status, (answer.json as { error?: string }).error, new URL(r2Calls[1].url).searchParams.get("continuation-token")], [503, "listing_unavailable", "tok1"]);
+  globalThis.fetch = realFetch;
+  for (const name of Object.keys(r2Env)) delete process.env[name];
+
+  part("deletion records are not kept yet");
+  reset();
   answer = await call("?page=deletions");
   is("deletion records: 503, never an empty, complete page", [answer.status, (answer.json as { error?: string }).error, answer.text.includes("records")], [503, "deletions_unavailable", false]);
 

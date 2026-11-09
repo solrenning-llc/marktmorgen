@@ -273,12 +273,18 @@ export type Referral = {
   /** Optional campaign labels recorded at checkout; absent on older records. */
   promotion?: AffiliatePromotion | null;
   /**
-   * A one-way mark of who bought it, for this store only (buyerMark), never the
-   * address: what keeps the second tier off the inviting affiliate's own
-   * purchase (tierLines). Sales written down before 9 November 2026 have none,
-   * and their buyer is not known. Never carried out of readBook.
+   * The second tier on this sale, decided when it was written down (tierFor), since who invited its affiliate is
+   * known then: 1 when its buyer is the inviting affiliate or the recruit themselves (inbox or payout address), so no
+   * second tier is earned on it. No mark of the buyer is kept. Best effort: a purchase made with another inbox is not
+   * recognized. Absent on sales written before 9 November 2026, which are read as they always were.
    */
-  buyerMark?: string;
+  tierOff?: 1;
+  /**
+   * 1 on a sale written since 9 November 2026 whose order named no buyer (or whose affiliates could not be read):
+   * its second tier is neither paid nor denied, it waits as "buyer not confirmed", out of what is paid automatically
+   * (owner, through Claude 1, 9 November 2026, 15h42); the creator may pay it by hand.
+   */
+  buyerUnknown?: 1;
 };
 
 /**
@@ -627,7 +633,8 @@ function parseReferral(raw: unknown): Referral | null {
       self: value.self === true,
       ...(readAffiliatePromotion(value.promotion) ? { promotion: readAffiliatePromotion(value.promotion) } : {}),
       // A mark that does not read is not known, as on a sale written down before there was one.
-      ...(typeof value.buyerMark === "string" && BUYER_MARK.test(value.buyerMark) ? { buyerMark: value.buyerMark } : {}),
+      ...(value.tierOff === 1 ? { tierOff: 1 as const } : {}),
+      ...(value.buyerUnknown === 1 ? { buyerUnknown: 1 as const } : {}),
       // Sales written down before a code or a bond could credit anybody have
       // neither field, and every one of those came from a click. `byCode` is
       // read for the ones written in between.
@@ -3287,11 +3294,11 @@ export async function funnelRate(store: Store, affId: string, productId: string)
 
 async function writeReferral(store: Store, referral: Referral, buyer: string): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
-  // With the buyer's one-way mark (buyerMark), never their address; none when the order named nobody.
-  const mark = buyerMark(store.statsId, buyer);
+  // The second tier decided now, never the buyer's address or a mark of it (tierFor).
+  const tier = await tierFor(store, referral.aff, buyer);
   // Once per sale, whichever of the thanks page and the five-minute job is
   // first, counted in the store's room at what it really adds (lib/order-data.ts).
-  await orderWrite(store, [["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify(mark ? { ...referral, buyerMark: mark } : referral)]]);
+  await orderWrite(store, [["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify({ ...referral, ...tier })]]);
 }
 
 /**
@@ -3375,7 +3382,8 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string, 
 async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean> {
   if (!buyer) return false;
   const affiliate = await readAffiliate(store, aff);
-  return Boolean(affiliate) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer);
+  // Their inbox or their payout address, as isOwn reads it: "your own purchases never earn" (lib/buyer-words/affiliates.ts).
+  return Boolean(affiliate) && ownAddress(affiliate!, buyer);
 }
 
 /**
@@ -3604,7 +3612,7 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
 
 // ---- The book ------------------------------------------------------------
 
-export type LineStatus = "earned" | "partly refunded" | "refunded" | "own purchase" | LeadStatus;
+export type LineStatus = "earned" | "partly refunded" | "refunded" | "own purchase" | "buyer not confirmed" | LeadStatus;
 
 export type Line = Referral & {
   /** Given back to the buyer, in cents, as Stripe says today. */
@@ -3690,6 +3698,8 @@ export type Book = {
   currency: string;
   /** How many sales and payouts are in another currency, and so not in the totals. */
   elsewhere: number;
+  /** How many sales wait for their second tier because their buyer was not confirmed (buyerUnknown): a count, no person. */
+  unconfirmed?: number;
   /** False when Stripe could not be asked about refunds and disputes, or not all of them. */
   refundsChecked: boolean;
   /** False when the invoices of memberships and plans could not all be read. */
@@ -4021,9 +4031,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // A goal reached in a month adds its bonus, and a sale by somebody an
   // affiliate brought adds their second tier, both worked out from the sales
   // as they stand after refunds. Then only the one affiliate's, when it is one.
-  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf, store.statsId as string), ...leadLines]
+  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf), ...leadLines]
     .filter((l) => !only || l.aff === only)
-    .map(unmarked)
     .sort((a, b) => b.at - a.at);
 
   // A sale made less than the creator's wait ago is not payable yet, so their
@@ -4036,7 +4045,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const earned = own.reduce((sum, l) => sum + l.commission, 0);
       const out = paid.filter((p) => p.aff === affiliate.id && p.currency === store.currency).reduce((sum, p) => sum + p.cents, 0);
       // A lead waits until the creator approves it (lib/affiliate-leads.ts decideLeads); a sale, until the store's wait has passed.
-      const waiting = own.filter((l) => (l.how === "lead" ? l.status !== "approved" : l.at > until)).reduce((sum, l) => sum + l.commission, 0);
+      // A second tier whose buyer was not confirmed is never paid automatically: the creator may pay it by hand.
+      const waiting = own.filter((l) => (l.how === "lead" ? l.status !== "approved" : l.at > until || l.status === "buyer not confirmed")).reduce((sum, l) => sum + l.commission, 0);
       const owed = earned - out;
       const flags = flagsOf.get(affiliate.id) ?? [];
       const payable = owed <= 0 ? owed : Math.max(0, Math.min(owed, earned - waiting - out));
@@ -4063,7 +4073,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     .sort((a, b) => b.owed - a.owed || b.affiliate.appliedAt - a.affiliate.appliedAt);
   const elsewhere =
     lines.filter((l) => l.currency !== store.currency).length + paid.filter((p) => p.currency !== store.currency).length;
-  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, currency: store.currency, elsewhere };
+  const unconfirmed = lines.filter((l) => l.how === "tier2" && l.status === "buyer not confirmed").length;
+  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, currency: store.currency, elsewhere, unconfirmed };
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */
@@ -4154,11 +4165,12 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
       total,
       currency: readCurrencyCode(invoice.currency),
       rate: Number(meta.via_rate) || 0,
-      self: Boolean(affiliate && buyer) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer),
+      self: Boolean(affiliate && buyer) && ownAddress(affiliate!, buyer),
       how: "recurring",
       promotion: affiliatePromotionFrom(meta) ?? undefined,
-      // Read with the invoice, never written down: the second tier is kept off the inviter's own payment the same way.
-      ...(buyer ? { buyerMark: buyerMark(store.statsId as string, buyer) } : {}),
+      // Decided with the invoice, as a sale is when written down (tierOff); with no address on an invoice paid since
+      // TIER_BUYER_FROM, it waits (buyerUnknown), as a new sale with none does.
+      ...tierOfInvoice(byId, meta.via, buyer, paidAt),
     });
   }
   return { lines, complete };
@@ -4211,24 +4223,46 @@ export function bonusLines(store: Pick<Store, "affiliates" | "currency">, lines:
 /** What a line credited this way is: a sale somebody brought, as opposed to a share, a bonus or a second tier. */
 const BROUGHT: readonly Credit[] = ["click", "code", "buyer", "contact", "recurring"];
 
-const BUYER_MARK = /^[0-9a-f]{32}$/;
-
-/**
- * A one-way mark of a buyer's address for one store: sha256 of the store's id
- * and the address as canonicalEmail reads it, so one inbox however it is written
- * is one mark, and two stores never share one. It cannot be turned back into the
- * address (lib/person-data.ts). "" when there is no address.
- */
-export function buyerMark(statsId: string, email: string): string {
-  return email ? sha(`nimbus-aff-buyer:${statsId}:${canonicalEmail(email)}`).slice(0, 32) : "";
+/** Whether this address is the affiliate's own: their inbox or their payout address, written any way (as isOwn in lib/affiliate-leads.ts). */
+function ownAddress(affiliate: Pick<Affiliate, "email" | "paypal">, email: string): boolean {
+  const person = canonicalEmail(email);
+  return person === canonicalEmail(affiliate.email) || person === canonicalEmail(payAddress(affiliate));
 }
 
-/** A line as it leaves readBook: without its buyer's mark, which only the second tier reads. */
-function unmarked<T extends Referral>(line: T): T {
-  if (line.buyerMark === undefined) return line;
-  const copy = { ...line };
-  delete copy.buyerMark;
-  return copy;
+/** Whether a buyer is the recruit or the affiliate who invited them, so no second tier is earned on their purchase. */
+function tierOwn(recruit: Affiliate, up: Affiliate | undefined, email: string): boolean {
+  return ownAddress(recruit, email) || Boolean(up && ownAddress(up, email));
+}
+
+/**
+ * The second tier of a sale, decided when it is written down: {} for none to decide (an affiliate nobody invited) or
+ * a buyer who is somebody else; tierOff when the buyer is the recruit or their inviter; buyerUnknown when the order
+ * named no buyer, or the affiliates do not read (never denied nor paid on a guess). Two record reads at the most.
+ */
+async function tierFor(store: Store, aff: string, buyer: string): Promise<{ tierOff?: 1; buyerUnknown?: 1 }> {
+  const recruit = await readAffiliate(store, aff).catch(() => undefined);
+  if (recruit === undefined) return { buyerUnknown: 1 };
+  if (!recruit?.by) return {};
+  if (!buyer) return { buyerUnknown: 1 };
+  const up = await readAffiliate(store, recruit.by.id).catch(() => undefined);
+  if (up === undefined) return { buyerUnknown: 1 };
+  return tierOwn(recruit, up ?? undefined, buyer) ? { tierOff: 1 } : {};
+}
+
+/** Invoices paid from this time (epoch seconds, 9 November 2026 00:00 UTC) with no buyer's address wait for their second tier. */
+export const TIER_BUYER_FROM = 1_794_182_400;
+
+/** The second tier of a membership's invoice, decided as it is read (recurringReferrals). */
+function tierOfInvoice(byId: Map<string, Affiliate>, aff: string, buyer: string, paidAt: number): { tierOff?: 1; buyerUnknown?: 1 } {
+  const recruit = byId.get(aff);
+  if (!recruit?.by) return {};
+  if (!buyer) return paidAt >= TIER_BUYER_FROM ? { buyerUnknown: 1 } : {};
+  return tierOwn(recruit, byId.get(recruit.by.id), buyer) ? { tierOff: 1 } : {};
+}
+
+/** Whether a sale earns its affiliate's inviter a second tier: never on tierOff, waiting on buyerUnknown (tierLines, idleSweep). */
+function tierOf(sale: Pick<Referral, "tierOff" | "buyerUnknown">): "off" | "waits" | "earns" {
+  return sale.tierOff ? "off" : sale.buyerUnknown ? "waits" : "earns";
 }
 
 /**
@@ -4245,10 +4279,10 @@ function unmarked<T extends Referral>(line: T): T {
  *     the creator to look at, nor on sales made after the inviting affiliate
  *     was declined or removed;
  *   - nothing on what the inviting affiliate bought themselves through their
- *     recruit's link (the sale's buyerMark), which would hand back to the two
+ *     recruit's link (the sale's tierOff), which would hand back to the two
  *     of them a share of their own money (Claude 5's audit, 9 November 2026).
  */
-export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<string, HoldFlag[]>, statsId: string): Line[] {
+export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<string, HoldFlag[]>): Line[] {
   const byId = new Map(everyone.map((a) => [a.id, a]));
   // What partners take of each sale (written "<sale>:<partner>"), so all the shares of one sale stay under the cap together.
   const partners = new Map<string, number>();
@@ -4266,12 +4300,13 @@ export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<strin
     if (!up || up.id === recruit.id) continue;
     if (up.status !== "approved" && (up.status !== "removed" || line.at * 1000 > up.decidedAt)) continue;
     // Never on a purchase of the inviting affiliate's own through their recruit's link, nor of the recruit's own with
-    // their payout address: either one's inbox, written any way, or payout address (as isOwn in lib/affiliate-leads.ts).
-    // A sale with no mark (written down before 9 November 2026) is not known, and is read as it always was.
-    if (line.buyerMark && [up, recruit].some((a) => line.buyerMark === buyerMark(statsId, a.email) || line.buyerMark === buyerMark(statsId, payAddress(a)))) continue;
+    // their payout address (tierOff, decided when it was written); waiting when its buyer was not known (buyerUnknown).
+    const tier = tierOf(line);
+    if (tier === "off") continue;
     const percent = Math.min(recruit.by.percent, MAX_COMMISSION - line.rate - (partners.get(line.ref) ?? 0));
     if (percent <= 0) continue;
-    out.push(settleLine({ ref: `tier2:${line.ref}`, pi: line.pi, aff: up.id, at: line.at, product: line.product, title: line.title, base: line.base, total: line.total, currency: line.currency, rate: percent, self: false, how: "tier2" }, line.refunded));
+    const settled = settleLine({ ref: `tier2:${line.ref}`, pi: line.pi, aff: up.id, at: line.at, product: line.product, title: line.title, base: line.base, total: line.total, currency: line.currency, rate: percent, self: false, how: "tier2" }, line.refunded);
+    out.push(tier === "waits" && settled.status === "earned" ? { ...settled, status: "buyer not confirmed" } : settled);
   }
   return out;
 }
@@ -4565,7 +4600,8 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
     if (sale.currency !== store.currency) foreign.add(sale.aff);
     earn(sale.aff, (sale.base * sale.rate) / 100);
     const up = inviter.get(sale.aff);
-    if (up) {
+    // The second tier by the rule readBook pays it by (tierOf): none on the inviter's own purchase.
+    if (up && tierOf(sale) !== "off") {
       active(up.id, sale.at);
       if (sale.currency !== store.currency) foreign.add(up.id);
       earn(up.id, (sale.base * up.percent) / 100);

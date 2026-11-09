@@ -51,12 +51,13 @@
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { essentialLimitState } from "@/lib/request-guard";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
 import { type Member, parseTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 
-import { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME, agentScopeOf } from "@/lib/api-key-rules";
+import { type AgentScope, type ApiKey, API_RATE, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME, agentScopeOf } from "@/lib/api-key-rules";
 export { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME };
 const KEY_PATTERN = /^nl_live_[0-9a-f]{40}$/;
 const ID_PATTERN = /^[0-9a-f]{12}$/;
@@ -521,7 +522,7 @@ const TOUCH_SECONDS = 60;
  * Checked against both records, so a key whose lookup survived a revocation
  * that was cut short still opens nothing.
  */
-export async function resolveKey(presented: string, now = Date.now()): Promise<{ sid: string; id: string; write: boolean; agent: AgentScope; paused: boolean; why?: PauseWhy } | null> {
+export async function resolveKey(presented: string, now = Date.now()): Promise<{ sid: string; id: string; write: boolean; agent: AgentScope; paused: boolean; why?: PauseWhy; minute?: "exceeded" | "unknown" } | null> {
   if (!KEY_PATTERN.test(presented) || !isRedisConfigured()) return null;
   const hash = hashOf(presented);
   const [raw] = await redisPipeline([["GET", lookupKey(hash)]]);
@@ -535,6 +536,18 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   const sid = typeof found.sid === "string" && SID_PATTERN.test(found.sid) ? found.sid : "";
   const id = typeof found.id === "string" && ID_PATTERN.test(found.id) ? found.id : "";
   if (!sid || !id) return null;
+  // The key's minute (API_RATE) is counted here, right after its lookup and
+  // before its record, hold, last use or team is read, for a live key and a
+  // paused one alike: past it, or with a count that could not be read, the
+  // key has cost the lookup and the counter alone (3 commands; 7 when the
+  // counter came after the four reads below). An unknown count refuses too,
+  // never lets through: a paused key has no month of the store's to bound
+  // it, so this counter is its only ceiling (Claude 5's API audit, A1). The
+  // refusal is marked paused as well, so a caller that does not read `minute`
+  // still refuses it; nothing about the key is known yet, so write and the
+  // agent scope say the least.
+  const minute = await essentialLimitState("api", id, API_RATE, 60);
+  if (minute !== "within") return { sid, id, write: false, agent: "none", paused: true, minute };
   // The team is read in the same trip, one command more (within an API request's own price, UNIT_COST.api in
   // tests/plan-cost-registry.ts): a teammate's key is refused once its maker is not on the team.
   const [listed, hold, used, team] = await redisPipeline([["HGET", listKey(sid), id], ["HGET", holdKey(sid), id], ["HGET", usedKey(sid), id], ["GET", teamRecordKey(sid)]]);

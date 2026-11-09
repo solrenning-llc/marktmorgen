@@ -13,15 +13,15 @@
  * that.
  */
 import { type AgentScope, type PauseWhy, keyFromHeader, resolveKey } from "@/lib/api-keys";
-import { agentMay } from "@/lib/api-key-rules";
+import { API_RATE, agentMay } from "@/lib/api-key-rules";
 import { storeForId, type Store } from "@/lib/store";
-import { BodyTooLarge, limited, withinLimit } from "@/lib/request-guard";
+import { BodyTooLarge, limited } from "@/lib/request-guard";
 import { giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { API_READ_PAUSED_WORDS, API_WRITE_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
 
-/** Requests one key may make in a minute. Generous for a sync, a wall for a runaway loop. */
-export const API_RATE = 120;
+/** Requests one key may make in a minute (lib/api-key-rules.ts), counted in resolveKey. */
+export { API_RATE };
 
 const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 
@@ -141,12 +141,15 @@ async function apiKeyed(
   // Missing, malformed, unknown and revoked all get the same answer, so the
   // API cannot be used to learn which keys ever existed.
   if (!found) return unauthorized();
-  // Every key the store holds is counted in its minute first, a paused one
-  // too, so a paused key a sync keeps calling hears 429 past API_RATE like
-  // any key, and is not answered without a limit (Claude 5's API audit, A1).
-  if (!(await withinLimit("api", found.id, API_RATE, 60))) {
+  // Every key the store holds is counted in its minute by resolveKey, right
+  // after its lookup and a paused one too, so a key a sync keeps calling past
+  // API_RATE hears 429 having cost only the lookup and the counter (Claude 5's
+  // API audit, A1). A count that could not be read is not a reason to slow
+  // down: 503, and the key is still refused.
+  if (found.minute === "exceeded") {
     return apiError(429, "rate_limited", `At most ${API_RATE} requests a minute per key. Try again in a minute.`, { "Retry-After": "60" });
   }
+  if (found.minute) return apiError(503, "unavailable", "The store could not answer just now. Try again in a moment.");
   // Paused by the team's two-step rule (owner C3-100, lib/api-key-pause.ts):
   // the key is real and kept, so its holder is told why and what to do.
   if (found.paused) return apiError(403, "key_paused", KEY_PAUSED_WORDS[found.why ?? "rule"]);

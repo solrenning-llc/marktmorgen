@@ -4,6 +4,12 @@
  * imports the crypto and the database.
  */
 export const MAX_KEYS = 5;
+/**
+ * Requests one key may make in a minute. Generous for a sync, a wall for a
+ * runaway loop. Counted in resolveKey (lib/api-keys.ts) right after the key's
+ * lookup, before anything else of the key is read; lib/api-guard.ts answers 429.
+ */
+export const API_RATE = 120;
 export const MAX_KEY_NAME = 40;
 /** How a key starts, so one pasted into the wrong place is recognisable for what it is. */
 export const KEY_PREFIX = "nl_live_";

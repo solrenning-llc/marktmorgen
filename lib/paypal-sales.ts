@@ -730,6 +730,25 @@ export function nextLook(paidAt: number, now: number): number | null {
 }
 
 /**
+ * A paid capture's status as the refund watch reads it (inbox C4-13, the owner on 4 November 2026: a payment the
+ * bank or PayPal took back closes the whole order, whatever its amount, as a dispute Stripe closed as lost does,
+ * lib/refunds.ts). Only COMPLETED, PENDING and PARTIALLY_REFUNDED keep the purchase; a partial refund keeps it,
+ * because the creator chose to keep part of the price, the rule every other door follows (lib/refunds.ts). REFUNDED,
+ * REVERSED (a chargeback), FAILED and DECLINED are the whole payment taken back. Any other status is not known here:
+ * it takes nothing back and gives nothing again, is logged, and stays watched (CX-123 rule 24).
+ *
+ * Not checked against PayPal's published description in this change: COMPLETED, PENDING, PARTIALLY_REFUNDED and
+ * REFUNDED are the capture statuses tests/paypal-sales.test.ts already uses; REVERSED, FAILED and DECLINED are taken
+ * as losses so that a capture PayPal reports in any of them never keeps a purchase, whether or not PayPal sends them
+ * on a capture once paid. A chargeback PayPal does not show on the capture's status is not seen here: PayPal's
+ * disputes are not read anywhere in the product (docs/bx2-earnings-design.md).
+ */
+const CAPTURE_KEEPS: ReadonlySet<string> = new Set(["COMPLETED", "PENDING", "PARTIALLY_REFUNDED"]);
+const CAPTURE_TAKEN_BACK: ReadonlySet<string> = new Set(["REFUNDED", "REVERSED", "FAILED", "DECLINED"]);
+/** How often a paid order whose capture is in a status not known here is looked at once PayPal's 180 days are over. */
+const UNKNOWN_STATUS_LOOK_SECONDS = 86_400;
+
+/**
  * What the sweep asks of PayPal for one store, a few orders at a time:
  *
  *   - a payment PayPal held as pending and has since completed is written
@@ -788,6 +807,12 @@ export async function watchPayPal(
       }
       continue;
     }
+    // A status not known here is not "declined": nothing is handed over yet, and it is asked again until the order's
+    // record ends (30 days), never dropped on a word this file does not know (rule 30 of CX-123, with the watch below).
+    if (!CAPTURE_KEEPS.has(capture.status) && !CAPTURE_TAKEN_BACK.has(capture.status)) {
+      console.error("a pending PayPal order's capture is in a status not known here; asked again", order, capture.status);
+      continue;
+    }
     // Declined, failed, or not what was asked: nothing is handed over.
     await redisPipeline([["ZREM", pendingKey(statsId), order]]);
   }
@@ -822,12 +847,18 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
       continue;
     }
-    if (status !== "REFUNDED") {
-      const next = nextLook(paid.at, now);
+    if (!CAPTURE_TAKEN_BACK.has(status)) {
+      const known = CAPTURE_KEEPS.has(status);
+      // Not known here: nothing taken back, and never let go on it either. Past PayPal's 180 days it is still looked at
+      // once a day, until the paid record ends (PAID_KEPT_SECONDS), when the watch lets it go above.
+      if (!known) console.error("a paid PayPal capture is in a status not known here; nothing taken back, still watched", order, status);
+      const next = nextLook(paid.at, now) ?? (known ? null : now + UNKNOWN_STATUS_LOOK_SECONDS);
       await redisPipeline([next === null ? ["ZREM", watchKey(statsId), order] : ["ZADD", watchKey(statsId), String(next), order]]);
       continue;
     }
-    // Refunded in full: counted as a refund in the store's numbers and the affiliate book, whatever is handed back below.
+    // Taken back in full, refunded or reversed, failed or declined (C4-13): counted as given back in the store's numbers
+    // and the affiliate book (the same mark as a refund, so a reversed payment never keeps a purchase for another
+    // payment of the same buyer and is never handed over again), whatever is handed back below.
     // The mark is also what stops the hand-over retry (handOverAgain), so it must be known written before the order can
     // leave this watch: both replies read exactly, each 0 or 1 (one member added or already there; the key's expiry
     // set). Anything else is unknown, never "written": the order stays watched and is looked at again in an hour,
@@ -844,7 +875,8 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;
     }
-    if (on.refunded) await on.refunded(paid).catch((error) => console.error("telling of a PayPal refund failed", error));
+    // Told as a refund only when it is one: the event says fully_refunded, which a chargeback or a failed payment is not.
+    if (on.refunded && status === "REFUNDED") await on.refunded(paid).catch((error) => console.error("telling of a PayPal refund failed", error));
     // The record read in its exact envelope (Codex G on #2791; CX-123 rule 24): one reply, null or text. Anything else
     // is unknown, looked at again in an hour, never "no record".
     const read = repliesFor(await redisPipeline([["HGET", importedKey(statsId, paid.email), paid.product]]), 1);

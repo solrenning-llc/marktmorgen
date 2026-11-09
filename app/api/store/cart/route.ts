@@ -15,7 +15,7 @@ import { readSoldCounts } from "@/lib/sold-count";
 import { cartWords } from "@/lib/buyer-words/cart";
 import type { Store } from "@/lib/store";
 import { salePrice } from "@/lib/store-sale";
-import { soonState } from "@/lib/preorders";
+import { knownNotSoon, soonState } from "@/lib/preorders";
 import { outOfKeys } from "@/lib/licence-keys";
 import { readCountry } from "@/lib/fair-price";
 import { formatMoney } from "@/lib/money";
@@ -61,7 +61,9 @@ export async function GET(request: NextRequest) {
   }
   const country = readCountry(request.headers.get("x-vercel-ip-country"));
   const locale = LANGUAGES[store.language].locale;
-  const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => ({ soon: new Set<string>() }))]);
+  // Which products are still coming soon: a reading that cannot be had is never "none" (Claude 6's audit of rule 24),
+  // so no line is payable right now, as for a stock count that cannot be read.
+  const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
   const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)));
@@ -76,7 +78,7 @@ export async function GET(request: NextRequest) {
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
     const soldOut = left.get(id) === 0;
     const unknown = left.has(id) && left.get(id) === undefined;
-    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
+    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
   });
   // What ships, as the checkout will ask Stripe for it (lib/cart-shipping.ts), from what can be paid for.
   const shippable = items.filter((item) => item.ok).flatMap((item) => listings.filter((p) => p.id === item.id));
@@ -136,8 +138,9 @@ export async function GET(request: NextRequest) {
     const listing = listings.find((p) => p.id === item.id);
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
-  const suggest = await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []);
-  const bundle = bundleSwap(store, payable, ids, coming.soon, country, locale);
+  // With the coming-soon reading unknown nothing is offered either: a suggestion or a bundle could be a product not out yet.
+  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []) : [];
+  const bundle = coming ? bundleSwap(store, payable, ids, coming.soon, country, locale) : null;
   return Response.json(
     {
       ok: true,
@@ -297,6 +300,9 @@ export async function POST(request: NextRequest) {
   if (!coming) return away(`/@${store.handle}?cart=error#cart`);
   const fit = products.length === ids.length && products.every((p) => cartable(p) && p.fields.length === 0 && !coming.soon.has(p.id));
   if (!fit) return away(`/@${store.handle}?cart=changed#cart`);
+  // Read in part: a product outside what was read may be coming soon, so it is unknown and never sent to Stripe;
+  // back to the cart to try again, nothing charged.
+  if (products.some((p) => !knownNotSoon(coming, p.id))) return away(`/@${store.handle}?cart=error#cart`);
   for (const product of products) {
     // A key count that cannot be read never sells (SG2, finding 12): back to the cart to try again, nothing charged.
     const out = await outOfKeys(store, product).catch(() => null);

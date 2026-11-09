@@ -32,15 +32,31 @@ async function run(request: NextRequest): Promise<Response> {
   const [got] = await redisPipeline([["SET", "nl:stream:lock", "1", "NX", "EX", 90]]);
   if (got === null) return Response.json({ ok: true, busy: true });
   try {
-    const counts = await sweep(Date.now() + 35_000);
+    // Each part runs on its own (CX-123 rule 24): a list one of them cannot read throws, and that must not keep the
+    // others from running until the next run, five minutes later. Every part is run once, the one that failed is
+    // logged, and the job answers 500 at the end when any part failed.
+    const failed: string[] = [];
+    const part = async <T,>(name: string, work: () => Promise<T>, none: T): Promise<T> => {
+      try {
+        return await work();
+      } catch (error) {
+        console.error(`the video job: ${name} failed`, error);
+        failed.push(name);
+        return none;
+      }
+    };
+    const counts = await part("stream", () => sweep(Date.now() + 35_000), { looked: 0, ready: 0, failed: 0, deleted: 0 });
     if (counts.looked || counts.deleted) {
       console.log(`stream: looked at ${counts.looked}, ${counts.ready} ready, ${counts.failed} failed, ${counts.deleted} deleted`);
     }
     // Captions being written by AI, asked after until they are all there (lib/auto-captions.ts).
-    const captions = await sweepAutoCaptions(Date.now() + 8_000);
+    const captions = await part("captions", () => sweepAutoCaptions(Date.now() + 8_000), { looked: 0, done: 0 });
     if (captions.done) console.log(`captions: ${captions.done} request(s) settled`);
-    const watched = await measureDue(Date.now() + 15_000);
+    const watched = await part("watch", () => measureDue(Date.now() + 15_000), { read: 0, seconds: 0 });
     if (watched.read) console.log(`watch: read ${watched.read} store(s), ${watched.seconds} second(s) of video watched since the reading before`);
+    if (failed.length) {
+      return Response.json({ ok: false, error: "server_error", failed }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    }
     return Response.json({ ok: true, ...counts, captions, watched }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("the video job failed", error);

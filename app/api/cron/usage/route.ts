@@ -74,15 +74,18 @@ const TOLD = "nl:usage-watch:told";
 
 type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number };
 
-/** Bills video past the plan's hours, and writes to each creator the first time a month passes them. */
-async function videoRun(): Promise<VideoRun> {
+/**
+ * Bills video past the plan's hours, and writes to each creator the first time a month passes them. `read` is false
+ * when a list it needs could not be read (CX-123 rule 24): the run goes on with the other parts and says so at the end.
+ */
+async function videoRun(): Promise<{ out: VideoRun; read: boolean }> {
   const out: VideoRun = { stores: 0, billed: 0, cents: 0, paused: 0, failed: 0, told: 0 };
   let settled: Awaited<ReturnType<typeof settleAll>> = [];
   try {
     settled = await settleAll();
   } catch (error) {
     console.error("settling video hours failed", error);
-    return out;
+    return { out, read: false };
   }
   for (const row of settled) {
     out.stores += 1;
@@ -102,10 +105,12 @@ async function videoRun(): Promise<VideoRun> {
   // a billing month may have begun); each is read in its own window
   // (lib/allowance-window.ts), and written to once a window.
   let watchedStores: string[] = [];
+  let read = true;
   try {
     watchedStores = await foldersOfTwoMonths(watchedFolders);
   } catch (error) {
     console.error("could not read the stores whose video was watched", error);
+    read = false;
   }
   for (const folder of watchedStores) {
     try {
@@ -143,7 +148,7 @@ async function videoRun(): Promise<VideoRun> {
       ? "video-watch: every store inside its hours"
       : `video-watch: ${out.stores} past a plan's hours, ${out.billed} billed ${centsWords(out.cents)}, ${out.paused} playback paused, ${out.failed} failed, ${out.told} written to`,
   );
-  return out;
+  return { out, read };
 }
 
 type VisitsRun = { stores: number; resting: number; failed: number; told: number };
@@ -231,9 +236,15 @@ export async function GET(request: NextRequest) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
 
-  const video = await videoRun();
+  const { out: video, read: videoRead } = await videoRun();
   const visits = await visitsRun();
   const orders = await ordersRun();
+  // A part whose list could not be read is said as unread at the end, never as "ok" (CX-123 rule 24).
+  const unread = videoRead ? [] : ["video"];
+  const finish = (body: Record<string, unknown>) =>
+    unread.length
+      ? Response.json({ ...body, ok: false, unread }, { status: 503, headers: { "Cache-Control": "no-store" } })
+      : Response.json(body, { headers: { "Cache-Control": "no-store" } });
 
   // The delivery part on its own: a list or total Redis answered in an unknown shape (CX-123 rule 24) is never
   // "nobody is over". It is said as unknown, nobody is written to on it and its told list is left as it was; the
@@ -244,7 +255,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it", error);
     return Response.json(
-      { ok: false, unread: ["delivery"], video, visits, orders },
+      { ok: false, unread: [...unread, "delivery"], video, visits, orders },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -265,16 +276,13 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("usage-watch: who was already told about the delivery allowance is unknown today; nobody was written to about it", error);
     return Response.json(
-      { ok: false, unread: ["delivery"], video, visits, orders },
+      { ok: false, unread: [...unread, "delivery"], video, visits, orders },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
   const fresh = over.filter((s) => !seen.has(s.folder));
   if (fresh.length === 0) {
-    return Response.json(
-      { ok: true, over: over.length, told: 0, video, visits, orders },
-      { headers: { "Cache-Control": "no-store" } },
-    );
+    return finish({ ok: true, over: over.length, told: 0, video, visits, orders });
   }
 
   // Whose these stores are, read exactly (lib/delivery.ts): unknown is never "no address on file". Then nobody is
@@ -285,7 +293,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("usage-watch: who the stores over the delivery allowance belong to is unknown today; nobody was written to about it", error);
     return Response.json(
-      { ok: false, unread: ["delivery"], video, visits, orders },
+      { ok: false, unread: [...unread, "delivery"], video, visits, orders },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -363,10 +371,7 @@ export async function GET(request: NextRequest) {
     ["SET", TOLD, JSON.stringify([...new Set([...seen, ...over.map((s) => s.folder)])]), "EX", 40 * 86_400],
   ]);
 
-  return Response.json(
-    { ok: true, over: over.length, told, unknown: unknown.length, video, visits, orders },
-    { headers: { "Cache-Control": "no-store" } },
-  );
+  return finish({ ok: true, over: over.length, told, unknown: unknown.length, video, visits, orders });
 }
 
 /** The stores already told about the delivery allowance this month: nil is none; any other shape throws. */

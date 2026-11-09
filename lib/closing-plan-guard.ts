@@ -39,6 +39,7 @@ import { createHash } from "node:crypto";
 import { BillingError, type StartedSubscription, isBillingConfigured, onPlatform, ownedBy, startedFromObservedSubscription } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
+import { chargeDisputes, disputesQuery } from "@/lib/closing-dispute";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
@@ -418,8 +419,13 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
   if (!wholeAtLeast(amount, 1) || !wholeAtLeast(onCharge, 0) || typeof isDisputed !== "boolean" || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) {
     throw new Error(`Stripe answered the charge of ${invoiceId} in another shape`);
   }
-  // A disputed charge cannot be refunded: the bank's dispute takes it back to the creator.
-  if (isDisputed) return { settled: true, returned: 0, disputed: amount, currency };
+  // A charge marked disputed is given back only when each of its disputes closed with the money left with us (won, or
+  // an inquiry closed: lib/closing-dispute.ts); one open, lost or prevented is not refunded, the bank's dispute taking
+  // it back to the creator. Its disputes are read exactly: a list that does not read throws, and settleOne keeps the
+  // plan in line, never refunded on a guess (the bank may have given it back already).
+  if (isDisputed && chargeDisputes(await onPlatform("GET", disputesQuery(charge.id), undefined, { version: AT }), charge.id) === "held") {
+    return { settled: true, returned: 0, disputed: amount, currency };
+  }
   // Read in full or not at all: a refund missed on an unknown list would be asked for twice (settleOne keeps it on the throw).
   // Each row in Stripe's own domain: a refund's amount is above zero and its status one of Stripe's. A negative one
   // would ask for more than was paid, an unknown one for a second refund: either throws before anything is asked for.

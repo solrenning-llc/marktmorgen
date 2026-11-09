@@ -43,8 +43,10 @@ import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { type PaidPeriod, REFUNDS_PER_REQUEST, stillToGive, totalsOf, unusedOf } from "@/lib/closing-buyers-rules";
 import { paidPeriods, savePaidPeriod, takeCalls, workKey } from "@/lib/closing-holds";
+import { chargeDisputes, disputesQuery } from "@/lib/closing-dispute";
 
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,64}$/;
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
 const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
 const lockKey = (folder: string) => `nl:closing:refund:${folder}`;
 const LOCK_SECONDS = 120;
@@ -306,7 +308,7 @@ export async function giveBackUnused(
         out.short.push({ sub: row.sub, amount: give, cur: row.paid.cur, email: row.paid.e });
       };
       // Its payment, the refunds already made on it and the refund itself, and two more when Stripe did not name its
-      // payment when it was held. Before the closing day they come from the budget; only the closing day uses the
+      // payment when it was held (one more, for a charge marked disputed, is taken when it is known: below). Before the closing day they come from the budget; only the closing day uses the
       // calls set aside when it was held (rcalls), so pressing the button again can never drain them. Every call not
       // made is given back to where it was taken from.
       const need = row.paid.pi ? 3 : 5;
@@ -382,10 +384,29 @@ export async function giveBackUnused(
         if (!Number.isSafeInteger(charge.amount_refunded) || (charge.amount_refunded as number) < 0 || (charge.amount_refunded as number) > (charge.amount as number)) {
           throw new Error("what this payment's charge gave back could not be read");
         }
+        // Marked disputed is not final (lib/closing-dispute.ts): a dispute the creator won, or an inquiry closed, left the
+        // money with the creator, and the member is owed the unused time as on a charge never disputed. Only this
+        // charge's own disputes, read exactly, decide; one more call, taken from the closing's budget before it is made
+        // as the first ones were. Without a call left it goes the way of a member the budget did not reach; a list that
+        // does not read throws (counted failed, tried again), never a refund on a guess.
         if (charge.disputed) {
-          await settle("disputed");
-          out.disputed += 1;
-          continue;
+          const chargeId = typeof charge.id === "string" ? charge.id : "";
+          if (!CHARGE_ID.test(chargeId)) throw new Error("this disputed payment's charge did not name itself");
+          const more = options.final ? (await take("calls", 1)) || (await take("rcalls", 1)) : await take("calls", 1);
+          if (!more) {
+            if (options.final) {
+              const amount = stillToGive(row.unused, row.paid.back ?? 0);
+              await settle("over", amount);
+              out.unmade.push({ sub: row.sub, amount, cur: row.paid.cur, email: row.paid.e });
+            } else out.over += 1;
+            continue;
+          }
+          count();
+          if (chargeDisputes(await onAccount("GET", account, disputesQuery(chargeId)), chargeId) === "held") {
+            await settle("disputed");
+            out.disputed += 1;
+            continue;
+          }
         }
         // One made here before, under this invoice: never a second.
         count();

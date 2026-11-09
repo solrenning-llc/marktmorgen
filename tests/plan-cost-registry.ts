@@ -1617,7 +1617,7 @@ export const NOT_A_COST: Record<string, string> = {
   BUYER_CAP_MONTHS: "Queue item 307 EC1: the cap on one closing's buyers (lib/closing-buyers-rules.ts, buyerNoticeCap), a post-cancellation funded exposure of docs/funded-exposure-review.md (closingBuyersCost above), the company's, not a plan's line.",
   BUYER_PAGES_PER_RUN: "Pages of a closing store's checkouts read in one run of the daily closing job (lib/closing-buyers.ts): inside the same exposure, bounded by its cap.",
   HOLD_PAGES_PER_RUN: "Pages of a closing store's memberships held, released or ended in one run (lib/closing-holds.ts): inside the same exposure.",
-  REFUNDS_PER_REQUEST: "Refunds of members' unused time in one request (lib/closing-refunds.ts): the creator's money on the creator's account; its calls inside the same exposure.",
+  REFUNDS_PER_REQUEST: "Refunds of members' unused time in one request (lib/closing-refunds.ts): the creator's money on the creator's account; its calls inside the same exposure, the one dispute list a charge marked disputed asks for (GET /disputes?charge=, lib/closing-dispute.ts) included: taken from the closing's call budget before it is made, never added to it.",
   EMAILS_PER_BUYER_PER_ENDING: "Emails one closing takes for a buyer (lib/closing-buyers-rules.ts), inside the same exposure's cap.",
   STRIPE_CALLS_PER_MEMBER: "Calls to the creator's Stripe account one member's closing takes at the most, the closing's call budget per buyer its cap allows (lib/closing-holds.ts, takeCalls): inside the same exposure (CLOSING_BUYER_COST).",
   MEMBERS_AT_ONCE: "How many members one closing works on at once: a pace inside the daily job's minute, not a figure of its own.",

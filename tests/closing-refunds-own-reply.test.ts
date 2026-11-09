@@ -48,6 +48,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return Response.json({ id: "re_closeown1", object: "refund", amount: Number(body.get("amount")), currency: "usd", payment_intent: pi, status: "succeeded" });
   }
   if (path === "/refunds") return Response.json({ object: "list", data: [], has_more: false });
+  // A disputed charge's own disputes (lib/closing-dispute.ts): one still open, so the charge is held, never given back.
+  if (path === "/disputes") return Response.json({ object: "list", has_more: false, data: [{ id: "du_closeown1", object: "dispute", charge: url.searchParams.get("charge"), status: "needs_response" }] });
   return Response.json({ error: { message: "unexpected synthetic request" } }, { status: 404 });
 }) as typeof fetch;
 
@@ -173,7 +175,9 @@ async function main() {
   part("This payment's charge is not expanded (only its id)");
   await triedAgain("chargeid", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: "ch_closeown1" }) }, 1);
 
-  part("Control: this payment's own disputed charge still settles the member disputed, with nothing POSTed");
+  // Regra 23 (claude5/closing-dispute-won): `disputed: true` alone no longer settles; the charge's own dispute list is
+  // read, and the stand-in above answers it with an open dispute. The assertions below are unchanged.
+  part("Control: this payment's own disputed charge, its dispute still open, settles the member disputed, with nothing POSTed");
   const disputed = await run("owndisputed", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, disputed: true }) }) });
   is("nothing POSTed", posts, []);
   is("settled disputed", [disputed.settled, disputed.result?.disputed], ["disputed", 1]);

@@ -258,7 +258,6 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:esync:seen:": X(30), "nl:esync:tags:": E,
   "nl:exposure:v1:": C, "nl:exposure:v1:YYYY-MM": C,
   "nl:fair:c:": E,
-  "nl:member:c:": E,
   "nl:firstsale:": C,
   "nl:flow-rotate:": X(1),
   "nl:form:r:": E, "nl:forms:": E,

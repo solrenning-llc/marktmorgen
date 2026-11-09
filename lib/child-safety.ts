@@ -201,7 +201,7 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
     if (kept?.[0] !== "OK") return "unknown";
     // Its files are kept and closed to everyone before it is taken off (unit 3b, lib/held-files.ts).
     const files = await productFilePaths(product, store.statsId || undefined)
-      .then(async (paths) => (await holdFiles(paths)) && (await listHeldFiles(store, product.id, paths)))
+      .then(async ({ paths, complete }) => (await holdFiles(paths)) && (await listHeldFiles(store, product.id, paths)) && complete)
       .catch(() => false);
     const done = await setProductHidden(storeRef(store), product.id, true);
     if (!done.ok) return done.reason === "unknown" ? "unknown" : "failed";

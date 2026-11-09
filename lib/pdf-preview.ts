@@ -31,6 +31,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
 import { copyFolder } from "@/lib/pdf-stamp";
 import { type DataStore, keepFor } from "@/lib/store-data";
+import { isFileHeld } from "@/lib/held-files";
 
 /** The most pages a preview may hold. */
 export const MAX_PREVIEW_PAGES = 10;
@@ -70,6 +71,8 @@ export async function firstPages(bytes: Uint8Array, pages: number): Promise<Uint
  */
 export async function previewCopy(file: ProductFile, pages: number, store: DataStore): Promise<ProductFile | null> {
   if (!previewable(file) || pages < 1) return null;
+  // A file kept for a child-safety report is previewed for nobody (lib/held-files.ts); unknown previews nothing.
+  if (await isFileHeld(file.pathname).catch(() => true)) return null;
   const key = previewKey(file, pages);
   try {
     if (isRedisConfigured()) {

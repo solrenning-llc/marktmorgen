@@ -35,6 +35,7 @@ import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
+import { isFileHeld } from "@/lib/held-files";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/product-file";
@@ -174,6 +175,9 @@ export async function stampedCopy(
   store: DataStore,
 ): Promise<ProductFile | null> {
   if (!isStampable(file) || !sale.reference || !sale.email) return null;
+  // A file kept for a child-safety report is copied for nobody, kept copy or new (lib/held-files.ts): the caller then
+  // serves the original, which refuses it; a mark that cannot be read copies nothing either.
+  if (await isFileHeld(file.pathname).catch(() => true)) return null;
   if (file.bytes > MAX_STAMP_BYTES) {
     await noteProblem(file.pathname, "too_big");
     return null;

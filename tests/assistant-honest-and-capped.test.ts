@@ -20,6 +20,8 @@ import { addProduct, claimHandle, ensureStatsId, setAssistant, setAssistantPlan,
 import { askAssistant } from "@/lib/store-assistant";
 import { assistantMessageExtraMicroUsd, assistantWindow, heldToFacts } from "@/lib/store-assistant-rules";
 import { neutralLine } from "@/lib/assistant-reminder-rules";
+import { forAi } from "@/lib/inbox-rules";
+import { postToModel } from "@/lib/ai";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -63,11 +65,18 @@ is("control: a neutral line is sent", neutralLine("A week of dinners, planned fo
 let next: { status: string; reply: string } = { status: "unknown", reply: "" };
 let calls = 0;
 let refuse = false;
+let pulled = 0;
+let huge = false;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.hostname !== "api.anthropic.com") return new Response("not found", { status: 404 });
   calls += 1;
   if (refuse) return new Response(JSON.stringify({ type: "error", error: { type: "overloaded_error" } }), { status: 529 });
+  if (huge) {
+    // An error answer with a body that does not end: only what the log keeps may be read of it.
+    const chunk = new TextEncoder().encode("x".repeat(65_536));
+    return new Response(new ReadableStream({ pull(controller) { pulled += chunk.byteLength; controller.enqueue(chunk); if (pulled >= 64 * 1_048_576) controller.close(); } }), { status: 500 });
+  }
   return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(next) }], usage: { input_tokens: 3_000, output_tokens: 40 } }));
 }) as typeof fetch;
 
@@ -130,6 +139,18 @@ async function main(): Promise<void> {
   is("refused as spent, no model call", [c.ok ? "answered" : c.reason, calls - before], ["spent", 0]);
   const catalogReads = keys.filter((k) => !k.startsWith("EVAL") && !k.includes("nl:assist:c:"));
   is("nothing of the catalog or its pages is read before the refusal", catalogReads, []);
+
+  part("D. Light: what goes to the model, an error body, the cart's reminder box");
+  is("a bare domain typed by the buyer does not reach the model", forAi("See mysite.com/deal for it").includes("mysite.com"), false);
+  is("nor an address written with a full-width at sign", forAi("I am jane\uFF20example.com").includes("example.com"), false);
+  is("while ordinary words and file names stay", forAi("Is it a PDF or a .docx file? Version 2.0."), "Is it a PDF or a .docx file? Version 2.0.");
+  huge = true;
+  const failed = await postToModel("{}", 5_000);
+  huge = false;
+  is("an error answer is refused", failed.ok, false);
+  is("and at most a little of its body is read, not all of it", pulled <= 131_072, true);
+  const cart = readFileSync("app/api/store/cart/route.ts", "utf8");
+  is("the cart keeps a reminder's yes only where every product in it offers the reminder", /products\.every\(\(p\) => assistReminderOffered\(store, p\)\)/.test(cart) && !/assistReminderShown\(store\)/.test(cart), true);
 
   part("C. Every question asked is a public request of the store's window");
   const route = readFileSync("app/api/store/assistant/route.ts", "utf8");

@@ -888,8 +888,9 @@ export async function openCourseLink(token: string): Promise<LinkGrant | null> {
 const DRIP_SET = "nl:courses:drip";
 /**
  * Where the next run starts when a run's deadline stopped it: the course it stopped at and the page of that course's
- * students it was on (`{ m, h }`), so the courses after it are not always the ones left for later. Gone after a run
- * that walked every course, and in thirty days by itself.
+ * students it was on (`{ m, h }`), so the courses after it are not always the ones left for later, and, when a run got
+ * no further on the course it began with, that course and the page it stopped at (`r`, the same `{ m, h }`), where it
+ * resumes in its turn. Gone after a run that walked every course, and in thirty days by itself.
  */
 const DRIP_CURSOR = "nl:courses:cursor";
 const DRIP_CURSOR_SECONDS = 30 * 86_400;
@@ -916,15 +917,28 @@ export async function registerDrip(store: Store, product: Listing, course: Cours
  */
 export type DripCounts = { sent: number; courses: number; failed: number; pending: number; unreadStudents: number };
 
-/** The cursor as kept: our own `{ m, h }`, null when there is none. A reply of another shape is unknown (rule 24). */
-function dripCursor(reply: unknown): { m: string; h: string } | null {
+type DripPoint = { m: string; h: string };
+type DripCursor = DripPoint & { r?: DripPoint };
+const dripPoint = (kept: unknown): DripPoint | null => {
+  const point = kept && typeof kept === "object" ? (kept as { m?: unknown; h?: unknown }) : null;
+  return point && typeof point.m === "string" && typeof point.h === "string" && /^[0-9]+$/.test(point.h) ? { m: point.m, h: point.h } : null;
+};
+
+/**
+ * The cursor as kept: our own `{ m, h }`, with the course passed over (`r`) when there is one; null when there is none.
+ * A reply of another shape is unknown (rule 24).
+ */
+function dripCursor(reply: unknown): DripCursor | null {
   if (reply === null) return null;
   if (typeof reply !== "string") throw new UnknownReplyError("where the drip emails' last run stopped");
   try {
-    const kept = JSON.parse(reply) as { m?: unknown; h?: unknown };
-    if (typeof kept.m === "string" && typeof kept.h === "string" && /^[0-9]+$/.test(kept.h)) return { m: kept.m, h: kept.h };
+    const kept = JSON.parse(reply) as { r?: unknown };
+    const at = dripPoint(kept);
+    const passed = kept && typeof kept === "object" && kept.r !== undefined ? dripPoint(kept.r) : undefined;
+    if (at && passed !== null) return passed ? { ...at, r: passed } : at;
   } catch {}
-  // Our own text, not in our shape: only where to start is lost, never an email or a course; it starts at the head.
+  // Our own text, not in our shape (the passed-over course's too): only where to start is lost, never an email or a
+  // course; it starts at the head, every course from its first page.
   console.error("the drip emails' cursor is not one this job writes; this run starts at the first course");
   return null;
 }
@@ -957,10 +971,13 @@ export async function sendDripEmails(
   const cursor = dripCursor(replies[1]);
   const members = [...new Set(listed)].sort();
   const first = cursor ? Math.max(0, members.findIndex((member) => member >= cursor.m)) : 0;
-  let stopped: { m: string; h: string } | null = null;
+  // The course an earlier run passed over, and the page it resumes at in its turn; carried until that turn comes.
+  let passed = cursor?.r ?? null;
+  let stopped: DripCursor | null = null;
   for (let i = 0; i < members.length; i += 1) {
     const member = members[(first + i) % members.length];
-    const from = cursor && member === cursor.m ? cursor.h : "0";
+    const from = cursor && member === cursor.m ? cursor.h : passed?.m === member ? passed.h : "0";
+    if (passed?.m === member) passed = null;
     if (Date.now() >= deadline) {
       stopped = { m: member, h: from };
       counts.pending = members.length - i;
@@ -970,10 +987,16 @@ export async function sendDripEmails(
       const left = await dripCourse(member, from, { load, loadCourse, origin, nowSeconds, deadline, counts });
       if (left !== null) {
         // No further on the course this run began with than where it began (a page whose sends are slow and fail,
-        // their marks let go): the next run begins with the course after it, and this one comes in its turn, from its
-        // first page (what was sent is marked, never sent twice), so one slow page never holds back every course
-        // after it (Claude 2 on #3344).
-        stopped = i === 0 && left === from && members.length > 1 ? { m: members[(first + 1) % members.length], h: "0" } : { m: member, h: left };
+        // their marks let go): the next run begins with the course after it, and this one comes in its turn, at the
+        // page it stopped at (what was sent is marked, never sent twice), so one slow page never holds back every
+        // course after it, and its earlier pages are not read again (Claude 2 on #3344). One course is passed over at
+        // a time: an earlier one left waiting gives way, and starts from its first page in its turn.
+        if (i === 0 && left === from && members.length > 1) {
+          const next = members[(first + 1) % members.length];
+          stopped = { m: next, h: passed?.m === next ? passed.h : "0" };
+          if (passed?.m === next) passed = null;
+          if (left !== "0") passed = { m: member, h: left };
+        } else stopped = { m: member, h: left };
         counts.pending = members.length - i;
         break;
       }
@@ -983,6 +1006,7 @@ export async function sendDripEmails(
       console.error("a course's drip emails failed; it stays and is tried again the next run", member.split("|")[0], error);
     }
   }
+  if (stopped && passed) stopped.r = passed;
   // Only where to start next is written: a write that does not land starts the next run where this one started.
   const write: Cmd | null = stopped ? ["SET", DRIP_CURSOR, JSON.stringify(stopped), "EX", DRIP_CURSOR_SECONDS] : cursor ? ["DEL", DRIP_CURSOR] : null;
   if (write) {

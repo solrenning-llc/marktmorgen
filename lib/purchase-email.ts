@@ -51,7 +51,7 @@ import { resendGroupReceipt, settleGroup } from "@/lib/group-buy";
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmail, sendEmailOutcome } from "@/lib/email";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { canUseDomain } from "@/lib/domains";
@@ -690,7 +690,7 @@ export function offerConfirmationFor(store: Store, offer: TakenOffer, key: SaleK
  * Its license key is given here if nothing gave it yet: the same key the
  * thanks page and the list of purchases show, because a sale only gets one.
  */
-export async function confirmOffer(store: Store, offer: TakenOffer): Promise<ConfirmOutcome> {
+export async function confirmOffer(store: Store, offer: TakenOffer): Promise<ConfirmOutcome | "uncertain"> {
   if (!canConfirm(store) || !INTENT_ID_PATTERN.test(offer.reference) || !offer.email) return "skip";
   const mark = confirmationKey(offer.reference);
   const [seen] = await redisPipeline([["GET", mark]]);
@@ -720,9 +720,13 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
   if (!letter) return "skip";
   const [claimed] = await redisPipeline([["SET", mark, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
   if (claimed === null) return "already";
-  let sent = false;
+  // A send whose answer is not known (a timeout, a 5xx, a network error) may
+  // have reached the buyer: its mark is kept and the order counted, as for a
+  // sent one, so it is never sent twice nor left out of the month's orders.
+  // Only a certain refusal lets the mark go (9 November 2026, rule 30).
+  let outcome: "sent" | "refused" | "uncertain" = "uncertain";
   try {
-    sent = await sendEmail({ meter: { by: "order" },
+    outcome = await sendEmailOutcome({ meter: { by: "order" },
       from: fromStore(store),
       to: letter.to,
       subject: letter.subject,
@@ -731,11 +735,11 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
       idempotencyKey: `nimbus-confirm:${offer.reference}`,
     });
   } finally {
-    await redisPipeline(sent ? [["SET", mark, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", mark]]);
+    await redisPipeline(outcome === "refused" ? [["DEL", mark]] : [["SET", mark, "sent", "EX", SENT_MARK_SECONDS]]);
   }
   // One of the month's orders (lib/orders.ts), by its own payment.
-  if (sent) await countOrder(store, `offer:${offer.reference}`, offer.amountCents);
-  return sent ? "sent" : "failed";
+  if (outcome !== "refused") await countOrder(store, `offer:${offer.reference}`, offer.amountCents);
+  return outcome === "refused" ? "failed" : outcome;
 }
 
 /**
@@ -765,7 +769,12 @@ async function keysFor(store: Store, session: SessionRecord, listings: Listing[]
   return lines;
 }
 
-export type ResendOutcome = "sent" | "unknown" | "call" | "refunded" | "failed";
+/**
+ * "uncertain": the sender's answer was not known (a timeout, a 5xx, a
+ * network error after the request may have reached it), so the copy may
+ * still arrive; the studio says so and never asks to try again at once.
+ */
+export type ResendOutcome = "sent" | "unknown" | "call" | "refunded" | "failed" | "uncertain";
 
 /**
  * Sends a buyer their purchase email again, when the creator — or someone on
@@ -818,12 +827,12 @@ export async function resendPurchase(store: Store, sessionId: string): Promise<R
   const listings = await listingsNamed(store, session.metadata);
   const letter = confirmationFor(store, session, created, await keysFor(store, session, listings), listings, await noteFor(store, session, listings));
   if (!letter) return "unknown";
-  const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  const sent = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
     from: fromStore(store),
     to: letter.to,
     subject: letter.subject,
     text: [ordersWords(store.language).copyNote(senderName(store.name)), "", letter.text].join("\n"),
     replyTo: store.email,
   });
-  return sent ? "sent" : "failed";
+  return sent === "refused" ? "failed" : sent;
 }

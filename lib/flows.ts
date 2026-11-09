@@ -73,7 +73,7 @@ import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
 import { readForm } from "@/lib/form-store";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { usedLinkIn } from "@/lib/mail-clicks";
 import { courseProgress } from "@/lib/learn";
@@ -810,7 +810,7 @@ async function actOnPeople(
   // One of the store's monthly emails, like every other email a workflow sends (lib/flow-limits.ts).
   if ((await takeFromMonth(store, 1)) < 1) return each(emails, "failed", "Your monthly emails were used up, so you were not emailed about this step.");
   const shown = emails.slice(0, 50);
-  const sent = await sendEmail({ meter: { by: "monthly" },
+  const sent = await sendEmailOutcome({ meter: { by: "monthly" },
     from: NIMBUS_FROM,
     to: store.email,
     subject: `${emails.length === 1 ? emails[0] : `${emails.length} people`} reached step ${at.index + 1} of “${at.flow.name}”`.slice(0, 200),
@@ -825,9 +825,11 @@ async function actOnPeople(
       "You get this because a step of that sequence tells you. Change it under Email, in your studio.",
     ].join("\n"),
     idempotencyKey: `nimbus-fl-notify:${at.flow.id}:${at.step.id}:${createHash("sha256").update([...emails].sort().join(",")).digest("hex").slice(0, 24)}`,
-  }).then((ok) => (ok ? "sent" : "no"), () => "unknown");
-  if (sent === "no") await giveBackToMonth(store, 1).catch(() => {});
-  return sent === "sent" ? each(emails, "confirmed", "You were emailed that they reached this step.").map((o) => ({ ...o, changed: true })) : sent === "no" ? each(emails, "failed", "The email to you was not accepted.") : each(emails, "uncertain", "Whether the email to you was sent could not be confirmed.");
+  }).catch(() => "uncertain" as const);
+  // Given back only when it surely did not go: an answer not known (a timeout, a 5xx, a network error) may
+  // have sent it, so the month's email stays taken and the step is held, never said "not accepted" (rule 30).
+  if (sent === "refused") await giveBackToMonth(store, 1).catch(() => {});
+  return sent === "sent" ? each(emails, "confirmed", "You were emailed that they reached this step.").map((o) => ({ ...o, changed: true })) : sent === "refused" ? each(emails, "failed", "The email to you was not accepted.") : each(emails, "uncertain", "Whether the email to you was sent could not be confirmed.");
 }
 
 /** Said when a deal changed on the board between the batch's read and its write: left as the creator made it. */

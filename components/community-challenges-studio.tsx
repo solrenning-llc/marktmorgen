@@ -90,6 +90,10 @@ export function CommunityChallengesStudio({ challenges: read, canManage }: { cha
   // Each challenge's Delete button, so the focus can go back to it.
   const deleteRefs = useRef(new Map<string, HTMLButtonElement>());
   const asked = useRef<string | null>(null);
+  // Where the focus goes after a delete that worked: the deleted challenge's
+  // Delete button goes with it, so the list's heading takes the focus (2.4.3;
+  // Claude 6's focal on #3452, C).
+  const listHeadRef = useRef<HTMLHeadingElement>(null);
   // Asked whether to delete: the safe answer takes the focus the Delete button
   // had. When the question closes without deleting ("Keep it", or a delete that
   // failed), the focus goes back to that Delete button, never to the page
@@ -126,11 +130,14 @@ export function CommunityChallengesStudio({ challenges: read, canManage }: { cha
     setError(null);
     const answer = await send({ action: "delete", challenge: id });
     setBusy(null);
-    setAsking(null);
     if (!answer.ok) {
+      setAsking(null);
       setError({ where: id, text: MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error });
       return;
     }
+    asked.current = null;
+    setAsking(null);
+    listHeadRef.current?.focus();
     toast("Challenge deleted.");
     router.refresh();
   }
@@ -214,7 +221,7 @@ export function CommunityChallengesStudio({ challenges: read, canManage }: { cha
         <p className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">Your role can see the challenges and their counts. Starting and deleting them is for the owner, Admins and Editors.</p>
       )}
 
-      <h3 className="mt-8 text-sm font-bold uppercase tracking-[0.06em] text-ink-soft">Your challenges</h3>
+      <h3 ref={listHeadRef} tabIndex={-1} className="mt-8 text-sm font-bold uppercase tracking-[0.06em] text-ink-soft">Your challenges</h3>
       {read === null ? (
         <p className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink" role="status">The challenges could not be read just now. Reload the page.</p>
       ) : challenges.length === 0 ? (

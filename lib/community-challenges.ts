@@ -254,11 +254,18 @@ export async function withinChallengeWrites(id: string): Promise<boolean> {
   return count <= CHALLENGE_WRITES_PER_HOUR;
 }
 
-/** Takes a challenge away, its members' places and check-ins with it, and gives its room back. */
+/**
+ * Takes a challenge away, its members' places and check-ins with it, and
+ * gives its room back. Off the list first, then its keys: a pipeline's
+ * commands run one after another, so a join or a check-in that lands in
+ * between already finds it unlisted and takes its own write back
+ * (`overtaken`), never leaving a place outside the list and the room
+ * (Claude 6's focal on #3452, A).
+ */
 async function letGo(id: string, ch: string, room: DataStore): Promise<void> {
   await redisPipeline([
-    ["DEL", challengeKey(id, ch), joinedKey(id, ch), checkKey(id, ch), countKey(id, ch)],
     ["ZREM", indexKey(id), ch],
+    ["DEL", challengeKey(id, ch), joinedKey(id, ch), checkKey(id, ch), countKey(id, ch)],
   ]);
   await giveData(room, [{ slot: slotOf(ch), bytes: 0, set: true }]);
 }
@@ -304,8 +311,8 @@ async function keptOverIds(id: string, now: number): Promise<string[]> {
 export async function deleteChallenge(store: Store, ch: string): Promise<"deleted" | "gone"> {
   const id = store.community?.id as string;
   if (!ITEM_ID.test(ch)) return "gone";
-  const [score] = await redisPipeline([["ZSCORE", indexKey(id), ch]]);
-  if (score === null || score === undefined) return "gone";
+  // Read exactly: a reply of an unknown shape throws, never deletes (rule 24; Claude 6's focal on #3452, B).
+  if (!(await stillKept(id, ch))) return "gone";
   await letGo(id, ch, store);
   return "deleted";
 }

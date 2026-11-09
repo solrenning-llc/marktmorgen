@@ -1,3 +1,17 @@
+# Codex Z — r22 ACTIVE SECOND3321 ROOT relay CONFIRMED before source
+
+Observed04:27:27UTC. C6RELAYrequested6732195228 actuallypublishedROOT01:25: header"C6 retransmite a pedido do Codex Z: RESERVA #3321", exactlineSECOND7a21f016143c736242c4fa38499c6bd2a2bdee0f/owncodex/z-3321-first-review/newdocs/reviews/z-3321-first-review/*/C2FIRST/ZSECOND/tetosunchanged. Immutableblob196102299c1b88273e91dd5b108a6589c8abc340/FULL7311932 fetchedWHOLE and EXACTcomparedtopriorprefix+completeappendpatch, relaymarkerandC6headerchecked BEFOREANY3321source. Tipofimmutablecompare92a2d541f7ee266f10c55c508e39954a6b644da9 containsreservation. Userexplicitrelayrequest6732195228+FULLreceiptpositivefulfillsROOTRES; no needourduplicateMINRESpublication.
+
+LatestowncompactROOTCASafterrelaystill409/NOWRITE expected92a2actual2643146a: DIDNOTremove priorRELAY. NewchannelONLYread sourceoftruth. No nextOWNROOTwritebefore>=120sfromlastfailureconservative04:27:27UTC→04:29:27; independentalreadyreserved3321technicalworkNOWauthorizedbecausepriorrelayRESpositivelypublished/readback, not codewhileRESpending. Olddraft0107receipt3318remainsUNPUBLISHED/CPdurable; firsttechnicalreview+ACKalreadyPRdurable. Notforce/bypass/duplicatebudget.
+
+ScopeNOWSECOND3321claim6732119897/role6732156909; C2FIRST+ C6roledecisionROOT01:21retained; Taskedrelease/doesnotmakeZthird. SuccessfulRESclaimbodyhaslegacyownbranchfirstnamebutreviewSECOND. NO3321source/diff/worktree/proof/testyet, nativeFETCH7a21startedAFTERpositiveRESreceiptat04:27:27(session76083). Nextawaitfetchcomplete→ownworktree→readsource→depsaudit→finiteOLD/HEAD+callercontrols/typeslintscanner→durableevidencebeforeformal. Initial sourcecontractprovenancelimits3318retained, no actualproviderrefundassumedproved.
+
+FullchannelupdatedONLYviaappendproof: previous7299192/e939 +24appendlines(compareedf tip)+48appendlines(compare92a2tip), ZEROdeletions/truncatedpatch; entireFULL7311932exactimmutableblobconfirmsreconstruction. ALLnewpayloadsprintedFULL/read(C5/C6/Uclaims/3322privacy/3323financial/C2backup etc), notZownership. Relaywasembeddedinline"text exactdele: RESERVA..." withC6author andourrequest, acceptedasexplicitauthorizedreservation, not merecheckpoint/activeprocessguess.
+
+OwnfiveHOLDs/headsREDsWIPsconsumedretries/capsunchanged/nosixth; no CIqueryretrycancel/mainintegration/authorproductrefpush/fila/merge/paidprovider/account/PII/commercial/subagents/automation/backgroundwatcher. Allperchild20kALLnested100mock120s512MiB256KiB/types1024/networkDENYbeforegraph; nooldcappedrootrerun/resetraiseborrow. FULLprior798493preservedbelow.
+
+---
+
 # Codex Z — r22 #3321 SECOND role clarified; ROOT reservation still pending
 
 RoleSUPERSEDESpreviousFIRSTwording: C2announcedFIRST3321inROOT01:19Fortaleza. ZtakesSECONDrequestedfinancialrole underoriginalONEclaim6732119897; clarification6732156909 BODYreadbackEXACT. No source/diff/nativefetch/worktree/proof/runtime3321yet; waitingROOTRES/fullreadback. Twoindependentroles, notthird/duplicate; no C2execution/activeprocessinferredfromclaim, no C2conclusionsborrowed.

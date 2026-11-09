@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AI_ALLOWANCE_UNKNOWN, allowanceOf } from "@/components/ai-assist";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -43,7 +44,7 @@ export function KitEditor({
   currency: Currency;
   /** The networks the creator already lists under their name, offered first. */
   socials: SocialNetwork[];
-  ai: { on: boolean; left: number };
+  ai: { on: boolean; left: number; known?: false };
   /** Whether the store's contact form is on, which is how a brand gets in touch. */
   contact: boolean;
 }) {
@@ -60,7 +61,7 @@ export function KitEditor({
   const [saving, setSaving] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [options, setOptions] = useState<string[]>([]);
-  const [left, setLeft] = useState(ai.left);
+  const [left, setLeft] = useState<number | null>(allowanceOf(ai));
   const [note, setNote] = useState("");
 
   const used = new Set(audience.map((row) => row.n));
@@ -164,7 +165,7 @@ export function KitEditor({
               <Icon name="sparkle" size={16} />
               {drafting ? "Drafting…" : "Draft it with AI"}
             </button>
-            <span className="text-sm text-ink-soft">{`From what you sell and the numbers below, never others. ${left} drafts left this month.`}</span>
+            <span className="text-sm text-ink-soft">{left === null ? `From what you sell and the numbers below, never others. ${AI_ALLOWANCE_UNKNOWN}` : `From what you sell and the numbers below, never others. ${left} drafts left this month.`}</span>
           </div>
         ) : null}
         {options.length ? (

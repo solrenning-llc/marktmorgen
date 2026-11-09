@@ -24,6 +24,7 @@
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type Store, ensureListId, ensureStatsId, setPastBuyers, storeRef } from "@/lib/store";
 import { readCards, readListing, readListings } from "@/lib/catalog";
+import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { MAX_CONTACT_NAME, changeLabels, importContactRows, leadsKey, parseContact, readTags } from "@/lib/contacts";
 import { enroll } from "@/lib/flows";
@@ -236,7 +237,7 @@ export async function giveAccess(
         to: email,
         subject: a.subject(product.title, store.name).slice(0, 200),
         text,
-        html: `<div style="font-family:system-ui,sans-serif;line-height:1.5">${text
+        html: `<div lang="${LANGUAGES[parseLanguage(store.language)].locale}" style="font-family:system-ui,sans-serif;line-height:1.5">${text
           .split("\n\n")
           .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
           .join("")}</div>`,

@@ -38,7 +38,7 @@ import { headers } from "next/headers";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepSecondsFor } from "@/lib/allowance-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { admitNonPaying } from "@/lib/free-pool";
+import { poolPlace } from "@/lib/free-pool";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { deriveKey } from "@/lib/secret-box";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
@@ -256,27 +256,43 @@ export async function isResting(store: Store, now = Date.now(), who: "public" | 
  * requestLimitFor). A count that cannot be made is a request refused.
  */
 async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<boolean> {
+  return (await countRequestWhy(folder, store, window, who, now, units, client, giveBack)) === "ok";
+}
+
+/**
+ * Why a public request was refused (takePublicRequestWhy): "store" when the store itself cannot take it (its window's
+ * requests are used, or it pays nothing and the month's free places are taken), "connection" when only the asking
+ * connection is over its share of the day, "unknown" when it could not be counted at all.
+ */
+export type PublicRequestRefusal = "store" | "connection" | "unknown";
+
+/** countRequest, saying why a refusal was one. The same commands, in the same order, as countRequest has always sent. */
+async function countRequestWhy(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<"ok" | PublicRequestRefusal> {
   const whole = requestLimitFor(store, now / 1000);
   const limit = who === "buyer" ? whole : publicVisitLimit(whole);
-  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return false;
-  if (!Number.isSafeInteger(units) || units < 1) return false;
+  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return "unknown";
+  if (!Number.isSafeInteger(units) || units < 1) return "unknown";
   // A store that pays nothing answers only while it holds one of the month's places (lib/free-pool-rules.ts).
-  if (!(await admitNonPaying(store, now))) return false;
+  const place = await poolPlace(store, now);
+  if (place !== "in") return place === "full" ? "store" : "unknown";
   // One connection's share of the day first (lib/traffic-rules.ts, clientDayShare):
   // past it this connection alone is refused, and nothing is counted against the store.
-  if (client && (await overShare(folder, window, whole, client, units, now))) return false;
+  if (client) {
+    const share = await overShare(folder, window, whole, client, units, now);
+    if (share !== "within") return share === "over" ? "connection" : "unknown";
+  }
   const key = requestsKey(folder, window.id);
   const reply = await redisPipeline([["INCRBY", key, units]]);
   // Only Redis's own answer to this one command counts (Codex G2 on #2583):
   // one reply, an integer at least `units`. Anything else, a `true`, a text
   // or a second item, is a count that cannot be made: the request is refused.
   const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
-  if (!Number.isSafeInteger(n) || n < units) return false;
+  if (!Number.isSafeInteger(n) || n < units) return "unknown";
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
   // A hold refused over the window (`giveBack`, a reading set aside at its worst) is not left counted: nothing was
   // read for it. A request refused as a page resting stays counted, as it always has.
   if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]]).catch(() => {});
-  return n <= limit;
+  return n <= limit ? "ok" : "store";
 }
 
 /**
@@ -296,6 +312,15 @@ export async function takePublicRequest(store: Store, who: "public" | "buyer" = 
 }
 
 /**
+ * takePublicRequest, saying why a refusal was one (PublicRequestRefusal), for a caller that answers each differently
+ * (lib/short-link-open.ts): the same counts, taken the same way. A throw, a window that cannot be told or a paid
+ * window that cannot be reserved is "unknown", never the store's own refusal.
+ */
+export async function takePublicRequestWhy(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1): Promise<"ok" | PublicRequestRefusal> {
+  return takePublicWhy(store, who, now, units, false, false);
+}
+
+/**
  * `units` public requests set aside at a reading's worst, before it (lib/affiliates.ts, accepting a partnership by its
  * emailed link): taken as takePublicRequest takes them, from the asking connection's share too, except that a hold
  * refused over the window is not left counted, since nothing was read for it. What the reading did not need is given
@@ -306,14 +331,18 @@ export async function holdPublicRequests(store: Store, units: number, now: numbe
 }
 
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
+  return (await takePublicWhy(store, who, now, units, shared, giveBack)) === "ok";
+}
+
+async function takePublicWhy(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<"ok" | PublicRequestRefusal> {
+  if (!isRedisConfigured()) return "unknown";
   try {
     const window = allowanceWindow(store, now);
-    if (!window) return false;
-    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
+    if (!window) return "unknown";
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "unknown";
+    return await countRequestWhy(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
   } catch {
-    return false;
+    return "unknown";
   }
 }
 
@@ -371,16 +400,16 @@ const MAX_HELD = 20_000;
  * requests at a time, with the share's expiry in the same write; a share that
  * cannot be read refuses the request, as a count that cannot be made does.
  */
-async function overShare(folder: string, window: AllowanceWindow, whole: number, client: string, units: number, now: number): Promise<boolean> {
+async function overShare(folder: string, window: AllowanceWindow, whole: number, client: string, units: number, now: number): Promise<"within" | "over" | "unknown"> {
   const day = new Date(now).toISOString().slice(0, 10);
   const field = `${day}:${fingerprint(`${day}|${folder}|share|${client}`)}`;
   const local = `${folder}|${window.id}|${field}`;
-  if (refusedShare.has(local)) return true;
+  if (refusedShare.has(local)) return "over";
   const held = (heldShare.get(local) ?? 0) + units;
   if (held < SHARE_BATCH) {
     if (heldShare.size >= MAX_HELD) heldShare.clear();
     heldShare.set(local, held);
-    return false;
+    return "within";
   }
   heldShare.delete(local);
   const [taken] = await redisPipeline([
@@ -388,11 +417,11 @@ async function overShare(folder: string, window: AllowanceWindow, whole: number,
     ["EXPIRE", shareKey(folder, window.id), keepSecondsFor(window, now)],
   ]);
   const total = Number(taken);
-  if (!Number.isSafeInteger(total) || total < held) return true;
-  if (total <= clientDayShare(whole)) return false;
+  if (!Number.isSafeInteger(total) || total < held) return "unknown";
+  if (total <= clientDayShare(whole)) return "within";
   if (refusedShare.size >= MAX_HELD) refusedShare.clear();
   refusedShare.add(local);
-  return true;
+  return "over";
 }
 
 /**

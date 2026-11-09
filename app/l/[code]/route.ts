@@ -1,12 +1,11 @@
 import type { NextRequest } from "next/server";
 import { CACHE_SECONDS, CODE } from "@/lib/short-link-rules";
 import { findLink, landingUrl } from "@/lib/short-links";
-import { storeForId } from "@/lib/store";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
 import { clientAddress } from "@/lib/request-guard";
 import { paceAddress } from "@/lib/picture-pace";
-import { admitShortLinkOpen, payShortLinkOpen, shortLinkRefusal } from "@/lib/short-link-open";
+import { admitShortLinkOpen, payShortLinkOpen, shortLinkNotPaid, shortLinkRefusal } from "@/lib/short-link-open";
 
 type Params = { params: Promise<{ code: string }> };
 
@@ -19,7 +18,8 @@ type Params = { params: Promise<{ code: string }> };
  * A link that was ended, or never was, opens the page that says so.
  * What reaches the function has a ceiling (lib/short-link-open.ts): a pace
  * per address and an hour's count, before anything is read; the store pays
- * for its link's open, after it is found. A refusal sends nobody anywhere.
+ * for its link's open, after it is found. A refusal sends nobody anywhere,
+ * and a link that cannot be read is refused, never answered as ended.
  */
 export async function GET(request: NextRequest, { params }: Params) {
   const { code: raw } = await params;
@@ -29,9 +29,20 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (!CODE.test(code)) return ended();
   const admission = await admitShortLinkOpen(code, { address: paceAddress(clientAddress(request)) });
   if (admission.state !== "open") return shortLinkRefusal(admission);
-  const link = await findLink(code).catch(() => null);
-  const store = link ? await storeForId(link.sid).catch(() => null) : null;
-  if (!link || !store || store.statsId !== link.statsId) return ended();
-  if (!(await payShortLinkOpen(store, code, admission))) return shortLinkRefusal({ state: "tired", now: Date.now() });
+  let link;
+  try {
+    link = await findLink(code);
+  } catch {
+    // A link that cannot be read is not a link that ended (PR #2527): refused, kept by nobody.
+    await shortLinkNotPaid(code, admission);
+    return shortLinkRefusal({ state: "unknown", now: Date.now() });
+  }
+  if (!link) {
+    await shortLinkNotPaid(code, admission);
+    return ended();
+  }
+  const store = await payShortLinkOpen(code, link, admission);
+  if (store instanceof Response) return store;
+  if (!store) return ended();
   return new Response(null, { status: 302, headers: { Location: landingUrl(storeBase(store), link), "Cache-Control": cache } });
 }

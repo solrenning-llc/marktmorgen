@@ -14,11 +14,13 @@
  *   - one address may make one server instance open at most
  *     SHORT_LINK_OPENS_PER_ADDRESS links in SHORT_LINK_ADDRESS_WINDOW_MS
  *     (lib/local-limit.ts), refused with a 429 and nothing read;
- *   - opens nobody pays for (a code nobody has, a store that cannot take one
- *     more request) are counted in the hour, for the whole site, before
- *     anything is read, and at most SHORT_LINK_UNPAID_PER_HOUR of them read:
- *     past it the instance refuses with a 503 that says when links open
- *     again, and sends nothing to the database until the hour turns;
+ *   - opens nobody pays for (a code nobody has, a store gone) are counted in
+ *     the hour, in one count every instance shares, before anything is read,
+ *     and at most SHORT_LINK_UNPAID_PER_HOUR of them read: past it the
+ *     instance refuses with a 503 that says when to try again, and sends
+ *     nothing to the database for a minute (since 9 November 2026; until
+ *     then, until the hour turned); a store over its own requests is held in
+ *     tests/short-link-open-avail.test.ts;
  *   - a count that cannot be read is not room to read: 503, nothing read;
  *   - a refusal never sends the visitor anywhere (no Location) and is never
  *     kept by the CDN (no-store): it is never shown as "this link ended".
@@ -29,8 +31,8 @@ import { CODE_LETTERS } from "@/lib/short-link-rules";
 import { GET } from "@/app/l/[code]/route";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import {
-  SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_UNKNOWN_PAUSE_MS,
-  SHORT_LINK_UNPAID_PER_HOUR,
+  SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS,
+  SHORT_LINK_REST_REFUNDS_PER_MINUTE, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_USED_UP_PAUSE_MS,
 } from "@/lib/short-link-open-rules";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
 import { CURRENT_COMMERCIAL_TERMS } from "@/lib/commercial-margin";
@@ -195,17 +197,29 @@ async function main(): Promise<void> {
     + sentCommands * COMMAND + dbBytes * DB_BYTE + 1_000 * ORIGIN_PER_BYTE;
   is("the heaviest unpaid open was measured", unpaidPipelines >= 3 && unpaidCommands >= SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS, true);
   // Priced with room: two pipelines and four commands more than measured, so a change in what the store's count sends stays inside.
-  is("the heaviest unpaid open waits on at most 6 pipelines and sends at most 8 commands", [unpaidPipelines <= 6, unpaidCommands <= 8], [true, true]);
-  const unpaid = request(6 + 2, 8 + 4, MAX_STORE_BYTES + 4_096);
+  // Rule 23 (9 November 2026): was "at most 6 pipelines and 8 commands", priced at request(6 + 2, 8 + 4). The store's id is now read
+  // with its resting mark and the refund's DECR and EXPIRE in one pipeline, and an open the store does not pay for is counted in the
+  // hour again: 7 pipelines and 12 commands measured for this open (a count that could not be made).
+  is("the heaviest unpaid open waits on at most 7 pipelines and sends at most 12 commands", [unpaidPipelines <= 7, unpaidCommands <= 12], [true, true]);
+  const unpaid = request(7 + 2, 12 + 4, MAX_STORE_BYTES + 4_096);
   const counted = request(1, SHORT_LINK_COUNT_COMMANDS, 64);
   const MONTH_HOURS = 31 * 24;
   const readMonth = SHORT_LINK_UNPAID_PER_HOUR * MONTH_HOURS * unpaid;
-  // One instance's counts beyond them: one an hour that finds the hour used, and one a minute after a count it could not read.
-  const instanceMonth = (1 + HOUR / SHORT_LINK_UNKNOWN_PAUSE_MS) * MONTH_HOURS * counted;
-  console.log(`  cost  heaviest unpaid open $${unpaid.toFixed(6)} (${unpaidPipelines} pipelines, ${unpaidCommands} commands measured), counted-only $${counted.toFixed(6)}; the site's unpaid opens $${readMonth.toFixed(2)} a month; one instance's counts beyond them $${instanceMonth.toFixed(2)} a month`);
-  is("the site's unpaid opens stay under $15 a month", readMonth < 15, true);
-  is("one instance's counts beyond them stay under $3 a month", instanceMonth < 3, true);
-  is("a paid open's own commands, held in the store's unit (tests/plan-cost-registry.test.ts)", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REFUND_COMMANDS, 6);
+  // One instance's counts beyond them: one a minute that finds the hour used, and one a minute after a count it could not read.
+  // Rule 23 (9 November 2026): the used hour was counted once an hour ((1 + HOUR / SHORT_LINK_UNKNOWN_PAUSE_MS), under $3); it is now
+  // counted again a minute later (SHORT_LINK_USED_UP_PAUSE_MS), so a paid link is not refused for the rest of the hour.
+  const instanceMonth = (HOUR / SHORT_LINK_USED_UP_PAUSE_MS + HOUR / SHORT_LINK_UNKNOWN_PAUSE_MS) * MONTH_HOURS * counted;
+  // Added 9 November 2026: a store over its own requests is refused off the shared count at most SHORT_LINK_REST_REFUNDS_PER_MINUTE
+  // times a minute on each instance, each at most the heaviest unpaid open and the SET of its resting mark.
+  const restMonth = SHORT_LINK_REST_REFUNDS_PER_MINUTE * 60 * MONTH_HOURS * (unpaid + request(1, 1, 64));
+  console.log(`  cost  heaviest unpaid open $${unpaid.toFixed(6)} (${unpaidPipelines} pipelines, ${unpaidCommands} commands measured), counted-only $${counted.toFixed(6)}; the shared count's unpaid opens $${readMonth.toFixed(2)} a month; per instance (their number unknown, never zero): counts beyond them $${instanceMonth.toFixed(2)} and store refusals off the count $${restMonth.toFixed(2)} a month`);
+  // Rule 23 (9 November 2026): was "under $15" ($14.13 measured); the heaviest open is now priced at 9 waits and 16 commands
+  // instead of 8 and 12 (an open its store does not pay for is counted in the hour again), $15.80 measured.
+  is("the shared count's unpaid opens stay under $16 a month", readMonth < 16, true);
+  is("one instance's counts beyond them stay under $6 a month", instanceMonth < 6, true);
+  is("one instance's store refusals off the count stay under $20 a month", restMonth < 20, true);
+  // Rule 23 (9 November 2026): was 6 (count 2, reads 3, DECR 1); now the resting mark's GET and the refund's EXPIRE are sent too.
+  is("a paid open's own commands, held in the store's unit (tests/plan-cost-registry.test.ts)", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REST_COMMANDS + SHORT_LINK_REFUND_COMMANDS, 8);
   // The company's cost is held in the test registry, unreviewed: priced above zero, its ceiling unknown, never zero.
   is("the company's cost is held, priced above zero, its reviewed ceiling unknown and not approved", [
     SHORT_LINK_UNPAID_COMPANY_COST.perHour,

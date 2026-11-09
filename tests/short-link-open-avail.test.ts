@@ -88,6 +88,14 @@ async function main(): Promise<void> {
   is("one mistyped code is told it ended", (await open("zzzzzz")).to?.endsWith("/l/ended"), true);
   const live = await open(liveCode);
   is("the other store's link, never opened on this instance before, opens", [live.status, live.to?.includes("/@bravo")], [302, true]);
+  // Added with the fix (9 November 2026): only the store's own refusal marks it resting, for a minute.
+  const alpha = (await storeForEmail("a@example.com"))!;
+  inject = (batch) => (batch.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:")) ? batch.map((c) => (c[0] === "INCRBY" ? 1_000_000_000 : "OK")) : null);
+  await open(tiredCode);
+  inject = null;
+  is("the store's own refusal writes its resting mark", (await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0], "1");
+  later(61_000);
+  is("the mark lapses after a minute", (await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0], null);
 
   part("(ii) Paid opens at once do not stop the instance for the rest of the hour");
   reset();
@@ -130,6 +138,9 @@ async function main(): Promise<void> {
   is("it is not told the page cannot be opened", /page this link leads to cannot be opened/i.test(refusedText), false);
   const next = await open(sharedCode);
   is("the next visitor, from another connection, opens the link", [next.status, next.to?.includes("/@echo")], [302, true]);
+  // Added with the fix (9 November 2026): a connection's refusal never marks the store resting.
+  const echo = (await storeForEmail("e@example.com"))!;
+  is("no resting mark for the store", (await redis.pipeline([["GET", `nl:slink:rest:${echo.sid}`]]))[0], null);
 
   part("(iv) The refund off the hour never leaves a count without expiry");
   reset();
@@ -153,6 +164,21 @@ async function main(): Promise<void> {
   before = null;
   is("503, sent nowhere", [failed.status, failed.to], [503, null]);
   is("never kept by the CDN", failed.cache.includes("no-store"), true);
+
+  part("(vii) Added with the fix: one store refusal a minute per instance stays off the hour; past it, refusals are counted");
+  reset();
+  topOfHour();
+  const tiredOne = await make("h@example.com", "hotel");
+  const tiredTwo = await make("i@example.com", "india");
+  inject = (batch) => (batch.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:")) ? batch.map((c) => (c[0] === "INCRBY" ? 1_000_000_000 : "OK")) : null);
+  const hourKey = `nl:slink:open:${Math.floor(Date.now() / HOUR)}`;
+  is("the first store's refusal", (await open(tiredOne)).status, 503);
+  is("it is off the hour's count", Number((await redis.pipeline([["GET", hourKey]]))[0]), 0);
+  is("a second store's refusal in the same minute", (await open(tiredTwo)).status, 503);
+  inject = null;
+  is("it is counted in the hour, so the minute's company cost stays one refusal", Number((await redis.pipeline([["GET", hourKey]]))[0]), 1);
+  const hold = SHORT_LINK_UNPAID_COMPANY_COST as unknown as { perInstance: Record<string, number> };
+  is("the per-instance ceiling is registered", [hold.perInstance.restRefusalsPerMinute, hold.perInstance.restRefusalReads, hold.perInstance.restMarkSets, hold.perInstance.restMarkMs], [1, 1, 1, 60_000]);
 
   part("(vi) The company's share is per instance; the number of instances is unknown, never zero");
   const held = SHORT_LINK_UNPAID_COMPANY_COST as unknown as Record<string, unknown>;

@@ -1252,7 +1252,15 @@ export async function storeIdExists(sid: string): Promise<boolean> {
 export async function storeForId(sid: string): Promise<Store | null> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
   const [ref] = await redisPipeline([["GET", storeIdKey(sid)]]);
-  if (typeof ref !== "string" || !ref) return null;
+  return storeForIdRef(sid, ref);
+}
+
+/** The command storeForId sends to find a store by its id, for a caller that sends it in a pipeline of its own (lib/short-link-open.ts). */
+export const storeIdCommand = (sid: string): [string, string] => ["GET", storeIdKey(sid)];
+
+/** The store that storeIdCommand's reply names, checked to carry that very id, as storeForId reads it; null for anything else. */
+export async function storeForIdRef(sid: string, ref: unknown): Promise<Store | null> {
+  if (!STORE_ID_PATTERN.test(sid) || typeof ref !== "string" || !ref) return null;
   const store = await storeForEmail(ref);
   return store && store.sid === sid ? store : null;
 }

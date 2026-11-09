@@ -20,7 +20,9 @@ const real = redis.pipeline.bind(redis);
 let afterCount: (() => Promise<void>) | null = null;
 redis.pipeline = (async (batch: Command[]) => {
   const values = await real(batch);
-  if (afterCount && batch.some((c) => c[0] === "HLEN" || c[0] === "LLEN")) {
+  // Altered 2026-11-09 (rule 23): get_page_versions measures its versions (versionSizes, one EVAL of the
+  // page-version-sizes script) where it counted them (LLEN), so the race runs after that measure too.
+  if (afterCount && batch.some((c) => c[0] === "HLEN" || c[0] === "LLEN" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:page-version-sizes:v1\n")))) {
     const run = afterCount;
     afterCount = null;
     await run();

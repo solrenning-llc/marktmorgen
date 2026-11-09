@@ -566,13 +566,18 @@ export function pageReadingWork(): ReadWork {
   return { commands: 2, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
 }
 
-/** get_page_versions: the listing, how many versions are kept (LLEN), then those versions; one sent whole, or the list. */
 /** What a count command (LLEN, HLEN) answers: one integer, never more than this. */
 export const COUNT_REPLY_BYTES = 32;
+/** What measuring a page's versions answers (lib/sales-page-store.ts, versionSizes): one integer for each, at most MAX_VERSIONS. */
+export const VERSION_SIZES_REPLY_BYTES = MAX_VERSIONS * COUNT_REPLY_BYTES;
 
+/**
+ * get_page_versions: the listing, each kept version measured in Redis (versionSizes: one EVAL and the LRANGE it runs,
+ * sizes only), then the newest `versions` that each fit in PAGE_VERSION_BYTES; one sent whole, or the list.
+ */
 export function pageVersionsWork(versions: number, one: boolean): ReadWork {
   const n = Math.min(Math.max(versions, 0), MAX_VERSIONS);
-  return { commands: 2, bytes: COUNT_REPLY_BYTES + n * PAGE_VERSION_BYTES, sent: (one ? PAGE_BYTES : n * 256) + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
+  return { commands: 3, bytes: VERSION_SIZES_REPLY_BYTES + n * PAGE_VERSION_BYTES, sent: (one ? PAGE_BYTES : n * 256) + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
 }
 
 /** list_saved_blocks: how many sections the library holds (HLEN), then those sections, read and sent. */

@@ -27,7 +27,7 @@ import { readAboutExact } from "@/lib/product-about";
 import { type Course, findLesson, readBody, readCourseExact } from "@/lib/course";
 import { readQuizFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
-import { MAX_VERSIONS, countVersions, readPageExact, readVersionsExact } from "@/lib/sales-page-store";
+import { MAX_VERSIONS, readPageExact, readVersionsExact, versionSizes } from "@/lib/sales-page-store";
 import { countSections, readSectionsExact } from "@/lib/saved-block-store";
 import type { PageBlock } from "@/lib/sales-page";
 import { EMPTY_PAGE, type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
@@ -46,7 +46,7 @@ import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
 import {
   EMAILS_BROADCASTS, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
   membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
-  COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork,
+  COUNT_REPLY_BYTES, PAGE_VERSION_BYTES, SAVED_SECTIONS_MAX, VERSION_SIZES_REPLY_BYTES, type ReadWork,
 } from "@/lib/api-read-rules";
 import { paypalCounts } from "@/lib/paypal-sales";
 import { insightsFrom } from "@/lib/insights";
@@ -665,9 +665,10 @@ export async function readPageReadingTool(store: Store, id: string, charge: Char
  * prepares a change, and how a creator can ask to bring one back.
  */
 export async function readPageVersionsTool(store: Store, id: string, version: number | null, hold: Hold) {
-  // Set aside at its most before anything is read: the listing and every version the page may keep. Counted and read
-  // afterwards, and settled at the larger of that ceiling for what was read and what was really read and sent, so a
-  // version saved between the count and the read is paid for (Codex J on #1821).
+  // Set aside at its most before anything is read: the listing and every version the page may keep, each at
+  // PAGE_VERSION_BYTES. Measured and read afterwards (only versions that fit in that), and settled at the larger of
+  // that ceiling for what was read and what was really read and sent, so a version saved between the measure and the
+  // read is paid for (Codex J on #1821).
   const listings = listingsWork(listingsToRead(store, [id]));
   const most = apiReadUnits(addWork(listings, pageVersionsWork(MAX_VERSIONS, version !== null)));
   const settle = await hold(most);
@@ -678,13 +679,22 @@ export async function readPageVersionsTool(store: Store, id: string, version: nu
     const refused = await settle(settledUnits(listings, most));
     return refused ?? { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
   }
-  const kept = store.statsId ? await countVersions(store.statsId, listing.id) : 0;
-  if (kept === null || !store.statsId) {
-    // Nothing of the versions was read: only the listing and the count are kept.
+  // Each kept version measured in Redis first (sizes only, as GET /api/store/page-versions), before any is read.
+  const sizes = store.statsId ? await versionSizes(store.statsId, listing.id).catch(() => null) : [];
+  if (sizes === null || !store.statsId) {
+    // Nothing of the versions was read: only the listing and the measure are kept.
     const refused = await settle(settledUnits(addWork(listings, pageVersionsWork(0, false)), most));
     return refused ?? unavailable;
   }
-  const read = await readVersionsExact(store.statsId, listing.id).catch(() => null);
+  // Only the newest versions that each fit in PAGE_VERSION_BYTES, what was set aside for each, are read. One kept
+  // larger (before 9 November 2026 a page was held to a length in UTF-16 units, up to three times that in bytes) is
+  // never read here, nor any older than it: they are counted in not_read, and the studio brings them back, paid for
+  // at what they weigh. A save in between pushes a version that fits in at the front and the one kept larger further
+  // back, so all MAX_VERSIONS are read when none was measured larger, and those read always fit.
+  const larger = sizes.findIndex((size) => size > PAGE_VERSION_BYTES);
+  const readable = larger < 0 ? MAX_VERSIONS : larger;
+  const notRead = larger < 0 ? 0 : sizes.length - larger;
+  const read = await readVersionsExact(store.statsId, listing.id, readable).catch(() => null);
   // Read but not known: how much was read is not known either, so all that was set aside is kept (Codex J on #1821).
   if (!read) return (await settle(most)) ?? unavailable;
   const { versions } = read;
@@ -693,18 +703,23 @@ export async function readPageVersionsTool(store: Store, id: string, version: nu
   if (version === null) {
     value = {
       product: listing.id,
-      note: "Newest first. at is when that version was saved over, in milliseconds since 1970 (UTC). Read one with version.",
+      note: "Newest first. at is when that version was saved over, in milliseconds since 1970 (UTC). Read one with version. not_read counts older versions left out here, because one of them was kept before November 9, 2026 and is too large to read here; open them from the page's versions in the studio.",
       versions: versions.map((v, index) => ({ version: index, at: v.at, blocks: v.page.blocks.length, headline: v.page.blocks[0]?.kind === "hero" ? v.page.blocks[0].headline : "" })),
+      not_read: notRead,
     };
     answer = { found: true as const, value };
   } else {
     const one = versions[version];
     value = one ? { ...salesPageTool(listing.id, listing.title, one.page), version, at: one.at } : null;
-    answer = one ? { found: true as const, value } : { found: false as const, error: "There is no such version. Read the list first, without version." };
+    answer = one
+      ? { found: true as const, value }
+      : larger >= 0 && version >= larger && version < sizes.length
+        ? { found: false as const, error: "That version is not read here: it, or a newer one, was kept before November 9, 2026 and is too large. Open it from the page's versions in the studio." }
+        : { found: false as const, error: "There is no such version. Read the list first, without version." };
   }
   const ceiling = addWork(listings, pageVersionsWork(versions.length, version !== null));
   const sent = Buffer.byteLength(JSON.stringify(answer.found ? answer.value : { error: answer.error }, null, 2) ?? "", "utf8");
-  const refused = await settle(settledUnits(atLeast(ceiling, { bytes: COUNT_REPLY_BYTES + read.bytes, sent }), most));
+  const refused = await settle(settledUnits(atLeast(ceiling, { bytes: VERSION_SIZES_REPLY_BYTES + read.bytes, sent }), most));
   return refused ?? answer;
 }
 

@@ -292,19 +292,22 @@ function pageRecordExact(json: string, what: string): SalesPage {
 }
 
 /**
- * A page's kept versions exactly as kept, newest first, for a reader that must
- * never take an answer it does not know for "no versions" (the MCP tools):
- * throws when Redis's answer is not exactly one list of texts, or when a kept
- * version is not one, so nothing is left out unsaid.
+ * A page's newest `count` kept versions exactly as kept, newest first, for a reader that must never take an answer
+ * it does not know for "no versions" (the MCP tools): throws when Redis's answer is not exactly one list of texts of
+ * at most `count`, when a kept version is not one, or when one weighs past MAX_VERSION_BYTES, so nothing is left out
+ * unsaid and nothing is taken past what was paid for. `count` is how many were measured to fit (versionSizes); none
+ * is read when it is 0. A save pushes a version that fits in at the front, so those read still fit.
  */
-export async function readVersionsExact(statsId: string, productId: string): Promise<{ versions: PageVersion[]; bytes: number }> {
+export async function readVersionsExact(statsId: string, productId: string, count: number = MAX_VERSIONS): Promise<{ versions: PageVersion[]; bytes: number }> {
   if (!isRedisConfigured()) throw new Error("the page's versions could not be read");
-  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
-  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
+  const most = Math.min(Math.max(Math.floor(count), 0), MAX_VERSIONS);
+  if (most === 0) return { versions: [], bytes: 0 };
+  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, most - 1]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0]) || reply[0].length > most) throw new Error("the page's versions could not be read");
   const versions: PageVersion[] = [];
   let bytes = 0;
   for (const entry of reply[0] as unknown[]) {
-    if (typeof entry !== "string") throw new Error("the page's versions could not be read");
+    if (typeof entry !== "string" || Buffer.byteLength(entry, "utf8") > MAX_VERSION_BYTES) throw new Error("the page's versions could not be read");
     bytes += Buffer.byteLength(entry, "utf8");
     const cut = entry.indexOf("\n");
     const at = Number(entry.slice(0, cut));

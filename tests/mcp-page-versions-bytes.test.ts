@@ -5,8 +5,8 @@
  * UTF-16 units, may weigh up to three times that: what it weighs past it moved before it was paid for.
  *
  * Each version is now measured in Redis first (versionSizes, sizes only), and only the newest ones that each fit in
- * PAGE_VERSION_BYTES are read; one kept larger is never read here, counted in too_large, and refused in words when
- * asked for (the studio still brings it back, paid for at its weight).
+ * PAGE_VERSION_BYTES are read; one kept larger, and any older than it, is never read here, counted in not_read, and
+ * refused in words when asked for (the studio still brings it back, paid for at its weight).
  *
  * Every call is a real one through the MCP route with a synthetic key, on the in-memory Redis; only the versions kept
  * before pages were held in bytes are set by hand.
@@ -80,15 +80,19 @@ async function main(): Promise<void> {
   const taken = (await allowanceUsed(store, "api")) - before;
   const versions = (listed.value.versions ?? []) as { headline: string }[];
   const due = 1 + apiReadUnits(addWork(listingsWork(listingsToRead(store, [p])), pageVersionsWork(1, false)));
-  console.log(`  heaviest version read: ${heaviest} bytes; listed ${versions.length}, too_large ${String(listed.value.too_large)}; took ${taken} (one version's envelope: ${due})`);
+  console.log(`  heaviest version read: ${heaviest} bytes; listed ${versions.length}, not_read ${String(listed.value.not_read)}; took ${taken} (one version's envelope: ${due})`);
   is("no version past MAX_VERSION_BYTES was read", heaviest <= MAX_VERSION_BYTES, true);
-  is("the one that fits is listed, the two larger counted", [listed.isError, versions.length, versions[0]?.headline, listed.value.too_large], [false, 1, "Bake bread", 2]);
+  // Altered 2026-11-09 (rule 23): the field is not_read, not too_large, since a version older than one kept larger is
+  // left out with it whether or not it fits.
+  is("the one that fits is listed, the two larger counted", [listed.isError, versions.length, versions[0]?.headline, listed.value.not_read], [false, 1, "Bake bread", 2]);
   is("it took the door's request and the envelope of the one version read", taken, due);
 
   part("Asking for a version kept larger is refused in words, without reading it");
   heaviest = 0;
   const asked = await call({ product: p, version: 1 });
   is("refused, the version not read", [asked.isError, String(asked.value.error ?? "").includes("too large"), heaviest <= MAX_VERSION_BYTES], [true, true, true]);
+  const missing = await call({ product: p, version: 3 });
+  is("past every kept version, still no such version", missing.value.error, "There is no such version. Read the list first, without version.");
   const first = await call({ product: p, version: 0 });
   is("the one that fits is still read whole", [first.isError, first.value.version], [false, 0]);
 
@@ -99,7 +103,8 @@ async function main(): Promise<void> {
   heaviest = 0;
   ranges = 0;
   const none = await call({ product: q });
-  is("no LRANGE of the versions, an empty list, both counted", [none.isError, ranges, none.value.versions, none.value.too_large], [false, 0, [], 2]);
+  // Altered 2026-11-09 (rule 23): the field is not_read (above).
+  is("no LRANGE of the versions, an empty list, both counted", [none.isError, ranges, none.value.versions, none.value.not_read], [false, 0, [], 2]);
   done();
 }
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -1294,6 +1294,12 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/api-read.ts", names: ["studentPage", "chargeBook", "bookingsWork"] },
       { file: "lib/call-moves-read.ts", names: ["MOVES_PER_MGET", "MOVE_BYTES", "MOVE_KEY_BYTES", "moveReads"] },
       { file: "lib/mcp-tools.ts", names: ["chargeBook"] },
+      // get_page_versions measures each kept version before it reads any and reads only the newest that each fit in
+      // PAGE_VERSION_BYTES, what it set aside for each; one kept larger before 9 November 2026 is never read through a
+      // key (tests/mcp-page-versions-bytes.test.ts). Added 2026-11-09 (rule 23), the sibling of the studio route.
+      { file: "lib/mcp-tools.ts", names: ["versionSizes(store.statsId, listing.id)", "size > PAGE_VERSION_BYTES", "readVersionsExact(store.statsId, listing.id, readable)"] },
+      { file: "lib/sales-page-store.ts", names: ["Buffer.byteLength(entry, \"utf8\") > MAX_VERSION_BYTES"] },
+      { file: "lib/api-read-rules.ts", names: ["pageVersionsWork", "VERSION_SIZES_REPLY_BYTES = MAX_VERSIONS * COUNT_REPLY_BYTES"] },
       { file: "app/api/v1/sales/route.ts", names: ["takeMoreApi(store, API_SALES_UNITS - 1)"] },
       { file: "lib/api-sales.ts", names: ["charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS)"] },
       { file: "lib/store-allowance-rules.ts", names: ["API_SALES_UNITS"] },

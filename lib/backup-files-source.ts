@@ -124,11 +124,17 @@ const OTHER_SECRETS = [
   "BACKUP_ENCRYPTION_KEY",
 ];
 
-/** The route's own secret, or null when it is unset, short, or the same as another secret of the site. */
+/**
+ * The route's own secret, or null when it is unset, short, or the same as another setting of the site: the named
+ * secrets above, and any other setting at all (Claude 2's LOW 2 and Codex Z's LOW 1, 9 November 2026: the files
+ * bucket's read key id, printed in every R2 address, the backup bucket's key, the database's and Stripe's tokens were
+ * taken), so the route's secret is never a value something else holds or prints.
+ */
 export function backupFilesRouteSecret(env: Record<string, string | undefined> = process.env): string | null {
   const secret = (env.BACKUP_FILES_ROUTE_SECRET ?? "").trim();
   if (secret.length < BACKUP_FILES_SECRET_MIN) return null;
   if (OTHER_SECRETS.some((name) => (env[name] ?? "").trim() === secret)) return null;
+  if (Object.entries(env).some(([name, value]) => name !== "BACKUP_FILES_ROUTE_SECRET" && (value ?? "").trim() === secret)) return null;
   return secret;
 }
 

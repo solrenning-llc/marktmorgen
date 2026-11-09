@@ -792,6 +792,11 @@ export const TEAM_READING = 7 * COMMAND + 1 * MEMORY_SECOND + 0.05 * CPU_SECOND;
 /** Commands a view of a team call's page costs: each host's claims, and one MGET of every host's calendar state and connection plus the round-robin counts (lib/team-booking.ts). */
 export const TEAM_COMMANDS_PER_HOST_VIEW = 1;
 export const TEAM_COMMANDS_PER_VIEW = 2;
+/**
+ * Commands a view of an ordinary weekly call's page, embedded calendar or move page adds since 9 November 2026: one
+ * HGETALL of the store owner's claims on every store (lib/calls.ts, ownerClaims), read before any time is offered.
+ */
+export const OWN_CLAIMS_COMMANDS_PER_VIEW = 1;
 
 /** Windows of a counter that a 31-day month can touch. */
 export const DAY_WINDOWS = 32;
@@ -1091,6 +1096,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/team.ts", names: ["MAX_TEAM"] },
     ],
     basis: "Each host's calendar read at most once a sync interval all month (about seven commands and its wait for the calendar inside the page that asked), and every later page of every visit a team call's page reading each host's claims (one command each), every host's calendar state and connection in one command, and the team's round-robin counts.",
+  },
+  {
+    id: "own-call-host-claims",
+    feature: "An ordinary weekly call read against its store owner's time on other stores' teams (lib/host-claims.ts, 9 November 2026)",
+    // Every page of every visit after the first an ordinary weekly call's page, each reading the owner's claims once.
+    monthlyUsd: (tier) => VISITS_INCLUDED[tier] * (PAGES_PER_VISIT - 1) * OWN_CLAIMS_COMMANDS_PER_VIEW * COMMAND,
+    sources: [
+      { file: "lib/calls.ts", names: ["ownerClaims", "claimOwner", "bookingOwn", "OWN_CLAIM_CAP"] },
+      { file: "lib/host-claims.ts", names: ["readClaims", "claimHosts", "confirmClaim", "releaseClaim"] },
+    ],
+    basis: "Every later page of every visit an ordinary weekly call's page (or its embedded calendar, or a move page) reading the store owner's claims in one command before any time is offered, as a team call's page reads each host's; a checkout reminder that asks whether a call still has an open time (lib/checkout-recovery.ts, hasOpenTime) reads them once more, inside its own email's work. A booking's own claim is written inside the order it is admitted as (CALL_ORDER_UNITS, ORDER_COMPUTE): the hold reads the claims and runs the claim script (two commands), the confirmation reads its diary entry and writes the claim and its lifetime (at most four), a move reads and writes again (two), a hold given back or a refund lets it go (one); a few commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page.",
   },
   {
     id: "quizzes",

@@ -33,6 +33,7 @@ import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, holdAndCheckout, moveBooking, slotsForProduct } from "@/lib/calls";
 import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import { claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -161,8 +162,9 @@ async function sellSession(w: World, start: number): Promise<string> {
 
 const lockOf = (w: World) => `nl:call:lock:${w.store.callsId}`;
 const diaryOf = (w: World) => `nl:call:busy:${w.store.callsId}`;
+// The store owner's claims too: a hold claims the owner's time (lib/calls.ts, claimOwner), and a time cleared here is free.
 async function clear(w: World): Promise<void> {
-  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)]]);
+  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)], ["DEL", claimsKey(hostId(w.store.email))]]);
 }
 
 async function main(): Promise<void> {

@@ -154,11 +154,17 @@ async function main(): Promise<void> {
 
   part("Claims that cannot be read are never read as free");
   const V = weekdayAt(6, 780);
-  await redis.pipeline([["SET", claimsKey(hostId(MAYA)), "not a hash"]]);
+  // Her claims answered in a shape that is not a list (rule 24), every other reply as Redis gives it.
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await real(commands);
+    return replies.map((reply, i) => (commands[i][0] === "HGETALL" && commands[i][1] === claimsKey(hostId(MAYA)) ? "not a list" : reply));
+  }) as typeof redis.pipeline;
   is("her own store offers no time at all", await slotsForProduct(lantern.store, lantern.product), null);
   const blind = await hold(lantern.store, lantern.product, V);
   is("and holds nothing", blind.ok ? "held" : blind.reason, "error");
-  await redis.pipeline([["DEL", claimsKey(hostId(MAYA))]]);
+  redis.pipeline = real;
+  is("read again, the time is offered", await offered(lantern.store, lantern.product, V), true);
 
   part("A group call's seats share one claim on her");
   const group = await anotherCall(MAYA, { ...weekly, seats: 3 } as CallSetup);

@@ -577,10 +577,11 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // An email sent from inside a request or a job already counted, and its count.
   email: PER_EMAIL + TAKE_COMMANDS * COMMAND,
   // An access email and its link: the link written, the sender's state read and written, the hour counted (five on a
-  // send that goes out). One that did not go out has its link deleted (lib/community-access.ts, lib/buyer-library.ts,
-  // lib/learn.ts, lib/affiliate-hub.ts, the same send and the same DEL); on the send that finds Amazon's account paused
-  // that is seven with the day's notice check (measured 7 November 2026, tests/access-link-uniform-reply.test.ts
-  // worlds), so seven are priced.
+  // send that goes out). One that did not go out has its link deleted (lib/membership-manage.ts,
+  // lib/community-access.ts, lib/buyer-library.ts, lib/affiliates.ts, lib/affiliate-hub.ts, the same send and the same
+  // DEL); on the send that finds Amazon's account paused that is seven with the day's notice check (measured
+  // 7 November 2026, tests/access-link-uniform-reply.test.ts and tests/oracle-siblings-uniform-reply.test.ts worlds),
+  // so seven are priced.
   transactional: PER_EMAIL + (7 + TAKE_COMMANDS) * COMMAND,
   // A call out, waited on at 2 GB for ten seconds.
   integration: request("wait", 10 + TAKE_COMMANDS, 20_000),

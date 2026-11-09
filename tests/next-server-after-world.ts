@@ -19,3 +19,16 @@ export function after(task: unknown): void {
 export function connection(): Promise<void> {
   return Promise.resolve();
 }
+
+/**
+ * Runs what was handed to after(), in order, as Next does once each answer is
+ * sent (lib/after-answer.ts); what a task leaves for after itself runs too.
+ */
+export async function runAfterTasks(): Promise<number> {
+  let ran = 0;
+  while (afterTasks.length) {
+    await (afterTasks.shift() as () => unknown)();
+    ran += 1;
+  }
+  return ran;
+}

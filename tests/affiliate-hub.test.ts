@@ -16,12 +16,7 @@ import { hubOwner, requestHubLink, storesPromoted } from "@/lib/affiliate-hub";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { afterTasks } from "./next-server-after-world";
-
-/** Runs what the answers left for after them, as Next does once each answer is sent. */
-async function runAfterTasks(): Promise<void> {
-  while (afterTasks.length) await (afterTasks.shift() as () => unknown)();
-}
+import { runAfterTasks } from "./next-server-after-world";
 
 const sent: { to: string; text: string }[] = [];
 const sessions = new Map<string, Record<string, unknown>>();

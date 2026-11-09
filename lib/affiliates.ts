@@ -792,7 +792,7 @@ export async function invitePartner(input: {
   const saved = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]), 1);
   if (saved?.[0] !== "OK") {
     // A SET that landed with its answer lost is removed, since no email carries it; in place of the send's own
-    // commands, so within the invitation's cost. Best effort: the hour's expiry still ends it.
+    // commands, so within the invitation's cost. Best effort: the link's 24-hour expiry still ends it.
     await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("removing an unconfirmed partner link failed", error));
     return "error";
   }

@@ -17,7 +17,7 @@ import { joinAsBuyer } from "@/lib/affiliates";
 import { requestHubLink } from "@/lib/affiliate-hub";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { store as redis } from "./redis-stub";
-import { afterTasks } from "./next-server-after-world";
+import { afterTasks, runAfterTasks } from "./next-server-after-world";
 import { done, is, part } from "./check";
 
 type Pipeline = typeof redis.pipeline;
@@ -69,16 +69,6 @@ const hubLinkKey = (token: string) => `nl:affhub:link:${createHash("sha256").upd
 const stored = async (key: string) => (await redis.pipeline([["EXISTS", key]]))[0] === 1;
 const hubLinks = () => [...(redis as unknown as { data: Map<string, unknown> }).data.keys()].filter((k) => k.startsWith("nl:affhub:link:")).length;
 
-/** Runs what the answers left for after them, as Next does once each answer is sent. */
-async function drain(): Promise<number> {
-  let ran = 0;
-  while (afterTasks.length) {
-    await (afterTasks.shift() as () => unknown)();
-    ran += 1;
-  }
-  return ran;
-}
-
 async function main(): Promise<void> {
   redis.clear();
   process.env.RESEND_API_KEY = "re_test_hub_only_a_stand_in";
@@ -123,10 +113,10 @@ async function main(): Promise<void> {
   afterTasks.length = 0;
   const control = await ask("dana@example.com");
   is("the answer is \"sent\" before anything is looked up or emailed", [control, sent.length, afterTasks.length], ["sent", 0, 1]);
-  await drain();
+  await runAfterTasks();
   const hubToken = sent.at(-1)?.text.match(/token=([0-9a-f]{64})/)?.[1] ?? "";
   is("one email, to Dana, with a stored link", [sent.length, sent.at(-1)?.to, await stored(hubLinkKey(hubToken))], [1, "dana@example.com", true]);
-  is("a stranger gets the same answer and no email", [await ask("nobody@example.com"), await drain(), sent.length], ["sent", 1, 1]);
+  is("a stranger gets the same answer and no email", [await ask("nobody@example.com"), await runAfterTasks(), sent.length], ["sent", 1, 1]);
 
   part("PROOF: requestHubLink's answer under an unconfirmed SET must not tell an affiliate from a stranger");
   const affiliate = await setAnswered("nl:affhub:link:", [], () => ask("dana@example.com"));
@@ -140,7 +130,7 @@ async function main(): Promise<void> {
       const before = { emails: sent.length, links: hubLinks() };
       const answers = await setAnswered("nl:affhub:link:", reply, async () => {
         const got = [await ask("dana@example.com"), await ask("nobody@example.com")];
-        await drain();
+        await runAfterTasks();
         return got;
       }, apply);
       is(`SET ${apply ? "made" : "not made"} with ${what}: "sent" to both, no email, no link kept`, [answers, sent.length - before.emails, hubLinks() - before.links], [["sent", "sent"], 0, 0]);
@@ -151,7 +141,7 @@ async function main(): Promise<void> {
   resendDown = true;
   const beforeRefused = { emails: sent.length, links: hubLinks() };
   const refused = [await ask("dana@example.com"), await ask("nobody@example.com")];
-  await drain();
+  await runAfterTasks();
   resendDown = false;
   is("\"sent\" to both, nothing delivered, no link kept", [refused, sent.length - beforeRefused.emails, hubLinks() - beforeRefused.links], [["sent", "sent"], 0, 0]);
   is("and the link already emailed still opens the page", await stored(hubLinkKey(hubToken)), true);

@@ -13,7 +13,8 @@
  *     offerRefunded), the list of purchases (lib/buyer-orders.ts) and the
  *     license key (lib/licence-keys.ts revokeRefunded, from the closing events);
  *   - a dispute still open (needs_response, under_review, the warning_
- *     stages), won, or prevented closes nothing;
+ *     stages) or won closes nothing; one prevented (or the legacy
+ *     charge_refunded) gave the money back and closes as lost does;
  *   - one lost dispute closes only what its own payment paid for: another
  *     purchase of the same product, a purchase made again, and another key
  *     keep standing;
@@ -101,7 +102,11 @@ const paid = (id: string, product: string, status: string | null, over: Record<s
   ...over,
 });
 
-const OPEN_STATES = ["needs_response", "under_review", "warning_needs_response", "warning_under_review", "warning_closed", "won", "prevented"];
+// Changed (rule 23, siblings of #3318): "prevented" left this list. Stripe closes a dispute as prevented when the money went
+// back to the buyer before a chargeback (lib/dispute-statuses.ts DISPUTE_RETURNED, as lib/plan-refund-rules.ts RETURNED reads
+// it), so keeping it open left the buyer with the money and the access. RETURNED_STATES below holds it closed.
+const OPEN_STATES = ["needs_response", "under_review", "warning_needs_response", "warning_under_review", "warning_closed", "won"];
+const RETURNED_STATES = ["prevented", "charge_refunded"];
 
 async function main(): Promise<void> {
   redis.clear();
@@ -113,6 +118,9 @@ async function main(): Promise<void> {
   is("lost, read from Stripe: closed", await purchaseRefunded(ACCOUNT, paid("cs_test_unit00000lost", "x", "lost")), true);
   for (const status of OPEN_STATES) {
     is(`${status}: open`, await purchaseRefunded(ACCOUNT, paid(`cs_test_unit0${status.replace(/_/g, "").slice(0, 8)}`, "x", status)), false);
+  }
+  for (const status of RETURNED_STATES) {
+    is(`${status}: closed, as lost`, await purchaseRefunded(ACCOUNT, paid(`cs_test_unit0${status.replace(/_/g, "").slice(0, 8)}`, "x", status)), true);
   }
   disputeReads = 0;
   is("never disputed: open", await purchaseRefunded(ACCOUNT, paid("cs_test_unit000000none", "x", null)), false);
@@ -150,6 +158,11 @@ async function main(): Promise<void> {
     const email = `open${n}@example.com`;
     sessions[email] = [paid(`cs_test_open${n}0000000${n}`, course, status)];
     is(`${status}: still open`, await open(email), [course]);
+  }
+  for (const [n, status] of RETURNED_STATES.entries()) {
+    const email = `back${n}@example.com`;
+    sessions[email] = [paid(`cs_test_back${n}0000000${n}`, course, status)];
+    is(`${status}: shut, as lost`, await open(email), []);
   }
   sessions["two@example.com"] = [paid("cs_test_two000000001", course, "lost"), paid("cs_test_two000000002", course, null)];
   is("bought twice, one lost: the other stands", await open("two@example.com"), [course]);

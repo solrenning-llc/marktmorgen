@@ -10,7 +10,9 @@
  *     (deleteIfHeldOnly), read exactly; the store's list and the person's set are cleaned only after that delete is
  *     confirmed, so a record still kept is still found by the person's erasure (CX-123 rules 24 and 30);
  *   - a version's text that is kept but does not read as recorded is unknown for the person's data copy
- *     (readVersionExact throws), never "no text"; the pages still read it as "can't be read right now".
+ *     (readVersionExact throws), never "no text"; the pages still read it as "can't be read right now", and the
+ *     person's data copy names that version with its mark and an "unread" note, so it is never blocked for good;
+ *   - a delete that finds the lock taken answers 409 "busy" (as a withdraw), not logged; an unknown reply answers 500.
  *
  * Synthetic store, synthetic people, the in-memory Redis stand-in (lib/redis-memory.ts), the email provider mocked.
  */
@@ -122,6 +124,19 @@ function track<T>(run: Promise<T>) {
   return { out, finished };
 }
 
+/** How many times `run` logged through console.error (the studio route logs only a real failure). */
+async function errorsLoggedBy(run: () => Promise<void>): Promise<number> {
+  const real = console.error;
+  let count = 0;
+  console.error = () => { count += 1; };
+  try {
+    await run();
+  } finally {
+    console.error = real;
+  }
+  return count;
+}
+
 async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_agreements_only_a_stand_in";
   const now = Date.now();
@@ -177,17 +192,41 @@ async function main(): Promise<void> {
     is("nothing is kept outside the store's list and the person's set", after === null || ((await indexIds(store)).includes(agreement.id) && (await inPersonSet(agreement.id))), true);
   }
 
-  part("The agreement's lock taken by someone else: the studio hears \"try again\", never \"deleted\", and everything stays");
+  part("The agreement's lock taken by someone else: the studio hears \"busy, try again\" (409, as a withdraw), never \"deleted\", and everything stays");
   {
     const store = await freshStore();
     const { agreement } = await make(store, SIGNER, lapsed);
     const session = await openSession("agree-locked@example.com");
     await realPipeline([["SET", `nl:agree:lock:${agreement.id}`, "someone-elses-token", "EX", 60]]);
-    const r = await studioRoute(new NextRequest("https://marktmorgen.com/api/store/agreements", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "delete", id: agreement.id }) }));
-    const body = (await r.json()) as { ok?: boolean; message?: string };
-    is("the studio: could not be done, try again (never ok)", [r.status, body.ok, /try again/i.test(String(body.message))], [500, false, true]);
+    let r: Response | undefined;
+    const logged = await errorsLoggedBy(async () => {
+      r = await studioRoute(new NextRequest("https://marktmorgen.com/api/store/agreements", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "delete", id: agreement.id }) }));
+    });
+    const body = (await r!.json()) as { ok?: boolean; error?: string; message?: string };
+    is("the studio: busy, the same sentence a withdraw answers (never ok)", [r!.status, body.ok, body.error, body.message], [409, false, "busy", "Someone is signing it right now. Try again in a moment."]);
+    is("a busy delete is not logged as a failure", logged, 0);
     is("the record, its version, the store's list and the person's set all stay", [(await readAgreement(agreement.id))?.id, keptKeys(agreement.id).length, (await indexIds(store)).includes(agreement.id), await inPersonSet(agreement.id)], [agreement.id, 2, true, true]);
     is("the other holder's lock is untouched", (await realPipeline([["GET", `nl:agree:lock:${agreement.id}`]]))[0], "someone-elses-token");
+  }
+
+  part("The record's delete answered in an unknown shape, through the studio: \"try again\" (500, logged), never \"busy\" or \"deleted\"");
+  {
+    const store = await freshStore();
+    const { agreement } = await make(store, SIGNER, lapsed);
+    const session = await openSession("agree-locked@example.com");
+    hook = async (commands) => {
+      const replies = await realPipeline(commands);
+      return commands.some(isRecordDelete(agreement.id)) ? replies.map(() => undefined) : replies;
+    };
+    let r: Response | undefined;
+    const logged = await errorsLoggedBy(async () => {
+      r = await studioRoute(new NextRequest("https://marktmorgen.com/api/store/agreements", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "delete", id: agreement.id }) }));
+    });
+    hook = null;
+    const body = (await r!.json()) as { ok?: boolean; error?: string; message?: string };
+    is("the studio: could not be done, try again (never ok, never busy)", [r!.status, body.ok, body.error, /try again/i.test(String(body.message))], [500, false, "server_error", true]);
+    is("an unknown reply is logged as a failure", logged, 1);
+    is("a retry: the record is gone, so \"gone\" (404), true", (await studioRoute(new NextRequest("https://marktmorgen.com/api/store/agreements", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "delete", id: agreement.id }) }))).status, 404);
   }
 
   part("The record's delete did not run while the list removals did (a pipeline is not atomic): the person's erasure still finds it");
@@ -210,7 +249,7 @@ async function main(): Promise<void> {
     const del = track(deleteAgreement(store, agreement.id));
     await del.finished;
     hook = null;
-    is("the delete's reply is unknown: refused, never \"deleted\"", [del.out.value, Boolean(del.out.threw)], [undefined, true]);
+    is("the delete's reply is unknown: refused as unknown (not as a busy lock), never \"deleted\"", [del.out.value, del.out.threw], [undefined, "UnknownReplyError"]);
     is("the record is still kept", (await readAgreement(agreement.id))?.email, SIGNER);
     is("so it is still in the store's list", (await indexIds(store)).includes(agreement.id), true);
     is("and still in the person's set", await inPersonSet(agreement.id), true);
@@ -305,9 +344,28 @@ async function main(): Promise<void> {
       is(`${what}: unknown (thrown), not null`, await outcome(), "threw");
       is(`${what}: the pages still read it as "can't be read right now"`, await readVersion(a, 1), null);
     }
+    // Kept but damaged for good (the last spoiled value is still there): the person's copy is not blocked for ever; it
+    // says so, with the version's mark, the way the assignment copier says a record it cannot read (lib/person-copy.ts).
     const scope = (await erasureScope(store, SIGNER))!;
-    const copied = await COPIERS["lib/agreement-store.ts"](scope).then(() => "copied", () => "threw");
-    is("the person's data copy fails instead of leaving the text out", copied, "threw");
+    const mark = a.versions[0];
+    const copyOf = async () => (await COPIERS["lib/agreement-store.ts"](scope).catch(() => [])) as { id: string; versions: Record<string, unknown>[] }[];
+    const copy = await copyOf();
+    is("damaged kept text: the agreement is in the copy", copy.map((c) => c.id), [agreement.id]);
+    is("damaged kept text: the version is there with its mark and an unread note, no text", copy[0]?.versions, [{ ...mark, unread: "This version's text is kept but could not be read for this copy." }]);
+    await realPipeline([["SET", vKey, "{damaged"]]);
+    is("text that is not JSON at all: the same unread note", (await copyOf())[0]?.versions[0]?.unread, "This version's text is kept but could not be read for this copy.");
+    for (const [what, reply] of [["a number", 5], ["a list", ["x"]], ["no reply", undefined]] as const) {
+      hook = async (commands) => {
+        const replies = await realPipeline(commands);
+        return commands.some((c) => c[0] === "GET" && c[1] === vKey) ? replies.map(() => reply) : replies;
+      };
+      const copied = await COPIERS["lib/agreement-store.ts"](scope).then(() => "copied", () => "threw");
+      hook = null;
+      is(`a reply that is not text or null (${what}): the person's data copy fails instead of leaving the text out`, copied, "threw");
+    }
+    await realPipeline([["SET", vKey, kept]]);
+    const healthy = await copyOf();
+    is("healthy: the copy carries the version's text and no unread note", [healthy[0]?.versions[0]?.text, "unread" in (healthy[0]?.versions[0] ?? {})], [version.text, false]);
     await realPipeline([["DEL", vKey]]);
     is("confirmed absent: null", await outcome(), "null");
     await realPipeline([["SET", vKey, kept]]);

@@ -29,6 +29,16 @@
  *  - answersUsed, welcomesOffered, nudgesThisMonth, yearlyAsksThisMonth and winbacksSent failed into 0, so a
  *    creator read "0 of 300 AI attempts used" or "Sent this month: 0" when the count was not known.
  *
+ * And the rest of what Today read that way (VR, item 2), held in the last parts:
+ *  - aiLeft (lib/ai.ts) failed into 0, so the bio, the store questions and the media kit said "0 left this month";
+ *  - readTeam (lib/team.ts) failed into null, so the Team card said "Invite up to ..." to an owner with a team;
+ *  - readCards (lib/catalog.ts) failed into no products, so the welcome offer said "Add a paid product first", the
+ *    leaving-visitor offer "Add something free", and the editors that pick products (sections, collections, buy
+ *    buttons, the checkout script, short links) were drawn with none, ready to save over the real ones;
+ *  - readLinks (lib/short-links.ts) failed into no links, the short links shown as if none were made;
+ *  - secondStepWay (lib/team.ts) failed into "set_up", so a member held at a team's door who has a passkey was told
+ *    to set up a second step.
+ *
  * Synthetic only: the Redis stand-in, a stubbed Stripe and stores made here.
  */
 import { NextRequest } from "next/server";
@@ -38,7 +48,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCall, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import type { CallSetup } from "@/lib/call-setup";
 import StudioPage from "@/app/studio/page";
 import { store as redis } from "./redis-stub";
@@ -46,6 +56,9 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { savePaidPeriod } from "@/lib/closing-holds";
 import { UNKNOWN_SALES_GOAL_CENTS } from "@/lib/sales-goal";
+import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
+import { SECOND_STEP_WORDS, putMember, setRequireTwoStep } from "@/lib/team";
+import { makePasskey } from "./passkey-world";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.STRIPE_SECRET_KEY = "sk_test_studio_money_reads_only";
@@ -293,6 +306,74 @@ async function main(): Promise<void> {
     is(`${count.label} that could not be read are never shown as 0`, /\b0 of |: 0\b/.test(text), false);
   }
   delete process.env.ANTHROPIC_API_KEY;
+
+  part("The month's AI allowance that could not be read");
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test-only-a-stand-in-0123456789";
+  const AI_EDITORS: [string, string][] = [["DetailsForm", "left this month"], ["FaqEditor", "drafts left this month"], ["KitEditor", "drafts left this month"]];
+  await shown(COUNTER);
+  is("control: read, the studio's help gets the number left", typeof element("StudioHelp")?.props.left, "number");
+  for (const [editor, words] of AI_EDITORS) {
+    const read = element(editor);
+    if (!read) throw new Error(`setup: ${editor} is not on the page`);
+    is(`control: read, ${editor} says how many are left`, has(drawnText(read), words), true);
+  }
+  const aiDown = await shown(COUNTER, (command) => command[0] === "GET" && String(command[1]).startsWith(`nl:ai:${countsStats}:`));
+  is("the page still renders when the AI allowance cannot be read", aiDown !== null, true);
+  is("the studio's help gets an allowance it could not read as unknown, never 0", element("StudioHelp")?.props.left, null);
+  for (const [editor] of AI_EDITORS) {
+    const text = drawnText(element(editor));
+    is(`${editor} says the allowance could not be checked`, has(text, AI_ALLOWANCE_UNKNOWN), true);
+    is(`${editor} never says 0 left`, /\b0 (drafts )?left this month/.test(text), false);
+  }
+  delete process.env.ANTHROPIC_API_KEY;
+
+  part("A team that could not be read");
+  const counterStore = await storeForEmail(COUNTER);
+  if (!counterStore?.sid) throw new Error("setup: no store id");
+  await putMember(counterStore, "money-reads-helper@example.com", "editor");
+  const teamCard = () => {
+    const tools = (element("StudioTools")?.props.tools ?? []) as { title: string; text: string }[];
+    return tools.find((tool) => tool.title === "Team")?.text ?? "";
+  };
+  await shown(COUNTER);
+  is("control: read, the Team card counts the people who help", teamCard(), "1 person helps run this store.");
+  await shown(COUNTER, (command) => command[0] === "GET" && command[1] === `nl:team:${counterStore.sid}`);
+  is("a team that could not be read is said so on its card", teamCard(), "We could not check just now who helps run this store.");
+
+  part("Products whose names could not be read");
+  const titlesKey = `nl:catalog:${counter.catalog.id}:t`;
+  const PICKERS = ["ExitOfferEditor", "StoreLayoutEditor", "CollectionsEditor", "BuyButtonEditor", "CheckoutScriptEditor", "WelcomeOfferEditor", "ShortLinks"];
+  await shown(COUNTER);
+  for (const picker of PICKERS) is(`control: read, ${picker} is drawn`, element(picker) !== null, true);
+  const cardsDown = await shown(COUNTER, (command) => command[0] === "HGETALL" && command[1] === titlesKey);
+  is("the page still renders when the products' names cannot be read", cardsDown !== null, true);
+  is("products that could not be read are said so", [has(cardsDown, "We could not read your products just now"), has(cardsDown, RELOAD)], [true, true]);
+  for (const picker of PICKERS) is(`${picker} is never drawn with no products in place of the real ones`, element(picker), null);
+  is("never 'Add a paid product first' to a store that has them", has(drawnText(element("WelcomeOfferEditor")), "Add a paid product first"), false);
+  is("never 'Add something free' to a store that gives something away", has(drawnText(element("ExitOfferEditor")), "Add something free"), false);
+
+  part("Short links that could not be read");
+  const linksDown = await shown(COUNTER, (command) => command[0] === "HVALS" && command[1] === `nl:slink:store:${countsStats}`);
+  is("the page still renders when the short links cannot be read", linksDown !== null, true);
+  is("short links that could not be read are said so", [has(linksDown, "We could not read your short links just now"), has(linksDown, RELOAD)], [true, true]);
+  is("never drawn as no links made", element("ShortLinks"), null);
+
+  part("A member held at a team's door whose second step could not be read");
+  const DOOR_OWNER = "money-reads-door@example.com";
+  const MEMBER = "money-reads-member@example.com";
+  await claimHandle(DOOR_OWNER, "moneyreadsdoor", "Money reads door", "");
+  const door = (await ensureStoreId(DOOR_OWNER)) ?? (await storeForEmail(DOOR_OWNER));
+  if (!door?.sid) throw new Error("setup: no store id");
+  await putMember(door, MEMBER, "editor");
+  await setRequireTwoStep(door, true, DOOR_OWNER);
+  await makePasskey(MEMBER, "cred-money-reads-member").keep();
+  const held = await shown(MEMBER);
+  is("control: read, the member is told to log in again with the passkey", has(held, SECOND_STEP_WORDS.passkey.title), true);
+  const twoStepKey = (command: unknown[]) => command[0] === "GET" && /^nl:2fa:/.test(String(command[1]));
+  const doorDown = await shown(MEMBER, (command) => twoStepKey(command) || (command[0] === "GET" && /^nl:pk:[0-9a-f]{40}$/.test(String(command[1]))));
+  is("the page still renders when the second step cannot be read", doorDown !== null, true);
+  is("never told to set up a second step it may already have", has(doorDown, SECOND_STEP_WORDS.set_up.title), false);
+  is("the second step that could not be read is said so", [has(doorDown, "We could not check just now how you log in with a second step"), has(doorDown, RELOAD)], [true, true]);
 
   done();
 }

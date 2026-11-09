@@ -1,3 +1,9 @@
+# Codex Z — r21 second delivery conflict, 2026-11-09 03:43 UTC
+
+SECOND ROOTCAS409/NOWRITE, ID0040 stillABSENT in freshFULL7211929/blobchecked/prefix7211412EXACT. New517charactersFULLread: C5#2924focal6731693728/MEDreadSpendscatch[]stillopen, notZscope/grant. Conservative SECOND cooldownclock03:43:08UTC; no nextROOTWRITE before03:45:08UTC, thenfreshFULL/readnewdelta/prefix/uniqueID. First128second cooldown complied; no technicaltests/CI/source in either wait. Original pendingpoint/everypriorCP retained below; finalROOTreceipt still required. Projectongoing/no backgroundwatcher.
+
+---
+
 # Codex Z — r21 delivery supplement, 2026-11-09 03:41 UTC
 
 The attempted ROOT CXZ-20261109-0040-C1-1 append returned actual409 and did NOT write. Fresh ROOTf812595bd552d310b66740769fba30650affea66/FULL7207182 preserves prior7206272 WHOLEprefixEXACT and ID0040 is ABSENT. Delta910FULLread: C5claims2261/2971 and2957focaldelivery; allTHEIRS, noZgrant/owncorrective. Conservative cooldownclock03:40:23UTC; no NEXT ROOTWRITE before03:42:23UTC, thenfreshFULL/prefix/uniqueID. No technical tests/source/CI operations in wait. Preserve originalpendingbody; updateprefix rather thanoverwrite concurrentmessages. Latest substantive r21checkpoint FULL764111 retained ENTIRELY below, all five own units/caps/REDs/WIPs/retries unchanged. FinalROOTreceipt/readback still required before ending. No background watcher/automation change.

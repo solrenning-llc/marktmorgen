@@ -17,6 +17,9 @@
  *     bundle holding a held product and a ticked box whose product is held or
  *     is a bundle holding one; a hold that cannot be read refuses too;
  *   - the store page's boxes (lib/catalog.ts, readPage) leave a held product out;
+ *   - a product page's boxes, and its embedded copy's, pass what they read
+ *     through offerableTargets (lib/child-safety-holds.ts), so a held
+ *     product's title is never drawn as a checkout box there;
  *   - the studio's extras route refuses a box pointing at a held product, or
  *     at a bundle holding one (409 on_hold).
  * Products not held are untouched by any of it.
@@ -25,6 +28,8 @@
  * neutral placeholders and the products hand over a placeholder link.
  * Synthetic store, in-memory Redis, every outside call caught here.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -132,6 +137,13 @@ async function main(): Promise<void> {
 
   part("A checkout box set up before the report");
   is("the store page's boxes leave the held product out", ids((await readPage(await current(), 1)).related).includes(reported), false);
+  // A product page, its embedded copy and a collection page draw a box's product the same way, from its own read:
+  // each passes what it read through offerableTargets, so a held product's title is never drawn as a checkout box there.
+  for (const page of ["app/[handle]/p/[product]/page.tsx", "app/embed/[handle]/[product]/page.tsx"]) {
+    const source = readFileSync(join(process.cwd(), page), "utf8");
+    const reads = source.match(/readListings\(store, bumpTargets\(product\)\)[^\n]*/g) ?? [];
+    is(`${page}: every box read goes through offerableTargets`, reads.length > 0 && reads.every((read) => read.includes("offerableTargets(store, found)")), true);
+  }
   is("a ticked box of the held product is refused", await sale(front, [reported]), "box");
   is("the first box ticked the old way is refused too", await sale(front, ["yes"]), "box");
   is("a ticked box of a bundle holding it is refused", await sale(front, [heldBundle]), "box");

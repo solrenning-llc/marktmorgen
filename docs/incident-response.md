@@ -179,11 +179,11 @@ A cópia de arquivos e vídeos é feita por um Worker na conta separada da Cloud
 ### 8.5 Troca da chave das cópias
 
 - Cada cópia leva no cabeçalho do arquivo `.mmbk` o identificador da chave que a selou (C4-36, item 3, a construir).
-- Depois de uma troca, a execução diária continua lendo com a chave anterior por **60 dias** (`BACKUP_KEY_PREVIOUS_DAYS`); cópias novas usam só a nova. Passados os 60 dias, a execução deixa de ler com a anterior.
-- **Mas o dono guarda a chave anterior offline por pelo menos 120 dias depois da troca** (`BACKUP_MAX_COPY_DAYS`): uma cópia mensal pode ter até 120 dias, e restaurar uma mensal selada antes da troca precisa da chave anterior. Jogar a chave fora aos 60 dias pode deixar as mensais impossíveis de abrir. Se a execução deve ler com ela por 120 dias é decisão do Claude 1 (docs/backup.md no #3293).
+- Depois de uma troca comum (sem vazamento), a execução diária continua lendo com a chave anterior por **120 dias** (`BACKUP_KEY_PREVIOUS_DAYS`, que é o próprio `BACKUP_MAX_COPY_DAYS`, nunca um número à parte); cópias novas usam só a nova. Passados os 120 dias, a execução deixa de ler com a anterior. Decidido em 9/11/2026 (C1-20261109-0025-C4-47, item 1; #3293); antes eram 60 dias, e com a regra do bucket em 120 dias uma cópia diária de 60 a 120 dias selada com a chave anterior fazia a execução parar em `room_unverified` quando a última boa cópia sumia (sonda A da Claude 2, hoje teste no #3293).
+- **O dono guarda a chave anterior offline por pelo menos 120 dias depois da troca** (`BACKUP_MAX_COPY_DAYS`): uma cópia mensal pode ter até 120 dias, e restaurar uma mensal selada antes da troca precisa da chave anterior.
 - Uma cópia que não abre só por estar com a chave diferente **nunca** é apagada como perdida (`last_good_copy_lost`).
 - O dono confere a cópia da chave guardada em papel e a do gerenciador de senhas pela impressão digital, com o script local (C4-36, item 2), nunca imprimindo a chave.
-- Se a chave das cópias vazou: trocar como na seção 3, e tratar as cópias seladas com ela como expostas.
+- **Se a chave das cópias vazou (ou pode ter vazado): trocar como na seção 3 e tirar a chave anterior da Vercel na hora.** Apagar `BACKUP_ENCRYPTION_KEY_PREVIOUS` (e `BACKUP_ENCRYPTION_KEY_ROTATED_AT`) na mesma mudança que grava a chave nova, sem esperar os 120 dias. A consequência, dita sem rodeio: **a partir daí a execução não lê mais nenhuma cópia selada com a chave vazada**, nem as mensais, nem as diárias, nem a última boa. Essas cópias ficam no bucket até a regra levá-las aos 120 dias, só podem ser restauradas com a cópia offline da chave antiga e são tratadas como expostas. Se a última boa cópia sumir e restar uma diária antiga que não abre, a execução para em `room_unverified` (nada é apagado, o alarme toca) até a regra levar essa cópia; a primeira cópia verificada com a chave nova é a primeira boa.
 
 ### 8.6 Trava do bucket e resposta 409
 

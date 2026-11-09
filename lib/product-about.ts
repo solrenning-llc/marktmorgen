@@ -16,6 +16,7 @@
  * description each would otherwise be carried by every visitor for nothing.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { hostIsLocal } from "@/lib/product-link";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -189,7 +190,8 @@ export function linkPieces(line: string): Piece[] {
     let valid = false;
     try {
       const parsed = new URL(url);
-      valid = (parsed.protocol === "https:" || parsed.protocol === "http:") && !parsed.username && !parsed.password;
+      // https only and no name that exists on the visitor's own machine, as every other link the creator types.
+      valid = parsed.protocol === "https:" && !parsed.username && !parsed.password && !hostIsLocal(parsed.hostname);
     } catch {
       valid = false;
     }

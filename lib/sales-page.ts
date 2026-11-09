@@ -31,6 +31,8 @@
  * the studio can import it.
  */
 
+import { hostIsLocal } from "@/lib/product-link";
+
 /** The most blocks one page may have. */
 export const MAX_BLOCKS = 30;
 /** The most questions one block of questions may have. */
@@ -343,7 +345,7 @@ export function quoteUrl(raw: unknown): string {
   }
   if (url.protocol !== "https:" || url.username || url.password) return "";
   const host = url.hostname.toLowerCase();
-  if (!host.includes(".") || host === "localhost" || host.endsWith(".localhost") || /^[\d.]+$/.test(host) || host.startsWith("[")) return "";
+  if (!host.includes(".") || hostIsLocal(host) || /^[\d.]+$/.test(host) || host.startsWith("[")) return "";
   return url.href.length > MAX_QUOTE_URL ? "" : url.href;
 }
 

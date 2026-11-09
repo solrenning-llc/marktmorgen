@@ -80,7 +80,7 @@ export function readLink(
 
   const host = url.hostname.toLowerCase();
   if (!host.includes(".")) return { ok: false, reason: "host" };
-  if (host === "localhost" || host.endsWith(".localhost")) {
+  if (hostIsLocal(host)) {
     return { ok: false, reason: "host" };
   }
   // A raw address is either a mistake or an attempt to point a buyer at

@@ -173,7 +173,7 @@ async function main(): Promise<void> {
   // What each deletion is handed, and why that cannot be a file of another record the browser named.
   const REASONS: Record<string, string> = {
     "page del(gone)": "pictures this page held in the page-picture registry, released after the page was written",
-    "file/attach del(result.removed.pathname)": "the file the record held, after the record that replaced it was written",
+    "file/attach del(removed.pathname)": "the file the record held, after the record that replaced it was written, never an episode's audio its podcast still plays (kept when unknown)",
     "site-page del(gone)": "pictures this site page held in the page-picture registry, released after the page was written",
     "podcast del(gone.pathname)": "the audio of the episode the record removed, unless the product's file or another episode still uses it, after it was written",
     // The thumbnail copy (Encanto 5b-2) goes with the picture and its smaller copy, from the same door.

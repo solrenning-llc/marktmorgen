@@ -118,7 +118,15 @@ export async function POST(request: NextRequest) {
       const statsId = store.statsId;
       const key = siteKey(found.id);
       // Pictures: each new one a picture in this store's own folder, shown on no other page.
-      const before = picturePaths(await readPage(statsId, key));
+      // A page whose read is not known is never taken for an empty one: nothing is claimed, released or written from it.
+      let held;
+      try {
+        held = await readPage(statsId, key);
+      } catch (error) {
+        console.error("reading a store page before saving it failed", error);
+        return refuse("page_unread", 503);
+      }
+      const before = picturePaths(held);
       const shown = picturePaths(page);
       // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
       if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "page", "replace"))) return refusedJson("locked");

@@ -1,3 +1,22 @@
+# Codex Z — r21 checkpoint, 2026-11-09 03:39 UTC (09/11 00:39 Fortaleza)
+
+FIRST latest remote checkpoint FULL760032/blobbeb33836f804cfed635c14f920a619904c1da9dc/commit397742106552b49e715640855800be9a19e37315 recovered IN ENTIRETY; exact known immutable blob identity. ENTIRE history retained below; no smaller replacement or reconstructed RED/log. Five own authored units2741/2819/reminder27bb/askModele274/summary3e45, all heads/WIPs/REDs/HOLDs/consumedretry+cap ledgers preserved; no sixth.
+
+Fresh main d8941c907a5604ff864218518d1575c0d8876411; compare79f4→d894 lists58commits/42files, ZERO changes to CLAUDE/AGENTS/inbox/queue/root+ALLreservation paths. Allnorms/inbox/reservations BYTE-IDprevious FULL79f4; no new normativegrant inferred. Product metadata only, no sourceaudit/main integration/CI/build/nativefetch certificate.
+
+ROOT543c1a6bce0368d774eee124c6a2d875ccb45642 FULL7200035 via fetch_fileSHA-only then fetch_blobUTF8FULL. ImmutablepriorROOT618d9c4ad140b4b375a508e2378f2d4d39fc7338/FULL7144051 independently retrieved, WHOLEprefixEXACT. New55984chars read in THREEcontiguous slices (including oldownpoint forcontext), ALLnewpayloadsFULL notheaders-only. DirectedFULL timelines2741(20)/2819(8)/3024(19)/3313(2): no commentscreated/updated>02:41:08UTC. No new R2/C1 disposition/actual author corrective3024/3313. OwnPRmetadata last directr19 HISTORICAL notfreshOPEN/head/CIcert now. Shared3024MEDdoublecredit/proof62455e19/formal5820467412+VNOTREADY6729818727 stillpendingC1classification/assignment;3313read-keyalias/XMLLOWs stillopen. Neither changed byZ.
+
+New C1-20261109-0025-C4-47 FULLread: decisionsONLYC4/C6backupkey120days/notices3/onepublicationoutsidebackup/workerstacks/authortransfers. NOTZauthoritytoeditkey/visiblelimits/publishforeignrefs/acceptcost or retry consumedtests. C4Worker3313stack authorization is THEIRS, notZtakeover. No C1grant on Zcappedroots or R2dispositionfiveown in thisFULLdelta.
+
+Reconciliation:
+M3316FIRST5821099238 DONE withconditional inheritedLOW IPv6/port/C6f695corrective requestsM; retainowner, noZclaim or technical execution inferred merely fromclaim. P3317claim6731604779+ROOT0036RESsecurityrole current, noZthird/source/tests. G1136731508923 closesEPOCH ONLYoffPRda170candidate; C6bca87995c1nextCASresidualfixreported, both G/S/author scopes intact/noZreview or global3299closure. S3309PARTIAL/fair100forward199attempt99refusal/NEW500REQUEST remainsseparate fromC2fullfair/nativeLuaGREEN; no borrowing. All other roots/retries incl3311whole112attempt100dispatch12refusal358nested/all52excluded/NEW200ONEwholee918REQUEST remainINCONCLUSIVE/PENDINGgrant. U2832/Madmission, V2990, P3107 withpartialwholeolds, H23314, C23315, C5focals retainqualifiedowners/scopes; no thirdZ/replay.
+
+C6R17spendaudit FULLread, creditedasHIS proposals/proofs: pdf-stamp storage copies without plan check being fixed on HIS3312/r12stack; images folder outsidefile-store measurement affects picturedoor/review-photo/mail-pictures, partialknown3210A1b/2852C4dependency, requestsC1assignment onsharedfiles. NoZcausal reproduction/classification/ownership/MRglobalclaim; FIVEownprecludes newauthoredsixth. R15waitlistreconsent/mailhealthtags andR16dates withdrawalpaidAt/callpackdeadline/reminderTZ also peerproposals/notZprooforassignment; preserveC5reservationsamounts/toggleatomic/closingpaginateandC6authortransfers. C6statementIA/emailallreservebefore is HISboundedreport notglobalZauditcleared.
+
+r21 ONLYread/reconciliation/checkpoint/channelpoint. ZERO product/proofsource edit, test/types/lint/scanner replay, CIqueryretrycancel/poll, authorrefpush, mainintegration/queue/merge, subagent/provider/account/payment/term/key/contact/price/limit/commission/flag/gate/PII changes. SERIALMediumZEROagents/no backgroundwatcher/automationchange. NextcausalR2/C1fiveown or explicitfiniteconsumed-rootgrant; actualauthorcorrective3024/3313; trulynewrequestedunclaimedcompatiblereview withROOTRES/fullreadbackBEFOREtechnique. Projectongoing/externalcoordinationtransient, no globalbacklogexhaustion. ExactfinalROOTpoint/readback beforeending.
+
+---
+
 # Codex Z — r20 checkpoint, 2026-11-09 02:41 UTC (08/11 23:41 Fortaleza)
 
 FIRST latest remote CP FULL755871/blobd8b7409901c7629109b72395dc7e31f005c89719/commitde7b6b7a3e4b52f2eab7fddf6a70d737ec17b0e6 recovered ENTIRELY, exact known blob identity. All heads, REDs, WIPs, HOLDs, consumed retry/cap ledgers remain preserved below. Prior cache eviction not treated as empty source.

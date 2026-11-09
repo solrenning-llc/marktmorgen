@@ -119,6 +119,7 @@ function centralAliases(file,root,here){
  if(file==='cart-physical.test.ts'||file==='cart-soon-unknown.test.ts'||file==='cart-soon-get.test.ts'||file==='r24-waitlist-soon-unknown.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-stock.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='lost-link-timing.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-open.test.ts'||file==='kb9-withdrawal.test.ts'||file==='n-2827-withdrawal-flow.test.ts'||file==='kb9-2827-c5-review.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-page-bounds.test.ts'){aliases['next/server']=join(here,'next-server-after-world.ts');aliases['next/link']=join(here,'next-link-world.tsx');}
  if(file==='deals-board-pipelines-render.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');

@@ -14,10 +14,15 @@ let checked = false;
 // The fetch from before the check wrapped it: a count whose check could not be loaded still goes, unsigned, and the
 // server then counts it as no visit (app/api/store/hit), as it would a program's.
 let unsigned: typeof fetch | null = null;
+// Set as the page is left: a count sent again from a page going away starts a request that is never finished.
+let leaving = false;
 function withBrowserCheck() {
   if (checked) return;
   checked = true;
   unsigned = window.fetch.bind(window);
+  window.addEventListener("pagehide", () => {
+    leaving = true;
+  });
   try {
     initBotId({ protect: [{ path: "/api/store/hit", method: "POST" }] });
   } catch {
@@ -29,7 +34,10 @@ function beacon(payload: Record<string, string>) {
   withBrowserCheck();
   const body = JSON.stringify(payload);
   const send = (via: typeof fetch) => via("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } });
-  send(fetch).catch(() => (unsigned ? send(unsigned) : undefined)?.catch(() => {}));
+  // Only a link's count is sent again without the check, and never from a page being left: a visit, a page or a
+  // funnel step without the check counts as nothing (app/api/store/hit), so sending it again would only cost a request.
+  const retryUnsigned = payload.k === "l";
+  send(fetch).catch(() => (retryUnsigned && unsigned && !leaving ? send(unsigned) : undefined)?.catch(() => {}));
 }
 
 /**

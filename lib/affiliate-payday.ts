@@ -152,6 +152,21 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
       ].join("\n"),
     };
   }
+  if (paid.reason === "pending") {
+    return {
+      subject: "Your affiliates' payment may still go out from your PayPal",
+      text: [
+        "Hello,",
+        "",
+        "It is your affiliate payday, and you asked us to pay by ourselves. We could not confirm that the batch was saved, so we did not send it now. If it was saved, our daily check sends it within a day, from your PayPal, to the same people for the same amounts.",
+        "",
+        "Until then, they show as on their way on your affiliate page. Do not pay them another way, or they could be paid twice.",
+        studio,
+        "",
+        "— Marktmorgen",
+      ].join("\n"),
+    };
+  }
   const why: Record<string, string> = {
     funds: "your PayPal balance did not cover it. Add money to your PayPal balance",
     refused: "PayPal refused the app you connected. Connect it again, with Payouts switched on",

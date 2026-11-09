@@ -8,8 +8,15 @@ export type PendingPayoutBatch = {
   t?: number;
   /** 1: it could not be confirmed with PayPal and needs the creator's own check; it is not sent again. */
   m?: 1;
+  /**
+   * A batch held under PayPal's id: the sender_batch_id it was sent under, so a "?" entry of that same request left
+   * behind (its removal not confirmed) is known to be this batch and never sent to PayPal again.
+   */
+  s?: string;
 };
 
+/** PayPal's sender_batch_id: at most 127 characters, printable ASCII, no space (lib/paypal-payouts.ts writes "nl-..."). */
+const SENDER_BATCH_ID = /^[\x21-\x7e]{1,127}$/;
 const unavailable = (): never => { throw new Error("Pending payout records are unavailable"); };
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value) &&
@@ -49,10 +56,12 @@ export function readPendingPayoutBatches(results: unknown): Map<string, PendingP
     // The two marks of a batch whose answer was not known, each only in its own shape.
     if (value.t !== undefined && (!Number.isSafeInteger(value.t) || (value.t as number) < 0)) return unavailable();
     if (value.m !== undefined && value.m !== 1) return unavailable();
+    if (value.s !== undefined && (typeof value.s !== "string" || !SENDER_BATCH_ID.test(value.s))) return unavailable();
     out.set(id, {
       at: value.at as number, currency: value.currency, lines,
       ...(value.t !== undefined ? { t: value.t as number } : {}),
       ...(value.m === 1 ? { m: 1 as const } : {}),
+      ...(typeof value.s === "string" ? { s: value.s } : {}),
     });
   }
   return out;

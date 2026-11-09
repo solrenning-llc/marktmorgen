@@ -50,7 +50,7 @@ import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { refundRowKnown, rowGivesBack } from "@/lib/refunds";
+import { refundRowKnown } from "@/lib/refunds";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { STRIPE_ACCOUNT_PATTERN, type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -146,6 +146,75 @@ const RETRY_CAP = 100;
 const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
 const PAYMENT_ID = /^pi_[A-Za-z0-9]{3,252}$/;
 const now = () => Math.floor(Date.now() / 1000);
+
+/**
+ * The refunds of one charge read in one run (one GET /refunds?charge= each, only for a refund that succeeded on a
+ * charge read refunded in full without covering the charge by itself): past it, the refund holds the anchor and is
+ * read in the next run. A scheduled job bounded by its schedule, like REFUND_PAGES; Stripe bills no API call.
+ */
+const CHARGE_REFUND_LOOKUPS = 10;
+/**
+ * A refund still on its way this long is said in the log, and still takes nothing back (the owner's decision 18, 9
+ * November 2026: a refund pending for many days raises an alert, never a revocation). Stripe finishes almost every
+ * refund within days; one still pending after a week needs a look (the creator's balance short, a payment method
+ * that answers slowly). Said on every run that reads it, from the log alone: no store command, no email.
+ */
+const REFUND_STUCK_SECONDS = 7 * 86_400;
+
+// The reading of a refund in parts below is a copy of the one on #2868 (lib/licence-keys.ts, claude5/fix-licence-refund,
+// wholeOnItsOwn and chargeRefundsSettled), not yet on main: once both are, one shared function in lib/refunds.ts
+// should take the place of both copies.
+/** The most refunds of one charge read in one GET /refunds?charge= (one page; more than that is unknown). */
+const CHARGE_REFUNDS_PAGE = 100;
+const CHARGE_PATTERN = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+/** Statuses a refund still on its way has: it may yet fail, and Stripe already counts it in amount_refunded. */
+const REFUND_ON_ITS_WAY = new Set(["pending", "requires_action"]);
+const REFUND_STATUS_KNOWN = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const centsKnown = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/**
+ * Whether a succeeded refund whose charge reads refunded in full gave the whole charge back by itself: its own amount
+ * covers the charge's. Only then is no other refund of the charge needed to say the money went back for good.
+ */
+function wholeOnItsOwn(refund: Record<string, unknown>): boolean {
+  const charge = refund.charge;
+  if (!plainObject(charge)) return false;
+  const amount = ownField(charge, "amount");
+  return centsKnown(refund.amount) && centsKnown(amount) && amount > 0 && refund.amount >= amount;
+}
+
+/**
+ * A full refund made of several refunds of one charge, read from all of that charge's refunds (one GET /refunds?charge=,
+ * Stripe's own list): "held" while any is still on its way (it may still fail, and Stripe counts it in the charge's
+ * amount_refunded already), "through" when the ones that succeeded add up to the whole charge. Anything else (no
+ * charge id, a row or a list in another shape, more than one page, or succeeded refunds that do not add up although
+ * the charge reads refunded in full) throws StripeListUnreadable: never "nothing pending" (CX-123 rule 24).
+ */
+async function chargeRefundsSettled(account: string, refund: Record<string, unknown>): Promise<"held" | "through"> {
+  const charge = refund.charge;
+  const id = plainObject(charge) ? ownField(charge, "id") : undefined;
+  const amount = plainObject(charge) ? ownField(charge, "amount") : undefined;
+  if (typeof id !== "string" || !CHARGE_PATTERN.test(id) || !centsKnown(amount) || amount <= 0) {
+    throw new StripeListUnreadable("a refund's charge without its id or amount");
+  }
+  const legible = (row: Record<string, unknown>) => {
+    const status = ownField(row, "status");
+    const named = ownField(row, "charge");
+    const chargeId = typeof named === "string" ? named : plainObject(named) ? ownField(named, "id") : undefined;
+    return typeof status === "string" && REFUND_STATUS_KNOWN.has(status) && centsKnown(ownField(row, "amount")) && chargeId === id;
+  };
+  const listed = readStripePage(
+    await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`),
+    legible,
+  );
+  if (listed.unreadable > 0 || listed.hasMore) throw new StripeListUnreadable("a charge's refunds");
+  // The refund being read is one of them, as it now stands: if Stripe's list does not have it, the list proves nothing.
+  if (!listed.rows.some((row) => row.id === refund.id)) throw new StripeListUnreadable("a charge's refunds without the one read");
+  if (listed.rows.some((row) => REFUND_ON_ITS_WAY.has(ownField(row, "status") as string))) return "held";
+  const through = listed.rows.reduce((sum, row) => sum + (ownField(row, "status") === "succeeded" ? (ownField(row, "amount") as number) : 0), 0);
+  if (through >= amount) return "through";
+  throw new StripeListUnreadable("a charge read refunded in full whose succeeded refunds do not add up");
+}
 
 /** How a place is named where purchases given to an address are kept. */
 export const groupJob = (id: string) => `group:${id}`;
@@ -833,6 +902,11 @@ function readPass(raw: unknown, account: string): RefundPass | null | undefined 
  * refunds since it last looked, finds the purchase each paid for, and removes
  * it from every address that took a place. Returns how many places went.
  *
+ * A refund takes the places back only once it succeeded on a charge refunded in full by the refunds that succeeded
+ * (the owner's decision 18, 9 November 2026): one still on its way, or a part of a charge whose rest is on its way,
+ * holds the anchor at its time and takes nothing back yet; one that failed or was canceled takes nothing back; one
+ * on its way for more than REFUND_STUCK_SECONDS is said in the log, never taken back for that.
+ *
  * The refunds are read in Stripe's exact list shape, every row as refundRowKnown (lib/refunds.ts) reads it, page
  * after page (CX-123 rules 24 and 30; C4-20261106-0450-C5-16). One pass from the anchor to the end of the list may
  * take several runs: where it stands is kept (passKey) after every page read whole and handled, so the next run goes
@@ -901,34 +975,54 @@ export async function revokeRefundedGroups(
   let hold = kept?.hold;
   let revoked = 0;
 
-  /**
-   * Whether a refund row takes its purchase back, read by the one shared rule (lib/refunds.ts rowGivesBack), as the
-   * other jobs that take things back read them (gifts and pre-orders since 0cbcc276b1): a full refund going through,
-   * succeeded or still pending; and, as before, a refund that succeeded on a charge marked refunded.
-   */
-  const givesBack = (refund: Record<string, unknown>): boolean => {
-    const charge = refund.charge as { refunded?: unknown } | null;
-    return rowGivesBack(refund) || (refund.status === "succeeded" && charge?.refunded === true);
-  };
-  /**
-   * A refund Stripe has not finished (pending, or waiting on an action) that does not give the purchase back yet: it
-   * holds the anchor at its time (audit of refunds, A1), so a later refund never moves the read past it, and it is
-   * listed again and taken back once it goes through.
-   */
-  const notFinal = (refund: Record<string, unknown>): boolean =>
-    (refund.status === "pending" || refund.status === "requires_action") && !givesBack(refund);
+  let lookups = CHARGE_REFUND_LOOKUPS;
+  /** Refunds read in this run still on their way after REFUND_STUCK_SECONDS, each said in the log once a run. */
+  const stuck = new Set<string>();
 
-  /** One refund row read whole: false when something it needed was left unknown, and then it is not marked handled. */
-  const handle = async (refund: Record<string, unknown>): Promise<boolean> => {
+  /**
+   * One refund row read whole: true when it was handled or takes nothing back; false when something it needed was left
+   * unknown, and then it is not marked handled; "hold" when it may still take its purchase back but has not yet, and it
+   * then holds the anchor at its time, so the next pass reads it again (audit of refunds, A1).
+   *
+   * The owner's decision 18 (9 November 2026): the places go only once the refund succeeded on a charge refunded in full.
+   * A refund still on its way (pending, or waiting on an action) takes nothing back, since it may yet fail, and holds
+   * the anchor; failed or canceled, it takes nothing back and holds nothing. A refund in parts (as on #2868): a
+   * succeeded part on a charge read refunded in full (Stripe counts a refund still pending in amount_refunded) takes
+   * the places back only once the charge's succeeded refunds add up to the whole charge; while one of them is on its
+   * way, or when they cannot be read, it holds. `decided` is a refund already read through, kept to be tried again.
+   */
+  const handle = async (refund: Record<string, unknown>, decided = false): Promise<boolean | "hold"> => {
     const id = refund.id as string;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-    // Nothing to take back (yet): a refund not final is held by the pass below, never marked read here.
-    if (!pi || !givesBack(refund)) return true;
+    if (!pi) return true;
+    if (!decided && REFUND_ON_ITS_WAY.has(refund.status as string)) {
+      if (typeof refund.created === "number" && refund.created <= now() - REFUND_STUCK_SECONDS && !stuck.has(id)) {
+        stuck.add(id);
+        // An alert for whoever reads the logs, never a revocation (the owner's decision 18): nothing goes until it succeeded.
+        console.error("a refund for a group purchase has been pending for more than seven days; its places are kept until it succeeds", { store: sid, account, refund: id, status: refund.status, created: refund.created });
+      }
+      return "hold";
+    }
+    const charge = refund.charge as { refunded?: unknown } | null;
+    if (refund.status !== "succeeded" || charge?.refunded !== true) return true;
     const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
     const handled = countOf(looked?.[0]);
     const groupId = looked?.[1];
     if (!looked || handled === null || handled > 1 || (groupId !== null && typeof groupId !== "string")) return false;
     if (handled === 1) return true;
+    // A succeeded part of the charge: through only once the charge's succeeded refunds add up to it. Read after the
+    // handled mark, so a refund already handled asks Stripe nothing more.
+    if (!decided && !wholeOnItsOwn(refund)) {
+      if (lookups <= 0) return "hold";
+      lookups -= 1;
+      try {
+        if ((await chargeRefundsSettled(account, refund)) === "held") return "hold";
+      } catch (error) {
+        if (!(error instanceof StripeListUnreadable) && !(error instanceof StripeError)) throw error;
+        console.error("reading the refunds of a refunded charge for group purchases failed; held for the next pass", error);
+        return "hold";
+      }
+    }
     if (typeof groupId === "string") {
       const raw = repliesFor(await redisPipeline([["GET", groupKey(groupId)]]), 1);
       if (!raw || (raw[0] !== null && typeof raw[0] !== "string")) return false;
@@ -1072,8 +1166,9 @@ export async function revokeRefundedGroups(
     for (const [id, pi] of pairs) {
       if (Date.now() >= deadline) return revoked;
       if (typeof id !== "string" || typeof pi !== "string" || !REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) continue;
-      // Only a refund in full is ever kept here (handle reads nothing else), so it is read again as one.
-      if (await handle({ id, payment_intent: pi, status: "succeeded", charge: { refunded: true } })) {
+      // Only a refund read through in full is ever kept here (handle hands nothing else to later), so it is read again
+      // as one, without asking Stripe again.
+      if ((await handle({ id, payment_intent: pi, status: "succeeded", charge: { refunded: true } }, true)) === true) {
         await redisPipeline([["HDEL", retryKey(sid), id]]);
       }
     }
@@ -1104,20 +1199,24 @@ export async function revokeRefundedGroups(
     }
     if (!read) return revoked;
     let whole = true;
+    const held: number[] = [];
     for (const refund of read.rows) {
       if (Date.now() >= deadline) return revoked;
       // A refund on a readable row is taken back whatever the other rows. One whose work was left unknown is kept to
       // be tried again first on the next runs, and the pass goes on; when it cannot be kept for sure, the page stays.
-      if (!(await handle(refund)) && !(await later(refund))) whole = false;
+      const result = await handle(refund);
+      if (result === "hold") held.push(refund.created as number);
+      else if (!result && !(await later(refund))) whole = false;
     }
     // A row neither handled nor kept for later: the page is read again next run.
     if (!whole) return revoked;
     // A row not readable holds the anchor at its time, so the next pass reads it again, and never holds back the pages
     // after it (the sibling of M1 on #3301).
     if (read.holdAt !== null) hold = hold === undefined ? read.holdAt : Math.min(hold, read.holdAt);
-    // A refund not final yet holds the anchor the same way (audit of refunds, A1; as gifts and pre-orders since
-    // 0cbcc276b1): the next pass reads it again, and its places go once it went through.
-    for (const refund of read.rows) if (notFinal(refund)) hold = hold === undefined ? (refund.created as number) : Math.min(hold, refund.created as number);
+    // A refund that has not taken its purchase back yet but may (on its way, a part of a charge not settled, or one
+    // whose charge's refunds did not read) holds the anchor the same way (audit of refunds, A1): the next pass reads it
+    // again, and its places go once it went through.
+    for (const at of held) hold = hold === undefined ? at : Math.min(hold, at);
     for (const refund of read.rows) newest = Math.max(newest, refund.created as number);
     if (!read.hasMore) {
       // Every row read and final: the anchor goes to the newest. A row not read, or a refund not final yet: no further

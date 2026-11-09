@@ -208,7 +208,9 @@ async function main(): Promise<void> {
   const dropped: string[] = [];
   // Somebody else has the product from the creator's own import: that stays.
   await grantImported(store.statsId!, "import_1", [{ email: "zed@example.com", productId: product.id, items: null }]);
-  refunds = [{ id: "re_1", created: Math.floor(Date.now() / 1000), status: "succeeded", payment_intent: "pi_Group000001", charge: { refunded: true } }];
+  // Rule 23: the refund and its charge now carry their amounts, as Stripe lists them: since the owner's decision 18 (9 November
+  // 2026) a succeeded refund takes the places back only when its amount covers the charge, or the charge's refunds add up.
+  refunds = [{ id: "re_1", created: Math.floor(Date.now() / 1000), status: "succeeded", amount: 4900, payment_intent: "pi_Group000001", charge: { refunded: true, amount: 4900 } }];
   is("a full refund takes every place back", await revokeRefundedGroups(store, Date.now() + 10_000, async (email, productId) => void dropped.push(`${email}|${productId}`)), 2);
   is("from each address", [(await importedFor(store, "ana@example.com")).length, (await importedFor(store, "ben@example.com")).length], [0, 0]);
   is("and their courses", dropped.sort(), [`ana@example.com|${product.id}`, `ben@example.com|${product.id}`]);

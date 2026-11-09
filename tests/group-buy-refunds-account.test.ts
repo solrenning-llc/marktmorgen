@@ -95,7 +95,9 @@ async function main(): Promise<void> {
   const anchor = async () => (await redis.pipeline([["GET", anchorKey]]))[0];
   const pass = async () => (await redis.pipeline([["GET", passKey]]))[0];
   const now = Math.floor(Date.now() / 1000);
-  const refund = (id: string, pi: string, created: number) => ({ id, object: "refund", created, status: "succeeded", payment_intent: pi, charge: { refunded: true } });
+  // Rule 23: the refund and its charge now carry their amounts, as Stripe lists them: since the owner's decision 18 (9 November
+  // 2026) a succeeded refund takes the places back only when its amount covers the charge, or the charge's refunds add up.
+  const refund = (id: string, pi: string, created: number) => ({ id, object: "refund", created, status: "succeeded", amount: 4900, payment_intent: pi, charge: { refunded: true, amount: 4900 } });
   /** n refunds of payments made elsewhere, newest first, one second apart from `top` down. */
   const others = (prefix: string, n: number, top: number) => Array.from({ length: n }, (_, i) => refund(`re_${prefix}${String(i).padStart(6, "0")}`, `pi_${prefix}${String(i).padStart(6, "0")}`, top - i));
   /** One run, and whether it threw. */

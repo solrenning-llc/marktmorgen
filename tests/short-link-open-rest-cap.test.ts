@@ -18,6 +18,13 @@ import { MAX_LINKS } from "@/lib/short-link-rules";
 import { answering } from "./security/next-headers";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ShortLinksOffNotice } from "@/components/short-links-off-notice";
+import { shortLinksOffNotice } from "@/lib/short-link-rest";
+import { PAYING_INDEX } from "@/lib/free-pool-rules";
+import { SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_STORE_READS_PER_HOUR } from "@/lib/short-link-open-rules";
+import { SHORT_LINK_UNPAID_COMPANY_COST } from "./plan-cost-registry";
 
 type Command = (string | number)[];
 const HOUR = 3_600_000;
@@ -28,8 +35,12 @@ const OFF_DAYS = 30;
 
 let tiredFolders = new Set<string>();
 let recordReads = 0;
+let pipelines = 0;
+let commandsSent = 0;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: Command[]) => {
+  pipelines += 1;
+  commandsSent += batch.length;
   if (batch.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:store:owner:"))) recordReads += 1;
   const values = await real(batch);
   return batch.map((c, i) => (c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:") && [...tiredFolders].some((f) => String(c[1]).includes(f)) ? 1_000_000_000 : values[i]));
@@ -120,13 +131,21 @@ async function main() {
   later(DAY + 60_000);
   forgetShortLinkOpenMemory();
   recordReads = 0;
+  pipelines = 0;
+  commandsSent = 0;
   const off = await open(goneOther);
+  const offPipelines = pipelines;
+  const offCommands = commandsSent;
   console.log(`  2 after ${OFF_DAYS} days: ${off.status}, ${off.type}, ${off.cache}, ${recordReads} record reads`);
   is("2: a 410 that sends nobody anywhere", [off.status, off.to], [410, null]);
   is("2: a short page in US English", [off.type.startsWith("text/html"), off.language, off.text.length < 2_000, /lang="en-US"/.test(off.text)], [true, "en-US", true, true]);
   is("2: it says in plain words the link is turned off", /turned off/i.test(off.text), true);
   is("2: kept by the CDN", /public/.test(off.cache) && sMaxAge(off.cache) > 0, true);
   is("2: its record is not read", recordReads, 0);
+  // Added with the fix: the open answered as turned off is a resting store's lookup, priced in the registry with room.
+  console.log(`  2 the open answered as turned off: ${offPipelines} pipelines and ${offCommands} commands`);
+  const lookup = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.restingLookup;
+  is("2: it stays inside the resting store's lookup the registry prices", [offPipelines <= lookup.waits, offCommands <= lookup.commands], [true, true]);
   forgetShortLinkOpenMemory();
   recordReads = 0;
   for (let i = 0; i < 50; i += 1) await open(goneCode);
@@ -169,6 +188,33 @@ async function main() {
   const [note] = await redis.pipeline([["GET", `nl:slink:rest:${back.s.sid}:back`]]);
   console.log(`  3 the studio's notice: ${String(note)}`);
   is("3: the studio's notice is kept, with when the links were turned off and when they came back", typeof note === "string" && /^\d{13,15}:\d{13,15}$/.test(note), true);
+
+  // Added with the fix: the figures are the code's, the studio reads and draws the notice, and a store that pays when its
+  // mark could not be taken away (the moment it paid did not reach the database) still opens at its next open.
+  part("The figures, the studio's notice, and a store that pays without its mark taken away");
+  is("the ceiling and the 30 days are the code's", [SHORT_LINK_STORE_READS_PER_HOUR, SHORT_LINK_OFF_AFTER_MS], [STORE_CAP, OFF_DAYS * DAY]);
+  const shown = await shortLinksOffNotice(back.s.sid);
+  is("the studio reads when they were turned off and when they came back", shown !== null && shown.backAt >= shown.offAt && Math.abs(shown.backAt - paysAt) < 5_000, true);
+  const html = shown ? renderToStaticMarkup(createElement(ShortLinksOffNotice, shown)) : "";
+  is("the studio says so in plain words, under a heading, with nothing to do", [/<h2[^>]*>Your short links were turned off for a while<\/h2>/.test(html), /work again/.test(html), /do not need to do anything/.test(html)], [true, true, true]);
+  is("a store with no notice is told nothing", await shortLinksOffNotice(busy.s.sid), null);
+  reset();
+  const heal = await store("healrest@example.com", "healrest");
+  const healCode = await link(heal.s, "reel");
+  tiredFolders.add(heal.folder);
+  await open(healCode);
+  later(OFF_DAYS * DAY + 60_000);
+  forgetShortLinkOpenMemory();
+  is("turned off", (await open(healCode)).status, 410);
+  tiredFolders = new Set();
+  await redis.pipeline([["SADD", PAYING_INDEX, "healrest@example.com"]]);
+  forgetShortLinkOpenMemory();
+  const healed = await open(healCode);
+  is("in the list of stores that pay, its next open reads it and opens", [healed.status, healed.to?.includes("/@healrest")], [302, true]);
+  const [healNote] = await redis.pipeline([["GET", `nl:slink:rest:${heal.s.sid}:back`]]);
+  is("and the studio's notice is kept then", typeof healNote === "string", true);
+  forgetShortLinkOpenMemory();
+  is("its mark is gone: the next open opens too", (await open(healCode)).status, 302);
   done();
 }
 main();

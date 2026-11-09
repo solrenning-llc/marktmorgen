@@ -266,7 +266,9 @@ async function main(): Promise<void> {
   // Rule 23 (9 November 2026): was "at most 6 pipelines and 8 commands", priced at request(6 + 2, 8 + 4). The store's id is now read
   // with its resting mark and the refund's DECR and EXPIRE in one pipeline, and an open the store does not pay for is counted in the
   // hour again: 7 pipelines and 12 commands measured for this open (a count that could not be made).
-  is("the heaviest unpaid open waits on at most 7 pipelines and sends at most 12 commands", [unpaidPipelines <= 7, unpaidCommands <= 12], [true, true]);
+  // Rule 23 (9 November 2026, the owner's decision 14): was "at most 12 commands"; the store's own count adds its INCR and
+  // EXPIRE to the pipeline that reads the store's id, and this open, which did not read the record unpaid, gives it back: 16.
+  is("the heaviest unpaid open waits on at most 7 pipelines and sends at most 16 commands", [unpaidPipelines <= 7, unpaidCommands <= 16], [true, true]);
   // Rule 23 (9 November 2026, second pre-review): was request(7 + 2, 12 + 4), the open whose store count could not be
   // made; the heaviest is the free store without a place measured above (9 pipelines and 17 commands), priced at the
   // registry's heaviestUnpaid, which holds that room. Since the third pre-review it is that open found past the resting
@@ -329,20 +331,33 @@ async function main(): Promise<void> {
   // Added 9 November 2026 (Claude 2's first cost review, ALTO 2): past the resting hour a resting store's opens are refused and
   // never counted in the shared hour, so what they read is held per resting store, their number unknown, never zero: its
   // record at most once a resting mark's time, and on each instance each of its links looked up once while remembered.
-  const markOpen = request(markPipelines + 2, markCommands + 4, 4_096);
+  // Rule 23 (9 November 2026, the owner's decision 14): was request(markPipelines + 2, markCommands + 4, 4_096); a resting
+  // store's lookup is now priced at the registry's restingLookup, which holds that room over the open refused on its mark
+  // (measured here) and over the open answered as turned off (measured in tests/short-link-open-rest-cap.test.ts).
+  const resting = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore;
+  const markOpen = request(resting.restingLookup.waits, resting.restingLookup.commands, 4_096);
+  is("a resting store's lookup is priced with room over the open refused on its mark", [resting.restingLookup.waits >= markPipelines + 2, resting.restingLookup.commands >= markCommands + 4], [true, true]);
   // Rule 23 (9 November 2026, Claude 2's focal return): was storeReadsPerHour alone ($20.37), a figure the code did not hold:
   // the opens in flight when a mark expired all read the record (600 in an hour, tests/short-link-open-prerev5.test.ts). The
   // check now holds storeReadsPerHour site-wide, and a store with no mark at all is read by at most the opens the two hours
   // hold at once, once a mark's life.
-  const resting = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore;
-  const restingStoreMonth = (resting.storeReadsPerHour * MONTH_HOURS + resting.coldReadsPerLapse * (MONTH_HOURS * HOUR) / resting.lapseEveryMs) * unpaid;
+  // Rule 23 (9 November 2026, the owner's decision 14): was storeReadsPerHour (60) a month plus coldReadsPerLapse (360) once a
+  // lapseEveryMs, US$81.49, not approved; now the store's own count, SHORT_LINK_STORE_READS_PER_HOUR reads an hour at most,
+  // counted before each read, cold burst included (tests/short-link-open-rest-cap.test.ts), each at the heaviest unpaid open.
+  const restingStoreMonth = resting.storeReadsPerHour * MONTH_HOURS * unpaid;
   const restingStoreInstanceMonth = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.lookupsPerInstancePerHour * MONTH_HOURS * markOpen;
   console.log(`  cost  past the resting hour, per resting store: its record $${restingStoreMonth.toFixed(2)} a month; per instance, its links looked up $${restingStoreInstanceMonth.toFixed(2)} a month (an open refused on its mark $${markOpen.toFixed(6)}: ${markPipelines} pipelines and ${markCommands} commands measured)`);
-  is("a resting store's open refused on its mark was measured: at most 4 pipelines and 9 commands", [markPipelines <= 4, markCommands <= 9], [true, true]);
+  // Rule 23 (9 November 2026, the owner's decision 14): was "at most 4 pipelines and 9 commands"; the store's own count's
+  // INCR and EXPIRE ride in the pipeline that reads its id, and are given back with the count in the resting hour: 13.
+  is("a resting store's open refused on its mark was measured: at most 4 pipelines and 13 commands", [markPipelines <= 4, markCommands <= 13], [true, true]);
   // Rule 23 (9 November 2026, Claude 2's focal return): was "under $21 a month" ($20.37, the 60 an hour the code did not hold);
   // the claims a mark's time plus a store with no mark read by every open the two hours hold at once, every two hours: $81.49.
-  is("past the resting hour, one resting store's record reads stay under $82 a month", restingStoreMonth < 82, true);
-  is("past the resting hour, one resting store's lookups on one instance stay under $18 a month", restingStoreInstanceMonth < 18, true);
+  // Rule 23 (9 November 2026, the owner's decision 14): was "under $82 a month" ($81.49) and, for the lookups on one instance,
+  // "under $18 a month" ($17.09, MAX_LINKS an hour); not approved. Now SHORT_LINK_STORE_READS_PER_HOUR reads an hour, and each
+  // link looked up once a SHORT_LINK_RESTING_OWNER_MS on an instance: held under the registry's figures, awaiting the owner.
+  is("one resting store's record reads stay under the registry's month (cents)", Math.ceil(restingStoreMonth * 100) <= resting.monthCeilingUsdCents, true);
+  is("one resting store's lookups on one instance stay under the registry's month (cents)", Math.ceil(restingStoreInstanceMonth * 100) <= resting.instanceMonthCeilingUsdCents, true);
+  is("those figures wait for the owner's approval", resting.approvedByOwner, false);
   is("their number is held unknown, never zero", [SHORT_LINK_UNPAID_COMPANY_COST.restingStores, SHORT_LINK_UNPAID_COMPANY_COST.instances, restingStoreMonth > 0, restingStoreInstanceMonth > 0], [null, null, true, true]);
   // It is not a line of lib/llc-fixed-costs.ts: those lines enter CURRENT_COMMERCIAL_TERMS, which only the owner changes.
   const ids = (list: readonly { id: string }[] | readonly string[]) => list.map((x) => (typeof x === "string" ? x : x.id));

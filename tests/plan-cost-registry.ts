@@ -110,7 +110,7 @@ import {
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
-import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS, SHORT_LINK_OWNER_MS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_KEY_SECONDS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_USED_UP_PAUSE_MS } from "@/lib/short-link-open-rules";
+import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS, SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_STORE_COUNT_COMMANDS, SHORT_LINK_STORE_READS_PER_HOUR, SHORT_LINK_STORE_REFUND_COMMANDS, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_USED_UP_PAUSE_MS } from "@/lib/short-link-open-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
@@ -365,10 +365,12 @@ export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_B
 /**
  * One short link that opens (app/l/[code]/route.ts, lib/short-link-open.ts): its CDN request and the proxy's call, a
  * heavy request's wait and CPU, its count in the hour, the link and the store's whole record read, the store's resting
- * mark read and its DECR and EXPIRE off the hour; the store's own count is REQUEST_COMMANDS of the line. Taken as SHORT_LINK_OPEN_UNITS public requests,
+ * mark read and its DECR and EXPIRE off the hour, and its place in its store's own count of the hour taken and given back
+ * (SHORT_LINK_STORE_COUNT_COMMANDS and SHORT_LINK_STORE_REFUND_COMMANDS, since the owner's decision 14 on #3330, 9 November
+ * 2026); the store's own count is REQUEST_COMMANDS of the line. Taken as SHORT_LINK_OPEN_UNITS public requests,
  * held above it in tests/plan-cost-registry.test.ts.
  */
-export const SHORT_LINK_OPEN_READ = CDN_PER_REQUEST + CALL + request("heavy", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REST_COMMANDS + SHORT_LINK_REFUND_COMMANDS, MAX_STORE_BYTES + 4_096) + 1_000 * ORIGIN_PER_BYTE;
+export const SHORT_LINK_OPEN_READ = CDN_PER_REQUEST + CALL + request("heavy", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REST_COMMANDS + SHORT_LINK_REFUND_COMMANDS + SHORT_LINK_STORE_COUNT_COMMANDS + SHORT_LINK_STORE_REFUND_COMMANDS, MAX_STORE_BYTES + 4_096) + 1_000 * ORIGIN_PER_BYTE;
 /**
  * Short links opened that no store pays for (lib/short-link-open.ts): a company cost under MR item 2, in three parts.
  * (1) At most SHORT_LINK_UNPAID_PER_HOUR an hour in the one count every server instance shares (a code nobody has,
@@ -400,20 +402,41 @@ export const SHORT_LINK_OPEN_READ = CDN_PER_REQUEST + CALL + request("heavy", SH
  * one measured, with room, held there), every Redis wait at its timeout, in tests/short-link-open-cap.test.ts. The
  * reviewed monthly ceiling is unknown (null), never zero, and the owner has not approved it. Kept here, not in
  * lib/llc-fixed-costs.ts: a line there enters CURRENT_COMMERCIAL_TERMS, which only the owner changes.
+ *
+ * The owner's decision 14 on #3330 (9 November 2026) did not approve the US$81.49 a month (4) came to for one resting
+ * store (its record read once a mark's time, 60 an hour, and by every open in flight, 360, once a mark's life). Since
+ * then (4) is: its record read at most SHORT_LINK_STORE_READS_PER_HOUR times an hour (storeReadsPerHour), counted in a
+ * count of the store's own before each read, the first day and in a cold burst alike, every open that did not read the
+ * record unpaid giving its place back; and on each instance each of its links looked up at most once a
+ * SHORT_LINK_RESTING_OWNER_MS (lookupsPerInstancePerHour), each at most restingLookup's waits and commands (an open
+ * refused on its mark, or answered as turned off with the one SISMEMBER that tells a store that pays again, measured
+ * with room). A store without a paid plan that has rested SHORT_LINK_OFF_AFTER_MS (offAfterDays) has its links turned
+ * off: answered with a static page the CDN keeps, its record never read, so from then on (4) is only its lookups. Its
+ * worst month is its first: monthCeilingUsdCents for its record, site-wide, and instanceMonthCeilingUsdCents for its
+ * lookups on each instance, both priced in tests/short-link-open-cap.test.ts and held under these figures, which wait
+ * for the owner's approval (approvedByOwner: false).
  */
 export const SHORT_LINK_UNPAID_COMPANY_COST = {
   perHour: SHORT_LINK_UNPAID_PER_HOUR,
   knownPerHour: SHORT_LINK_KNOWN_UNPAID_PER_HOUR,
   readUnits: SHORT_LINK_UNPAID_READ_UNITS, missesPerAddress: SHORT_LINK_MISSES_PER_ADDRESS, missWindowMs: SHORT_LINK_MISS_WINDOW_MS,
   restPerHour: SHORT_LINK_REST_UNPAID_PER_HOUR, restRefusalReads: 1, restMarkSets: 1, restMarkMs: SHORT_LINK_TIRED_MS, restUsedMarkMs: SHORT_LINK_TIRED_MAX_MS,
+  // Rule 23 (9 November 2026, the owner's decision 14): was storeReadsPerHour 3_600_000 / SHORT_LINK_TIRED_MS (60) with
+  // coldReadsPerLapse (360) every lapseEveryMs (two hours), US$81.49 a month, and lookupsPerInstancePerHour
+  // MAX_LINKS * (3_600_000 / SHORT_LINK_OWNER_MS) (100), US$17.09 a month an instance; not approved.
   perRestingStore: {
-    storeReadsPerHour: 3_600_000 / SHORT_LINK_TIRED_MS,
-    coldReadsPerLapse: (SHORT_LINK_UNPAID_PER_HOUR + SHORT_LINK_KNOWN_UNPAID_PER_HOUR) * SHORT_LINK_UNPAID_READ_UNITS + SHORT_LINK_REST_UNPAID_PER_HOUR,
-    lapseEveryMs: SHORT_LINK_UNPAID_KEY_SECONDS * 1000,
-    lookupsPerInstancePerHour: MAX_LINKS * (3_600_000 / SHORT_LINK_OWNER_MS),
+    storeReadsPerHour: SHORT_LINK_STORE_READS_PER_HOUR,
+    lookupsPerInstancePerHour: MAX_LINKS * (3_600_000 / SHORT_LINK_RESTING_OWNER_MS),
+    restingLookup: { waits: 6, commands: 17 },
+    offAfterDays: SHORT_LINK_OFF_AFTER_MS / 86_400_000,
+    monthCeilingUsdCents: 700,
+    instanceMonthCeilingUsdCents: 100,
+    approvedByOwner: false,
   },
   restingStores: null,
-  heaviestUnpaid: { waits: 12, commands: 23 },
+  // Rule 23 (9 November 2026, the owner's decision 14): was 23 commands; the store's own count adds its INCR and EXPIRE to the
+  // pipeline that reads the store's id, and an open that does not read the record unpaid gives it back (DECR and EXPIRE).
+  heaviestUnpaid: { waits: 12, commands: 24 },
   perInstance: {
     usedHourCountEveryMs: SHORT_LINK_USED_UP_PAUSE_MS, usedRestHourCountEveryMs: SHORT_LINK_USED_UP_PAUSE_MS, unknownCountEveryMs: SHORT_LINK_UNKNOWN_PAUSE_MS,
   },
@@ -1674,6 +1697,7 @@ export const NOT_A_COST: Record<string, string> = {
   FORGET_PER_RUN: "lib/store-forget-retry.ts limits work to twenty-five stores per daily closing run, but first reads the entire active queue with HGETALL. The synthetic 2,000-row expired-deadline control produces a 166,893-byte JSON-serialized stub reply (not RESP, wire or billed bytes) and does no cleanup work. Twenty-five is not a queue-read byte bound. Complete queue, Lua, runtime, retention and company funding remain unknown; no finite fixed-cost or plan margin certification follows from this classification.",
   STATUS_VIEWS_PER_HOUR: "Requests in an hour, for the whole site, that read the runs on the public status page (247 [SP4] unit 2, lib/status-page.ts): not a plan's cost, since the page belongs to no store; a company cost under MR item 2, every kind of request priced at the rates of lib/spend-cost-table.ts and tests/traffic-cost.ts, held by tests/status-page.test.ts.",
   SHORT_LINK_UNPAID_PER_HOUR: "Short links opened in an hour that no store pays for and that read a found link's store (a store gone, a count that could not be made, a connection over its share; lib/short-link-open.ts), in one count every server instance shares, kept in units since 9 November 2026 (SHORT_LINK_UNPAID_READ_UNITS each, a code nobody has one unit, counted before it is looked up; a resting store's open never lands there): not a plan's cost, since no store is known or pays; a company cost under MR item 2, held as SHORT_LINK_UNPAID_COMPANY_COST with the resting hour beside it (SHORT_LINK_REST_UNPAID_PER_HOUR) and what each instance adds beyond them (a count a minute while either hour is used or a count is unreadable), the number of instances unknown, never zero (reviewed ceiling unknown, never zero; not a line of lib/llc-fixed-costs.ts, so CURRENT_COMMERCIAL_TERMS does not change), its worst month priced at every Redis wait's timeout in tests/short-link-open-cap.test.ts. A link that opens is its store's public request (public-requests, SHORT_LINK_OPEN_READ) and comes off the hour.",
+  SHORT_LINK_STORE_READS_PER_HOUR: "Opens of one store's links an hour that may read its record without the store paying for them (lib/short-link-open.ts, the owner's decision 14 on #3330, 9 November 2026), in a count of that store's own every server instance shares, made before the read, the first day and in a cold burst alike; an open its store pays for, or one that did not read the record unpaid, gives its place back, so a paying store's count is only its opens in flight. Not a plan's cost, since the store did not pay for those reads; a company cost under MR item 2, per resting store, the number of resting stores unknown, never zero: SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore, priced in tests/short-link-open-cap.test.ts (worst month under monthCeilingUsdCents, awaiting the owner's approval).",
   SHORT_LINK_KNOWN_UNPAID_PER_HOUR: "Opens past SHORT_LINK_UNPAID_PER_HOUR, in the same shared count, that may still read while the hour is used, only for a link its store paid for on that instance a moment ago (lib/short-link-open.ts): one its store pays for is given back to the count, one that ends unpaid stays counted, so the shared count's unpaid reads are at most the two figures together an hour; not a plan's cost, since the store did not pay for it; a company cost under MR item 2, held in SHORT_LINK_UNPAID_COMPANY_COST.knownPerHour and priced in tests/short-link-open-cap.test.ts.",
   SHORT_LINK_REST_UNPAID_PER_HOUR: "Opens in an hour of stores over their own requests, in a second count every server instance shares, apart from SHORT_LINK_UNPAID_PER_HOUR (lib/short-link-open.ts): the first open of a link whose store is found resting, moved there out of the shared count once its store is known, and a store asked again whether it still rests, counted there before it is read; each one read and at most one SET of the store's resting mark. Past it (since 9 November 2026, Claude 2's first cost review) a first one is refused, never counted in the shared hour, and the store's mark is kept SHORT_LINK_TIRED_MAX_MS; a store due to be asked again rests in the instance's memory a minute, nothing sent; so a store over its own requests never uses the hour every other store's links need. What resting stores read past it is held per resting store and per instance, their numbers unknown, never zero (SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore). Not a plan's cost, since the store did not pay; a company cost under MR item 2, site-wide, held in SHORT_LINK_UNPAID_COMPANY_COST.restPerHour and priced in tests/short-link-open-cap.test.ts (reviewed ceiling unknown, never zero, not approved).",
   STATUS_COUNTS_PER_ADDRESS_PER_HOUR: "Times one address may make one server instance count a request on the public status page in an hour (247 [SP4] unit 2, lib/status-page.ts, lib/local-limit.ts): a pace that only refuses, held in memory at no cost, so one client cannot use up the hour's reads; the page's cost is the company's, priced in tests/status-page.test.ts.",

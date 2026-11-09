@@ -158,7 +158,9 @@ async function main() {
   is("found resting: refused, nothing in the shared hour", [(await open(mcode)).status, await hourCount()], [503, 0]);
   // Rule 23 (9 November 2026, Claude 2's focal return): the mark's TTL was the longer time itself; the mark now holds the
   // moment the store rests until and lives two hours, so the longer time is that moment, read from its value.
-  const markUntil = Number((await redis.pipeline([["GET", `nl:slink:rest:${m.s.sid}`]]))[0]) - Date.now();
+  // Rule 23 (9 November 2026, the owner's decision 14): was Number(mark); the mark of a store without a paid plan is now
+  // "<until>:<since>", so the moment is its first part.
+  const markUntil = Number(String((await redis.pipeline([["GET", `nl:slink:rest:${m.s.sid}`]]))[0]).split(":")[0]) - Date.now();
   is("its mark is kept the longer time, so its record is read at most once that long", markUntil > SHORT_LINK_TIRED_MS && markUntil <= SHORT_LINK_TIRED_MAX_MS, true);
   forgetShortLinkOpenMemory();
   commands = [];

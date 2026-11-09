@@ -101,10 +101,13 @@ async function main(): Promise<void> {
   // read the store again; it now holds the moment the store rests until (a minute on), and lives two hours, so once that
   // moment is past one open alone, site-wide, asks the store again (tests/short-link-open-prerev5.test.ts).
   const markAt = Date.now();
+  // Rule 23 (9 November 2026, the owner's decision 14): was Number(mark); a store without a paid plan's mark is now
+  // "<until>:<since>" (since when it rests that way, for its links turned off after 30 days), so the moment is its first part.
+  const untilOf = (value: unknown) => Number(String(value).split(":")[0]);
   const mark = (await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0];
-  is("the store's own refusal writes its resting mark: the moment it rests until, a minute on", Math.abs(Number(mark) - (markAt + 60_000)) <= 2_000, true);
+  is("the store's own refusal writes its resting mark: the moment it rests until, a minute on", Math.abs(untilOf(mark) - (markAt + 60_000)) <= 2_000, true);
   later(61_000);
-  is("after a minute the mark is still there, its moment past, so one open asks the store again", Number((await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0]) <= Date.now(), true);
+  is("after a minute the mark is still there, its moment past, so one open asks the store again", untilOf((await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0]) <= Date.now(), true);
 
   part("(ii) Paid opens at once do not stop the instance for the rest of the hour");
   reset();

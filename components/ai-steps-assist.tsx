@@ -117,6 +117,7 @@ export function AiStepsAssist<T>({
   extra,
   allowEmpty = false,
   validateResult,
+  messages,
 }: {
   title: string;
   hint: string;
@@ -130,8 +131,12 @@ export function AiStepsAssist<T>({
   extra?: React.ReactNode;
   allowEmpty?: boolean;
   validateResult?: (value: unknown) => value is T;
+  /** This job's own words for an error, in place of the box's (e.g. "file", when its PDF could not be read). */
+  messages?: Partial<Record<string, string>>;
 }) {
   const ai = useContext(AiOn);
+  const words: Record<string, string> = { ...MESSAGES };
+  for (const [key, value] of Object.entries(messages ?? {})) if (typeof value === "string" && value) words[key] = value;
   const startKnown = allowanceOf(ai) !== null;
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -182,7 +187,7 @@ export function AiStepsAssist<T>({
       setAllowanceKnown(true);
       setReadOnce(true);
       if (validateResult && !validateResult(line.value)) {
-        finish({ error: MESSAGES.unconfirmed });
+        finish({ error: words.unconfirmed });
         return;
       }
       onResult(line.value as T);
@@ -213,9 +218,9 @@ export function AiStepsAssist<T>({
       return;
     }
     const refused = REFUSED_BEFORE_START.has(line.error);
-    if (!refused && !Object.hasOwn(MESSAGES, line.error)) setAllowanceKnown(false);
+    if (!refused && !Object.hasOwn(words, line.error)) setAllowanceKnown(false);
     setAnnounce("");
-    finish({ error: refused ? MESSAGES.failed : Object.hasOwn(MESSAGES, line.error) ? MESSAGES[line.error] : MESSAGES.unconfirmed });
+    finish({ error: refused ? words.failed : Object.hasOwn(words, line.error) ? words[line.error] : words.unconfirmed });
   }
 
   function stepLine(line: AiStepLine) {
@@ -229,7 +234,7 @@ export function AiStepsAssist<T>({
   async function run() {
     if (busy) return;
     if (!allowEmpty && !notes.trim()) {
-      setError(MESSAGES.notes);
+      setError(words.notes);
       return;
     }
     const id = crypto.randomUUID().replace(/-/g, "");
@@ -280,7 +285,7 @@ export function AiStepsAssist<T>({
     else {
       setAllowanceKnown(false);
       setAnnounce("");
-      finish({ error: MESSAGES.unconfirmed });
+      finish({ error: words.unconfirmed });
     }
     setStopping(false);
     setBusy(false);

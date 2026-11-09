@@ -33,14 +33,16 @@ import { imageFolder } from "@/lib/store";
 import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
-import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepLine } from "@/lib/ai-steps";
+import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepId, type AiStepLine, type AiStepState } from "@/lib/ai-steps";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
 import { writeProductIdeas } from "@/lib/product-ideas";
+import { writeFromPdf } from "@/lib/product-pdf-assist";
+import type { AiResult, AiStopped } from "@/lib/ai";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
 /**
- * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research" | "ideas", … }`.
+ * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research" | "ideas" | "product-pdf", … }`.
  * It writes into the studio's own boxes and saves nothing: whatever comes back
  * is the creator's to read, change and keep, or not.
  *
@@ -62,8 +64,8 @@ export async function POST(request: NextRequest) {
     if (!AI_RUN_ID.test(run)) return fail("invalid");
     return (await markAiStop(store, run)) ? Response.json({ ok: true }) : fail("unconfirmed", 503);
   }
-  // A page asked for step by step names its run, so it can be stopped; one that does not is refused before anything is asked.
-  const stepped = body.kind === "page" && body.steps === true;
+  // A page asked for step by step, or a title and benefits from a product's PDF (always in steps), names its run, so it can be stopped; one that does not is refused before anything is asked.
+  const stepped = (body.kind === "page" && body.steps === true) || body.kind === "product-pdf";
   if (stepped && !AI_RUN_ID.test(text(body.run, 60))) return fail("invalid");
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return fail("slow", 429);
   const notes = text(body.notes, MAX_AI_NOTES + 100);
@@ -102,10 +104,7 @@ export async function POST(request: NextRequest) {
     // The product's own PDF, its first pages only, when the creator asked for it to be read (lib/ai.ts, readPdfFacts).
     let pdf: Uint8Array | null = null;
     if (body.readFile === true) {
-      const file = readableFile(product);
-      if (!file) return fail("file");
-      const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES).catch(() => null);
-      pdf = bytes ? await firstPages(bytes, READ_PDF_PAGES).catch(() => null) : null;
+      pdf = await pdfPagesOf(product);
       if (!pdf) return fail("file");
     }
     const input: Parameters<typeof writePage>[1] = {
@@ -118,42 +117,20 @@ export async function POST(request: NextRequest) {
       pdf,
     };
     if (!stepped) return answer(writePage(store, input));
-    // Step by step (758 [STN5]): one line as each step starts and ends, then
-    // the result, so the studio can say what is running and offer to stop.
     const run = text(body.run, 60);
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const send = (line: AiStepLine | { pad: string }) => {
-          try {
-            controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
-          } catch {
-            // The page has gone; the job goes on to its end and keeps its count, as one without steps does.
-          }
-        };
-        send({ pad: " ".repeat(AI_STEP_PADDING_BYTES) });
-        let last: AiStepLine = { done: true, ok: false, error: "failed" };
-        try {
-          const done = await writePage(store, input, Date.now(), { run, onStep: (step, state) => send({ step, state }) });
-          last = done.ok
-            ? { done: true, ok: true, value: done.value, left: done.left }
-            : "returned" in done
-              ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left }
-              : { done: true, ok: false, error: done.reason };
-        } catch (error) {
-          console.error("a page drafted step by step failed", error);
-        }
-        send(last);
-        try {
-          controller.close();
-        } catch {
-          // Already closed by the page going away.
-        }
-      },
-    });
-    return new Response(stream, {
-      headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" },
-    });
+    return inSteps((onStep) => writePage(store, input, Date.now(), { run, onStep }), "a page drafted step by step failed");
+  }
+  if (body.kind === "product-pdf") {
+    // A title, a short description and benefits from the product's own PDF
+    // (758 [STN5], unit 4): the product and its file are read here, from the
+    // store's own record, never taken from the browser.
+    const product = await readListing(store, text(body.product, 40));
+    if (!product) return fail("unknown", 404);
+    const pdf = await pdfPagesOf(product);
+    if (!pdf) return fail("file");
+    const about = product.about ? await readAbout(store.statsId, product.id) : "";
+    const run = text(body.run, 60);
+    return inSteps((onStep) => writeFromPdf(store, { title: product.title, summary: product.summary, about, notes, pdf }, Date.now(), { run, onStep }), "a title and benefits from a PDF failed");
   }
   if (body.kind === "review") {
     // The page as it stands in the editor, saved or not, held to the same
@@ -394,4 +371,53 @@ export async function POST(request: NextRequest) {
     return answer(writeEmail(store, { goal, product: text(body.product, 200), link: text(body.link, 400), notes }));
   }
   return fail("invalid");
+}
+
+/** A product's own PDF, its first pages only (lib/ai.ts, readPdfFacts), or null when it has none to read or it cannot be read. */
+async function pdfPagesOf(product: Parameters<typeof readableFile>[0]): Promise<Uint8Array | null> {
+  const file = readableFile(product);
+  if (!file) return null;
+  const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES).catch(() => null);
+  return bytes ? await firstPages(bytes, READ_PDF_PAGES).catch(() => null) : null;
+}
+
+/**
+ * A job told step by step (758 [STN5]): one line as each step starts and
+ * ends, then the result, so the studio can say what is running and offer to
+ * stop. The first line is padding some browsers wait for.
+ */
+function inSteps<T>(job: (onStep: (step: AiStepId, state: AiStepState) => void) => Promise<AiResult<T> | AiStopped>, failure: string): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (line: AiStepLine | { pad: string }) => {
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+        } catch {
+          // The page has gone; the job goes on to its end and keeps its count, as one without steps does.
+        }
+      };
+      send({ pad: " ".repeat(AI_STEP_PADDING_BYTES) });
+      let last: AiStepLine = { done: true, ok: false, error: "failed" };
+      try {
+        const done = await job((step, state) => send({ step, state }));
+        last = done.ok
+          ? { done: true, ok: true, value: done.value, left: done.left }
+          : "returned" in done
+            ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left }
+            : { done: true, ok: false, error: done.reason };
+      } catch (error) {
+        console.error(failure, error);
+      }
+      send(last);
+      try {
+        controller.close();
+      } catch {
+        // Already closed by the page going away.
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" },
+  });
 }

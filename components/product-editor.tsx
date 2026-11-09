@@ -45,10 +45,12 @@ import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, pric
 import { StoreCurrency, useStoreCurrency } from "@/components/store-currency";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { ProductIdeas } from "@/components/product-ideas";
+import { ProductPdfAssist } from "@/components/product-pdf-assist";
 import {
   ACCEPT_ATTRIBUTE,
   MAX_FILE_BYTES,
   maxFileLabel,
+  readableFile,
   readableSize,
   type ProductFile,
 } from "@/lib/product-file";
@@ -422,6 +424,15 @@ function ProductForm({
           summary={draft.summary}
           titleFieldId={`product-title-${id}`}
           onUse={(next) => setDraft({ ...draft, title: next.title, summary: next.summary })}
+        />
+      ) : null}
+
+      {/* A name, a short description and benefits from the product's own PDF (758 [STN5], unit 4): only once it has one to read. */}
+      {product && readableFile(product) ? (
+        <ProductPdfAssist
+          productId={product.id}
+          fields={{ title: draft.title, summary: draft.summary, about: draft.about }}
+          onChange={(next) => setDraft({ ...draft, ...next })}
         />
       ) : null}
 

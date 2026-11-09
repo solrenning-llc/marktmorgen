@@ -257,6 +257,21 @@ part("a run stopped by its time limit is red: a job canceled with no newer run o
   is("stopped with no job evidence at all (not named): no evidence, as before", withStopped([...restGreen(), b], []).action, "none");
 }
 
+part("a job stopped before any newer run began is a time-out, even when a later push ended the rest of its run (Claude 6 on #3422, LOW)");
+{
+  // stoppedAt: when the first stopped job of a canceled run ended (its completed_at, from the jobs listing).
+  const withTimes = (runs: Run[], stoppedJobs: number[], stoppedAt: Record<number, string>, trigger: Run) =>
+    decide({ runs, trigger, head: HEAD, stoppedJobs, stoppedAt } as Parameters<typeof decide>[0]);
+  const a = run(PC, stopped, { head_sha: OLD, updated_at: "2026-11-06T23:00:00Z" });
+  const next = run(PC, null, { created_at: "2026-11-06T22:30:00Z" });
+  is("a job stopped at 22:00, the next push's run created at 22:30, the run ended at 23:00: a time-out, open",
+    withTimes([...restGreen(), a, next], [a.id], { [a.id]: "2026-11-06T22:00:00Z" }, restGreen()[0]).action, "open");
+  is("control: the job stopped at 22:45, after the next run began: superseded, nothing",
+    withTimes([...restGreen(), a, next], [a.id], { [a.id]: "2026-11-06T22:45:00Z" }, restGreen()[0]).action, "none");
+  is("control: no job time known: the run's end decides, as before (superseded)",
+    withTimes([...restGreen(), a, next], [a.id], {}, restGreen()[0]).action, "none");
+}
+
 part("a merge_group run that passed on main's very head is that workflow's result there (C1-0305-C4-28)");
 {
   // main only fast-forwards to the merge queue's commit, so the queue's merge_group runs are on main's
@@ -387,7 +402,7 @@ async function endToEnd() {
   part("the whole run, against a synthetic GitHub (no network)");
   // Jobs of a run, in the real API shape (GET actions/runs/{id}/jobs); by default a canceled run whose
   // jobs were canceled and whose aggregator "All checks (…)" failed, as every canceled run's does.
-  const job = (name: string, conclusion: string | null) => ({ id: 1, name, status: conclusion === null ? "in_progress" : "completed", conclusion });
+  const job = (name: string, conclusion: string | null, completed_at: string | null = null) => ({ id: 1, name, status: conclusion === null ? "in_progress" : "completed", conclusion, completed_at });
   const cleanJobs = { total_count: 2, jobs: [job("verify", stopped), job("All checks (product-checks)", "failure")] };
   const redJobsReply = { total_count: 3, jobs: [job("verify", "success"), job("Mobile render (candidate)", "failure"), job("All checks (product-checks)", "failure")] };
   const github = (o: { head: string, headRuns: unknown[], older?: Record<string, unknown[][]>, issues?: unknown[], olderReply?: unknown, jobs?: Record<number, unknown>, defaultJobs?: unknown,
@@ -484,6 +499,15 @@ async function endToEnd() {
     const gh = github({ head: HEAD, headRuns: [...restGreen(), b], jobs: { [b.id]: skipped }, older: { "product-checks.yml": [[]] } });
     await alarmRun({ api: gh.api, trigger: b, log: quiet });
     is("canceled with its jobs skipped, none stopped: nothing opens", gh.writes, []);
+  }
+  {
+    // Claude 6 on #3422 (LOW): a matrix job hit its time limit at 22:00; a push at 22:30 then canceled the rest of
+    // the run, which ended at 23:00. The run reads as superseded by its end, but the job stopped before any newer run.
+    const a = run(PC, stopped, { head_sha: OLD, id: 7_201, updated_at: "2026-11-06T23:00:00Z" });
+    const timedOut = { total_count: 3, jobs: [job("Mobile render (candidate)", stopped, "2026-11-06T22:00:00Z"), job("verify", stopped, "2026-11-06T22:59:00Z"), job("All checks (product-checks)", "failure", "2026-11-06T23:00:00Z")] };
+    const gh = github({ head: HEAD, headRuns: [...restGreen(), run(PC, null, { id: 7_202, created_at: "2026-11-06T22:30:00Z" })], jobs: { [a.id]: timedOut }, older: { "product-checks.yml": [[a]] } });
+    const d = await alarmRun({ api: gh.api, trigger: restGreen()[0], log: quiet });
+    is("a job stopped before the next push's run began: the time-out opens, with that run", [d.action, d.red.map((r) => r.id)], ["open", [a.id]]);
   }
   {
     // Claude 6 on #3422 (MEDIUM): three quick merges. B's push run canceled A's and is itself still being canceled

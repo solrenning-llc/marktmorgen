@@ -9,7 +9,7 @@ import { redisPipeline } from "@/lib/redis";
 
 export { setAssistantPlan };
 export const DAY = 86_400;
-export const NOW = Date.UTC(2026, 11, 2) / 1000;
+export const NOW = Math.floor(Date.now() / 1000);
 
 type Row = Record<string, unknown>;
 export const world = {
@@ -60,6 +60,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const q = url.searchParams;
   world.calls.push(`${method} ${path}`);
   const page = (data: unknown[]) => json({ object: "list", data, has_more: false });
+  const searchPage = (data: unknown[]) => json({ object: "search_result", data, has_more: false, next_page: null });
   const form = new URLSearchParams(String(init?.body ?? ""));
   const sub = path.match(/^\/subscriptions\/(sub_\w+)$/);
   if (sub) {
@@ -116,7 +117,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/charges") return page(world.charges.filter((c) => c.customer === q.get("customer")));
   const charge = path.match(/^\/charges\/(ch_\w+)$/);
   if (charge) return json(world.charges.find((c) => c.id === charge[1]));
-  if (path === "/charges/search" || path === "/customers/search") return page([]);
+  if (path === "/charges/search" || path === "/customers/search") return searchPage([]);
   if (path === "/disputes") return page([]);
   return json({ error: { message: `no stand-in for ${path}` } }, 404);
 }) as typeof fetch;

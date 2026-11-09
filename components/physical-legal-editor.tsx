@@ -314,8 +314,8 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
 
         {error ? <p className="notice notice-error mt-3" role="alert">{error}</p> : null}
         <div className="mt-4 flex flex-wrap gap-3">
-          <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary btn-sm min-h-11">{busy ? "Saving…" : "Save legal information"}</button>
-          <button type="button" className="btn btn-ghost btn-sm min-h-11" onClick={() => { setOpen(false); setError(null); setProblems([]); }}>Cancel</button>
+          <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary btn-sm inline-flex min-h-11 items-center justify-center">{busy ? "Saving…" : "Save legal information"}</button>
+          <button type="button" className="btn btn-ghost btn-sm inline-flex min-h-11 items-center justify-center" onClick={() => { setOpen(false); setError(null); setProblems([]); }}>Cancel</button>
         </div>
       </fieldset>
     </form>

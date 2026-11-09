@@ -41,7 +41,7 @@ import { fromPrice, listedLengths } from "@/lib/call-lengths";
 import { takeDataBytes } from "@/lib/store-data";
 import { saleHandles } from "@/lib/store";
 import { activeIntro } from "@/lib/intro-price";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -71,6 +71,7 @@ import { chargeNow } from "@/lib/call-deposit";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
+import { deriveKey } from "@/lib/secret-box";
 import { suppressedCommand } from "@/lib/suppression";
 import { assistRemindKey } from "@/lib/assistant-reminder-rules";
 
@@ -120,10 +121,9 @@ export function productLink(store: Store, productId: string): string {
   return `${storeBase(store)}/p/${encodeURIComponent(productId)}`;
 }
 
-async function stopLink(store: Store, email: string, what?: "move"): Promise<{ page: string; oneClick: string }> {
+async function stopLink(store: Store, email: string): Promise<{ page: string; oneClick: string }> {
   const token = randomBytes(20).toString("hex");
-  // `w`: what the email was about, so the stop page names it; the mark it leaves is the same either way.
-  const grant = { k: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.name, ...(what ? { w: what } : {}) };
+  const grant = { k: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.name };
   const notes = noteForErasure(store.statsId, email, linkKey(token));
   // Read in their exact shape (CX-123 rule 24): the link written ("OK") and
   // each erasure note a count. Anything else is unknown, and the reminder is
@@ -150,10 +150,32 @@ type StopGrant = { k: string; e: string; n?: unknown; h?: unknown; w?: unknown }
  * (lib/imports.ts, lib/move-members.ts): the same door, page and one-click
  * address as a checkout reminder's, and the same mark, so pressing it stops
  * every reminder from that store to that address, the move's among them.
- * Throws when its record is not confirmed written (stopLink).
+ *
+ * One link a store and address (review of #3476, MEDIUM 1), the same in the
+ * first email, its reminder and every pass that tries a send again: its
+ * token is signed with a key of our own, so nobody can make the link of an
+ * address, and writing it again only renews it. So a sender that answers
+ * "try again later" for a day leaves one link, not one a pass, and a link
+ * an email already carries is never taken back by a later pass. Its erasure
+ * note is written first and confirmed before the link: a link is never kept
+ * that erasure cannot find, and a note whose link was never written only
+ * names a key that is not there. Throws when either is not confirmed
+ * written, or when there is no key to sign with: nothing is sent then.
  */
-export function moveStopLink(store: Store, email: string): Promise<{ page: string; oneClick: string }> {
-  return stopLink(store, email, "move");
+export async function moveStopLink(store: Store, email: string): Promise<{ page: string; oneClick: string }> {
+  const key = deriveKey("move-stop");
+  if (!key || !store.statsId) throw new Error("no key to sign a moved member's stop link with");
+  const token = createHmac("sha256", key).update(`${store.statsId}|${normaliseEmail(email)}`).digest("hex").slice(0, 40);
+  const grant = { k: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.name, w: "move" };
+  const notes = noteForErasure(store.statsId, email, linkKey(token));
+  const noted = repliesFor(await redisPipeline(notes), notes.length);
+  if (!noted || noted.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a moved member's stop link");
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a moved member's stop link");
+  return {
+    page: `${SITE_URL}/unsubscribe?r=${token}`,
+    oneClick: `${SITE_URL}/api/mail/unsubscribe?r=${token}`,
+  };
 }
 
 /**

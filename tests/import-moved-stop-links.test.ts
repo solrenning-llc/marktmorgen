@@ -12,6 +12,8 @@
  *   - a reminder the month cannot take writes no link;
  *   - a link write answered in an unknown shape sends nothing, gives back the day and the month, puts the reminder
  *     back in line, and keeps the link an email already sent carries;
+ *   - a member's link write answered in an unknown shape sends nothing, keeps the member queued and the import's hold
+ *     whole, and the next pass emails them once;
  *   - a reminder whose store has no postal address any more is put back in line, not dropped (LOW 2);
  *   - a purchases import saved before files could say they have no status column reads its rows as before (LOW 3).
  */
@@ -196,6 +198,42 @@ async function main(): Promise<void> {
     let pj = await runImport(p.job.id, Date.now() + 30_000);
     for (let i = 0; i < 10 && pj && pj.state !== "done"; i += 1) pj = await runImport(p.job.id, Date.now() + 30_000);
     is("a row with no status is given, as before the option", [pj?.state, pj?.counts.added, pj?.counts.errors], ["done", 1, 0]);
+    const q = await startImport(store, OWNER, "purchases", { expected: 1, file: "orders.csv", email: false, statusColumn: true } as Parameters<typeof startImport>[3]);
+    if (!q.ok) throw new Error(`purchases not started: ${q.reason}`);
+    await addRows(store, q.job.id, [["2", "late@example.com", "The Guide", ""]]);
+    await finishUpload(store, q.job.id);
+    let qj = await runImport(q.job.id, Date.now() + 30_000);
+    for (let i = 0; i < 10 && qj && qj.state !== "done"; i += 1) qj = await runImport(q.job.id, Date.now() + 30_000);
+    is("control: one started with a status column still reads an empty status as not paid", [qj?.state, qj?.counts.added, qj?.counts.errors], ["done", 0, 1]);
+  }
+
+  part("A member's stop link write answered in an unknown shape: nothing goes, and the import's hold is kept whole");
+  {
+    const HOLD = "links-hold@example.com";
+    await openStore(HOLD, "linkshold", "acct_1TestStopLink04", "StopLinks4");
+    const hold = (await storeForEmail(HOLD))!;
+    const member = "eli@example.com";
+    const j = await startImport(hold, HOLD, "members", { expected: 1, file: "patrons.csv", stopped: true });
+    if (!j.ok) throw new Error(`not started: ${j.reason}`);
+    await addRows(hold, j.job.id, [["2", member, "The Inner Circle", renews, ""]]);
+    await finishUpload(hold, j.job.id);
+    const heldOf = () => (JSON.parse(String(redis.run(["GET", `nl:import:${j.job.id}`]))) as { held?: { n: number } }).held?.n;
+    const heldBefore = heldOf();
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      const out = (await original(commands)) as unknown[];
+      return commands.map((c, i) => (c[0] === "SET" && String(c[1]).startsWith("nl:recover:link:") ? "QUEUED" : out[i]));
+    };
+    before = emails.length;
+    let first;
+    try {
+      first = await runImport(j.job.id, Date.now() + 30_000);
+    } finally {
+      restore();
+    }
+    is("nothing goes, the member is still queued, the hold is as it was", [first?.state, emails.length - before, redis.run(["SCARD", `nl:import:${j.job.id}:mail`]), heldOf()], ["mailing", 0, 1, heldBefore]);
+    let hj = await runImport(j.job.id, Date.now() + 30_000);
+    for (let i = 0; i < 10 && hj && hj.state !== "done"; i += 1) hj = await runImport(j.job.id, Date.now() + 30_000);
+    is("control: the next pass emails the member once", [hj?.state, sentTo(member, before).length, tokenOf(sentTo(member, before)[0]).length], ["done", 1, 40]);
   }
   done();
 }

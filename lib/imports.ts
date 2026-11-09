@@ -270,7 +270,8 @@ export const IMPORT_END_EXTRA_COMMANDS = END_TRIES * (1 + JOB_WRITE_IF_EXTRA_COM
 /**
  * The most each email to somebody brought over costs in commands beside what it did before: the creator's list's rows
  * read (one HMGET a portion, at most one an email: leftListAmong), and for a member's email or reminder the stop mark
- * read (one EXISTS: remindersStoppedAmong) and its own stop link written with its erasure notes (one SET and three:
+ * read (one EXISTS: remindersStoppedAmong) and its stop link, one a store and address, written with its erasure notes
+ * once the day and the month have room for the email (three, then one SET:
  * lib/checkout-recovery.ts moveStopLink, lib/erasure-index.ts noteForErasure).
  */
 export const MOVED_EMAIL_EXTRA_COMMANDS = 1 + 1 + 1 + 3;
@@ -342,7 +343,10 @@ export type ImportJob = {
     dateOrder?: DateOrder | "";
     /** Where the file came from; absent on imports made before ClickFunnels files were read. */
     source?: ImportSource;
-    /** Purchases: false when the file has no status column (StartInput.statusColumn); absent is read as having one. */
+    /**
+     * Purchases: whether the file has a status column (StartInput.statusColumn), written by every start since the
+     * option exists; absent on an import started before it, read as it was then (an empty status as paid).
+     */
     statusColumn?: boolean;
   };
   finishedAt: number;
@@ -1172,7 +1176,9 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
   const statsId = store.statsId;
   if (!statsId) throw new Error("the store has no statsId");
   const listings = await listingsNamed(store, rows);
-  const { valid, problems, skipped } = classifyPurchases(listings, rows, job.options.statusColumn !== false);
+  // Only an import that said it has a status column reads an empty status as unknown: one saved before the option
+  // existed, which never says, reads its rows as it did when it started (review of #3476, LOW 3).
+  const { valid, problems, skipped } = classifyPurchases(listings, rows, job.options.statusColumn === true);
   // Nobody deleted from the store is given anything again or emailed ("no import puts them back"); unknown throws.
   // Read before the repeat check, so a deleted address on several rows is left out on each, never written into the
   // report or kept among the rows the import saw.
@@ -1615,23 +1621,6 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await unsent(portion);
     return "more";
   }
-  // Each member's email with its own stop link (lib/checkout-recovery.ts, moveStopLink: a page, a one-click address
-  // and the header a mail app reads) and the creator's postal address. A link not confirmed written sends nothing:
-  // the same addresses go back, the portion is given back, and it throws, the step left as it was.
-  if (members) {
-    try {
-      for (const message of messages) {
-        const stop = await moveStopLink(store, message.to);
-        message.text = [message.text, ...moveFoot(store, stop.page)].join("\n");
-        message.headers = { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" };
-      }
-    } catch (error) {
-      await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
-      await unsent(portion);
-      throw error;
-    }
-  }
-  for (const message of messages) message.html = letterHtml(message.text);
   // The company's day first: over it, the same buyers wait for tomorrow.
   if (!(await reserveDay(messages.length))) {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
@@ -1664,13 +1653,35 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await unsent(portion);
     return "more";
   }
-  const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
-  if (sent === "retry") {
+  // Each member's email that goes with its stop link (lib/checkout-recovery.ts, moveStopLink: a page, a one-click
+  // address and the header a mail app reads) and the creator's postal address, written only now, once the day and the
+  // month have room for it (review of #3476, MEDIUM 1): one link a store and address, the same on every pass. A link
+  // not confirmed written sends nothing: the same addresses go back, what was taken for them is given back as for a
+  // send tried again, and the step is tried again, the job saved with its hold as it was.
+  const giveBack = async () => {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
     if (held) held.n += sending.length;
     else await releaseMoved(store, sending.length);
     await releaseDay(sending.length);
     await unsent(portion);
+  };
+  if (members) {
+    try {
+      for (const message of sending) {
+        const stop = await moveStopLink(store, message.to);
+        message.text = [message.text, ...moveFoot(store, stop.page)].join("\n");
+        message.headers = { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" };
+      }
+    } catch (error) {
+      console.error("a moved member's stop link was not confirmed written; the portion waits", error);
+      await giveBack();
+      return "retry";
+    }
+  }
+  for (const message of sending) message.html = letterHtml(message.text);
+  const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
+  if (sent === "retry") {
+    await giveBack();
     return "retry";
   }
   job.counts.unmailed += messages.length - sending.length + refusedCount;
@@ -1931,8 +1942,13 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if ((await deletedAmong(store.listId, [invite.e])).size) continue;
       if ((await leftListAmong(store.listId, [invite.e])).size) continue;
       if ((await remindersStoppedAmong(store, [invite.e])).size) continue;
-      // It carries the creator's postal address: with none, it is not sent.
-      if (!movePostal(store)) continue;
+      // It carries the creator's postal address: with none, it is not sent now, and is put back in line for an hour
+      // later while that is still before the renewal date, so a creator who saves the address again still has it sent
+      // (review of #3476, LOW 2); after that date there is nothing left for it to help with.
+      if (!movePostal(store)) {
+        if (invite.r * 1000 > now + 3_600_000) await remindLater(sid, field, now);
+        continue;
+      }
       if (await keptAlready(store, invite.e, invite.p)) {
         await noteKept(store, invite.e, invite.p, now);
         counts.kept += 1;
@@ -1940,10 +1956,6 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
       const letter = await reminderEmail(store, field, now);
       if (!letter) continue;
-      // Its own stop link, made before anything is taken (moveStopLink throws when it is not confirmed written: the
-      // catch below puts the reminder back in line, nothing taken or sent).
-      const stop = await moveStopLink(store, letter.to);
-      const text = [letter.text, ...moveFoot(store, stop.page)].join("\n");
       if (!(await reserveDay(1))) {
         await remindLater(sid, field, now);
         continue;
@@ -1958,6 +1970,18 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         if (opens && opens < invite.r * 1000) await remindLater(sid, field, opens - 3_600_000);
         continue;
       }
+      // Its stop link, written only once the day and the month have room for it: the member's own, the same as in
+      // their first email (moveStopLink, one a store and address). Not confirmed written, nothing is sent: what was
+      // taken is given back and the reminder is put back in line (review of #3476, MEDIUM 1).
+      let stop: Awaited<ReturnType<typeof moveStopLink>>;
+      try {
+        stop = await moveStopLink(store, letter.to);
+      } catch (error) {
+        await releaseMoved(store, 1);
+        await releaseDay(1);
+        throw error;
+      }
+      const text = [letter.text, ...moveFoot(store, stop.page)].join("\n");
       const sent = await sendBatch(
         [
           {

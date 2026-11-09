@@ -1117,7 +1117,12 @@ export type Sale = {
   /** Stripe's own id for the sale. The creator can search it in Stripe. */
   reference: string;
   title: string;
-  amount: number;
+  /**
+   * What it cost, in the currency's smallest unit, exactly as Stripe gave it.
+   * null when Stripe did not give a whole number of at least zero: unknown,
+   * shown as unknown, never as 0 (rule 24).
+   */
+  amount: number | null;
   /** What it was paid in, as Stripe says. */
   currency: string;
   email: string | null;
@@ -1215,7 +1220,9 @@ export async function listSales(store: Store): Promise<SaleList> {
           row.metadata?.title ||
           known?.title ||
           "A product that is no longer listed",
-        amount: typeof row.amount_total === "number" ? row.amount_total : 0,
+        // Only a whole number of the smallest unit, at least zero, is an amount; anything
+        // else Stripe gave is unknown, never $0.00 nor the odd figure.
+        amount: Number.isSafeInteger(row.amount_total) && (row.amount_total as number) >= 0 ? (row.amount_total as number) : null,
         currency: typeof row.currency === "string" && row.currency ? row.currency : "usd",
         email: typeof email === "string" && email ? email : null,
         paidAt,

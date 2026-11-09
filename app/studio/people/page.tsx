@@ -274,7 +274,11 @@ async function LatestBuyers({ store }: { store: Store }) {
                 </Link>
                 <span className="block text-sm text-ink-soft">{`${s.title} · ${day(s.paidAt)}`}</span>
               </span>
-              <span className="font-display font-semibold tabular-nums text-ink">{formatMoney(s.amount, s.currency)}</span>
+              {s.amount === null ? (
+                <span role="status" className="text-sm font-semibold text-ink">Amount could not be loaded</span>
+              ) : (
+                <span className="font-display font-semibold tabular-nums text-ink">{formatMoney(s.amount, s.currency)}</span>
+              )}
             </li>
           ))}
         </ul>

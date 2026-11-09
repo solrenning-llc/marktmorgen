@@ -734,8 +734,17 @@ export async function deliverPayPal(input: {
   await countOrder(store, `paypal:${paid.order}`, paid.cents);
 }
 
-/** How long after PayPal's refund window a capture the account refused to show is still asked about, once a day. */
-const UNANSWERED_GRACE_SECONDS = 30 * 86_400;
+/**
+ * How long after PayPal's refund window a capture whose read fails is still asked about once a day: past it, the
+ * account's own refusal ends the watch and any other failure is asked about once a week (lookAfterFailure).
+ */
+export const UNANSWERED_DAILY_SECONDS = 30 * 86_400;
+/**
+ * How often a capture is asked about once its reads have failed for UNANSWERED_DAILY_SECONDS past the refund window
+ * without the account refusing it, until its paid record ends (PAID_KEPT_SECONDS). Every look of an order is a PayPal
+ * call and the watch's Redis, a cost of the five-minute job (PAYPAL_WATCH_LOOKS in tests/plan-cost-registry.ts).
+ */
+export const UNANSWERED_WEEKLY_SECONDS = 7 * 86_400;
 
 /**
  * PayPal's answers to a capture read that are the seller account's own refusal (Payments v2 errors, as `call` reads
@@ -751,6 +760,24 @@ const ACCOUNT_REFUSALS: ReadonlyMap<number, ReadonlySet<string>> = new Map([
 /** Whether a failed read of `path` is PayPal's answer that the account refuses it, from that request itself. */
 function accountRefused(error: unknown, path: string): boolean {
   return error instanceof PayPalError && error.path === path && (ACCOUNT_REFUSALS.get(error.status)?.has(error.code) ?? false);
+}
+
+/**
+ * When an order whose capture PayPal did not answer about (a failed read, or no status) is asked about next, or null
+ * when it leaves the watch. Inside PayPal's refund window: the watch's own schedule (nextLook), never sooner. Past it,
+ * once a day for UNANSWERED_DAILY_SECONDS, so a fault that passes is caught within a day; past those days the account's
+ * own refusal (`refused`) ends the watch, and any other failure, by then a month of every read failing, is asked about
+ * once every UNANSWERED_WEEKLY_SECONDS until the paid record ends, with a last look on its last day, so a refund made
+ * inside the window is still seen at the first look PayPal answers. A later `now` never gives an earlier answer, so the
+ * five-minute job's delays only make the looks fewer.
+ */
+export function lookAfterFailure(paidAt: number, now: number, refused: boolean): number | null {
+  const scheduled = nextLook(paidAt, now);
+  if (scheduled !== null) return scheduled;
+  if (now - paidAt < WATCH_SECONDS + UNANSWERED_DAILY_SECONDS) return now + 86_400;
+  if (refused) return null;
+  const lastDay = paidAt + PAID_KEPT_SECONDS - 86_400;
+  return now < lastDay ? Math.min(now + UNANSWERED_WEEKLY_SECONDS, lastDay) : now + 86_400;
 }
 
 /**
@@ -845,18 +872,18 @@ export async function watchPayPal(
     // PayPal's answer about the capture is not known (a failed read, or no status): never taken for "not refunded"
     // nor for "refunded". It is asked again on the watch's own schedule (nextLook: hourly in the first week, then
     // less), never more often, moved back so it cannot hold the place of the orders behind it. Once PayPal's refund
-    // window has closed, a last look that failed is asked again once a day. Only the account's own refusal of the read
-    // (accountRefused: it withdrew its grant, or has no such capture) ends the watch, after UNANSWERED_GRACE_SECONDS,
-    // so a capture PayPal will never show is not asked about for ever (Claude 6's MEDIUM 3 in audit 18). Any other
-    // failure (a PayPal outage, a timeout, the partner's token refused) is asked about once a day until the paid record
-    // ends (PAID_KEPT_SECONDS; readPaidExact then answers no record and the order leaves), so a refund made inside the
-    // window is still seen once PayPal answers again (pre-review MEDIUM on this branch). Either way the purchase is
-    // kept and never marked refunded without PayPal's word: at most the schedule's looks and one a day from day 180 to
-    // day 400 an order (about 220, against the thirty before).
+    // window has closed, a last look that failed is asked again once a day for UNANSWERED_DAILY_SECONDS. Only the
+    // account's own refusal of the read (accountRefused: it withdrew its grant, or has no such capture) then ends the
+    // watch, so a capture PayPal will never show is not asked about for ever (Claude 6's MEDIUM 3 in audit 18). Any
+    // other failure (a PayPal outage, a timeout, the partner's token refused) is asked about once a week until the paid
+    // record ends (PAID_KEPT_SECONDS; readPaidExact then answers no record and the order leaves), so a refund made
+    // inside the window is still seen once PayPal answers again (pre-review MEDIUM on this branch), at a quarter of the
+    // reads a daily look would make (lookAfterFailure). Either way the purchase is kept and never marked refunded
+    // without PayPal's word. Each order's looks over its whole life are counted in PAYPAL_WATCH_LOOKS
+    // (tests/plan-cost-registry.ts, held by tests/paypal-watch-looks-cost.test.ts).
     const path = `/v2/payments/captures/${encodeURIComponent(paid.capture)}`;
     const askLater = async (why: string, refused: boolean): Promise<void> => {
-      const ended = refused && now - paid.at >= WATCH_SECONDS + UNANSWERED_GRACE_SECONDS;
-      const next = nextLook(paid.at, now) ?? (ended ? null : now + 86_400);
+      const next = lookAfterFailure(paid.at, now, refused);
       if (next === null) console.error("the account that took a capture refused to show it past its refund window; no longer watched, purchase kept, refund unknown", statsId, order, why);
       await redisPipeline([next === null ? ["ZREM", watchKey(statsId), order] : ["ZADD", watchKey(statsId), String(next), order]]).catch(() => undefined);
     };

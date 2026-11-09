@@ -7,9 +7,10 @@
  *
  * Now only the account's own refusal ends the watch after the grace days: PayPal answering 403 NOT_AUTHORIZED /
  * PERMISSION_DENIED (the account withdrew the platform's grant) or 404 INVALID_RESOURCE_ID (the account has no such
- * capture) to the capture read itself. Any other failure is asked again once a day until the paid record ends (400
- * days), so a refund made inside the window is still seen once PayPal answers again, and the cost stays bounded (at
- * most one read a day an order between day 180 and day 400).
+ * capture) to the capture read itself. Any other failure is asked again once a day for the thirty days, then once a
+ * week until the paid record ends (400 days), so a refund made inside the window is still seen once PayPal answers
+ * again, and the cost stays bounded (at most 58 reads an order after day 180, PAYPAL_WATCH_LOOKS in
+ * tests/plan-cost-registry.ts, held by tests/paypal-watch-looks-cost.test.ts).
  *
  * Synthetic only: a stand-in for PayPal's API, the Redis stub, the real return route and the real sweep.
  */
@@ -21,6 +22,7 @@ import { sweepPayPal } from "@/lib/paypal-delivery";
 import { importedFor } from "@/lib/imported-purchases";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { PAYPAL_WATCH_LOOKS } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { NextRequest } from "next/server";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
@@ -174,18 +176,23 @@ async function main(): Promise<void> {
   is("the purchase is kept and never marked refunded", [await owned("refused@example.com"), (await refundMark(refusedSale)) === null], [1, true]);
   is("never asked about after day 210", readsOf(refusedSale, 211 * DAY).length, 0);
 
-  part("Reads that never get an answer (a timeout, a network error): asked once a day until the paid record ends at 400 days");
-  is("still watched on day 217, asked again in a day", Number(await watched(timeout)) - Math.floor(Date.now() / 1000), 86_400);
+  part("Reads that never get an answer (a timeout, a network error): asked once a week from day 210 until the paid record ends at 400 days");
+  // Altered 2026-11-09 (rule 23): a read failing past the thirty daily days is asked once a week, not once a day, until
+  // the record ends (lib/paypal-sales.ts, lookAfterFailure; the cost of each look is in PAYPAL_WATCH_LOOKS).
+  is("still watched on day 217, asked again in a week", Number(await watched(timeout)) - Math.floor(Date.now() / 1000), 7 * 86_400);
   await daily(0, 218, 398);
   is("still watched on day 398", (await watched(timeout)) !== null, true);
   is("the purchase is kept and never marked refunded meanwhile", [await owned("timeout@example.com"), (await refundMark(timeout)) === null], [1, true]);
-  is("asked at most once a day after the refund window (days 180 to 398)", readsOf(timeout, 180 * DAY, 399 * DAY).length <= 219, true);
+  // Altered 2026-11-09 (rule 23): at most once a day to day 210 and once a week after it, not once a day to the end.
+  is("asked once a day to day 210, then once a week (days 180 to 398)", readsOf(timeout, 180 * DAY, 399 * DAY).length <= 30 + 28, true);
   await daily(0, 399, 402);
   is("once the paid record has ended, no longer watched", await watched(timeout), null);
   const after = readsOf(timeout).length;
   await daily(0, 403, 405);
   is("and never asked about again", readsOf(timeout).length - after, 0);
-  is("every read of it in its whole life stays bounded (the schedule's looks plus one a day to 400 days)", readsOf(timeout).length <= 230, true);
+  // Altered 2026-11-09 (rule 23): bounded by the registry's looks a sale (PAYPAL_WATCH_LOOKS: 410 inside the window, 58
+  // after it), not by a daily look to 400 days; this test sweeps once a day, so it makes fewer.
+  is("every read of it in its whole life stays bounded (the registry's looks a sale)", readsOf(timeout).length <= PAYPAL_WATCH_LOOKS.inWindowPerSaleMost + PAYPAL_WATCH_LOOKS.pastWindowPerSaleMost, true);
 
   part("The partner's own token refused (401, or 403 PERMISSION_DENIED) from day 175 to day 215; refund on day 178");
   const base = 410 * DAY;

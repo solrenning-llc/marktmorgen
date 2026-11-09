@@ -148,10 +148,11 @@ export function readWindow(now: number): { from: string; to: string } {
 /**
  * What the studio and the owner's email add when Meta did not confirm that it took a permission back (lib/meta-ads.ts
  * revokeToken: refused, {"success": false}, an answer that could not be read, or out of reach): never that it was
- * given back (VR item 2), and how to end it on Facebook's side.
+ * given back (VR item 2), and how to end it on Facebook's side. It names the permission the person gave, not the
+ * one to read the ads, which on "permission" Meta never gave (pre-review, 9 November 2026).
  */
 export const META_ACCESS_UNCONFIRMED =
-  "Meta did not confirm that it took back the permission to read your ads, so that access may stay on until Meta ends it. We no longer keep the key Meta gave us. To end it yourself now: on Facebook, open Settings and privacy, then Settings, then Business integrations, and remove Marktmorgen.";
+  "Meta did not confirm that it took back the permission you gave Marktmorgen, so that access may stay on until Meta ends it. We no longer keep the key Meta gave us. To end it yourself now: on Facebook, open Settings and privacy, then Settings, then Business integrations, and remove Marktmorgen.";
 
 /** The studio's notice for each outcome that gave a permission back without Meta confirming it, before META_ACCESS_UNCONFIRMED. */
 const UNCONFIRMED_NOTICES: Record<string, { title: string; body: string }> = {

@@ -29,6 +29,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { type Affiliate, type Line, bookCsv, creditPayPalSale, bookSize, readBook, tierLines } from "@/lib/affiliates";
 import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
 import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
+import * as commissionView from "@/lib/affiliate-commission-view";
+import { HELP_SECTIONS } from "@/lib/help-content";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { readPayPalRefundsWithCoverage, refundSeen, type Paid, watchPayPal } from "@/lib/paypal-sales";
 import { payableLines } from "@/lib/paypal-payouts";
@@ -145,6 +149,36 @@ async function main(): Promise<void> {
   is("and says why, and that it stays held", studio.includes("PayPal refunded part of this payment. The amount refunded is not known here, so no commission is paid on it. It stays held."), true);
   is("the affiliate's page has the words in every language", Object.values(AFFILIATES_WORDS).every((w) => typeof w.lineStatus.held === "string" && w.lineStatus.held.length > 0), true);
   is("in English", AFFILIATES_WORDS.en.lineStatus.held, "held: partly refunded, amount unknown");
+
+  part("The program's words say what happens to a PayPal sale refunded in part, in every language");
+  // VR 2: "a partly refunded one earns on what was kept" is not true for a PayPal sale, which is held instead. Each of
+  // the three places that promise it (the affiliate's terms, a partner share, a partner's invitation) says so.
+  const paypalHeld: Record<string, string> = {
+    en: "A sale paid with PayPal and partly refunded is held, earning nothing, until the amount refunded is known.",
+    es: "Una venta pagada con PayPal y reembolsada en parte queda retenida, sin generar nada, hasta que se conozca el importe reembolsado.",
+    fr: "Une vente payée avec PayPal et partiellement remboursée est retenue, sans rien rapporter, jusqu'à ce que le montant remboursé soit connu.",
+    de: "Ein mit PayPal bezahlter und teilweise erstatteter Verkauf wird zurückgehalten und bringt nichts ein, bis der erstattete Betrag bekannt ist.",
+    it: "Una vendita pagata con PayPal e rimborsata in parte resta trattenuta, senza far guadagnare nulla, finché l'importo rimborsato non è noto.",
+    nl: "Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, wordt vastgehouden en levert niets op tot het terugbetaalde bedrag bekend is.",
+    pt: "Uma venda paga com PayPal e parcialmente reembolsada fica retida, sem gerar nada, até que o valor reembolsado seja conhecido.",
+  };
+  is("seven languages", Object.keys(AFFILIATES_WORDS).sort(), Object.keys(paypalHeld).sort());
+  for (const [lang, w] of Object.entries(AFFILIATES_WORDS)) {
+    const sentence = paypalHeld[lang];
+    is(`${lang}: the terms, a partner share and a partner's invitation each say it`, [w.termRefunds.includes(sentence), w.partnerShare(10, "x").includes(sentence), w.partnerTerms(10).includes(sentence)], [true, true, true]);
+  }
+  const helpText = JSON.stringify(HELP_SECTIONS);
+  is("the creator's help says it beside the Stripe rule", helpText.includes(`cancels it or reduces it. ${paypalHeld.en}`), true);
+
+  part("The affiliate's page shows held in place of an amount, never $0.00");
+  const shown = (commissionView as Record<string, unknown>).commissionShown as ((line: { status: string; commission: number; currency: string }, money: (c: number, cur: string) => string, held: string) => string) | undefined;
+  const dollars = (c: number) => `$${(c / 100).toFixed(2)}`;
+  const heldWord = (w: unknown) => (w as { heldAmount?: unknown }).heldAmount;
+  is("a held line shows the word for held", shown?.({ status: "held", commission: 0, currency: "usd" }, dollars, String(heldWord(AFFILIATES_WORDS.es))), "Retenida");
+  is("an earned line shows its amount", shown?.({ status: "earned", commission: 1470, currency: "usd" }, dollars, "Held"), "$14.70");
+  is("every language has the word", Object.values(AFFILIATES_WORDS).every((w) => typeof heldWord(w) === "string" && String(heldWord(w)).length > 0), true);
+  const affiliatePage = readFileSync(join(process.cwd(), "app/[handle]/affiliates/page.tsx"), "utf8");
+  is("the affiliate's page draws a sale's amount through it", affiliatePage.includes("commissionShown(line, money, a.heldAmount)"), true);
 
   part("A second tier on a held sale is held too, never paid in full");
   const recruit = { id: "bbbbbbbbbbbb", status: "approved", by: { id: AFF, percent: 10 } } as unknown as Affiliate;

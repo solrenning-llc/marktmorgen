@@ -2,7 +2,8 @@
 // same start the page reads (courseLedger): a course bought again after a full refund is emailed from the purchase
 // that stands, a purchase refunded in full and not bought again is not emailed, and a start that cannot be read
 // sends nothing that run and is tried again on the next, never early and never skipped. The page re-dates the
-// student's row when it reads a different start, so the studio and the next run follow it.
+// student's row when it reads a different start, so the studio and the next run follow it. The job's reads are its
+// own, bounded per store and run, never taken from the store's public requests (what its buyers' pages use).
 import type { Course } from "@/lib/course";
 import { emailKey, paidCourses, recordEnrollment, registerDrip, sendDripEmails, studentDates, touchStudent } from "@/lib/learn";
 import type { DataStore } from "@/lib/store-data";
@@ -11,7 +12,7 @@ import { catalog } from "./course-repurchase-catalog-world";
 import { stripe } from "./course-repurchase-stripe-world";
 import { mail } from "./course-drip-mail-world";
 import { counted } from "./course-drip-count-world";
-import { DRIP_START_UNITS, dripStartUnits } from "@/lib/drip-start-rules";
+import { allowanceFor } from "@/lib/store-allowance-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -39,8 +40,8 @@ const session = (id: string, created: number, refunded: boolean) => ({
 });
 
 /** The row touchStudent writes the first time a student opens the course. */
-async function openedOn(start: number) {
-  await redis.pipeline([["HSET", `nl:course:${courseId}:students`, emailKey(buyer), JSON.stringify({ e: buyer, s: start, l: start })]]);
+async function openedOn(start: number, who = buyer) {
+  await redis.pipeline([["HSET", `nl:course:${courseId}:students`, emailKey(who), JSON.stringify({ e: who, s: start, l: start })]]);
 }
 
 /** One run of the daily job at `now`; the subjects of what it sent. */
@@ -72,6 +73,7 @@ async function fresh(sessions: Record<string, unknown>[]) {
   counted.left = Number.MAX_SAFE_INTEGER;
   catalog.listings = [product];
   stripe.sessions = sessions;
+  stripe.fail = false;
   await registerDrip(store, product, course);
 }
 
@@ -121,20 +123,40 @@ async function main() {
   is("the mark's claim unknown: nothing is sent", await run(first + 30 * DAY), []);
   is("the next run sends it, never skipped", await run(first + 31 * DAY), [subject("Month 1")]);
 
-  part("The read counted with the store's public requests before it is made");
+  part("Stripe does not answer: the start is unknown, never the thanks page's alone");
+  await fresh([session("cs_test_once", first, false)]);
+  await recordEnrollment(store, buyer, product.id, first);
+  await openedOn(first);
+  stripe.fail = true;
+  is("Stripe unknown: nothing is sent", await run(first + 30 * DAY), []);
+  stripe.fail = false;
+  is("the next run sends it, never skipped", await run(first + 31 * DAY), [subject("Month 1")]);
+  is("once", await run(first + 32 * DAY), []);
+
+  part("The job's reads are its own, never the store's public requests");
   await fresh([session("cs_test_once", first, false)]);
   await recordEnrollment(store, buyer, product.id, first);
   await openedOn(first);
   counted.left = 0;
+  is("with the store's public requests all used, the email still goes", await run(first + 30 * DAY), [subject("Month 1")]);
+  is("and none of them is asked for", counted.asked, []);
+  is("a run with nothing to announce reads nothing at Stripe", (stripe.asked = [], await run(first + 45 * DAY), stripe.asked), []);
+
+  part("One run reads at most the job's own figure for a store, and the rest go on the next run");
+  await fresh([session("cs_test_once", first, false)]);
+  // A one-course store's run reads as many students as the store may email in its month (its "email" figure).
+  const reads = allowanceFor(store, "email", first + 30 * DAY);
+  const students = Array.from({ length: reads + 1 }, (_, n) => `student-${n}@example.test`);
+  for (const who of students) {
+    await recordEnrollment(store, who, product.id, first);
+    await openedOn(first, who);
+  }
   stripe.asked = [];
-  is("the store's requests used: nothing is sent", await run(first + 30 * DAY), []);
-  is("and nothing is read at Stripe", stripe.asked.length, 0);
-  is("it asked for the read's requests, for a store of one course", counted.asked, [DRIP_START_UNITS + 1]);
-  counted.left = Number.MAX_SAFE_INTEGER;
-  counted.asked = [];
-  is("with requests again, the next run sends it", await run(first + 31 * DAY), [subject("Month 1")]);
-  is("one read for the student", counted.asked, [dripStartUnits(1)]);
-  is("a run with nothing to announce reads nothing", (counted.asked = [], await run(first + 45 * DAY), counted.asked), []);
+  const day30 = await run(first + 30 * DAY);
+  is(`the first run announces Month 1 to ${reads} students`, day30.length, reads);
+  is("and reads no more students at Stripe", stripe.asked.filter((p) => p.startsWith("/checkout/sessions?")).length, reads);
+  is("the next run announces it to the last one", await run(first + 31 * DAY), [subject("Month 1")]);
+  is("and then to nobody again", await run(first + 32 * DAY), []);
 
   part("One purchase, written down on its thanks page (unchanged)");
   await fresh([session("cs_test_once", first, false)]);

@@ -768,7 +768,9 @@ export async function createCheckout(
       for (const key of [...body.keys()]) {
         if (key.startsWith("line_items[0][price_data]")) body.delete(key);
       }
-      body.set("line_items[0][price]", await pwywPriceId(store, product, pwyw, fresh));
+      // On the retry, the Price Stripe just refused marks it, so every checkout retrying it shares one new Price.
+      const refused = fresh ? (body.get("line_items[0][price]") ?? "") : undefined;
+      body.set("line_items[0][price]", await pwywPriceId(store, product, pwyw, refused));
       body.set("metadata[pwyw]", "yes");
     }
     // Set just before the request, because Stripe counts its minimum from then.

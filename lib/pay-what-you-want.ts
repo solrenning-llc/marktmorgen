@@ -134,7 +134,8 @@ const KEEP_SECONDS = 365 * 24 * 60 * 60;
  *
  * Every new key may make a Price on the creator's account, so a Stripe that keeps answering wrong is asked under at
  * most REFUSED_MOST new keys a day for a shape: past REFUSED_MOST refusals, a checkout fails at once, without asking
- * Stripe, until the count runs out (PwywPriceHeld; the buyer is told plainly, nothing is charged). At most
+ * Stripe, until the count runs out (PwywPriceHeld; the buyer is told plainly, nothing is charged). The retry after
+ * Stripe refused a kept Price at checkout (archivedKey) asks under a new key too, so it goes up the same count. At most
  * REFUSED_MOST + 1 Prices a day for a shape, then, the first key's and one for each new key.
  *
  * Without Redis, the count is this server's own: kept for the same 25 hours, and for at most REFUSED_HERE_MOST
@@ -144,25 +145,40 @@ const refusedKey = (account: string, print: string) => `nl:pwyw:${account}:${pri
 const REFUSED_SECONDS = 25 * 60 * 60;
 export const REFUSED_MOST = 3;
 const REFUSED_HERE_MOST = 1_000;
-const refusedHere = new Map<string, { count: number; until: number }>();
-const refusedHereNow = (refused: string, now: number) => {
-  const held = refusedHere.get(refused);
+type HeldHere = Map<string, { count: number; until: number }>;
+const refusedHere: HeldHere = new Map();
+const archivedHere: HeldHere = new Map();
+function hereNow(here: HeldHere, name: string, now: number) {
+  const held = here.get(name);
   if (held && held.until > now) return held.count;
-  if (held) refusedHere.delete(refused);
+  if (held) here.delete(name);
   return 0;
-};
-function refusedHereAdd(refused: string, now: number) {
-  const count = refusedHereNow(refused, now) + 1;
-  refusedHere.delete(refused);
-  if (refusedHere.size >= REFUSED_HERE_MOST) {
-    for (const [name, held] of refusedHere) if (held.until <= now) refusedHere.delete(name);
-    for (const name of refusedHere.keys()) {
-      if (refusedHere.size < REFUSED_HERE_MOST) break;
-      refusedHere.delete(name);
+}
+/** Kept REFUSED_SECONDS, for at most REFUSED_HERE_MOST names, the oldest dropped first. */
+function herePut(here: HeldHere, name: string, count: number, now: number) {
+  here.delete(name);
+  if (here.size >= REFUSED_HERE_MOST) {
+    for (const [other, held] of here) if (held.until <= now) here.delete(other);
+    for (const other of here.keys()) {
+      if (here.size < REFUSED_HERE_MOST) break;
+      here.delete(other);
     }
   }
-  refusedHere.set(refused, { count, until: now + REFUSED_SECONDS * 1000 });
+  here.set(name, { count, until: now + REFUSED_SECONDS * 1000 });
 }
+const refusedHereNow = (refused: string, now: number) => hereNow(refusedHere, refused, now);
+const refusedHereAdd = (refused: string, now: number) => herePut(refusedHere, refused, refusedHereNow(refused, now) + 1, now);
+
+/**
+ * The retry after Stripe refused a kept Price at checkout (the creator archived it in their dashboard), marked by the
+ * refused Price's id: it holds the count of refusals the retry asks under, one more than the count it found. The first
+ * retry to set it (SET NX) adds that one to the count of refusals, so the new key is counted and held to REFUSED_MOST
+ * as any other; every retry for the same refused Price, at the same moment or a little later, reads it and asks
+ * under the same key, so they make one Price between them. Never a key of the clock. A retry answered wrong takes
+ * the mark away, so the next retry is counted and asks under a new key; otherwise it runs out with the count.
+ */
+const archivedKey = (account: string, print: string, archived: string) => `nl:pwyw:${account}:${print}:archived:${archived}`;
+const PRICE_ID = /^price_[A-Za-z0-9]{6,64}$/;
 
 /** Stripe kept answering wrong today for this product's Price (REFUSED_MOST): the checkout fails before asking it. */
 export class PwywPriceHeld extends Error {
@@ -177,17 +193,21 @@ const refusedCount = (value: unknown) => (typeof value === "string" && /^[1-9][0
  * The id of the Price on the creator's account that lets a buyer choose the
  * amount of this product, made the first time it is needed.
  *
- * `fresh` skips the kept id, for the one retry after Stripe says the kept
- * Price can no longer be used (the creator archived it in their dashboard).
+ * `archived` skips the kept id, for the one retry after Stripe says the kept
+ * Price can no longer be used (the creator archived it in their dashboard):
+ * it is the id Stripe refused, and the retry is counted with the refusals
+ * (archivedKey).
  */
 export async function pwywPriceId(
   store: Store,
   product: Listing,
   pwyw: PayWhatYouWant,
-  fresh = false,
+  archived?: string,
 ): Promise<string> {
   const account = store.stripeAccountId;
   if (!account) throw new Error("This store has no account");
+  const fresh = archived !== undefined;
+  if (fresh && !PRICE_ID.test(archived)) throw new Error("The Price refused at checkout is not a price id");
   // The currency is part of what shapes the Price: a store that changes it
   // is given a new one rather than a Price in the old currency.
   const shape = {
@@ -202,17 +222,48 @@ export async function pwywPriceId(
   const print = await fingerprint(JSON.stringify(shape));
   const key = priceKey(account, print);
   const refused = refusedKey(account, print);
+  const retry = fresh ? archivedKey(account, print, archived) : "";
   const cache = isRedisConfigured();
 
   let refusals = cache ? 0 : refusedHereNow(refused, Date.now());
+  let marked = fresh && !cache ? hereNow(archivedHere, retry, Date.now()) : 0;
   if (cache) {
-    const [kept, count, left] = await redisPipeline([["GET", key], ["GET", refused], ["TTL", refused]]);
-    if (!fresh && typeof kept === "string" && /^price_[A-Za-z0-9]{6,64}$/.test(kept)) return kept;
+    const [kept, count, left, mark] = await redisPipeline([["GET", key], ["GET", refused], ["TTL", refused], ...(fresh ? [["GET", retry]] : [])]);
+    if (!fresh && typeof kept === "string" && PRICE_ID.test(kept)) return kept;
     refusals = refusedCount(count);
+    marked = refusedCount(mark);
     // A count left with no expiry (its EXPIRE never landed) would hold the product for good: it is given its day.
     if (left === -1) await redisPipeline([["EXPIRE", refused, REFUSED_SECONDS]]).catch(() => {});
   }
   if (refusals > REFUSED_MOST) throw new PwywPriceHeld();
+  if (fresh) {
+    // The retry asks under a new key, so it is counted before it asks, and held past REFUSED_MOST as any other.
+    if (!marked) {
+      if (refusals + 1 > REFUSED_MOST) throw new PwywPriceHeld();
+      if (cache) {
+        const [set, mark] = await redisPipeline([["SET", retry, String(refusals + 1), "NX", "EX", REFUSED_SECONDS], ["GET", retry]]);
+        marked = refusedCount(mark);
+        if (!marked) throw new Error("The retry could not be counted");
+        // Never a Price asked for without its count: a count that did not land fails the checkout and frees the mark.
+        if (set === "OK") {
+          try {
+            const [added] = await redisPipeline([["INCR", refused], ["EXPIRE", refused, REFUSED_SECONDS]]);
+            if (!refusedCount(added)) throw new Error("The retry was not counted");
+          } catch (error) {
+            await redisPipeline([["DEL", retry]]).catch(() => {});
+            throw error;
+          }
+        }
+      } else {
+        marked = refusals + 1;
+        const now = Date.now();
+        herePut(archivedHere, retry, marked, now);
+        refusedHereAdd(refused, now);
+      }
+    }
+    if (marked > REFUSED_MOST) throw new PwywPriceHeld();
+    refusals = marked;
+  }
 
   const body = new URLSearchParams({
     currency: store.currency,
@@ -227,14 +278,19 @@ export async function pwywPriceId(
     "metadata[product]": product.id,
   });
   if (shape.tax) body.set("tax_behavior", shape.tax);
-  // Two buyers pressing buy at the same moment make one Price, not two: they read the same count of refusals.
-  const idempotency = `pwyw-${print}${refusals ? `-r${refusals}` : ""}${fresh ? `-${Date.now()}` : ""}`;
+  // Two buyers pressing buy at the same moment make one Price, not two: they read the same count of refusals, or, on
+  // the retry after an archived Price, the same mark. Never a key of the clock: each new key may make a Price.
+  const idempotency = `pwyw-${print}${refusals ? `-r${refusals}` : ""}`;
   const price = await onAccount("POST", account, "/prices", body, undefined, idempotency);
   // Nothing is kept on any other reply: the checkout that asked fails, and the count of refusals goes up, so the next
   // one asks Stripe again under a new key instead of being answered this reply again for a day (rule 30).
   const written = { currency: store.currency, minimum: shape.minimum, preset: shape.preset, maximum: shape.maximum, tax: shape.tax, product: product.id };
   if (!isPwywPrice(price, written)) {
-    if (cache) await redisPipeline([["INCR", refused], ["EXPIRE", refused, REFUSED_SECONDS]]).catch(() => {});
+    // A retry's key was counted when it was marked: the mark goes, so the next retry is counted and asks under a new key.
+    if (fresh) {
+      if (cache) await redisPipeline([["DEL", retry]]).catch(() => {});
+      else archivedHere.delete(retry);
+    } else if (cache) await redisPipeline([["INCR", refused], ["EXPIRE", refused, REFUSED_SECONDS]]).catch(() => {});
     else refusedHereAdd(refused, Date.now());
     throw new Error("Stripe did not return the price just written");
   }

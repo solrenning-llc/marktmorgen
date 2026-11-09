@@ -59,7 +59,9 @@ async function main(): Promise<void> {
 
   part("Any other ZREM answer is unknown: it throws, never taken");
   for (const [label, reply] of [["true", true], ['"1"', "1"], ["[1]", [1]], ["2", 2], ["-1", -1], ["null", null]] as const) {
-    const path = picture(`zrem-${label.replace(/\W/g, "")}`);
+    // One name per answer: "1", [1] and -1 all read "zrem-1" without the index, and a taken name is never noted again
+    // (lib/picture-door.ts, takenKey).
+    const path = picture(`zrem-${label.replace(/\W/g, "")}-${label.length}${typeof reply}`);
     await notePictureDoor(path);
     is(`ZREM answers ${label}: throws`, await take(path, { command: "ZREM", reply }), "throws");
   }

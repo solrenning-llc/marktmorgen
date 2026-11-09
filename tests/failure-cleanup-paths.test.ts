@@ -30,7 +30,7 @@ import { readListing } from "@/lib/catalog";
 import { fileFolder } from "@/lib/product-file";
 import { store as redis } from "./redis-stub";
 import { files } from "./failure-cleanup-world";
-import { PICTURE_DOOR_MAX, PICTURE_DOOR_SECONDS, PictureDoorFull, notePictureDoor, takePictureDoor } from "@/lib/picture-door";
+import { PICTURE_DOOR_MAX, PICTURE_DOOR_SECONDS, PICTURE_DOORS_KEPT_SECONDS, PictureDoorFull, notePictureDoor, takePictureDoor } from "@/lib/picture-door";
 import { done, is, part } from "./check";
 import { POST as linkImage } from "@/app/api/store/link-image/route";
 import { POST as productImage } from "@/app/api/store/image/route";
@@ -142,7 +142,9 @@ async function main(): Promise<void> {
   // Refused past its cap, never by pushing its oldest out (lib/picture-door.ts; tests/picture-door-ceiling.test.ts).
   is("and that store is refused one more, keeping its oldest", [past, ...(await takePictureDoor([other(0), other(PICTURE_DOOR_MAX)], now + 2_000)).keys()], ["full", other(0)]);
   const [ttl] = (await redis.pipeline([["TTL", `nl:pictures:doors:${"9".repeat(24)}`]])) as number[];
-  is("each list has no expiry: its untaken notes count until they are taken or swept", ttl, -1);
+  // Untaken notes count until they are taken or swept; the list expires PICTURE_DOORS_KEPT_SECONDS after its last note
+  // (Claude 2 on #3347: a list with no expiry kept notes left behind for good).
+  is("each list expires a while after its last note", ttl > PICTURE_DOOR_SECONDS && ttl <= PICTURE_DOORS_KEPT_SECONDS, true);
 
   part("Inventory: every deletion under app/api/store, and why it cannot reach another record's file");
   const routes: string[] = [];

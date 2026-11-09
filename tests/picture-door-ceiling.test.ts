@@ -86,7 +86,13 @@ async function main(): Promise<void> {
   part("Notes past the day still count until the sweep deletes their pictures");
   redis.run(["DEL", shop.doors]);
   const stale = now - (PICTURE_DOOR_SECONDS + 60) * 1000;
-  for (let i = 0; i < PICTURE_DOOR_MAX; i += 1) redis.run(["ZADD", shop.doors, stale, shop.fresh()]);
+  // Untaken: each note on the store's list and on the list of unclaimed pictures, as the door writes it (a store note
+  // whose picture is off that list was taken or swept, and is dropped at the cap: tests/picture-door-sweep-guard.test.ts).
+  for (let i = 0; i < PICTURE_DOOR_MAX; i += 1) {
+    const path = shop.fresh();
+    redis.run(["ZADD", shop.doors, stale, path]);
+    redis.run(["ZADD", "nl:pictures:unclaimed", stale, path]);
+  }
   is("a store whose untaken notes are all past the day is still refused", await answer(await shop.ask(shop.fresh())), [429, "pictures_waiting"]);
   is("and its notes all wait for the sweep", shop.card(), PICTURE_DOOR_MAX);
   // As the sweep leaves the list once their files are deleted (tests/picture-door-sweep.test.ts).

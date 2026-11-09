@@ -108,7 +108,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
   "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sweep:cursor", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:taken:",
-  "nl:pictures:unclaimed",
+  "nl:pictures:taken:", "nl:pictures:unclaimed",
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:x:", "nl:upd:job:",
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
@@ -345,8 +345,11 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:person:": E, "nl:person:find:": X(1),
   "nl:pfunnel:done:": E, "nl:pfunnel:seen:": E, "nl:pfunnels:": E,
   "nl:phone:cfg:": E, "nl:phone:seen:": X(40), "nl:phone:st:": E,
-  // A store's picture uploads not yet put on anything (lib/picture-door.ts): each note goes when taken or swept, a day and an hour after its door by the daily sweep.
-  "nl:pictures:doors:": X(3),
+  // A store's picture uploads not yet put on anything (lib/picture-door.ts): each note goes when taken or swept, 30 days after its door,
+  // and the list expires PICTURE_DOORS_KEPT_SECONDS (32 days) after its last note.
+  "nl:pictures:doors:": X(32),
+  // A picture's mark that a record took it (lib/picture-door.ts, takenKey): a day.
+  "nl:pictures:taken:": X(1),
   "nl:pinv:": Cr(30),
   "nl:pkg:": T("nl:pkg:s:"), "nl:pkg:s:": E, "nl:pkg:t:": T("nl:pkg:s:"),
   "nl:held:stores": I, "nl:held:retry:": Cr(2), "nl:held:month:": Cr(400), "nl:held:walk": C,

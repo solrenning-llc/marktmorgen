@@ -34,7 +34,7 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   slow_down: "Uploads can't start just now. Try again later.",
   files_unavailable: "File uploads are unavailable right now. Keep your file and try again in a few minutes.",
   // The studio's picture door, capped before it signs (lib/picture-door.ts).
-  pictures_waiting: "Your store has many uploaded pictures that are not on a product, link or page yet, so this upload did not start. Add the ones from today where you want them, or try again tomorrow. Pictures left unused for more than a day are deleted on their own.",
+  pictures_waiting: "Your store has many uploaded pictures that are not on a product, link or page yet, so this upload did not start. Add the ones from today where you want them, or try again later. Unused pictures are deleted on their own 30 days after upload, which makes room again.",
   pictures_hourly: "Your store has started many picture uploads in the last hour, so this upload did not start. Try again in an hour.",
   pictures_unavailable: "We could not check your store's picture uploads just now, so this upload did not start. Try again in a moment.",
   // A page whose read did not come back in a known shape (lib/sales-page-store.ts readPage): nothing is decided from it.

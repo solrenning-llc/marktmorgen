@@ -19,8 +19,7 @@ import { sweepPictureDoors } from "@/lib/picture-door";
  * And deletes files students uploaded for an assignment and never handed
  * in (lib/assignment.ts), and community pictures never put in a post
  * (lib/community-files.ts), a day on, and studio pictures let in through the
- * picture door and never put on anything (lib/picture-door.ts), a day and an
- * hour on.
+ * picture door and never put on anything (lib/picture-door.ts), 30 days on.
  */
 export async function GET(request: NextRequest) {
   // Vercel sends the secret with every scheduled run, compared here in
@@ -51,7 +50,7 @@ export async function GET(request: NextRequest) {
     });
     const studioPictures = await sweepPictureDoors(del).catch((error: unknown) => {
       console.error("could not sweep unused studio pictures", error);
-      return [] as string[];
+      return null;
     });
     return Response.json(
       {
@@ -60,7 +59,8 @@ export async function GET(request: NextRequest) {
         unusedUploads: stale.length,
         unusedPictures: pictures,
         ...(pictures === null ? { picturesFailed: true } : {}),
-        unusedStudioPictures: studioPictures.length,
+        unusedStudioPictures: studioPictures === null ? null : studioPictures.length,
+        ...(studioPictures === null ? { studioPicturesFailed: true } : {}),
       },
       { headers: { "Cache-Control": "no-store" } },
     );

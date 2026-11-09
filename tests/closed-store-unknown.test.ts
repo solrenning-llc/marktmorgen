@@ -16,7 +16,7 @@
  */
 import { createHash } from "node:crypto";
 import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
-import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { hostId } from "@/lib/host-claims";
@@ -31,10 +31,22 @@ const unreadable = new Set<string>();
 // The same for the list of stores an address serves on a team (lib/team.ts memberStores reads it first).
 const unreadableSets = new Set<string>();
 const teamIndexKey = (email: string) => "nl:team:of:" + createHash("sha256").update("nimbus-team-of:" + email).digest("hex").slice(0, 40);
+let unreadableParts: string[] = [];
+// The write of the walk's entry for a store (HSET BATCH_KEY) that fails, as a lost connection would.
+let batchWriteFails = false;
+// The same write answered with something HSET never says (here [null]): not known to have been written.
+let batchWriteUnconfirmed = false;
+// The move back a walk (ZADD XX) answered with nothing Redis would say: not known to have moved.
+let unconfirmedMoves = false;
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
+  if (unconfirmedMoves && commands.length === 1 && commands[0][0] === "ZADD" && commands[0][2] === "XX") return [null];
   if (commands.some((c) => c[0] === "GET" && unreadable.has(String(c[1])))) throw new Error("Redis request timed out (test)");
   if (commands.some((c) => c[0] === "SMEMBERS" && unreadableSets.has(String(c[1])))) throw new Error("Redis request timed out (test)");
+  if (batchWriteFails && commands.some((c) => c[0] === "HSET" && c[1] === BATCH_KEY)) throw new Error("Redis request timed out (test)");
+  if (batchWriteUnconfirmed && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) return [null];
+  // A read of what the store is made of (its team, its email sequences) that times out.
+  if (commands.some((c) => c[0] === "GET" && unreadableParts.some((prefix) => String(c[1]).startsWith(prefix)))) throw new Error("Redis request timed out (test)");
   return realPipeline(commands);
 };
 
@@ -108,6 +120,94 @@ async function main(): Promise<void> {
   const last = await eraseClosed(Date.now() + 30_000, async () => {}, T4);
   is("the closing store is prepared", last.stores, 1);
   is("the host's calendar is gone", kept(X), [0, 0, 0, 0]);
+
+  part("A move back a walk that Redis does not confirm is unknown, never a run that is done");
+  redis.clear();
+  await makeStore(A, "unknowna");
+  const TU = Date.now();
+  await markDue(A, TU - 1000);
+  unreadable.add(ownerKey(A));
+  unconfirmedMoves = true;
+  const unsure = await eraseClosed(Date.now() + 30_000, async () => {}, TU);
+  unconfirmedMoves = false;
+  unreadable.delete(ownerKey(A));
+  is("the store is still in line (nothing taken out)", redis.run(["ZSCORE", DUE_KEY, A]) !== null, true);
+  is("the run does not say it is done", unsure.done, false);
+  const confirmed = await (async () => {
+    unreadable.add(ownerKey(A));
+    try {
+      return await eraseClosed(Date.now() + 30_000, async () => {}, TU);
+    } finally {
+      unreadable.delete(ownerKey(A));
+    }
+  })();
+  is("control: the same run with the move confirmed is done", confirmed.done, true);
+
+  // C6's inherited LOW (review 6712088601, point 2): what a store is made of read as nothing when the read failed,
+  // so it was prepared without those ids, taken out of line, and their keys were never erased.
+  for (const [what, prefix] of [["its team", "nl:team:"], ["its email sequences", "nl:mail:flows:"]] as const) {
+    part(`A closing store whose ${what.slice(4)} cannot be read waits; it is never prepared without them`);
+    redis.clear();
+    const owner = `parts-${prefix.length}@example.com`;
+    await makeStore(owner, `parts${prefix.length}`);
+    await ensureListId(owner);
+    const TP = Date.now();
+    await markDue(owner, TP - 1000);
+    unreadableParts = [prefix];
+    const blind = await eraseClosed(Date.now() + 30_000, async () => {}, TP);
+    unreadableParts = [];
+    const score = redis.run(["ZSCORE", DUE_KEY, owner]);
+    is(`${what} unread: the store is not prepared`, [blind.stores, redis.run(["HEXISTS", BATCH_KEY, owner])], [0, 0]);
+    is(`${what} unread: its record is still there`, (await storeForEmail(owner)) !== null, true);
+    is(`${what} unread: still in line, moved back a walk`, score !== null && Number(score) >= TP + WALK_GAP_MS, true);
+    const seen = await eraseClosed(Date.now() + 30_000, async () => {}, TP + WALK_GAP_MS + 1);
+    is(`control: once ${what} reads, it is prepared and out of line`, [seen.stores, redis.run(["ZSCORE", DUE_KEY, owner])], [1, null]);
+  }
+
+  // C6's other inherited LOW (review 6712309813): the record was closed before the walk's entry was written, so a
+  // failed write left a store that later read as gone (nil) and left the line with its keys never erased.
+  part("A store's walk entry that cannot be written leaves its record, so the walk can try again");
+  redis.clear();
+  const W = "batch-write@example.com";
+  await makeStore(W, "batchwrite");
+  const TW = Date.now();
+  await markDue(W, TW - 1000);
+  batchWriteFails = true;
+  let threw = false;
+  try {
+    await eraseClosed(Date.now() + 30_000, async () => {}, TW);
+  } catch {
+    threw = true;
+  }
+  batchWriteFails = false;
+  is("its record is still there", (await storeForEmail(W)) !== null, true);
+  is("it is still in line", redis.run(["ZSCORE", DUE_KEY, W]) !== null, true);
+  is("the run did not crash on it (the store waits a walk instead)", threw, false);
+  const again = await eraseClosed(Date.now() + 30_000, async () => {}, TW + WALK_GAP_MS + 1);
+  is("control: once the write works, it is prepared and out of line, its record closed", [again.stores, redis.run(["ZSCORE", DUE_KEY, W]), (await storeForEmail(W)) === null], [1, null, true]);
+
+
+  // Codex T on #3181 (C6's inherited conditional LOW): the walk entry's HSET answered in another shape was taken as
+  // written, so the record was closed and the store left the line with no entry naming its keys.
+  part("A store's walk entry whose write Redis does not confirm leaves its record, so the walk can try again");
+  redis.clear();
+  const U = "batch-unconfirmed@example.com";
+  await makeStore(U, "batchunconfirmed");
+  const TBU = Date.now();
+  await markDue(U, TBU - 1000);
+  batchWriteUnconfirmed = true;
+  let threwU = false;
+  try {
+    await eraseClosed(Date.now() + 30_000, async () => {}, TBU);
+  } catch {
+    threwU = true;
+  }
+  batchWriteUnconfirmed = false;
+  is("its record is still there", (await storeForEmail(U)) !== null, true);
+  is("it is still in line", redis.run(["ZSCORE", DUE_KEY, U]) !== null, true);
+  is("the run did not crash on it (the store waits a walk instead)", threwU, false);
+  const againU = await eraseClosed(Date.now() + 30_000, async () => {}, TBU + WALK_GAP_MS + 1);
+  is("control: once the write is confirmed, it is prepared and out of line, its record closed", [againU.stores, redis.run(["ZSCORE", DUE_KEY, U]), (await storeForEmail(U)) === null], [1, null, true]);
 
   done();
 }

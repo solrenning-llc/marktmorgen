@@ -25,7 +25,7 @@ import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
 // On its own line, so open pull requests that change the redis-reply import above still merge cleanly.
 import { listSlots } from "@/lib/redis-reply";
@@ -65,6 +65,15 @@ const INTENT_ID = /^pi_[A-Za-z0-9]{8,255}$/;
  * and whether any other product is coming soon is unknown (CX-123 rule 24), so a page draws no way to buy it.
  */
 export type SoonState = { soon: Set<string>; days: Map<string, string>; partial?: true };
+
+/**
+ * True only when the product is known not to be coming soon: not in the read set, and the set read whole. While the
+ * read is `partial`, a product outside the read set is unknown (CX-123 rule 24), so it is never "not coming soon": a
+ * caller that sells, lists or sends it to Stripe leaves it out.
+ */
+export function knownNotSoon(state: SoonState, productId: string): boolean {
+  return !state.partial && !state.soon.has(productId);
+}
 
 function knownSoonMember(raw: unknown): boolean {
   if (raw === 1 || raw === "1") return true;
@@ -157,11 +166,19 @@ export async function preorderViews(store: Store, productIds: string[]): Promise
   return out;
 }
 
-/** How many of a product's pre-orders wait to be handed over. */
+/**
+ * How many of a product's pre-orders wait to be handed over. Read exactly (CX-123 rule 24): an answer in another
+ * shape throws UnknownReplyError, never "none waiting" (a product removed while paid pre-orders wait, a release never
+ * queued); a record that does not read counts as waiting, since it may be a paid one.
+ */
 export async function waitingCount(store: Store, productId: string): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["HVALS", entriesKey(store.statsId, productId)]]);
-  return preorderCounts((Array.isArray(raw) ? raw : []).map(parsePreorder).filter((e): e is Preorder => e !== null)).waiting;
+  const read = repliesFor(await redisPipeline([["HVALS", entriesKey(store.statsId, productId)]]), 1);
+  const values = read ? stringList(read[0]) : null;
+  if (!values) throw new UnknownReplyError("a product's pre-orders");
+  const entries = values.map(parsePreorder);
+  const unread = entries.filter((e) => e === null).length;
+  return preorderCounts(entries.filter((e): e is Preorder => e !== null)).waiting + unread;
 }
 
 /**
@@ -184,6 +201,21 @@ export async function readPreorder(store: Store, productId: string, sessionId: s
   if (!store.statsId || !isRedisConfigured() || !SESSION_ID.test(sessionId)) return null;
   const [raw] = await redisPipeline([["HGET", entriesKey(store.statsId, productId), sessionId]]);
   return parsePreorder(raw);
+}
+
+/**
+ * One pre-order's entry, read exactly for the hand-over (Codex C2 on #2963; CX-123 rule 24): one reply; null is a
+ * confirmed absence; an entry that parses is the entry. Anything else (no reply, a hole, one too many, another type,
+ * text that does not parse) throws, so the release job keeps it and the next run asks again, never "skip".
+ */
+async function readPreorderExact(sid: string, productId: string, sessionId: string): Promise<Preorder | null> {
+  const replies = repliesFor(await redisPipeline([["HGET", entriesKey(sid, productId), sessionId]]), 1);
+  if (!replies) throw new UnknownReplyError("a pre-order's entry");
+  const [raw] = replies;
+  if (raw === null) return null;
+  const entry = parsePreorder(raw);
+  if (!entry) throw new UnknownReplyError("a pre-order's entry");
+  return entry;
 }
 
 /**
@@ -303,7 +335,8 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
   }
   if (claimed === "unknown") throw new UnknownReplyError("a pre-order's giving mark");
   try {
-    const entry = await readPreorder(store, product.id, sessionId);
+    if (!SESSION_ID.test(sessionId)) return "skip";
+    const entry = await readPreorderExact(sid, product.id, sessionId);
     if (!entry || entry.revoked) return "skip";
     if (entry.given) {
       // Given by an earlier run: the way in is asked for again under the SAME idempotency key, which the senders
@@ -437,65 +470,97 @@ export async function runPreorderReleases(
   deadline: number,
 ): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [members] = await redisPipeline([["SMEMBERS", JOBS]]);
+  const read = repliesFor(await redisPipeline([["SMEMBERS", JOBS]]), 1);
+  const members = read ? stringList(read[0]) : null;
+  if (!members) throw new UnknownReplyError("the products with pre-orders to hand over");
   let given = 0;
-  for (const member of Array.isArray(members) ? (members as string[]) : []) {
+  for (const member of members) {
     if (Date.now() > deadline) break;
-    const [sid, pid, handle] = member.split("|");
-    const store = handle ? await load(handle) : null;
-    const product = store && store.statsId === sid ? await readProduct(store, pid) : null;
-    if (!store || !product || !store.stripeAccountId) {
-      await redisPipeline([["SREM", JOBS, member]]);
-      continue;
-    }
-    // Put back to "coming soon" since: it waits for its next release.
-    let soon: boolean;
+    // One job that cannot be read (a listing that does not read throws) is kept for the next run, never holding up
+    // the others.
     try {
-      ({ soon } = await soonOne(store, pid));
+      given += await releaseJob(member, load, readProduct, depsFor, deadline);
     } catch (error) {
-      // Keep this release queued for the next pass; another store can still be delivered now.
-      console.error("reading a pre-order release state failed", store.handle, error);
-      continue;
+      console.error("a product's pre-orders could not be handed over; kept for the next run", member, error);
     }
-    if (soon) {
-      await redisPipeline([["SREM", JOBS, member]]);
-      continue;
-    }
-    const [raw] = await redisPipeline([["HGETALL", entriesKey(sid, pid)]]);
-    const pairs: [string, Preorder][] = [];
-    if (Array.isArray(raw)) {
-      for (let i = 0; i + 1 < raw.length; i += 2) {
-        const entry = parsePreorder(raw[i + 1]);
-        if (entry) pairs.push([String(raw[i]), entry]);
-      }
-    }
-    const waiting = pairs.filter(([, e]) => !e.given && !e.revoked);
-    const deps = depsFor(store);
-    let left = 0;
-    for (const [session, entry] of waiting) {
-      if (Date.now() > deadline) {
-        left += 1;
-        continue;
-      }
-      try {
-        if (entry.pi) {
-          const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(entry.pi)}?expand[]=latest_charge`);
-          // Refunded in full or lost to a dispute (lib/refunds.ts): never handed over.
-          if (await givenBack(store.stripeAccountId, payment)) {
-            await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, pid)]);
-            continue;
-          }
-        }
-        const outcome = await handOverPreorder(store, product, session, deps);
-        if (outcome === "given") given += 1;
-        else if (outcome === "already") left += 1;
-      } catch (error) {
-        console.error("handing over a pre-order failed", store.handle, error);
-        left += 1;
-      }
-    }
-    if (left === 0) await redisPipeline([["SREM", JOBS, member]]);
   }
+  return given;
+}
+
+/**
+ * One job of runPreorderReleases. Paid pre-orders (CX-123 rule 24; Claude 4's Stripe hand-over audit): the job is let
+ * go only on a confirmed reading, every pre-order handed over or refunded, or the product put back to coming soon
+ * (queueRelease queues it again). Pre-orders read in another shape throw; a store or product not found, a store
+ * without its Stripe account, or a pre-order record that does not read keep the job and are said. Returns how many
+ * were handed over.
+ */
+async function releaseJob(
+  member: string,
+  load: (handle: string) => Promise<Store | null>,
+  readProduct: (store: Store, id: string) => Promise<Listing | null>,
+  depsFor: (store: Store) => HandOverDeps,
+  deadline: number,
+): Promise<number> {
+  const [sid, pid, handle] = member.split("|");
+  if (!sid || !pid || !handle) {
+    console.error("a pre-order job that does not read is kept", member);
+    return 0;
+  }
+  const read = repliesFor(await redisPipeline([["HGETALL", entriesKey(sid, pid)]]), 1);
+  const flat = read ? stringList(read[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a product's pre-orders");
+  const pairs: [string, Preorder][] = [];
+  let unread = 0;
+  for (let i = 0; i < flat.length; i += 2) {
+    const entry = parsePreorder(flat[i + 1]);
+    if (entry) pairs.push([flat[i], entry]);
+    else unread += 1;
+  }
+  if (unread) console.error(`${unread} pre-order record(s) do not read; the job is kept`, member);
+  const waiting = pairs.filter(([, e]) => !e.given && !e.revoked);
+  // Confirmed: nothing left to hand over.
+  if (!waiting.length && !unread) {
+    await redisPipeline([["SREM", JOBS, member]]);
+    return 0;
+  }
+  const store = await load(handle);
+  const product = store && store.statsId === sid ? await readProduct(store, pid) : null;
+  if (!store || !product || !store.stripeAccountId) {
+    console.error("a product's pre-orders wait: its store or product could not be read; the job is kept", member);
+    return 0;
+  }
+  // Put back to "coming soon" since: it waits for its next release.
+  const { soon } = await soonOne(store, pid);
+  if (soon) {
+    await redisPipeline([["SREM", JOBS, member]]);
+    return 0;
+  }
+  const deps = depsFor(store);
+  let given = 0;
+  let left = unread;
+  for (const [session, entry] of waiting) {
+    if (Date.now() > deadline) {
+      left += 1;
+      continue;
+    }
+    try {
+      if (entry.pi) {
+        const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(entry.pi)}?expand[]=latest_charge`);
+        // Refunded in full or lost to a dispute (lib/refunds.ts): never handed over.
+        if (await givenBack(store.stripeAccountId, payment)) {
+          await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, pid)]);
+          continue;
+        }
+      }
+      const outcome = await handOverPreorder(store, product, session, deps);
+      if (outcome === "given") given += 1;
+      else if (outcome === "already") left += 1;
+    } catch (error) {
+      console.error("handing over a pre-order failed", store.handle, error);
+      left += 1;
+    }
+  }
+  if (left === 0) await redisPipeline([["SREM", JOBS, member]]);
   return given;
 }
 

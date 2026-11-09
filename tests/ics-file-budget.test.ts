@@ -17,7 +17,8 @@
  *     the 29th/30th/31st and February 29;
  *   - a file that needs more work than the budget is refused as unreadable
  *     (CalendarTooComplex): readFeed throws, addFeed refuses and saves nothing,
- *     and calendarBusy keeps the last good reading, as for any unreadable file;
+ *     and calendarBusy closes the calendar's whole window, since its busy
+ *     times are not known (tests/calendar-unread-window.test.ts);
  *   - a repeat that cannot be walked to the end of the window within its own
  *     cap makes the file unreadable instead of silently shorter;
  *   - partsIn answers exactly as a new formatter would.
@@ -318,7 +319,7 @@ async function main(): Promise<void> {
   const second = await addFeed(store!, "https://calendar2.r27.example.org/cal.ics", now, hooks);
   is("addFeed refuses it, saving nothing", [second.ok, second.ok ? null : second.reason, second.ok ? "" : second.message === (crowdedRead.error as Error | null)?.message], [false, "invalid", true]);
 
-  part("A saved calendar that turns too complex keeps its last good reading, as any unreadable one does");
+  part("A saved calendar that turns too complex closes its whole window: its busy times are not known");
   served = calendar([vevent(["UID:good@example.com", "DTSTART;TZID=America/New_York:20261110T090000", "DURATION:PT1H"])]);
   const good = await addFeed(store!, "https://calendar3.r27.example.org/cal.ics", now, hooks);
   is("setup: a light calendar is added with its one busy time", [good.ok, good.ok ? good.busyTimes : -1], [true, 1]);
@@ -329,7 +330,9 @@ async function main(): Promise<void> {
   const lastGood = Date.UTC(2026, 10, 10, 14);
   // Both saved calendars (the R27 one and this one) now answer with the crowded file.
   is("the refusal counts as a failing calendar, for each of the two saved ones", busyLater.failing, 2);
-  is("and the last good busy time still blocks (no partial reading replaced it)", busyLater.busy.some((b) => b.start === lastGood && b.end === lastGood + 3_600_000), true);
+  const covered = (at: number) => busyLater.busy.some((b) => b.start <= at && at < b.end);
+  is("the last good busy time still blocks (no partial reading replaced it)", covered(lastGood), true);
+  is("and so does a time no reading held busy, to the end of the window", [covered(Date.UTC(2026, 10, 16, 10)), covered(later + (LOOKAHEAD - 1) * DAY)], [true, true]);
 
   part("A repeat that cannot be walked to the window within its own cap makes the file unreadable, never shorter");
   {

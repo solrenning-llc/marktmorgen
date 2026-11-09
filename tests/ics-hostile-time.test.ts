@@ -14,6 +14,12 @@
  *   - LOW 4: an INTERVAL above 1e6 left the range of Date and gave NaN
  *     times, or a RangeError in a named zone.
  *
+ * Since Claude 2's focal return on #3339 (finding A), one event's own rule
+ * past the per-rule caps (an INTERVAL above 1e6, a rule longer than 2,048
+ * characters, a BYxxx list of more than 400 items) no longer refuses the
+ * file: that event blocks from its first time to the end of the window, and
+ * the rest of the file is read. Limits of the whole file still refuse it.
+ *
  * Held here, with synthetic files only: each hostile file runs in its own
  * child process (this same bundle, ICS_HOSTILE_PROBE=<name>), killed after
  * PROBE_KILL_MS; it must answer, by a reading or by CalendarTooComplex, within
@@ -154,20 +160,26 @@ function main(): void {
     refusedFor("2 MB of 'A:' lines (over the file's line budget)", PROBES["2 MB of 'A:' lines"]().text);
     refusedFor("blocks nested 40 deep", calendar(`${"BEGIN:X\r\n".repeat(40)}${vevent(["UID:d", "DTSTART:20261110T090000Z", "DURATION:PT1H"])}`));
     refusedFor("a zone rule with 401 BYMONTH entries", zoneRuleFile(401, 1));
-    refusedFor("an event rule with 401 BYDAY entries", calendar(vevent(["UID:b", "DTSTART:20261110T090000Z", "DURATION:PT1H", `RRULE:FREQ=WEEKLY;BYDAY=${"MO,".repeat(400)}MO`])));
-    refusedFor("an event rule longer than 2,048 characters", calendar(vevent(["UID:l", "DTSTART:20261110T090000Z", "DURATION:PT1H", `RRULE:FREQ=DAILY;X-PAD=${"A".repeat(2100)}`])));
+    const firstOn = Date.UTC(2026, 10, 10, 9);
+    const blockedFor = (label: string, text: string) => {
+      const { parsed, error } = tryParse(text, WINDOW);
+      const read = parsed as (ics.ParsedCalendar & { unreadable?: number }) | null;
+      is(`${label}: read, the event blocking from its first time to the end of the window`, [error === null, read?.busy, read?.unreadable], [true, [{ start: firstOn, end: WINDOW.to }], 1]);
+    };
+    blockedFor("an event rule with 401 BYDAY entries", calendar(vevent(["UID:b", "DTSTART:20261110T090000Z", "DURATION:PT1H", `RRULE:FREQ=WEEKLY;BYDAY=${"MO,".repeat(400)}MO`])));
+    blockedFor("an event rule longer than 2,048 characters", calendar(vevent(["UID:l", "DTSTART:20261110T090000Z", "DURATION:PT1H", `RRULE:FREQ=DAILY;X-PAD=${"A".repeat(2100)}`])));
     refusedFor("an EXDATE property longer than 128 KiB", calendar(vevent(["UID:x", "DTSTART:20261110T090000Z", "DURATION:PT1H", "RRULE:FREQ=DAILY", `EXDATE:${"20261111T090000Z,".repeat(8000)}20261111T090000Z`])));
   }
 
-  part("LOW 4: an INTERVAL above 1e6 is refused, never a NaN time or a RangeError");
-  for (const [label, start] of [["in UTC", "DTSTART:20261110T090000Z"], ["in a named zone", "DTSTART;TZID=America/New_York:20261110T090000"]] as const) {
+  part("LOW 4: an INTERVAL above 1e6 blocks from the event's first time to the end of the window, never a NaN time or a RangeError");
+  for (const [label, start, first] of [["in UTC", "DTSTART:20261110T090000Z", Date.UTC(2026, 10, 10, 9)], ["in a named zone", "DTSTART;TZID=America/New_York:20261110T090000", Date.UTC(2026, 10, 10, 14)]] as const) {
     const { parsed, error } = tryParse(calendar(vevent(["UID:i", start, "DURATION:PT1H", "RRULE:FREQ=DAILY;INTERVAL=1000000000"])), WINDOW);
     console.log(`        ${label}: ${parsed ? `busy ${JSON.stringify(parsed.busy)}` : String(error)}`);
-    is(`DAILY;INTERVAL=1000000000 ${label}: refused as too complex`, [parsed === null, isTooComplex(error)], [true, true]);
+    is(`DAILY;INTERVAL=1000000000 ${label}: read, blocking from its first time to the end of the window`, [error === null, parsed?.busy], [true, [{ start: first, end: WINDOW.to }]]);
   }
   {
     const { parsed, error } = tryParse(calendar(vevent(["UID:w", "DTSTART:20261110T090000Z", "DURATION:PT1H", "RRULE:FREQ=WEEKLY;INTERVAL=5000000"])), WINDOW);
-    is("WEEKLY;INTERVAL=5000000: refused as too complex", [parsed === null, isTooComplex(error)], [true, true]);
+    is("WEEKLY;INTERVAL=5000000: read, blocking from its first time to the end of the window", [error === null, parsed?.busy], [true, [{ start: Date.UTC(2026, 10, 10, 9), end: WINDOW.to }]]);
     const ok = tryParse(calendar(vevent(["UID:k", "DTSTART:20261110T090000Z", "DURATION:PT1H", "RRULE:FREQ=DAILY;INTERVAL=1000000"])), WINDOW);
     is("an INTERVAL of exactly 1e6 is still read (its one time in the window)", [ok.error === null, ok.parsed?.busy.length], [true, 1]);
   }

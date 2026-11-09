@@ -185,7 +185,7 @@ export default async function DeletePage({ searchParams }: Params) {
                 <p className="notice notice-info mb-6" role="status">
                   We could not load that store just now, so deleting your data from it alone cannot be offered here at the moment.{" "}
                   <Link href={`/privacy/delete?store=${encodeURIComponent(handle)}`} className="underline underline-offset-4">
-                    Try again
+                    Try loading this store again
                   </Link>
                   , or ask below for every store.
                 </p>

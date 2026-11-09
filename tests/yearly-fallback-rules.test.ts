@@ -11,12 +11,16 @@ import { done, is, part } from "./check";
 
 const NOW = Date.UTC(2026, 10, 4) / 1000;
 const product = { id: "p1", priceCents: 2000, recurring: { interval: "month", trialDays: 0, payments: 0 }, options: [], pwyw: false, yearly: { cents: 20000 } };
+// Stripe always sends `discounts` on the subscription and on each item (a list, empty when none): every row here lists
+// none, so each check below still fails or passes for its own reason, never for a discount not known
+// (tests/yearly-discounts-unknown.test.ts, rule 30).
 const sub: FallbackSub = {
   status: "past_due",
+  discounts: [],
   collection_method: "charge_automatically",
   metadata: { store: "lena" },
   default_payment_method: { id: "pm_1", type: "card" },
-  items: { data: [{ quantity: 1, price: { unit_amount: 20000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] },
+  items: { data: [{ quantity: 1, discounts: [], price: { unit_amount: 20000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] },
 };
 const invoice: FallbackInvoice = { subscription: "sub_1", billing_reason: "subscription_cycle", status: "open", amount_due: 20000, currency: "usd" };
 const offer = (s: FallbackSub = sub, i: FallbackInvoice = invoice, p: typeof product | null = product, tiers: string[] = []) => monthlyFallback("sub_1", s, i, p, tiers, "usd", NOW);
@@ -97,10 +101,10 @@ is("a card, a wallet or Link, its own or the customer's default", [paidWith({ ty
 is(
   "only once a year, one item of one, in the store's currency",
   [
-    offer({ ...sub, items: { data: [{ quantity: 1, price: { unit_amount: 2000, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } }),
-    offer({ ...sub, items: { data: [{ quantity: 1, price: { unit_amount: 40000, currency: "usd", recurring: { interval: "year", interval_count: 2 } } }] } }),
-    offer({ ...sub, items: { data: [{ quantity: 2, price: { unit_amount: 20000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] } }),
-    offer({ ...sub, items: { data: [{ quantity: 1, price: { unit_amount: 20000, currency: "eur", recurring: { interval: "year", interval_count: 1 } } }] } }),
+    offer({ ...sub, items: { data: [{ quantity: 1, discounts: [], price: { unit_amount: 2000, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } }),
+    offer({ ...sub, items: { data: [{ quantity: 1, discounts: [], price: { unit_amount: 40000, currency: "usd", recurring: { interval: "year", interval_count: 2 } } }] } }),
+    offer({ ...sub, items: { data: [{ quantity: 2, discounts: [], price: { unit_amount: 20000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] } }),
+    offer({ ...sub, items: { data: [{ quantity: 1, discounts: [], price: { unit_amount: 20000, currency: "eur", recurring: { interval: "year", interval_count: 1 } } }] } }),
   ],
   [null, null, null, null],
 );
@@ -116,7 +120,7 @@ is(
 );
 is(
   "never offered as a saving: a membership whose own yearly price is more than twelve months at today's monthly price is not offered",
-  offer({ ...sub, items: { data: [{ quantity: 1, price: { unit_amount: 30000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] } }),
+  offer({ ...sub, items: { data: [{ quantity: 1, discounts: [], price: { unit_amount: 30000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] } }),
   null,
 );
 is(

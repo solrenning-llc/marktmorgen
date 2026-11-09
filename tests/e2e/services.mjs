@@ -63,6 +63,9 @@ export async function startServices(port) {
     status: "active",
     customer: "cus_PauseMember01",
     metadata: { store: "localshop", product: "club" },
+    // As Stripe always sends it: a list, empty when none. Without it the discount is not known and the page offers no
+    // yearly price (lib/yearly-switch-rules.ts discounted, rule 30).
+    discounts: [],
     pause_collection: null,
     items: { data: [{ id: "si_PauseMember01", current_period_end: Math.floor(Date.now() / 1000) + 20 * 86_400, price: { unit_amount: 2000, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] },
   });
@@ -72,6 +75,9 @@ export async function startServices(port) {
     status: "active",
     customer: "cus_PauseMember01",
     metadata: { store: "localshop", product: "club" },
+    // As Stripe always sends it: a list, empty when none. Without it the discount is not known and the page offers no
+    // yearly price (lib/yearly-switch-rules.ts discounted, rule 30).
+    discounts: [],
     pause_collection: null,
     items: { data: [{ id: "si_PauseMember01", current_period_end: Math.floor(Date.now() / 1000) + 20 * 86_400, price: { unit_amount: 2000, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] },
   };

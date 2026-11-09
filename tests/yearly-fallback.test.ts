@@ -44,6 +44,8 @@ const PENDING_METADATA_FROM = "2026-05-27.dahlia";
 const versionDate = (version: string | null) => (version ?? "").slice(0, 10);
 const metadataOf = (body: URLSearchParams) => Object.fromEntries([...body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v]));
 
+// Each item lists its `discounts` as Stripe always sends them at FALLBACK_STRIPE_VERSION (an empty list): an item without
+// them is a discount not known and is never offered (lib/yearly-fallback-rules.ts, tests/yearly-discounts-unknown.test.ts).
 const subscription = () => ({
   id: "sub_Year00000001",
   object: "subscription",
@@ -58,7 +60,7 @@ const subscription = () => ({
   cancel_at_period_end: false,
   metadata: { store: "harbor", product },
   latest_invoice: "in_Year00000001",
-  items: { data: [{ id: "si_Year0000001", quantity: 1, price: { id: "price_Year0001", unit_amount: 20000, currency: "usd", metadata: { product }, recurring: { interval: "year", interval_count: 1 } } }] },
+  items: { data: [{ id: "si_Year0000001", quantity: 1, discounts: [], price: { id: "price_Year0001", unit_amount: 20000, currency: "usd", metadata: { product }, recurring: { interval: "year", interval_count: 1 } } }] },
 });
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {

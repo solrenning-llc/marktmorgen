@@ -66,6 +66,8 @@ export async function runningMembers() {
     id: "sub_SyntheticYearlyU", status: "active", start_date: NOW / 1000 - 90 * 86_400,
     customer: { id: "cus_SyntheticYearlyU", email: "member@example.test" },
     metadata: { product: product.id },
+    // Stripe always sends `discounts` (a list, empty when none); a row without it is a discount not known (lib/yearly-switch-rules.ts discounted), and the yearly offer is never made on it.
+    discounts: [],
     items: { data: [{ quantity: 1, price: { unit_amount: 2000, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] },
   }] };
 }

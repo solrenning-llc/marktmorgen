@@ -17,7 +17,8 @@
  *     currency the member pays in, and that year costs less than twelve of
  *     the member's own monthly payments, so the saving said is theirs;
  *   - no discount on the membership: a coupon for a few months would
- *     otherwise come off a whole year's payment;
+ *     otherwise come off a whole year's payment; a discount that cannot be
+ *     read as none counts as one (`discounted`);
  *   - no affiliate share still running for a set number of months: a year
  *     paid at once inside those months would give the affiliate a share of
  *     all twelve. A share for as long as the member pays is the same either
@@ -68,10 +69,32 @@ export function affiliateMonthsLeft(meta: Record<string, string> | null | undefi
   return nowSeconds < end;
 }
 
-/** Whether the membership carries a discount of any kind. */
+/** One row of a Stripe `discounts` list: a discount's id, or the discount itself (expanded) with its id. */
+const discountRow = (row: unknown): boolean =>
+  (typeof row === "string" && row.length > 0) ||
+  (!!row && typeof row === "object" && !Array.isArray(row) && typeof (row as { id?: unknown }).id === "string" && (row as { id: string }).id.length > 0);
+
+/**
+ * A Stripe `discounts` (a subscription's or a subscription item's) read exactly (CX-123 rule 30): Stripe documents it as
+ * a list of discount ids or discount objects, empty when there is none (API 2026-10-28.endive, stripe-node 23.1.0,
+ * `Array<string | Discount>`, not optional). True when it lists one, false when it is an empty list, null ("not known")
+ * for anything else: missing, null, one id as text, a list object, or a row that is neither.
+ */
+export function discountsListed(value: unknown): boolean | null {
+  if (!Array.isArray(value) || !value.every(discountRow)) return null;
+  return value.length > 0;
+}
+
+/**
+ * Whether the membership carries a discount of any kind, or one that cannot be read as none: a discount not known
+ * is never "none", so nothing is offered on it (the figure compared would be the undiscounted price). API versions
+ * before `discounts` had only the single `discount` (null when there is none), so `discount: null` with no list still
+ * reads "none"; with neither field, or a single field that is neither a discount nor null, nothing is known.
+ */
 export function discounted(sub: YearlySub): boolean {
-  if (sub.discount && typeof sub.discount === "object") return true;
-  return Array.isArray(sub.discounts) && sub.discounts.length > 0;
+  if (sub.discount !== undefined && sub.discount !== null) return true;
+  if (sub.discounts === undefined) return sub.discount !== null;
+  return discountsListed(sub.discounts) !== false;
 }
 
 /**

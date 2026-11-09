@@ -34,7 +34,7 @@
  * so the member never owes both (the next unit, with its test).
  */
 import { type Yearly, type YearlyCandidate, activeYearly } from "@/lib/yearly-price";
-import { type YearlySub, affiliateMonthsLeft, discounted } from "@/lib/yearly-switch-rules";
+import { type YearlySub, affiliateMonthsLeft, discounted, discountsListed } from "@/lib/yearly-switch-rules";
 
 /** The parts of a Stripe subscription these rules read: yearly-switch-rules' own, how it is collected and with what. */
 export type FallbackSub = Omit<YearlySub, "items"> & {
@@ -44,7 +44,7 @@ export type FallbackSub = Omit<YearlySub, "items"> & {
   items?: {
     data?: {
       quantity?: unknown;
-      /** A discount on the item itself, which `discounted` (the subscription's own) does not see. */
+      /** A discount on the item itself, which `discounted` (the subscription's own) does not see; read by `discountsListed`. */
       discounts?: unknown;
       price?: { unit_amount?: unknown; currency?: unknown; recurring?: { interval?: unknown; interval_count?: unknown } | null } | null;
     }[];
@@ -183,8 +183,9 @@ export function monthlyFallback(
   if (items.length !== 1) return null;
   const item = items[0];
   if ((item.quantity ?? 1) !== 1) return null;
-  // No discount on the item either: the yearly figure compared would be the undiscounted price.
-  if (Array.isArray(item.discounts) && item.discounts.length > 0) return null;
+  // No discount on the item either: the yearly figure compared would be the undiscounted price. Read at
+  // FALLBACK_STRIPE_VERSION, where every item lists its discounts: one not read as an empty list is not known, never none.
+  if (discountsListed(item.discounts) !== false) return null;
   const price = item.price;
   if (!price?.recurring || price.recurring.interval !== "year" || (price.recurring.interval_count ?? 1) !== 1) return null;
   if (String(price.currency ?? "").toLowerCase() !== storeCurrency.toLowerCase()) return null;

@@ -25,6 +25,7 @@ import { aiLeft, aiMonthKey } from "@/lib/ai";
 import { POST as AI } from "@/app/api/store/ai/route";
 import { POST as MAIL } from "@/app/api/store/mail/route";
 import { readFlows } from "@/lib/flows";
+import { storeBase } from "@/lib/purchase-email";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { jobsForCall } from "@/lib/funnel-ai-rules";
 import { WRITING_JOB_MICRO_USD, WRITING_JOB_REFERENCE, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
@@ -229,13 +230,13 @@ async function main(): Promise<void> {
     trigger: "abandoned",
     product: "p1",
     goal: { type: "product", product: "p1" },
-    steps: [email(1, "Still thinking about the course?", `It is here when you are ready.\n${"https://marktmorgen.com/@harbor/p/"}${course.product.id}`)],
+    steps: [email(1, "Still thinking about the course?", `It is here when you are ready.\n${storeBase(store)}/p/${course.product.id}`)],
   })}`;
   const drafted = await (await post(AI, "ai", { kind: "automation", notes: "Remind people who leave my course checkout, and stop once they buy." })).json();
   store = (await storeForEmail(OWNER))!;
   is("drafted, one job taken, one request at the bound", [drafted.ok, asked.length, asked[0]?.max, start - (await aiLeft(store))], [true, 1, AUTOMATION_DRAFT_CALL.outputTokens, 1]);
   is("the product is the store's own id, and its title comes back for the explanation", [drafted.value?.draft.productId, drafted.value?.titles[course.product.id]], [course.product.id, "Weeknight Course"]);
-  is("the request offered only the store's own pieces and products", [asked[0].content.includes(`- p1: Weeknight Course`), asked[0].content.includes(course.product.id), asked[0].system.includes('"type": "webhook"')], [true, false, false]);
+  is("the request offered the store's own products by reference, and only the studio's own pieces", [asked[0].content.includes(`- p1: Weeknight Course`), asked[0].system.includes("by its reference"), asked[0].system.includes('"type": "webhook"')], [true, true, false]);
 
   asked.length = 0;
   reply.text = JSON.stringify({ ...good(), trigger: "product", product: "p5" });

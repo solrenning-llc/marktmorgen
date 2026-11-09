@@ -34,11 +34,13 @@ import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
+import { writeAutomationDraft } from "@/lib/automation-draft-ai";
+import { MAX_DRAFT_PRODUCTS } from "@/lib/automation-draft";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
 /**
- * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research", … }`.
+ * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "automation" | "funnel" | "funnel-research", … }`.
  * It writes into the studio's own boxes and saves nothing: whatever comes back
  * is the creator's to read, change and keep, or not.
  *
@@ -48,7 +50,7 @@ const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call"
 export async function POST(request: NextRequest) {
   // A review or a translation sends the page being edited, which may be long, and
   // twice as long with a second version being tested (lib/sales-page.ts, MAX_PAGE_BYTES).
-  const guarded = await guardStoreWrite(request, (body) => (body.kind === "email" || body.kind === "sequence" ? "draft" : body.kind === "bio" || body.kind === "faq" || body.kind === "kit" || body.kind === "setup" || body.kind === "blog" || body.kind === "funnel" || body.kind === "funnel-research" || (body.kind === "posts" && !body.product) ? "page" : body.kind === "reply" ? "reviews" : "products"), 280_000);
+  const guarded = await guardStoreWrite(request, (body) => (body.kind === "automation" ? "send" : body.kind === "email" || body.kind === "sequence" ? "draft" : body.kind === "bio" || body.kind === "faq" || body.kind === "kit" || body.kind === "setup" || body.kind === "blog" || body.kind === "funnel" || body.kind === "funnel-research" || (body.kind === "posts" && !body.product) ? "page" : body.kind === "reply" ? "reviews" : "products"), 280_000);
   if (!guarded.ok) return guarded.response;
   const { body, store } = guarded;
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
@@ -325,6 +327,30 @@ export async function POST(request: NextRequest) {
         notes,
         count,
       }),
+    );
+  }
+  if (body.kind === "automation") {
+    // A workflow from the creator's goal (20 [E3], lib/automation-draft-ai.ts). Drafting one needs what saving one
+    // needs (the mail route's "flow": "send"). What the store sells is read here, from its own records, in its own
+    // order: names, prices, links and whether each is a course, never sent by the page. Nothing is saved here.
+    const hidden = new Set(idsOfKind(store, "hidden"));
+    const paid = new Set(idsOfKind(store, "paid"));
+    const courses = new Set(idsOfKind(store, "course"));
+    const listings = await readListings(store, productIds(store).filter((id) => !hidden.has(id)).slice(0, MAX_DRAFT_PRODUCTS));
+    const base = storeBase(store);
+    return answer(
+      writeAutomationDraft(
+        store,
+        {
+          storeName: store.name,
+          creator: store.mail?.fromName || store.name,
+          storeLink: base,
+          ordersLink: `${base}/orders`,
+          language: isLanguage(store.language) ? LANGUAGES[store.language].english : "English",
+          products: listings.map((p) => ({ id: p.id, title: p.title, summary: p.summary, price: priceWords(p, store.currency, store.tiers), link: productLink(store, p.id), paid: paid.has(p.id), course: courses.has(p.id) })),
+        },
+        notes,
+      ),
     );
   }
   if (body.kind === "funnel" || body.kind === "funnel-research") {

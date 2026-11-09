@@ -43,7 +43,7 @@ import { saleHandles } from "@/lib/store";
 import { activeIntro } from "@/lib/intro-price";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
-import { sendEmail } from "@/lib/email";
+import { type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { RECOVERY_OPEN_SECONDS, recoveryOn } from "@/lib/recovery-setting";
@@ -484,9 +484,16 @@ async function deliver(
   ].join("\n");
   }
 
-  let ok = false;
+  // What became of the email (rule 30, as 283 [HG2]). Only a certain refusal
+  // lets the marks go, so the next pass of the five-minute job asks again.
+  // An answer not known (a timeout, a server error, an error thrown on the
+  // way, as 283 [HG2] reads it) may mean it went: both marks are kept, so no later pass
+  // of the six-hour window writes to the buyer again, takes another email from
+  // the store's figure (taken before each request, even one Amazon's once mark
+  // then holds back) or writes another stop link.
+  let outcome: SendOutcome = "uncertain";
   try {
-    ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+    outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
       // An email that asks for a sale is the creator's, like their list's:
       // from their own address where there is one (lib/mail-from.ts).
       from: fromCreator(store),
@@ -497,14 +504,17 @@ async function deliver(
       headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
       idempotencyKey: `nimbus-recover:${id}`,
     });
-  } finally {
-    if (ok) {
-      await redisPipeline([["SET", sentKey(id), "sent", "EX", ONCE_PER_SECONDS * 2]]);
-    } else {
-      await redisPipeline([["DEL", sentKey(id)], ["DEL", onceKey(statsId, email, onceFor)]]);
-    }
+  } catch (error) {
+    console.error("sending a checkout reminder threw on the way; it may have gone, so its marks are kept", store.handle, error);
   }
-  return ok ? "sent" : "failed";
+  if (outcome === "sent") {
+    await redisPipeline([["SET", sentKey(id), "sent", "EX", ONCE_PER_SECONDS * 2]]);
+  } else if (outcome === "refused") {
+    await redisPipeline([["DEL", sentKey(id)], ["DEL", onceKey(statsId, email, onceFor)]]);
+  } else {
+    console.error("a checkout reminder may have gone; its marks are kept and it is not sent again", store.handle, id);
+  }
+  return outcome === "sent" ? "sent" : "failed";
 }
 
 /**

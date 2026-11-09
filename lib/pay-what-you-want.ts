@@ -106,7 +106,8 @@ type WrittenPwyw = { currency: string; minimum: number; preset: number; maximum:
  * Whether Stripe's reply to POST /prices is the choose-your-price Price just written (rule 30, as ensurePrice in
  * lib/billing.ts): a price id, the currency sent, the buyer's box with the floor, the suggestion and the ceiling sent,
  * no set amount, paid once and never again, the tax treatment when one was sent, and the product it is for. Any other
- * reply is never used for a checkout, nor kept for the next: the checkout that asked fails, and the next asks again.
+ * reply is never used for a checkout, nor kept for the next: the checkout that asked fails, and the next asks again,
+ * under a new Idempotency-Key (refusedKey), since Stripe answers the same key with the same reply for a day.
  */
 function isPwywPrice(reply: Record<string, unknown>, written: WrittenPwyw): reply is Record<string, unknown> & { id: string } {
   const box = reply.custom_unit_amount as { minimum?: unknown; preset?: unknown; maximum?: unknown } | null | undefined;
@@ -120,6 +121,19 @@ function isPwywPrice(reply: Record<string, unknown>, written: WrittenPwyw): repl
 
 /** A year: long enough that a steady seller never waits for Stripe twice. */
 const KEEP_SECONDS = 365 * 24 * 60 * 60;
+
+/**
+ * How many replies to this Price were refused (isPwywPrice) in the last day, under the same family as the Price it
+ * stands for: it is the Idempotency-Key's ending. Stripe keeps its reply to a key for 24 hours and answers it again to
+ * the same key, so after a refusal the next checkout asks under a new key, or the refused reply would come back to
+ * every buyer of the product for a day; checkouts asking at the same moment read the same count, so they still share
+ * one key and make one Price. Kept a day and an hour, past Stripe's 24 hours, and dropped once a Price is kept: one of
+ * the two at a time for a shape. Without Redis, the count is this server's own.
+ */
+const refusedKey = (account: string, print: string) => `nl:pwyw:${account}:${print}:refused`;
+const REFUSED_SECONDS = 25 * 60 * 60;
+const refusedHere = new Map<string, number>();
+const refusedCount = (value: unknown) => (typeof value === "string" && /^[1-9][0-9]{0,8}$/.test(value) ? Number(value) : typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0);
 
 /**
  * The id of the Price on the creator's account that lets a buyer choose the
@@ -149,11 +163,14 @@ export async function pwywPriceId(
   };
   const print = await fingerprint(JSON.stringify(shape));
   const key = priceKey(account, print);
+  const refused = refusedKey(account, print);
   const cache = isRedisConfigured();
 
-  if (cache && !fresh) {
-    const [kept] = await redisPipeline([["GET", key]]);
-    if (typeof kept === "string" && /^price_[A-Za-z0-9]{6,64}$/.test(kept)) return kept;
+  let refusals = cache ? 0 : (refusedHere.get(refused) ?? 0);
+  if (cache) {
+    const [kept, count] = await redisPipeline([["GET", key], ["GET", refused]]);
+    if (!fresh && typeof kept === "string" && /^price_[A-Za-z0-9]{6,64}$/.test(kept)) return kept;
+    refusals = refusedCount(count);
   }
 
   const body = new URLSearchParams({
@@ -169,11 +186,18 @@ export async function pwywPriceId(
     "metadata[product]": product.id,
   });
   if (shape.tax) body.set("tax_behavior", shape.tax);
-  // Two buyers pressing buy at the same moment make one Price, not two.
-  const price = await onAccount("POST", account, "/prices", body, undefined, `pwyw-${print}${fresh ? `-${Date.now()}` : ""}`);
-  // Nothing is kept on any other reply: the checkout that asked fails, and the next one asks Stripe again (rule 30).
+  // Two buyers pressing buy at the same moment make one Price, not two: they read the same count of refusals.
+  const idempotency = `pwyw-${print}${refusals ? `-r${refusals}` : ""}${fresh ? `-${Date.now()}` : ""}`;
+  const price = await onAccount("POST", account, "/prices", body, undefined, idempotency);
+  // Nothing is kept on any other reply: the checkout that asked fails, and the count of refusals goes up, so the next
+  // one asks Stripe again under a new key instead of being answered this reply again for a day (rule 30).
   const written = { currency: store.currency, minimum: shape.minimum, preset: shape.preset, maximum: shape.maximum, tax: shape.tax, product: product.id };
-  if (!isPwywPrice(price, written)) throw new Error("Stripe did not return the price just written");
-  if (cache) await redisPipeline([["SET", key, price.id, "EX", KEEP_SECONDS]]).catch(() => {});
+  if (!isPwywPrice(price, written)) {
+    if (cache) await redisPipeline([["SET", refused, String(refusals + 1), "EX", REFUSED_SECONDS]]).catch(() => {});
+    else refusedHere.set(refused, refusals + 1);
+    throw new Error("Stripe did not return the price just written");
+  }
+  if (cache) await redisPipeline([["SET", key, price.id, "EX", KEEP_SECONDS], ["DEL", refused]]).catch(() => {});
+  else refusedHere.delete(refused);
   return price.id;
 }

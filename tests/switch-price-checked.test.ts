@@ -5,7 +5,8 @@
  * (tierPrice) and lib/yearly-switch.ts (yearlyPrice) used and kept for 400 days any reply with an id, and
  * lib/pay-what-you-want.ts (pwywPriceId) any reply with an id for a year, so a wrong or altered reply became the price
  * a member or a buyer is charged. A reply that is not the price written is never used, never kept, and fails where it
- * is seen; the next asks Stripe again. A price kept before this check is not read: it was never checked.
+ * is seen; the next asks Stripe again (a choose-your-price Price under a new Idempotency-Key, since Stripe answers the
+ * same key with the same reply for a day). A price kept before this check is not read: it was never checked.
  */
 import { tierPrice } from "@/lib/tier-switch";
 import { yearlyPrice } from "@/lib/yearly-switch";
@@ -19,6 +20,11 @@ const ACCOUNT = "acct_Harbor00001";
 let reply: (id: string, body: URLSearchParams) => Record<string, unknown> = priceEcho;
 let nextId = "price_Made00000001";
 const posts: URLSearchParams[] = [];
+/**
+ * As Stripe does, the reply to a request sent with an Idempotency-Key is kept and answered again to the same key (for
+ * 24 hours): so a refused reply is not asked for again under the key it came back to (lib/pay-what-you-want.ts).
+ */
+const replayed = new Map<string, Record<string, unknown>>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
@@ -26,7 +32,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "POST" && path === "/prices") {
     const body = new URLSearchParams(init?.body ? String(init.body) : "");
     posts.push(body);
-    return new Response(JSON.stringify(reply(nextId, body)));
+    const key = new Headers(init?.headers).get("Idempotency-Key");
+    if (key && replayed.has(key)) return new Response(JSON.stringify(replayed.get(key)));
+    const answer = reply(nextId, body);
+    if (key) replayed.set(key, answer);
+    return new Response(JSON.stringify(answer));
   }
   return new Response(JSON.stringify({ error: { message: `unexpected ${method} ${path}` } }), { status: 500 });
 }) as typeof fetch;

@@ -59,7 +59,7 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
-import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
+import { confirmedBack, purchaseRefunded, refundChecks } from "@/lib/refunds";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { type Learner, TOKEN_PATTERN, emailKey, learnerFrom, storeKey } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
@@ -157,8 +157,6 @@ const isSessionRow = (row: Row) => hasId(row) && hasMeta(row) && oneOf(row.statu
 /** A PaymentIntent as Stripe lists it: an id and a state among Stripe's own. */
 const isIntentRow = (row: Row) => hasId(row) && hasMeta(row) && oneOf(row.status, INTENT_STATES);
 
-/** The rule every door uses for a refund (lib/refunds.ts). */
-const refunded = refundedInFull;
 
 /**
  * Whether this address paid for one of `ids` on the creator's Stripe account
@@ -171,6 +169,8 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   const customers = new Set<string>();
   // Whether every list read here was read to its end: a "no" is only a "no" when it was.
   let complete = true;
+  // Reads of a refunded charge's own refunds and alert marks this question may make (lib/refunds.ts, CHARGE_REFUND_READS).
+  const checks = refundChecks();
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   for (const variant of variants) {
@@ -184,13 +184,14 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
       const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
       if (!handles.has(meta.store ?? "")) continue;
       if (!isSettled(session)) continue;
-      if (refunded(session.payment_intent)) continue;
       if (typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer)) customers.add(session.customer);
       // A product in a bundle opens the door as if bought on its own.
       const bought = deliveredIds(meta).filter((id) => ids.has(id));
       if (!bought.length) continue;
       // A payment plan's first payment is read only for a purchase that would open the door.
-      if (await purchaseRefunded(account, session)) continue;
+      // Refunded in full only once confirmed (lib/refunds.ts; the owner's decision 18): a full refund still on its way
+      // keeps the door open. Its reads inside this question's `checks`.
+      if (await purchaseRefunded(account, session, checks)) continue;
       // A membership opens the door while it is being paid for; a payment
       // plan is a one-off paid in parts, and counts like one.
       if (session.mode === "subscription" && meta.kind !== "plan") {
@@ -212,11 +213,11 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
     for (const intent of listed.rows) {
       const meta = (intent.metadata ?? {}) as Record<string, string>;
       if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) continue;
-      if (intent.status !== "succeeded" || refunded(intent)) continue;
+      if (intent.status !== "succeeded") continue;
       if (!deliveredIds(meta).some((id) => ids.has(id))) continue;
-      // Lost to a dispute is given back too (lib/refunds.ts); asked only of a
-      // charge Stripe marks disputed, and a failed read keeps it, as a refund read does.
-      if (await keptUnlessLost(account, intent)) continue;
+      // Refunded in full and confirmed, or lost to a dispute (lib/refunds.ts, confirmedBack; decision 18): asked only of
+      // a charge that reads refunded or is marked disputed; a refund still on its way, or a failed read, keeps it.
+      if (await confirmedBack(account, intent, checks)) continue;
       return true;
     }
   }

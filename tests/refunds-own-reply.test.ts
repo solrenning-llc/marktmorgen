@@ -15,6 +15,8 @@
  */
 import { purchaseRefunded } from "@/lib/refunds";
 import { done, is, part } from "./check";
+import { chargeRefundList } from "./refund-stand-in";
+import { store as redis } from "./redis-stub";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_refunds_own_reply_synthetic";
 
@@ -36,6 +38,9 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   if (path === "/invoice_payments") return Response.json(world.listed);
   if (path.startsWith("/payment_intents/")) return Response.json(world.intent(decodeURIComponent(path.slice("/payment_intents/".length))));
   if (path === "/disputes") return Response.json({ object: "list", data: [], has_more: false });
+  // Rule 23 (decision 18, lib/refunds.ts moneyBack): a charge read refunded in full is asked for its own refunds; here
+  // one refund of the whole charge that succeeded.
+  if (path === "/refunds" && url.searchParams.get("charge")) return Response.json(chargeRefundList(url.searchParams.get("charge") as string, 2000));
   return Response.json({ error: { message: "unexpected synthetic request" } }, { status: 404 });
 }) as typeof fetch;
 
@@ -55,6 +60,8 @@ const whole = (...data: unknown[]) => ({ object: "list", data, has_more: false }
 async function judged(next: World): Promise<{ refunded: boolean; calls: string[] }> {
   world = next;
   calls = [];
+  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each case starts with none.
+  redis.clear();
   const refunded = await purchaseRefunded(ACCOUNT, plan);
   return { refunded, calls };
 }
@@ -70,14 +77,16 @@ async function main() {
   part("Controls: every reply is the object asked for");
   let got = await judged({ invoice: ownInvoice, listed: null, intent: allRefunded });
   is("the invoice names this payment, refunded in full: refunded", got.refunded, true);
-  is("two requests, as today", got.calls, [`/invoices/${INVOICE}`, `/payment_intents/${INTENT}`]);
+  // Rule 23 (decision 18): one more request, the charge's own refunds, since its fields count a refund still on its way.
+  is("three requests: the invoice, the payment and its charge's refunds", got.calls, [`/invoices/${INVOICE}`, `/payment_intents/${INTENT}`, "/refunds"]);
   got = await judged({ invoice: ownInvoice, listed: null, intent: intents });
   is("the invoice names this payment, not refunded: kept", got.refunded, false);
   got = await judged({ invoice: { ...ownInvoice, payment_intent: { id: INTENT, object: "payment_intent" } }, listed: null, intent: allRefunded });
   is("the invoice's payment expanded as an object: read by its id", got.refunded, true);
   got = await judged({ invoice: namesNone, listed: whole(row()), intent: allRefunded });
   is("the invoice names none, its own paid payment listed and refunded: refunded", got.refunded, true);
-  is("three requests, as today", got.calls, [`/invoices/${INVOICE}`, "/invoice_payments", `/payment_intents/${INTENT}`]);
+  // Rule 23 (decision 18): one more request, the charge's own refunds, since its fields count a refund still on its way.
+  is("four requests: the invoice, its payments, the payment and its charge's refunds", got.calls, [`/invoices/${INVOICE}`, "/invoice_payments", `/payment_intents/${INTENT}`, "/refunds"]);
   got = await judged({ invoice: namesNone, listed: whole(row({ invoice: { id: INVOICE, object: "invoice" } })), intent: allRefunded });
   is("the listed payment names this invoice as an expanded object: refunded", got.refunded, true);
   got = await judged({ invoice: namesNone, listed: whole(row({ invoice: undefined })), intent: allRefunded });

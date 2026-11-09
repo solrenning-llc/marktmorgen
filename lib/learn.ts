@@ -41,7 +41,7 @@ import { earnedCourses } from "@/lib/community-points";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
-import { purchaseRefunded } from "@/lib/refunds";
+import { purchaseRefunded, refundChecks } from "@/lib/refunds";
 import { folderFromPathname, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
 import { isStreamPath } from "@/lib/stream-rules";
@@ -231,6 +231,9 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   const courses = new Map((await readKind(store, "course")).filter((p) => p.course).map((p) => [p.id, p]));
   if (courses.size === 0) return { paid: found, ended, refunded };
 
+  // Reads of a refunded charge's own refunds and alert marks this reading may make (lib/refunds.ts, CHARGE_REFUND_READS;
+  // decision 18): past them a refund is not known, and the course stays open.
+  const checks = refundChecks();
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   for (const variant of variants) {
@@ -250,8 +253,9 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
         .map((id) => courses.get(id))
         .filter((p): p is Listing => Boolean(p));
       if (bought.length === 0) continue;
-      // Refunded in full: the one rule every door uses (lib/refunds.ts).
-      if (await purchaseRefunded(account, session)) {
+      // Refunded in full and confirmed: the one rule every door uses (lib/refunds.ts; a full refund still on its way
+      // keeps the course, decision 18).
+      if (await purchaseRefunded(account, session, checks)) {
         for (const product of bought) refunded.add(product.id);
         continue;
       }

@@ -19,7 +19,9 @@ is("run by a job every half hour", /"path": "\/api\/cron\/discord",\s*"schedule"
 is("Stripe not answering: kept, and checked again later", /Stripe could not be asked: nothing is taken on a guess\.[\s\S]{0,200}await keepMember\(room, sid, userId, member, now\);/.test(read("lib/discord-access.ts")), true);
 is("six hours", CHECK_HOURS, 6);
 is("Discord refusing a role: kept, and tried again at the next check", /if \(done === "failed"\) failed = true;[\s\S]{0,40}if \(failed\) \{\s*await keepMember\(room, sid, userId, member, now\);/.test(read("lib/discord-access.ts")), true);
-is("only a refund in full takes access away", read("lib/community-access.ts").includes("refundedInFull"), true);
+// Rule 23 (decision 18): community-access no longer reads the charge's own fields (which count a refund still on its
+// way); a refund in full takes access away only once confirmed, through lib/refunds.ts purchaseRefunded / confirmedBack.
+is("only a refund in full takes access away", ["purchaseRefunded(", "confirmedBack("].every((name) => read("lib/community-access.ts").includes(name)), true);
 
 part("What the pages say");
 const studio = read("app/studio/discord/page.tsx");

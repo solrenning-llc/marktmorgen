@@ -44,6 +44,7 @@ import { createCheckout } from "@/lib/store-checkout";
 import { createCartCheckout } from "@/lib/cart-checkout";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { purchaseRefunded, refundedInFull } from "@/lib/refunds";
+import { chargeRefundList } from "./refund-stand-in";
 import { fingerprint, offerRefunded, takeUpsell } from "@/lib/upsell";
 import { noteSession, settleLine } from "@/lib/affiliates";
 import { applyShareToPayment, owedOn, toGiveBack } from "@/lib/platform-share";
@@ -61,6 +62,9 @@ const checkouts: URLSearchParams[] = [];
 const charges: URLSearchParams[] = [];
 let session: Record<string, unknown> = {};
 const intents: Record<string, Record<string, unknown>> = {};
+/** The charges this journey refunds in full, with their amounts (each charge carries its id, as Stripe sends it). */
+const REFUNDED_CHARGES: Record<string, number> = { ch_offerjourney007300: 7300, ch_offerjourneyup0500: 500 };
+
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
@@ -71,6 +75,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return answer({ id: `cs_test_${"b".repeat(24)}`, url: "https://checkout.stripe.com/c/pay/test" });
   }
   if (path === `/checkout/sessions/${SESSION}` && method === "GET") return answer(session);
+  // Rule 23 (decision 18, lib/refunds.ts moneyBack): a charge read refunded in full is asked for its own refunds; here
+  // each such charge was refunded in full by one refund that succeeded.
+  const refundedCharge = url.searchParams.get("charge") ?? "";
+  if (path === "/refunds" && method === "GET" && REFUNDED_CHARGES[refundedCharge]) return answer(chargeRefundList(refundedCharge, REFUNDED_CHARGES[refundedCharge]));
   if (path === "/payment_intents" && method === "POST") {
     const body = new URLSearchParams(String(init?.body));
     charges.push(body);
@@ -161,7 +169,7 @@ async function main(): Promise<void> {
   part("F11 · A refund in full closes what the box added too");
   const meta = metadataOf(await open(store, [ids.Workbook, ids.Checklist]));
   is("the order hands over the product and every box checked", deliveredIds(meta), [ids.Course, ids.Workbook, ids.Checklist]);
-  const paid = (refunded: number) => ({ mode: "payment", metadata: meta, payment_intent: { object: "payment_intent", latest_charge: { object: "charge", amount: 7300, amount_refunded: refunded, refunded: refunded >= 7300 } } });
+  const paid = (refunded: number) => ({ mode: "payment", metadata: meta, payment_intent: { object: "payment_intent", latest_charge: { object: "charge", id: "ch_offerjourney007300", amount: 7300, amount_refunded: refunded, refunded: refunded >= 7300 } } });
   is("refunded in full: every door closes, the boxes' with it", await purchaseRefunded(ACCOUNT, paid(7300)), true);
   is("refunded in part (the creator kept part of the price): the buyer keeps what it paid for", await purchaseRefunded(ACCOUNT, paid(1900)), false);
 
@@ -226,7 +234,7 @@ async function main(): Promise<void> {
 
   part("F12 · A refund in full of an offer closes it on its own");
   const reference = Object.keys(intents)[0];
-  intents[reference] = { ...intents[reference], latest_charge: { object: "charge", amount: 500, amount_refunded: 500, refunded: true } };
+  intents[reference] = { ...intents[reference], latest_charge: { object: "charge", id: "ch_offerjourneyup0500", amount: 500, amount_refunded: 500, refunded: true } };
   is("its own payment, refunded in full, is refunded", await offerRefunded(store, reference), true);
   intents[reference] = { ...intents[reference], latest_charge: { object: "charge", amount: 500, amount_refunded: 0, refunded: false } };
   is("not refunded, it stays open", await offerRefunded(store, reference), false);

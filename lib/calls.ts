@@ -61,7 +61,7 @@ import { HOLD_SECONDS, checkoutClosesAt, onAccount } from "@/lib/stripe-account"
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { askForCallReminder, recoveryOn, refusedRecovery, withoutCallReminder } from "@/lib/recovery-setting";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
-import { keptUnlessLost, refundedInFull } from "@/lib/refunds";
+import { type RefundChecks, confirmedBack, keptUnlessLost, refundChecks, refundedInFull } from "@/lib/refunds";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import type { Listing, Product, Store } from "@/lib/store";
 import { idsOfKind, listingFinder, readListing, readListings, sellsAny } from "@/lib/catalog";
@@ -324,9 +324,14 @@ function disputedCharge(row: SessionRow): boolean {
  * dispute lost frees the booking as a full refund does (lib/refunds.ts, the
  * owner's rule of 4 November 2026: whatever its amount).
  */
-async function callOrLost(store: Store, row: SessionRow, handles: Set<string>, reads: { left: number }): Promise<CallRow | "refunded" | null> {
+async function callOrLost(store: Store, row: SessionRow, handles: Set<string>, reads: { left: number }, checks: RefundChecks): Promise<CallRow | "refunded" | null> {
   const call = callFromRow(row, handles);
-  if (!call || call === "refunded" || !disputedCharge(row) || !store.stripeAccountId) return call;
+  if (!call || !store.stripeAccountId) return call;
+  // A charge that reads refunded in full frees the time only once the refund is confirmed (decision 18, lib/refunds.ts
+  // confirmedBack, its reads inside `checks`): a full refund still on its way, or one past this reading's reads, keeps
+  // the booking's time, as the buyer has not had the money back yet.
+  if (refundedInFull(row.payment_intent)) return (await confirmedBack(store.stripeAccountId, row.payment_intent, checks)) ? "refunded" : call;
+  if (!disputedCharge(row)) return call;
   if (reads.left <= 0) {
     console.warn("a disputed booking keeps its time: this reading asked Stripe about as many disputes as it may", store.handle, call.session);
     return call;
@@ -337,17 +342,17 @@ async function callOrLost(store: Store, row: SessionRow, handles: Set<string>, r
 
 /**
  * A paid booking of this store from one checkout session, or null. A booking
- * refunded in full is `refunded`: it no longer holds its time or gets reminders.
- * A dispute lost is read by callOrLost, which asks Stripe.
+ * refunded in full is told by callOrLost, which confirms the refund with
+ * Stripe (decision 18), as it asks about a dispute lost: then it no longer
+ * holds its time or gets reminders.
  */
-function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded" | null {
+function callFromRow(row: SessionRow, handles: Set<string>): CallRow | null {
   const meta = row.metadata ?? {};
   if (meta.kind !== "call" || !handles.has(meta.store ?? "")) return null;
   if (!isSettled(row)) return null;
   const start = Number(meta.start);
   const end = Number(meta.end);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-  if (refundedInFull(row.payment_intent)) return "refunded";
   const email = row.customer_details?.email;
   const name = row.customer_details?.name;
   return {
@@ -411,6 +416,8 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 86400;
   const found: CallRow[] = [];
   const reads = { left: DISPUTE_READS_PER_READING };
+  // Reads of a refunded charge's own refunds and alert marks this reading may make (lib/refunds.ts, CHARGE_REFUND_READS).
+  const checks = refundChecks();
   let after = "";
   // Whether the last page read still said there were more: older bookings were then left out.
   let partial = false;
@@ -427,7 +434,7 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
     if (list.hasMore && !list.lastId) throw new StripeListUnreadable("more checkouts, with no row to read on from");
     const rows = list.rows as SessionRow[];
     for (const row of rows) {
-      const call = await callOrLost(store, row, handles, reads);
+      const call = await callOrLost(store, row, handles, reads, checks);
       if (call === "refunded") {
         if (typeof row.id === "string") refunded.add(row.id);
       } else if (call) found.push(call);
@@ -451,7 +458,7 @@ export async function paidCall(store: Store, session: string): Promise<CallRow |
     store.stripeAccountId,
     `/checkout/sessions/${encodeURIComponent(session)}?expand[]=payment_intent.latest_charge`,
   )) as SessionRow;
-  const call = await callOrLost(store, row, saleHandles(store), { left: 1 });
+  const call = await callOrLost(store, row, saleHandles(store), { left: 1 }, refundChecks(2));
   if (!call || call === "refunded") return null;
   return (await withMoves([call]))[0] ?? null;
 }

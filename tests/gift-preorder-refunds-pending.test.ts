@@ -11,8 +11,11 @@
  * for. Checked against a stand-in for the creator's Stripe account that
  * honours created[gte], through the real gift and pre-order journeys:
  *
- *   - a full refund listed as pending is taken back at once, as the shared
- *     rule rowGivesBack() (lib/refunds.ts) reads it for the other jobs;
+ *   - a full refund listed as pending is NOT taken back while it is pending
+ *     (the owner's decision 18, 9 November 2026: only a refund confirmed,
+ *     succeeded, or a dispute lost takes access away; before it, the shared
+ *     rule rowGivesBack() counted "pending" and took it back at once): it
+ *     holds the anchor and is taken back once it succeeded;
  *   - a refund still pending or requiring action whose charge is not yet
  *     refunded in full holds the anchor at its time, so a later refund never
  *     moves the read past it, and it is taken back once it went through;
@@ -52,9 +55,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return answer({ error: { message: `no stand-in for ${init?.method ?? "GET"} ${path}` } }, 404);
 }) as typeof fetch;
 
-/** One refund row, as /refunds lists it with its charge expanded. */
+/**
+ * One refund row, as /refunds lists it with its charge expanded. Rule 23 (decision 18, lib/refunds.ts refundRowState):
+ * the refund carries its amount (the whole charge unless partial) and its charge its id, as Stripe sends them, so a
+ * refund of the whole charge reads as given back by itself.
+ */
 function row(id: string, created: number, status: string, pi: string, refunded: boolean, back = refunded ? 2500 : 0): Record<string, unknown> {
-  return { id, object: "refund", created, status, payment_intent: pi, charge: { object: "charge", refunded, amount: 2500, amount_refunded: back } };
+  return { id, object: "refund", created, status, amount: refunded ? 2500 : back, payment_intent: pi, charge: { object: "charge", id: `ch_${pi.slice(3)}`, refunded, amount: 2500, amount_refunded: back } };
 }
 
 type Job = {
@@ -69,10 +76,15 @@ async function check(job: Job, base: number): Promise<void> {
   const anchorNow = async () => (await redis.pipeline([["GET", job.anchor]]))[0];
   const n = job.name;
 
-  part(`${n}: a full refund listed as pending is taken back at once`);
+  // Rule 23 (the owner's decision 18, C1-20261109-1029-C5-52): a full refund still pending takes nothing back; before,
+  // it was taken back at once ("the pending full refund takes it back": 1, "no longer held": false).
+  part(`${n}: a full refund listed as pending is not taken back until it succeeded`);
   const pending = await job.make(1);
   refunds = [row(`re_${n}pend000001`, base, "pending", pending.pi, true)];
-  is(`${n}: the pending full refund takes it back`, await job.run(), 1);
+  is(`${n}: the pending full refund takes nothing back`, await job.run(), 0);
+  is(`${n}: still held while pending`, await pending.holds(), true);
+  refunds = [row(`re_${n}pend000001`, base, "succeeded", pending.pi, true)];
+  is(`${n}: once it succeeded, it is taken back`, await job.run(), 1);
   is(`${n}: no longer held`, await pending.holds(), false);
 
   for (const [k, status] of [[2, "pending"], [3, "requires_action"]] as const) {

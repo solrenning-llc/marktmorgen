@@ -10,6 +10,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { store as redis } from "./redis-stub";
+import { chargeRefundList } from "./refund-stand-in";
 import { paidPeriod } from "./billing-period-fixture";
 import {
   MAX_LISTED,
@@ -90,6 +91,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const found = [...sessions, ...intents].find((row) => row.id === one[2]);
     return found ? answer(found) : new Response(JSON.stringify({ error: { type: "invalid_request_error", code: "resource_missing" } }), { status: 404 });
   }
+  // Rule 23 (decision 18, lib/refunds.ts moneyBack): a charge read refunded in full is asked for its own refunds; here
+  // one refund of the whole charge (1,900) that succeeded.
+  if (path === "/refunds" && url.searchParams.get("charge")) return answer(chargeRefundList(url.searchParams.get("charge") as string, 1900));
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
@@ -528,7 +532,7 @@ test("a download in one click is refused where the list would not read it: the c
   const parent = sessions[0] as Record<string, unknown> & { metadata: Record<string, string> };
   assert.equal((await findPurchase(store, token, "pi_testupsell000001"))?.purchase.kind, "upsell");
   const variants: [string, Record<string, unknown>][] = [
-    ["refunded", { payment_intent: { id: "pi_testmoss000000", status: "succeeded", latest_charge: { refunded: true, amount_refunded: 1900 } } }],
+    ["refunded", { payment_intent: { id: "pi_testmoss000000", status: "succeeded", latest_charge: { id: "ch_testmoss000000", refunded: true, amount: 1900, amount_refunded: 1900 } } }],
     ["a gift", { metadata: { ...parent.metadata, gift: "1" } }],
     ["a place", { metadata: { ...parent.metadata, group: "1" } }],
     ["a call", { metadata: { ...parent.metadata, kind: "call" } }],
@@ -563,7 +567,7 @@ test("a download in one click is handed over exactly when the list shows it", as
   const parent = sessions[0] as Record<string, unknown> & { metadata: Record<string, string> };
   const cases: [string, Record<string, unknown>, boolean][] = [
     ["a checkout the list hands over", {}, true],
-    ["a checkout given back", { payment_intent: { id: "pi_testmoss000000", status: "succeeded", latest_charge: { refunded: true, amount_refunded: 1900 } } }, false],
+    ["a checkout given back", { payment_intent: { id: "pi_testmoss000000", status: "succeeded", latest_charge: { id: "ch_testmoss000000", refunded: true, amount: 1900, amount_refunded: 1900 } } }, false],
     ["a checkout of something that hands nothing over", { metadata: { ...parent.metadata, product: bare.product.id } }, false],
     ["a checkout with something checked that hands over", { metadata: { ...parent.metadata, product: bare.product.id, bump: ids[0] } }, true],
     ["a checkout without a customer", { customer: null }, false],

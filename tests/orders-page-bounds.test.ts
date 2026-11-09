@@ -49,6 +49,7 @@ import { GET as bundleRoute } from "@/app/api/store/orders/bundle/route";
 import { GET as olderRoute } from "@/app/api/store/orders/older/route";
 import type { OlderAnswer } from "@/components/older-purchases";
 import { store as redis } from "./redis-stub";
+import { chargeRefundList } from "./refund-stand-in";
 import { afterTasks } from "./next-server-after-world";
 import { paidPeriod } from "./billing-period-fixture";
 import {
@@ -162,11 +163,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (paidFor) {
       // A payment of an installment plan's first invoice: partly given back (1 of 1,000) unless the plan was refunded.
       const back = refundedInvoices.has(`in_${paidFor[1]}`);
-      return answer({ object: "payment_intent", id: one[2], status: "succeeded", latest_charge: { object: "charge", amount: 1000, amount_refunded: back ? 1000 : 1, refunded: back } });
+      // Rule 23 (decision 18): the charge carries its id, as Stripe sends it, so its own refunds can be asked (below).
+      return answer({ object: "payment_intent", id: one[2], status: "succeeded", latest_charge: { object: "charge", id: `ch_${one[2].slice(3)}`, amount: 1000, amount_refunded: back ? 1000 : 1, refunded: back } });
     }
     const found = [...checkouts, ...intents].find((row) => row.id === one[2]);
     return found ? answer(found) : answer({ error: { type: "invalid_request_error", code: "resource_missing" } }, 404);
   }
+  // Rule 23 (decision 18, lib/refunds.ts moneyBack): a charge read refunded in full is asked for its own refunds; here
+  // one refund of the whole charge (1,000) that succeeded.
+  if (path === "/refunds" && url.searchParams.get("charge")) return answer(chargeRefundList(url.searchParams.get("charge") as string, 1000));
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
@@ -823,7 +828,7 @@ test("showing a bundle's products refuses without reading: no room, no such bund
   assert.equal((await ask("f".repeat(64), ref, "main")).status, 410);
   assert.deepEqual(calls, []);
   // Refunded in full: not handed over.
-  checkouts[0] = { ...checkouts[0], payment_intent: { id: "pi_given_back", status: "succeeded", latest_charge: { refunded: true, amount_refunded: 1000 } } };
+  checkouts[0] = { ...checkouts[0], payment_intent: { id: "pi_given_back", status: "succeeded", latest_charge: { id: "ch_givenback01", refunded: true, amount: 1000, amount_refunded: 1000 } } };
   assert.equal((await ask(token, ref, "main")).status, 410);
   // A store with room for the request but not its lookup: too often, and Stripe is asked nothing.
   await redis.pipeline([["SET", `nl:traffic:r:${folder}:${window}`, String(requestLimitFor(store) - 1)]]);

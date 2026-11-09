@@ -24,7 +24,7 @@ import { sendEmail } from "@/lib/email";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
+import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, moneyBack, noteHeld, refundChecks, refundRowKnown, refundRowState, settleParts } from "@/lib/refunds";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
 // On its own line, so open pull requests that change the redis-reply import above still merge cleanly.
@@ -548,6 +548,8 @@ async function releaseJob(
   const deps = depsFor(store);
   let given = 0;
   let left = unread;
+  // Reads of a refunded charge's own refunds and alert marks this job may make (lib/refunds.ts, CHARGE_REFUND_READS).
+  const checks = refundChecks();
   for (const [session, entry] of waiting) {
     if (Date.now() > deadline) {
       left += 1;
@@ -556,9 +558,16 @@ async function releaseJob(
     try {
       if (entry.pi) {
         const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(entry.pi)}?expand[]=latest_charge`);
-        // Refunded in full or lost to a dispute (lib/refunds.ts): never handed over.
-        if (await givenBack(store.stripeAccountId, payment)) {
+        // Refunded in full and confirmed, or lost to a dispute (lib/refunds.ts, moneyBack): never handed over. A full
+        // refund still on its way may yet fail (the owner's decision 18): the hand-over waits, the job is kept and
+        // reads it again next run, and nothing is marked refunded for good until the refund succeeded.
+        const money = await moneyBack(store.stripeAccountId, payment, checks);
+        if (money === "back") {
           await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, pid)]);
+          continue;
+        }
+        if (money === "held") {
+          left += 1;
           continue;
         }
       }
@@ -632,28 +641,34 @@ export async function revokeRefundedPreorders(
   let unsure = !lost.complete || !refundsKnown;
   // The time of the oldest refund read that has not gone through yet (Infinity: none).
   let waiting = Infinity;
+  // Reads of a charge's own refunds and alert marks this run may make (lib/refunds.ts, CHARGE_REFUND_READS).
+  const checks = refundChecks();
   for (const refund of [...lost.rows, ...refunds]) {
     if (Date.now() >= deadline) return revoked;
     const id = typeof refund.id === "string" ? refund.id : "";
     const created = typeof refund.created === "number" ? refund.created : 0;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
     const dispute = refund.object === "dispute";
-    // Disputes and refunds read by the one shared rule (lib/refunds.ts rowGivesBack), as the other jobs that take
-    // things back read them: a full refund going through (succeeded or pending), or a dispute lost; and, as before,
-    // a refund that succeeded on a charge marked refunded, whatever else that charge says.
-    const charge = refund.charge as { refunded?: unknown } | null;
-    const givesBack = rowGivesBack(refund) || (!dispute && refund.status === "succeeded" && charge?.refunded === true);
+    // Disputes and refunds read by the one shared rule (lib/refunds.ts refundRowState), as the other jobs that take
+    // things back read them. Only money back for good takes anything back (the owner's decision 18): a dispute lost,
+    // or a refund that succeeded for the whole charge; one that succeeded as a part is read from its charge's refunds
+    // below, only once there is something to take back.
+    const state = refundRowState(refund);
     newest = Math.max(newest, created);
-    // A refund Stripe has not finished (pending, or waiting on an action) whose charge is not refunded in full yet
-    // keeps the anchor at its time (review of #3188, Claude 3): a later refund never moves the read past it, so it is
-    // listed again and taken back once it goes through. One that already gives everything back is taken back now.
-    if (!dispute && (refund.status === "pending" || refund.status === "requires_action") && !givesBack) waiting = Math.min(waiting, created);
+    // A refund Stripe has not finished (pending, or waiting on an action) takes nothing back, whatever its charge
+    // reads, and keeps the anchor at its time (review of #3188, Claude 3; decision 18): a later refund never moves the
+    // read past it, so it is listed again, taken back once it succeeded, and kept for good if it failed or was
+    // canceled. One on its way for more than seven days is said in the log, never taken back for that.
+    if (state === "held") {
+      waiting = Math.min(waiting, created);
+      await noteHeld(refund, checks);
+    }
     if (dispute && id && !pi) {
       // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
       if (!(await markRead(sid, id))) unsure = true;
       continue;
     }
-    if (!id || !pi || !givesBack) continue;
+    if (!id || !pi || (state !== "back" && state !== "parts")) continue;
     // Read before anything is marked (Codex Z on #2724; CX-123 rule 24): whether this row was handled, the payment's
     // pre-order and the pre-order itself, each in its exact shape. Unknown leaves the row unread and the read unsure,
     // and the next run asks again; nothing is marked read until it was handled.
@@ -674,6 +689,12 @@ export async function revokeRefundedPreorders(
       }
       const entry = parsePreorder(raw);
       if (entry && !entry.revoked) {
+        // A succeeded part of a full refund takes back only once the charge's succeeded refunds add up to it
+        // (decision 18): while the rest is on its way, or the charge's refunds do not read, it is held, not read.
+        if (state === "parts" && (await settleParts(store.stripeAccountId, refund, checks)) !== "back") {
+          waiting = Math.min(waiting, created);
+          continue;
+        }
         if (entry.given) {
           // Only what this pre-order gave: a purchase of the same product given another way stays.
           const given = repliesFor(await redisPipeline([["HGET", importedKey(sid, entry.to), productId]]), 1)?.[0];

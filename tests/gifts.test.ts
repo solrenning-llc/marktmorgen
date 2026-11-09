@@ -135,7 +135,9 @@ async function main(): Promise<void> {
 
   part("A refund");
   const dropped: string[] = [];
-  refunds = [{ id: "re_1", created: Math.floor(Date.now() / 1000), status: "succeeded", payment_intent: "pi_Gift0000001", charge: { refunded: true } }];
+  // Rule 23 (decision 18, lib/refunds.ts refundRowState): the refund carries its amount and its charge its amount, as
+  // Stripe sends them, so a refund of the whole charge reads as given back by itself.
+  refunds = [{ id: "re_1", created: Math.floor(Date.now() / 1000), status: "succeeded", amount: 2500, payment_intent: "pi_Gift0000001", charge: { refunded: true, amount: 2500 } }];
   // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the purchase,
   // so the next run takes both away again.
   await revokeRefundedGifts(store, Date.now() + 10_000, async () => { throw new Error("the ledger did not answer"); }).catch(() => 0);

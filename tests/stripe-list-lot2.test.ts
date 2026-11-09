@@ -16,6 +16,7 @@ import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscripti
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { chargeRefundList } from "./refund-stand-in";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_stripe_list_lot2_only";
 
@@ -66,6 +67,9 @@ async function membershipProof(): Promise<void> {
     if (path === "/invoices/in_LotTwoFirst01") return Response.json({ id: "in_LotTwoFirst01", object: "invoice", payment_intent: null });
     if (path === "/invoice_payments") return Response.json(payments);
     if (path === "/payment_intents/pi_LotTwoPaid0001") return Response.json({ id: "pi_LotTwoPaid0001", object: "payment_intent", status: "succeeded", latest_charge: { id: "ch_LotTwo1", refunded: true, amount_refunded: 1000, amount: 1000, disputed: false } });
+    // Rule 23 (decision 18, lib/refunds.ts moneyBack): a charge read refunded in full is asked for its own refunds
+    // (GET /refunds?charge=): here one refund of the whole charge that succeeded.
+    if (path === "/refunds") return Response.json(chargeRefundList("ch_LotTwo1", 1000));
     return null;
   };
   for (const [label, page] of [...GARBLED, ["a row not readable", { object: "list", data: ["inpay_garbled"], has_more: false }] as [string, unknown]]) {
@@ -84,7 +88,9 @@ async function refundPass(): Promise<void> {
   const before = Math.floor(Date.now() / 1000) - 3 * 86_400;
   const newer = before + 86_400;
   // A refund in full, newer than the anchor, readable: what moves the anchor when the page is read whole.
-  const fresh = { id: "re_LotTwoNewer001", object: "refund", status: "succeeded", created: newer, payment_intent: "pi_LotTwoPaid0001", charge: { id: "ch_LotTwo1", object: "charge", refunded: true, amount: 1000, amount_refunded: 1000, disputed: false } };
+  // Rule 23 (decision 18, lib/refunds.ts refundRowState): the refund carries its amount and its charge its amount, as
+  // Stripe sends them, so a refund of the whole charge reads as given back by itself.
+  const fresh = { id: "re_LotTwoNewer001", object: "refund", status: "succeeded", amount: 1000, created: newer, payment_intent: "pi_LotTwoPaid0001", charge: { id: "ch_LotTwo1", object: "charge", refunded: true, amount: 1000, amount_refunded: 1000, disputed: false } };
   let refunds: unknown = null;
   handler = (method, path) => {
     if (method !== "GET") return null;

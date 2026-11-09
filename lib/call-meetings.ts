@@ -33,7 +33,7 @@ import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
-import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, noteHeld, refundChecks, refundRowState, settleParts } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
 import { markBookingsChanged, readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
@@ -180,6 +180,13 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   // A failed or unfinished read of the lost disputes keeps the anchor.
   let unsure = false;
   let lostRead: LostRead | null = null;
+  // The earliest refund left for later because its money is not back for good yet: the anchor never moves past it.
+  let holdAt = Number.POSITIVE_INFINITY;
+  const hold = (created: number) => {
+    holdAt = Math.min(holdAt, created);
+  };
+  // Reads of a charge's own refunds and alert marks this run may make (lib/refunds.ts, CHARGE_REFUND_READS).
+  const checks = refundChecks();
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
@@ -198,13 +205,27 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       const id = typeof refund.id === "string" ? refund.id : "";
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
-      if (!rowGivesBack(refund)) {
+      // Only money back for good ends a meeting (lib/refunds.ts, refundRowState; the owner's decision 18). A refund
+      // still on its way ends nothing and holds the anchor at its time, so the next run reads it again; one on its way
+      // more than seven days is said in the log, never acted on.
+      const state = refundRowState(refund);
+      if (state === "held") {
+        hold(created);
+        await noteHeld(refund, checks);
+        continue;
+      }
+      if (state === "no") {
         newest = Math.max(newest, created);
         continue;
       }
       const [seen] = await redisPipeline([["SISMEMBER", seenKey(callsId), id]]);
       if (Number(seen) === 1) {
         newest = Math.max(newest, created);
+        continue;
+      }
+      // A succeeded part of a full refund ends the meeting only once its charge's succeeded refunds add up to it.
+      if (state === "parts" && (await settleParts(account, refund, checks)) !== "back") {
+        hold(created);
         continue;
       }
       const intent = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
@@ -266,7 +287,8 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", anchorKey(callsId), String(Math.max(newest, anchor)), "EX", REFUND_KEEP_SECONDS * 2]]);
+  // A refund held for later keeps the anchor at its time, never before where it already was (decision 18).
+  if (done) await redisPipeline([["SET", anchorKey(callsId), String(Math.max(Math.min(newest, holdAt), anchor)), "EX", REFUND_KEEP_SECONDS * 2]]);
   else if (!(Number(anchorRaw) > 0)) {
     await redisPipeline([
       ["SET", anchorKey(callsId), String(anchor), "EX", REFUND_KEEP_SECONDS * 2],

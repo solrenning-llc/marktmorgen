@@ -54,12 +54,27 @@
  * is judged on its own; a product ticked at checkout is part of the
  * checkout's payment and goes with it.
  *
+ * Only money gone back for good takes anything back (the owner's decision
+ * 18, 9 November 2026, C1-20261109-1029-C5-52): a refund that succeeded, or
+ * a dispute lost. Stripe counts a refund still on its way (pending, or
+ * waiting on an action) in the charge's `amount_refunded`, and marks the
+ * charge `refunded`, although it may still fail; so neither field alone
+ * takes anything back. A door confirms it from the charge's own refunds
+ * (moneyBack, one GET /refunds?charge= only for a charge that reads refunded
+ * in full); a job holds its place at a refund still on its way
+ * (refundRowState "held") and reads a refund made in parts the same way
+ * (settleParts). A refund failed or canceled keeps everything; an answer
+ * that does not read is unknown, which never takes anything away. A refund
+ * on its way for more than REFUND_STUCK_SECONDS is said in the log, at most
+ * once a charge a day, never acted on.
+ *
  * What a refund cannot take back: a file already saved, and a product
  * delivered as a link to somewhere else — once the buyer has the address,
  * only the creator can close it there.
  */
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 type ChargeLike = {
   id?: unknown;
@@ -100,8 +115,10 @@ function chargeOf(payment: unknown): ChargeLike | null {
 
 /**
  * Whether Stripe says this payment was refunded in full. On a charge Stripe
- * sent this is refunds only; a lost dispute is seen here only on a row
- * lostDisputesSince() built. Doors use givenBack() or purchaseRefunded().
+ * sent this is refunds only, and counts a refund still on its way as well
+ * (decision 18, header): never enough to take anything away on its own; a
+ * lost dispute is seen here only on a row lostDisputesSince() built. Doors
+ * use moneyBack(), givenBack() or purchaseRefunded().
  *
  * Takes a PaymentIntent read with its latest charge expanded, or a Charge
  * itself. Anything Stripe did not expand, or did not send, counts as not
@@ -222,10 +239,12 @@ export async function keptUnlessLost(account: string, payment: unknown): Promise
   }
 }
 
-/** Refunded in full, or lost to a dispute: given back either way. Throws when Stripe cannot be asked. */
-export async function givenBack(account: string | null | undefined, payment: unknown): Promise<boolean> {
-  if (refundedInFull(payment)) return true;
-  return account ? disputeLost(account, payment) : false;
+/**
+ * Refunded in full and confirmed, or lost to a dispute: given back either way (moneyBack "back"). A refund still on
+ * its way is not (decision 18). Throws when Stripe cannot be asked, or its answer is not known.
+ */
+export async function givenBack(account: string | null | undefined, payment: unknown, checks?: RefundChecks): Promise<boolean> {
+  return (await moneyBack(account, payment, checks)) === "back";
 }
 
 /**
@@ -236,11 +255,209 @@ export async function givenBack(account: string | null | undefined, payment: unk
  */
 export type GivenBackRow = Record<string, unknown>;
 
-/** Whether one row of a job's reading takes its sale back: a full refund going through, or a dispute lost. */
+/**
+ * Whether one row of a job's reading takes its sale back with nothing more read: a dispute lost, or a refund that
+ * succeeded and gave the whole charge back by itself. A refund still on its way never does (decision 18); a refund
+ * that succeeded as one part of a full refund needs settleParts() (refundRowState "parts"), so it is not one here.
+ */
 export function rowGivesBack(row: GivenBackRow): boolean {
-  if (row.object === "dispute") return row.status === "lost" && refundedInFull(row.charge);
-  if (row.status !== "succeeded" && row.status !== "pending") return false;
-  return refundedInFull(row.charge);
+  return refundRowState(row) === "back";
+}
+
+/**
+ * Where money stands after a refund or a dispute (the owner's decision 18):
+ *   - "back": gone back for good (a refund succeeded for the whole charge, or a dispute lost);
+ *   - "held": a refund still on its way (pending, requires_action) that may yet fail: nothing is taken back, and a job
+ *     keeps its place at it so it is read again;
+ *   - "no": nothing gone back (none, a part, failed or canceled).
+ */
+export type MoneyBack = "back" | "held" | "no";
+
+/** Statuses of a refund still on its way: it may yet fail, and Stripe already counts it in the charge's amount_refunded. */
+const REFUND_ON_ITS_WAY = new Set(["pending", "requires_action"]);
+
+/** A refund on its way longer than this is said in the log (decision 18: an alert, never a revocation). */
+export const REFUND_STUCK_SECONDS = 7 * 86_400;
+/** At most once a charge a day: the mark of a refund on its way said in the log (one SET NX EX). */
+export const stuckRefundKey = (charge: string) => `nl:refund:stuck:${charge}`;
+const STUCK_SAID_SECONDS = 86_400;
+
+/**
+ * The most reads of a charge's own refunds (GET /refunds?charge=) and alert marks (SET NX) one run of a job, or one
+ * door's reading of many purchases, makes (RefundChecks): past it the answer is unknown, never "no" or "back".
+ */
+export const CHARGE_REFUND_READS = 5;
+/** The most refunds of one charge read in one GET /refunds?charge= (one page; a charge with more is unknown). */
+export const CHARGE_REFUNDS_PAGE = 100;
+
+/**
+ * A charge whose refunds were read back for good, kept a day (one SET EX when read, one GET before the next read), so
+ * a reading of many refunded payments (a store's bookings, lib/calls.ts) does not ask Stripe again for each one every
+ * time. A day, not longer: a refund Stripe later reports failed counts again from the next day.
+ */
+export const refundBackKey = (charge: string) => `nl:refund:back:${charge}`;
+const BACK_KEPT_SECONDS = 86_400;
+
+/** What one run (or one reading) may still read about refunds: taken before each read. */
+export type RefundChecks = { left: number };
+export const refundChecks = (left = CHARGE_REFUND_READS): RefundChecks => ({ left });
+
+/** A charge's refunds could not be read as a whole answer: unknown, which never takes anything back. */
+export class RefundsUnknown extends Error {
+  constructor(what: string) {
+    super(`a charge's refunds are not known: ${what}`);
+    this.name = "RefundsUnknown";
+  }
+}
+
+const centsKnown = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/** Whether a refund's own amount covers its charge's: then it gave the whole charge back by itself. */
+function wholeOnItsOwn(refund: Record<string, unknown>, charge: Record<string, unknown>): boolean {
+  const amount = ownField(charge, "amount");
+  const own = ownField(refund, "amount");
+  return centsKnown(own) && centsKnown(amount) && amount > 0 && own >= amount;
+}
+
+/**
+ * One row of a job's reading (a refund from GET /refunds with its charge expanded, or a lost dispute from
+ * lostDisputesSince()), read alone:
+ *   - "back": a dispute lost, or a refund that succeeded and covers its whole charge by itself;
+ *   - "held": a refund still on its way (pending, requires_action), whatever its charge reads;
+ *   - "parts": a refund that succeeded on a charge that reads refunded in full but does not cover it alone: whether
+ *     the money is back is read from the charge's own refunds (settleParts), only for a row the job will act on;
+ *   - "no": anything else (a part, failed, canceled, a dispute not lost).
+ */
+export function refundRowState(row: GivenBackRow): MoneyBack | "parts" {
+  if (row.object === "dispute") return row.status === "lost" && refundedInFull(row.charge) ? "back" : "no";
+  if (typeof row.status === "string" && REFUND_ON_ITS_WAY.has(row.status)) return "held";
+  // The row's charge is the one /refunds expanded (`expand[]=data.charge`), read as a charge whatever its `object` says.
+  const charge = plainObject(row.charge) ? row.charge : null;
+  if (row.status !== "succeeded" || !charge || !chargeRefunded(charge)) return "no";
+  return wholeOnItsOwn(row, charge) ? "back" : "parts";
+}
+
+/** Says a refund on its way for more than REFUND_STUCK_SECONDS in the log, at most once a charge a day; never throws. */
+async function sayStuck(charge: string, since: number, checks?: RefundChecks): Promise<void> {
+  if (!charge || !Number.isFinite(since) || Date.now() / 1000 - since <= REFUND_STUCK_SECONDS) return;
+  if (checks) {
+    if (checks.left <= 0) return;
+    checks.left -= 1;
+  }
+  try {
+    const [first] = await redisPipeline([["SET", stuckRefundKey(charge), "1", "NX", "EX", STUCK_SAID_SECONDS]]);
+    if (first !== "OK") return;
+  } catch {
+    // The mark could not be written: said anyway, as an alert is worth more than one line too many.
+  }
+  console.error(`a full refund has been on its way for more than seven days; nothing is taken back until it succeeds (decision 18): charge ${charge}, since ${new Date(since * 1000).toISOString()}`);
+}
+
+/**
+ * A job's row still on its way (refundRowState "held"): said in the log when it has waited more than
+ * REFUND_STUCK_SECONDS, at most once a charge a day, inside the run's `checks`. Never throws.
+ */
+export async function noteHeld(row: GivenBackRow, checks?: RefundChecks): Promise<void> {
+  const charge = idOf(row.charge) || idOf(row.payment_intent) || idOf(row.id);
+  await sayStuck(charge, typeof row.created === "number" ? row.created : Number.NaN, checks);
+}
+
+/**
+ * Whether a charge that reads refunded in full has its money back for good, read from the charge's own refunds (one
+ * GET /refunds?charge=, pinned to STRIPE_LIST_VERSION, one page read whole): "back" when the ones that succeeded add up
+ * to the charge, "held" while the rest is on its way (said when stuck). Anything else throws RefundsUnknown: no charge
+ * id or amount, `checks` spent, a list or a row in another shape, a row of another charge, more than one page, the
+ * refund being read (`own`) missing from the list, or succeeded refunds that do not add up with nothing on its way.
+ */
+async function chargeSettled(account: string, charge: Record<string, unknown>, own: string | null, checks?: RefundChecks): Promise<"back" | "held"> {
+  const id = ownField(charge, "id");
+  const amount = ownField(charge, "amount");
+  if (typeof id !== "string" || !CHARGE_ID.test(id) || !centsKnown(amount) || amount <= 0) throw new RefundsUnknown("a charge without its id or amount");
+  // Read back for good today already: no new read. A mark that does not read is no mark.
+  try {
+    const [kept] = await redisPipeline([["GET", refundBackKey(id)]]);
+    if (kept === "1") return "back";
+  } catch {
+    // Read from Stripe below.
+  }
+  if (checks) {
+    if (checks.left <= 0) throw new RefundsUnknown("past the reads this run may make");
+    checks.left -= 1;
+  }
+  const legible = (row: Record<string, unknown>) => {
+    const status = ownField(row, "status");
+    return typeof status === "string" && REFUND_STATUSES.has(status) && centsKnown(ownField(row, "amount")) && secondsKnown(ownField(row, "created")) && idOf(ownField(row, "charge")) === id;
+  };
+  let listed;
+  try {
+    listed = readStripePage(
+      await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`, undefined, STRIPE_LIST_VERSION),
+      legible,
+    );
+  } catch (error) {
+    if (error instanceof StripeListUnreadable) throw new RefundsUnknown(error.message);
+    throw error;
+  }
+  if (listed.unreadable > 0 || listed.hasMore) throw new RefundsUnknown("a list not read whole");
+  if (own !== null && !listed.rows.some((row) => row.id === own)) throw new RefundsUnknown("a list without the refund read");
+  let back = 0;
+  let since = Number.POSITIVE_INFINITY;
+  for (const row of listed.rows) {
+    const status = ownField(row, "status") as string;
+    if (status === "succeeded") back += ownField(row, "amount") as number;
+    else if (REFUND_ON_ITS_WAY.has(status)) since = Math.min(since, ownField(row, "created") as number);
+  }
+  if (back >= amount) {
+    try {
+      await redisPipeline([["SET", refundBackKey(id), "1", "EX", BACK_KEPT_SECONDS]]);
+    } catch {
+      // Unmarked: the next reading asks Stripe again.
+    }
+    return "back";
+  }
+  if (Number.isFinite(since)) {
+    await sayStuck(id, since, checks);
+    return "held";
+  }
+  throw new RefundsUnknown("a charge read refunded in full whose succeeded refunds do not add up");
+}
+
+/**
+ * A job's row read "parts" by refundRowState: "back" once the charge's succeeded refunds add up to it, "held" while a
+ * part is on its way, "unknown" when they could not be read (said in the log). Never throws: a job holds its place
+ * at the row unless the answer is "back".
+ */
+export async function settleParts(account: string, row: GivenBackRow, checks?: RefundChecks): Promise<"back" | "held" | "unknown"> {
+  const own = typeof row.id === "string" ? row.id : "";
+  if (!plainObject(row.charge) || !own) return "unknown";
+  try {
+    return await chargeSettled(account, row.charge, own, checks);
+  } catch (error) {
+    console.error("reading the refunds of a charge refunded in parts failed; held for the next run", error);
+    return "unknown";
+  }
+}
+
+/**
+ * Where the money of one payment stands (a PaymentIntent read with its latest charge expanded, or a Charge): "back"
+ * for a refund confirmed for the whole charge or a dispute lost, "held" for a full refund still on its way, "no"
+ * otherwise. Stripe is asked about the refunds only for a charge that reads refunded in full (one GET
+ * /refunds?charge=), and about the disputes only for a charge marked disputed. Throws when Stripe cannot be asked or
+ * its answer is not known (RefundsUnknown): never "no", never "back".
+ */
+export async function moneyBack(account: string | null | undefined, payment: unknown, checks?: RefundChecks): Promise<MoneyBack> {
+  const charge = chargeOf(payment);
+  if (!charge) return "no";
+  if (lostOnCharge(charge)) return "back";
+  let held = false;
+  if (chargeRefunded(charge)) {
+    if (!account) throw new RefundsUnknown("no account to read the charge's refunds on");
+    if (!plainObject(charge)) throw new RefundsUnknown("a charge in another shape");
+    if ((await chargeSettled(account, charge, null, checks)) === "back") return "back";
+    held = true;
+  }
+  if (account && (await disputeLost(account, payment))) return "back";
+  return held ? "held" : "no";
 }
 
 /**
@@ -488,10 +705,32 @@ async function planRefundedInFull(account: string, session: SessionLike): Promis
  * The one rule for every door. A plan's later instalments, refunded or lost,
  * close nothing here, as before.
  */
-export async function purchaseRefunded(account: string | null | undefined, session: SessionLike): Promise<boolean> {
-  if (refundedInFull(session.payment_intent)) return true;
+/**
+ * moneyBack() for a door that lets in: true only for money back for good. A full refund still on its way, and an
+ * answer Stripe did not give or gave in another shape, keep the purchase (decision 18), as keptUnlessLost() does
+ * for a dispute; the next read corrects it.
+ */
+export async function confirmedBack(account: string | null | undefined, payment: unknown, checks?: RefundChecks): Promise<boolean> {
+  try {
+    return (await moneyBack(account, payment, checks)) === "back";
+  } catch (error) {
+    console.error("reading whether a payment was given back failed; the purchase is kept", error);
+    return false;
+  }
+}
+
+export async function purchaseRefunded(account: string | null | undefined, session: SessionLike, checks?: RefundChecks): Promise<boolean> {
   if (!account) return false;
-  // As for a plan's first payment below: what Stripe did not answer closes nothing.
-  if (await keptUnlessLost(account, session.payment_intent)) return true;
+  // Only money back for good closes (decision 18): a full refund still on its way keeps the purchase. As for a plan's
+  // first payment below, what Stripe did not answer, or answered in another shape, closes nothing.
+  let state: MoneyBack;
+  try {
+    state = await moneyBack(account, session.payment_intent, checks);
+  } catch (error) {
+    console.error("reading whether a payment was given back failed; the purchase is kept", error);
+    state = "no";
+  }
+  if (state === "back") return true;
+  if (state === "held") return false;
   return planRefundedInFull(account, session);
 }

@@ -22,6 +22,8 @@
  * Synthetic only: Stripe is a stand-in fetch and Redis is tests/redis-stub.ts. Nothing real is reached.
  */
 import { givenBack, purchaseRefunded, rowGivesBack } from "@/lib/refunds";
+import { paidCall } from "@/lib/calls";
+import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -31,6 +33,10 @@ const ACCOUNT = "acct_refundd18001";
 const CHARGE = "ch_refundd18charge1";
 const INTENT = "pi_refundd18intent1";
 const NOW = Math.floor(Date.now() / 1000);
+const BOOKING = "cs_test_refundd18booking1";
+const callStore = { handle: "d18calls", previousHandles: [], releasedHandles: [], stripeAccountId: ACCOUNT } as unknown as Store;
+/** A booked call paid by the payment below, as Stripe sends its checkout. */
+let booking: Record<string, unknown> = {};
 
 /** What GET /refunds?charge= answers: the charge's refunds, or anything else for an answer in another shape. */
 let chargeRefunds: unknown = { object: "list", data: [], has_more: false };
@@ -42,6 +48,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   calls.push(`${path}${url.search}`);
   if (path === "/refunds" && url.searchParams.get("charge") === CHARGE) return Response.json(chargeRefunds);
   if (path === "/disputes") return Response.json({ object: "list", data: [], has_more: false });
+  if (path === `/checkout/sessions/${BOOKING}`) return Response.json(booking);
   return Response.json({ error: { message: "unexpected synthetic request" } }, { status: 404 });
 }) as typeof fetch;
 
@@ -89,7 +96,11 @@ async function main(): Promise<void> {
   chargeRefunds = { object: "list", data: [refund("re_refundd18pend01", "succeeded", 2500)], has_more: false };
   is("givenBack: succeeded in full is given back", await givenBack(ACCOUNT, payment(2500)), true);
   is("purchaseRefunded: succeeded in full closes the door", await purchaseRefunded(ACCOUNT, session(2500)), true);
+  calls = [];
+  is("read back for good once, the same day it is not asked again", [await givenBack(ACCOUNT, payment(2500)), calls.filter((call) => call.startsWith("/refunds")).length], [true, 0]);
 
+  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each scenario starts with none.
+  redis.clear();
   part("A refund in parts");
   chargeRefunds = { object: "list", data: [refund("re_refundd18part02", "pending", 1500), refund("re_refundd18part01", "succeeded", 1000, NOW - 120)], has_more: false };
   is("a succeeded part plus a pending part does not give back", await givenBack(ACCOUNT, payment(2500)), false);
@@ -99,6 +110,8 @@ async function main(): Promise<void> {
   chargeRefunds = { object: "list", data: [refund("re_refundd18part03", "failed", 1500), refund("re_refundd18part02", "succeeded", 1500), refund("re_refundd18part01", "succeeded", 1000, NOW - 120)], has_more: false };
   is("a failed part beside succeeded parts that add up still gives back", await givenBack(ACCOUNT, payment(2500)), true);
 
+  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each scenario starts with none.
+  redis.clear();
   part("Unknown never takes access away and is never a no");
   chargeRefunds = { object: "list", data: [refund("re_refundd18pend01", "succeeded", 2500)], has_more: true };
   is("purchaseRefunded: a list not read whole keeps the purchase", await purchaseRefunded(ACCOUNT, session(2500)), false);
@@ -114,6 +127,18 @@ async function main(): Promise<void> {
   chargeRefunds = null;
   is("purchaseRefunded: an answer in another shape keeps the purchase", await purchaseRefunded(ACCOUNT, session(2500)), false);
 
+  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each scenario starts with none.
+  redis.clear();
+  part("A booked call keeps its time while its full refund is on its way (lib/calls.ts)");
+  const start = Date.now() + 3 * 86_400_000;
+  booking = { id: BOOKING, object: "checkout.session", status: "complete", payment_status: "paid", amount_total: 2500, currency: "usd", metadata: { kind: "call", store: "d18calls", start: String(start), end: String(start + 1_800_000) }, payment_intent: payment(2500) };
+  chargeRefunds = { object: "list", data: [refund("re_refundd18call01", "pending", 2500)], has_more: false };
+  is("a booking whose full refund is pending keeps its time", (await paidCall(callStore, BOOKING))?.session ?? null, BOOKING);
+  chargeRefunds = { object: "list", data: [refund("re_refundd18call01", "succeeded", 2500)], has_more: false };
+  is("once the refund succeeded, the time is free", await paidCall(callStore, BOOKING), null);
+
+  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each scenario starts with none.
+  redis.clear();
   part("Controls: a refund failed or canceled keeps access, and an unrefunded payment needs no extra read");
   calls = [];
   is("givenBack: the charge no longer reads refunded", await givenBack(ACCOUNT, payment(0)), false);

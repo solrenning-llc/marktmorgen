@@ -192,6 +192,9 @@ async function main(): Promise<void> {
     id: `re_CursorFirst${String(i).padStart(3, "0")}`,
     object: "refund",
     status: "succeeded",
+    // Rule 23 (decision 18, lib/refunds.ts refundRowState): the refund carries its amount, as Stripe sends it, so a
+    // refund of the whole charge reads as given back by itself.
+    amount: 100,
     created: nowAt - 3_600 * (i + 1),
     payment_intent: `pi_CursorFirst${String(i).padStart(3, "0")}`,
     charge: { object: "charge", refunded: true, amount: 100, amount_refunded: 100 },

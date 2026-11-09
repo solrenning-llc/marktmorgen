@@ -31,6 +31,7 @@ import { importedKey } from "@/lib/imported-purchases";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { chargeRefundList } from "./refund-stand-in";
 
 const STATS = "e".repeat(32);
 const NOW = Date.parse("2026-10-10T12:00:00Z");
@@ -46,7 +47,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (url.hostname === "api.stripe.com") {
     const intent = url.pathname.match(/\/v1\/payment_intents\/(pi_\w+)/)?.[1];
-    if (intent) return new Response(JSON.stringify({ id: intent, object: "payment_intent", latest_charge: { object: "charge", refunded: refunded.has(intent), amount: 2500, amount_refunded: refunded.has(intent) ? 2500 : 0 } }));
+    // Rule 23 (decision 18, lib/refunds.ts moneyBack): the charge carries its id, as Stripe sends it, and a charge read
+    // refunded in full is asked for its own refunds (GET /refunds?charge=): here one refund of the whole charge that succeeded.
+    if (intent) return new Response(JSON.stringify({ id: intent, object: "payment_intent", latest_charge: { object: "charge", id: `ch_${intent.slice(3)}`, refunded: refunded.has(intent), amount: 2500, amount_refunded: refunded.has(intent) ? 2500 : 0 } }));
+    const asked = url.searchParams.get("charge");
+    if (url.pathname === "/v1/refunds" && asked) return new Response(JSON.stringify(chargeRefundList(asked, 2500)));
     if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ object: "list", data: refunds, has_more: false }));
   }
   return new Response("{}", { status: 404 });
@@ -172,7 +177,9 @@ async function main(): Promise<void> {
   is("and emailed the way in", emails.at(-1)?.subject, "It is out: The Bread Book");
 
   part("Refunded after it was handed over");
-  refunds = [{ id: "re_preorder1", created: Math.floor(NOW / 1000), status: "succeeded", payment_intent: session(1, "").payment_intent, charge: { refunded: true } }];
+  // Rule 23 (decision 18, lib/refunds.ts refundRowState): the refund carries its amount and its charge its amount, as
+  // Stripe sends them, so a refund of the whole charge reads as given back by itself.
+  refunds = [{ id: "re_preorder1", created: Math.floor(NOW / 1000), status: "succeeded", amount: 2500, payment_intent: session(1, "").payment_intent, charge: { refunded: true, amount: 2500 } }];
   // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the purchase,
   // so the next run takes both away again.
   await revokeRefundedPreorders(store, Date.now() + 10_000, async () => { throw new Error("the ledger did not answer"); }).catch(() => 0);

@@ -46,6 +46,7 @@ import { cookieValues } from "./letter-members-world";
 import { afterTasks } from "./next-server-after-world";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { chargeRefundList } from "./refund-stand-in";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_letter_members_only";
@@ -77,10 +78,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   stripeAsked += 1;
   if (stripeDown) return answer({ error: { message: "down" } }, 500);
   if (path === "/checkout/sessions") return answer({ object: "list", data: sessions[url.searchParams.get("customer_details[email]") ?? ""] ?? [], has_more: false });
+  // Rule 23 (decision 18, lib/refunds.ts moneyBack): a charge read refunded in full is asked for its own refunds; here
+  // one refund of the whole charge that succeeded (the amount is in the charge's id, charge() below).
+  const asked = /^ch_letter(\d+)x$/.exec(url.searchParams.get("charge") ?? "");
+  if (path === "/refunds" && asked) return answer(chargeRefundList(asked[0], Number(asked[1])));
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
-const charge = (amount: number, back: number) => ({ object: "charge", amount, amount_refunded: back, refunded: back >= amount });
+// Rule 23 (decision 18): each charge carries its id, as Stripe sends it, so a door can ask for its own refunds.
+const charge = (amount: number, back: number) => ({ object: "charge", id: `ch_letter${amount}x`, amount, amount_refunded: back, refunded: back >= amount });
 const paid = (id: string, product: string, back = 0) => ({
   id,
   object: "checkout.session",

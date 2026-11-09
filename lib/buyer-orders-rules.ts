@@ -135,18 +135,22 @@ export const ORDERS_STRIPE_CALLS = 200;
  * buyer's checkouts under both spellings of the address (two), the payments
  * taken in one click for ten of their customers (ORDERS_ONE_CLICK_LISTS; each
  * further customer's list is a call taken from the rest, and one that does not
- * fit waits for a batch, said as not checked yet), and the store's bookings,
- * five pages at the most (lib/calls.ts, MAX_PAGES).
+ * fit waits for a batch, said as not checked yet), the store's bookings,
+ * five pages at the most (lib/calls.ts, MAX_PAGES), and the refunds of the
+ * bookings whose charge reads refunded in full, CHARGE_REFUND_READS at the
+ * most (lib/calls.ts, callOrLost; decision 18).
  */
-export const ORDERS_STRIPE_LISTS = 2 + 10 + 5;
+export const ORDERS_STRIPE_LISTS = 2 + 10 + 5 + 5;
 /**
  * Calls lib/refunds.ts makes at the most to read whether a purchase paid in
  * installments was given back: its first invoice, that invoice's payments
- * (ten at the most, its list's limit), each of those payments and, for each
- * one whose charge Stripe marks disputed, its disputes (givenBack)
+ * (ten at the most, its list's limit), each of those payments, for each one
+ * whose charge reads refunded in full its own refunds (decision 18: only a
+ * refund that succeeded closes it, moneyBack), and for each one whose charge
+ * Stripe marks disputed its disputes (givenBack)
  * (tests/orders-page-bounds.test.ts holds the ten to that file).
  */
-export const PLAN_REFUND_CALLS = 1 + 1 + 10 + 10;
+export const PLAN_REFUND_CALLS = 1 + 1 + 10 + 10 + 10;
 
 /**
  * What one opening of the orders page sends to the browser at the most, in
@@ -258,8 +262,12 @@ export const ORDERS_OLDER_PER_HOUR = 60;
  * disputed) would otherwise let a batch show as many as the ceiling of calls
  * holds. A checkout and what was added to it in one click after paying count
  * one each; what does not fit waits for the next batch, said as not checked yet.
+ * As many as one opening checks of the purchases paid in installments
+ * ((ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS) / PLAN_REFUND_CALLS): 8 until
+ * each installment's own refunds were read too (the owner's decision 18,
+ * 9 November 2026), 5 since; ORDERS_OLDER_BYTES, measured at 8, still holds it.
  */
-export const ORDERS_OLDER_MOST = 8;
+export const ORDERS_OLDER_MOST = 5;
 /** The lists of payments taken in one click every opening and every batch may read inside ORDERS_STRIPE_LISTS; each one past them is a call from the ceiling. */
 export const ORDERS_ONE_CLICK_LISTS = 10;
 /** The most customers whose payments taken in one click wait for a batch, named in the batch's address (lib/buyer-orders.ts, readOlderCursor). */

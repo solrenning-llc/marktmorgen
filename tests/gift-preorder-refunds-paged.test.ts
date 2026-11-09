@@ -67,8 +67,11 @@ function list(tag: string, count: number, newest: number, at: number, pi: string
     object: "refund",
     created: newest - i,
     status: "succeeded",
+    // Rule 23 (decision 18, lib/refunds.ts refundRowState): the refund and its charge carry their amounts, as Stripe
+    // sends them, so a refund of the whole charge reads as given back by itself.
+    amount: 2500,
     payment_intent: i === at ? pi : `pi_${tag}other${String(i).padStart(6, "0")}`,
-    charge: { object: "charge", refunded: true },
+    charge: { object: "charge", refunded: true, amount: 2500 },
   }));
 }
 

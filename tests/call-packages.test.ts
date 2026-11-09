@@ -19,6 +19,7 @@ import { boughtByToken, holdSession, packageCheckout, packageState, prepareSessi
 import type { CallSetup } from "@/lib/call-setup";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { chargeRefundList } from "./refund-stand-in";
 import { paidPeriod } from "./billing-period-fixture";
 
 const emails: { to: string[]; text: string }[] = [];
@@ -38,8 +39,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (path === "/coupons") return new Response(JSON.stringify({ id: `co_Session${posts.length}` }));
   }
   if (path.startsWith("/checkout/sessions/")) {
-    return new Response(JSON.stringify({ id: PAID, status: "complete", payment_status: "paid", payment_intent: { latest_charge: { refunded, amount: 50000, amount_refunded: refunded ? 50000 : 0 } } }));
+    // Rule 23 (decision 18, lib/refunds.ts moneyBack): the charge carries its id, as Stripe always sends it, so a door
+    // can ask the charge's own refunds whether the full refund succeeded (GET /refunds?charge= below).
+    return new Response(JSON.stringify({ id: PAID, status: "complete", payment_status: "paid", payment_intent: { latest_charge: { id: "ch_callpkgpaid00001", refunded, amount: 50000, amount_refunded: refunded ? 50000 : 0 } } }));
   }
+  if (path === "/refunds" && url.searchParams.get("charge") === "ch_callpkgpaid00001") return new Response(JSON.stringify(chargeRefundList("ch_callpkgpaid00001", 50000)));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
 

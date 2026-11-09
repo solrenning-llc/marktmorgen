@@ -39,6 +39,7 @@ import { store as redis } from "./redis-stub";
 import { NOT_A_COST } from "./plan-cost-registry";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
+import { chargeRefundList } from "./refund-stand-in";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_lost_dispute_doors_only";
@@ -97,6 +98,10 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const read = /^\/charges\/(ch_[A-Za-z0-9]+)$/.exec(path);
   if (read) chargeReads += 1;
   if (read) return answer(charges[read[1]] ?? { object: "charge", id: read[1], amount: 4900, amount_refunded: 0, disputed: true });
+  // A charge's own refunds (lib/refunds.ts moneyBack, the owner's decision 18): one refund of the whole charge, its
+  // status as chargeRefundStatus says (succeeded unless set).
+  const ownCharge = url.searchParams.get("charge");
+  if (path === "/refunds" && ownCharge) return answer(chargeRefundList(ownCharge, 4900, chargeRefundStatus[ownCharge] ?? "succeeded"));
   if (path === "/refunds") {
     if (lateAfterRefunds) Date.now = () => realNow() + 3_600_000;
     return list(refunds);
@@ -104,6 +109,8 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   return list([]);
 }) as typeof fetch;
 
+/** The status of the one refund of a charge read refunded in full, by charge id (GET /refunds?charge=). */
+const chargeRefundStatus: Record<string, string> = {};
 const charge = (id: string, status: string | null, amount = 4900, lost = amount) => {
   if (status) disputes[id] = [{ charge: id, status, amount: lost }];
   return { object: "charge", id, amount, amount_refunded: 0, refunded: false, disputed: status !== null };
@@ -151,7 +158,13 @@ async function main(): Promise<void> {
   const given = await keyForSale(store, app, "cs_test_keyrefund0001", "buyer@example.com");
   if (given?.state !== "issued") throw new Error("no key");
   sessionsByPayment.pi_TestKeyRefund1 = [{ id: "cs_test_keyrefund0001", metadata: { store: "kilnworks", product: tool.product.id } }];
-  refunds = [{ id: "re_TestKeyRefund1", object: "refund", created: NOW - 30, status: "succeeded", payment_intent: "pi_TestKeyRefund1", charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } }];
+  // Rule 23 (decision 18, lib/refunds.ts refundRowState): the refund carries its amount and its charge its amount, as
+  // Stripe sends them, so a refund of the whole charge reads as given back by itself.
+  // The owner's decision 18: the same full refund while still pending revokes nothing, and is read again next run.
+  refunds = [{ id: "re_TestKeyRefund1", object: "refund", created: NOW - 30, status: "pending", amount: 2900, payment_intent: "pi_TestKeyRefund1", charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } }];
+  const pendingRun = await revokeRefunded(store, Date.now() + 10_000).then((n) => n, () => "stopped");
+  is("decision 18: a full refund still pending revokes no key", [pendingRun, await checkKey(store, app, given.key)], [0, "valid"]);
+  refunds = [{ id: "re_TestKeyRefund1", object: "refund", created: NOW - 30, status: "succeeded", amount: 2900, payment_intent: "pi_TestKeyRefund1", charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } }];
   eventsStatus = 403;
   const ran = await revokeRefunded(store, Date.now() + 10_000).then((n) => n, () => "stopped");
   is("a full refund still revokes its key", [ran, await checkKey(store, app, given.key)], [1, "revoked"]);
@@ -257,7 +270,9 @@ async function main(): Promise<void> {
   const plainStore: Store = { ...store, callsId: plainId };
   const plainFor = async (handle: string) => (handle === "kilnworks" ? plainStore : null);
   sessionsByPayment.pi_TestCallRefd01 = call("pi_TestCallRefd01");
-  const refund = { id: "re_TestCallRefd01", object: "refund", created: NOW - 30, status: "succeeded", payment_intent: "pi_TestCallRefd01", charge: { object: "charge", amount: 4900, amount_refunded: 4900, refunded: true } };
+  // Rule 23 (decision 18, lib/refunds.ts refundRowState): the refund carries its amount and its charge its amount, as
+  // Stripe sends them, so a refund of the whole charge reads as given back by itself.
+  const refund = { id: "re_TestCallRefd01", object: "refund", created: NOW - 30, status: "succeeded", amount: 4900, payment_intent: "pi_TestCallRefd01", charge: { object: "charge", amount: 4900, amount_refunded: 4900, refunded: true } };
   is("the store is not in MEET_STORES by its bookings", await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]), [null]);
   refunds = [refund];
   await syncMeetings(plainFor, Date.now() + 10_000, "https://marktmorgen.com");
@@ -268,6 +283,11 @@ async function main(): Promise<void> {
   const fed = await bookedCalendarFeed({ statsId: store.statsId!, handle: "kilnworks", callsId: plainId }, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", listId: null, named: [] }));
   const [listedAt] = await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]);
   is("its feed made, the store's refunds are read for two days", [fed.state, Number(listedAt) > Date.now() + 86_400_000], ["made", true]);
+  // The owner's decision 18: the same full refund while still pending ends nothing, and is read again next run.
+  refunds = [{ ...refund, status: "pending" }];
+  await syncMeetings(plainFor, Date.now() + 10_000, "https://marktmorgen.com");
+  is("decision 18: a call's full refund still pending tells the feed nothing", (await redis.pipeline([["GET", bookingsChangedKey(plainId)]]))[0], null);
+  refunds = [refund];
   await syncMeetings(plainFor, Date.now() + 10_000, "https://marktmorgen.com");
   refunds = [];
   const [changed, credits] = await redis.pipeline([["GET", bookingsChangedKey(plainId)], ["GET", bookingCreditsKey(plainId, today)]]);
@@ -286,6 +306,12 @@ async function main(): Promise<void> {
     return proof.state === "ok" ? proof.proof.refunded : proof.state;
   };
   is("proved: lost is refunded, under review is not", [await proved("cs_test_rev0000000lost"), await proved("cs_test_rev00000review")], [true, false]);
+  // The owner's decision 18: a charge read refunded in full is refunded for the review only once its refund succeeded.
+  const refundedCharge = (id: string) => ({ object: "payment_intent", id: `pi_${id.slice(8)}`, latest_charge: { object: "charge", id: `ch_${id.slice(8)}`, amount: 4900, amount_refunded: 4900, refunded: true, disputed: false } });
+  oneSession.cs_test_rev000pending1 = { ...paid("cs_test_rev000pending1", guide.product.id, null), payment_intent: refundedCharge("cs_test_rev000pending1") };
+  oneSession.cs_test_rev000succeed1 = { ...paid("cs_test_rev000succeed1", guide.product.id, null), payment_intent: refundedCharge("cs_test_rev000succeed1") };
+  chargeRefundStatus.ch_rev000pending1 = "pending";
+  is("decision 18: a full refund still pending is not refunded for a review; one that succeeded is", [await proved("cs_test_rev000pending1"), await proved("cs_test_rev000succeed1")], [false, true]);
   await saveReview(store.statsId!, { productId: guide.product.id, email: "rev@example.com", reference: "cs_test_revjob00000001", pi: "pi_TestRevLost01", rating: 5, text: "Clear glaze notes", name: "Rev" }, ROOM);
   const review = (await visibleReviews(store.statsId!, guide.product.id, 0, 10))[0];
   closings = [closing("evt_TestRevLost01", "pi_TestRevLost01", "lost")];

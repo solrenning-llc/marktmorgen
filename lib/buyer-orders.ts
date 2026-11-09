@@ -39,7 +39,7 @@ import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
 import { isLiveSub, soldAMembership } from "@/lib/membership-access";
-import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
+import { confirmedBack, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, readListings, sellsAny, sellsThings } from "@/lib/catalog";
 import { paidCalls } from "@/lib/calls";
@@ -519,7 +519,10 @@ function rows(listed: Listed): Row[] {
   return Array.isArray(listed.data) ? (listed.data as Row[]) : [];
 }
 
-/** Whether Stripe says this charge was given back in full: the shared rule (lib/refunds.ts). */
+/**
+ * Whether Stripe's charge reads given back in full, a refund still on its way included: only then is Stripe asked
+ * for the charge's own refunds (lib/refunds.ts, moneyBack; the owner's decision 18), one call.
+ */
 const refunded = refundedInFull;
 
 /** Whether Stripe marks this payment's charge as disputed: only then does lib/refunds.ts ask it for the charge's disputes. */
@@ -532,16 +535,21 @@ function disputed(payment: unknown): boolean {
 
 /**
  * The calls lib/refunds.ts (purchaseRefunded) makes to the creator's Stripe
- * account for this checkout, at the most: none when its own payment, read with
- * the list, already says it was refunded; one for the disputes of a charge
- * Stripe marks disputed (keptUnlessLost); and for a payment plan its first
- * invoice, that invoice's payments and each payment's disputes
+ * account for this checkout, at the most: one for the charge's own refunds
+ * when its payment, read with the list, reads refunded in full (decision 18:
+ * a refund still on its way does not close it, moneyBack); one for the
+ * disputes of a charge Stripe marks disputed; and for a payment plan its first
+ * invoice, that invoice's payments and each payment's refunds and disputes
  * (PLAN_REFUND_CALLS).
  */
 function refundCalls(session: Row): number {
-  if (refundedInFull(session.payment_intent)) return 0;
   const meta = (session.metadata ?? {}) as Record<string, unknown>;
-  return (disputed(session.payment_intent) ? 1 : 0) + (session.mode === "subscription" && meta.kind === "plan" ? PLAN_REFUND_CALLS : 0);
+  return oneClickCalls(session.payment_intent) + (session.mode === "subscription" && meta.kind === "plan" ? PLAN_REFUND_CALLS : 0);
+}
+
+/** The calls whether one payment was given back makes at the most (lib/refunds.ts, moneyBack): its refunds, its disputes. */
+function oneClickCalls(payment: unknown): number {
+  return (refunded(payment) ? 1 : 0) + (disputed(payment) ? 1 : 0);
 }
 
 /**
@@ -761,11 +769,11 @@ async function purchaseFromSession(
   } };
 }
 
-/** A payment taken in one click after a checkout of this store, paid and not given back in full: what the list may show once its dispute is checked. */
+/** A payment taken in one click after a checkout of this store, paid: what the list may show once its refund and dispute are checked. */
 function oneClickHere(store: Store, intent: Row): boolean {
   const id = typeof intent.id === "string" ? intent.id : "";
   const meta = (intent.metadata ?? {}) as Record<string, string>;
-  return INTENT_ID_PATTERN.test(id) && meta.kind === "upsell" && saleHandles(store).has(meta.store ?? "") && intent.status === "succeeded" && !refunded(intent);
+  return INTENT_ID_PATTERN.test(id) && meta.kind === "upsell" && saleHandles(store).has(meta.store ?? "") && intent.status === "succeeded";
 }
 
 /** The checkout a payment taken in one click followed (lib/upsell.ts, metadata[parent]), or "". */
@@ -791,9 +799,12 @@ async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines
   // list says it is not checked yet and a batch checks it, oneClickOf), never downloaded unchecked (lookUp).
   meter?.alive();
   const account = store.stripeAccountId;
-  if (account && disputed(intent)) {
-    if (meter && !checked && !meter.stripe(1)) return null;
-    if (await keptUnlessLost(account, intent)) return null;
+  // Refunded in full and confirmed, likewise (decision 18): a charge that reads refunded is asked for its own refunds, and a
+  // full refund still on its way, or an answer that does not read, keeps it (confirmedBack).
+  const calls = oneClickCalls(intent);
+  if (account && calls > 0) {
+    if (meter && !checked && !meter.stripe(calls)) return null;
+    if (await confirmedBack(account, intent)) return null;
   }
   const product = await find(meta.product);
   const items = product ? await linesOf(find, bundleFromMeta(meta, "bundle"), lines) : null;
@@ -916,7 +927,7 @@ async function oneClickOf(
   const taken = mine.slice(from, from + room);
   // No room left for them in this batch: read only to know whether any wait, so no batch is asked for nothing.
   if (taken.length === 0) return { purchases: [], next: mine.length > from ? paidEntry(customer, from) : null };
-  if (!meter.stripe(taken.filter(disputed).length)) return wait;
+  if (!meter.stripe(taken.reduce((sum, intent) => sum + oneClickCalls(intent), 0))) return wait;
   const purchases: Purchase[] = [];
   for (const intent of taken) {
     const purchase = await purchaseFromIntent(store, intent, find, false, meter, true);

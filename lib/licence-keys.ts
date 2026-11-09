@@ -62,7 +62,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, noteHeld, refundChecks, refundRowState, settleParts } from "@/lib/refunds";
 import { readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -556,6 +556,10 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   let unsure = false;
   let lostRead: LostRead | null = null;
   const handles = saleHandles(store);
+  // The earliest refund left for later because its money is not back for good yet: the anchor never moves past it.
+  let holdAt = Number.POSITIVE_INFINITY;
+  // Reads of a charge's own refunds and alert marks this run may make (lib/refunds.ts, CHARGE_REFUND_READS).
+  const checks = refundChecks();
 
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
@@ -573,10 +577,24 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       const id = typeof refund.id === "string" ? refund.id : "";
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
-      if (!rowGivesBack(refund)) continue;
+      // Only money back for good revokes a key (lib/refunds.ts, refundRowState; the owner's decision 18). A refund
+      // still on its way revokes nothing and holds the anchor at its time, so the next run reads it again; one on its
+      // way more than seven days is said in the log, never acted on.
+      const state = refundRowState(refund);
+      if (state === "held") {
+        holdAt = Math.min(holdAt, created);
+        await noteHeld(refund, checks);
+        continue;
+      }
+      if (state === "no") continue;
       const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
       if (Number(seen) === 1) {
         newest = Math.max(newest, created);
+        continue;
+      }
+      // A succeeded part of a full refund revokes only once its charge's succeeded refunds add up to it.
+      if (state === "parts" && (await settleParts(account, refund, checks)) !== "back") {
+        holdAt = Math.min(holdAt, created);
         continue;
       }
       const intent = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
@@ -668,7 +686,8 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  // A refund held for later keeps the anchor at its time, never before where it already was (decision 18).
+  if (done) await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(Math.min(newest, holdAt), anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   else if (!(Number(anchorRaw) > 0)) {
     await redisPipeline([
       ["SET", refundAnchorKey(store), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],

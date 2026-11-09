@@ -25,6 +25,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, storeForEmail } from "@/lib/store";
 import { purchaseRefunded, refundedInFull } from "@/lib/refunds";
+import { chargeRefundList } from "./refund-stand-in";
 import { paidCourses, recordEnrollment, setBlocked } from "@/lib/learn";
 import { holdsProducts, paidForAny } from "@/lib/community-access";
 import { store as redis } from "./redis-stub";
@@ -55,10 +56,15 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   if (path === "/invoice_payments") return answer({ object: "list", data: invoicePayments[url.searchParams.get("invoice") ?? ""] ?? [], has_more: false });
   const pi = /^\/payment_intents\/(pi_[A-Za-z0-9]+)$/.exec(path);
   if (pi) return answer(paymentIntents[pi[1]] ?? {});
+  // Rule 23 (decision 18, lib/refunds.ts moneyBack): a charge read refunded in full is asked for its own refunds; here
+  // one refund of the whole amount that succeeded (the amount is in the charge's id, charge() below).
+  const asked = /^ch_access(\d+)x$/.exec(url.searchParams.get("charge") ?? "");
+  if (path === "/refunds" && asked) return answer(chargeRefundList(asked[0], Number(asked[1])));
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
-const charge = (amount: number, back: number, refunded = back >= amount) => ({ object: "charge", amount, amount_refunded: back, refunded });
+// Rule 23 (decision 18): each charge carries its id, as Stripe sends it, so a door can ask for its own refunds.
+const charge = (amount: number, back: number, refunded = back >= amount) => ({ object: "charge", id: `ch_access${amount}x`, amount, amount_refunded: back, refunded });
 const paid = (id: string, product: string, over: Record<string, unknown> = {}) => ({
   id,
   object: "checkout.session",

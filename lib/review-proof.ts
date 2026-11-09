@@ -37,7 +37,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
-import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, confirmedBack, lostCursorKey, lostDisputesOrRetry, noteHeld, refundChecks, refundRowKnown, refundRowState, settleParts } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
@@ -139,14 +139,15 @@ export async function provePurchase(store: Store, reference: string): Promise<Pr
             : "";
       if (!email || products.length === 0) return { state: "no" };
       let pi = idOf(session.payment_intent);
-      // Refunded in full or lost to a dispute (lib/refunds.ts); a dispute that
-      // could not be read counts as not lost, as everywhere a door lets in.
-      let refunded = refundedInFull(session.payment_intent) || (await keptUnlessLost(account, session.payment_intent));
+      // Refunded in full and confirmed, or lost to a dispute (lib/refunds.ts, confirmedBack): a full refund still on
+      // its way, or an answer that could not be read, counts as not given back, as everywhere a door lets in
+      // (the owner's decision 18).
+      let refunded = await confirmedBack(account, session.payment_intent);
       if (!INTENT_ID.test(pi) && session.mode === "subscription") {
         pi = await invoicePayment(account, session.invoice);
         if (pi) {
           const intent = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);
-          refunded = refundedInFull(intent) || (await keptUnlessLost(account, intent));
+          refunded = await confirmedBack(account, intent);
         }
       }
       return {
@@ -184,7 +185,7 @@ export async function provePurchase(store: Store, reference: string): Promise<Pr
           products,
           pi: reference,
           paidAt: typeof intent.created === "number" ? intent.created : 0,
-          refunded: refundedInFull(intent) || (await keptUnlessLost(account, intent)),
+          refunded: await confirmedBack(account, intent),
         },
       };
     }
@@ -305,6 +306,10 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   // A failed or unfinished read of the lost disputes keeps the anchor.
   let unsure = false;
   let lostRead: LostRead | null = null;
+  // The earliest refund left for later because its money is not back for good yet: the anchor never moves past it.
+  let holdAt = Number.POSITIVE_INFINITY;
+  // Reads of a charge's own refunds and alert marks this run may make (lib/refunds.ts, CHARGE_REFUND_READS).
+  const checks = refundChecks();
   try {
     for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
       const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
@@ -333,12 +338,26 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       if (lost && !lost.complete) unsure = true;
       // What gives back on the page, and which of it an earlier pass already took: one request for the page, and
       // nothing written again for one already taken (each pass reads the last days' refunds again).
-      const full = [...(lost?.rows ?? []), ...refunds]
-        .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
-        .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
+      // Only money back for good marks a review (lib/refunds.ts, refundRowState; the owner's decision 18): a refund
+      // still on its way marks nothing and holds the anchor at its time, so the next run reads it again (said in the
+      // log past seven days); a succeeded part marks only once its charge's succeeded refunds add up to it.
+      const full: { id: string; created: number; pi: string; row: Row; parts: boolean }[] = [];
+      for (const refund of [...(lost?.rows ?? []), ...refunds]) {
+        if (typeof refund.id !== "string" || !refund.id) continue;
+        const created = typeof refund.created === "number" ? refund.created : 0;
+        const state = refundRowState(refund);
+        if (state === "held") {
+          holdAt = Math.min(holdAt, created);
+          await noteHeld(refund, checks);
+        } else if (state !== "no") full.push({ id: refund.id, created, pi: idOf(refund.payment_intent), row: refund, parts: state === "parts" });
+      }
       const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
       for (const [i, refund] of full.entries()) {
         if (Number(seen[i]) !== 1) {
+          if (refund.parts && (await settleParts(store.stripeAccountId, refund.row, checks)) !== "back") {
+            holdAt = Math.min(holdAt, refund.created);
+            continue;
+          }
           if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi);
           // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
           await redisPipeline([
@@ -373,7 +392,8 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", anchorKey(statsId), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  // A refund held for later keeps the anchor at its time, never before where it already was (decision 18).
+  if (done) await redisPipeline([["SET", anchorKey(statsId), String(Math.max(Math.min(newest, holdAt), anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   else if (!(Number(anchorRaw) > 0)) {
     await redisPipeline([
       ["SET", anchorKey(statsId), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],

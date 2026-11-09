@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   is("none yet: an empty list, confirmed", await readSavedFilters(statsId), []);
   const courses = await saveSalesFilter(statsId, "Courses", filterFromQuery("product=Course&kind=products"));
   is("saved", courses.ok && [courses.filter.name, courses.filter.query], ["Courses", "product=Course&kind=products"]);
-  const april = await saveSalesFilter(statsId, "april", filterFromQuery("from=2026-04-01&to=2026-04-30"));
+  await saveSalesFilter(statsId, "april", filterFromQuery("from=2026-04-01&to=2026-04-30"));
   is("listed by name, any case", (await readSavedFilters(statsId)).map((f) => f.name), ["april", "Courses"]);
   is("a name already used refused, any case", await saveSalesFilter(statsId, "COURSES", filterFromQuery("kind=tips")), { ok: false, reason: "taken" });
   is("a filter that keeps nothing out refused", await saveSalesFilter(statsId, "All", EMPTY_FILTER), { ok: false, reason: "empty" });
@@ -127,9 +127,18 @@ async function main(): Promise<void> {
       redis.pipeline = original;
     }
   }), "unknown reply");
-  await redis.pipeline([["SET", key, "not a hash"]]);
-  is("a key of another kind is never an empty list", await threw(() => readSavedFilters(statsId)), "unknown reply");
-  await redis.pipeline([["DEL", key]]);
+  // Upstash answers a command on a key of another kind with an error, which lib/redis.ts throws (the stand-in here
+  // does not keep kinds apart, so the error is given as Upstash gives it).
+  const failing = redis.pipeline;
+  redis.pipeline = (async () => {
+    throw new Error("Redis error: WRONGTYPE Operation against a key holding the wrong kind of value");
+  }) as typeof redis.pipeline;
+  try {
+    is("a key of another kind is never an empty list", await threw(() => readSavedFilters(statsId)), "unknown reply");
+    is("nor a deletion said done or gone", await threw(() => removeSalesFilter(statsId, "0123456789ab")), "unknown reply");
+  } finally {
+    redis.pipeline = failing;
+  }
 
   part("The studio's route (app/api/store/sales-filters)");
   const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
@@ -168,12 +177,12 @@ async function main(): Promise<void> {
   is("and nothing an editor sent was kept", (await readSavedFilters(statsId)).map((f) => f.name), ["Calls"]);
 
   part("Could not be read: said so, never none, never written over");
-  await redis.pipeline([["DEL", key], ["SET", key, "not a hash"]]);
+  await redis.pipeline([["DEL", key], ["HSET", key, "0123456789ab", "{"]]);
   const unread = await list();
   is("503 with plain words, no list", [unread.status, unread.body.error, unread.body.filters, unread.body.message], [503, "unavailable", undefined, SAVED_FILTER_REFUSALS.unavailable]);
   const blind = await post({ action: "save", name: "Products", query: "kind=products" });
   is("a save then refused, 503", [blind.status, blind.body.error], [503, "unavailable"]);
-  is("and the key left as it was", (await redis.pipeline([["GET", key]]))[0], "not a hash");
+  is("a deletion then refused too, the kept value left as it was", [(await post({ action: "remove", id: "0123456789ab" })).status, (await redis.pipeline([["HGETALL", key]]))[0]], [503, ["0123456789ab", "{"]]);
 
   done();
 }

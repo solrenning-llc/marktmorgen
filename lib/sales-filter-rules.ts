@@ -3,8 +3,9 @@
  * 9 November 2026). Pure and browser-safe: nothing here reads Stripe or Redis.
  *
  * A filter lives in the page's address (filterQuery, readSalesFilter), so the filtered list can be bookmarked
- * and, in a later unit, saved by name as the same link. The next units: the filter bar on the studio's buyer list,
- * saved filters per store, bulk actions with a counter and undo, and where each buyer came from.
+ * and saved by name as the same link (unit 3: the saved filters' rules at the end of this file, kept by
+ * lib/sales-filters.ts). The next units: the filter bar on the studio's buyer list, bulk actions with a counter
+ * and undo, and where each buyer came from.
  *
  *   - A filter keeps a sale when every field that is set matches: words of the product's title and part of the
  *     buyer's email (any case), the day it was paid (both ends included, in UTC as the list shows it), and its kind.
@@ -133,4 +134,87 @@ export function salesTotals(sales: readonly FilterableSale[]): SalesTotal[] | nu
       totalCents: sum.total,
       averageCents: sum.charged ? Math.floor(sum.total / sum.charged + 0.5) : null,
     }));
+}
+
+// ------------------------------------------------------------ saved filters (unit 3)
+
+/**
+ * The most saved filters a store keeps (lib/sales-filters.ts): a bound on what is stored, the same on every plan,
+ * never a plan limit (tests/store-data-registry.ts prices it). Ten names fit on one row of choices.
+ */
+export const MAX_SAVED_FILTERS = 10;
+/** The longest name a saved filter keeps. */
+export const MAX_SAVED_FILTER_NAME = 60;
+/**
+ * The most one saved filter weighs as kept (its JSON, in bytes). What the fields allow stays well under it (a
+ * product of FILTER_TEXT_MAX characters written in the address is at most 900 bytes); a filter over it is refused.
+ */
+export const SAVED_FILTER_BYTES = 2_048;
+export const SAVED_FILTER_ID = /^[0-9a-f]{12}$/;
+
+/** A filter kept under a name: `query` is the page's address for it (filterQuery), never with a buyer's address. */
+export type SavedFilter = { id: string; name: string; query: string };
+
+export type SavedFilterRefusal = "name" | "empty" | "email" | "taken" | "full" | "gone" | "long";
+
+/** What the studio says for each refusal, and when the saved filters could not be read. Plain words, no plan talk. */
+export const SAVED_FILTER_REFUSALS: Record<SavedFilterRefusal | "unavailable", string> = {
+  name: "Give this filter a name.",
+  empty: "Choose at least one filter before you save it.",
+  email: "A saved filter does not keep an email address. Clear the email box, then save.",
+  taken: "You already have a filter with this name. Choose another name.",
+  full: `A store keeps up to ${MAX_SAVED_FILTERS} saved filters. Delete one to save a new one.`,
+  gone: "This filter was deleted. Open the list again.",
+  long: "This filter is too long to save. Shorten the product words.",
+  unavailable: "Your saved filters could not be read just now. Try again in a moment.",
+};
+
+/** Bytes of a text as UTF-8, in the browser as on the server. */
+export const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;
+
+/** A name as it is kept: control characters and runs of spaces made one space, trimmed, cut at the most; "" for none. */
+export function savedFilterName(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const clean = raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  return Array.from(clean).slice(0, MAX_SAVED_FILTER_NAME).join("").trim();
+}
+
+/** The filter a page's address says (what follows "?"), read as readSalesFilter reads it: a field given twice is left out. */
+export function filterFromQuery(query: string): SalesFilter {
+  const fields: Query = {};
+  for (const [name, value] of new URLSearchParams(query)) {
+    const before = fields[name];
+    fields[name] = before === undefined ? value : [...(Array.isArray(before) ? before : [before]), value];
+  }
+  return readSalesFilter(fields);
+}
+
+/**
+ * A kept saved filter, read exactly: null for anything that is not one as lib/sales-filters.ts writes it (the
+ * three fields and no other, the name and the address as they are kept, a filter that keeps something out and
+ * holds no buyer's address). Its reader takes null as unknown, never as a filter to leave out (CX-123 rule 24).
+ */
+export function parseSavedFilter(raw: unknown): SavedFilter | null {
+  if (typeof raw !== "string" || utf8Bytes(raw) > SAVED_FILTER_BYTES) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { id, name, query, ...rest } = value as Record<string, unknown>;
+  if (Object.keys(rest).length || typeof id !== "string" || !SAVED_FILTER_ID.test(id)) return null;
+  if (typeof name !== "string" || !name || savedFilterName(name) !== name) return null;
+  if (typeof query !== "string") return null;
+  const filter = filterFromQuery(query);
+  if (!isFiltered(filter) || filter.email || filterQuery(filter) !== query) return null;
+  return { id, name, query };
+}
+
+/** Saved filters by name, any case, then by id: the order the studio lists them in. */
+export function byName(a: SavedFilter, b: SavedFilter): number {
+  const x = a.name.toLowerCase();
+  const y = b.name.toLowerCase();
+  return x < y ? -1 : x > y ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { away, creatorFrom, studioPath } from "@/lib/studio-route";
-import { limited, withinLimit } from "@/lib/request-guard";
+import { limited, unknownLimit, withinLimit } from "@/lib/request-guard";
 import { readStatement } from "@/lib/withdrawal-rules";
 import { withdrawFromPlan } from "@/lib/plan-withdrawal";
 
@@ -51,7 +51,11 @@ export async function POST(request: NextRequest) {
   if (!store.subscriptionId) return told("closed");
   const statement = readStatement({ name, email, reference: store.subscriptionId });
   if (!statement) return told("form");
-  if (!(await withinLimit("plan-withdraw", store.sid || store.handle, PER_DAY, 86_400))) return told("later");
+  // A day's count that could not be read is never "too many today" (rule 24): nothing is recorded, and the page
+  // says to try again.
+  const room = await withinLimit("plan-withdraw", store.sid || store.handle, PER_DAY, 86_400).catch(unknownLimit);
+  if (room === "unknown") return told("error");
+  if (!room) return told("later");
   try {
     return told(await withdrawFromPlan(store, statement));
   } catch (error) {

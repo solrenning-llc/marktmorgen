@@ -5,8 +5,8 @@ import { readKind } from "@/lib/catalog";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
 import { storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { dropCaption, isStreamConfigured } from "@/lib/stream";
-import { addStoreCaption } from "@/lib/store-caption";
+import { isStreamConfigured } from "@/lib/stream";
+import { addStoreCaption, dropStoreCaption } from "@/lib/store-caption";
 import { readStreamPath } from "@/lib/stream-rules";
 import { autoQuote, requestAutoCaptions } from "@/lib/auto-captions";
 
@@ -14,7 +14,7 @@ import { autoQuote, requestAutoCaptions } from "@/lib/auto-captions";
 const CHANGES_PER_HOUR = 600;
 
 /** What a refusal is answered with. */
-const STATUS: Record<string, number> = { off: 404, unknown: 404, unavailable: 503 };
+const STATUS: Record<string, number> = { off: 404, unknown: 404, unavailable: 503, auto_writing: 409, auto_held: 409 };
 
 /**
  * Captions for a lesson's video (lib/captions.ts, lib/stream.ts).
@@ -23,7 +23,9 @@ const STATUS: Record<string, number> = { off: 404, unknown: 404, unavailable: 50
  * captions in one language from the words of a .vtt or .srt file, read in
  * the studio's browser and sent as text. `{ action: "remove", lessonId,
  * lang }` takes them away. Either answers the languages the video has
- * captions in afterward. `{ action: "quote", lessonId }` answers the video's
+ * captions in afterward; neither runs in a language AI captions ordered for
+ * the video hold (lib/auto-captions.ts, withOwnCaptions), so a caption by
+ * hand is never charged as the AI's. `{ action: "quote", lessonId }` answers the video's
  * length as captions written by AI are charged for it, and `{ action:
  * "auto", lessonId, spoken, also }` charges for them and has them written
  * (lib/auto-captions.ts).
@@ -70,7 +72,7 @@ export async function POST(request: NextRequest) {
       if (!asked.ok) return Response.json({ ok: false, error: asked.reason === "off" ? "off" : `auto_${asked.reason}` }, { status: asked.reason === "off" ? 404 : 400 });
       return Response.json({ ok: true, writing: asked.writing, cents: asked.cents }, { headers: { "Cache-Control": "no-store" } });
     }
-    const answer = action === "add" ? await addStoreCaption(store, pathname, lang, body.text) : await dropCaption(pathname, lang);
+    const answer = action === "add" ? await addStoreCaption(store, pathname, lang, body.text) : await dropStoreCaption(pathname, lang);
     if (!answer.ok) {
       const error = answer.reason === "unavailable" ? "video_unavailable" : `caption_${answer.reason}`;
       return Response.json({ ok: false, error: answer.reason === "off" ? "off" : error }, { status: STATUS[answer.reason] ?? 400 });

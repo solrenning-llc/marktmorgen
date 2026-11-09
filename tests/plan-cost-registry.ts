@@ -88,7 +88,8 @@ import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
-import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { STREAM_TIMEOUT_MS, STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { GIVE_UP_HOURS } from "@/lib/auto-captions-rules";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
@@ -1594,6 +1595,56 @@ export const ADD_ON_LINES: AddOnLine[] = [
   },
 ];
 
+/**
+ * AI captions requests given back in full (lib/auto-captions.ts; Claude 5's second money review of #3427, LOW 1): the
+ * whole price goes back, so no revenue pays for the looks at them, and an unknown cost is never zero. A look is a
+ * call to the video service waited on at most STREAM_TIMEOUT_MS (priced at the `wait` shape) with at most
+ * AUTO_CAPTIONS_LOOK_COMMANDS commands of the request's record, read and written whole (AUTO_CAPTIONS_RECORD_BYTES
+ * each way). A request is looked at `firstMs` after it is asked, then every `againMs` until GIVE_UP_HOURS; past it,
+ * while the service's answers stay unknown, a quarter of the time past apart (at least `againMs`, at most `maxGapMs`)
+ * for `deliveryLooksMs`; then at most `refundLooks` looks at a refund Stripe has not confirmed, each two Stripe calls
+ * waited on at most STRIPE_TIMEOUT_MS. These figures are lib/auto-captions.ts's own, held by
+ * tests/plan-cost-registry.test.ts.
+ *
+ * A company exposure (MR item 2: a refund, docs/funded-exposure-review.md), never a plan's line: one request given
+ * back costs at most AUTO_CAPTIONS_GIVEN_BACK_USD, and the five-minute job looks at no more than
+ * AUTO_CAPTIONS_LOOKS_PER_RUN videos a run, given back or not, so its month of looks is at most
+ * AUTO_CAPTIONS_LOOKS_MONTH_USD (a month of 31 days). Looks on the service's own announcements (app/api/stream/hook)
+ * are outside that monthly figure: not certified, never zero. Neither figure is yet a line of lib/llc-fixed-costs.ts.
+ */
+export const AUTO_CAPTIONS_LOOK_TIMING = { firstMs: 3 * 60_000, againMs: 10 * 60_000, maxGapMs: 6 * 3_600_000, deliveryLooksMs: 14 * 86_400_000, refundLooks: 40 } as const;
+/** GET of the record, then at the most SET and ZADD of it, or DEL, ZREM and SREM with the languages listed (HSET). */
+export const AUTO_CAPTIONS_LOOK_COMMANDS = 6;
+/** A request's record at its largest: three languages, a payment, a path, a refund owed. */
+export const AUTO_CAPTIONS_RECORD_BYTES = 4_096;
+/** Videos the five-minute job looks at in one run (sweepAutoCaptions, ZRANGEBYSCORE with LIMIT 0 30). */
+export const AUTO_CAPTIONS_LOOKS_PER_RUN = 30;
+/** One look at the video service: it never waits longer than the `wait` shape holds (STREAM_TIMEOUT_MS). */
+export const AUTO_CAPTIONS_LOOK = request("wait", AUTO_CAPTIONS_LOOK_COMMANDS, 2 * AUTO_CAPTIONS_RECORD_BYTES);
+/** One look at a refund owed: Stripe's list of the payment's refunds and a refund asked for, each waited on at most STRIPE_TIMEOUT_MS. */
+export const AUTO_CAPTIONS_REFUND_LOOK = CALL + SHAPES.wait.cpu * CPU_SECOND + ((2 * STRIPE_TIMEOUT_MS) / 1000) * MEMORY_SECOND + AUTO_CAPTIONS_LOOK_COMMANDS * COMMAND + 2 * AUTO_CAPTIONS_RECORD_BYTES * DB_BYTE;
+/** The video service's wait a look is priced at, in milliseconds, held against the shape by the test. */
+export const AUTO_CAPTIONS_LOOK_WAIT_MS = STREAM_TIMEOUT_MS;
+
+/** The most looks at the video service one request given back in full can take, by the schedule above. */
+export function autoCaptionsGivenBackLooks(): number {
+  const { firstMs, againMs, maxGapMs, deliveryLooksMs } = AUTO_CAPTIONS_LOOK_TIMING;
+  const giveUp = GIVE_UP_HOURS * 3_600_000;
+  let at = firstMs;
+  let looks = 0;
+  for (;;) {
+    looks += 1;
+    const past = at - giveUp;
+    if (past > deliveryLooksMs) return looks;
+    at += past <= 0 ? againMs : Math.min(maxGapMs, Math.max(againMs, past / 4));
+  }
+}
+
+/** What the looks at one request given back in full cost at the most, in dollars, with no revenue to pay them. */
+export const AUTO_CAPTIONS_GIVEN_BACK_USD = autoCaptionsGivenBackLooks() * AUTO_CAPTIONS_LOOK + AUTO_CAPTIONS_LOOK_TIMING.refundLooks * AUTO_CAPTIONS_REFUND_LOOK;
+/** The five-minute job's looks at AI captions in a month of 31 days at the most, given back or not, in dollars. */
+export const AUTO_CAPTIONS_LOOKS_MONTH_USD = AUTO_CAPTIONS_LOOKS_PER_RUN * 12 * 24 * 31 * Math.max(AUTO_CAPTIONS_LOOK, AUTO_CAPTIONS_REFUND_LOOK);
+
 /** Per-use costs that no monthly figure bounds yet: not in worstCost, so nothing here is certified. */
 export type OpenItem = { id: string; what: string; names?: string[] };
 export const OPEN: OpenItem[] = [];
@@ -1624,7 +1675,7 @@ export const NOT_A_COST: Record<string, string> = {
   REFUND_CALLS_PER_MEMBER: "The part of STRIPE_CALLS_PER_MEMBER set aside for a member's refund (lib/closing-holds.ts): inside the same budget, not added to it.",
   PICTURES_PER_MINUTE: "A pace on the pictures a function answers (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses, and what it lets through is the CDN's picture of line visits.",
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
-  CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
+  CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts); the looks at a request given back in full, which no revenue pays, are priced apart as a company exposure (AUTO_CAPTIONS_GIVEN_BACK_USD, AUTO_CAPTIONS_LOOKS_MONTH_USD).",
   MAX_PAGES_PER_STORE: "Pages of Stripe sessions the five-minute job reads per store per run: a scheduled job, bounded by its schedule (a company fixed cost).",
   HAND_OVER_BATCH: "PayPal orders still owed their hand-over that the five-minute job's sweep of a store tries again in one run (lib/paypal-delivery.ts, handOverAgain; #2909): one ZRANGEBYSCORE of the list a store with PayPal a run, then for each order tried at most four commands of its own (GET of the paid record, ZSCORE of the refund mark, at most two ZREM or ZADD of the list) besides the hand-over's own work, which is the order's (line orders): at most 1 + HAND_OVER_BATCH x 4 commands of its own a store a run, and at most HAND_OVER_BATCH hand-overs tried, each order at most once a run (PAYPAL_HAND_OVER_RETRY, held by tests/paypal-handover-cost.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   STRIPE_LOOKUPS_PER_STORE: "Calls to the creator's Stripe account the five-minute job makes per store per run to tell whose a refunded charge is and to read a canceled member's address (lib/webhooks.ts, watchStore): a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call, and a membership's charge (three calls) is taken from the same ten, so no run asks more than before.",

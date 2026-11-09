@@ -74,6 +74,8 @@ const MESSAGES: Record<string, string> = {
   caption_not_ready: "The video has to finish uploading before captions can be added.",
   caption_language: "Choose a language from the list.",
   caption_unknown: "That video is not there anymore. Reload the page.",
+  caption_auto_writing: `AI captions in this language are still on their way for this video. Until they arrive, or the charge for them is given back (no sooner than ${GIVE_UP_HOURS} hours after the order), captions in this language can't be uploaded or removed.`,
+  caption_auto_held: "We could not confirm earlier AI captions in this language with our video provider, so captions in this language can't be changed here yet. Write to " + SUPPORT_EMAIL + " about it.",
   auto_not_ready: "The video has to finish uploading and being prepared before captions can be written.",
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
   auto_long: `Captions are written for videos of up to ${MAX_AUTO_MINUTES / 60} hours.`,
@@ -1186,7 +1188,11 @@ function Captions({
 }) {
   const streams = useContext(Streams);
   const tracks = streams.captions[pathname] ?? [];
-  const [lang, setLang] = useState("en");
+  // A language AI captions are still being written in is not offered by hand: the server refuses it too (lib/auto-captions.ts, withOwnCaptions).
+  const writingHere = streams.writing[pathname] ?? [];
+  const choices = CAPTION_LANGUAGES.filter((language) => !writingHere.includes(language.code));
+  const [picked, setLang] = useState("en");
+  const lang = choices.some((language) => language.code === picked) ? picked : choices[0]?.code ?? picked;
   const [working, setWorking] = useState(false);
 
   async function send(payload: Record<string, unknown>, done: string) {
@@ -1250,7 +1256,7 @@ function Captions({
         </p>
       ) : (streams.writing[pathname] ?? []).length ? (
         <p className="mt-2 text-sm text-ink" role="status" data-captions-writing>
-          {`Being written by AI: ${(streams.writing[pathname] ?? []).map((code) => CAPTION_LANGUAGES.find((l) => l.code === code)?.label ?? code).join(", ")}. Most lessons take a few minutes; they appear here when they are done.`}
+          {`Being written by AI: ${(streams.writing[pathname] ?? []).map((code) => CAPTION_LANGUAGES.find((l) => l.code === code)?.label ?? code).join(", ")}. Most lessons take a few minutes; they appear here when they are done. Until then, captions in ${(streams.writing[pathname] ?? []).length > 1 ? "these languages" : "this language"} can't be uploaded here.`}
         </p>
       ) : streams.auto.can ? (
         <AutoCaptions lessonId={lessonId} pathname={pathname} have={tracks.map((t) => t.lang)} busy={busy || working} onError={onError} />
@@ -1259,7 +1265,7 @@ function Captions({
         <label htmlFor={selectId} className="block">
           <span className="sr-only">Captions language</span>
           <select id={selectId} className="field" value={lang} disabled={busy || working} onChange={(e) => setLang(e.target.value)}>
-            {CAPTION_LANGUAGES.map((language) => (
+            {choices.map((language) => (
               <option key={language.code} value={language.code}>{language.label}</option>
             ))}
           </select>

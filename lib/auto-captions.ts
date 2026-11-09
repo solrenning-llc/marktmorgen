@@ -38,6 +38,12 @@
  * only a 4xx or a 2xx saying `success: false` is a refusal, refunded at once;
  * any other answer keeps the request for the sweep (finding R32).
  *
+ * Only the service's own captions count as delivered (Claude 5 on #3427):
+ * while a request holds a language (ordered, being written, or kept for a
+ * person), a caption in it is not added or removed by hand (withOwnCaptions),
+ * and a language once delivered stays delivered, so a caption by hand is never
+ * charged as the AI's and what the AI never wrote is given back.
+ *
  * A request kept for a person (what was delivered still unknown after every
  * automatic look) is marked `kept`: never shown as being written, never a
  * refund owed (none was decided), listed for its store apart with what was
@@ -55,6 +61,10 @@ import type { Store } from "@/lib/store";
 import { GIVE_UP_HOURS, MAX_AUTO_MINUTES, autoCaptionCents, chargedMinutes, readAutoAsk } from "@/lib/auto-captions-rules";
 
 const pendingKey = (id: string) => `nl:stream:auto:${id}`;
+/** Held while a caption in one language is added or removed by hand (withOwnCaptions), so no request for it starts meanwhile. */
+const ownKey = (id: string, lang: string) => `nl:stream:auto:${id}:own:${lang}`;
+/** How long a change by hand holds its language at the most: its calls to the service end long before. */
+const OWN_HOLD_SECONDS = 120;
 /** The videos of one store folder with captions money not settled: a refund owed, or a charge kept for a person. */
 const owedKey = (folder: string) => `nl:stream:autoowed:${folder}`;
 const QUEUE = "nl:stream:autoq";
@@ -237,6 +247,13 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     return { ok: false, reason: "unavailable" };
   }
   if (claim === "taken") return heldBy(record.id, now);
+  // A caption by hand in an asked language, in flight or landed since the read above, is never charged as the AI's:
+  // read after the claim, so a change by hand either sees this order or is seen here (withOwnCaptions).
+  const free = await askedFree(record.id, pathname, asked.languages);
+  if (free !== "free") {
+    await releaseMark(key, value);
+    return { ok: false, reason: free === "language" ? "language" : "unavailable" };
+  }
   // Queued before the charge, so the sweep finds this order if nothing after the charge runs.
   const queued = repliesFor(await redisPipeline([["ZADD", QUEUE, now + ORDER_SETTLE_MS, record.id]]), 1);
   if (!queued || (queued[0] !== 0 && queued[0] !== 1)) {
@@ -315,6 +332,62 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     return { ok: false, reason: "refund_pending" };
   }
   return { ok: true, writing: asked.languages, cents };
+}
+
+/**
+ * Whether the asked languages are still free once the order holds the video: no change by hand to one of them in
+ * flight (its hold, ownKey) and none listed since. Read exactly (rule 24): anything else is "unknown", never free.
+ */
+async function askedFree(id: string, pathname: string, langs: string[]): Promise<"free" | "language" | "unknown"> {
+  try {
+    const holds = repliesFor(await redisPipeline(langs.map((lang) => ["GET", ownKey(id, lang)])), langs.length);
+    if (!holds || holds.some((hold) => hold !== null)) return "unknown";
+    const listed = ((await streamCaptions([pathname]))[pathname] ?? []).map((t) => t.lang);
+    return langs.some((lang) => listed.includes(lang)) ? "language" : "free";
+  } catch (error) {
+    console.error("whether captions by hand are being changed for a video could not be read; nothing charged", id, error);
+    return "unknown";
+  }
+}
+
+/**
+ * A change by hand to a video's captions in one language (`change`: added or removed), run only while no AI captions
+ * request holds that language, so a caption by hand is never counted as delivered by the AI (Claude 5 on #3427).
+ * Refused with "auto_writing" while a request holds it (its order, or captions not yet delivered in it), "auto_held"
+ * while a request kept for a person holds it, and "unavailable" when that cannot be read exactly (rule 24). A
+ * request settled, owed a refund, or holding other languages lets it run. The language is held (ownKey) for the
+ * change, so no request for it starts meanwhile (askedFree); the hold is let go when the change's outcome is known
+ * (`known`), and otherwise kept until it runs out, since the service may still take it.
+ */
+export async function withOwnCaptions<T>(pathname: string, lang: string, change: () => Promise<T>, known: (result: T) => boolean): Promise<{ ok: true; result: T } | { ok: false; reason: "auto_writing" | "auto_held" | "unavailable" }> {
+  const parts = readStreamPath(pathname);
+  // No request can hold a video that is not one, a language there is none of, or anything without the database.
+  if (!parts || !STREAM_ID_PATTERN.test(parts.id) || !captionLabel(lang) || !isRedisConfigured()) return { ok: true, result: await change() };
+  const own = ownKey(parts.id, lang);
+  const value = claimValue();
+  if ((await claimMark(own, OWN_HOLD_SECONDS, value)) !== "ours") return { ok: false, reason: "unavailable" };
+  let letGo = true;
+  try {
+    const read = repliesFor(await redisPipeline([["GET", pendingKey(parts.id)]]), 1);
+    if (!read || (read[0] !== null && typeof read[0] !== "string")) return { ok: false, reason: "unavailable" };
+    const raw = read[0];
+    if (raw !== null) {
+      const order = parseOrder(raw);
+      const pending = order ? null : parsePending(raw);
+      // Neither an order nor a request (one still being charged, or in no known shape): not known free.
+      if (!order && !pending) return { ok: false, reason: "unavailable" };
+      if (order && order.langs.includes(lang)) return { ok: false, reason: "auto_writing" };
+      if (pending && !pending.owed && pending.langs.includes(lang) && !pending.got.includes(lang)) {
+        return { ok: false, reason: pending.kept !== undefined ? "auto_held" : "auto_writing" };
+      }
+    }
+    letGo = false;
+    const result = await change();
+    letGo = known(result);
+    return { ok: true, result };
+  } finally {
+    if (letGo) await releaseMark(own, value);
+  }
 }
 
 /**
@@ -474,7 +547,9 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
   }
   const there = answer.status === 200 ? deliveredIn(answer.data) : null;
   if (!there) return unknownLook(id, pending, raw as string, answer.status, now);
-  const got = pending.langs.filter((lang) => there.includes(lang));
+  // Delivered once is delivered: a language the service listed stays so if it is removed by hand later, and only the
+  // service's own captions are listed in a language the request holds (withOwnCaptions).
+  const got = pending.langs.filter((lang) => pending.got.includes(lang) || there.includes(lang));
   const fresh = got.filter((lang) => !pending.got.includes(lang));
   if (fresh.length) await noteCaptionLanguages(id, fresh);
   if (got.length === pending.langs.length || now - pending.at > GIVE_UP_HOURS * 3_600_000) {

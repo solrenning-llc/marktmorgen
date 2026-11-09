@@ -6,6 +6,8 @@ export const world = {
   link: "",
   storeThrows: false,
   listingThrows: false,
+  claimThrows: false,
+  spent: 0,
   served: [] as string[],
   leads: 0,
   events: 0,
@@ -23,8 +25,13 @@ export async function storeForHandle(handle: string) {
   // A store switched off after notices about its content carries the time in suspended (lib/takedown.ts, noteTakedown).
   return handle === "shop" ? { handle: "shop", language: "en", suspended: world.suspended, statsId: "s1" } : null;
 }
-// @/lib/free
+// @/lib/free: what the emailed link names, read without spending, and one use of it spent.
+export async function readClaim() {
+  if (world.claimThrows) throw new Error("synthetic: the link could not be read");
+  return { handle: "shop", productId: "prod1" };
+}
 export async function spendClaim() {
+  world.spent += 1;
   return { ok: true, claim: { h: "shop", p: "prod1", e: "a@example.com", c: false, at: 1, a: "" } };
 }
 export async function recordLead() {

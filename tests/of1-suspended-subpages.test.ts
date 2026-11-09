@@ -21,7 +21,9 @@
  * the review page and the thank-you page it goes back to say the review was
  * not saved, and the thank-you page shows no review form for it. The emailed free copy's
  * button (app/api/store/free/download) hands over nothing, lists no one and
- * leaves the link's uses untouched while the store is off.
+ * leaves the link's uses untouched while the store is off; so does a free
+ * product taken down after a notice (hidden, lib/takedown.ts), with the same
+ * answer, while its store is on (joined with tests/free-download-takedown.test.ts).
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -41,7 +43,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { listSize } from "@/lib/free";
 import { StoreResting } from "@/components/store-resting";
 import { BLOCK_WORDS } from "@/lib/buyer-words/blocks";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, noteTakedown, setProductLink, setStripeAccount, setSubscription, storeForHandle } from "@/lib/store";
+import { addProduct, claimHandle, setProductHidden, ensureListId, ensureStatsId, ensureStoreId, noteTakedown, setProductLink, setStripeAccount, setSubscription, storeForHandle } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { answering } from "./security/next-headers";
 import { paidPeriod } from "./billing-period-fixture";
@@ -220,6 +222,22 @@ async function main(): Promise<void> {
     is("the free copy's button hands it over again", [handed.status, handed.headers.get("location")], [303, "https://example.com/glaze-chart.pdf"]);
     is("spending one use of the link", await uses(), before + 1);
     is("and the address joins the list now that it is proved", await listed(), 1);
+
+    part("A free product taken down after a notice, its store on: the same answer, and the link keeps its uses");
+    if (!(await setProductHidden(owner, freeId, true)).ok) throw new Error("product not hidden");
+    const kept = await uses();
+    const hiddenCommands = await commands(async () => {
+      const hiddenDownload = await download();
+      is("nothing is handed over", [hiddenDownload.status, hiddenDownload.headers.get("location")], [404, null]);
+      is("the answer says the page is unavailable, as for a store switched off", await hiddenDownload.text(), `${BLOCK_WORDS.en.unavailableTitle}.`);
+    });
+    is("the link keeps every use it had", await uses(), kept);
+    is("nothing is counted, listed or queued", hiddenCommands.some((c) => /^(INCR|SET|ZADD|HSET|LPUSH|RPUSH|SADD|EVAL)/.test(c)), false);
+    is("no one more joins the creator's list", await listed(), 1);
+    if (!(await setProductHidden(owner, freeId, false)).ok) throw new Error("product not shown again");
+    const again = await download();
+    is("shown again, the free copy is handed over", [again.status, again.headers.get("location")], [303, "https://example.com/glaze-chart.pdf"]);
+    is("spending one use of the link", await uses(), kept + 1);
 
     part("Each check is made where the store is read, before anything else");
     // The code between the two, comments set aside.

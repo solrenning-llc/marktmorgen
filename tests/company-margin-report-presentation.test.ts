@@ -54,6 +54,9 @@ test("a complete reconciled month has one deterministic private owner presentati
       "Margem líquida: 50,00%",
       "Meta: 60,00% — não atingida.",
       "Lojas retidas para recuperação: 2 no fim do mês; pico mensal 5.",
+      // Rule 23 (DONO-3, M3 of the pre-review of claude5/closed-store-deadline): the month's lapses now have their own
+      // line; this observation does not say them, so they are unknown, never zero.
+      "Lojas fechadas no prazo sem resposta do Stripe: desconhecido (não zero).",
       "Somente informativo: este relatório não abre vendas nem altera preço, limite, comissão, sinalizador ou trava.",
     ].join("\n"),
   });

@@ -17,7 +17,7 @@ test("the real company report deducts all categories and measures the 60% target
   assert.deepEqual(result, { schema: 1, month: "2026-10", currency: "USD", basis: "reconciled_actual",
     status: "complete", reason: "complete", revenueCents: 9000, variableCostsCents: 900,
     fixedCostsCents: 900, taxesCents: 1800, refundsCents: 450, reservesCents: 450,
-    netProfitCents: 4500, netMarginBps: 5000, targetBps: 6000, targetMet: false, heldStores: null, heldStoresPeak: null });
+    netProfitCents: 4500, netMarginBps: 5000, targetBps: 6000, targetMet: false, heldStores: null, heldStoresPeak: null, lapsedStores: null }); // Rule 23 (DONO-3, M3): the report's new lapsedStores field, unknown here.
   assert.equal(COMPANY_NET_MARGIN_TARGET_BPS, 6000);
   assert.equal(commercialPlansMayOpen(true), false);
 });

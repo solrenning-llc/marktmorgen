@@ -660,6 +660,8 @@ export function periodOf(subscription: Record<string, unknown>, trialing: boolea
 export async function readSubscription(
   subscriptionId: string,
   fundingStore?:Store,
+  /** Told why Stripe could not be asked, for a caller that must tell no answer from an unknown one (lib/stripe-silence.ts). */
+  failed?: (error: unknown) => void,
 ): Promise<SubscriptionState> {
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
@@ -676,6 +678,7 @@ export async function readSubscription(
       return { state: "inactive", reason: "missing" };
     }
     console.error("reading the subscription failed", error);
+    failed?.(error);
     return { state: "unknown" };
   }
 

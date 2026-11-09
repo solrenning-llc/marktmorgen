@@ -130,6 +130,33 @@ export async function recordHeldMonth(now: number, complete: boolean): Promise<v
   const reply = await redisPipeline([["EVAL", RECORD_HELD_MONTH, 2, INDEX, "nl:held:month:" + day.slice(0, 7), day, complete ? 1 : 0, HELD_MONTH_COUNT_SECONDS]]);
   if (!ack(reply)) throw new Error("held store count is unknown");
 }
+/**
+ * DONO-3: a closed store closed without Stripe at its deadline (lib/plan-closing.ts, STRIPE_SILENT_DAYS) is counted
+ * in its month, in the same monthly hash as the held count (field `lapsed`), so the owner's report says why held
+ * stores left the line. A count that is not confirmed throws: the closing day is then tried again with it.
+ */
+export async function recordLapsed(now: number): Promise<void> {
+  const day = dayOf(now);
+  if (day === null) throw new Error("lapsed closing clock is unknown");
+  const key = "nl:held:month:" + day.slice(0, 7);
+  const values = exactArray(await redisPipeline([["HINCRBY", key, "lapsed", 1], ["EXPIRE", key, HELD_MONTH_COUNT_SECONDS]]));
+  if (!values || values.length !== 2 || number(values[0]) === null || (values[0] as number | string) === 0 || values[1] !== 1) throw new Error("lapsed closing count is unknown");
+}
+/** The month's lapses, known only once its last day was observed (as readHeldMonth): none recorded then is zero; otherwise unknown, never zero. */
+export async function readLapsedMonth(month: string): Promise<number | null> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
+  try {
+    const reply = exactArray(await redisPipeline([["HMGET", "nl:held:month:" + month, "day", "lapsed"]]));
+    const values = reply?.length === 1 ? exactArray(reply[0]) : null;
+    if (!values || values.length !== 2) return null;
+    const [year, m] = month.split("-").map(Number);
+    const last = new Date(0);
+    last.setUTCFullYear(year, m, 0);
+    if (values[0] !== last.toISOString().slice(0, 10)) return null;
+    if (values[1] === null) return 0;
+    return number(values[1]);
+  } catch { return null; }
+}
 export type HeldMonthCount = { month: string; count: number; peak: number };
 export async function readHeldMonth(month: string): Promise<HeldMonthCount | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;

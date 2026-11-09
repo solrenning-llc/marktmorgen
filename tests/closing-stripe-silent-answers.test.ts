@@ -78,8 +78,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
   }
   if (url.hostname === "api.resend.com") {
-    sent.push(JSON.parse(String(init?.body)) as { to: string[]; subject: string });
-    return json({ id: `email-${sent.length}` });
+    // One email, or a batch of them (lib/closing-buyers.ts sends its members' notices as one batch).
+    const body = JSON.parse(String(init?.body)) as { to: string[]; subject: string } | { to: string[]; subject: string }[];
+    const mails = Array.isArray(body) ? body : [body];
+    sent.push(...mails);
+    return json(Array.isArray(body) ? { data: mails.map((_, i) => ({ id: `email-${sent.length - mails.length + i + 1}` })) } : { id: `email-${sent.length}` });
   }
   return new Response(null, { status: 404 });
 }) as typeof fetch;

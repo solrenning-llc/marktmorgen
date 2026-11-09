@@ -25,6 +25,8 @@ export type CompanyMonthlyMarginReport = {
   targetMet: boolean | null;
   heldStores: number | null;
   heldStoresPeak: number | null;
+  /** Closed stores closed without Stripe at their deadline in the month (DONO-3); null is unknown, never zero. */
+  lapsedStores: number | null;
 };
 export type CompanyMonthlyMarginPresentation = Readonly<{
   schema: 1;
@@ -125,7 +127,7 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
     revenueCents: null, variableCostsCents: null, fixedCostsCents: null,
     taxesCents: null, refundsCents: null, reservesCents: null, netProfitCents: null,
     netMarginBps: null, targetBps: COMPANY_NET_MARGIN_TARGET_BPS, targetMet: null,
-    heldStores: null, heldStoresPeak: null,
+    heldStores: null, heldStoresPeak: null, lapsedStores: null,
   };
   if (month === null) return report;
   // Validate the original graph through the shared accounting boundary before
@@ -141,6 +143,8 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
       Number.isSafeInteger(observed.peak) && observed.peak >= observed.count) {
     report.heldStores = observed.count; report.heldStoresPeak = observed.peak;
   }
+  if (observed && typeof observed === "object" && !Array.isArray(observed) && observed.month === month &&
+      Number.isSafeInteger(observed.lapsed) && observed.lapsed >= 0) report.lapsedStores = observed.lapsed;
   if (!data || typeof data !== "object" || Array.isArray(data)) return report;
   if (data.basis !== "reconciled_actual" || data.interval !== "month" || data.period !== month) {
     report.reason = "wrong_period_or_basis"; return report;
@@ -205,6 +209,9 @@ export function companyMonthlyMarginPresentation(
   const heldLine = report.heldStores === null || report.heldStoresPeak === null
     ? "Lojas retidas para recuperação: desconhecido (não zero)."
     : `Lojas retidas para recuperação: ${report.heldStores} no fim do mês; pico mensal ${report.heldStoresPeak}.`;
+  const lapsedLine = report.lapsedStores === null
+    ? "Lojas fechadas no prazo sem resposta do Stripe: desconhecido (não zero)."
+    : `Lojas fechadas no prazo sem resposta do Stripe: ${report.lapsedStores}.`;
   // The pure presentation never invokes the paid Redis readers. Once a caller
   // explicitly supplies this source, missing or invalid evidence is visible as
   // unknown; omission preserves the earlier presentation until a funded caller exists.
@@ -231,6 +238,7 @@ export function companyMonthlyMarginPresentation(
       marginLine,
       targetLine,
       heldLine,
+      lapsedLine,
       ...operationalLines,
       "Somente informativo: este relatório não abre vendas nem altera preço, limite, comissão, sinalizador ou trava.",
     ].join("\n"),
@@ -241,6 +249,10 @@ export function companyMonthlyMarginPresentation(
  * reconciled money inputs or scheduling/sending any owner communication. */
 export async function companyMonthlyMarginReportWithHeld(input: CommercialProfitMixInput | null, now = Date.now()): Promise<CompanyMonthlyMarginReport> {
   const month = lastCompleteCompanyMonth(now);
-  const held = month === null ? null : await (await import("./held-stores")).readHeldMonth(month);
-  return companyMonthlyMarginReport(input, now, held);
+  const heldStores = await import("./held-stores");
+  const held = month === null ? null : await heldStores.readHeldMonth(month);
+  const lapsed = month === null ? null : await heldStores.readLapsedMonth(month);
+  // The two observations are independent: either may be unknown without hiding the other.
+  const observed = month === null ? null : held === null ? (lapsed === null ? null : { month, lapsed }) : lapsed === null ? held : { ...held, lapsed };
+  return companyMonthlyMarginReport(input, now, observed);
 }

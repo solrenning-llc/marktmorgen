@@ -145,7 +145,7 @@ async function main(): Promise<void> {
 
     answering(new Request(`${ORIGIN}/studio/site?page=${SITE}`, { headers }));
     const site = await unknown(mode, () => StudioSitePage({ searchParams: Promise.resolve({ page: SITE }) }).catch((error: Error) => `thrown ${error.name}`));
-    is(`${mode}: the store page editor says the page could not be read`, holds(site, { text: STUDIO_MESSAGES.page_unread }), true);
+    is(`${mode}: the store page editor says the page could not be read`, holds(site, { text: "This page could not be read just now. Reload in a moment; nothing was changed, and its blocks are still kept." }), true);
     is(`${mode}: and mounts no editor that could save over it`, holds(site, { component: PageEditor }), false);
 
     is(`${mode}: how far the page is read: 503 page_unread`, await unknown(mode, async () => result(await depthRoute(get(`/api/store/depth?id=${paid.product.id}`)))), [503, "page_unread"]);

@@ -18,6 +18,8 @@ import { stampLine } from "@/lib/pdf-stamp-line";
 import { copyFolder, dropStamped, epubProblem, stampProblems, stampedCopy, wantsStamp } from "@/lib/pdf-stamp";
 import { MAX_STAMP_BYTES, type ProductFile, isEpub, isPdf, isStampable } from "@/lib/product-file";
 import { done, is, part } from "./check";
+// A new stamped copy reserves its bytes in the store's storage (lib/storage-reservations.ts; audit R17, finding 1).
+import "./storage-reservation-scripts";
 
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
 const BUCKET = "sold-files";

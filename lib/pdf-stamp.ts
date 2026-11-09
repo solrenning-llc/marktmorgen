@@ -44,6 +44,10 @@ import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
 import { type DataStore, keepFor } from "@/lib/store-data";
 import { noteForErasure, notedFor } from "@/lib/erasure-index";
+import { releaseStorage, reserveStorage } from "@/lib/storage-reservations";
+import { storageBrakeFor, storageUsed } from "@/lib/storage-quota";
+import { type PlanFields, costPauseCode, standingOf } from "@/lib/plan-standing";
+import type { Tier } from "@/lib/plan";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -188,6 +192,32 @@ async function keptAndNoted(store: DataStore, email: string, pathname: string, k
   }));
 }
 
+/** What stampedCopy reads of the store: its data room, and its plan for the storage a new copy is taken from. */
+type StampStore = DataStore & PlanFields & { tier: Tier };
+
+/**
+ * Reserves a new copy's bytes in its store's storage, as a vault upload's are (lib/storage-reservations.ts), against
+ * the plan's figure (storageBrakeFor), measured exactly (storageUsed) with every reservation still held counted in
+ * (audit R17, finding 1). Null when it does not fit, when the measure or the reservations are not known (rule 24:
+ * unknown never fits), or while the store's renewal is unpaid or its plan disputed, when nothing new is stored
+ * (costPauseCode, as in the upload door); then no copy is written. The reservation is let go once the copy is written,
+ * or was not, since from then on the measure itself reads what is there.
+ */
+async function storageFor(store: StampStore, folder: string | null, bytes: number): Promise<string | null> {
+  if (!folder || costPauseCode(store)) return null;
+  const brake = storageBrakeFor(standingOf(store), store.tier);
+  try {
+    const entry = await reserveStorage(folder, bytes, brake, async () => {
+      const held = await storageUsed(folder, brake);
+      if (held.available !== true) throw new Error("storage_unknown");
+      return held.bytes;
+    });
+    return entry.id;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The buyer's stamped copy of a PDF or an EPUB, made on the first download of a sale and
  * reused after. Null means hand over the original: stamping does not apply,
@@ -197,7 +227,7 @@ async function keptAndNoted(store: DataStore, email: string, pathname: string, k
 export async function stampedCopy(
   file: ProductFile,
   sale: { reference: string; email: string; paidAt: number },
-  store: DataStore,
+  store: StampStore,
 ): Promise<ProductFile | null> {
   if (!isStampable(file) || !sale.reference || !sale.email) return null;
   if (file.bytes > MAX_STAMP_BYTES) {
@@ -253,8 +283,18 @@ export async function stampedCopy(
     // The copy carries the buyer's address, so it is kept only once deleting the buyer can find it (audit R12, item 1):
     // its record's room is taken and both are noted for the erasure before the file is written. Without room, a store to
     // note it in, or a confirmed note, the original is handed over and no copy is kept.
-    if (!(await keptAndNoted(store, sale.email, pathname, key))) return null;
-    await writeFileWhole(pathname, stamped, contentType);
+    // Its bytes come out of the store's storage first (audit R17, finding 1): with no room, or a measure not known, the
+    // original is handed over and nothing is written. The copy is under the store's own folder (copyFolder), which the
+    // measure lists, so once written it counts there like any upload.
+    const folder = folderFromPathname(file.pathname);
+    const room = await storageFor(store, folder, stamped.byteLength);
+    if (!room || !folder) return null;
+    try {
+      if (!(await keptAndNoted(store, sale.email, pathname, key))) return null;
+      await writeFileWhole(pathname, stamped, contentType);
+    } finally {
+      await releaseStorage(folder, room).catch((error: unknown) => console.error("a stamped copy's storage reservation is still held; it is counted until it is retired", error));
+    }
     const copy: ProductFile = {
       pathname,
       name: file.name,

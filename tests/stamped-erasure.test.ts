@@ -24,6 +24,8 @@ import type { ProductFile } from "@/lib/product-file";
 import * as world from "./stamped-drop-retry-world";
 import { makeWorld } from "./erasure-world";
 import { store as redis } from "./redis-stub";
+// A new stamped copy reserves its bytes in the store's storage (lib/storage-reservations.ts; audit R17, finding 1).
+import "./storage-reservation-scripts";
 import { done, is, part } from "./check";
 
 const FOLDER = "fedcba9876543210fedcba9876543210";

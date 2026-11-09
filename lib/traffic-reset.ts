@@ -19,9 +19,10 @@
  * a change whose answer is lost, is unknown and never said done. One reset at
  * a time, under a short lock, so two at once cannot lower the count twice.
  */
+import { randomBytes } from "node:crypto";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { countKey } from "@/lib/traffic";
 
@@ -31,6 +32,26 @@ export const TRAFFIC_LOG_KEEP = 1_000;
 const LOG_KEY = "nl:operator:traffic-log";
 const LOCK_KEY = "nl:operator:traffic-reset:lock";
 const LOCK_SECONDS = 30;
+
+/**
+ * Under this reset's own lock token only (KEYS[3], ARGV[5]): a count in another shape writes nothing; a count lower
+ * than the one read (another reset got in) writes nothing; otherwise the record first, then the visits lowered by
+ * the delta, so visits counted meanwhile stay counted. Both or neither.
+ */
+const RESET_SCRIPT = `-- marktmorgen:traffic-reset:v1
+if redis.call('GET', KEYS[3]) ~= ARGV[4] then return {-2} end
+local current = redis.call('GET', KEYS[1])
+if current == false then current = '0' end
+if not string.match(current, '^%d+$') then return {-3} end
+if tonumber(current) < tonumber(ARGV[1]) then return {-1, tonumber(current)} end
+redis.call('LPUSH', KEYS[2], ARGV[3])
+redis.call('LTRIM', KEYS[2], 0, tonumber(ARGV[5]) - 1)
+return {1, redis.call('DECRBY', KEYS[1], ARGV[2])}`;
+
+/** The lock let go only by the token that took it. */
+const RELEASE_SCRIPT = `-- marktmorgen:traffic-reset-release:v1
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
 const FOLDER_PATTERN = /^[0-9a-f]{32}$/;
 
 export type TrafficReset = { at: number; sid: string; handle: string; window: string; before: number; after: number };
@@ -59,7 +80,10 @@ export async function resetVisits(input: { store: Store; to: number; now?: numbe
   if (!FOLDER_PATTERN.test(folder)) return { ok: false, reason: "unknown" };
   const key = countKey(folder, window.id);
 
-  const lock = repliesFor(await redisPipeline([["SET", LOCK_KEY, String(now), "NX", "EX", LOCK_SECONDS]]), 1);
+  // The lock is this reset's own token: a reset that waited past its lease can neither change the visits (the
+  // script checks the token) nor let go of a lock another reset now holds (the release checks it too).
+  const token = randomBytes(16).toString("hex");
+  const lock = repliesFor(await redisPipeline([["SET", LOCK_KEY, token, "NX", "EX", LOCK_SECONDS]]), 1);
   if (!lock) return { ok: false, reason: "unknown" };
   if (lock[0] !== "OK") return lock[0] === null ? { ok: false, reason: "busy" } : { ok: false, reason: "unknown" };
   try {
@@ -68,23 +92,22 @@ export async function resetVisits(input: { store: Store; to: number; now?: numbe
     if (before === null) return { ok: false, reason: "unknown" };
     if (to > before) return { ok: false, reason: "above", before };
     if (to === before) return { ok: false, reason: "same", before };
-    // The record goes first in the same pipeline, so a change is never made without it.
+    // One script: the record, then the visits lowered by what was asked, both or neither (Codex M on #3380).
     const entry: TrafficReset = { at: now, sid: store.sid, handle: store.handle, window: window.id, before, after: to };
     const replies = repliesFor(
       await redisPipeline([
-        ["LPUSH", LOG_KEY, JSON.stringify(entry)],
-        ["LTRIM", LOG_KEY, 0, TRAFFIC_LOG_KEEP - 1],
-        ["DECRBY", key, before - to],
+        ["EVAL", RESET_SCRIPT, 3, key, LOG_KEY, LOCK_KEY, String(before), String(before - to), JSON.stringify(entry), token, TRAFFIC_LOG_KEEP],
       ]),
-      3,
+      1,
     );
-    const pushed = replies ? countOf(replies[0]) : null;
-    const left = replies && typeof replies[2] === "number" && Number.isSafeInteger(replies[2]) ? replies[2] : null;
+    const answer = replies && Array.isArray(replies[0]) ? (replies[0] as unknown[]) : null;
+    if (answer && answer[0] === -2) return { ok: false, reason: "busy" };
+    const left = answer && answer[0] === 1 && answer.length === 2 && typeof answer[1] === "number" && Number.isSafeInteger(answer[1]) ? answer[1] : null;
     // DECRBY keeps visits counted while this ran: the count is `to` plus them, never less than `to`.
-    if (!replies || pushed === null || pushed < 1 || replies[1] !== "OK" || left === null || left < to) return { ok: false, reason: "unknown" };
+    if (left === null || left < to) return { ok: false, reason: "unknown" };
     return { ok: true, window: window.id, before, after: left };
   } finally {
-    await redisPipeline([["DEL", LOCK_KEY]]).catch(() => undefined);
+    await redisPipeline([["EVAL", RELEASE_SCRIPT, 1, LOCK_KEY, token]]).catch(() => undefined);
   }
 }
 

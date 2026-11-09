@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   const base = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const answer = await base(commands);
-    return commands.some((command) => command[0] === "DECRBY") ? answer.map(() => "garbled") : answer;
+    return commands.some((command) => command[0] === "DECRBY" || (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:traffic-reset:v1"))) ? answer.map(() => "garbled") : answer;
   }) as typeof redis.pipeline;
   is("a change whose answer is lost: unknown, never said done", await resetVisits({ store: shop, to: 10, now: NOW }), { ok: false, reason: "unknown" });
   redis.pipeline = base;

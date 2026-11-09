@@ -949,6 +949,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stream:v:@lib/stream.ts": { what: "What is known about a video", room: ["app/api/store/stream/route.ts", "lib/stream.ts"] },
 
   // ---------------------------------------------------------------- lib/ t–z
+  "nl:csa:files:@lib/child-safety.ts": short("Where a product kept for a child-safety report keeps its files (at most HELD_LIST_PATHS paths), for the owner to find them after a closing or an erasure: 400 days (18 U.S.C. 2258A(h))", "studio", 400, 48_000),
   "nl:csa:file:@lib/held-files.ts": short("A file of a product kept for a child-safety report, by a hash of its path or video id: never deleted or handed out for 400 days (18 U.S.C. 2258A(h))", "studio", 400, 96),
   "nl:csa:keep:@lib/child-safety.ts": short("A product kept for a child-safety report: not removed, changed or published again, nor its files, options, picture, page, episodes or lessons replaced or deleted, for 400 days (18 U.S.C. 2258A(h))", "studio", 400, 64),
   "nl:csa:held:@lib/child-safety.ts": short("Which products child-safety reports took off a store that day (a set of at most the cap's product ids), two days: the cap on the automatic step", "studio", 2, 128),

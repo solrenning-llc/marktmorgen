@@ -506,6 +506,19 @@ export default function PrivacyPage() {
           refunded. We email you a receipt with the day it is expected, and
           once more when it comes out, with the way to open it.
         </p>
+        <p id="child-safety-kept" className="scroll-mt-24">
+          <strong className="text-black">Material reported as child sexual exploitation.</strong>{" "}
+          When a product is reported to us as child sexual exploitation, we
+          take it off its store and keep it, with its files and records, for
+          up to 400 days, as United States law requires (18 U.S.C. &sect; 2258A).
+          While it is kept, we show and send it to nobody, and it is not
+          deleted when its store closes or when someone asks us to delete their
+          data. We keep the list of where its files are for the same time. Our{" "}
+          <Link href="/terms#child-safety" className="text-black underline underline-offset-2 hover:no-underline">
+            Terms on children and intimate images
+          </Link>{" "}
+          say what else we do.
+        </p>
         <p id="store-closing">
           <strong className="text-black">When a store you bought from closes.</strong>{" "}
           From the day the store&rsquo;s plan ends until it closes or stays

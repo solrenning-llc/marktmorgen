@@ -1112,7 +1112,9 @@ export default function PrivacyPage() {
           A person deleted from the store has their address removed from the
           lead; the lead stays, as the affiliate&apos;s record, and so does
           the fingerprint, which cannot be turned back into the address, so
-          they are not counted again. The creator sees all of this; an
+          they are not counted again. If the lead was damaged and can no
+          longer be read, everything in it is deleted except the
+          fingerprint. The creator sees all of this; an
           affiliate sees only their own figures. It is kept with the
           store&apos;s records. We never hold or pay out an affiliate&apos;s
           money: the creator pays them. A creator who pays from their own

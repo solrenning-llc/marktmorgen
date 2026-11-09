@@ -272,10 +272,23 @@ export async function leadOf(store: Pick<Store, "statsId">, email: string): Prom
   if (!replies) throw new UnknownReplyError("a person's affiliate lead");
   const [raw] = replies;
   // A lead whose contents were deleted with its person (forgetLeadPerson) keeps nothing of theirs: there is nothing to copy.
-  if (raw === null || raw === emptiedLead(leadId(store.statsId, email))) return null;
+  const id = leadId(store.statsId, email);
+  if (raw === null || raw === emptiedLead(id) || addressTakenOff(raw, id)) return null;
   const lead = parseLeadExact(raw);
   if (!lead) throw new UnknownReplyError("a person's affiliate lead");
   return lead;
+}
+
+/**
+ * A lead under a person's own field that forgetLeadPerson took the address off when it held one of another type and
+ * another field did not read either: it reads loosely as this very lead (parseLead, its id the field's own) and its
+ * address is exactly "", so nothing of the person is left in it, though its money fields still do not read. Any
+ * other lead that does not read exactly is not this, and its reader still fails closed.
+ */
+function addressTakenOff(raw: unknown, id: string): boolean {
+  if (typeof raw !== "string") return false;
+  const lead = parseLead(raw);
+  return lead !== null && lead.id === id && (JSON.parse(raw) as Record<string, unknown>).email === "";
 }
 
 /**
@@ -357,7 +370,8 @@ export async function decideLeads(store: Store, ids: string[], decision: LeadDec
  * an affiliate was credited for. The lead itself stays, without it, because
  * it is the affiliate's money record, paid or owed; so does its id, a one-way
  * fingerprint that cannot be turned back into the address, so the same person
- * joining again is not counted as a new lead.
+ * joining again is not counted as a new lead. A lead that no longer reads at
+ * all keeps only its id (emptiedLead), so it is no money record any more.
  */
 export async function forgetLeadPerson(store: Store, email: string): Promise<number> {
   if (!store.statsId || !isRedisConfigured() || !email) return 0;

@@ -869,9 +869,11 @@ function isDamaged(job: Job | DamagedJob | null): job is DamagedJob {
 
 /**
  * The address a damaged job record still says, read exactly or not at all: the
- * string `email` of a JSON object, or, in a record cut short, the complete
- * string that follows the start queuePerson writes every record with (its id,
- * its store, then its address). Null otherwise.
+ * string `email` of a JSON object; in a JSON object with its own id and store
+ * whose `email` is of another type, the one address every string in it says
+ * (soleAddress), never a guess between two; or, in a record cut short, the
+ * complete string that follows the start queuePerson writes every record with
+ * (its id, its store, then its address), cut there or after. Null otherwise.
  */
 function damagedAddress(raw: string, id: string, statsId: string): string | null {
   let value: unknown;
@@ -881,12 +883,18 @@ function damagedAddress(raw: string, id: string, statsId: string): string | null
     value = undefined;
   }
   if (value !== undefined) {
-    const email = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>).email : undefined;
-    return typeof email === "string" ? email : null;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    if (typeof record.email === "string") return record.email;
+    // An address of another type (as lib/affiliate-leads.ts forgetLeadPerson takes one): whose it is only when the
+    // record is this job of this store and the value names exactly one address; anything else stays unread.
+    if (record.id !== id || record.statsId !== statsId) return null;
+    return soleAddress(record.email);
   }
   const start = `{"id":${JSON.stringify(id)},"statsId":${JSON.stringify(statsId)},"email":`;
   if (!raw.startsWith(start)) return null;
-  const field = /^("(?:[^"\\]|\\.)*")[,}]/.exec(raw.slice(start.length));
+  // The string is whole once its closing quote is there: the record may be cut right after it.
+  const field = /^("(?:[^"\\]|\\.)*")(?:[,}]|$)/.exec(raw.slice(start.length));
   if (!field) return null;
   try {
     const email = JSON.parse(field[1]) as unknown;
@@ -894,6 +902,32 @@ function damagedAddress(raw: string, id: string, statsId: string): string | null
   } catch {
     return null;
   }
+}
+
+/** Strings a value of another type may hold before it is taken as unread: more is never searched. */
+const SOLE_ADDRESS_STRINGS = 16;
+
+/**
+ * The one address a value of another type names: every string in it, the keys
+ * of an object included, is the same address once normalised, and there is at
+ * least one. Two different strings, none, or more than SOLE_ADDRESS_STRINGS is
+ * null: whose it is is not known.
+ */
+function soleAddress(value: unknown): string | null {
+  const strings: string[] = [];
+  const walk = (v: unknown, depth: number): boolean => {
+    if (typeof v === "string") {
+      strings.push(v);
+      return strings.length <= SOLE_ADDRESS_STRINGS;
+    }
+    if (v === null || typeof v !== "object") return true;
+    if (depth > 4) return false;
+    if (Array.isArray(v)) return v.every((item) => walk(item, depth + 1));
+    return Object.entries(v as Record<string, unknown>).every(([key, item]) => walk(key, depth + 1) && walk(item, depth + 1));
+  };
+  if (!walk(value, 0) || !strings.length) return null;
+  const addresses = new Set(strings.map(normaliseEmail));
+  return addresses.size === 1 ? [...addresses][0] : null;
 }
 
 /**

@@ -12,7 +12,8 @@
  *
  * When. The store's usual pace is its sales over the last 60 days (or, for a
  * store with more completed checkouts in them than one look reads, over the
- * stretch those it read cover: saleHistory). At that
+ * stretch those it read cover, once that holds QUIET_STRETCH_MIN_SALES of its
+ * sales: saleHistory). At that
  * pace, the chance of a stretch of `d` days with none is e^(−pace × d); the
  * email goes when that is under one in a hundred, after at least two days,
  * and only for a store with at least QUIET_MIN_SALES sales to read a pace
@@ -41,6 +42,14 @@ export const QUIET_PACE_DAYS = 60;
 export const QUIET_MIN_SALES = 8;
 /** How unlikely a quiet stretch must be at the usual pace: one in a hundred. */
 const UNLIKELY = Math.log(100);
+/**
+ * The fewest of this store's sales a stretch read short of the 60 days must hold for its pace to decide (saleHistory).
+ * The 60 days hold at least as many, so with this many a quiet stretch of two days or more at the stretch's pace is
+ * quiet at the 60-day pace as well: the stretch never sends an email the 60 days would not. Fewer, and the stretch was
+ * cut short by other completed checkouts on the account (another shop, Payment Links), and a few sales in a few days
+ * are not the store's usual pace (pre-review of 9 November 2026).
+ */
+export const QUIET_STRETCH_MIN_SALES = Math.ceil((UNLIKELY * QUIET_PACE_DAYS) / 2);
 const DAY_MS = 86_400_000;
 
 /**
@@ -75,7 +84,8 @@ export const QUIET_PAGES_PER_STORE = 3;
  * over the stretch the pages cover: newest first, they hold every completed checkout newer than the oldest one read,
  * so the count over that stretch is exact, and a quiet stretch inside it is measured against the store's own pace
  * just before. Unknown (null) when an answer is not a list, a session is answered twice, a sale has no date, or the
- * stretch read holds fewer than QUIET_MIN_SALES of this store's sales (they may be past it, so nothing is decided).
+ * stretch read holds fewer than QUIET_STRETCH_MIN_SALES of this store's sales (other checkouts cut it short, so a few
+ * sales in it are not the store's pace, and its sales may be past it: nothing is decided).
  */
 export async function saleHistory(store: Store, now: number): Promise<{ times: number[]; days: number; whole: boolean } | null> {
   const handles = saleHandles(store);
@@ -116,7 +126,7 @@ export async function saleHistory(store: Store, now: number): Promise<{ times: n
   const from = oldest * 1000;
   const within = times.filter((at) => at > from);
   const days = (now - from) / DAY_MS;
-  if (!(days > 0) || within.length < QUIET_MIN_SALES) return null;
+  if (!(days > 0) || within.length < QUIET_STRETCH_MIN_SALES) return null;
   return { times: within, days, whole: false };
 }
 

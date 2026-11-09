@@ -8,7 +8,8 @@
  *     reinstated (a prevention resolved by a refund through the dispute); a
  *     prevention that moved nothing (a network block: the creator kept the
  *     money) or that was reinstated gave nothing back; balance transactions
- *     missing or unreadable are unknown. The card case type (block or
+ *     not in Stripe's shape are unknown (disputeMoneyGone, the rule of #3321,
+ *     Claude 6). The card case type (block or
  *     resolution) is not what decides: the money the dispute moved is;
  *   - the legacy `charge_refunded` is not a return by the dispute: the refund
  *     doors (refundedInFull, the /refunds rows) count that money at its own
@@ -37,7 +38,7 @@
  * Synthetic Stripe only: no real account, no real money.
  */
 import { disputeLost, lostDisputesSince, refundedInFull, rowGivesBack } from "@/lib/refunds";
-import { DISPUTE_APPEAL_STAGES, DISPUTE_STATUSES, disputeMoney, disputeMoneyFields, disputeNetWithdrawnCents } from "@/lib/dispute-statuses";
+import { DISPUTE_APPEAL_STAGES, DISPUTE_STATUSES, disputeMoney, disputeMoneyFields, disputeMoneyGone } from "@/lib/dispute-statuses";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_c5_prevented_siblings";
@@ -80,8 +81,11 @@ const UNKNOWN: Shape[] = [
   shape("prevented, balance transactions as ids", "prevented", { balance_transactions: ["txn_C5Prevented01"] }),
   shape("prevented, an amount that is not whole cents", "prevented", { balance_transactions: [txn(-50.5)] }),
   shape("prevented, an amount as text", "prevented", { balance_transactions: [txn("-5000")] }),
-  shape("prevented, a balance transaction without its currency", "prevented", { balance_transactions: [txn(-5000, "")] }),
-  shape("prevented, two currencies", "prevented", { balance_transactions: [txn(-5000, "usd"), txn(4600, "eur")] }),
+  // Changed (rule 23): #3321's disputeMoneyGone (Claude 6, @31890b10c4), which this PR now copies, reads the amounts and
+  // not their currency, so "a balance transaction without its currency" and "two currencies" left this list; three
+  // balance transactions (Stripe lists zero, one or two) and an entry that is not a balance transaction joined it.
+  shape("prevented, three balance transactions", "prevented", { balance_transactions: [txn(-5000), txn(5000), txn(-5000)] }),
+  shape("prevented, an entry that is not a balance transaction", "prevented", { balance_transactions: [{ ...txn(-5000), object: "refund" }] }),
   shape("prevented, more reinstated than withdrawn", "prevented", { balance_transactions: [txn(5000)] }),
   ...["mystery", "", null, undefined, 7, "Lost"].map((s) => shape(`status ${JSON.stringify(s)}`, s)),
 ];
@@ -126,10 +130,12 @@ function table() {
   for (const s of NOT_RETURNED) is(`${s.label}: not returned`, settledSync(() => disputeMoney(fields(s))), "not_returned");
   for (const s of UNKNOWN) is(`${s.label}: unknown`, settledSync(() => disputeMoney(fields(s))), "unknown");
   is("the appeal stages are statuses Stripe gives", [...DISPUTE_APPEAL_STAGES].every((status) => DISPUTE_STATUSES.has(status)), true);
-  is("disputeNetWithdrawnCents: one withdrawal", settledSync(() => disputeNetWithdrawnCents({ balance_transactions: [txn(-5000)] })), 5000);
-  is("disputeNetWithdrawnCents: withdrawn and reinstated", settledSync(() => disputeNetWithdrawnCents({ balance_transactions: [txn(-5000), txn(5000)] })), 0);
-  is("disputeNetWithdrawnCents: nothing moved", settledSync(() => disputeNetWithdrawnCents({ balance_transactions: [] })), 0);
-  is("disputeNetWithdrawnCents: missing is unknown, never zero", settledSync(() => disputeNetWithdrawnCents({ status: "prevented" })), null);
+  // Changed (rule 23): the stand-in disputeNetWithdrawnCents gave way to #3321's disputeMoneyGone, so these read true,
+  // false and null instead of the cents withdrawn.
+  is("disputeMoneyGone: one withdrawal", settledSync(() => disputeMoneyGone({ balance_transactions: [txn(-5000)] })), true);
+  is("disputeMoneyGone: withdrawn and reinstated", settledSync(() => disputeMoneyGone({ balance_transactions: [txn(-5000), txn(5000)] })), false);
+  is("disputeMoneyGone: nothing moved", settledSync(() => disputeMoneyGone({ balance_transactions: [] })), false);
+  is("disputeMoneyGone: missing is unknown, never false", settledSync(() => disputeMoneyGone({ status: "prevented" })), null);
   for (const value of [null, undefined, "prevented", 7, [], [{ status: "lost" }]]) {
     is(`not a dispute (${JSON.stringify(value)}): unknown`, settledSync(() => disputeMoney(value)), "unknown");
   }
@@ -195,7 +201,8 @@ async function doors() {
   is("lostDisputesSince: reads the whole page", read.complete, true);
   is("lostDisputesSince: lost and a resolved prevention become rows; a blocked one, a reinstated one, charge_refunded, won and warning_closed do not", read.rows.map((r) => r.id), ["evt_C5Lost000001", "evt_C5Resolved01"]);
   is("lostDisputesSince: every row it builds is one the jobs take back", read.rows.every((r) => rowGivesBack(r)), true);
-  is("lostDisputesSince: the resolved row carries what the dispute withdrew", settledSync(() => disputeNetWithdrawnCents(read.rows[1])), 5000);
+  // Changed (rule 23): read with disputeMoneyGone (true) instead of the stand-in's cents (5000).
+  is("lostDisputesSince: the resolved row carries what the dispute withdrew", settledSync(() => disputeMoneyGone(read.rows[1])), true);
   is("lostDisputesSince: and so does the charge it writes", refundedInFull(read.rows[1]?.charge), true);
   for (const s of UNKNOWN.slice(0, 9)) {
     events = { object: "list", has_more: false, data: [event("evt_C5Unknown001", s)] };

@@ -12,23 +12,29 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import {
   SHORT_LINK_BACK_NOTICE_SECONDS, SHORT_LINK_OFF_AFTER_MS, readRestMark, shortLinkBackKey, shortLinkRestCheckKey, shortLinkRestKey,
-  shortLinkStoreHourKey,
+  shortLinkStoreFlightKey, shortLinkStoreHourKey,
 } from "@/lib/short-link-open-rules";
 
 /** A store id as lib/store.ts writes it (STORE_ID_PATTERN; not imported, lib/store.ts imports this file). */
 const STORE_ID = /^[0-9a-f]{32}$/;
 
-/** When a store's links were turned off, read from its resting mark: null when they were not (or nothing says so). */
+/**
+ * When a store's links were turned off, read from its resting mark: the moment it had rested SHORT_LINK_OFF_AFTER_MS
+ * without a gap, when its record, read at or after that moment, still said so; null when they were not (or nothing
+ * says so).
+ */
 export function turnedOffAt(mark: unknown, now: number): number | null {
   const read = readRestMark(mark);
-  if (!read || read.since === null) return null;
+  if (!read || read.since === null || read.read === null) return null;
   const off = read.since + SHORT_LINK_OFF_AFTER_MS;
-  return off <= now ? off : null;
+  return off <= read.read && off <= now ? off : null;
 }
 
 /** What takes a store's resting state away once it pays, and keeps the studio's notice when its links were turned off. */
 export function backOnCommands(sid: string, offAt: number | null, now: number): (string | number)[][] {
-  const commands: (string | number)[][] = [["DEL", shortLinkRestKey(sid)], ["DEL", shortLinkRestCheckKey(sid)], ["DEL", shortLinkStoreHourKey(sid, now)]];
+  const commands: (string | number)[][] = [
+    ["DEL", shortLinkRestKey(sid)], ["DEL", shortLinkRestCheckKey(sid)], ["DEL", shortLinkStoreHourKey(sid, now)], ["DEL", shortLinkStoreFlightKey(sid)],
+  ];
   if (offAt !== null) commands.push(["SET", shortLinkBackKey(sid), `${offAt}:${now}`, "EX", SHORT_LINK_BACK_NOTICE_SECONDS]);
   return commands;
 }

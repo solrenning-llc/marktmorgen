@@ -119,44 +119,69 @@ export const shortLinkRestKey = (sid: string) => `nl:slink:rest:${sid}`;
 export const shortLinkRestCheckKey = (sid: string) => `nl:slink:rest:${sid}:check`;
 
 /**
- * Opens of one store's links an hour, in a count of that store's own, that may read its record without the store
- * paying for them (the owner's decision 14 on #3330, 9 November 2026: the US$81.49 a month one resting store could
- * cost was not approved). Counted before the record is read, from the first day, in a cold burst before the store
- * carries a resting mark as much as after; an open its store pays for, or one refused for its connection or for a
- * read that failed, gives its place back, so the count of a store with room is only its opens in flight. Past it the
- * open is refused with nothing of the record read. Twenty in flight at once is some hundreds of opens a second for one
- * store, past what any plan's month holds (Scale: 40,000 visits); a paying store is not refused by it.
+ * Reads of one store's record that the store does not pay for, at most, an hour (the owner's decision 14 on #3330,
+ * 9 November 2026: the US$81.49 a month one resting store could cost was not approved). Two counts of the store's
+ * own, every instance sharing them, both taken in the pipeline that reads the store's id, before its record can be
+ * read, the first day and in a cold burst alike: the reads it did not pay for this hour (shortLinkStoreHourKey, kept
+ * once the store itself refused one) and the opens of it in flight (shortLinkStoreFlightKey, each place lapsing by
+ * itself SHORT_LINK_FLIGHT_MS after it was taken, so a give-back lost to a timeout never holds the store; Claude 2's
+ * focal on #3330). Past their sum the open is refused with nothing of the record read, the store marked resting a
+ * minute and kept so in the instance's memory, unless it is in the list of stores that pay and has had fewer than
+ * this many unpaid reads this hour: a paying store with room is never refused by it (it pays each read).
  */
 export const SHORT_LINK_STORE_READS_PER_HOUR = 20;
-/** Commands an open sends to be counted in its store's own hour: INCR and EXPIRE, in the pipeline that reads the store's id. */
-export const SHORT_LINK_STORE_COUNT_COMMANDS = 2;
-/** Commands an open its store pays for sends to give its place in that count back: DECR and EXPIRE, in one pipeline. */
-export const SHORT_LINK_STORE_REFUND_COMMANDS = 2;
-/** How long a store without a paid plan rests before its links are turned off (the owner's decision 14). */
+/**
+ * How long an open's place among its store's opens in flight lasts at most: past it, it lapses by itself. Longer than
+ * the heaviest open can take (every Redis wait at its timeout, held in tests/short-link-open-cap.test.ts), so a place
+ * never lapses while its read can still happen; a give-back lost holds the store this long at most.
+ */
+export const SHORT_LINK_FLIGHT_MS = 120_000;
+/** Commands an open sends to be counted in its store's own counts: ZREMRANGEBYSCORE, ZADD, ZCARD and EXPIRE of the opens in flight, and GET of the hour's unpaid reads, in the pipeline that reads the store's id. */
+export const SHORT_LINK_STORE_COUNT_COMMANDS = 5;
+/** Commands an open sends to give its place among the opens in flight back: one ZREM. */
+export const SHORT_LINK_STORE_REFUND_COMMANDS = 1;
+/** How long a store without a paid plan rests, without a gap, before its links are turned off (the owner's decision 14). */
 export const SHORT_LINK_OFF_AFTER_MS = 30 * 86_400_000;
-/** How long a resting mark that says since when its store rests without a paid plan is kept; each open answered off keeps it that long again. */
-export const SHORT_LINK_OFF_KEEP_SECONDS = 35 * 86_400;
+/**
+ * The longest a store's record may go unread while it still counts as resting without a gap, and while its links stay
+ * turned off: past it, one open reads it again (Claude 2's focal on #3330: the 30 days counted from a mark's age).
+ */
+export const SHORT_LINK_OFF_CONFIRM_MS = 86_400_000;
+/** How long a resting mark of a store without a paid plan is kept past its last reading, and the longest gap between two readings that still counts as resting without a gap. Never renewed by a link answered off. */
+export const SHORT_LINK_OFF_KEEP_SECONDS = 2 * 86_400;
 /** The longest a paying store over its own requests is marked resting for: until its window ends, at most this. */
 export const SHORT_LINK_PAID_REST_MAX_MS = 32 * 86_400_000;
 /** How long the studio is told that the store's links were turned off, once it pays again. */
 export const SHORT_LINK_BACK_NOTICE_SECONDS = 30 * 86_400;
 /** How long an instance remembers the store of a link whose store it found resting or turned off (a link's store never changes). */
 export const SHORT_LINK_RESTING_OWNER_MS = 24 * 3_600_000;
-/** A store's own count of opens that may read its record in the hour (SHORT_LINK_STORE_READS_PER_HOUR), kept two hours. */
+/** A store's reads of its record it did not pay for in the hour (SHORT_LINK_STORE_READS_PER_HOUR), kept two hours. */
 export const shortLinkStoreHourKey = (sid: string, now: number) => `nl:slink:rest:${sid}:cap:${hourOf(now)}`;
+/** A store's opens in flight, a sorted set scored by when each took its place, kept two minutes. */
+export const shortLinkStoreFlightKey = (sid: string) => `nl:slink:rest:${sid}:flight`;
 /** The studio's notice that the store's links were turned off: "<turned off at>:<back at>", in milliseconds. */
 export const shortLinkBackKey = (sid: string) => `nl:slink:rest:${sid}:back`;
 /**
- * What a resting mark holds: "<until>" (a store that pays, or a mark written before 9 November 2026) or
- * "<until>:<since>", since when its store rests without a paid plan. Null for anything else, read as resting.
+ * What a resting mark holds: "<until>" (a store that pays, a store found past its own count, or a mark written before
+ * 9 November 2026), or "<until>:<since>:<read>" for a store without a paid plan: since when it has rested without a
+ * gap, and when its record last said so. Null for anything else, read as resting.
  */
-export function readRestMark(value: unknown): { until: number; since: number | null } | null {
+export function readRestMark(value: unknown): { until: number; since: number | null; read: number | null } | null {
   const text = typeof value === "number" ? String(value) : value;
   if (typeof text !== "string") return null;
-  const found = /^([0-9]{13,15})(?::([0-9]{13,15}))?$/.exec(text);
+  const found = /^([0-9]{13,15})(?::([0-9]{13,15}):([0-9]{13,15}))?$/.exec(text);
   if (!found) return null;
-  const until = Number(found[1]);
-  const since = found[2] === undefined ? null : Number(found[2]);
-  if (!Number.isSafeInteger(until) || (since !== null && !Number.isSafeInteger(since))) return null;
-  return { until, since };
+  const [until, since, read] = [found[1], found[2], found[3]].map((part) => (part === undefined ? null : Number(part)));
+  if (until === null || !Number.isSafeInteger(until) || (since !== null && !Number.isSafeInteger(since)) || (read !== null && !Number.isSafeInteger(read))) return null;
+  return { until, since, read };
+}
+
+/**
+ * Whether a store's links are turned off at `now`: its mark says it has rested without a paid plan, without a gap,
+ * SHORT_LINK_OFF_AFTER_MS, and its record said so less than SHORT_LINK_OFF_CONFIRM_MS ago. "stale" when it would be,
+ * but that reading is too old: one open must read the record again first.
+ */
+export function offState(mark: { since: number | null; read: number | null } | null, now: number): "off" | "stale" | null {
+  if (!mark || mark.since === null || mark.read === null || mark.read - mark.since < SHORT_LINK_OFF_AFTER_MS) return null;
+  return now - mark.read <= SHORT_LINK_OFF_CONFIRM_MS ? "off" : "stale";
 }

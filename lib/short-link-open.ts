@@ -85,23 +85,31 @@
  *   nl:slink:tired:<hour>  string   the hour's opens of stores over their own requests, kept two hours
  *   nl:slink:rest:<sid>    string   the moment the store rests until, SHORT_LINK_TIRED_MS on (SHORT_LINK_TIRED_MAX_MS once the resting hour is used), kept two hours
  *                                   past it; since 9 November 2026 (the owner's decision 14): a store with a paid plan rests until its window ends,
- *                                   and one without says "<until>:<since>", since when it has rested that way, kept SHORT_LINK_OFF_KEEP_SECONDS
+ *                                   and one without says "<until>:<since>:<read>", since when it has rested without a gap and when its
+ *                                   record last said so, kept SHORT_LINK_OFF_KEEP_SECONDS past that reading (never renewed by a link off)
  *   nl:slink:rest:<sid>:check string "1", the one open that asks a store whose moment is past (SET NX), kept SHORT_LINK_TIRED_MS
- *   nl:slink:rest:<sid>:cap:<hour> string the store's own count of opens that may read its record, kept two hours
+ *   nl:slink:rest:<sid>:cap:<hour> string the store's reads this hour it did not pay for, kept two hours
+ *   nl:slink:rest:<sid>:flight zset   the store's opens in flight, by when each took its place, each lapsing SHORT_LINK_FLIGHT_MS later
  *   nl:slink:rest:<sid>:back  string the studio's notice that its links were turned off (lib/short-link-rest.ts)
  *
  * The owner's decision 14 on #3330 (9 November 2026) did not approve the US$81.49 a month one resting store could cost
  * (its record read once a mark's time and by every open in flight while it had no mark). Since then:
- *   - each store has its own count of the hour (SHORT_LINK_STORE_READS_PER_HOUR), taken in the pipeline that reads its
- *     id, before its record can be read, the first day and in a cold burst alike: past it the open is refused with
- *     nothing of the record read. Every open that did not read the record unpaid gives its place back (a paid one in a
- *     pipeline of its own), so a store with room counts only its opens in flight and is never refused by it;
- *   - a store without a paid plan that has rested SHORT_LINK_OFF_AFTER_MS has its links turned off: a short static page
- *     (410, kept by the CDN CACHE_SECONDS), its record never read, only one SISMEMBER of the list of stores that pay, so
- *     one that pays again opens at its next open; the moment it pays (lib/store.ts, setSubscription) its mark goes, its
- *     links open everywhere, and the studio is told they were turned off (lib/short-link-rest.ts);
+ *   - each store has its own counts (SHORT_LINK_STORE_READS_PER_HOUR), taken in the pipeline that reads its id, before
+ *     its record can be read, the first day and in a cold burst alike: its reads this hour it did not pay for, and its
+ *     opens in flight, each place lapsing by itself SHORT_LINK_FLIGHT_MS later (a give-back lost never holds the store).
+ *     Past their sum the open is refused with nothing of the record read, the store marked resting a minute where it
+ *     had no mark and kept so in this instance's memory, so the opens after it send nothing; except a store in the list
+ *     of stores that pay with fewer than the figure's unpaid reads this hour, which pays each read (Claude 2's focal);
+ *   - a store without a paid plan that has rested SHORT_LINK_OFF_AFTER_MS without a gap (its record read at least once
+ *     a SHORT_LINK_OFF_KEEP_SECONDS, saying so each time) has its links turned off: a short static page (410, kept by
+ *     the CDN CACHE_SECONDS) that promises nothing, its record read again once a day at most, never renewed by the page,
+ *     and one SISMEMBER of the list of stores that pay, so one that pays again opens at its next open (a list that
+ *     cannot be read is refused as unknown, never answered off). The moment it pays (lib/store.ts, setSubscription) its
+ *     mark goes and the studio is told they were turned off (lib/short-link-rest.ts); an instance that remembers it
+ *     off answers so up to SHORT_LINK_TIRED_MAX_MS more, and the CDN keeps the page CACHE_SECONDS;
  *   - an instance keeps a resting store's links' store SHORT_LINK_RESTING_OWNER_MS, so it looks each up once a day.
  */
+import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLocalLimit } from "@/lib/local-limit";
 import { takePublicRequestWhy } from "@/lib/traffic";
@@ -113,8 +121,10 @@ import {
   SHORT_LINK_OPEN_UNITS, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_OWNER_MS, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_TIRED_KEPT,
   SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_KEY_SECONDS, SHORT_LINK_UNPAID_PER_HOUR,
   SHORT_LINK_USED_UP_PAUSE_MS, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS,
-  SHORT_LINK_OFF_KEEP_SECONDS, SHORT_LINK_PAID_REST_MAX_MS, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_STORE_READS_PER_HOUR,
-  hourOf, readRestMark, shortLinkRestCheckKey, shortLinkRestHourKey, shortLinkRestKey, shortLinkStoreHourKey, shortLinkUnpaidKey,
+  SHORT_LINK_FLIGHT_MS, SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_OFF_KEEP_SECONDS, SHORT_LINK_PAID_REST_MAX_MS,
+  SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_STORE_READS_PER_HOUR,
+  hourOf, offState, readRestMark, shortLinkRestCheckKey, shortLinkRestHourKey, shortLinkRestKey, shortLinkStoreFlightKey, shortLinkStoreHourKey,
+  shortLinkUnpaidKey,
 } from "@/lib/short-link-open-rules";
 import { CACHE_SECONDS } from "@/lib/short-link-rules";
 import { SITE_URL } from "@/lib/site-url";
@@ -397,79 +407,99 @@ async function payOpen(
       return shortLinkRefusal({ state: "connection", now, until: refused });
     }
   }
-  // The store's own count of the hour (SHORT_LINK_STORE_READS_PER_HOUR, the owner's decision 14 on #3330): every open
-  // is counted there before its record can be read, a cold burst as much as any other, and gives its place back
-  // unless it read the record and the store itself could not pay for it.
-  const capKey = shortLinkStoreHourKey(link.sid, now);
-  const capBack: (string | number)[][] = [["DECR", capKey], ["EXPIRE", capKey, SHORT_LINK_UNPAID_KEY_SECONDS]];
+  // The store's own counts (SHORT_LINK_STORE_READS_PER_HOUR, the owner's decision 14 on #3330, and Claude 2's focal):
+  // this open takes a place among the store's opens in flight, which lapses by itself SHORT_LINK_FLIGHT_MS later, and
+  // reads how many of the store's reads this hour it did not pay for; both before its record can be read, a cold
+  // burst as much as any other. The place is given back however the open ends (ZREM: one not there changes nothing);
+  // only a read the store itself could not pay for is added to the hour's.
+  const flightKey = shortLinkStoreFlightKey(link.sid);
+  const hourKey = shortLinkStoreHourKey(link.sid, now);
+  const place = `${now}:${randomBytes(6).toString("hex")}`;
+  const capBack: (string | number)[][] = [["ZREM", flightKey, place]];
+  const kept: (string | number)[][] = [...capBack, ["INCR", hourKey], ["EXPIRE", hourKey, SHORT_LINK_UNPAID_KEY_SECONDS]];
   // An open the store does not pay for: back in the hour it was counted in, which its refund may have left, after
   // `first` (sent with it).
   const unpaid = async (first: (string | number)[][] = []): Promise<void> => {
     known.delete(code);
     await count(admission.hour, admission.key, now, first, UNPAID_UNITS[admission.hour]);
   };
-  // `counted`: the store's own count is known to have been made, so its place is given back with the open; after a
-  // pipeline that failed it is left as it is, so the count is never taken below what was sent.
-  const unknown = async (counted: boolean): Promise<Response> => {
+  const unknown = async (): Promise<Response> => {
     remember(held, code, now + SHORT_LINK_TIRED_MS, SHORT_LINK_TIRED_KEPT);
     resting.delete(link.sid);
-    await unpaid(counted ? capBack : []);
+    await unpaid(capBack);
     return shortLinkRefusal({ state: "unknown", now });
   };
   const commands: (string | number)[][] = [
     storeIdCommand(link.sid), ["GET", shortLinkRestKey(link.sid)], ["DECR", admission.key], ["EXPIRE", admission.key, SHORT_LINK_UNPAID_KEY_SECONDS],
-    ["INCR", capKey], ["EXPIRE", capKey, SHORT_LINK_UNPAID_KEY_SECONDS],
+    ["ZREMRANGEBYSCORE", flightKey, 0, now - SHORT_LINK_FLIGHT_MS], ["ZADD", flightKey, now, place], ["ZCARD", flightKey],
+    ["EXPIRE", flightKey, 2 * SHORT_LINK_FLIGHT_MS / 1000], ["GET", hourKey],
   ];
   let replies: unknown[];
   try {
     // The refund may have been made, or not: counted again below, never left out of the hour.
     replies = await redisPipeline(commands);
   } catch {
-    return unknown(false);
+    return unknown();
   }
-  if (!Array.isArray(replies) || replies.length !== commands.length) return unknown(false);
-  // The store's own count, read exactly as the hour's (INCR's whole number of at least 1, then EXPIRE's 1); anything
-  // else is a count that cannot be told, refused.
-  const storeCount = countOf(replies, commands.length);
-  if (storeCount === null) return unknown(false);
+  if (!Array.isArray(replies) || replies.length !== commands.length) return unknown();
+  // The store's own counts, read exactly; anything else is a count that cannot be told, refused, nothing read.
+  const inFlight = replies[6];
+  const unpaidReads = replies[8] === null ? 0 : typeof replies[8] === "string" && /^[0-9]{1,9}$/.test(replies[8]) ? Number(replies[8]) : null;
+  if (replies[5] !== 1 || !Number.isSafeInteger(inFlight) || (inFlight as number) < 1 || replies[7] !== 1 || unpaidReads === null) return unknown();
+  const ref = typeof replies[0] === "string" && replies[0] ? replies[0] : null;
+  // Whether the store is in the list of stores that pay (one SISMEMBER by the reference its id names): true, false, or
+  // null when that cannot be told. Asked at most once, only where it decides something.
+  let paying: boolean | null | undefined;
+  const isPaying = async (): Promise<boolean | null> => {
+    if (paying !== undefined) return paying;
+    paying = null;
+    if (!ref) return paying;
+    try {
+      const reply = await redisPipeline([["SISMEMBER", PAYING_INDEX, ref]]);
+      const member = Array.isArray(reply) && reply.length === 1 ? reply[0] : null;
+      paying = member === 1 ? true : member === 0 ? false : null;
+    } catch {
+      paying = null;
+    }
+    return paying;
+  };
+  const read = readRestMark(replies[1]);
   // A store found resting is refused without its record read; once its resting moment is past, only the one open that
   // takes the check, site-wide, reads it again, so the opens in flight when it turns due do not all read it.
-  const mark = restMarkOf(replies[1], now);
-  // Turned off: a store without a paid plan that has rested SHORT_LINK_OFF_AFTER_MS. Nothing of its record is read,
-  // only whether it is in the list of stores that pay (one SISMEMBER, by the reference its id names), so a store that
-  // pays again opens at once even when the moment it paid could not take its mark away (lib/short-link-rest.ts).
-  const offAt = turnedOffAt(replies[1], now);
+  let mark = restMarkOf(replies[1], now);
+  // Turned off: a store without a paid plan that has rested SHORT_LINK_OFF_AFTER_MS without a gap, its record saying
+  // so less than a day ago. Nothing of its record is read; only whether it pays now, so a store that pays again opens at
+  // its next open even when the moment it paid could not take its mark away (lib/short-link-rest.ts), and a list that
+  // cannot be read is refused as unknown, never answered as turned off. Too old a reading: one open reads it again.
+  const off = offState(read, now);
   let paysAgain = false;
-  if (offAt !== null) {
-    let member: unknown = null;
-    try {
-      const reply = typeof replies[0] === "string" && replies[0] ? await redisPipeline([["SISMEMBER", PAYING_INDEX, replies[0]]]) : null;
-      member = Array.isArray(reply) && reply.length === 1 ? reply[0] : null;
-    } catch {
-      member = null;
-    }
-    if (member !== 1) {
+  if (off === "off") {
+    const nowPaying = await isPaying();
+    if (nowPaying === null) return unknown();
+    if (!nowPaying) {
       outcome.kept = false;
-      return offRefused(link.sid, code, now, [...capBack, ["EXPIRE", shortLinkRestKey(link.sid), SHORT_LINK_OFF_KEEP_SECONDS]]);
+      return offRefused(link.sid, code, now, capBack);
     }
     paysAgain = true;
   }
-  if (mark === "resting" && !paysAgain) {
+  if (off === "stale" || paysAgain) mark = "due";
+  if (mark === "resting") {
     outcome.kept = false;
     return restRefused(link.sid, code, now, null, capBack);
   }
-  // Past the store's own count: refused with nothing of its record read, its place given back (only a read the store
-  // could not pay for stays counted). A store found resting before is kept resting here; with no mark at all (a cold
-  // burst, or a store with that many opens in flight) only this open is refused, so a paying store is not held.
-  if (storeCount > SHORT_LINK_STORE_READS_PER_HOUR) {
-    outcome.kept = false;
-    if (mark !== null) return restRefused(link.sid, code, now, null, capBack);
-    known.delete(code);
-    await countResting(now, capBack);
-    return shortLinkRefusal({ state: "tired", now, until: now + SHORT_LINK_TIRED_MS });
+  // Past the store's own counts: refused with nothing of its record read, its place given back, unless the store pays
+  // and has had fewer than the figure's unpaid reads this hour (a paying store with room pays for each read). Refused,
+  // it is marked resting a minute where it had no mark (NX, so a mark that says more is never written over) and kept
+  // so in this instance's memory, so the opens after it send nothing (Claude 2's focal on #3330, HIGH 1).
+  if (inFlight as number + unpaidReads > SHORT_LINK_STORE_READS_PER_HOUR) {
+    const paysWithRoom = unpaidReads < SHORT_LINK_STORE_READS_PER_HOUR && (await isPaying()) === true;
+    if (!paysWithRoom) {
+      outcome.kept = false;
+      return restRefused(link.sid, code, now, mark === null ? "short" : null, capBack);
+    }
   }
   let checking = false;
-  if (mark === "due" || paysAgain) {
+  if (mark === "due") {
     let took: unknown = null;
     try {
       const reply = await redisPipeline([["SET", shortLinkRestCheckKey(link.sid), "1", "NX", "EX", SHORT_LINK_TIRED_MS / 1000]]);
@@ -488,10 +518,10 @@ async function payOpen(
   try {
     store = await storeForIdRefRead(link.sid, replies[0]);
   } catch {
-    return unknown(true);
+    return unknown();
   }
   // A record that cannot be read is not a store gone.
-  if (store === "unknown") return unknown(true);
+  if (store === "unknown") return unknown();
   if (!store || store.statsId !== link.statsId) {
     resting.delete(link.sid);
     remember(ended, code, now + SHORT_LINK_ENDED_MS, SHORT_LINK_TIRED_KEPT);
@@ -503,17 +533,17 @@ async function payOpen(
     outcome.kept = false;
     resting.delete(link.sid);
     remember(known, code, now + SHORT_LINK_KNOWN_MS, SHORT_LINK_KNOWN_KEPT);
-    // Its place in its own count given back; a store that rested and pays again has its mark taken away too, so its
-    // links open everywhere at once, and the studio is told when they had been turned off (best effort: a place not
-    // given back lapses with its hour, a mark left only asks the store again a mark's time later).
-    await redisPipeline(checking ? [...capBack, ...backOnCommands(link.sid, offAt, now)] : capBack).catch(() => {});
+    // Its place given back; a store that rested and pays again has its mark taken away too, so its links open on every
+    // instance that does not remember it resting, and the studio is told when they had been turned off (best effort:
+    // a place not given back lapses SHORT_LINK_FLIGHT_MS later, a mark left only asks the store again later).
+    await redisPipeline(checking ? [...capBack, ...backOnCommands(link.sid, turnedOffAt(replies[1], now), now)] : capBack).catch(() => {});
     return store;
   }
-  // Only the store's own refusal marks it resting, and keeps its place in its own count; best effort, a mark not
+  // Only the store's own refusal marks it resting and is kept in its hour's unpaid reads; best effort, a mark not
   // written is read again next time.
   if (why === "store") {
     outcome.kept = false;
-    return restRefused(link.sid, code, now, { store, since: readRestMark(replies[1])?.since ?? null }, []);
+    return restRefused(link.sid, code, now, { store, before: read }, kept);
   }
   if (why === "connection") {
     // That connection alone, for that store, until its share starts again: the day's end, or the store's window's
@@ -530,39 +560,50 @@ async function payOpen(
     await unpaid(capBack);
     return shortLinkRefusal({ state: "connection", now, until: end });
   }
-  return unknown(true);
+  return unknown();
 }
+
+/** What a resting mark is written from: the store's record just read, with what its mark said before; or "short". */
+type MarkFrom = { store: Store; before: { since: number | null; read: number | null } | null } | "short";
 
 /**
  * A store that cannot take one more request: every link of it refused from this instance's memory, for longer each
  * time it is found still resting, and each link's store kept here a day. The open is counted in the resting hour,
  * never the shared one (Claude 2's first cost review of #3330: a store that cannot pay never uses the hour every other
  * store's links need), after `first` (sent with it). `write` writes the store's resting mark in the same pipeline:
- * SHORT_LINK_TIRED_MS on while the resting hour has room, and SHORT_LINK_TIRED_MAX_MS once it is used (restMark).
+ * from its record (restMark), SHORT_LINK_TIRED_MS on while the resting hour has room and SHORT_LINK_TIRED_MAX_MS once it
+ * is used; or "short", a store past its own counts with no mark, a minute on and only where none is (NX). A store
+ * without a paid plan whose record says it has rested SHORT_LINK_OFF_AFTER_MS without a gap is answered turned off.
  */
-async function restRefused(sid: string, code: string, now: number, write: { store: Store; since: number | null } | null, first: (string | number)[][]): Promise<Response> {
+async function restRefused(sid: string, code: string, now: number, write: MarkFrom | null, first: (string | number)[][]): Promise<Response> {
+  const restUsed = now < pausedUntil.rest;
+  const markMs = restUsed ? SHORT_LINK_TIRED_MAX_MS : SHORT_LINK_TIRED_MS;
+  const written = write === null ? null : write === "short"
+    ? { command: ["SET", shortLinkRestKey(sid), String(now + SHORT_LINK_TIRED_MS), "NX", "EX", SHORT_LINK_UNPAID_KEY_SECONDS] as (string | number)[], off: false }
+    : restMark(sid, write, now, markMs);
+  if (written?.off) return offRefused(sid, code, now, [...first, written.command]);
   const before = resting.get(sid);
   const wait = before && !before.off ? Math.min(before.wait * 2, SHORT_LINK_TIRED_MAX_MS) : SHORT_LINK_TIRED_MS;
   remember(resting, sid, { until: now + wait, wait }, SHORT_LINK_TIRED_KEPT);
   remember(owners, code, { sid, until: now + SHORT_LINK_RESTING_OWNER_MS }, SHORT_LINK_TIRED_KEPT);
   known.delete(code);
-  const restUsed = now < pausedUntil.rest;
-  const markMs = restUsed ? SHORT_LINK_TIRED_MAX_MS : SHORT_LINK_TIRED_MS;
-  const used = await countResting(now, write ? [...first, restMark(sid, write, now, markMs)] : first);
+  const used = await countResting(now, written ? [...first, written.command] : first);
   // The resting hour found used by this very count: the store rests the longer time too (best effort; a mark kept
-  // the shorter time only asks the store again sooner, one open site-wide, inside its own count).
-  if (write && used && !restUsed) await redisPipeline([restMark(sid, write, now, SHORT_LINK_TIRED_MAX_MS)]).catch(() => {});
+  // the shorter time only asks the store again sooner, one open site-wide, inside its own counts).
+  if (write !== null && write !== "short" && used && !restUsed) await redisPipeline([restMark(sid, write, now, SHORT_LINK_TIRED_MAX_MS).command]).catch(() => {});
   return shortLinkRefusal({ state: "tired", now, until: now + wait });
 }
 
 /**
- * A store's resting mark. A store with a paid plan rests until its window ends, when its own requests come back (at
- * least `ms` on, at most SHORT_LINK_PAID_REST_MAX_MS), kept that long and two hours more; a change to its plan takes the
- * mark away (lib/short-link-rest.ts). A store without one rests `ms` on and the mark says since when it has rested
- * that way (`since`, carried from its last mark, or now), kept SHORT_LINK_OFF_KEEP_SECONDS: past
- * SHORT_LINK_OFF_AFTER_MS its links are turned off.
+ * A store's resting mark, from its record just read. A store with a paid plan rests until its window ends, when its
+ * own requests come back (at least `ms` on, at most SHORT_LINK_PAID_REST_MAX_MS), kept that long and two hours more; a
+ * change to its plan takes the mark away (lib/short-link-rest.ts). A store without one rests `ms` on, and the mark says
+ * since when it has rested without a gap (carried from its last mark when that one's record was read less than
+ * SHORT_LINK_OFF_KEEP_SECONDS ago, the mark's own life, or now; a store turned off is read again once a reading is
+ * SHORT_LINK_OFF_CONFIRM_MS old, so a store that keeps resting keeps its since) and that its record said so now, kept SHORT_LINK_OFF_KEEP_SECONDS: once that is
+ * SHORT_LINK_OFF_AFTER_MS, `off`, and its links are turned off (Claude 2's focal on #3330, MEDIUM 3).
  */
-function restMark(sid: string, { store, since }: { store: Store; since: number | null }, now: number, ms: number): (string | number)[] {
+function restMark(sid: string, { store, before }: Exclude<MarkFrom, "short">, now: number, ms: number): { command: (string | number)[]; off: boolean } {
   let paid = false;
   try {
     paid = standingOf(store, now / 1000) === "paid";
@@ -577,15 +618,20 @@ function restMark(sid: string, { store, since }: { store: Store; since: number |
     } catch {
       // `ms` on, then.
     }
-    return ["SET", shortLinkRestKey(sid), String(until), "EX", Math.ceil((until - now) / 1000) + SHORT_LINK_UNPAID_KEY_SECONDS];
+    return { command: ["SET", shortLinkRestKey(sid), String(until), "EX", Math.ceil((until - now) / 1000) + SHORT_LINK_UNPAID_KEY_SECONDS], off: false };
   }
-  const from = since !== null && since <= now ? since : now;
-  return ["SET", shortLinkRestKey(sid), `${now + ms}:${from}`, "EX", SHORT_LINK_OFF_KEEP_SECONDS];
+  const carried = before && before.since !== null && before.read !== null && before.since <= now && now - before.read <= SHORT_LINK_OFF_KEEP_SECONDS * 1000;
+  const since = carried ? (before.since as number) : now;
+  return {
+    command: ["SET", shortLinkRestKey(sid), `${now + ms}:${since}:${now}`, "EX", SHORT_LINK_OFF_KEEP_SECONDS],
+    off: now - since >= SHORT_LINK_OFF_AFTER_MS,
+  };
 }
 
 /**
  * A store whose links are turned off: every link of it answered off from this instance's memory for
- * SHORT_LINK_TIRED_MAX_MS, each link's store kept a day, the open counted in the resting hour after `first`.
+ * SHORT_LINK_TIRED_MAX_MS, each link's store kept a day, the open counted in the resting hour after `first`. Its mark
+ * is never kept longer for it: only a reading of the store's record does that.
  */
 async function offRefused(sid: string, code: string, now: number, first: (string | number)[][]): Promise<Response> {
   remember(resting, sid, { until: now + SHORT_LINK_TIRED_MAX_MS, wait: SHORT_LINK_TIRED_MAX_MS, off: true }, SHORT_LINK_TIRED_KEPT);
@@ -644,7 +690,7 @@ const OFF_PAGE = [
   "<style>body{margin:0;padding:2rem 1rem;font:1.125rem/1.6 system-ui,sans-serif;color:#111;background:#fff}main{max-width:40rem;margin:0 auto}",
   "a{color:inherit;display:inline-block;min-height:44px;padding:.5rem 0}@media (prefers-color-scheme:dark){body{color:#f5f5f5;background:#111}}</style>",
   "</head><body><main><h1>This link is turned off</h1>",
-  "<p>This short link is turned off for now, because the store that shared it does not have a paid plan right now. It will work again as soon as the store has one.</p>",
+  "<p>This short link is turned off, because the store that shared it has not had a paid plan for more than 30 days.</p>",
   `<p><a href="${SITE_URL}/">Go to the Marktmorgen home page</a></p></main></body></html>`,
 ].join("");
 

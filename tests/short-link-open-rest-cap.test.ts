@@ -16,7 +16,7 @@ import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
 import { MAX_LINKS } from "@/lib/short-link-rules";
 import { answering } from "./security/next-headers";
-import { advance, store as redis } from "./redis-stub";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -48,7 +48,9 @@ redis.pipeline = (async (batch: Command[]) => {
 const realNow = Date.now;
 let shift = 0;
 Date.now = () => realNow() + shift;
-const later = (ms: number) => { shift += ms; advance(ms); };
+// Rule 23 (Claude 2's focal on #3330, NIT): was `shift += ms; advance(ms)`, which moved the in-memory database's clock
+// twice as fast (it reads Date.now itself): only the test's clock moves now.
+const later = (ms: number) => { shift += ms; };
 let n = 0;
 const fresh = () => `203.0.${Math.floor(n / 250) % 250}.${(n++ % 250) + 1}`;
 const open = async (code: string, address = fresh()) => {
@@ -75,6 +77,19 @@ async function link(s: { sid: string; statsId?: string | null }, name: string) {
 }
 const startOfHour = () => later(HOUR - (Date.now() % HOUR) + 1_000);
 const reset = () => { redis.clear(); forgetShortLinkOpenMemory(); tiredFolders = new Set(); startOfHour(); };
+/**
+ * Added with Claude 2's focal (MEDIUM 3): a store rests without a gap only while its record keeps saying so, so it is
+ * opened twice a day, on a fresh instance each time, for `ms`; the last answer is returned.
+ */
+async function restFor(code: string, ms: number) {
+  let last = await open(code);
+  for (let t = 12 * HOUR; t <= ms; t += 12 * HOUR) {
+    later(12 * HOUR);
+    forgetShortLinkOpenMemory();
+    last = await open(code);
+  }
+  return last;
+}
 const sMaxAge = (cache: string) => Number(/s-maxage=(\d+)/.exec(cache)?.[1] ?? 0);
 
 async function main() {
@@ -124,11 +139,11 @@ async function main() {
   const goneCode = await link(gone.s, "reel");
   const goneOther = await link(gone.s, "story");
   tiredFolders.add(gone.folder);
+  // Rule 23 (Claude 2's focal, MEDIUM 3): was one refusal, then 29 and 30 days with no open at all; 30 days of resting
+  // are now 30 days with the record read at least once a day saying so, so the store is opened twice a day.
   is("2: found resting, refused", (await open(goneCode)).status, 503);
-  later((OFF_DAYS - 1) * DAY);
-  forgetShortLinkOpenMemory();
-  is("2: after 29 days it is still resting, not turned off", (await open(goneCode)).status, 503);
-  later(DAY + 60_000);
+  is("2: after 29 days of resting it is still resting, not turned off", (await restFor(goneCode, (OFF_DAYS - 1) * DAY)).status, 503);
+  await restFor(goneCode, DAY + 12 * HOUR);
   forgetShortLinkOpenMemory();
   recordReads = 0;
   pipelines = 0;
@@ -171,8 +186,8 @@ async function main() {
   const back = await store("backrest@example.com", "backrest");
   const backCode = await link(back.s, "reel");
   tiredFolders.add(back.folder);
-  await open(backCode);
-  later(OFF_DAYS * DAY + 60_000);
+  // Rule 23 (Claude 2's focal, MEDIUM 3): was one open, then 30 days with none; now 30 days of resting, opened twice a day.
+  await restFor(backCode, OFF_DAYS * DAY + 12 * HOUR);
   forgetShortLinkOpenMemory();
   is("3: turned off", (await open(backCode)).status, 410);
   const paysAt = Date.now();
@@ -202,8 +217,7 @@ async function main() {
   const heal = await store("healrest@example.com", "healrest");
   const healCode = await link(heal.s, "reel");
   tiredFolders.add(heal.folder);
-  await open(healCode);
-  later(OFF_DAYS * DAY + 60_000);
+  await restFor(healCode, OFF_DAYS * DAY + 12 * HOUR);
   forgetShortLinkOpenMemory();
   is("turned off", (await open(healCode)).status, 410);
   tiredFolders = new Set();

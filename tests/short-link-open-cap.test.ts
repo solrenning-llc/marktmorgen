@@ -35,6 +35,7 @@ import { MAX_STORE_BYTES } from "@/lib/store";
 import {
   SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS,
   SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_USED_UP_PAUSE_MS,
+  SHORT_LINK_STORE_COUNT_COMMANDS, SHORT_LINK_STORE_REFUND_COMMANDS, SHORT_LINK_FLIGHT_MS,
 } from "@/lib/short-link-open-rules";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
 import { CURRENT_COMMERCIAL_TERMS } from "@/lib/commercial-margin";
@@ -268,7 +269,9 @@ async function main(): Promise<void> {
   // hour again: 7 pipelines and 12 commands measured for this open (a count that could not be made).
   // Rule 23 (9 November 2026, the owner's decision 14): was "at most 12 commands"; the store's own count adds its INCR and
   // EXPIRE to the pipeline that reads the store's id, and this open, which did not read the record unpaid, gives it back: 16.
-  is("the heaviest unpaid open waits on at most 7 pipelines and sends at most 16 commands", [unpaidPipelines <= 7, unpaidCommands <= 16], [true, true]);
+  // Rule 23 (Claude 2's focal on #3330 @99ac6f3858): was "at most 16 commands"; the store's own counts are five commands
+  // in the pipeline that reads its id (was two), and its place is given back with one ZREM (was DECR and EXPIRE): 18.
+  is("the heaviest unpaid open waits on at most 7 pipelines and sends at most 18 commands", [unpaidPipelines <= 7, unpaidCommands <= 18], [true, true]);
   // Rule 23 (9 November 2026, second pre-review): was request(7 + 2, 12 + 4), the open whose store count could not be
   // made; the heaviest is the free store without a place measured above (9 pipelines and 17 commands), priced at the
   // registry's heaviestUnpaid, which holds that room. Since the third pre-review it is that open found past the resting
@@ -290,7 +293,7 @@ async function main(): Promise<void> {
   // counted in the resting hour every instance shares, SHORT_LINK_REST_UNPAID_PER_HOUR an hour site-wide, each at the heaviest
   // unpaid open, which holds the SET of the resting mark.
   const restMonth = SHORT_LINK_REST_UNPAID_PER_HOUR * MONTH_HOURS * unpaid;
-  console.log(`  cost  heaviest unpaid open $${unpaid.toFixed(6)} (priced at ${SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits} pipelines and ${SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands} commands; ${heaviestPipelines} and ${heaviestCommands} measured at the heaviest), counted-only $${counted.toFixed(6)}; the shared count's unpaid opens $${readMonth.toFixed(2)} a month; the resting hour's opens $${restMonth.toFixed(2)} a month; per instance (their number unknown, never zero): counts beyond them $${instanceMonth.toFixed(2)} a month`);
+  console.log(`  cost  heaviest unpaid open $${unpaid.toFixed(6)} (priced at ${SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits} pipelines and ${SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands} commands; ${heaviestPipelines} and ${heaviestCommands} measured at the heaviest), counted-only $${counted.toFixed(6)}; the shared count's unpaid opens $${readMonth.toFixed(4)} a month; the resting hour's opens $${restMonth.toFixed(4)} a month; per instance (their number unknown, never zero): counts beyond them $${instanceMonth.toFixed(2)} a month`);
   // Rule 23 (9 November 2026): was "under $15" ($14.13 measured); the heaviest open is now priced at 9 waits and 16 commands
   // instead of 8 and 12 (an open its store does not pay for is counted in the hour again), $15.80 measured.
   // Rule 23 (9 November 2026, second pre-review): was "under $16" ($15.80, 60 an hour at 9 waits and 16 commands); now 60 + 20
@@ -317,6 +320,10 @@ async function main(): Promise<void> {
   is("the resting hour's opens, for every instance together, stay under $42 a month", restMonth < 42, true);
   // Rule 23 (9 November 2026): was 6 (count 2, reads 3, DECR 1); now the resting mark's GET and the refund's EXPIRE are sent too.
   is("a paid open's own commands, held in the store's unit (tests/plan-cost-registry.test.ts)", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REST_COMMANDS + SHORT_LINK_REFUND_COMMANDS, 8);
+  // Added with Claude 2's focal on #3330: a place among a store's opens in flight outlasts the heaviest open, every wait at its timeout.
+  is("a place in flight lasts longer than the heaviest open can take", SHORT_LINK_FLIGHT_MS > SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits * REDIS_TIMEOUT_MS, true);
+  // Added with Claude 2's focal on #3330: with the store's own counts (five) and its place given back (one), a paid open sends 14.
+  is("a paid open's own commands with its store's counts, held in SHORT_LINK_OPEN_READ", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REST_COMMANDS + SHORT_LINK_REFUND_COMMANDS + SHORT_LINK_STORE_COUNT_COMMANDS + SHORT_LINK_STORE_REFUND_COMMANDS, 14);
   // The company's cost is held in the test registry, unreviewed: priced above zero, its ceiling unknown, never zero.
   is("the company's cost is held, priced above zero, its reviewed ceiling unknown and not approved", [
     SHORT_LINK_UNPAID_COMPANY_COST.perHour,
@@ -346,10 +353,11 @@ async function main(): Promise<void> {
   // counted before each read, cold burst included (tests/short-link-open-rest-cap.test.ts), each at the heaviest unpaid open.
   const restingStoreMonth = resting.storeReadsPerHour * MONTH_HOURS * unpaid;
   const restingStoreInstanceMonth = SHORT_LINK_UNPAID_COMPANY_COST.perRestingStore.lookupsPerInstancePerHour * MONTH_HOURS * markOpen;
-  console.log(`  cost  past the resting hour, per resting store: its record $${restingStoreMonth.toFixed(2)} a month; per instance, its links looked up $${restingStoreInstanceMonth.toFixed(2)} a month (an open refused on its mark $${markOpen.toFixed(6)}: ${markPipelines} pipelines and ${markCommands} commands measured)`);
+  console.log(`  cost  past the resting hour, per resting store: its record $${restingStoreMonth.toFixed(4)} a month; per instance, its links looked up $${restingStoreInstanceMonth.toFixed(4)} a month (an open refused on its mark $${markOpen.toFixed(6)}: ${markPipelines} pipelines and ${markCommands} commands measured)`);
   // Rule 23 (9 November 2026, the owner's decision 14): was "at most 4 pipelines and 9 commands"; the store's own count's
   // INCR and EXPIRE ride in the pipeline that reads its id, and are given back with the count in the resting hour: 13.
-  is("a resting store's open refused on its mark was measured: at most 4 pipelines and 13 commands", [markPipelines <= 4, markCommands <= 13], [true, true]);
+  // Rule 23 (Claude 2's focal): was "at most 13 commands"; the store's counts are five commands, its place given back with one: 15.
+  is("a resting store's open refused on its mark was measured: at most 4 pipelines and 15 commands", [markPipelines <= 4, markCommands <= 15], [true, true]);
   // Rule 23 (9 November 2026, Claude 2's focal return): was "under $21 a month" ($20.37, the 60 an hour the code did not hold);
   // the claims a mark's time plus a store with no mark read by every open the two hours hold at once, every two hours: $81.49.
   // Rule 23 (9 November 2026, the owner's decision 14): was "under $82 a month" ($81.49) and, for the lookups on one instance,

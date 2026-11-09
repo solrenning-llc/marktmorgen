@@ -395,8 +395,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ship:mail:person:": C, "nl:ship:mail:pool": C, "nl:ship:mail:pool:": C, "nl:ship:mail:row:": C, "nl:ship:mail:store:": C,
   "nl:slink:": T("nl:slink:store:"), "nl:slink:store:": E,
   // The hour counts (two hours each) and a resting store's check (a minute) and own count of the hour (two hours) are the
-  // company's and gone by themselves; its mark is kept at most 35 days (a store without a paid plan, SHORT_LINK_OFF_KEEP_SECONDS)
-  // and the studio's notice that its links were turned off 30 days (SHORT_LINK_BACK_NOTICE_SECONDS).
+  // company's and gone by themselves, as its opens in flight (four minutes); its mark is kept at most 32 days and two hours
+  // (a paying store until its window ends) and the studio's notice that its links were turned off 30 days.
   "nl:slink:open:": Cr(1), "nl:slink:rest:": Cr(36), "nl:slink:tired:": Cr(1),
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,

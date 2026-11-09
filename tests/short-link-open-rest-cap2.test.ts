@@ -23,7 +23,6 @@ const DAY = 86_400_000;
 const STORE_CAP = 20;
 
 let tiredFolders = new Set<string>();
-let recordReads = 0;
 let commandsSent = 0;
 /** Pipelines that give a store's place back, made to fail (a give-back lost to a timeout). */
 let loseGiveBacks = false;
@@ -31,7 +30,6 @@ let breakPayingList = false;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: Command[]) => {
   commandsSent += batch.length;
-  if (batch.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:store:owner:"))) recordReads += 1;
   const givesBack = batch.length > 0 && batch.every((c) => ["DECR", "ZREM", "EXPIRE", "DEL"].includes(String(c[0])) && /^nl:slink:rest:[0-9a-f]{32}:/.test(String(c[1])));
   if (loseGiveBacks && givesBack) throw new Error("timeout");
   if (breakPayingList && batch.some((c) => c[0] === "SISMEMBER")) throw new Error("timeout");
@@ -91,8 +89,14 @@ async function main() {
   const first = await open(lostCodes[0]);
   commandsSent = 0;
   for (let i = 0; i < 200; i += 1) await open(lostCodes[i % lostCodes.length]);
-  console.log(`  HIGH 1 first open ${first.status}; the next 200 on the same instance: ${commandsSent} commands`);
-  is("HIGH 1: past the first, the instance answers that store from memory: 200 opens send at most 20 commands", commandsSent <= 20, true);
+  const firstRound = commandsSent;
+  commandsSent = 0;
+  for (let i = 0; i < 200; i += 1) await open(lostCodes[i % lostCodes.length]);
+  console.log(`  HIGH 1 first open ${first.status}; the next 200 on the same instance: ${firstRound} commands, then 200 more: ${commandsSent}`);
+  // Rule 23 (with the fix): was "200 opens send at most 20 commands"; each of the store's other links is looked up once on
+  // this instance (its count in the shared hour, its GET, its refund: 5 commands), the priced lookup, and then never again.
+  is("HIGH 1: past the first, each other link of that store is looked up once on the instance, at most 5 commands each", firstRound <= (STORE_CAP - 1) * 5, true);
+  is("HIGH 1: and then the instance answers that store from memory: 200 more opens send nothing", commandsSent, 0);
 
   part("MEDIUM 2: a store that pays, with room, is never refused by its own count");
   reset();

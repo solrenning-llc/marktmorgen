@@ -6,8 +6,8 @@
  * reply of any other shape (a missing envelope, "QUEUED", a number, a
  * lower-case "ok") raised the counter as if a new person had been offered it.
  * Expected: only an exact "OK" raises it; nil (already begun) does not; any
- * other answer does not either and is reported, and the offer itself is
- * still read back as before.
+ * other answer does not either and is reported, and no offer is shown on it
+ * (its start is unknown too: tests/welcome-offer-start-exact.test.ts).
  */
 import { welcomeFor } from "@/lib/welcome-offer-send";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWelcomeOffer, storeForEmail } from "@/lib/store";
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "countkitchen", "Count Kitchen", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestWelcomeCnt1", true);
+  await setStripeAccount(OWNER, "acct_WelcomeCnt1", true);
   await setSubscription(OWNER, { customerId: "cus_WelcomeCnt01", subscriptionId: "sub_WelcomeCnt01", active: true, period: paidPeriod() });
   const free = await addProduct(OWNER, "Pantry Guide", "", "0", null);
   const paid = await addProduct(OWNER, "Knife Skills", "", "49", null);
@@ -83,7 +83,8 @@ async function main(): Promise<void> {
     odd = undefined;
     is(`${label}: the counter stays at one`, await counted(statsId), 1);
     is(`${label}: reported`, reported.length > before, true);
-    is(`${label}: the offer is still read and shown`, offer?.percent, 25);
+    // The start is unknown too (review of #3298, rule 24): no offer is shown on it (tests/welcome-offer-start-exact.test.ts).
+    is(`${label}: no offer is shown`, offer, null);
   }
 
   part("An exact OK still counts");

@@ -128,7 +128,7 @@ export function ProductIdeas({
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <button
-            className="btn btn-secondary btn-sm min-h-11"
+            className="btn btn-secondary btn-sm inline-flex min-h-11 items-center"
             type="button"
             disabled={busy || !allowanceKnown || left <= 0}
             aria-busy={busy}
@@ -151,7 +151,7 @@ export function ProductIdeas({
           </p>
         ) : null}
         {before ? (
-          <button className="btn btn-ghost btn-sm min-h-11" type="button" onClick={undo}>
+          <button className="btn btn-ghost btn-sm inline-flex min-h-11 items-center" type="button" onClick={undo}>
             {IDEAS_COPY.undo}
           </button>
         ) : null}
@@ -170,7 +170,7 @@ export function ProductIdeas({
                   <p className="mt-1 text-sm text-ink">
                     <span className="font-semibold">{IDEAS_COPY.why}</span> {idea.why}
                   </p>
-                  <button className="btn btn-secondary btn-sm mt-2 min-h-11" type="button" onClick={() => use(idea)}>
+                  <button className="btn btn-secondary btn-sm mt-2 inline-flex min-h-11 items-center" type="button" onClick={() => use(idea)}>
                     {IDEAS_COPY.use}<span className="sr-only">: {idea.title}</span>
                   </button>
                 </li>

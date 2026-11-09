@@ -1,3 +1,17 @@
+# Codex Z — r18 checkpoint, 2026-11-09 00:54 UTC (08/11 21:54 Fortaleza)
+
+FIRST fetched latest remote docs/z-cost-audit-checkpoint.md on codex/z-cost-audit-checkpoint: blobe30610b5f97df1a8cdb8bef7130ef1c0eb18341b / FULL749419 matches ENTIRE prior canonical content exactly. All previous heads, REDs, WIPs, cap and consumed retry ledgers remain unchanged below.
+
+Fresh main API787c8748ab9124fb861235c59e8e6b221c101bdc, identical to last normative/inbox/reservations read; no new main/inbox content or integration inferred. Fresh canonical ROOTcd70701aa831b5688abca8cc54dfb176c8dc161d equals prior verified FULL7030011; no new channel delta at 00:54:11UTC. Five own authored units retained; no sixth or duplicate.
+
+Fresh direct own metadata2741OPEN/unmerged/headab5818b75c73ae66fffa1365677e46e0a2c3c400 and2819OPEN/unmerged/head3fdcbe1c3bbcdeb47149ef9d959f8fc8dd5d43ac, unchanged. FULL discussion timelines2741(20),2819(8),3024(18),3313(2) have no created/updated comments after00:50:46UTC. R2/C1dispositions on five own still pending, shared3024MEDstillOPEN/noauthorcorrective,3313LOWsstillOPEN/noauthorcorrective. Two initial get_pr_info argumentbinding errors missingrepository_full_name were READ-ONLY/NOMUTATION; corrected endpoint invocation succeeded, no semantic/CI retry.
+
+Prior completed3311enumfocal5820524643/e918 and evidencebd575a3d/tc5bfb2d0 remain preserved, no replay. Wholecheckup112attempts100dispatch12refused358nested remainsINCONCLUSIVE/all52excluded; C1NEW200ONEwholefinale918 requestPENDING, not grant. All other caps/retries remain exactly as prior. No CI status query/poll/retry/cancel, test/type/lint/scanner replay, code/proof source edit, author ref/product push, main chase/integration, queue/merge, price/limits/flags/account/payment/provider/PII.
+
+SERIAL Medium ZERO agents, no watcher/background process/automation change. Temporary external dispositions and new requested compatible review are the next causal inputs; no global backlog exhaustion or task completion asserted. At final ROOT exact point and full readback before ending this run. Existing project continuity retained.
+
+---
+
 # Codex Z — canonical continuation observed 2026-11-09 00:50:46 UTC
 
 r17 stopping after completion/readbacks of nominal #3311 enum focal. SERIAL Medium ZERO agents; no background watcher/automation changes. This section supersedes prior top's NEXT #3311 metadata-only state: reservation, technique, evidence and formal focal NOW COMPLETED below. COMPLETE prior741245-character checkpoint3d774f38e4295ddafb546cb64621554b85a984d7/blobd65ea476dc2602a1df95cde163a44a4fb68e3d29 FULL EXACT preserved below. Five own authored units, HOLDs, heads, REDs, WIPs, consumed retries/caps intact; no sixth. Reviews do not count. No product push, author-ref/product edit, main integration, CI query/retry/cancel, queue/merge, account/provider/live payment/PII change.

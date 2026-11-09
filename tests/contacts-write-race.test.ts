@@ -16,7 +16,7 @@
 import { forgetContactPerson, leadsKey, noteProduct, orderRoom, readUnsubToken, stopWriting, tokensFor, unsubscribe, upsertContact } from "@/lib/contacts";
 import { stopCounting } from "@/lib/mail-clicks";
 import { sendTo } from "@/lib/mail";
-import { suppressCommand, suppressedKey } from "@/lib/suppression";
+import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimHandle, ensureListId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -192,6 +192,61 @@ async function main() {
     is("a new sign-up through an order still joins", [fresh.joined, fresh.gotProduct], [true, true]);
     const again = await upsertContact(list, "fresh@example.com", { agreed: true, explicit: true, source: "free", productId: "prod_10", title: "Course" }, ROOM);
     is("and a second one notes the product without joining twice", [again.joined, again.gotProduct, JSON.parse(String(row(list, "fresh@example.com"))).ids], [false, true, ["prod_9", "prod_10"]]);
+  }
+
+  part("unsubscribe against a deletion or a purchase in between");
+  {
+    const list = "race_unsub_erase", email = "leaving.gone@example.com";
+    const token = await setup(list, email);
+    const race = raceAt(rowRead(list, 1), () => erase(list, email));
+    const answer = await unsubscribe(token);
+    redis.pipeline = real;
+    is("control: the race ran", race.ran(), true);
+    is("a person deleted between the press's read and its write is not written back; the press is done by the deletion", [row(list, email), answer?.email], [null, email]);
+    is("and the mark that keeps them off stays", redis.run(["HLEN", suppressedKey(list)]), 1);
+  }
+  {
+    const list = "race_unsub_note", email = "leaving.buyer@example.com";
+    const token = await setup(list, email);
+    const race = raceAt(rowRead(list, 1), () => noteProduct(list, email, "prod_11", "Guide", OWNER));
+    await unsubscribe(token);
+    redis.pipeline = real;
+    is("control: the race ran", race.ran(), true);
+    const after = (await readUnsubToken(token))?.contact;
+    is("a purchase noted in between is kept, and the press still takes them off", [after?.unsub, after?.ids], [true, ["prod_11"]]);
+  }
+
+  part("A yes from before a deletion never undoes it (a thank-you page of an older order reloaded)");
+  for (const [what, room] of [["the store's room", ROOM], ["an order's room", orderRoom(OWNER)]] as const) {
+    const list = `old_yes_${what.length}`, email = "old.yes@example.com";
+    await setup(list, email);
+    const ordered = new Date(Date.now() - 60_000).toISOString();
+    await erase(list, email);
+    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "buyer", at: ordered, productId: "prod_12", title: "Book" }, room);
+    is(`${what}: an older order's yes writes nothing back and lifts nothing`, [row(list, email), result.joined, redis.run(["HLEN", suppressedKey(list)])], [null, false, 1]);
+    const bought = await upsertContact(list, email, { agreed: false, explicit: false, source: "buyer", at: ordered, productId: "prod_12", title: "Book" }, room);
+    is(`${what}: nor does an older purchase without the box`, [row(list, email), bought.gotProduct], [null, false]);
+  }
+  for (const [what, room] of [["the store's room", ROOM], ["an order's room", orderRoom(OWNER)]] as const) {
+    const list = `new_yes_${what.length}`, email = "new.yes@example.com";
+    await setup(list, email);
+    await forgetContactPerson(list, email);
+    // Deleted ten seconds ago; their own yes, given now.
+    await real([suppressCommand(list, email, Math.floor(Date.now() / 1000) - 10)]);
+    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free" }, room);
+    is(`${what}: their own yes given after the deletion puts them back and lifts it`, [result.joined, JSON.parse(String(row(list, email))).agreed, redis.run(["HLEN", suppressedKey(list)])], [true, true, 0]);
+  }
+  {
+    const list = "later_purchase", email = "later.buyer@example.com";
+    await real([suppressCommand(list, email, Math.floor(Date.now() / 1000) - 10)]);
+    const result = await upsertContact(list, email, { agreed: false, explicit: false, source: "buyer", productId: "prod_13", title: "Pack" }, orderRoom(OWNER));
+    is("a purchase made after the deletion, without the box, is still noted, as one who may not be written to", [result.gotProduct, JSON.parse(String(row(list, email))).agreed, redis.run(["HLEN", suppressedKey(list)])], [true, false, 1]);
+  }
+  for (const [what, mark] of [["a mark that is not a count of seconds", "soon"], ["a deletion in this same second", String(Math.floor(Date.now() / 1000))]] as const) {
+    const list = `unknown_mark_${what.length}`, email = "unknown.mark@example.com";
+    await redis.pipeline([["HSET", suppressedKey(list), suppressionPrint(list, email), mark]]);
+    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free" }, ROOM);
+    is(`${what}: not known to be older, so nothing is written and nothing lifted`, [row(list, email), result.joined, redis.run(["HLEN", suppressedKey(list)])], [null, false, 1]);
   }
 
   part("The deleted mark where links are handed out (tokensFor, sendTo)");

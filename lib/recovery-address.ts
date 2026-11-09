@@ -28,10 +28,11 @@
  *   nl:auth:rec:link:<hash>   a link sent to the recovery address, 15 minutes, spent once
  *   nl:auth:rec:until:<hash>  until when logins through the recovery address are locked
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
 import { LOCKED_LIST } from "@/lib/locked-words";
 
@@ -46,11 +47,20 @@ const setKey = (session: string) => `nl:auth:rec:set:${sha(`nimbus-rec-set:${ses
 const linkKey = (token: string) => `nl:auth:rec:link:${sha(`nimbus-rec-link:${token}`).slice(0, 40)}`;
 const untilKey = (email: string) => `nl:auth:rec:until:${sha(`nimbus-rec-until:${normaliseEmail(email)}`).slice(0, 40)}`;
 
-/** The account's recovery address, or "" for none. */
+/**
+ * The account's recovery address, or "" for none: only when Redis says there is none (GET null). A reply in any
+ * other shape, or a value this code never wrote, is unknown and throws UnknownReplyError (CX-123 rule 24; VR2
+ * audit): it is never read as "this account has no recovery address", which the studio, the two-step status and the
+ * rescue from the code page would say, and a move would act on.
+ */
 export async function recoveryAddress(email: string): Promise<string> {
   if (!isRedisConfigured()) return "";
-  const [raw] = await redisPipeline([["GET", addressKey(email)]]);
-  return typeof raw === "string" && EMAIL_PATTERN.test(raw) ? raw : "";
+  const replies = repliesFor(await redisPipeline([["GET", addressKey(email)]]), 1);
+  if (!replies) throw new UnknownReplyError("a recovery address");
+  const [raw] = replies;
+  if (raw === null) return "";
+  if (typeof raw !== "string" || !EMAIL_PATTERN.test(raw)) throw new UnknownReplyError("a recovery address");
+  return raw;
 }
 
 /** Keeps an address already proved to be read (the two-step setup's own code). */
@@ -82,7 +92,7 @@ export async function startRecoveryAddress(email: string, session: string, raw: 
   if (!address || address.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(address)) return "invalid";
   if (address === normaliseEmail(email)) return "same";
   if (!(await withinLimit("recovery-address", normaliseEmail(email), 5, 60 * 60))) return "limited";
-  const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, "0");
+  const code = String(randomInt(1_000_000)).padStart(6, "0");
   const sent = await mail(address, `${code} is your code to confirm a recovery address`, [
     `The Marktmorgen account ${normaliseEmail(email)} is choosing this address to get back in if its owner can no longer open their email or lose their phone.`,
     "",

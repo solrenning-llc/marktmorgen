@@ -24,10 +24,12 @@ export async function setupOwnedReader(options={}){
  // A download can fail before preferences are installed. Only the pinned
  // macOS preferences asset plus an explicit network-fetch failure qualifies;
  // signature, mount, permission, timeout and unknown errors remain failures.
+ const cacheAsset="guidepup-voiceover-preferences-macos-26.dmg";
  const cacheDownload=platform==="darwin"&&!first.signal&&!first.error&&
   first.status!==null&&first.status!==0&&
-  output.includes("Failed to download Guidepup cache asset: guidepup-voiceover-preferences-macos-26.dmg")&&
-  output.includes("Cause: TypeError: fetch failed");
+  output.includes(`Failed to download Guidepup cache asset: ${cacheAsset}`)&&
+  (output.includes("Cause: TypeError: fetch failed")||
+   output.includes(`Cause: Error: Failed to download Guidepup cache asset: ${cacheAsset} (504 )`));
  if(!permissionPropagation&&!cacheDownload)throw Error("Reader preparation failed; no permitted recovery");
  // Repeat only idempotent preparation once. Never skip download validation,
  // change SIP/TCC protections, retry the reader pilot or convert failure to approval.

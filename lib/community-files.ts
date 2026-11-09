@@ -14,8 +14,10 @@
  *   nl:cimg:doors            doors given and not yet used in a post, by when
  */
 import { createHash } from "node:crypto";
+import { isProxy } from "node:util/types";
 import { del, get, head } from "@/lib/blob";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import type { ImageStore } from "@/lib/community-image";
 
 async function firstBytes(path: string): Promise<Uint8Array | null> {
@@ -71,8 +73,23 @@ export async function takePicturePlace(path: string, limit: number): Promise<boo
   const folder = folderOf(path);
   if (!folder || !Number.isSafeInteger(limit) || limit <= 0 || !isRedisConfigured()) return false;
   try {
-    const [count] = await redisPipeline([["INCR", countKey(folder)]]);
-    if (Number(count) <= limit) return true;
+    const reply = await redisPipeline([["INCR", countKey(folder)]]);
+    if (
+      typeof reply !== "object" ||
+      reply === null ||
+      isProxy(reply) ||
+      !Array.isArray(reply) ||
+      Object.getPrototypeOf(reply) !== Array.prototype ||
+      reply.length !== 1
+    )
+      return false;
+    const keys = Reflect.ownKeys(reply);
+    if (keys.length !== 2 || !keys.includes("0") || !keys.includes("length")) return false;
+    const slot = Object.getOwnPropertyDescriptor(reply, "0");
+    if (!slot || !Object.hasOwn(slot, "value")) return false;
+    const count = slot.value;
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count <= 0) return false;
+    if (count <= limit) return true;
     await redisPipeline([["DECR", countKey(folder)]]);
   } catch (error) {
     console.error("could not count a community picture", error);
@@ -155,13 +172,24 @@ export async function dropCommunityImage(path: string | undefined | null): Promi
 export async function sweepCommunityUploads(now = Date.now(), limit = 300): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const before = Math.floor(now / 1000) - UPLOAD_TTL_SECONDS;
-  const [found] = await redisPipeline([["ZRANGEBYSCORE", DOORS_KEY, 0, before, "LIMIT", 0, limit]]);
-  const paths = (Array.isArray(found) ? found : []).filter((p): p is string => typeof p === "string");
+  // Read exactly (CX-123 rule 24): a list in another shape is unknown, never "none to sweep".
+  const found = repliesFor(await redisPipeline([["ZRANGEBYSCORE", DOORS_KEY, 0, before, "LIMIT", 0, limit]]), 1);
+  const paths = found ? stringList(found[0]) : null;
+  if (!paths) throw new UnknownReplyError("the community pictures to sweep");
   let swept = 0;
   for (const path of paths) {
     // Taken off the list first, so a run that stops halfway never gives a place back twice.
-    const [removed] = await redisPipeline([["ZREM", DOORS_KEY, path]]);
-    if (Number(removed) !== 1) continue;
+    // A throw (a timeout after it was sent) may have taken it off as well: unknown, the same as an odd answer.
+    const answered = await redisPipeline([["ZREM", DOORS_KEY, path]]).then((replies) => repliesFor(replies, 1), () => null);
+    const removed = answered ? countOf(answered[0]) : null;
+    if (removed === 0) continue;
+    if (removed !== 1) {
+      // It may have been taken off the list: put back, so a later sweep deletes it and gives its place back once.
+      // Its door ran out a day ago (UPLOAD_TTL_SECONDS), so nobody can have put it in a post since.
+      console.error("could not tell whether an unused community picture was taken off the list; listed again");
+      await redisPipeline([["ZADD", DOORS_KEY, before, path]]).catch(() => null);
+      continue;
+    }
     try {
       // A door never used may never have been sent a file: deleting nothing is fine.
       await del(path);

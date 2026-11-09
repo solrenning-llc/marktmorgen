@@ -19,6 +19,8 @@ const S = " ";
 
 const en = {
   pageTitle: "Your order",
+  /** Beside the drawn mark once Stripe confirmed the payment (components/payment-received.tsx, 654 [WG14]). */
+  paymentReceived: "Payment received",
   /** What a page that found no paid order says, by what was found instead. */
   notices: {
     unpaid: {
@@ -95,12 +97,12 @@ const en = {
   groupBoughtFor: (store: string, forWhom: string, price: string) => ` from ${store} for ${forWhom}, for ${price}.`,
   groupBought: (store: string, price: string) => ` from ${store}, for ${price}.`,
   groupSend: (title: string) =>
-    `Send it to the people it is for. Each one opens it and types their own email address; a link arrives in their inbox, and opening it puts ${title} on that address, as if they had bought it.`,
+    `Send it to the people it is for. Each one opens it and types their own email address. If the email with the link reaches them, opening it puts ${title} on that address, as if they had bought it.`,
   groupTakeOne: (people: number) => `Take a place yourself the same way: you paid for ${people}, and you are one of them only if you take one.`,
   groupDemo:
     "This is the demo store, which sends no email, so it makes no link and hands out no places. On a real store this page shows one link to pass on, and the same link is in your receipt: each person opens it, types their own email and has it on their own address.",
-  noGroupLink: "We could not get your link just now. Refresh this page in a moment; it is also on its way to your email.",
-  groupReceipt: (email: string) => `The same link is in the receipt sent to ${email}: keep it, it is how the places are handed out.`,
+  noGroupLink: "We could not get your link just now. Refresh this page in a moment; an email with it may also reach you.",
+  groupReceipt: (email: string) => `If the receipt reaches ${email}, it includes the same link: keep it, it is how the places are handed out.`,
 
   // ---- What was bought -------------------------------------------------------------------------------
   trialStarted: "Trial started",
@@ -223,6 +225,12 @@ const en = {
     "Some PayPal payments, such as ones from a bank account, take a few days to clear. As soon as PayPal confirms it, what you bought is emailed to the address of your PayPal account. There is nothing more to do here.",
   tooManyTries: "That was a lot of tries in a few minutes",
   ppWrite: (store: string) => `If PayPal shows a payment to ${store}, write to them by replying to PayPal's receipt.`,
+  ppCouldNotCheck: "We could not check this payment just now",
+  ppCouldNotCheckBody: "If you paid, it will be handed over and your receipt emailed; refresh in a minute.",
+  ppHandingOver: "Payment received, we're handing it over",
+  ppHandingOverBody: (email: string) => `Your receipt will be emailed to ${email} once it is handed over. Refresh in a minute.`,
+  ppRefunded: "Payment refunded",
+  ppRefundedBody: "This payment was refunded in full through PayPal, so this purchase is no longer yours to open. Your PayPal account shows the refund.",
   waitFew: "Wait a few minutes, then open this page again.",
 };
 
@@ -230,6 +238,7 @@ export type ThanksWords = typeof en;
 
 const es: ThanksWords = {
   pageTitle: "Tu pedido",
+  paymentReceived: "Pago recibido",
   notices: {
     unpaid: {
       title: "Este pedido no se ha pagado",
@@ -301,12 +310,12 @@ const es: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` a ${store} para ${forWhom}, por ${price}.`,
   groupBought: (store, price) => ` a ${store}, por ${price}.`,
   groupSend: (title) =>
-    `Envíalo a las personas para quienes es. Cada una lo abre y escribe su propia dirección de email; le llega un enlace a su bandeja de entrada, y al abrirlo ${title} queda en esa dirección, como si lo hubiera comprado.`,
+    `Envíalo a las personas para quienes es. Cada una lo abre y escribe su propia dirección de email. Si le llega el email con el enlace, al abrirlo ${title} queda en esa dirección, como si lo hubiera comprado.`,
   groupTakeOne: (people) => `Toma tú una plaza de la misma manera: pagaste por ${people}, y solo ocupas una si la tomas.`,
   groupDemo:
     "Esta es la tienda de demostración, que no envía emails, así que no crea ningún enlace ni reparte plazas. En una tienda real, esta página muestra un enlace para compartir, y el mismo enlace está en tu recibo: cada persona lo abre, escribe su propio email y lo tiene en su propia dirección.",
-  noGroupLink: "Ahora mismo no pudimos obtener tu enlace. Actualiza esta página en un momento; también va de camino a tu email.",
-  groupReceipt: (email) => `El mismo enlace está en el recibo enviado a ${email}: guárdalo, es como se reparten las plazas.`,
+  noGroupLink: "Ahora mismo no pudimos obtener tu enlace. Actualiza esta página en un momento; también puede llegarte por email.",
+  groupReceipt: (email) => `Si el recibo llega a ${email}, incluye el mismo enlace: guárdalo, es como se reparten las plazas.`,
 
   trialStarted: "Prueba iniciada",
   youAreBooked: "Tienes tu reserva",
@@ -421,11 +430,18 @@ const es: ThanksWords = {
     "Algunos pagos de PayPal, como los hechos desde una cuenta bancaria, tardan unos días en confirmarse. En cuanto PayPal lo confirme, lo que compraste se envía por email a la dirección de tu cuenta de PayPal. No tienes que hacer nada más aquí.",
   tooManyTries: "Fueron muchos intentos en pocos minutos",
   ppWrite: (store) => `Si PayPal muestra un pago a ${store}, escríbele respondiendo al recibo de PayPal.`,
+  ppCouldNotCheck: "No pudimos comprobar este pago ahora mismo",
+  ppCouldNotCheckBody: "Si pagaste, lo que compraste se te entregará y tu recibo se enviará por email; actualiza la página en un minuto.",
+  ppHandingOver: "Pago recibido, lo estamos entregando",
+  ppHandingOverBody: (email) => `Tu recibo se enviará por email a ${email} en cuanto se entregue. Actualiza la página en un minuto.`,
+  ppRefunded: "Pago reembolsado",
+  ppRefundedBody: "Este pago se reembolsó por completo a través de PayPal, así que ya no puedes abrir esta compra. Tu cuenta de PayPal muestra el reembolso.",
   waitFew: "Espera unos minutos y vuelve a abrir esta página.",
 };
 
 const fr: ThanksWords = {
   pageTitle: "Votre commande",
+  paymentReceived: "Paiement reçu",
   notices: {
     unpaid: {
       title: "Cette commande n'a pas été payée",
@@ -496,12 +512,12 @@ const fr: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` auprès de ${store} pour ${forWhom}, pour ${price}.`,
   groupBought: (store, price) => ` auprès de ${store}, pour ${price}.`,
   groupSend: (title) =>
-    `Envoyez-le aux personnes concernées. Chacune l'ouvre et saisit sa propre adresse e-mail${S}; un lien arrive dans sa boîte de réception, et l'ouvrir met ${title} sur cette adresse, comme si elle l'avait acheté.`,
+    `Envoyez-le aux personnes concernées. Chacune l'ouvre et saisit sa propre adresse e-mail${S}; si l'e-mail contenant le lien lui parvient, l'ouvrir met ${title} sur cette adresse, comme si elle l'avait acheté.`,
   groupTakeOne: (people) =>
     `Prenez vous-même une place de la même façon${S}: vous avez payé pour ${people}, et vous n'en faites partie que si vous en prenez une.`,
   groupDemo: `Ceci est la boutique de démonstration, qui n'envoie aucun e-mail, elle ne crée donc aucun lien et ne distribue aucune place. Dans une vraie boutique, cette page affiche un lien à transmettre, et le même lien figure sur votre reçu${S}: chaque personne l'ouvre, saisit son propre e-mail et l'a sur sa propre adresse.`,
-  noGroupLink: `Nous n'avons pas pu obtenir votre lien pour l'instant. Actualisez cette page dans un instant${S}; il est aussi en route vers votre boîte e-mail.`,
-  groupReceipt: (email) => `Le même lien se trouve sur le reçu envoyé à ${email}${S}: gardez-le, c'est avec lui que les places sont distribuées.`,
+  noGroupLink: `Nous n'avons pas pu obtenir votre lien pour l'instant. Actualisez cette page dans un instant${S}; il peut aussi vous parvenir par e-mail.`,
+  groupReceipt: (email) => `Si le reçu arrive à ${email}, il contient le même lien${S}: gardez-le, c'est avec lui que les places sont distribuées.`,
 
   trialStarted: "Essai commencé",
   youAreBooked: "Votre réservation est faite",
@@ -618,11 +634,18 @@ const fr: ThanksWords = {
     "Certains paiements PayPal, comme ceux depuis un compte bancaire, prennent quelques jours. Dès que PayPal le confirme, votre achat est envoyé par e-mail à l'adresse de votre compte PayPal. Vous n'avez rien d'autre à faire ici.",
   tooManyTries: "Beaucoup d'essais en quelques minutes",
   ppWrite: (store) => `Si PayPal affiche un paiement à ${store}, écrivez-lui en répondant au reçu de PayPal.`,
+  ppCouldNotCheck: "Nous n'avons pas pu vérifier ce paiement pour le moment",
+  ppCouldNotCheckBody: "Si vous avez payé, votre achat vous sera remis et votre reçu envoyé par e-mail ; actualisez la page dans une minute.",
+  ppHandingOver: "Paiement reçu, nous vous remettons votre achat",
+  ppHandingOverBody: (email) => `Votre reçu sera envoyé par e-mail à ${email} dès que l'achat vous sera remis. Actualisez la page dans une minute.`,
+  ppRefunded: "Paiement remboursé",
+  ppRefundedBody: "Ce paiement a été remboursé en totalité via PayPal, vous ne pouvez donc plus ouvrir cet achat. Votre compte PayPal indique le remboursement.",
   waitFew: "Patientez quelques minutes, puis rouvrez cette page.",
 };
 
 const de: ThanksWords = {
   pageTitle: "Ihre Bestellung",
+  paymentReceived: "Zahlung erhalten",
   notices: {
     unpaid: {
       title: "Diese Bestellung wurde nicht bezahlt",
@@ -694,12 +717,12 @@ const de: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` bei ${store} für ${forWhom}, für ${price}.`,
   groupBought: (store, price) => ` bei ${store}, für ${price}.`,
   groupSend: (title) =>
-    `Schicken Sie ihn an die Personen, für die er gedacht ist. Jede öffnet ihn und gibt ihre eigene E-Mail-Adresse ein; ein Link kommt in ihr Postfach, und wer ihn öffnet, hat ${title} auf dieser Adresse, als hätte er es gekauft.`,
+    `Schicken Sie ihn an die Personen, für die er gedacht ist. Jede öffnet ihn und gibt ihre eigene E-Mail-Adresse ein. Falls die E-Mail mit dem Link sie erreicht, wird ${title} beim Öffnen dieser Adresse zugeordnet, als hätte sie es gekauft.`,
   groupTakeOne: (people) => `Nehmen Sie selbst auf dieselbe Weise einen Platz: Sie haben für ${people} bezahlt und gehören nur dazu, wenn Sie einen nehmen.`,
   groupDemo:
     "Dies ist der Demo-Shop, der keine E-Mails verschickt, daher erstellt er keinen Link und vergibt keine Plätze. In einem echten Shop zeigt diese Seite einen Link zum Weitergeben, und derselbe Link steht auf Ihrer Quittung: Jede Person öffnet ihn, gibt ihre eigene E-Mail ein und hat es auf ihrer eigenen Adresse.",
-  noGroupLink: "Wir konnten Ihren Link gerade nicht abrufen. Laden Sie diese Seite gleich neu; er ist auch per E-Mail unterwegs.",
-  groupReceipt: (email) => `Derselbe Link steht auf der Quittung an ${email}: Bewahren Sie ihn auf, damit werden die Plätze vergeben.`,
+  noGroupLink: "Wir konnten Ihren Link gerade nicht abrufen. Laden Sie diese Seite gleich neu; er kann Sie auch per E-Mail erreichen.",
+  groupReceipt: (email) => `Falls die Quittung ${email} erreicht, enthält sie denselben Link: Bewahren Sie ihn auf, damit werden die Plätze vergeben.`,
 
   trialStarted: "Testphase gestartet",
   youAreBooked: "Ihr Termin ist gebucht",
@@ -815,11 +838,18 @@ const de: ThanksWords = {
     "Manche PayPal-Zahlungen, etwa vom Bankkonto, brauchen ein paar Tage. Sobald PayPal sie bestätigt, wird Ihr Kauf an die Adresse Ihres PayPal-Kontos gemailt. Hier ist nichts weiter zu tun.",
   tooManyTries: "Das waren viele Versuche in wenigen Minuten",
   ppWrite: (store) => `Wenn PayPal eine Zahlung an ${store} zeigt, schreiben Sie, indem Sie auf die Quittung von PayPal antworten.`,
+  ppCouldNotCheck: "Wir konnten diese Zahlung gerade nicht prüfen",
+  ppCouldNotCheckBody: "Wenn Sie bezahlt haben, wird Ihr Kauf übergeben und Ihre Quittung gemailt; laden Sie die Seite in einer Minute neu.",
+  ppHandingOver: "Zahlung erhalten, wir übergeben Ihren Kauf",
+  ppHandingOverBody: (email) => `Ihre Quittung wird an ${email} gemailt, sobald der Kauf übergeben ist. Laden Sie die Seite in einer Minute neu.`,
+  ppRefunded: "Zahlung erstattet",
+  ppRefundedBody: "Diese Zahlung wurde über PayPal vollständig erstattet, daher können Sie diesen Kauf nicht mehr öffnen. Ihr PayPal-Konto zeigt die Erstattung.",
   waitFew: "Warten Sie ein paar Minuten und öffnen Sie diese Seite dann erneut.",
 };
 
 const it: ThanksWords = {
   pageTitle: "Il tuo ordine",
+  paymentReceived: "Pagamento ricevuto",
   notices: {
     unpaid: {
       title: "Questo ordine non è stato pagato",
@@ -891,12 +921,12 @@ const it: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` da ${store} per ${forWhom}, per ${price}.`,
   groupBought: (store, price) => ` da ${store}, per ${price}.`,
   groupSend: (title) =>
-    `Mandalo alle persone a cui è destinato. Ognuna lo apre e scrive il proprio indirizzo email; arriva un link nella sua casella, e aprirlo mette ${title} su quell'indirizzo, come se l'avesse comprato.`,
+    `Mandalo alle persone a cui è destinato. Ognuna lo apre e scrive il proprio indirizzo email. Se le arriva l'email con il link, aprendolo ${title} viene associato a quell'indirizzo, come se l'avesse comprato.`,
   groupTakeOne: (people) => `Prendi anche tu un posto allo stesso modo: hai pagato per ${people}, e ne fai parte solo se ne prendi uno.`,
   groupDemo:
     "Questo è il negozio dimostrativo, che non invia email, quindi non crea nessun link e non assegna posti. In un negozio vero, questa pagina mostra un link da passare, e lo stesso link è nella tua ricevuta: ogni persona lo apre, scrive la propria email e lo ha sul proprio indirizzo.",
-  noGroupLink: "Al momento non siamo riusciti a ottenere il tuo link. Aggiorna questa pagina tra un momento; è anche in arrivo nella tua email.",
-  groupReceipt: (email) => `Lo stesso link è nella ricevuta inviata a ${email}: conservalo, è così che si assegnano i posti.`,
+  noGroupLink: "Al momento non siamo riusciti a ottenere il tuo link. Aggiorna questa pagina tra un momento; potrebbe anche arrivarti via email.",
+  groupReceipt: (email) => `Se la ricevuta arriva a ${email}, contiene lo stesso link: conservalo, è così che si assegnano i posti.`,
 
   trialStarted: "Prova iniziata",
   youAreBooked: "Hai prenotato",
@@ -1012,11 +1042,18 @@ const it: ThanksWords = {
     "Alcuni pagamenti PayPal, come quelli da conto bancario, richiedono alcuni giorni. Appena PayPal lo conferma, ciò che hai comprato viene inviato via email all'indirizzo del tuo account PayPal. Qui non c'è altro da fare.",
   tooManyTries: "Sono stati tanti tentativi in pochi minuti",
   ppWrite: (store) => `Se PayPal mostra un pagamento a ${store}, scrivigli rispondendo alla ricevuta di PayPal.`,
+  ppCouldNotCheck: "Non siamo riusciti a verificare questo pagamento in questo momento",
+  ppCouldNotCheckBody: "Se hai pagato, l'acquisto ti verrà consegnato e la ricevuta inviata via email; aggiorna la pagina tra un minuto.",
+  ppHandingOver: "Pagamento ricevuto, stiamo consegnando l'acquisto",
+  ppHandingOverBody: (email) => `La ricevuta verrà inviata via email a ${email} appena l'acquisto sarà consegnato. Aggiorna la pagina tra un minuto.`,
+  ppRefunded: "Pagamento rimborsato",
+  ppRefundedBody: "Questo pagamento è stato rimborsato per intero tramite PayPal, quindi non puoi più aprire questo acquisto. Il tuo account PayPal mostra il rimborso.",
   waitFew: "Aspetta qualche minuto, poi riapri questa pagina.",
 };
 
 const nl: ThanksWords = {
   pageTitle: "Je bestelling",
+  paymentReceived: "Betaling ontvangen",
   notices: {
     unpaid: {
       title: "Deze bestelling is niet betaald",
@@ -1088,12 +1125,12 @@ const nl: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` bij ${store} voor ${forWhom}, voor ${price}.`,
   groupBought: (store, price) => ` bij ${store}, voor ${price}.`,
   groupSend: (title) =>
-    `Stuur hem naar de mensen voor wie hij is. Ieder opent hem en typt een eigen e-mailadres; er komt een link in hun inbox, en wie die opent, heeft ${title} op dat adres, alsof ze het zelf kochten.`,
+    `Stuur hem naar de mensen voor wie hij is. Ieder opent hem en typt een eigen e-mailadres. Als de e-mail met de link aankomt, staat ${title} na het openen op dat adres, alsof die persoon het zelf kocht.`,
   groupTakeOne: (people) => `Neem zelf op dezelfde manier een plek: je betaalde voor ${people}, en je hoort er alleen bij als je er een neemt.`,
   groupDemo:
     "Dit is de demowinkel, die geen e-mails verstuurt, dus hij maakt geen link en deelt geen plekken uit. In een echte winkel toont deze pagina één link om door te geven, en dezelfde link staat op je bon: ieder opent hem, typt een eigen e-mailadres en heeft het op een eigen adres.",
-  noGroupLink: "We konden je link nu niet ophalen. Vernieuw deze pagina zo meteen; hij is ook onderweg naar je e-mail.",
-  groupReceipt: (email) => `Dezelfde link staat op de bon naar ${email}: bewaar hem, daarmee worden de plekken uitgedeeld.`,
+  noGroupLink: "We konden je link nu niet ophalen. Vernieuw deze pagina zo meteen; hij kan je ook per e-mail bereiken.",
+  groupReceipt: (email) => `Als de bon ${email} bereikt, staat dezelfde link erop: bewaar hem, daarmee worden de plekken uitgedeeld.`,
 
   trialStarted: "Proefperiode gestart",
   youAreBooked: "Je bent geboekt",
@@ -1209,11 +1246,18 @@ const nl: ThanksWords = {
     "Sommige PayPal-betalingen, zoals die vanaf een bankrekening, duren een paar dagen. Zodra PayPal hem bevestigt, wordt wat je kocht gemaild naar het adres van je PayPal-rekening. Je hoeft hier verder niets te doen.",
   tooManyTries: "Dat waren veel pogingen in een paar minuten",
   ppWrite: (store) => `Toont PayPal een betaling aan ${store}, schrijf hen dan door op de bon van PayPal te antwoorden.`,
+  ppCouldNotCheck: "We konden deze betaling nu niet controleren",
+  ppCouldNotCheckBody: "Heb je betaald, dan wordt je aankoop overgedragen en je bon gemaild; vernieuw de pagina over een minuut.",
+  ppHandingOver: "Betaling ontvangen, we dragen je aankoop over",
+  ppHandingOverBody: (email) => `Je bon wordt naar ${email} gemaild zodra de aankoop is overgedragen. Vernieuw de pagina over een minuut.`,
+  ppRefunded: "Betaling terugbetaald",
+  ppRefundedBody: "Deze betaling is volledig terugbetaald via PayPal, dus je kunt deze aankoop niet meer openen. Je PayPal-rekening toont de terugbetaling.",
   waitFew: "Wacht een paar minuten en open deze pagina dan opnieuw.",
 };
 
 const pt: ThanksWords = {
   pageTitle: "A sua encomenda",
+  paymentReceived: "Pagamento recebido",
   notices: {
     unpaid: {
       title: "Esta encomenda não foi paga",
@@ -1285,12 +1329,12 @@ const pt: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` a ${store} para ${forWhom}, por ${price}.`,
   groupBought: (store, price) => ` a ${store}, por ${price}.`,
   groupSend: (title) =>
-    `Envie-a às pessoas a quem se destina. Cada uma abre-a e escreve o próprio endereço de email; chega uma ligação à caixa de correio, e abri-la põe ${title} nesse endereço, como se o tivesse comprado.`,
+    `Envie-a às pessoas a quem se destina. Cada uma abre-a e escreve o próprio endereço de email. Se o email com a ligação lhe chegar, ao abri-la ${title} fica associado a esse endereço, como se o tivesse comprado.`,
   groupTakeOne: (people) => `Fique também com um lugar da mesma forma: pagou por ${people}, e só faz parte delas se ficar com um.`,
   groupDemo:
     "Esta é a loja de demonstração, que não envia emails, por isso não cria nenhuma ligação nem distribui lugares. Numa loja real, esta página mostra uma ligação para partilhar, e a mesma ligação está no seu recibo: cada pessoa abre-a, escreve o próprio email e fica com ele no próprio endereço.",
-  noGroupLink: "Não conseguimos obter a sua ligação neste momento. Atualize esta página daqui a pouco; também vai a caminho do seu email.",
-  groupReceipt: (email) => `A mesma ligação está no recibo enviado para ${email}: guarde-a, é com ela que os lugares são distribuídos.`,
+  noGroupLink: "Não conseguimos obter a sua ligação neste momento. Atualize esta página daqui a pouco; também pode chegar-lhe por email.",
+  groupReceipt: (email) => `Se o recibo chegar a ${email}, inclui a mesma ligação: guarde-a, é com ela que os lugares são distribuídos.`,
 
   trialStarted: "Período experimental iniciado",
   youAreBooked: "A sua marcação está feita",
@@ -1406,6 +1450,12 @@ const pt: ThanksWords = {
     "Alguns pagamentos PayPal, como os feitos a partir de uma conta bancária, demoram alguns dias. Assim que o PayPal o confirmar, o que comprou é enviado por email para o endereço da sua conta PayPal. Não há mais nada a fazer aqui.",
   tooManyTries: "Foram muitas tentativas em poucos minutos",
   ppWrite: (store) => `Se o PayPal mostrar um pagamento a ${store}, escreva-lhe respondendo ao recibo do PayPal.`,
+  ppCouldNotCheck: "Não foi possível verificar este pagamento agora",
+  ppCouldNotCheckBody: "Se pagou, a compra será entregue e o recibo enviado por email; atualize a página dentro de um minuto.",
+  ppHandingOver: "Pagamento recebido, estamos a entregar a sua compra",
+  ppHandingOverBody: (email) => `O recibo será enviado por email para ${email} assim que a compra for entregue. Atualize a página dentro de um minuto.`,
+  ppRefunded: "Pagamento reembolsado",
+  ppRefundedBody: "Este pagamento foi reembolsado na totalidade através do PayPal, por isso já não pode abrir esta compra. A sua conta PayPal mostra o reembolso.",
   waitFew: "Aguarde alguns minutos e depois abra esta página novamente.",
 };
 

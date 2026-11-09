@@ -51,9 +51,12 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { communityWords } from "@/lib/buyer-words/community";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type DataStore, DataRoomError } from "@/lib/store-data";
-import { onAccount } from "@/lib/stripe-account";
+import { StripeError, onAccount } from "@/lib/stripe-account";
+// The one Stripe version these lists are read at, so their shape is the one checked here (Revisor 1 on #2464).
+import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
@@ -83,6 +86,8 @@ const IP_LIMIT = 10;
 const ADDRESS_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
+/** The customers whose one-click additions are read for one answer. */
+const CUSTOMERS_READ = 10;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const okKey = (id: string, email: string) => `nl:cm:${id}:ok:${emailKey(email)}`;
@@ -95,11 +100,62 @@ export async function accessProducts(store: Store, config: CommunityConfig): Pro
 }
 
 type Row = Record<string, unknown>;
-type Listed = { data?: unknown };
 
-function rows(listed: Listed): Row[] {
-  return Array.isArray(listed.data) ? (listed.data as Row[]) : [];
+/** A list from Stripe that is not one, or that has more than was read: whether the address holds anything is not known. */
+export class UnreadPurchasesError extends Error {
+  /**
+   * True when asking again gives the same answer: Stripe has more than the one page read of this address's
+   * checkouts or payments, or more customers for it than are asked (CUSTOMERS_READ). A reply that is not a list
+   * at all may be a passing fault, and is not.
+   */
+  readonly lasting: boolean;
+  constructor(what: string, lasting = false) {
+    super(`the purchases could not be read in full: ${what}`);
+    this.name = "UnreadPurchasesError";
+    this.lasting = lasting;
+  }
 }
+
+/**
+ * Whether a strict door's "could not be asked" (holdsTicket, holdsAnyOf with `strict`) will be the same however
+ * often it is asked again, so a send waiting on it would wait for good (review of #3140, M2): an address whose
+ * purchases are more than is read (UnreadPurchasesError `lasting`), or a request Stripe refuses as such (400, 403
+ * or 404, or `account_invalid`: the store's Stripe account disconnected, or no longer reachable by us). Anything
+ * else (a timeout, a 429 or 5xx, Redis) may pass, and the caller tries again, a bounded number of times.
+ */
+export function askingAgainWontTell(error: unknown): boolean {
+  if (error instanceof UnreadPurchasesError) return error.lasting;
+  if (error instanceof StripeError) return error.code === "account_invalid" || error.status === 400 || error.status === 403 || error.status === 404;
+  return false;
+}
+
+/**
+ * The rows of a Stripe list, read exactly (CX-123 rule 24): `data` an array
+ * and `has_more` a boolean, or the reply is not a list and throws. `complete`
+ * is false when Stripe has more than this page: a "no" read from it is not a
+ * "no" (Codex G on #2464), so a caller that finds nothing in it throws.
+ */
+function listOf(listed: unknown, readable: (row: Row) => boolean): { rows: Row[]; complete: boolean } {
+  const list = listed && typeof listed === "object" ? (listed as { data?: unknown; has_more?: unknown }) : null;
+  if (!list || !Array.isArray(list.data) || typeof list.has_more !== "boolean") throw new UnreadPurchasesError("a reply that is not a list");
+  const rows = list.data.filter((row): row is Row => isRecord(row) && readable(row));
+  // An entry that is not the kind asked for (no id, an unknown state, a list in its place) proves nothing, and is not
+  // a "no" either: the readable ones may still prove a purchase, but the list is not complete (Revisor 1 on #2464).
+  return { rows, complete: !list.has_more && rows.length === list.data.length };
+}
+
+const isRecord = (value: unknown): value is Row => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const SESSION_STATES = new Set(["open", "complete", "expired"]);
+const SESSION_PAYMENTS = new Set(["paid", "unpaid", "no_payment_required"]);
+const INTENT_STATES = new Set(["requires_payment_method", "requires_confirmation", "requires_action", "processing", "requires_capture", "canceled", "succeeded"]);
+/** A field Stripe always fills, read only when it is one of Stripe's own values: absent is not known (Codex G on #2464). */
+const oneOf = (value: unknown, known: Set<string>) => typeof value === "string" && known.has(value);
+const hasId = (row: Row) => typeof row.id === "string" && row.id.length > 0;
+const hasMeta = (row: Row) => row.metadata === undefined || row.metadata === null || isRecord(row.metadata);
+/** A Checkout Session as Stripe lists it: an id, and its state and payment state among Stripe's own. */
+const isSessionRow = (row: Row) => hasId(row) && hasMeta(row) && oneOf(row.status, SESSION_STATES) && oneOf(row.payment_status, SESSION_PAYMENTS);
+/** A PaymentIntent as Stripe lists it: an id and a state among Stripe's own. */
+const isIntentRow = (row: Row) => hasId(row) && hasMeta(row) && oneOf(row.status, INTENT_STATES);
 
 /** The rule every door uses for a refund (lib/refunds.ts). */
 const refunded = refundedInFull;
@@ -113,14 +169,17 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   if (!account || ids.size === 0) return false;
   const handles = saleHandles(store);
   const customers = new Set<string>();
+  // Whether every list read here was read to its end: a "no" is only a "no" when it was.
+  let complete = true;
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
     query.append("expand[]", "data.payment_intent.latest_charge");
-    const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
-    for (const session of rows(listed)) {
+    const listed = listOf(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_VERSION), isSessionRow);
+    if (!listed.complete) complete = false;
+    for (const session of listed.rows) {
       // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
       const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
       if (!handles.has(meta.store ?? "")) continue;
@@ -143,11 +202,14 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
     }
   }
   // What was added in one click after paying is its own payment.
-  for (const customer of [...customers].slice(0, 10)) {
+  // At most ten customers are asked (the reads stay bounded); more than that leaves the answer unread, not "no".
+  if (customers.size > CUSTOMERS_READ) complete = false;
+  for (const customer of [...customers].slice(0, CUSTOMERS_READ)) {
     const query = new URLSearchParams({ customer, limit: "50" });
     query.append("expand[]", "data.latest_charge");
-    const listed = (await onAccount("GET", account, `/payment_intents?${query}`)) as Listed;
-    for (const intent of rows(listed)) {
+    const listed = listOf(await onAccount("GET", account, `/payment_intents?${query}`, undefined, STRIPE_VERSION), isIntentRow);
+    if (!listed.complete) complete = false;
+    for (const intent of listed.rows) {
       const meta = (intent.metadata ?? {}) as Record<string, string>;
       if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) continue;
       if (intent.status !== "succeeded" || refunded(intent)) continue;
@@ -158,6 +220,9 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
       return true;
     }
   }
+  // Nothing found, but not everything was read: unknown, never "holds none of them". A door that does not need to
+  // know (not strict) lets nobody in on it and keeps no answer; a strict door says it could not be asked.
+  if (!complete) throw new UnreadPurchasesError("more than one page", true);
   return false;
 }
 
@@ -181,10 +246,16 @@ async function broughtOver(store: Store, email: string, ids: Set<string>): Promi
  * Stripe is asked at most once every five minutes per address (once a minute
  * while the answer is no); a change to the settings asks again at once.
  */
-export async function holdsTicket(store: Store, config: CommunityConfig, email: string): Promise<boolean> {
+export async function holdsTicket(store: Store, config: CommunityConfig, email: string, options: { strict?: boolean } = {}): Promise<boolean> {
   const id = store.community?.id;
-  if (!id || !isRedisConfigured()) return false;
-  return ticketFor(store, config.access, email, okKey(id, email), config.v);
+  if (!id) return false;
+  // `strict`, for deciding who an email goes to (lib/community-mail.ts, lib/community-event-mail.ts): an answer that
+  // could not be had throws instead of being a no, so nobody is left out of a batch counted as sent (rules 24 and 30).
+  if (!isRedisConfigured()) {
+    if (options.strict) throw new Error("the database is not set up");
+    return false;
+  }
+  return ticketFor(store, config.access, email, okKey(id, email), config.v, options.strict === true);
 }
 
 /**
@@ -195,9 +266,14 @@ export async function holdsTicket(store: Store, config: CommunityConfig, email: 
  * (one while it is no), so a membership that lapses loses the event with the
  * community.
  */
-export async function holdsAnyOf(store: Store, ids: string[], email: string, cacheKey: string, version: string): Promise<boolean> {
-  if (!store.community?.id || !isRedisConfigured()) return false;
-  return ticketFor(store, ids, email, cacheKey, version);
+export async function holdsAnyOf(store: Store, ids: string[], email: string, cacheKey: string, version: string, options: { strict?: boolean } = {}): Promise<boolean> {
+  if (!store.community?.id) return false;
+  // `strict` as holdsTicket's: an answer that could not be had throws, never a no.
+  if (!isRedisConfigured()) {
+    if (options.strict) throw new Error("the database is not set up");
+    return false;
+  }
+  return ticketFor(store, ids, email, cacheKey, version, options.strict === true);
 }
 
 /**
@@ -401,12 +477,28 @@ function senderAddress(): string {
   return (match ? match[1] : NIMBUS_FROM).trim();
 }
 
-async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+/** A whole number from one up after INCR, or null when the reply is not exactly that. */
+function incremented(reply: unknown): number | null {
+  const count = countOf(reply);
+  return count !== null && count >= 1 ? count : null;
+}
+
+/**
+ * Whether one more request fits in the hour: true or false on a count read in
+ * its exact shape, null when the answer is missing, cut short or of another
+ * shape, which is never taken as room (CX-123 rule 24).
+ */
+async function within(key: string, limit: number): Promise<boolean | null> {
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
+  const count = incremented(both[1]);
+  return count === null ? null : count <= limit;
 }
 
 export type LinkRequest = "sent" | "email" | "limited" | "error";
@@ -427,8 +519,13 @@ export async function requestCommunityLink(input: {
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   const id = store.community?.id;
   if (!id || !store.community?.on || !isRedisConfigured()) return "error";
-  if (!(await within(`nl:rl:cm:ip:${sha(`${ip}|${store.handle}`).slice(0, 32)}`, IP_LIMIT))) return "limited";
-  if (!(await within(`nl:rl:cm:addr:${emailKey(raw)}`, ADDRESS_LIMIT))) return "limited";
+  // A count that could not be read sends nothing; it is said as the email not sent, never as too many requests.
+  const byConnection = await within(`nl:rl:cm:ip:${sha(`${ip}|${store.handle}`).slice(0, 32)}`, IP_LIMIT);
+  if (byConnection === null) return "error";
+  if (!byConnection) return "limited";
+  const byAddress = await within(`nl:rl:cm:addr:${emailKey(raw)}`, ADDRESS_LIMIT);
+  if (byAddress === null) return "error";
+  if (!byAddress) return "limited";
 
   const config = await readConfig(id);
   if (!config) return "error";
@@ -449,15 +546,25 @@ export async function requestCommunityLink(input: {
   return sent ? "sent" : "error";
 }
 
-/** Spends one open of an emailed link, and says who it was for. */
+/**
+ * Spends one open of an emailed link, and says who it was for. An answer
+ * not in its exact shape gives no pass and is thrown: it is neither an
+ * expired link nor one used too many times (CX-123 rule 24).
+ */
 export async function openCommunityLink(token: string): Promise<LinkGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw, , opens] = await redisPipeline([
-    ["GET", linkKey(token)],
-    ["SET", opensKey(token), "0", "EX", LINK_SECONDS, "NX"],
-    ["INCR", opensKey(token)],
-  ]);
-  if (typeof raw !== "string" || Number(opens) > MAX_LINK_OPENS) return null;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["GET", linkKey(token)],
+      ["SET", opensKey(token), "0", "EX", LINK_SECONDS, "NX"],
+      ["INCR", opensKey(token)],
+    ]),
+    3,
+  );
+  const raw = replies?.[0];
+  const opens = replies && (replies[1] === "OK" || replies[1] === null) ? incremented(replies[2]) : null;
+  if (!replies || (typeof raw !== "string" && raw !== null) || opens === null) throw new UnknownReplyError("a community link's opens");
+  if (typeof raw !== "string" || opens > MAX_LINK_OPENS) return null;
   try {
     const grant = JSON.parse(raw) as LinkGrant;
     return typeof grant.e === "string" && typeof grant.h === "string" && typeof grant.k === "string" ? grant : null;

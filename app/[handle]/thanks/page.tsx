@@ -33,7 +33,7 @@ import { isVideoRoom, roomLabel, roomOf, videoRoomNote } from "@/lib/call-rooms"
 import { SITE_URL } from "@/lib/site-url";
 import { StoreTracking } from "@/components/store-tracking";
 import { ClearCart } from "@/components/store-cart";
-import { confirmStock } from "@/lib/stock";
+import { confirmCartStock, confirmStock } from "@/lib/stock";
 import { finishPlan } from "@/lib/plans";
 import { cookies, headers } from "next/headers";
 import { clientAddress } from "@/lib/request-guard";
@@ -51,6 +51,7 @@ import { listOrder } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { readPaid, stillPending } from "@/lib/paypal-sales";
+import { paypalHandedOver } from "@/lib/paypal-handed";
 import { saleClock } from "@/lib/store-sale";
 import { readListing } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -68,17 +69,19 @@ import { type SaleRecord, noteSale } from "@/lib/sale-events";
 import { BundleDelivery } from "@/components/bundle-delivery";
 import type { BundleContents } from "@/lib/bundles";
 import { thanksWords } from "@/lib/buyer-words/thanks";
+import { PaymentReceived } from "@/components/payment-received";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
-import { groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
+import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
 import { speech } from "@/lib/buyer-words";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
 import { heardOff } from "@/lib/heard";
 import { listedReturn, listedSite, purchaseReturn } from "@/lib/embed-sites";
 import { eventIdFor } from "@/lib/webhooks";
+import { adEventId, adEventRelay } from "@/lib/ad-events";
 import { Suspense } from "react";
 import { NextOfferCard } from "@/components/next-offer-card";
 import { NewTab } from "@/components/new-tab";
@@ -181,7 +184,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            <p className="st-price text-sm">{t.paid}</p>
+            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.sessionsReady(Number(bought?.total ?? packageMeta.sessions))}</h1>
             <p className="st-muted mt-4 text-lg">
               {t.youBought}
@@ -192,14 +195,16 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               <p className="st-muted mt-3">{t.bookBy(longDate(bought.until))}</p>
             ) : null}
             {book ? (
-              <Link href={book} className="btn st-btn btn-lg mt-7">{t.bookFirst}</Link>
+              // A full page load, not Next's client move: the link names the package's token,
+              // and this page's ad scripts would count a history change as a view of it.
+              <a href={book} className="btn st-btn btn-lg mt-7">{t.bookFirst}</a>
             ) : (
               <p className="st-note mt-6 text-sm">{t.noBookingLink}</p>
             )}
             <p className="st-muted mt-5 text-sm">{t.packageSameLink(order.email ?? t.theAddressYouPaidWith)}</p>
             <StoreTracking
               store={store}
-              event={{ type: "purchase", id: sessionId, value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
+              event={{ type: "purchase", id: adEventId(sessionId), relay: adEventRelay(sessionId, store.handle), value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
             />
           </div>
         </main>
@@ -236,7 +241,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            <p className="st-price text-sm">{t.paid}</p>
+            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{p.thanksTitle}</h1>
             <p className="st-muted mt-4 text-lg">{p.thanksBought(order.product.title, store.name, money(order.amount, order.currency))}</p>
             <p className="mt-4">
@@ -245,14 +250,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <p className="st-muted mt-4 text-sm">{p.refund(store.name)}</p>
             {order.email ? <p className="st-muted mt-4 text-sm">{t.receiptTo(order.email)}</p> : null}
             <div className="mt-8">
-              <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+              <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {t.backTo(store.name)}
               </a>
               <StoreTracking
                 store={store}
                 event={{
                   type: "purchase",
-                  id: sessionId,
+                  id: adEventId(sessionId),
+                  relay: adEventRelay(sessionId, store.handle),
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -296,7 +302,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            <p className="st-price text-sm">{t.paid}</p>
+            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.giftOnWay}</h1>
             <p className="st-muted mt-4 text-lg">
               {t.youBought}
@@ -312,14 +318,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             </p>
             {order.email ? <p className="st-muted mt-4 text-sm">{t.receiptTo(order.email)}</p> : null}
             <div className="mt-8">
-              <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+              <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {t.backTo(store.name)}
               </a>
               <StoreTracking
                 store={store}
                 event={{
                   type: "purchase",
-                  id: sessionId,
+                  id: adEventId(sessionId),
+                  relay: adEventRelay(sessionId, store.handle),
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -362,7 +369,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <div className="st-card p-7 sm:p-10">
-            <p className="st-price text-sm">{t.paid}</p>
+            {order.amount > 0 ? <PaymentReceived label={t.paymentReceived} /> : <p className="st-price text-sm">{t.paid}</p>}
             <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">
               {group ? t.placesReadyCount(group.people) : t.placesReady}
             </h1>
@@ -388,14 +395,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             )}
             {order.email && !isHouseStore(store) ? <p className="st-muted mt-5 text-sm">{t.groupReceipt(order.email)}</p> : null}
             <div className="mt-8">
-              <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+              <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {t.backTo(store.name)}
               </a>
               <StoreTracking
                 store={store}
                 event={{
                   type: "purchase",
-                  id: sessionId,
+                  id: adEventId(sessionId),
+                  relay: adEventRelay(sessionId, store.handle),
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -535,6 +543,10 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // A limited product's unit becomes a sale the moment its buyer is back.
   if (order.state === "paid" && sessionId && order.product.stock !== null) {
     await confirmStock(store, order.product, sessionId).catch((error) => console.error("confirming stock failed", error));
+  }
+  // So does each limited product of a cart after its first (lib/stock.ts; 513 [PF1], unit 3). A box at checkout never offers a limited one.
+  if (order.state === "paid" && sessionId && order.bumps.some((added) => added.product.stock !== null)) {
+    await confirmCartStock(store, order.bumps.map((added) => added.product), sessionId).catch((error) => console.error("confirming a cart's stock failed", error));
   }
 
   // A sale through an affiliate's link is written down for them, once,
@@ -679,16 +691,23 @@ export default async function ThanksPage({ params, searchParams }: Params) {
           .filter(reviewable)
           .filter((p, i, all) => all.findIndex((q) => q.id === p.id) === i)
       : [];
-  const reviewed = new Map<string, Review | null>();
+  // A review of theirs that could not be read is unknown (CX-123 rule 24, inventory R24 item 13): the section says so
+  // instead of a blank form that would post over the review they already wrote.
+  const reviewed = new Map<string, Review | null | "unknown">();
   if (toReview.length && store.statsId && order.state === "paid" && order.email) {
     const statsId = store.statsId;
     const email = order.email;
     await Promise.all(
       toReview.map(async (p) => {
-        reviewed.set(p.id, await readReview(statsId, p.id, reviewId(statsId, p.id, email)).catch(() => null));
+        reviewed.set(p.id, await readReview(statsId, p.id, reviewId(statsId, p.id, email)).catch(() => "unknown" as const));
       }),
     );
   }
+  const reviewedKnown = (id: string): Review | null => {
+    const review = reviewed.get(id);
+    return review === "unknown" ? null : (review ?? null);
+  };
+  const giving = givingWords(store.language);
   const reviewStatus = typeof query.review === "string" && REVIEW_NOTICES[query.review] ? query.review : "";
   const reviewProduct = typeof query.product === "string" ? query.product : "";
 
@@ -767,9 +786,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         <div className="st-card p-7 sm:p-10">
           {order.state === "paid" ? (
             <>
-              <p className="st-price text-sm">
-                {order.product.recurring && order.firstChargeAt > 0 ? t.movedStarted : order.product.recurring && order.trialDays > 0 ? t.trialStarted : t.paid}
-              </p>
+              {/* A payment Stripe confirmed, of an amount, gets the drawn mark (654 [WG14]); a trial, a moved membership or
+                  a free order keeps its words, since no payment was received. */}
+              {!(order.product.recurring && (order.firstChargeAt > 0 || order.trialDays > 0)) && order.amount > 0 ? (
+                <PaymentReceived label={t.paymentReceived} />
+              ) : (
+                <p className="st-price text-sm">
+                  {order.product.recurring && order.firstChargeAt > 0 ? t.movedStarted : order.product.recurring && order.trialDays > 0 ? t.trialStarted : t.paid}
+                </p>
+              )}
               <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">
                 {booked ? t.youAreBooked : t.thankYou}
               </h1>
@@ -1304,7 +1329,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             {order.state === "paid" && (order.record.metadata as Record<string, string> | null)?.cart === "yes" ? <ClearCart handle={store.handle} /> : null}
             <a
               href={`/@${store.handle}`}
-              className="st-footer-link text-sm font-semibold"
+              className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold"
             >
               {t.backTo(store.name)}
             </a>
@@ -1314,7 +1339,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 order.state === "paid" && sessionId
                   ? {
                       type: "purchase",
-                      id: sessionId,
+                      id: adEventId(sessionId),
+                      relay: adEventRelay(sessionId, store.handle),
                       value: toMajor(order.amount, order.currency),
                       currency: order.currency,
                       productId: order.product.id,
@@ -1351,19 +1377,25 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               {t.reviewWhenever(store.name)}
             </p>
             <div className="mt-6 space-y-10">
-              {toReview.map((product) => (
-                <ReviewForm
-                  key={product.id}
-                  handle={store.handle}
-                  door={{ session_id: sessionId }}
-                  product={{ id: product.id, title: product.title }}
-                  existing={reviewed.get(product.id) ?? null}
-                  storeName={store.name}
-                  back="thanks"
-                  notice={reviewProduct === product.id ? reviewStatus || null : null}
-                  lang={store.language}
-                />
-              ))}
+              {toReview.map((product) =>
+                reviewed.get(product.id) === "unknown" ? (
+                  <p key={product.id} role="status" className="st-note text-sm">
+                    {giving.reviewUnread(product.title)}
+                  </p>
+                ) : (
+                  <ReviewForm
+                    key={product.id}
+                    handle={store.handle}
+                    door={{ session_id: sessionId }}
+                    product={{ id: product.id, title: product.title }}
+                    existing={reviewedKnown(product.id)}
+                    storeName={store.name}
+                    back="thanks"
+                    notice={reviewProduct === product.id ? reviewStatus || null : null}
+                    lang={store.language}
+                  />
+                ),
+              )}
             </div>
           </section>
         ) : null}
@@ -1377,9 +1409,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <p className="st-muted mt-2 text-sm leading-relaxed">
               {t.earnHow(store.affiliates.percent, store.name)}
             </p>
-            <Link href={`/@${store.handle}/affiliates?order=${encodeURIComponent(sessionId)}`} className="btn st-btn mt-6">
+            {/* A full page load, not Next's client move: the affiliate page takes the order only
+                in its address, and this page's ad scripts would count a history change as a view of it. */}
+            <a href={`/@${store.handle}/affiliates?order=${encodeURIComponent(sessionId)}`} className="btn st-btn mt-6">
               {t.getMyLink}
-            </Link>
+            </a>
           </section>
         ) : null}
       </main>
@@ -1395,19 +1429,66 @@ export default async function ThanksPage({ params, searchParams }: Params) {
  */
 async function PayPalThanks({ store, order }: { store: Store; order: string }) {
   const allowed = await withinStore("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "buyer");
-  const paid = allowed ? await readPaid(order) : null;
+  // A record or a mark that could not be read is unknown, never "not found" and never the error page (PF1): the
+  // buyer is told the payment could not be checked just now.
+  let unread = false;
+  const paid = allowed
+    ? await readPaid(order).catch(() => {
+        unread = true;
+        return null;
+      })
+    : null;
   const ours = paid && paid.store === store.statsId ? paid : null;
-  const product = ours ? await readListing(store, ours.product) : null;
-  const waiting = !ours && allowed ? await stillPending(store, order) : false;
+  // Handed over only when the buyer's grant proves it (lib/paypal-handed.ts): this order's own, or, when the address
+  // already held the product (a repeat purchase, a gift: the record keeps the first grant), this order standing behind
+  // it (the Claude 4 team's re-review of #2911), which proves the payment and the access but not this order's receipt. The pending mark is no proof:
+  // settle() in lib/paypal-sales.ts clears it before anything is handed over (Claude 5's MEDIUM on #2911), so a paid
+  // order without its grant is still being handed over (the sweep running, or a hand-over that failed), and a grant
+  // that cannot be read is unknown: never a link to the purchase or a purchase event for the creator's pixels.
+  const handed = ours ? await paypalHandedOver(ours).catch(() => "unknown" as const) : false;
+  if (handed === "unknown") unread = true;
+  // "owned": a repeat purchase (or one after a gift) whose buyer already holds the product through another grant. The
+  // purchase, its link and the event are shown (paid, and the access is real), but the receipt is promised only when
+  // this order's own hand-over is proven (Claude 5's LOW on #2911).
+  const delivered = ours !== null && (handed === true || handed === "owned");
+  const ownReceipt = ours !== null && handed === true;
+  const handing = ours !== null && handed === false;
+  // Refunded in full by PayPal and taken back by the refund watch: said so, with no link, no purchase event and no
+  // hand-over or receipt promised (the Claude 4 team's second money review of #2911).
+  const refunded = ours !== null && handed === "refunded";
+  // A product that cannot be read (or is gone) never sends a paid buyer to the error page or to "not found"
+  // (Claude 5's LOW 2 on #2911): the page then says it was paid and opens the list of purchases.
+  const product = delivered ? await readListing(store, ours.product).catch(() => null) : null;
+  const waiting =
+    !ours && allowed && !unread
+      ? await stillPending(store, order).catch(() => {
+          unread = true;
+          return false;
+        })
+      : false;
   const fresh = ours ? saleClock() - ours.at < DOWNLOAD_WINDOW_SECONDS : false;
-  const link = ours && product && fresh ? await ordersLinkFor(store, ours.email, storeBase(store)).catch(() => null) : null;
+  const link = ours && delivered && fresh ? await ordersLinkFor(store, ours.email, storeBase(store)).catch(() => null) : null;
   const t = thanksWords(store.language);
   const money = (cents: number, currency: string) => formatMoney(cents, currency, LANGUAGES[store.language].locale);
   return (
     <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
         <div className="st-card p-7 sm:p-10">
-          {ours && product ? (
+          {ours && refunded ? (
+            <>
+              <p className="st-price text-sm">{t.paidWithPayPal}</p>
+              <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.ppRefunded}</h1>
+              <p className="st-muted mt-4">{t.ppRefundedBody}</p>
+              <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
+            </>
+          ) : ours && handing ? (
+            <>
+              <p className="st-price text-sm">{t.paidWithPayPal}</p>
+              <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.ppHandingOver}</h1>
+              <p className="st-muted mt-4">{t.ppHandingOverBody(ours.email)}</p>
+              <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
+            </>
+          ) : ours && delivered && product ? (
             <>
               <p className="st-price text-sm">{t.paidWithPayPal}</p>
               <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.thankYou}</h1>
@@ -1425,12 +1506,33 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
                   {t.openPurchases}
                 </Link>
               )}
-              <p className="st-muted mt-5 text-sm">{t.ppReceipt(ours.email)}</p>
-              <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
+              {ownReceipt ? <p className="st-muted mt-5 text-sm">{t.ppReceipt(ours.email)}</p> : null}
+              <p className={`st-muted ${ownReceipt ? "mt-3" : "mt-5"} text-sm`}>{t.ppPaidTo(store.name)}</p>
               <StoreTracking
                 store={store}
-                event={{ type: "purchase", id: order, value: toMajor(ours.cents, ours.currency), currency: ours.currency, productId: product.id, title: product.title }}
+                event={{ type: "purchase", id: adEventId(order), value: toMajor(ours.cents, ours.currency), currency: ours.currency, productId: product.id, title: product.title }}
               />
+            </>
+          ) : ours && delivered ? (
+            <>
+              <p className="st-price text-sm">{t.paidWithPayPal}</p>
+              <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.thankYou}</h1>
+              {link ? (
+                <a href={link} className="btn st-btn btn-lg mt-7">
+                  {t.openPurchases}
+                </a>
+              ) : (
+                <Link href={`/@${store.handle}/orders`} className="btn st-btn btn-lg mt-7">
+                  {t.openPurchases}
+                </Link>
+              )}
+              {ownReceipt ? <p className="st-muted mt-5 text-sm">{t.ppReceipt(ours.email)}</p> : null}
+              <p className={`st-muted ${ownReceipt ? "mt-3" : "mt-5"} text-sm`}>{t.ppPaidTo(store.name)}</p>
+            </>
+          ) : unread ? (
+            <>
+              <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{t.ppCouldNotCheck}</h1>
+              <p className="st-muted mt-4">{t.ppCouldNotCheckBody}</p>
             </>
           ) : waiting ? (
             <>
@@ -1451,7 +1553,7 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
             </>
           )}
           <div className="mt-8">
-            <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+            <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
               {t.backTo(store.name)}
             </a>
           </div>

@@ -77,6 +77,8 @@ import { breadcrumbData, faqData } from "@/lib/page-structured-data";
 import { PictureViewer } from "@/components/picture-viewer";
 import { featuredCards } from "@/lib/featured-cards";
 import { ProductAbout } from "@/components/product-about-view";
+import { readCourse } from "@/lib/course";
+import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -304,7 +306,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </Link>
       </p>
     ) : null;
-  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts] = await Promise.all([
+  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
     stockLeft(store, product).catch(() => null),
     outOfKeys(store, product).catch(() => false),
@@ -316,7 +318,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
     product.bundle ? offeredItems(store, [product]).then((m) => m.get(product.id) ?? []).catch(() => []) : Promise.resolve(null),
     // How many times it was bought, when the creator chose to say so (lib/sold-count.ts).
     readSoldCounts(store).catch(() => null),
+    // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
+    product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
   ]);
+  const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -399,7 +404,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
       <strong>{w.testModeTitle}</strong> {w.testModeBody}
     </p>
   ) : selling || byPayPal ? (
-    <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+    <>
+      <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+      <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
+    </>
   ) : (
     <p className="st-note mt-6 text-sm">
       <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBodyOne(store.name)}
@@ -428,7 +436,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </p>
       ) : null}
       <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} />
-      {cartOn && !soon && cartable(product) ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox
@@ -495,7 +503,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
   });
   // Which of them can go in the cart now: one more read, only when there are any (lib/preorders.ts).
   const pairedSoon = cartOn && paired.length ? (await soonState(store).catch(() => ({ soon: new Set<string>() }))).soon : new Set<string>();
-  const pairedCart = new Set(paired.filter((p) => cartOn && cartable(p) && canSellProduct(store, p) && !pairedSoon.has(p.id)).map((p) => p.id));
+  // A limited one with none left is not offered for the cart (lib/stock.ts); only limited ones are counted.
+  const pairedOut = new Set((await Promise.all(paired.filter((p) => cartOn && p.stock !== null).map(async (p) => ((await stockLeft(store, p).catch(() => 0)) === 0 ? p.id : null)))).filter((id) => id !== null));
+  const pairedCart = new Set(paired.filter((p) => cartOn && cartable(p) && canSellProduct(store, p) && !pairedSoon.has(p.id) && !pairedOut.has(p.id)).map((p) => p.id));
   const shownElsewhere = [...paired.map((p) => p.id), ...alsoBought.map((item) => item.product.id)];
   const more = (
     <>
@@ -508,7 +518,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   const footer = (
     <div className="mt-10 text-center">
-      <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+      <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
         {w.everythingFrom(store.name)}
       </a>
       <StoreTracking store={store} presence product={product.id} />
@@ -538,7 +548,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />
       {page.blocks.some((block) => block.kind === "pictures" && block.items.length > 0) ? <PictureViewer lang={store.language} /> : null}
-      <main id="content" className={`relative mx-auto ${wide ? "max-w-3xl" : "max-w-2xl"} px-4 pb-16 pt-10 sm:pt-14${sticky ? " st-has-sticky" : ""}`}>
+      <main id="content" className={`st-measure relative mx-auto ${wide ? "max-w-3xl" : "max-w-2xl"} px-4 pb-16 pt-10 sm:pt-14${sticky ? " st-has-sticky" : ""}`}>
         {children}
       </main>
       {sticky}
@@ -563,7 +573,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
                 height={product.image.height}
                 fetchPriority="high"
                 className="st-hero-img"
-                style={{ aspectRatio: `${product.image.width} / ${product.image.height}` }}
+                style={{ aspectRatio: `${product.image.width} / ${product.image.height}`, ...(product.image.tone ? { backgroundColor: product.image.tone } : {}) }}
               />
             </div>
           ) : null}
@@ -577,7 +587,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
             </div>
             {summary ? <RatingLine summary={summary} href="#reviews" className="mt-2" lang={store.language} /> : null}
             {soldLine}
-            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} />
+            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} videoLine={videoLine} />
             {product.summary ? <p className="st-muted mt-4 text-lg leading-relaxed">{product.summary}</p> : null}
             {blocks.length > 0 ? <ProductAbout blocks={blocks} language={store.language} /> : null}
             {bundleList}
@@ -645,7 +655,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
       </div>
       {soldLine}
-      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} />
+      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} />
       {bundleList}
       <div className="mt-4">{buyTerms}</div>
     </section>

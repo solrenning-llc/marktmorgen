@@ -47,6 +47,7 @@ import { revokeRefundedGroups } from "@/lib/group-buy";
 import { sweepPayPal } from "@/lib/paypal-delivery";
 import { dropEnrollment } from "@/lib/learn";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { CONFIRM_WITHIN_SECONDS, type SessionRecord, canConfirm, confirmPurchase, confirmationKey } from "@/lib/purchase-email";
@@ -55,12 +56,12 @@ import { enroll, readFlows } from "@/lib/flows";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
-import { affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
-import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
+import { AFFILIATE_ID_PATTERN, affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
+import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
-import { listOrder, listedAlready } from "@/lib/buyer-list";
+import { putOnList, listedAlready } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { isHouseStore } from "@/lib/house-store";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -344,6 +345,11 @@ function worthAsking(store: Store, requesting = false): boolean {
   );
 }
 
+/** What an order's error is said as in the log: its name and the start of its message, never the whole object. */
+function describe(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message.slice(0, 200)}` : typeof error;
+}
+
 /** One store: its checkouts of the last day, each handed to what it needs. */
 async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }): Promise<void> {
   // Refunds first: a key that should no longer open anything matters more
@@ -395,14 +401,23 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   }
   if (!worthAsking(store, requesting)) return;
   // A membership's renewals, sent to the creator's ad platforms as purchases
-  // of their own (lib/ad-events.ts): one read of the day's invoices, only on
-  // a store that sends from the server.
+  // of their own (lib/ad-events.ts): the day's paid invoices, read page by
+  // page up to its cap and within the pass's deadline, only on a store that
+  // sends from the server.
   if (store.stripeAccountId && sendsFromServer(store)) {
     await sendRenewals(store, Date.now(), deadline).catch((error) => console.error("sending renewals to ad platforms failed", store.handle, error));
   }
   const now = Math.floor(Date.now() / 1000);
   const since = now - CONFIRM_WITHIN_SECONDS;
   const reminding = recoveryOn(store);
+  // An order that fails is counted once in this pass, however many of its steps failed (Claude 5 on #2977): its
+  // confirmation and its place on the list can both throw on the same unreadable record, and that is one order.
+  const failedOrders = new Set<string>();
+  const failOrder = (id: string): void => {
+    if (failedOrders.has(id)) return;
+    failedOrders.add(id);
+    counts.failed += 1;
+  };
   let after = "";
   for (let page = 0; page < MAX_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
     const listed = await onAccount(
@@ -410,7 +425,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       store.stripeAccountId as string,
       `/checkout/sessions?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as SessionRecord[]) : [];
+    // A page that is not a list is not "no checkouts" (CX-123 rule 24, L6): it stops this store's sweep, said as failed.
+    if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of checkouts");
+    const rows = listed.data as SessionRecord[];
 
     // Asked in one round trip: which of the paid ones were already confirmed.
     const paid = rows.filter((row) => isSettled(row) && typeof row.id === "string");
@@ -430,17 +447,40 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     // A partner's standing share has to be written for every sale, not only
     // the ones somebody referred, so the store's partners are read once here
     // and a sale is passed on when a link, a code or a partner touches it.
-    if (affiliatesOn(store)) {
-      const [owners, partners] = paid.length
-        ? await Promise.all([codeOwners(store), listPartners(store)])
-        : [new Map<string, string>(), []];
-      for (const row of paid) {
-        // A gift through "Support my work" sold nothing, so it earns nobody a share (lib/store-tips.ts),
-        // and a payment request is the creator's own bill to someone they already deal with (lib/payment-requests.ts).
-        if (row.metadata?.kind === "tip" || row.metadata?.kind === "request") continue;
-        const code = owners.size ? affiliateForCodes(row as { discounts?: unknown }, owners) : "";
+    // Nothing here ends the store's pass (Claude 2 on #3238): the codes are read only when an order on the page
+    // carries one and no click, and a read that fails is null, never an empty map or list, so the orders that needed
+    // it are counted as failed and wait for the next pass (the writes are HSETNX, so a retry records a share once),
+    // while the confirmations, the library and the rest below go on. A click wins over a code (Codex H2 on #3238):
+    // an order whose `via` is an affiliate id is decided by noteSession without the codes, the same test it uses.
+    if (affiliatesOn(store) && paid.length) {
+      // A gift through "Support my work" sold nothing, so it earns nobody a share (lib/store-tips.ts),
+      // and a payment request is the creator's own bill to someone they already deal with (lib/payment-requests.ts).
+      const sold = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request");
+      const needsCodes = (row: SessionRecord) =>
+        promoCodesOn(row as { discounts?: unknown }).length > 0 && !AFFILIATE_ID_PATTERN.test(row.metadata?.via ?? "");
+      const coded = sold.some(needsCodes);
+      const unread = (what: string) => (error: unknown): null => {
+        console.error(`reading ${what} failed; the sales that need them wait for the next run`, store.handle, describe(error));
+        return null;
+      };
+      const [owners, partners] = await Promise.all([
+        coded ? codeOwners(store).catch(unread("the codes given to affiliates")) : new Map<string, string>(),
+        listPartners(store).catch(unread("the store's partners")),
+      ]);
+      for (const row of sold) {
+        const id = row.id as string;
+        if (partners === null || (owners === null && needsCodes(row))) {
+          failOrder(id);
+          continue;
+        }
+        const code = owners?.size ? affiliateForCodes(row as { discounts?: unknown }, owners) : "";
         if (row.metadata?.via || code || partners.length) {
-          await noteSession(store, row as Parameters<typeof noteSession>[1], owners, partners);
+          try {
+            await noteSession(store, row as Parameters<typeof noteSession>[1], owners ?? undefined, partners);
+          } catch (error) {
+            failOrder(id);
+            console.error("an affiliate's sale was left for the next run", id, describe(error));
+          }
         }
       }
     }
@@ -464,14 +504,35 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       await noteSales(store, paid).catch((error) => console.error("telling about sales failed", store.handle, error));
     }
     const confirming = canConfirm(store);
+    // Which confirmations already went: one exact answer per order, 0 or 1 (CX-123 rule 24, L6). Anything else is
+    // unknown, and that order waits for the next run's whole reading rather than being sent on a guess.
     const marks = paid.length && confirming
-      ? await redisPipeline(paid.map((row) => ["EXISTS", confirmationKey(row.id as string)]))
+      ? repliesFor(await redisPipeline(paid.map((row) => ["EXISTS", confirmationKey(row.id as string)])), paid.length)
       : [];
     for (let i = 0; confirming && i < paid.length && Date.now() < deadline; i += 1) {
-      if (Number(marks[i]) === 1) continue;
-      const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
-      if (outcome === "sent") counts.confirmed += 1;
-      if (outcome === "failed") counts.failed += 1;
+      const mark = marks ? countOf(marks[i]) : null;
+      // Unknown is said as failed (Claude 3 on #2714): past the confirmation window the order is not read again, so a
+      // silent skip would be a confirmation never sent and never noticed.
+      if (mark === null || mark > 1) {
+        failOrder(paid[i].id as string);
+        continue;
+      }
+      if (mark !== 0) continue;
+      try {
+        const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
+        if (outcome === "sent") counts.confirmed += 1;
+        if (outcome === "failed") failOrder(paid[i].id as string);
+      } catch (error) {
+        // One order's confirmation that throws (a record that does not read) never ends the store's pass: the orders
+        // behind it, the next pages, the library and the list go on (Claude 4, C4-2990). It is counted as failed, once,
+        // and logged by the order, not the buyer. When it is tried again depends on where it threw: before its
+        // "sending" mark was taken (a record that does not read), nothing is marked and the next run tries it; when
+        // the mark was taken and letting it go failed too, the runs skip it until the mark expires
+        // (SENDING_MARK_SECONDS in lib/purchase-email.ts, 15 minutes) and the first run after that tries it; after
+        // the email went (a throw after sending), it is marked sent and never sent again.
+        failOrder(paid[i].id as string);
+        console.error("a paid order's confirmation was left for the next run", paid[i].id, describe(error));
+      }
     }
 
     // Every buyer of an ordinary order finds this store in their library,
@@ -500,19 +561,35 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       });
       const listed = await listedAlready(ordinary.map((row) => row.id as string));
       for (let i = 0; i < ordinary.length && Date.now() < deadline; i += 1) {
-        if (listed[i]) continue;
+        if (listed[i] === true) continue;
+        // Not known whether it is on the list (CX-123 rule 24, L7): nothing done on it this run, and the run says so.
+        if (listed[i] === null) {
+          failOrder(ordinary[i].id as string);
+          continue;
+        }
         const row = ordinary[i];
         const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
         if (!email) continue;
+        // One order that throws here (its products not read) never holds back the orders behind it (C4-2990): nothing
+        // marks it, so it is listed on the next run; it is counted as failed (once, with its confirmation), logged by
+        // the order, not the buyer. The try's body is left unindented on purpose: #2719 rewrites those lines.
+        try {
         const products = await listingsNamed(store, row.metadata);
-        if ((await listOrder(store, {
+        const outcome = await putOnList(store, {
           sessionId: row.id as string,
           email,
           news: row.metadata?.news === "yes",
           clicks: row.metadata?.news === "yes" && row.metadata?.clicks === "yes",
           created: typeof row.created === "number" ? row.created : Math.floor(Date.now() / 1000),
           products: products.map((p) => ({ id: p.id, title: p.title })),
-        })) === "done") counts.listed += 1;
+        });
+        if (outcome === "done") counts.listed += 1;
+        // A claim or a write not known to have landed is said as failed (Codex G on #2719); a no-op or another run's work is not.
+        else if (outcome === "failed") failOrder(row.id as string);
+        } catch (error) {
+          failOrder(row.id as string);
+          console.error("a paid order was left off the list for the next run", row.id, describe(error));
+        }
       }
     }
 
@@ -520,7 +597,13 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       for (const row of rows) {
         if (Date.now() >= deadline) break;
         if (row.status !== "expired" || row.consent?.promotions !== "opt_in") continue;
-        const outcome = await remindAbandoned(store, row);
+        // One checkout whose reminder cannot be decided (an unknown reply,
+        // CX-123 rule 24) is that checkout's failure only: the next buyer's
+        // reminder, the workflows and the later pages still go (CX-116).
+        const outcome = await remindAbandoned(store, row).catch((error) => {
+          console.error("a checkout reminder could not be decided", store.handle, error);
+          return "failed" as const;
+        });
         if (outcome === "sent") counts.reminded += 1;
         if (outcome === "failed") counts.failed += 1;
       }
@@ -620,8 +703,9 @@ async function startAbandonedWorkflows(store: Store, rows: SessionRecord[]): Pro
     if (!handles.has(meta.store ?? "") || !meta.product || !flows.some((f) => f.productId === meta.product)) continue;
     const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
     if (!email || typeof row.id !== "string") continue;
-    const [fresh] = await redisPipeline([["SET", `nl:wf:abandoned:${row.id}`, "1", "NX", "EX", 2 * 86_400]]);
-    if (fresh === null) continue;
+    // Handed on only on an exact OK (CX-123 rule 24, L6): taken by an earlier run, or unknown, starts nothing.
+    const fresh = repliesFor(await redisPipeline([["SET", `nl:wf:abandoned:${row.id}`, "1", "NX", "EX", 2 * 86_400]]), 1);
+    if (!fresh || fresh[0] !== "OK") continue;
     await enroll(store, email, { joined: false, abandoned: meta.product });
   }
 }

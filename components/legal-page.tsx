@@ -5,7 +5,7 @@ import { SiteFooter } from "./site-footer";
 import { SiteNav } from "./site-nav";
 
 /** An anchor for a section, from its title: "3. Selling through a store" → "selling-through-a-store". */
-function sectionId(title: string): string {
+export function sectionId(title: string): string {
   return title
     .toLowerCase()
     .replace(/^\d+\.\s*/, "")

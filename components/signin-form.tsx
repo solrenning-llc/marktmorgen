@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { initBotId } from "botid/client/core";
 import { Icon } from "@/components/icons";
 import { EmailSuggestion } from "@/components/email-suggestion";
+import { EmailCodeForm } from "@/components/email-code-form";
 import { holdForSuggestion, suggestEmail } from "@/lib/email-typo";
 
 type State =
   | { kind: "idle" }
   | { kind: "sending" }
-  | { kind: "sent" }
+  | { kind: "sent"; request: string | null }
   | { kind: "error"; message: string };
 
 const MESSAGES: Record<string, string> = {
@@ -100,7 +101,8 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
       const raw: unknown = await response.json();
       const data: Record<string, unknown> = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
       if (response.ok && data.ok === true && data.error === undefined) {
-        setState({ kind: "sent" });
+        // The request's id, for the code in the same email (652 [WG12]); a page without it shows the link only.
+        setState({ kind: "sent", request: typeof data.request === "string" && /^[0-9a-f]{64}$/.test(data.request) ? data.request : null });
         setWait(RESEND_AFTER_SECONDS);
         return;
       }
@@ -137,10 +139,11 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
         </span>
         <p className="mt-4 text-xl font-semibold text-ink">Check that inbox</p>
         <p className="mt-2 text-ink-soft">
-          If <span className="font-medium text-ink [overflow-wrap:anywhere]">{sentTo || email}</span> can log in, the link is on its way from Marktmorgen.
-          It works once and stops working in 15 minutes.
+          If <span className="font-medium text-ink [overflow-wrap:anywhere]">{sentTo || email}</span> can log in, a link and a 6-digit code are on their way from Marktmorgen.
+          They work once, together, and stop working in 15 minutes.
         </p>
         <p className="mt-3 text-sm text-ink-soft">Not there within a minute? Look in spam or promotions.</p>
+        {state.request ? <EmailCodeForm request={state.request} /> : null}
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           <button type="button" onClick={() => void send()} disabled={wait > 0} className="btn btn-secondary btn-sm">
             {wait > 0 ? `Send it again in ${wait}s` : "Send it again"}

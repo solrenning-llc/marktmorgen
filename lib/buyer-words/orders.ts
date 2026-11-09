@@ -216,13 +216,13 @@ const en = {
     `Type ${email} on that page and a link to your own private feed comes right away. It works in Apple Podcasts, Overcast, Pocket Casts and most other podcast apps, for as long as you have it.`,
   startCourseAt: (url: string) => `Start the course: ${url}`,
   courseNote: (email: string) =>
-    `If you pressed "Start the course" after paying, it opens right away on that device. Anywhere else, the course page asks for your email: type ${email}, and a link that lets that device in usually arrives within a minute. There is no password to make.`,
+    `If you pressed "Start the course" after paying, it opens right away on that device. Anywhere else, the course page asks for your email: type ${email} and request an email link that lets that device in. There is no password to make.`,
   openWhatYouBought: (url: string) => `Open what you bought: ${url}`,
   threeDays: (ordersUrl: string, email: string, store: string) =>
     `That page has your download or your link for the next 3 days. After that it is not lost: open ${ordersUrl}, type ${email}, and a link to everything you bought from ${store} is emailed to you, at any time.`,
   startTitleAt: (title: string, url: string) => `Start ${title}: ${url}`,
   bundleCourseNote: (email: string) =>
-    `A course you started after paying opens right away on that device. Anywhere else, its page asks for your email: type ${email}, and a link that lets that device in usually arrives within a minute.`,
+    `A course you started after paying opens right away on that device. Anywhere else, its page asks for your email: type ${email} and request an email link that lets that device in.`,
   /** `label` is yourKey or yourKeyFor. */
   keyIssued: (label: string, key: string) => `${label}: ${key}`,
   keyOnItsWay: (label: string, store: string) =>
@@ -470,13 +470,13 @@ const es: OrdersWords = {
     `Escribe ${email} en esa página y al instante te llegará un enlace a tu propio feed privado. Funciona en Apple Podcasts, Overcast, Pocket Casts y la mayoría de las demás apps de pódcast, mientras lo tengas.`,
   startCourseAt: (url) => `Empieza el curso: ${url}`,
   courseNote: (email) =>
-    `Si pulsaste «${esStart}» después de pagar, se abre al instante en ese dispositivo. En cualquier otro, la página del curso te pide tu email: escribe ${email} y normalmente en menos de un minuto te llega un enlace que da acceso a ese dispositivo. No hay contraseña que crear.`,
+    `Si pulsaste «${esStart}» después de pagar, se abre al instante en ese dispositivo. En cualquier otro, la página del curso te pide tu email: escribe ${email} y pide por email un enlace que dé acceso a ese dispositivo. No hay contraseña que crear.`,
   openWhatYouBought: (url) => `Abre lo que compraste: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Esa página tiene tu descarga o tu enlace durante los próximos 3 días. Después no se pierde: abre ${ordersUrl}, escribe ${email} y te enviaremos por email un enlace a todo lo que le compraste a ${store}, en cualquier momento.`,
   startTitleAt: (title, url) => `Empieza ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Un curso que empezaste después de pagar se abre al instante en ese dispositivo. En cualquier otro, su página te pide tu email: escribe ${email} y normalmente en menos de un minuto te llega un enlace que da acceso a ese dispositivo.`,
+    `Un curso que empezaste después de pagar se abre al instante en ese dispositivo. En cualquier otro, su página te pide tu email: escribe ${email} y pide por email un enlace que dé acceso a ese dispositivo.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: en camino. A ${store} se le acabaron las claves justo cuando pagaste; te llegará por email en cuanto añada más.`,
@@ -711,13 +711,13 @@ const fr: OrdersWords = {
     `Saisissez ${email} sur cette page et un lien vers votre propre flux privé arrive aussitôt. Il fonctionne dans Apple Podcasts, Overcast, Pocket Casts et la plupart des autres applications de podcasts, aussi longtemps que vous l'avez.`,
   startCourseAt: (url) => `Commencez la formation${S}: ${url}`,
   courseNote: (email) =>
-    `Si vous avez cliqué sur «${S}${frStart}${S}» après le paiement, elle s'ouvre immédiatement sur cet appareil. Ailleurs, la page de la formation vous demande votre e-mail${S}: saisissez ${email}, et un lien qui donne accès à cet appareil arrive généralement en moins d'une minute. Aucun mot de passe à créer.`,
+    `Si vous avez cliqué sur «${S}${frStart}${S}» après le paiement, elle s'ouvre immédiatement sur cet appareil. Ailleurs, la page de la formation vous demande votre e-mail${S}: saisissez ${email} et demandez par e-mail un lien qui donne accès à cet appareil. Aucun mot de passe à créer.`,
   openWhatYouBought: (url) => `Ouvrez votre achat${S}: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Cette page contient votre téléchargement ou votre lien pendant les 3${S}prochains jours. Ensuite, rien n'est perdu${S}: ouvrez ${ordersUrl}, saisissez ${email}, et un lien vers tout ce que vous avez acheté chez ${store} vous est envoyé par e-mail, à tout moment.`,
   startTitleAt: (title, url) => `Commencez ${title}${S}: ${url}`,
   bundleCourseNote: (email) =>
-    `Une formation commencée après le paiement s'ouvre immédiatement sur cet appareil. Ailleurs, sa page vous demande votre e-mail${S}: saisissez ${email}, et un lien qui donne accès à cet appareil arrive généralement en moins d'une minute.`,
+    `Une formation commencée après le paiement s'ouvre immédiatement sur cet appareil. Ailleurs, sa page vous demande votre e-mail${S}: saisissez ${email} et demandez par e-mail un lien qui donne accès à cet appareil.`,
   keyIssued: (label, key) => `${label}${S}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}${S}: en route. ${store} n'avait plus de clés au moment de votre paiement${S}; elle vous sera envoyée par e-mail dès que de nouvelles clés seront ajoutées.`,
@@ -953,13 +953,13 @@ const de: OrdersWords = {
     `Geben Sie auf dieser Seite ${email} ein, und ein Link zu Ihrem eigenen privaten Feed kommt sofort. Er funktioniert in Apple Podcasts, Overcast, Pocket Casts und den meisten anderen Podcast-Apps, solange Sie den Podcast haben.`,
   startCourseAt: (url) => `Kurs starten: ${url}`,
   courseNote: (email) =>
-    `Wenn Sie nach dem Bezahlen auf „${deStart}“ geklickt haben, öffnet sich der Kurs auf diesem Gerät sofort. Überall sonst fragt die Kursseite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein, und ein Link, der dieses Gerät freischaltet, kommt in der Regel innerhalb einer Minute. Sie müssen kein Passwort anlegen.`,
+    `Wenn Sie nach dem Bezahlen auf „${deStart}“ geklickt haben, öffnet sich der Kurs auf diesem Gerät sofort. Überall sonst fragt die Kursseite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein und fordern Sie per E-Mail einen Link an, der dieses Gerät freischaltet. Sie müssen kein Passwort anlegen.`,
   openWhatYouBought: (url) => `Ihren Kauf öffnen: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Auf dieser Seite finden Sie Ihren Download oder Ihren Link für die nächsten 3 Tage. Danach ist nichts verloren: Öffnen Sie ${ordersUrl}, geben Sie ${email} ein, und ein Link zu allem, was Sie bei ${store} gekauft haben, wird Ihnen jederzeit per E-Mail geschickt.`,
   startTitleAt: (title, url) => `${title} starten: ${url}`,
   bundleCourseNote: (email) =>
-    `Ein Kurs, den Sie nach dem Bezahlen gestartet haben, öffnet sich auf diesem Gerät sofort. Überall sonst fragt seine Seite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein, und ein Link, der dieses Gerät freischaltet, kommt in der Regel innerhalb einer Minute.`,
+    `Ein Kurs, den Sie nach dem Bezahlen gestartet haben, öffnet sich auf diesem Gerät sofort. Überall sonst fragt seine Seite nach Ihrer E-Mail-Adresse: Geben Sie ${email} ein und fordern Sie per E-Mail einen Link an, der dieses Gerät freischaltet.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: unterwegs. ${store} hatte genau bei Ihrer Zahlung keine Schlüssel mehr; Ihr Schlüssel wird Ihnen per E-Mail geschickt, sobald neue hinzugefügt werden.`,
@@ -1199,13 +1199,13 @@ const it: OrdersWords = {
     `Inserisci ${email} in quella pagina e ricevi subito un link al tuo feed privato. Funziona con Apple Podcasts, Overcast, Pocket Casts e la maggior parte delle altre app di podcast, per tutto il tempo in cui lo hai.`,
   startCourseAt: (url) => `Inizia il corso: ${url}`,
   courseNote: (email) =>
-    `Se dopo il pagamento hai premuto «${itStart}», si apre subito su quel dispositivo. Altrove, la pagina del corso ti chiede la tua email: inserisci ${email} e di solito entro un minuto arriva un link che dà accesso a quel dispositivo. Non c'è nessuna password da creare.`,
+    `Se dopo il pagamento hai premuto «${itStart}», si apre subito su quel dispositivo. Altrove, la pagina del corso ti chiede la tua email: inserisci ${email} e richiedi via email un link che dia accesso a quel dispositivo. Non c'è nessuna password da creare.`,
   openWhatYouBought: (url) => `Apri ciò che hai acquistato: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Quella pagina contiene il tuo download o il tuo link per i prossimi 3 giorni. Dopo non va perso: apri ${ordersUrl}, inserisci ${email} e ti verrà inviato via email un link a tutto ciò che hai acquistato da ${store}, in qualsiasi momento.`,
   startTitleAt: (title, url) => `Inizia ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Un corso che hai iniziato dopo il pagamento si apre subito su quel dispositivo. Altrove, la sua pagina ti chiede la tua email: inserisci ${email} e di solito entro un minuto arriva un link che dà accesso a quel dispositivo.`,
+    `Un corso che hai iniziato dopo il pagamento si apre subito su quel dispositivo. Altrove, la sua pagina ti chiede la tua email: inserisci ${email} e richiedi via email un link che dia accesso a quel dispositivo.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: in arrivo. Le chiavi di ${store} si sono esaurite proprio mentre pagavi; ti verrà inviata via email appena ne verranno aggiunte altre.`,
@@ -1440,13 +1440,13 @@ const nl: OrdersWords = {
     `Vul op die pagina ${email} in en je krijgt meteen een link naar je eigen privéfeed. Die werkt in Apple Podcasts, Overcast, Pocket Casts en de meeste andere podcastapps, zolang je de podcast hebt.`,
   startCourseAt: (url) => `Start de cursus: ${url}`,
   courseNote: (email) =>
-    `Als je na het betalen op ‘${nlStart}’ hebt gedrukt, opent de cursus meteen op dat apparaat. Op elk ander apparaat vraagt de cursuspagina om je e-mailadres: vul ${email} in, en meestal komt er binnen een minuut een link die dat apparaat toegang geeft. Je hoeft geen wachtwoord aan te maken.`,
+    `Als je na het betalen op ‘${nlStart}’ hebt gedrukt, opent de cursus meteen op dat apparaat. Op elk ander apparaat vraagt de cursuspagina om je e-mailadres: vul ${email} in en vraag per e-mail een link aan die dat apparaat toegang geeft. Je hoeft geen wachtwoord aan te maken.`,
   openWhatYouBought: (url) => `Open wat je hebt gekocht: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Op die pagina staat je download of je link de komende 3 dagen. Daarna is het niet kwijt: open ${ordersUrl}, vul ${email} in en je krijgt op elk moment een link gemaild naar alles wat je bij ${store} hebt gekocht.`,
   startTitleAt: (title, url) => `Start ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Een cursus die je na het betalen hebt gestart, opent meteen op dat apparaat. Op elk ander apparaat vraagt de pagina om je e-mailadres: vul ${email} in, en meestal komt er binnen een minuut een link die dat apparaat toegang geeft.`,
+    `Een cursus die je na het betalen hebt gestart, opent meteen op dat apparaat. Op elk ander apparaat vraagt de pagina om je e-mailadres: vul ${email} in en vraag per e-mail een link aan die dat apparaat toegang geeft.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: onderweg. De sleutels van ${store} waren op net toen je betaalde; je sleutel wordt je gemaild zodra er nieuwe zijn toegevoegd.`,
@@ -1682,13 +1682,13 @@ const pt: OrdersWords = {
     `Introduza ${email} nessa página e recebe de imediato uma ligação para o seu próprio feed privado. Funciona no Apple Podcasts, Overcast, Pocket Casts e na maioria das outras aplicações de podcasts, enquanto o tiver.`,
   startCourseAt: (url) => `Comece o curso: ${url}`,
   courseNote: (email) =>
-    `Se carregou em «${ptStart}» depois de pagar, o curso abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e uma ligação que dá acesso a esse dispositivo chega normalmente em menos de um minuto. Não há palavra-passe para criar.`,
+    `Se carregou em «${ptStart}» depois de pagar, o curso abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e peça por email uma ligação que dê acesso a esse dispositivo. Não há palavra-passe para criar.`,
   openWhatYouBought: (url) => `Abra o que comprou: ${url}`,
   threeDays: (ordersUrl, email, store) =>
     `Essa página tem o seu ficheiro para descarregar ou a sua ligação durante os próximos 3 dias. Depois disso não se perde: abra ${ordersUrl}, introduza ${email} e é-lhe enviada por email uma ligação para tudo o que comprou a ${store}, a qualquer momento.`,
   startTitleAt: (title, url) => `Comece ${title}: ${url}`,
   bundleCourseNote: (email) =>
-    `Um curso que começou depois de pagar abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e uma ligação que dá acesso a esse dispositivo chega normalmente em menos de um minuto.`,
+    `Um curso que começou depois de pagar abre de imediato nesse dispositivo. Em qualquer outro, a página do curso pede o seu email: introduza ${email} e peça por email uma ligação que dê acesso a esse dispositivo.`,
   keyIssued: (label, key) => `${label}: ${key}`,
   keyOnItsWay: (label, store) =>
     `${label}: a caminho. As chaves de ${store} esgotaram-se no momento em que pagou; a sua ser-lhe-á enviada por email assim que forem adicionadas mais.`,

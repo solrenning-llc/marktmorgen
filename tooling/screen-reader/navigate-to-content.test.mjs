@@ -17,9 +17,9 @@ hooks.deregister();
 const title="Start your store — Marktmorgen";
 const browserTitle=title+" - Chromium";
 
-function fixture({initialSwitches=0,afterPreparationSwitches=0,loseFocus=false,loseAgain=false,recoverOnBringToFront=false,lostWindowTitle="Start, window"}={}){
+function fixture({initialSwitches=0,afterPreparationSwitches=0,loseFocus=false,loseAgain=false,recoverOnBringToFront=false,recoverOnPlainEscape=false,lostWindowTitle="Start, window"}={}){
  const state={windowTitle:initialSwitches?"Other window":browserTitle,switchesNeeded:initialSwitches,
-  switches:0,reports:[],documentResets:0,headingReads:0,bringToFronts:0,last:""};
+  switches:0,plainEscapes:0,reports:[],documentResets:0,headingReads:0,bringToFronts:0,last:""};
  const reader={
   async perform(command){
    if(command===NVDAKeyCodeCommands.reportTitle){
@@ -28,6 +28,12 @@ function fixture({initialSwitches=0,afterPreparationSwitches=0,loseFocus=false,l
    if(command.keyCode?.includes?.(WindowsKeyCodes.Escape)&&command.modifiers?.includes(WindowsModifiers.Alt)){
     state.switches++;state.switchesNeeded--;
     if(state.switchesNeeded<=0)state.windowTitle=browserTitle;
+   }
+   if(command.keyCode?.includes?.(WindowsKeyCodes.Escape)&&Array.isArray(command.modifiers)&&command.modifiers.length===0){
+    if(state.windowTitle==="Search"){
+     state.plainEscapes++;
+     if(recoverOnPlainEscape)state.windowTitle=browserTitle;
+    }
    }
    if(command.keyCode?.includes?.(WindowsKeyCodes.Home)&&command.modifiers?.includes(WindowsModifiers.Control)){
     state.documentResets++;
@@ -80,6 +86,18 @@ test("an observed Search foreground is restored through the page before headings
  assert.ok(state.reports.includes("Search"),"The native mismatch must be observed before recovery");
  assert.equal(state.bringToFronts,2,"Recovery activates the already selected synthetic page once");
  assert.equal(state.reports.at(-1),browserTitle,"The exact synthetic page title still proves recovery");
+ assert.equal(state.headingReads,1,"No heading assertion is retried");
+});
+
+test("an observed native Search foreground is dismissed once before headings are read",async()=>{
+ const {reader,page,state}=fixture({loseFocus:true,afterPreparationSwitches:Infinity,recoverOnPlainEscape:true,lostWindowTitle:"Search"});
+ const nativeTitles=[];const foreground={async read(){nativeTitles.push(state.windowTitle);return state.windowTitle;}};
+ await navigateToContent(reader,page,"nvda",foreground);
+ await reader.nextHeading();
+ assert.ok(nativeTitles.includes("Search"),"The native foreground must observe Search before recovery");
+ assert.equal(state.plainEscapes,1,"Only the observed Search window is dismissed");
+ assert.equal(state.switches,0,"Dismissing Search must not consume the ten-switch budget");
+ assert.equal(state.reports.at(-1),browserTitle,"The exact browser title still proves recovery");
  assert.equal(state.headingReads,1,"No heading assertion is retried");
 });
 

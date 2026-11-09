@@ -324,7 +324,7 @@ export function LookEditor({
                 <label
                   key={option.hex}
                   title={option.label}
-                  className="relative grid h-10 w-10 cursor-pointer place-items-center rounded-full ring-offset-2 transition has-[:checked]:ring-2 has-[:checked]:ring-ink has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-violet-brand"
+                  className="relative grid h-11 w-11 cursor-pointer place-items-center rounded-full ring-offset-2 transition has-[:checked]:ring-2 has-[:checked]:ring-ink has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-violet-brand"
                   style={{ background: option.hex }}
                 >
                   <input
@@ -340,7 +340,7 @@ export function LookEditor({
                 </label>
               ))}
               <label
-                className={`flex h-10 cursor-pointer items-center gap-2 rounded-full border px-3 text-sm font-semibold transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-violet-brand ${
+                className={`flex h-11 cursor-pointer items-center gap-2 rounded-full border px-3 text-sm font-semibold transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-violet-brand ${
                   preset ? "border-line-strong text-ink-soft" : "border-ink text-ink"
                 }`}
               >

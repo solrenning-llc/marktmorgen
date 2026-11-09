@@ -17,6 +17,7 @@
 import type { Store } from "@/lib/store";
 import { idsOfKind, readProducts } from "@/lib/catalog";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type Member, directory } from "@/lib/community";
 import { allEvents, eventCount } from "@/lib/community-events";
 import { communityOf, eventEntry, lessonBodies, lessonEntries, memberEntry } from "@/lib/community-index";
@@ -129,8 +130,10 @@ export async function walkCommunity(store: Store, pay: WalkPay): Promise<boolean
   const communityId = communityOf(store);
   if (!communityId || !isRedisConfigured()) return false;
   if (!(await needsWalk(communityId))) return false;
-  const [held] = await redisPipeline([["SET", walkKey(communityId), "1", "NX", "EX", WALK_SECONDS]]);
-  if (held === null) return false;
+  // Read exactly (CX-123 rule 24): a lock held by another walk, or one that cannot be read, walks nothing now; the
+  // next search walks.
+  const mine = claimValue();
+  if ((await claimMark(walkKey(communityId), WALK_SECONDS, mine)) !== "ours") return false;
 
   try {
     // The courses sold with this store, each read once.
@@ -171,6 +174,7 @@ export async function walkCommunity(store: Store, pay: WalkPay): Promise<boolean
     await redisPipeline([["SET", markKey(communityId), INDEX_VERSION]]);
     return true;
   } finally {
-    await redisPipeline([["DEL", walkKey(communityId)]]).catch(() => {});
+    // Only while it is still ours: a walk that outlasted its lock never deletes the lock of the walk that took it.
+    await releaseMark(walkKey(communityId), mine);
   }
 }

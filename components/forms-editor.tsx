@@ -1,5 +1,6 @@
 "use client";
 
+import { StudioEmptyState } from "@/components/empty-state";
 import { FORM_STARTERS } from "@/lib/form-starters";
 import { FormAnswers } from "@/components/form-answers";
 import { FormResponseDeal } from "@/components/form-response-deal";
@@ -42,7 +43,7 @@ import {
 } from "@/lib/forms";
 
 /** One saved form, with how many answers it has kept and the newest of them. */
-export type SavedForm = { form: FormDef; total: number; latest: (FormResponse & { opportunityRef?: string })[] };
+export type SavedForm = { form: FormDef; total: number | null; latest: (FormResponse & { opportunityRef?: string })[] };
 
 const MESSAGES: Record<string, string> = {
   name: "Give the form a name. Only you see it.",
@@ -202,7 +203,7 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
 
       {saved.length === 0 && draft === null ? (
         <div className="mt-6 rounded-2xl bg-paper p-4 text-sm text-ink-soft ring-1 ring-line" data-form-starters="">
-          <p>No forms yet. Make one, then add a Form block to one of your pages under Pages and choose it there.</p>
+          <StudioEmptyState compact title="No forms yet" body="Make one, then add a Form block to one of your pages under Pages and choose it there." />
           {/* A ready example (487 [IT4], item 5): it opens in the editor below, unsaved, for you to change and save. */}
           <h3 id="form-starters-title" className="mt-3 font-semibold text-ink">Or start from an example</h3>
           <ul className="mt-2 space-y-2" aria-labelledby="form-starters-title">
@@ -237,15 +238,15 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
                   {form.name}
                   {isScored(form) ? <span className="tag">Scored quiz</span> : form.outcomes.length ? <span className="tag">Quiz</span> : null}
                 </p>
-                <p className="mt-1 text-sm text-ink-soft">{`${form.fields.length} ${form.fields.length === 1 ? "question" : "questions"} · ${total.toLocaleString("en-US")} ${total === 1 ? "answer" : "answers"} kept`}</p>
+                {total === null ? <p className="notice notice-warn mt-2" role="status">Answers could not be read right now. Reload this page to try again. You can still edit this form.</p> : <p className="mt-1 text-sm text-ink-soft">{`${form.fields.length} ${form.fields.length === 1 ? "question" : "questions"} · ${total.toLocaleString("en-US")} ${total === 1 ? "answer" : "answers"} kept`}</p>}
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {total > 0 ? (
+                {total !== null && total > 0 ? (
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpen(open === form.id ? null : form.id)}>
                     {open === form.id ? "Hide answers" : "See answers"}
                   </button>
                 ) : null}
-                {total > 0 ? (
+                {total !== null && total > 0 ? (
                   <a className="btn btn-secondary btn-sm" href={`${exportBase}${form.id}`}>
                     <Icon name="download" size={16} />
                     Download all answers
@@ -270,7 +271,7 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
                 )}
               </div>
             </div>
-            {open === form.id ? (
+            {open === form.id && total !== null ? (
               <FormAnswers pdfBase={exportBase.replace("/forms/export?", "/forms/response-pdf?")} form={form} latest={latest} total={total} canReview={dealStages.some(stage => stage.kind === "open")} blocked={draft !== null || dealDraft !== null} existingDeals={knownDeals} existingDealsAvailable={existingDealsAvailable} onReview={response => response.opportunityRef && setDealDraft({ form, response, responseRef: response.opportunityRef })} />
             ) : null}
           </li>

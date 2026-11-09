@@ -62,6 +62,8 @@ export default async function MovePage({ params, searchParams }: Params) {
   const notice = priceGone ? m.notices.price : (said ?? blocking);
   // Where the prices offered today are, when the one named is gone: the product's own page, while buyers can see it.
   const pricesLink = priceGone && product && !product.hidden ? product : null;
+  // A draft is named only to whoever holds this move's private invitation; otherwise it is a product not known here (MM-SA-30).
+  const named = product && (!product.hidden || invite) ? product : null;
 
   return (
     <div
@@ -85,7 +87,7 @@ export default async function MovePage({ params, searchParams }: Params) {
         <div className="st-card mt-6 p-6 sm:p-9" data-move={blocking ? "closed" : "open"}>
           <p className="st-label">{m.label}</p>
           <h1 className="font-display mt-1 text-3xl font-semibold leading-tight tracking-[-0.02em]">{m.pageTitle}</h1>
-          {product ? <p className="st-muted mt-4 text-lg leading-relaxed">{m.intro(store.name, product.title)}</p> : null}
+          {named ? <p className="st-muted mt-4 text-lg leading-relaxed">{m.intro(store.name, named.title)}</p> : null}
 
           {notice ? (
             <div className="st-note mt-6 text-sm" role="status">

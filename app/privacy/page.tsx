@@ -160,7 +160,10 @@ export default function PrivacyPage() {
           another of the store&apos;s plans, the change is made on the
           creator&apos;s Stripe account, which keeps the record of it, and we
           email the member a receipt and the creator a note with the
-          member&apos;s email address and the two plans. We keep nothing more
+          member&apos;s email address and the two plans. The same goes for a
+          switch to yearly payments. Each asks the box about starting before
+          the 14 days end again, and keeps its answer on the membership (see{" "}
+          <a href="#instant-access" className="underline">Starting before the 14 days end</a>). We keep nothing more
           about it.
         </p>
         <p>
@@ -485,7 +488,8 @@ export default function PrivacyPage() {
           box about starting before a 14-day right to cancel ends. When you
           check it, we write &ldquo;yes&rdquo;, the version and kind of that
           sentence and the time on the order, and the confirmation email quotes
-          it back to you. For a card payment it is kept on the order itself, in
+          it back to you. Switching a membership to another plan or to yearly
+          payments asks the same box again, and the receipt quotes it. For a card payment it is kept on the order itself (on a switch, on the membership), in
           the creator&apos;s own Stripe account, for as long as the creator
           keeps their Stripe records. For a PayPal payment it is kept with our
           own record of that PayPal order, which we keep for 400 days for
@@ -656,6 +660,24 @@ export default function PrivacyPage() {
           opens for them. A student taken off a course by its creator is kept
           on a list so the course stays closed to them. To check who bought a
           course, we ask the creator&apos;s own Stripe account by email address.
+        </p>
+        <p id="lesson-places">
+          <strong className="text-black">Where you stopped in a lesson video.</strong>{" "}
+          When a student watches a lesson video a store hosts with us, their
+          own browser keeps where they stopped, so the lesson can offer to
+          continue from there: in its storage, under <code>mm:lp:</code>{" "}
+          followed by the course, the lesson and a code made on our server
+          that cannot be worked out from their email address. It holds the
+          second they reached and when, and nothing else, and is never sent to
+          us. The speed they chose is kept the same way, under{" "}
+          <code>mm:lp-speed</code>. A place is removed when the video is
+          watched to its end and when they press Start over. One older than
+          90 days is never used, and is removed the next time that lesson is
+          opened in that browser. Whenever the course page opens in that
+          browser without confirming their access (because it ended, or
+          because it could not be checked at that moment), all their places in
+          that course are removed. Clearing the browser&apos;s site data
+          removes them at any time.
         </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}
@@ -905,7 +927,10 @@ export default function PrivacyPage() {
           email from the store&apos;s name, through our email provider, saying
           what they were given, within the same 20,000 in 30 days as the
           emails above. We keep how many of these a store made each day, for a
-          day, to hold them to their limits.
+          day, to hold them to their limits. Any key of a store, one that only
+          reads included, can also list the store&apos;s sales with each
+          buyer&apos;s email address and name, read from the creator&apos;s own
+          Stripe account when the tool asks; we do not keep that list.
         </p>
         <p id="code-links">
           <strong className="text-black">
@@ -1488,9 +1513,12 @@ export default function PrivacyPage() {
           it, its ID, link, title and time and, on Google, its guest list,
           until 60 days after the meeting. We keep a short log of problems with a
           connection for 30 days, and each consent in progress for ten
-          minutes. When a creator disconnects from the studio, we give the
-          token back to Google or Zoom so that access ends on their side too,
-          and delete the connection and its tokens; meetings already made
+          minutes. When a creator disconnects from the studio, we ask Google
+          or Zoom to cancel the token, so that access ends on their side too,
+          and delete the connection and its tokens. If Google or Zoom does not
+          confirm that our access ended, we say so on the screen and tell the
+          creator how to remove our app in their Google or Zoom account
+          themselves. Meetings already made
           stay on the creator&apos;s calendar or Zoom account. If the creator
           removes our app from their Zoom account, Zoom tells us and we delete
           every connection that user made, with its tokens, at once. If the

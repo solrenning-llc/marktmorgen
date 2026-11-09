@@ -40,7 +40,7 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { noteForErasure } from "@/lib/erasure-index";
 import { normaliseEmail } from "@/lib/auth";
 import { storeKey } from "@/lib/learn";
-import { createRequest, saveRequest } from "@/lib/payment-request-store";
+import { changeRequest, createRequest } from "@/lib/payment-request-store";
 import { ROOM } from "./data-room";
 
 export const OWNER = "keeper@example.com";
@@ -151,7 +151,7 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   // A payment request sent them, with its reminder waiting (lib/payment-request-store.ts).
   const billed = await createRequest(store, { email, name: "Tess", lines: [{ text: "Coaching, October", quantity: 1, cents: 48_000 }], note: `For ${email}`, dueDate: "", autoReminders: 1, total: 48_000 }, Date.now());
   if (!billed.ok) throw new Error(`a payment request was not kept: ${billed.message}`);
-  await saveRequest({ ...billed.request, sent: [Date.now()] });
+  await changeRequest(store, billed.request.id, (current) => ({ next: { ...current, sent: [Date.now()] }, answer: null }));
   // A form answer (lib/form-store.ts).
   await addResponse(statsId, w.formId, { id: hex(16), at: now, page: "/@erase-shop/form/intake", answers: { fmail1: email, fgoal1: "Learn fast" }, outcome: "", joined: false }, ROOM);
 
@@ -166,7 +166,16 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
     ["SET", `nl:course:${w.courseId}:open:${learner}`, "1", "EX", 400 * 86_400],
     ["SET", `nl:course:${w.courseId}:fin:${learner}`, "1", "EX", 400 * 86_400],
     ["SET", `nl:course:${w.courseId}:quiz:${w.lessons[0]}:tries:${learner}`, "1"],
-    ["SET", `nl:course:${w.courseId}:quiz:${w.lessons[0]}:result:${learner}`, JSON.stringify({ score: 3, of: 3 })],
+    ["SET", `nl:course:${w.courseId}:quiz:${w.lessons[0]}:result:${learner}`, JSON.stringify({
+      used: 1,
+      last: {
+        answers: { q1: [0] },
+        grade: { right: 1, total: 1, percent: 100, passed: true, marks: { q1: true } },
+        at: now,
+      },
+      best: 100,
+      passed: true,
+    })],
   ]);
   await markPassed(w.courseId, learner, w.lessons[0], ROOM);
   await takeRoom(storeKey(store), 1_000);
@@ -213,7 +222,9 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
     const them = emailKey(normaliseEmail(other));
     const pair = pairOf(learner, them);
     await redisPipeline([
-      ["RPUSH", `nl:cm:${id}:dm:${pair}`, JSON.stringify({ f: learner, t: "hi", at: now })],
+      // A line in the shape lib/community-dm.ts writes ({ a, text, at }, type Message): the data copy reads every line
+      // and refuses one it cannot read rather than leave it out (rule 24).
+      ["RPUSH", `nl:cm:${id}:dm:${pair}`, JSON.stringify({ a: learner, text: "hi", at: now })],
       ["ZADD", `nl:cm:${id}:dm:i:${learner}`, now, pair],
       ["ZADD", `nl:cm:${id}:dm:q:${them}`, now, pair],
       ["HSET", `nl:cm:${id}:dm:r:${pair}`, learner, now],

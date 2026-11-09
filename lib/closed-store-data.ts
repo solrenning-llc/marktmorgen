@@ -54,7 +54,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { type Held as LockHeld, LockBusyError, holdLock, releaseLock } from "@/lib/redis-lock";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
@@ -1211,7 +1211,8 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     if (now - started < WALK_GAP_MS) return { ...report, done: true };
     const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "-inf", now, "LIMIT", 0, BATCH_MAX]]);
     const refs = Array.isArray(due) ? (due as unknown[]).map(String) : [];
-    if (!refs.length) return { ...report, done: true };
+    // An empty line still reads the prepared stores below: a run that stopped after a store left the line and before
+    // its walk started has left its entry there, and only a walk erases what it names.
     for (const ref of refs) {
       if (Date.now() > deadline) break;
       // Still due, read again just before the first destructive step, and the store's lock taken in the same step as
@@ -1249,8 +1250,11 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       }
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
-    const [count] = await redisPipeline([["HLEN", BATCH_KEY]]);
-    if (!Number(count)) return { ...report, done: !unsure };
+    // How many stores wait for the walk, read exactly: an unknown count is never "none", which would say the run is
+    // done and leave the prepared stores' keys unwalked.
+    const count = countOf(repliesFor(await redisPipeline([["HLEN", BATCH_KEY]]), 1)?.[0]);
+    if (count === null) throw new UnknownReplyError("the closing walk's count of prepared stores (HLEN)");
+    if (count === 0) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);
     phase = "walk";
     cursor = "0";

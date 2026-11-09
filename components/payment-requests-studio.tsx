@@ -206,11 +206,19 @@ export function PaymentRequestsStudio({
     // Said at once as every action's result is (the toast's live region), and kept beside the request in words.
     toast(answer.checked ? "Refunds checked on Stripe." : answer.message);
   }
+  // A check kept on this page stands only over the row it was made for: router.refresh() keeps this state but
+  // brings newer rows, and a server row that is no longer paid and unchecked (refunded in full, or checked on its
+  // own since) or whose floor is above what the check said knows more, so the server's row is shown instead.
+  const checkHolds = (r: RequestRow): boolean => {
+    const seen = refundChecks[r.id];
+    return !!seen?.checked && r.state === "paid" && !r.refundsChecked && seen.refunded >= r.refunded;
+  };
   // A request as last checked on its own: what Stripe said, once it said it whole.
   const asChecked = (r: RequestRow): RequestRow => {
     const seen = refundChecks[r.id];
-    return seen?.checked ? { ...r, state: seen.state, refunded: seen.refunded, refundsChecked: true, refundsRetry: false, refundsOnDemand: false } : r;
+    return seen?.checked && checkHolds(r) ? { ...r, state: seen.state, refunded: seen.refunded, refundsChecked: true, refundsRetry: false, refundsOnDemand: false } : r;
   };
+  const checkShown = new Set(given.filter(checkHolds).map((r) => r.id));
   const rows = given.map(asChecked);
 
   // Paid outside Stripe (639 [GL7](30)): which request's form is open, and what it says.
@@ -425,7 +433,7 @@ export function PaymentRequestsStudio({
                 </p>
                 {r.failed && status === "open" ? <p className="mt-1 text-xs font-semibold text-danger">{r.failed}</p> : null}
                 {unchecked && refundCheck && !refundCheck.checked ? <p className="mt-1 text-sm text-ink [overflow-wrap:anywhere]">{refundCheck.message}</p> : null}
-                {refundCheck?.checked && status !== "open" ? <p className="mt-1 text-sm text-ink">{`Refunds checked on Stripe: ${refundCheck.refunded > 0 ? `${its(refundCheck.refunded)} refunded` : "none"}.`}</p> : null}
+                {refundCheck?.checked && checkShown.has(r.id) && status !== "open" ?<p className="mt-1 text-sm text-ink">{`Refunds checked on Stripe: ${refundCheck.refunded > 0 ? `${its(refundCheck.refunded)} refunded` : "none"}.`}</p> : null}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <button
                     type="button"

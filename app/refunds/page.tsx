@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 
 export default function RefundsPage() {
   return (
-    <LegalPage title="Refund Policy" lastUpdated="October 31, 2026">
+    <LegalPage title="Refund Policy" lastUpdated="November 9, 2026">
       <p>
         This Refund Policy applies to what you pay Marktmorgen, a product of
         Solrenning, an independent software studio, for the creator store at
@@ -218,6 +218,16 @@ export default function RefundsPage() {
           creator keeps the store open, nothing is refunded and your
           membership goes on as it was, with nothing charged for the days in
           between.
+        </p>
+        <p id="plan-past-end">
+          <strong className="text-black">A payment plan that charges you after its last payment.</strong>{" "}
+          A payment plan ends after the payments you agreed to. If Stripe still
+          takes a payment after that date, we end the plan and refund that
+          payment in full, automatically, from the creator&rsquo;s own Stripe
+          account, and email you once to say so. If the creator&rsquo;s balance
+          does not cover it, or Stripe refuses the refund, we try again every
+          day and tell the creator. Marktmorgen does not hold that money and
+          never pays it.
         </p>
         <p>
           If you cannot reach them, write to us at{" "}

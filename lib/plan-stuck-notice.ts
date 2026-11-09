@@ -22,14 +22,26 @@
  * before it is sent, at most once per plan (the caller keeps the plan's
  * "told" mark, and lets it go when this answers "unsent").
  */
+import { createHash } from "node:crypto";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { storeForId } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 
-export type StuckPlan = { sid: string; product: string; account: string; days: number };
+export type StuckPlan = { sid: string; product: string; account: string; session: string; days: number };
 
-/** The words of the email, for one store and one product (null: the product is no longer in the store). */
-export function stuckPlanWords(storeName: string, product: string | null, account: string, days: number): { subject: string; text: string } {
+/**
+ * The idempotency key of a plan's notice: one per plan and kind, so an email Resend accepted whose answer was lost is
+ * not sent again on the next try (the review of #3367 at 9489992283, Claude 6 LEVE 2).
+ */
+export const noticeKey = (kind: "plan-stuck" | "plan-owed", account: string, session: string): string =>
+  `${kind}:${createHash("sha256").update(`${account}|${session}`).digest("hex").slice(0, 32)}`;
+
+/**
+ * The words of the email, for one store and one product (null: the product is no longer in the store). The plan is
+ * named by the checkout that started it, which the creator can search for in their Stripe dashboard to reach the
+ * buyer's subscription; never by anything about the buyer (Claude 6 A1 on #3367).
+ */
+export function stuckPlanWords(storeName: string, product: string | null, account: string, session: string, days: number): { subject: string; text: string } {
   const what = product ? `"${product}"` : "one of your products";
   return {
     subject: `${storeName}: a payment plan's end could not be saved`.slice(0, 180),
@@ -38,38 +50,42 @@ export function stuckPlanWords(storeName: string, product: string | null, accoun
       "",
       `For ${days} days, the Stripe account ${account} has refused our access, so we could not tell Stripe when this plan ends. Until we can, Stripe may keep charging the buyer after their last payment.`,
       "",
+      `The plan started with this checkout: ${session}`,
+      "",
       "What to do:",
-      `- In your Stripe dashboard, open the account ${account}, find the buyer's subscription and set it to cancel after their last payment. Then Stripe never charges past it.`,
+      `- In your Stripe dashboard for the account ${account}, search for the checkout above, open the subscription it started and set it to cancel after the buyer's last payment. Then Stripe never charges past it.`,
       "",
       "What we do by ourselves:",
-      "- We try again once a week. As soon as Stripe answers us for this account, we save the plan's end, and we refund in full any payment Stripe took after it.",
+      "- We try again once a week. As soon as Stripe answers us for this account, we save the plan's end. If that end has already passed, we end the subscription at once and refund in full, from your Stripe balance, every payment Stripe took after it.",
       "",
       "We send this email once for this plan.",
     ].join("\n"),
   };
 }
 
-export type OwedPlan = { sid: string; product: string; days: number; invoices: string[] };
+export type OwedPlan = { sid: string; product: string; account: string; session: string; days: number; invoices: string[] };
 
 /** The words of the email about a payment after a plan's end still to refund (null product: no longer in the store). */
-export function owedPlanWords(storeName: string, product: string | null, invoices: string[], days: number): { subject: string; text: string } {
+export function owedPlanWords(storeName: string, product: string | null, session: string, invoices: string[], days: number): { subject: string; text: string } {
   const what = product ? `"${product}"` : "one of your products";
   const one = invoices.length === 1;
   return {
     subject: `${storeName}: a payment to refund to a buyer is waiting`.slice(0, 180),
     text: [
-      `A buyer paying for ${what} on a payment plan was charged after their last payment. The plan's end was promised to the buyer, so we refund such a payment in full from your Stripe balance and end the plan.`,
+      `A buyer paying for ${what} on a payment plan was charged after their last payment. The plan's end was promised to the buyer, so we end the subscription and refund such a payment in full, from your Stripe balance.`,
       "",
       `For ${days} days we could not refund ${one ? "it" : "them"}: your Stripe balance does not cover ${one ? "it" : "them"}, or Stripe refused the refund.`,
       "",
+      `The plan started with this checkout: ${session}`,
       `${one ? "The payment" : "The payments"} to refund (Stripe invoice${one ? "" : "s"}):`,
       ...invoices.map((invoice) => `- ${invoice}`),
       "",
       "What to do:",
-      `- Refund ${one ? "it" : "them"} yourself now: in your Stripe dashboard, open ${one ? "the invoice" : "each invoice"} above and refund ${one ? "its payment" : "the payment"} in full.`,
+      `- Refund ${one ? "it" : "them"} yourself now: in your Stripe dashboard, search for ${one ? "the invoice" : "each invoice"} above and refund ${one ? "its payment" : "the payment"} in full.`,
+      "- If Stripe says a payment can no longer be refunded (it is too old, or the buyer's card is closed), we cannot give it back from here either: contact the buyer and pay them back another way.",
       "",
       "What we do by ourselves:",
-      "- We try again every day. As soon as your balance covers it, we refund it and tell the buyer by email. A payment you refund yourself is not refunded again.",
+      "- We try again every day. When your balance covers it and Stripe accepts the refund, we refund it and email the buyer. A payment you refund yourself in Stripe is not refunded again.",
       "",
       "We send this email once for this plan.",
     ].join("\n"),
@@ -86,8 +102,8 @@ export async function tellPlanOwed(plan: OwedPlan): Promise<"told" | "unsent" | 
   if (!store) return "nobody";
   if (!isSenderConfigured()) return "unsent";
   const listing = plan.product ? await readListing(store, plan.product).catch(() => null) : null;
-  const words = owedPlanWords(store.name, listing?.title ?? null, plan.invoices, plan.days);
-  const sent = await sendEmail({ meter: { by: "store", store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject: words.subject, text: words.text }).catch(() => false);
+  const words = owedPlanWords(store.name, listing?.title ?? null, plan.session, plan.invoices, plan.days);
+  const sent = await sendEmail({ meter: { by: "store", store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject: words.subject, text: words.text, idempotencyKey: noticeKey("plan-owed", plan.account, plan.session) }).catch(() => false);
   return sent ? "told" : "unsent";
 }
 
@@ -104,7 +120,7 @@ export async function tellPlanStuck(plan: StuckPlan): Promise<"told" | "unsent" 
   if (!store) return "nobody";
   if (!isSenderConfigured()) return "unsent";
   const listing = plan.product ? await readListing(store, plan.product).catch(() => null) : null;
-  const words = stuckPlanWords(store.name, listing?.title ?? null, plan.account, plan.days);
-  const sent = await sendEmail({ meter: { by: "store", store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject: words.subject, text: words.text }).catch(() => false);
+  const words = stuckPlanWords(store.name, listing?.title ?? null, plan.account, plan.session, plan.days);
+  const sent = await sendEmail({ meter: { by: "store", store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject: words.subject, text: words.text, idempotencyKey: noticeKey("plan-stuck", plan.account, plan.session) }).catch(() => false);
   return sent ? "told" : "unsent";
 }

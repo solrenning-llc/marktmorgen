@@ -384,7 +384,7 @@ export async function settlePlans(
       }
       const marked = memberOf({ ...entry, since: now + DAY, owed, owedTold: true });
       if (!(await moveTo(member, now + DAY, marked))) continue;
-      const said = await withCutoff(deadline, () => tellPlanOwed({ sid: entry.sid, product: entry.product, days: PLAN_OWED_TELL_DAYS, invoices: short })).catch((error: unknown) => {
+      const said = await withCutoff(deadline, () => tellPlanOwed({ sid: entry.sid, product: entry.product, account, session, days: PLAN_OWED_TELL_DAYS, invoices: short })).catch((error: unknown) => {
         console.error("telling a creator about a plan's payment owed back failed", error);
         return "unsent" as const;
       });
@@ -430,7 +430,7 @@ export async function settlePlans(
     const told = memberOf({ ...entry, told: true });
     if (!(await moveTo(member, at, told))) continue;
     // Inside the run's deadline: an email cut off by it is "unsent", its mark given back.
-    const said = await withCutoff(deadline, () => tellPlanStuck({ sid: entry.sid, product: entry.product, account, days: PLAN_GIVE_UP_DAYS })).catch((error: unknown) => {
+    const said = await withCutoff(deadline, () => tellPlanStuck({ sid: entry.sid, product: entry.product, account, session, days: PLAN_GIVE_UP_DAYS })).catch((error: unknown) => {
       console.error("telling a creator about a stuck payment plan failed", error);
       return "unsent" as const;
     });

@@ -267,7 +267,9 @@ async function main(): Promise<void> {
     /end the subscription/.test(termsPart),
     /refund that payment in full/.test(termsPart),
     /your own Stripe account's balance/.test(termsPart),
-    termsPart.includes(`after ${String(N)} days`),
+    // Rule 23: the RED asked for "after 3 days"; tests/refund-window.test.ts refuses a typed number of days next to a
+    // refund after "after", so the Terms say "3 days later", still checked against PLAN_OWED_TELL_DAYS.
+    termsPart.includes(`still owed ${String(N)} days later`),
   ], [true, true, true, true, true]);
   is("the Refund Policy tells the buyer: refunded in full, from the creator's account, and emailed", [
     refundsPage.includes('id="plan-past-end"'),

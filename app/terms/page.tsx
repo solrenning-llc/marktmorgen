@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 4, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 9, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -163,6 +163,19 @@ export default function TermsPage() {
           or reversing each lead is your decision, and you must not use it to
           pay for sign-ups or bookings that people did not make themselves. If you run a community, what is posted in it is
           yours to moderate, and the rules in section 4 apply to it.
+        </p>
+        <p id="plan-past-end" className="scroll-mt-24">
+          <strong className="text-black">Payment plans end when agreed.</strong>{" "}
+          When a buyer pays on a payment plan, we tell your Stripe account when
+          the plan ends, after its last payment. If Stripe still takes a
+          payment after that date (for example, because your account refused
+          our access for a while), we end the subscription and refund that
+          payment in full, automatically, from your own Stripe account&rsquo;s
+          balance, and email the buyer once to say so. If your balance does not
+          cover it, or Stripe refuses the refund, we try again every day; if
+          it is still owed 3 days later, we email you once with what to
+          refund. Marktmorgen never
+          pays these refunds and never takes any part of them.
         </p>
         <p id="instant-access" className="scroll-mt-24">
           <strong className="text-black">Starting before the 14 days end.</strong>{" "}

@@ -722,7 +722,11 @@ export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStor
  *   (each refund's mark and idempotency key live at Stripe), and a plan with more to give back is kept for the next
  *   day (ZADD, SREM, ZREM, inside ownCommandsPerPlanTried);
  * - runMs: the share of the run the route gives the plans (PLANS_MS), every request given up by then;
- * - tellCommandsPerPlan: once a plan, when its account has refused us for PLAN_GIVE_UP_DAYS, telling its creator
+ * - tellCommandsPerPlan: per try of the telling (sent once a plan; while it stays unsent, tried again at each of the
+ *   plan's tries, weekly for a stuck plan and daily for an owed one, each try these commands again and, on the Amazon
+ *   SES path, one of the store's emails taken before sending and not given back when both providers fail; each
+ *   notice goes under an idempotency key of its own plan, lib/plan-stuck-notice.ts, noticeKey), when its account has
+ *   refused us for PLAN_GIVE_UP_DAYS, telling its creator
  *   (lib/plan-stuck-notice.ts): the store read by its id (two GETs and the free-account check storeForEmail makes,
  *   five, as measured in tests/payment-plan-stuck.test.ts), the product's listing (at most one read), the email's
  *   meter and send on the Resend path measured there (four; on Amazon SES that path's own commands, priced with

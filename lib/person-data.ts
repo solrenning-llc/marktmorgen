@@ -112,6 +112,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/assignment.ts", how: "erased", what: "The work they handed in for assignments, files included, and your feedback on it" },
   { file: "lib/certificate.ts", how: "erased", what: "Their certificates; a certificate's page then says it was not found" },
   { file: "lib/lesson-comments.ts", how: "erased", what: "Their comments under lessons, the answers under them, and the name they chose" },
+  { file: "lib/lesson-notes.ts", how: "erased", what: "Their private notes on lessons, which only they could see" },
   { file: "lib/podcast-access.ts", how: "erased", what: "Their private podcast feeds" },
   { file: "lib/letter-access.ts", how: "expires", days: 1, what: "A link to read an email kept for members works for an hour; whether their address may read it is kept for minutes, and how often a link was asked for, by a one-way hash of their address and connection, for an hour" },
   { file: "lib/discord-store.ts", how: "erased", via: "lib/discord-access.ts", what: "Their Discord account, and the roles they were given are taken back in your server" },

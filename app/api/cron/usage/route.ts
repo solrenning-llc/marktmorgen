@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import {
   DELIVERY_ALLOWANCE_BYTES,
@@ -255,8 +256,19 @@ export async function GET(request: NextRequest) {
       : `usage-watch: ${over.length} over ${allowance} — ${over.map((s) => `${s.folder} ${bytesWords(s.bytes)}`).join(", ")}`,
   );
 
-  const [seenRaw] = await redisPipeline([["GET", TOLD]]);
-  const seen = new Set<string>(typeof seenRaw === "string" ? (JSON.parse(seenRaw) as string[]) : []);
+  // Who was already told, read exactly (CX-123 rule 24): nil is nobody yet; anything but a JSON list of names is
+  // unknown, and is never "nobody told yet". Then nobody is written to about the allowance, the list is left as it
+  // was, and the part is said as unknown, as above.
+  let seen: Set<string>;
+  try {
+    seen = await readTold();
+  } catch (error) {
+    console.error("usage-watch: who was already told about the delivery allowance is unknown today; nobody was written to about it", error);
+    return Response.json(
+      { ok: false, unread: ["delivery"], video, visits, orders },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const fresh = over.filter((s) => !seen.has(s.folder));
   if (fresh.length === 0) {
     return Response.json(
@@ -355,6 +367,24 @@ export async function GET(request: NextRequest) {
     { ok: true, over: over.length, told, unknown: unknown.length, video, visits, orders },
     { headers: { "Cache-Control": "no-store" } },
   );
+}
+
+/** The stores already told about the delivery allowance this month: nil is none; any other shape throws. */
+async function readTold(): Promise<Set<string>> {
+  const replies = repliesFor(await redisPipeline([["GET", TOLD]]), 1);
+  if (!replies) throw new UnknownReplyError("the stores told about the delivery allowance");
+  const raw = replies[0];
+  if (raw === null) return new Set();
+  if (typeof raw !== "string") throw new UnknownReplyError("the stores told about the delivery allowance");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("the stores told about the delivery allowance");
+  }
+  const names = stringList(parsed);
+  if (!names) throw new UnknownReplyError("the stores told about the delivery allowance");
+  return new Set(names);
 }
 
 type OrdersRun = { stores: number; failed: number; told: number };

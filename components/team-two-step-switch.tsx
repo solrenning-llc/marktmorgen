@@ -14,7 +14,30 @@ const ERRORS: Record<string, string> = {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-type Answer = { ok?: boolean; error?: string; preview?: PausePreview; paused?: number; emailed?: number; waiting?: number; undone?: boolean };
+type Answer = { ok?: boolean; error?: string; preview?: PausePreview; paused?: number; emailed?: number; waiting?: number; uncertain?: number; undone?: boolean };
+
+/** Emails that may have gone but were not confirmed: never left out, so the confirmed count is never read as everyone (VR item 2). */
+function unconfirmedWords(uncertain: number, others: number): string {
+  if (!uncertain) return "";
+  return ` We could not confirm the email to ${plural(uncertain, others ? "more person" : "person", others ? "more people" : "people")}; it may still arrive.`;
+}
+
+/** What the page says once the rule is on and everyone who could be emailed was. */
+export function turnedOnWords(answer: Pick<Answer, "paused" | "emailed" | "uncertain">): string {
+  const paused = answer.paused ?? 0;
+  const emailed = answer.emailed ?? 0;
+  const unconfirmed = unconfirmedWords(answer.uncertain ?? 0, emailed);
+  return paused
+    ? `Turned on. ${plural(paused, "API key is", "API keys are")} paused, and ${plural(emailed, "person was", "people were")} emailed how to turn theirs back on.${unconfirmed}`
+    : `Turned on. Everyone on the team now logs in with a second step.${emailed ? ` ${plural(emailed, "person was", "people were")} emailed about their paused keys.` : ""}${unconfirmed}`;
+}
+
+/** What the page says when the rule is saved but not finished: who still waits, and any email not confirmed. */
+export function unfinishedWords(answer: Pick<Answer, "emailed" | "waiting" | "uncertain">): string {
+  const waiting = answer.waiting ?? 0;
+  const unconfirmed = unconfirmedWords(answer.uncertain ?? 0, waiting + (answer.emailed ?? 0));
+  return `Turned on, but not finished: ${waiting ? `${plural(waiting, "key's maker was", "keys' makers were")} not emailed yet` : "some keys may not be paused yet"}.${unconfirmed} Press Finish now to try again.`;
+}
 
 /**
  * The owner's switch: everybody on the team logs in with a second step (612
@@ -66,9 +89,7 @@ export function TeamTwoStepSwitch({
       setOn(true);
       setReviewing(false);
       setPending(Math.max(1, answer.waiting ?? 1));
-      setError(
-        `Turned on, but not finished: ${answer.waiting ? `${plural(answer.waiting, "key's maker was", "keys' makers were")} not emailed yet` : "some keys may not be paused yet"}. Press Finish now to try again.`,
-      );
+      setError(unfinishedWords(answer));
       return;
     }
     if (!answer?.ok) {
@@ -96,12 +117,7 @@ export function TeamTwoStepSwitch({
     setReviewing(false);
     setPending(0);
     if (next) {
-      const paused = answer.paused ?? 0;
-      setDone(
-        paused
-          ? `Turned on. ${plural(paused, "API key is", "API keys are")} paused, and ${plural(answer.emailed ?? 0, "person was", "people were")} emailed how to turn theirs back on.`
-          : `Turned on. Everyone on the team now logs in with a second step.${answer.emailed ? ` ${plural(answer.emailed, "person was", "people were")} emailed about their paused keys.` : ""}`,
-      );
+      setDone(turnedOnWords(answer));
     } else {
       setDone("Turned off. The team no longer has to use a second step. Paused API keys stay paused until whoever made them turns them back on.");
     }

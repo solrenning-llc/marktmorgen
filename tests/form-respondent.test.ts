@@ -12,7 +12,7 @@
  */
 import { parseForm, type FormResponse } from "@/lib/forms";
 import { addResponse, forgetFormsPerson, readResponses, writeForm } from "@/lib/form-store";
-import { COPIERS } from "@/lib/person-copy";
+import { COPIERS, COPY_PLAN } from "@/lib/person-copy";
 import { formDealDraft } from "@/lib/form-deal";
 import { emailQuestionIds, respondentOf } from "@/lib/form-respondent";
 import type { ErasureScope } from "@/lib/erasure-rules";
@@ -97,6 +97,10 @@ async function main(): Promise<void> {
     ["Feedback", { "How to reach you": TESS }],
   ]);
   is("the other words of those responses are not in her copy", [text.includes("Loved the last workshop."), text.includes("Please slow down the videos.")], [false, false]);
+  // Claude 5's pre-review of this branch, LIGHT 1: the copy's own line said "Your answers to the store's forms", which
+  // promises a whole response that is hers but whose sender cannot be told (the poll above, sent with no email
+  // question). It says what comes: the whole response only when its email questions give her address and no other.
+  is("the copy's line says what comes, and no more", COPY_PLAN["lib/form-store.ts"], { how: "copied", what: "Each response to the store's forms whose email questions give your address and no other, all of it. From any other response, only the answers that are your address" });
 
   part("Olly's copy: his own responses whole, and nothing of Tess's");
   const olly = await copyOf(OLLY);

@@ -5,7 +5,10 @@
  * itself after a fixed number of payments. Stripe cannot be told that when
  * the checkout is opened, so once the first payment is through the
  * subscription is given the exact moment it ends — the end of the period the
- * last payment covers — and Stripe then never charges again.
+ * last payment covers — and Stripe then never charges again. A plan reached
+ * only after its end has its subscription ended at once and every payment
+ * taken after the end given back (lib/plan-late-refunds.ts), since that end
+ * was promised to the buyer.
  *
  * That is done as soon as the buyer is back from paying, and a scheduled job
  * goes over every plan opened since, so a buyer who paid and closed the tab is
@@ -40,6 +43,7 @@ import { type Interval, isInterval } from "@/lib/product-recurring";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { tellPlanStuck } from "@/lib/plan-stuck-notice";
+import { refundLatePayments } from "@/lib/plan-late-refunds";
 
 const PENDING = "nl:plans:pending";
 /**
@@ -119,7 +123,7 @@ export function addPeriods(anchorSeconds: number, interval: Interval, n: number)
   return Math.floor(target.getTime() / 1000);
 }
 
-export type PlanState = "done" | "open" | "gone" | "early" | "unread";
+export type PlanState = "done" | "open" | "gone" | "early" | "unread" | "owed";
 
 /** What one try found, and for a plan ending sooner, when it is read again (seconds). */
 type Outcome = { state: PlanState; again?: number };
@@ -142,7 +146,10 @@ const isOwnReply = (reply: unknown, id: string): boolean =>
  * own end in case that sooner end is taken away; "unread" means Stripe
  * answered for something other than what was asked, or did not confirm the
  * end just set, so nothing is known and the job tries the plan again, as it
- * does a plan whose account refused the call.
+ * does a plan whose account refused the call; "owed" means a payment taken
+ * after the plan's own end is still to be given back (lib/plan-late-refunds.ts:
+ * the creator's balance did not cover it, Stripe refused it, or more are left
+ * than one try gives back), so the job tries the plan again.
  */
 export async function finishPlan(account: string, session: string): Promise<PlanState> {
   return (await tryPlan(account, session)).state;
@@ -167,7 +174,7 @@ async function tryPlan(account: string, session: string): Promise<Outcome> {
   const subscription = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(view.subscription)}`);
   // Read before cancel_at or status: another subscription's end is not this plan's.
   if (!isOwnReply(subscription, view.subscription)) return { state: "unread" };
-  if (subscription.status === "canceled") return { state: "done" };
+  const canceled = subscription.status === "canceled";
   const payments = Number(isPlan ? meta.plan_payments : meta.ends_after);
   const named = isPlan ? meta.plan_interval : meta.ends_interval;
   const interval: Interval = isPlan ? (named === "week" ? "week" : "month") : isInterval(named) ? named : "month";
@@ -177,8 +184,17 @@ async function tryPlan(account: string, session: string): Promise<Outcome> {
   const cycle = typeof subscription.billing_cycle_anchor === "number" ? subscription.billing_cycle_anchor : 0;
   const trialEnd = typeof subscription.trial_end === "number" ? subscription.trial_end : 0;
   const anchor = Math.max(cycle, trialEnd);
-  if (!Number.isInteger(payments) || payments < 2 || !anchor) return { state: "gone" };
+  if (!Number.isInteger(payments) || payments < 2 || !anchor) return { state: canceled ? "done" : "gone" };
   const end = addPeriods(anchor, interval, payments);
+  const now = Math.floor(Date.now() / 1000);
+  if (canceled) {
+    // Ended at or before its own end, or with its end still to come: it never charged past it. Otherwise (Stripe
+    // canceled it later, or a pass ended it and could not give everything back) its late payments are given back
+    // first (the owner's decision of 9 November 2026, item 12). An end Stripe does not state is read as late.
+    const endedAt = typeof subscription.ended_at === "number" && subscription.ended_at > 0 ? subscription.ended_at : 0;
+    if (now < end || (endedAt && endedAt <= end)) return { state: "done" };
+    return { state: (await refundLatePayments(account, view.subscription, end)).state };
+  }
   // An end already set is the plan's when it is the last payment's period's.
   // A later one (set by hand, or left from before) would charge more payments
   // than were agreed, so it is brought back. An earlier one (the buyer stopped
@@ -190,15 +206,19 @@ async function tryPlan(account: string, session: string): Promise<Outcome> {
   if (cancelAt === end) return { state: "done" };
   // Two days before its own end, so two daily runs come before it, never only one that may fall minutes before.
   if (cancelAt && cancelAt < end) {
-    return Math.floor(Date.now() / 1000) >= end ? { state: "done" } : { state: "early", again: Math.min(cancelAt, end - 2 * DAY) };
+    return now >= end ? { state: "done" } : { state: "early", again: Math.min(cancelAt, end - 2 * DAY) };
   }
 
   // Its own end already past (a plan stuck longer than its term, or a short one): an end in the past is not a time
   // Stripe documents for cancel_at, and the buyer agreed to no payment after it, so the subscription is ended now,
-  // with nothing prorated or invoiced (the review of #3367, item 3). Settled only on its own answer saying canceled.
-  if (Math.floor(Date.now() / 1000) >= end) {
+  // with nothing prorated or invoiced (the review of #3367, item 3), and every payment Stripe took at or after that
+  // end is given back (lib/plan-late-refunds.ts; the owner's decision of 9 November 2026, item 12). Settled only on
+  // its own answer saying canceled and every late payment given back; a pass that ended it and could not give them
+  // all back finds it canceled next time, and gives back what is left.
+  if (now >= end) {
     const ended = await onAccount("DELETE", account, `/subscriptions/${encodeURIComponent(view.subscription)}`, undefined, undefined, `plan-ended:${view.subscription}`);
-    return { state: isOwnReply(ended, view.subscription) && ended.status === "canceled" ? "done" : "unread" };
+    if (!(isOwnReply(ended, view.subscription) && ended.status === "canceled")) return { state: "unread" };
+    return { state: (await refundLatePayments(account, view.subscription, end)).state };
   }
   const updated = await onAccount(
     "POST",
@@ -232,8 +252,9 @@ async function leave(member: string): Promise<void> {
 
 /**
  * Settles the plans opened and not yet settled, at most `limit` a run (each
- * at most three calls to Stripe and four Redis commands of its own, and, once
- * a plan, telling its creator it is stuck) and none started after `deadline`
+ * at most three calls to Stripe, LATE_REFUND_CALLS more when it is past its
+ * end and has payments to give back, and four Redis commands of its own, and,
+ * once a plan, telling its creator it is stuck) and none started after `deadline`
  * (milliseconds since the epoch), every request given up by then; a plan not
  * reached stays where it is for the next run. New plans come from the pending
  * set; plans already tried and not settled wait in RETRY, the one due first
@@ -248,8 +269,8 @@ async function leave(member: string): Promise<void> {
 export async function settlePlans(
   limit = PLANS_PER_RUN,
   deadline = Number.POSITIVE_INFINITY,
-): Promise<{ done: number; open: number; dropped: number; failed: number; watched: number; stuck: number; told: number }> {
-  const counts = { done: 0, open: 0, dropped: 0, failed: 0, watched: 0, stuck: 0, told: 0 };
+): Promise<{ done: number; open: number; dropped: number; failed: number; watched: number; stuck: number; told: number; owed: number }> {
+  const counts = { done: 0, open: 0, dropped: 0, failed: 0, watched: 0, stuck: 0, told: 0, owed: 0 };
   if (!isRedisConfigured() || !Number.isSafeInteger(limit) || limit < 1) return counts;
   const now = Math.floor(Date.now() / 1000);
   const read = repliesFor(
@@ -300,6 +321,13 @@ export async function settlePlans(
       // Read again when it is due, its days of refusals counted from then.
       counts.watched += 1;
       await moveTo(member, Math.max(now + 1, outcome.again), memberOf({ ...entry, since: Math.max(now + 1, outcome.again) }));
+      continue;
+    }
+    if (state === "owed") {
+      // A payment after its end still to give back (the balance did not cover it, Stripe refused it, or more were
+      // left than one try gives back): its account answered, so no day of refusals counts; tried again the next day.
+      counts.owed += 1;
+      await moveTo(member, now + DAY, memberOf({ ...entry, since: now + DAY }));
       continue;
     }
     if (state === "open") {

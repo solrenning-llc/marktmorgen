@@ -131,6 +131,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     subscriptions[sub[1]] = { ...subscriptions[sub[1]], status: "canceled" };
     return answer(subscriptions[sub[1]]);
   }
+  // Rule 23 (the owner's decision of 9 November 2026, item 12): a plan ended past its end now asks for its paid
+  // invoices from the end on, to give back what was taken after it (lib/plan-late-refunds.ts); this stand-in had none
+  // and answered 404. Its plans here took no payment after their end: an empty, whole list
+  // (tests/payment-plan-late-refund.test.ts holds the refunds).
+  if (path === "/invoices" && method === "GET") return answer({ object: "list", data: [], has_more: false });
   if (sub && method === "POST") {
     const body = new URLSearchParams(String(init?.body));
     // Stripe documents cancel_at as a future time (docs.stripe.com/billing/subscriptions/cancel): one already past is
@@ -503,7 +508,9 @@ async function main(): Promise<void> {
   is("all six were tried", tried, 6);
   is("Redis commands within readCommandsPerRun + tried x ownCommandsPerPlanTried", commands <= (declared?.readCommandsPerRun ?? 0) + tried * (declared?.ownCommandsPerPlanTried ?? 0), true);
   is("Stripe calls within tried x stripeCallsPerPlanTried", stripeCalls <= tried * (declared?.stripeCallsPerPlanTried ?? 0), true);
-  is("the registry's figures", declared && [declared.readCommandsPerRun, declared.ownCommandsPerPlanTried, declared.stripeCallsPerPlanTried, declared.runMs, declared.tellCommandsPerPlan], [2, 4, 3, 25_000, 15]);
+  // Rule 23 (item 12 of 9 November 2026): stripeCallsPerPlanTried was 3; a plan past its end now also gives back its
+  // late payments, at most LATE_REFUND_CALLS (8) more calls: 11.
+  is("the registry's figures", declared && [declared.readCommandsPerRun, declared.ownCommandsPerPlanTried, declared.stripeCallsPerPlanTried, declared.runMs, declared.tellCommandsPerPlan], [2, 4, 11, 25_000, 15]);
   redis.clear();
   emails.length = 0;
   setClock(Math.floor(realNow() / 1000));

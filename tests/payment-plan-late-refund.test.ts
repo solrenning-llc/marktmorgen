@@ -20,6 +20,7 @@
  *   - a try stays within the registry's Stripe calls (PLAN_SETTLE_RUN in tests/plan-cost-registry.ts).
  */
 import { addPeriods, finishPlan, rememberPlan, settlePlans } from "@/lib/plans";
+import { LATE_REFUND_CALLS, LATE_REFUNDS_PER_TRY } from "@/lib/plan-late-refunds";
 import * as registry from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -242,6 +243,7 @@ async function main(): Promise<void> {
   await finishPlan(ACCOUNT, m.session).catch(() => "threw");
   is("calls within stripeCallsPerPlanTried", stripeCalls <= declared.stripeCallsPerPlanTried, true);
   is("the registry names the late refunds a try makes", typeof declared.lateRefundsPerTry, "number");
+  is("and they are the code's: the plan's three calls and LATE_REFUND_CALLS", [declared.lateRefundsPerTry, declared.stripeCallsPerPlanTried], [LATE_REFUNDS_PER_TRY, 3 + LATE_REFUND_CALLS]);
   // Six late payments, LATE_REFUNDS_PER_TRY a try: every one refunded, once, after enough passes.
   for (let pass = 0; pass < 6; pass += 1) await finishPlan(ACCOUNT, m.session).catch(() => "threw");
   is("every late payment refunded once in the end", m.invoices.map((row) => madeFor(row).length), [0, 0, 1, 1, 1, 1, 1, 1]);

@@ -34,7 +34,7 @@ import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
-import { holdState } from "@/lib/child-safety";
+import { heldRefusal } from "@/lib/child-safety";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
@@ -64,9 +64,8 @@ export async function POST(request: NextRequest) {
   // hold that cannot be read is not a yes.
   const named = body.kind === "quiz" || body.kind === "feedback" ? text(body.id, 40) : HELD_KINDS.has(String(body.kind)) ? text(body.product, 40) : "";
   if (named) {
-    const hold = await holdState(store, named);
-    if (hold === "held") return fail("held_for_report", 409);
-    if (hold === "unknown") return fail("unavailable", 503);
+    const held = await heldRefusal(store, named);
+    if (held) return held;
   }
 
   const answer = async <T,>(result: Promise<{ ok: true; value: T; left: number } | { ok: false; reason: string }>) => {

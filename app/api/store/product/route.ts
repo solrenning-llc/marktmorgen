@@ -48,7 +48,7 @@ import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
 import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
-import { isHeldForReport } from "@/lib/child-safety";
+import { heldRefusal } from "@/lib/child-safety";
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
 
@@ -177,15 +177,12 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 
-  // A product kept for a child-safety report (lib/child-safety.ts) is not removed, edited or published again
-  // while the hold lasts; a hold that cannot be read refuses too, never lets the change through.
-  if (action === "remove" || action === "edit" || action === "visibility") {
-    try {
-      if (await isHeldForReport(guarded.store, id)) return Response.json({ ok: false, error: "held_for_report" }, { status: 409 });
-    } catch (error) {
-      console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
-      return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-    }
+  // A product kept for a child-safety report (lib/child-safety.ts) is not removed, edited, published again, nor
+  // given a link or none in place of its file or an option's, while the hold lasts; a hold that cannot be read
+  // refuses too, never lets the change through. Only reordering it stays open: it changes nothing of it.
+  if (action !== "add" && action !== "move") {
+    const held = await heldRefusal(guarded.store, id);
+    if (held) return held;
   }
 
   // What the Terms forbid ("anything that promises fast or easy money, or income

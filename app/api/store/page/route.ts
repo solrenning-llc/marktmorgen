@@ -11,6 +11,7 @@ import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sa
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -41,6 +42,10 @@ export async function POST(request: NextRequest) {
   const store = guarded.store;
   const product = await readListing(store, id);
   if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+  // A product kept for a child-safety report (lib/child-safety.ts) keeps its page and the pictures on it while the
+  // hold lasts; a hold that cannot be read refuses too.
+  const held = await heldRefusal(store, id);
+  if (held) return held;
 
   const raw = body.page && typeof body.page === "object" ? (body.page as Record<string, unknown>) : null;
   const page = raw ? parsePage(raw) : { ...EMPTY_PAGE, blocks: [] };

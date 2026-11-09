@@ -13,6 +13,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError } from "@/lib/store";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { readOptionDirection } from "@/lib/option-request";
+import { heldRefusal } from "@/lib/child-safety";
 
 const ACTIONS = new Set(["add", "edit", "remove", "move"]);
 
@@ -49,6 +50,14 @@ export async function POST(request: NextRequest) {
 
   if (!id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+  }
+
+  // A product kept for a child-safety report (lib/child-safety.ts) keeps its price options: none added, changed or
+  // removed with its file while the hold lasts (the id names the product or the option); a hold that cannot be read
+  // refuses too. Reordering stays open: it changes nothing of them.
+  if (action !== "move") {
+    const held = await heldRefusal(guarded.store, id);
+    if (held) return held;
   }
 
   try {

@@ -50,6 +50,22 @@ const day = (at: number) => new Date(at).toLocaleDateString("en-US", { month: "s
 const emptyLine = (): LineDraft => ({ text: "", quantity: "1", amount: "" });
 
 /**
+ * What the studio says once an agreement's email was tried (lib/agreements.ts).
+ * When its send is not known, the email may still arrive: it is never said to
+ * have not gone, and the creator is told to check before sending again.
+ */
+export function agreementSentWords(action: "create" | "revise" | "resend" | "copy", answer: { sent?: boolean; uncertain?: unknown }): string {
+  if (answer.sent) return { create: "Sent for signature.", revise: "New version sent. It needs a new signature.", resend: "Sent again.", copy: "Signed copy sent again." }[action];
+  const saved = action === "create" || action === "revise";
+  if (answer.uncertain === true) {
+    return saved
+      ? "Saved, but we could not confirm its email was sent. It may still arrive; check before sending again."
+      : "We could not confirm the email was sent. It may still arrive; check before sending again.";
+  }
+  return saved ? "Saved, but its email did not go. Send it again from the list." : "The email did not go. Your store's emails for this month may be used.";
+}
+
+/**
  * The studio's proposals and agreements (lib/agreement-rules.ts): a form for
  * a new one, or a new version of one, and every one kept, with where it
  * stands, its link, each version's signature and what can still be done.
@@ -199,7 +215,7 @@ export function AgreementsStudio({
     setReviewOf(null);
     setReviewed(null);
     setErrorFor(null);
-    toast(answer.sent ? (editing ? "New version sent. It needs a new signature." : "Sent for signature.") : "Saved, but its email did not go. Send it again from the list.");
+    toast(agreementSentWords(editing ? "revise" : "create", answer));
     reset();
     // The review is gone with the focus in it: the focus goes back to the start of the form.
     requestAnimationFrame(() => document.getElementById("ag-email")?.focus());
@@ -215,7 +231,7 @@ export function AgreementsStudio({
       toast(answer.message ?? "We couldn't confirm the result. Reload to check before trying again.");
       return;
     }
-    toast((action === "resend" || action === "copy") && answer.sent === false ? "The email did not go. Your store's emails for this month may be used." : done);
+    toast((action === "resend" || action === "copy") && answer.sent === false ? agreementSentWords(action, answer) : done);
     router.refresh();
   }
 

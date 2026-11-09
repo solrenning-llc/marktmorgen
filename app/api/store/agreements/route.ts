@@ -18,7 +18,9 @@ import { statusOf as requestStatus } from "@/lib/payment-request-rules";
  *
  * Creating or revising keeps it within every count and the data room and
  * emails the link at once, from the store's emails for the month. Answers
- * `{ ok, id?, sent? }` or `{ ok: false, error, message }` with a sentence.
+ * `{ ok, id?, sent?, uncertain? }` or `{ ok: false, error, message }` with a
+ * sentence. `uncertain`: its email's send is not known, so it may still
+ * arrive (lib/agreements.ts); the studio says to check before sending again.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "send", 40_000);
@@ -43,7 +45,7 @@ export async function POST(request: NextRequest) {
       const created = await createAgreement(store, read.draft);
       if (!created.ok) return refuse(created.reason, created.message, created.reason === "unavailable" ? 503 : 409);
       const done = await sendAgreementEmail(store, created.agreement, created.version);
-      return Response.json({ ok: true, id: created.agreement.id, sent: done.sent });
+      return Response.json({ ok: true, id: created.agreement.id, sent: done.sent, ...(done.uncertain ? { uncertain: true } : {}) });
     }
     const id = text(body.id, 40);
     if (!ID_PATTERN.test(id)) return refuse("invalid", "That agreement is not one of this store's. Reload the page.");
@@ -65,18 +67,18 @@ export async function POST(request: NextRequest) {
       const changed = await reviseAgreement(store, id, read.draft);
       if (!changed.ok) return refuse(changed.reason, changed.message, changed.reason === "unavailable" ? 503 : 409);
       const done = await sendAgreementEmail(store, changed.agreement, changed.version);
-      return Response.json({ ok: true, id, sent: done.sent, version: changed.version.n });
+      return Response.json({ ok: true, id, sent: done.sent, version: changed.version.n, ...(done.uncertain ? { uncertain: true } : {}) });
     }
     if (action === "resend") {
       if (!agreementsAllowed(store)) return refuse("closed", "Agreements can be sent while your plan, or free trial, is running.", 409);
       const done = await sendAgain(store, id);
       if (!done.ok) return refuse("not_now", done.why, 409);
-      return Response.json({ ok: true, sent: done.sent });
+      return Response.json({ ok: true, sent: done.sent, ...(done.uncertain ? { uncertain: true } : {}) });
     }
     if (action === "copy") {
       const done = await resendSignedCopy(store, id);
       if (!done.ok) return refuse("not_now", done.why, 409);
-      return Response.json({ ok: true, sent: done.sent });
+      return Response.json({ ok: true, sent: done.sent, ...(done.uncertain ? { uncertain: true } : {}) });
     }
     if (action === "withdraw") {
       const done = await withdrawAgreement(store, id);

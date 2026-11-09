@@ -47,6 +47,21 @@ const day = (at: number) => new Date(at).toLocaleDateString("en-US", { month: "s
 const dueDay = (d: string) => day(Date.parse(`${d}T12:00:00Z`));
 
 /**
+ * What the studio says once a request's email was tried (lib/payment-requests.ts
+ * sendRequestEmail). When its send is not known, the email may still arrive:
+ * it is never said to have not gone, and the creator is told to check first.
+ */
+export function requestSentWords(action: "create" | "remind", answer: { sent?: boolean; uncertain?: boolean }): string {
+  if (answer.sent) return action === "create" ? "Request sent." : "Reminder sent.";
+  if (answer.uncertain === true) {
+    return action === "create"
+      ? "Request saved, but we could not confirm its email was sent. It may still arrive; check before sending again."
+      : "We could not confirm the reminder was sent. It may still arrive; check before sending again.";
+  }
+  return action === "create" ? "Request saved, but its email did not go. Send it again from the list." : "The reminder did not go. Your store's emails for this month may be used.";
+}
+
+/**
  * The studio's payment requests (lib/payment-request-rules.ts): a form for a
  * new one, for one person, with its lines, an optional due date and the
  * reminders that may go by themselves; and every request kept, with where
@@ -115,7 +130,7 @@ export function PaymentRequestsStudio({
     return cents !== null && Number.isSafeInteger(quantity) && quantity > 0 ? sum + cents * quantity : sum;
   }, 0);
 
-  async function call(body: Record<string, unknown> & { action: RequestAction }): Promise<{ ok: boolean; message?: string; sent?: boolean }> {
+  async function call(body: Record<string, unknown> & { action: RequestAction }): Promise<{ ok: boolean; message?: string; sent?: boolean; uncertain?: true }> {
     try {
       const response = await fetch("/api/store/payment-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data: unknown = await response.json().catch(() => null);
@@ -164,7 +179,7 @@ export function PaymentRequestsStudio({
     setReviewed(null);
     setErrorFor(null);
     requestAnimationFrame(() => document.getElementById("pr-email")?.focus());
-    toast(answer.sent ? "Request sent." : "Request saved, but its email did not go. Send it again from the list.");
+    toast(requestSentWords("create", answer));
     setEmail("");
     setName("");
     setLines([{ text: "", quantity: "1", amount: "" }]);
@@ -183,7 +198,7 @@ export function PaymentRequestsStudio({
       toast(answer.message ?? "The result could not be confirmed. Reload to check the request before trying again.");
       return;
     }
-    toast(action === "remind" && answer.sent === false ? "The reminder did not go. Your store's emails for this month may be used." : done);
+    toast(action === "remind" && answer.sent === false ? requestSentWords("remind", answer) : done);
     router.refresh();
   }
 

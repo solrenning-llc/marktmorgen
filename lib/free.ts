@@ -31,7 +31,7 @@ import { personKey } from "@/lib/person-key";
 import { countOrder, storeOrdersThisMonth } from "@/lib/orders";
 import { freeCopiesLimitFor } from "@/lib/order-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isPaidUp } from "@/lib/billing";
 import { csvCell } from "@/lib/csv";
@@ -144,7 +144,12 @@ async function within(key: string, limit: number): Promise<boolean> {
   return Number(count) <= limit;
 }
 
-export type RequestResult = "sent" | "email" | "limited" | "unavailable" | "error";
+/**
+ * "uncertain": the sender's answer was not known (a timeout, a 5xx, a network
+ * error after the request may have reached it), so the copy may still arrive
+ * and its link works; the page says so and to check before asking again.
+ */
+export type RequestResult = "sent" | "email" | "limited" | "unavailable" | "error" | "uncertain";
 
 export type Claim = {
   /** The store's address when the copy was asked for. */
@@ -216,7 +221,7 @@ export async function requestCopy(input: {
   const name = store.name;
   const g = givingWords(store.language);
   const link = `${origin}/@${store.handle}/free?token=${token}`;
-  const sent = await sendEmail({ meter: { by: "order" },
+  const outcome = await sendEmailOutcome({ meter: { by: "order" },
     from: `"${displayName(name)} via Marktmorgen" <${senderAddress()}>`,
     to: email,
     subject: g.freeSubject(product.title),
@@ -233,11 +238,12 @@ export async function requestCopy(input: {
       "",
       g.freeSentBy(name),
     ].join("\n"),
-  });
-  // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts.
-  if (sent) await countOrder(store, `free:${token}`, 0);
+  }).catch(() => "uncertain" as const);
+  // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts, also when its
+  // send is not known, since it may have arrived with a link that works (9 November 2026, rule 30).
+  if (outcome !== "refused") await countOrder(store, `free:${token}`, 0);
   await settleAdmitted(store, admitted.hour);
-  return sent ? "sent" : "error";
+  return outcome === "refused" ? "error" : outcome;
 }
 
 /** What an emailed link names, without spending anything. For the page. */

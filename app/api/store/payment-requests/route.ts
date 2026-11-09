@@ -14,8 +14,10 @@ import { markPaidOutside, remindNow, requestsOpen, sendRequestEmail } from "@/li
  *   { action: "outside", id, method: "cash" | "transfer" | "other", date: "2026-11-02", note }   paid outside Stripe (639 [GL7](30))
  *
  * Creating keeps the request within every count and emails it at once, from
- * the store's emails for the month. Answers `{ ok, sent? }` or `{ ok: false,
- * error, message }` with a sentence to show.
+ * the store's emails for the month. Answers `{ ok, sent?, uncertain? }` or
+ * `{ ok: false, error, message }` with a sentence to show. `uncertain`: its
+ * email's send is not known, so it may still arrive (lib/payment-requests.ts
+ * sendRequestEmail); the studio says to check before sending again.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "send", 16_000);
@@ -33,7 +35,7 @@ export async function POST(request: NextRequest) {
       const created = await createRequest(store, read.draft);
       if (!created.ok) return refuse(created.reason, created.message, created.reason === "unavailable" ? 503 : 409);
       const done = await sendRequestEmail(store, created.request);
-      return Response.json({ ok: true, id: created.request.id, sent: done.sent });
+      return Response.json({ ok: true, id: created.request.id, sent: done.sent, ...(done.uncertain ? { uncertain: true } : {}) });
     }
     const id = text(body.id, 40);
     if (!ID_PATTERN.test(id)) return refuse("invalid", "That request is not one of this store's. Reload the page.");
@@ -41,7 +43,7 @@ export async function POST(request: NextRequest) {
       if (!requestsOpen(store)) return refuse("closed", "Your store can't take payments right now, so nothing was sent.", 409);
       const done = await remindNow(store, id);
       if (!done.ok) return refuse("not_now", done.why, 409);
-      return Response.json({ ok: true, sent: done.sent });
+      return Response.json({ ok: true, sent: done.sent, ...(done.uncertain ? { uncertain: true } : {}) });
     }
     if (action === "outside") {
       const mark = readOutside(body);

@@ -260,8 +260,13 @@ async function main(): Promise<void> {
   mailFailureStatus = 500; mailDown = true;
   const unknown = await sendRequestEmail(big, unknownRequest.request, now);
   mailDown = false;
-  const unknownAgain = await sendRequestEmail(big, (await readRequest(unknownRequest.request.id))!, now);
-  is("HTTP500 is not confirmed non-acceptance or permission to repeat", [unknown.sent, unknownAgain.sent, mailPosts - beforeUnknown], [false, false, 1]);
+  // Rule 23 (9 November 2026, claude5/uncertain-send-texts-2): this called sendRequestEmail again at once and expected
+  // it not to post, held only by the sender's 24-hour key. The uncertain send now counts as one of the request's emails
+  // (said "could not confirm", never "Not sent"), so a send by hand within the day is refused before any post, and a
+  // later one goes under the next key; the same intent (no repeat on an uncertain answer), checked on the studio's path.
+  const unknownAgain = await remindNow(big, unknownRequest.request.id, now + 3_600_000);
+  is("HTTP500 is not confirmed non-acceptance or permission to repeat", [unknown.sent, unknownAgain.ok, mailPosts - beforeUnknown], [false, false, 1]);
+  is("it counts as one of the request's emails, said as not confirmed", [(await readRequest(unknownRequest.request.id))?.sent.length, (await readRequest(unknownRequest.request.id))?.failed], [1, "We could not confirm it was sent. It may still arrive; check before sending again."]);
   is("the payment request source is retained for reconciliation", (await readRequest(unknownRequest.request.id))?.email, "uncertain@example.com");
 
   part("Cancel, delete, and deleting the person");

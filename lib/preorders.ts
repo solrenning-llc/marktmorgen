@@ -20,7 +20,7 @@
  */
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { sendEmail } from "@/lib/email";
+import { type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -278,11 +278,11 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
 }
 
 /** The email the day it comes out: it is theirs, and the way in. */
-async function sendOut(store: Store, product: Listing, to: string, deps: HandOverDeps, idempotencyKey?: string): Promise<boolean> {
+async function sendOut(store: Store, product: Listing, to: string, deps: HandOverDeps, idempotencyKey?: string): Promise<SendOutcome> {
   const p = preorderWords(store.language);
   const g = givingWords(store.language);
   const link = product.course ? `${deps.base}/course/${product.id}` : ((await deps.ordersLink(to)) ?? `${deps.base}/orders`);
-  return sendEmail({ meter: { by: "order" },
+  return sendEmailOutcome({ meter: { by: "order" },
     from: deps.from,
     to,
     subject: p.outSubject(product.title).slice(0, 200),
@@ -296,18 +296,19 @@ async function sendOut(store: Store, product: Listing, to: string, deps: HandOve
     replyTo: store.email,
     ...(idempotencyKey ? { idempotencyKey } : {}),
   }).catch((error) => {
+    // Thrown after the request may have reached the sender: not known, never "not sent" (rule 30).
     console.error("a pre-order's email failed", error);
-    return false;
+    return "uncertain" as const;
   });
 }
 
 /** The receipt: what was pre-ordered, what it cost, and the day it is expected. */
-async function sendReceipt(store: Store, product: Listing, session: Session, to: string, reference: string, day: string | null, deps: HandOverDeps, idempotencyKey?: string): Promise<boolean> {
+async function sendReceipt(store: Store, product: Listing, session: Session, to: string, reference: string, day: string | null, deps: HandOverDeps, idempotencyKey?: string): Promise<SendOutcome> {
   const p = preorderWords(store.language);
   const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents;
   const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
   const said = speech(store);
-  return sendEmail({ meter: { by: "order" },
+  return sendEmailOutcome({ meter: { by: "order" },
     from: deps.from,
     to,
     subject: p.receiptSubject(product.title).slice(0, 200),
@@ -327,11 +328,18 @@ async function sendReceipt(store: Store, product: Listing, session: Session, to:
     ...(idempotencyKey ? { idempotencyKey } : {}),
   }).catch((error) => {
     console.error("a pre-order's receipt failed", error);
-    return false;
+    return "uncertain" as const;
   });
 }
 
-export type PreorderConfirm = "sent" | "given" | "skip" | "failed";
+/**
+ * "uncertain": the receipt's send is not known (a timeout, a 5xx, a network
+ * error after the request may have reached the sender), so it may have
+ * arrived: its confirmation mark is kept as for a sent one
+ * (lib/purchase-email.ts confirmPreorderOnce lets it go only on "failed"),
+ * so it is never sent twice (9 November 2026, rule 30).
+ */
+export type PreorderConfirm = "sent" | "given" | "skip" | "failed" | "uncertain";
 
 /**
  * A paid pre-order, confirmed once (lib/purchase-email.ts, confirmPurchase):
@@ -349,22 +357,25 @@ export async function confirmPreorder(store: Store, session: Session, product: L
     return outcome === "skip" ? "skip" : "given";
   }
   const sent = await sendReceipt(store, product, session, read.email, read.id, day, deps, `nimbus-preorder:${read.id}`);
-  return sent ? "sent" : "failed";
+  return sent === "refused" ? "failed" : sent;
 }
 
 /**
  * Sends a pre-order's buyer their email again, when the creator asks from the
  * studio's list of sales: the receipt while it waits, the way in once it was
- * handed over. "refunded" once it was given back.
+ * handed over. "refunded" once it was given back. "uncertain" when the
+ * sender's answer is not known: it may still arrive, so the studio says to
+ * check before sending again (lib/purchase-email.ts ResendOutcome).
  */
-export async function resendPreorder(store: Store, session: Session, product: Listing, deps: HandOverDeps): Promise<"sent" | "refunded" | "unknown" | "failed"> {
+export async function resendPreorder(store: Store, session: Session, product: Listing, deps: HandOverDeps): Promise<"sent" | "refunded" | "unknown" | "failed" | "uncertain"> {
   const read = readSession(store, session);
   if (!read || read.productId !== product.id) return "unknown";
   const entry = (await readPreorder(store, product.id, read.id)) ?? (await recordPreorder(store, read));
   if (entry.revoked) return "refunded";
-  if (entry.given) return (await sendOut(store, product, entry.to, deps)) ? "sent" : "failed";
-  const { day } = await soonOne(store, product.id);
-  return (await sendReceipt(store, product, session, read.email, read.id, day, deps)) ? "sent" : "failed";
+  const sent = entry.given
+    ? await sendOut(store, product, entry.to, deps)
+    : await sendReceipt(store, product, session, read.email, read.id, (await soonOne(store, product.id)).day, deps);
+  return sent === "refused" ? "failed" : sent;
 }
 
 // ------------------------------------------------------------------ the five-minute job

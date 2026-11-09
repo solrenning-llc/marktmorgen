@@ -126,6 +126,22 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
+        if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, listKey, id, kept] = args;
+          this.live(listKey);
+          if (!this.data.has(listKey)) return null;
+          for (const raw of this.list(listKey).slice(0, Number(kept))) {
+            if (!raw.includes(`"id":"${id}"`)) continue;
+            try {
+              const value = JSON.parse(raw) as unknown;
+              if (!value || typeof value !== "object" || Array.isArray(value) || (value as { id?: unknown }).id === id) return raw;
+            } catch {
+              return raw;
+            }
+          }
+          return null;
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;
@@ -317,6 +333,19 @@ export class MemoryRedis {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
         }
+        // lib/calls.ts: a call lock's value swapped (take-over, renewal), and a hold written, only while the lock holds the value given.
+        if (key.startsWith("-- marktmorgen:call-lock-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, lock, from, to, seconds] = args;
+          if (this.run(["GET", lock]) !== from) return 0;
+          this.run(["SET", lock, to, "EX", seconds]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:call-hold-if-locked:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, lock, diary, token, field, value] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["HSET", diary, field, value]);
+          return 1;
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;
@@ -351,6 +380,20 @@ export class MemoryRedis {
           const targets = args.slice(2, count + 1);
           if (this.run(["GET", lock]) !== args[count + 1]) return 0;
           for (const target of targets) this.run(["DEL", target]);
+          return 1;
+        }
+        // lib/payment-request-store.ts SAVE: a request's record written only while its write lock is the writer's,
+        // "new" only when absent, "edit" only over the record still there, with its open entry and reminder in step.
+        if (key.startsWith("-- marktmorgen:payreq-save:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, lock, target, open, due, token, mode, value, seconds, id, openScore, member, dueScore] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          const there = Number(this.run(["EXISTS", target]));
+          if ((mode === "new" && there !== 0) || (mode !== "new" && there !== 1)) return 2;
+          this.run(["SET", target, value, "EX", seconds]);
+          if (mode === "edit") {
+            this.run(openScore === "" ? ["ZREM", open, id] : ["ZADD", open, openScore, id]);
+            this.run(dueScore === "" ? ["ZREM", due, member] : ["ZADD", due, dueScore, member]);
+          }
           return 1;
         }
         if (key.startsWith("-- marktmorgen:pause-due-observation:v1\n") && args[0] === "1" && args.length === 3) {

@@ -94,6 +94,19 @@ export class BillingError extends Error {
   }
 }
 
+/**
+ * A plan switch sent to Stripe whose outcome is not known: the answer was lost,
+ * unreadable or a server error, or what came back could not be confirmed after
+ * Stripe took it. Stripe may have moved the subscription and charged for it, so
+ * this is never told to the creator as "nothing changed".
+ */
+export class SwitchUnconfirmedError extends Error {
+  constructor(cause: unknown) {
+    super(`The plan switch was sent to Stripe and its outcome is not confirmed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = "SwitchUnconfirmedError";
+  }
+}
+
 export async function onPlatform(
   method: "GET" | "POST" | "DELETE",
   path: string,
@@ -484,6 +497,9 @@ export async function readStartedSubscription(
     const meta=subscription?.metadata as Record<string,unknown>|null|undefined;
     if(meta?.funding_grant!==undefined||meta?.funding_review!==undefined)return null;
     state=subscription?stateOf(subscription):{state:"inactive",reason:"missing"};
+    // A reply without its plan line says nothing: thrown, so the return route
+    // writes nothing and the daily job settles it (lib/billing-sync.ts).
+    if(state.state==="unknown")throw new Error("The started subscription's plan is unknown");
   }
   return {
     customerId,
@@ -613,11 +629,62 @@ export function planOf(subscription: Record<string, unknown>): { tier: Tier; cyc
   return { tier, cycle, amountCents, shared: isSharedPrice(tier, cycle, amountCents) };
 }
 
+/** An own data property of a plain object, never a getter or an inherited one. */
+function ownDataField(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object") return undefined;
+  const field = Object.getOwnPropertyDescriptor(value, key);
+  return field && Object.hasOwn(field, "value") ? field.value : undefined;
+}
+const plainRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * Whether a subscription carries its one plan line in its exact shape
+ * (CX-123 rule 24): `items.data` a list of exactly one line whose price has a
+ * whole positive `unit_amount` and a `recurring.interval` of month or year,
+ * agreeing with the price's name when it has one. A quantity, currency or
+ * interval_count Stripe sends that is not 1, "usd" and 1 is off every plan's
+ * design (ensurePrice and checkout make them so) and is unknown too. Anything
+ * else says nothing about which plan is paid for, never the lowest plan at $0.
+ */
+function hasExactPlanLine(subscription: Record<string, unknown>): boolean {
+  const items = ownDataField(subscription, "items");
+  if (!plainRecord(items)) return false;
+  const data = ownDataField(items, "data");
+  if (!Array.isArray(data) || data.length !== 1) return false;
+  const line = ownDataField(data, "0");
+  if (!plainRecord(line)) return false;
+  // Absent stays as before (older fixtures and replies); present must be the design's.
+  if (Object.hasOwn(line, "quantity") && ownDataField(line, "quantity") !== 1) return false;
+  const price = ownDataField(line, "price");
+  if (!plainRecord(price)) return false;
+  if (Object.hasOwn(price, "currency") && ownDataField(price, "currency") !== "usd") return false;
+  const amount = ownDataField(price, "unit_amount");
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) return false;
+  const recurring = ownDataField(price, "recurring");
+  if (!plainRecord(recurring)) return false;
+  const interval = ownDataField(recurring, "interval");
+  if (interval !== "month" && interval !== "year") return false;
+  if (Object.hasOwn(recurring, "interval_count") && ownDataField(recurring, "interval_count") !== 1) return false;
+  const named = planFromLookupKey(ownDataField(price, "lookup_key"));
+  return !named || named.cycle === interval;
+}
+
 /** One reading of a subscription, used for what Stripe sends back either way. */
 export function stateOf(subscription: Record<string, unknown>): SubscriptionState {
   const status = typeof subscription.status === "string" ? subscription.status : "";
   if (!GOOD.has(status)) return { state: "inactive", reason: status || "unknown" };
   if (status === "past_due" && !pastDueInGrace(subscription)) return { state: "inactive", reason: "past_due" };
+
+  // A subscription in good standing is a plan only as Stripe sends one in full:
+  // its one plan line, and whether and when it stops, both explicit. A reply
+  // without them is unknown, and every caller keeps what it wrote down.
+  const cancelAtField = ownDataField(subscription, "cancel_at");
+  const stopsField = ownDataField(subscription, "cancel_at_period_end");
+  if (!hasExactPlanLine(subscription) || typeof stopsField !== "boolean" ||
+      !(cancelAtField === null || (typeof cancelAtField === "number" && Number.isSafeInteger(cancelAtField) && cancelAtField >= 0))) {
+    return { state: "unknown" };
+  }
 
   const trialing = status === "trialing";
   // Newer versions also fill `cancel_at` when a subscription is set to stop at
@@ -1143,6 +1210,7 @@ export async function setCancelAtPeriodEnd(
     throw new Error("The cancellation response does not identify the requested subscription state");
   }
   const state = stateOf(subscription);
+  if (state.state === "unknown") throw new Error("The cancellation response does not carry the subscription's plan");
   if (state.state === "active" &&
       (typeof subscription.cancel_at_period_end !== "boolean" || state.cancelsAtEnd !== cancel)) {
     throw new Error("The subscription did not acknowledge the requested cancellation setting");
@@ -1247,11 +1315,18 @@ export async function switchPlan(
   assertSourcePhase();
   assertFunding(funding,choice.tier,choice.cycle,'switch',undefined,subscriptionId);
   if(funding)await onPlatform('POST',path,new URLSearchParams({'metadata[funding_pending_grant]':funding.id,'metadata[funding_pending_review]':funding.reviewId}));
+  // From here the change itself is on its way to Stripe. A refusal Stripe
+  // states (a 4xx with its reason) changed nothing; any other failure, such as
+  // a lost or unreadable answer or a server error, may have switched and billed.
+  const sendChange = () => onPlatform("POST", path, body).catch((error: unknown) => {
+    if (error instanceof BillingError && error.status >= 400 && error.status < 500) throw error;
+    throw new SwitchUnconfirmedError(error);
+  });
   let updated: Record<string, unknown>;
   try {
     assertSourcePhase();
   assertFunding(funding,choice.tier,choice.cycle,'switch',undefined,subscriptionId);
-    updated = await onPlatform("POST", path, body);
+    updated = await sendChange();
   } catch (error) {
     // A price archived at Stripe since we last read it. The creator asked to
     // change plan once; they should not have to ask twice because of our own
@@ -1264,28 +1339,33 @@ export async function switchPlan(
     body.set("items[0][price]", await ensurePrice(choice.tier, choice.cycle));
     assertSourcePhase();
   assertFunding(funding,choice.tier,choice.cycle,'switch',undefined,subscriptionId);
-    updated = await onPlatform("POST", path, body);
+    updated = await sendChange();
   }
 
-  const updatedMeta=updated.metadata as Record<string,unknown>|null|undefined;
-  if(funding&&(updated.id!==subscriptionId||updatedMeta?.funding_pending_grant!==funding.id||updatedMeta?.funding_pending_review!==funding.reviewId))throw new Error('Switch funding observation does not match the submitted contract');
-  if (updated.pending_update) {
-    const invoice = updated.latest_invoice as { hosted_invoice_url?: unknown } | null;
-    const url = typeof invoice?.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
-    if (INVOICE_PAGE.test(url) || (LOCAL_PAGE.test(url) && STRIPE_API.startsWith("http://127.0.0.1"))) {
-      return { kind: "confirm", url };
+  // Stripe has taken the change: whatever fails from here, it may have switched and billed.
+  try {
+    const updatedMeta=updated.metadata as Record<string,unknown>|null|undefined;
+    if(funding&&(updated.id!==subscriptionId||updatedMeta?.funding_pending_grant!==funding.id||updatedMeta?.funding_pending_review!==funding.reviewId))throw new Error('Switch funding observation does not match the submitted contract');
+    if (updated.pending_update) {
+      const invoice = updated.latest_invoice as { hosted_invoice_url?: unknown } | null;
+      const url = typeof invoice?.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
+      if (INVOICE_PAGE.test(url) || (LOCAL_PAGE.test(url) && STRIPE_API.startsWith("http://127.0.0.1"))) {
+        return { kind: "confirm", url };
+      }
+      return { kind: "refused", reason: "pending" };
     }
-    return { kind: "refused", reason: "pending" };
+    const observedState=stateOf(updated);
+    if(funding&&(observedState.state!=='active'||observedState.tier!==choice.tier||observedState.cycle!==choice.cycle))throw new Error('Switch observation does not match the requested plan');
+    if(funding&&!(await activateObservedSwitch(funding.statsId,funding.id,funding.reviewId,subscriptionId,updated)))throw new Error('Switch funding activation was not acknowledged');
+    // The price says which plan this is; the note is for whoever reads the
+    // subscription in the Stripe dashboard. Missing it changes nothing charged.
+    await onPlatform("POST", path, new URLSearchParams({ "metadata[tier]": choice.tier,...(funding?{"metadata[funding_grant]":funding.id,"metadata[funding_review]":funding.reviewId,"metadata[funding_action]":"switch","metadata[funding_pending_grant]":"","metadata[funding_pending_review]":""}:{}) })).catch((error) =>
+      console.error("noting the plan on the subscription failed", error),
+    );
+    return { kind: "switched", state: funding&&observedState.state==="active"?{...observedState,period:fundedPeriod(observedState.period)}:observedState };
+  } catch (error) {
+    throw new SwitchUnconfirmedError(error);
   }
-  const observedState=stateOf(updated);
-  if(funding&&(observedState.state!=='active'||observedState.tier!==choice.tier||observedState.cycle!==choice.cycle))throw new Error('Switch observation does not match the requested plan');
-  if(funding&&!(await activateObservedSwitch(funding.statsId,funding.id,funding.reviewId,subscriptionId,updated)))throw new Error('Switch funding activation was not acknowledged');
-  // The price says which plan this is; the note is for whoever reads the
-  // subscription in the Stripe dashboard. Missing it changes nothing charged.
-  await onPlatform("POST", path, new URLSearchParams({ "metadata[tier]": choice.tier,...(funding?{"metadata[funding_grant]":funding.id,"metadata[funding_review]":funding.reviewId,"metadata[funding_action]":"switch","metadata[funding_pending_grant]":"","metadata[funding_pending_review]":""}:{}) })).catch((error) =>
-    console.error("noting the plan on the subscription failed", error),
-  );
-  return { kind: "switched", state: funding&&observedState.state==="active"?{...observedState,period:fundedPeriod(observedState.period)}:observedState };
 }
 
 /**
@@ -1550,6 +1630,8 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
     price.recurring = recurring;
     items.data = [item];
     member.items = items;
+    // Whether and when it stops, explicit too: an unknown row is neither adopted nor ended as lapsed.
+    if (stateOf(member).state === "unknown") throw new Error("Subscription search member state is unknown");
     if (member.status === "trialing") {
       if (typeof member.trial_start !== "number" || !Number.isSafeInteger(member.trial_start) ||
           typeof member.trial_end !== "number" || !Number.isSafeInteger(member.trial_end) ||

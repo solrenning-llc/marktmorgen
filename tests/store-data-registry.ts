@@ -63,6 +63,7 @@ import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
+import { MAX_SCHEDULED_CODES } from "@/lib/discount-schedule-rules";
 import { MAX_NOTES, MAX_NOTE_LENGTH as MAX_STATS_NOTE } from "@/lib/stats-notes";
 import { MAX_CRM_FIELDS, MAX_FIELD_OPTIONS, MAX_STAGES } from "@/lib/crm-rules";
 import { MAX_FORMS, MAX_FIELDS, MAX_OPTIONS, MAX_OUTCOMES } from "@/lib/forms";
@@ -327,6 +328,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:billing:sync:cursor@lib/billing-sync.ts": company("Where the billing sync stopped", "One key, the company's job."),
   "nl:plan-refund:@lib/plan-refund-flow.ts": company("One store's plan refund lock while its refund is made and its plan ended (305 [SY1])", "One short key a store, the company's money job: a random token, expiring by itself FLOW_LOCK_SECONDS (505) after it was taken, released at once when done (lib/plan-refund-flow.ts)."),
   "nl:plan-refund:ending@lib/plan-refund-flow.ts": company("Plan refunds not finished yet (305 [SY1])", "One hash, one small field a store with a refund in progress (a subscription id, two times, a flag and up to MAX_PARTS (6) charge ids with their amounts; no person's data), removed when the plan is ended or the refund is found not made, by the request itself or the daily job within GIVE_UP_DAYS (7) (lib/plan-refund-flow.ts)."),
+  "nl:plan-withdraw:@lib/plan-withdrawal.ts": company("A creator's withdrawal from their own plan (EU art. 11a, 588 [KB9] unit 3)", "One small hash a store's plan subscription, the company's proof of the withdrawal as trader: the first statement's time, the receipts tried (at most PLAN_WITHDRAW_ACK_SENDS, 3), a sent flag, a refund flag and, when support is owed a note, its short reason (the flow's own words), the notes tried (at most PLAN_WITHDRAW_SUPPORT_TRIES, 3) and a told flag; no name or email. Written with HSETNX and EXPIRE, gone by itself PLAN_WITHDRAW_KEEP_DAYS (400) after (lib/plan-withdrawal.ts)."),
   "nl:plan-refund:@lib/plan-refund-write.ts": company("A store's plan refund lock while one is made (305 [SY1])", "One short key a store, the company's money job: a random token, expiring by itself LOCK_SECONDS (345) after it was taken, released at once when the refund is done (lib/plan-refund-write.ts)."),
   "nl:plan-disputes:seen@lib/plan-disputes.ts": company("What each dispute on our own Stripe account turned out to be (232 [CA1] unit 5)", "One hash, the company's job: dispute ids with 'final', 'unmatched:<seconds>' or 'open:<store id>', never an address; 400 days from the last write; a deleted store's id reads as unmatched."),
   "nl:mail:bc:@lib/broadcasts.ts": { what: "Broadcasts and who each goes to", room: ["lib/broadcasts.ts"], parts: [per("studio", 1, KEY, "A broadcast's lock while it sends, minutes.")] },
@@ -715,6 +717,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:outreach:@lib/outreach.ts": { what: "Pitches, the domains that asked to stop, who writes, the day's count: each pitch at its largest (PITCH_BYTES) while it is kept, and its stop link for good (OUTREACH_TRACE_BYTES)", room: ["lib/outreach.ts"], parts: [capped(4 * KB, "Who writes, and the day's count.")] },
   "nl:outreach:stop:all@lib/outreach.ts": company("Domains that asked that nobody here write to them", "One set for every store."),
   "nl:outreach:stoplink:@lib/outreach.ts": room("A pitch's stop link, kept for good: counted in the room when the pitch is written (OUTREACH_TRACE_BYTES)", "lib/outreach.ts"),
+  // A discount code with a start and an end set ahead (511 [CK3], lib/discount-schedule.ts): one small field a code, gone once it is switched on.
+  "nl:dsched:@lib/discount-schedule.ts": { what: "A store's discount codes waiting for their start", parts: [capped(KEY + MAX_SCHEDULED_CODES * (ENTRY_BYTES + 160), "MAX_SCHEDULED_CODES fields: a promotion code id and its code, start, end, tries and failed mark.", src("lib/discount-schedule-rules.ts", "MAX_SCHEDULED_CODES"))] },
+  "nl:dsched:due@lib/discount-schedule.ts": company("Discount codes due to be switched on", "One sorted set for every store, at most MAX_SCHEDULED_CODES members a store (lib/discount-schedule-rules.ts), each taken out once its code is switched on, canceled, failed, or its store gone."),
+  "nl:dsched:lock:@lib/discount-schedule.ts": { what: "One change to a store's scheduled codes at a time", parts: [capped(KEY, "One key a store, held a minute at most.", src("lib/discount-schedule.ts", "LOCK_SECONDS"))] },
   "nl:depth:@lib/page-depth.ts": { what: "How far a page is read: at most DEPTH_FIELDS_MAX fields a product, counted with the product (DEPTH_RECORD_BYTES)", room: ["lib/store.ts"] },
   "nl:pfunnel:done:@lib/page-funnel-store.ts": room("Who signed up or paid at a step: counted with its funnel", "lib/page-funnel-store.ts"),
   "nl:pfunnel:seen:@lib/page-funnel-store.ts": room("Who opened a step: counted with its funnel", "lib/page-funnel-store.ts"),
@@ -935,6 +941,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:catalog:move:cursor@lib/store.ts": company("Where the catalog move stopped", "One key, the company's job."),
   "nl:store:before-catalog:@lib/store.ts": { what: "A store record kept aside while it moved, thirty days", parts: [capped(MAX_STORE_BYTES + KB, "Once, at most the record.", src("lib/store.ts", "MAX_STORE_BYTES"))] },
   "nl:store:handle:@lib/store.ts": { what: "The store's addresses", parts: [capped(21 * KEY, "Its address and up to twenty before it.")] },
+  "nl:store:id:@lib/discount-schedule.ts": { what: "Where the store is kept, read exactly so a scheduled code is dropped only for a store confirmed gone", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:store:id:@lib/store.ts": { what: "Where the store is kept", parts: [capped(KEY, "One a store.")] },
   "nl:store:id:@lib/store-exact.ts": { what: "Where the store is kept, read exactly to tell a store that is gone from one that did not answer", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:store:lock:@lib/store.ts": short("The store's lock while one change is written", "studio", 1, 128),

@@ -221,6 +221,12 @@ export async function createCode(
    * when the code is typed and works out nothing else here.
    */
   minimum: CodeMinimum | null = null,
+  /**
+   * A code scheduled ahead (511 [CK3], lib/discount-schedule.ts): made
+   * switched off, with Stripe's own expiry as its end, for the five-minute
+   * job to switch on at its start.
+   */
+  later: { expiresAt: number } | null = null,
 ): Promise<MadeCode> {
   const coupon = new URLSearchParams({
     // Once: the discount applies to the payment it is typed into. On a
@@ -260,6 +266,10 @@ export async function createCode(
     if (minimum) {
       promotion.set("restrictions[minimum_amount]", String(minimum.cents));
       promotion.set("restrictions[minimum_amount_currency]", minimum.currency);
+    }
+    if (later) {
+      promotion.set("active", "false");
+      promotion.set("expires_at", String(later.expiresAt));
     }
 
     const row = await onAccount(
@@ -316,6 +326,33 @@ export async function stopCode(
       && !Object.hasOwn(row, "error");
   } catch (error) {
     console.error("switching a discount code off failed", error);
+    return false;
+  }
+}
+
+/**
+ * Switches a scheduled code on (511 [CK3]): true only when Stripe's answer
+ * names this code and says it is active, nothing else (an error, another
+ * code, a partial answer, a timeout) proves it. The idempotency key is the
+ * caller's, one for each try, so a repeat of a try is answered with the same
+ * result instead of being done again.
+ */
+export async function activateCode(account: string, id: string, idempotencyKey: string): Promise<boolean> {
+  try {
+    const row = await onAccount(
+      "POST",
+      account,
+      `/promotion_codes/${encodeURIComponent(id)}`,
+      new URLSearchParams({ active: "true" }),
+      API_VERSION,
+      idempotencyKey,
+    );
+    return !!row && typeof row === "object" && !Array.isArray(row)
+      && Object.hasOwn(row, "id") && row.id === id
+      && Object.hasOwn(row, "active") && row.active === true
+      && !Object.hasOwn(row, "error");
+  } catch (error) {
+    console.error("switching a scheduled discount code on failed", error);
     return false;
   }
 }

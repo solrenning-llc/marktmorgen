@@ -74,7 +74,7 @@
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { type Paid, paypalPaymentId, readPayPalRefunds, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
+import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -105,7 +105,7 @@ import {
 import { type Card, productIds, readCardsFor } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
 import type { BookSizes } from "@/lib/api-read-rules";
-import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
+import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
@@ -2364,7 +2364,7 @@ export async function notePartners(
  * the share it had when the buyer paid, and to every partner who shares in
  * the product. Once per order, whichever of the return page and the sweep
  * hands it over first. A refund in full on PayPal takes it back in the book
- * (readBook, through readPayPalRefunds).
+ * (readBook, through readPayPalRefundsWithCoverage).
  */
 export async function creditPayPalSale(store: Store, paid: Paid, title: string): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
@@ -2481,8 +2481,9 @@ export async function noteSession(
   let how: Credit = "click";
   if (!AFFILIATE_ID_PATTERN.test(aff)) {
     // Then the code the buyer typed, which is the only trace a sale made on a
-    // podcast or from a stage leaves at all (lib/affiliate-codes.ts).
-    const given = owners ?? (await codeOwners(store));
+    // podcast or from a stage leaves at all (lib/affiliate-codes.ts). Read only
+    // for a sale that carries a code: a sale with none never waits on that read.
+    const given = promoCodesOn(session).length ? (owners ?? (await codeOwners(store))) : new Map<string, string>();
     let found = affiliateForCodes(session, given);
     how = "code";
     // And last, the buyer themselves: somebody who was credited to an
@@ -2878,8 +2879,11 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
  * milliseconds), Stripe is asked nothing past it, and what was not read is
  * marked incomplete (invoicesChecked, refundsChecked): the affiliate page's
  * refresh stops so (lib/affiliate-book-snapshot.ts, BOOK_READ_SECONDS).
+ * With `titles: false`, a membership's or plan's payment is not named after its
+ * product (its title is ""), and nothing is read for the names: for a reader
+ * that prints no product, as the payout file (lib/affiliate-payouts.ts).
  */
-export async function readBook(store: Store, only?: string, limits: { deadline?: number } = {}): Promise<Book> {
+export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean } = {}): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
   const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = await redisPipeline([
@@ -2937,7 +2941,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   let recurringLines: Referral[] = [];
   if (store.stripeAccountId && everyone.length) {
     try {
-      const read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400, limits.deadline);
+      const read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400, limits.deadline, limits.titles !== false);
       recurringLines = read.lines.filter((r) => mine(r.aff));
       invoicesChecked = read.complete;
     } catch (error) {
@@ -2959,8 +2963,30 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
       refundsChecked = read.complete;
-      // PayPal's refunds in full, named by the payment as the book names it.
-      for (const r of await readPayPalRefunds(store.statsId, since)) refunds.set(paypalPaymentId(r.capture), (refunds.get(paypalPaymentId(r.capture)) ?? 0) + r.cents);
+      // PayPal's refunds in full, named by the payment as the book names it. One with no capture id never meets its
+      // sale, one in another currency than its sale's means nothing in its cents, and one whose cents are not a
+      // whole positive amount, or not its sale's whole amount (a PayPal refund here is in full), would count as a
+      // refund of less: each leaves what is owed unknown (refundsChecked), never a refund of nothing, so no payout
+      // is made on it (rule 24, as #3189 for Stripe). So does a reading that did not cover every refund since the
+      // oldest line (more listed than PAYPAL_REFUNDS_READ, or a listed one whose record is gone): a refund past the
+      // cut is never paid on. A refund is in full, so the same payment listed twice counts once.
+      const paypalSales = new Map<string, { currency: string; total: number }[]>();
+      for (const r of everything) {
+        if (r.pi.startsWith("paypal:")) paypalSales.set(r.pi, [...(paypalSales.get(r.pi) ?? []), { currency: r.currency.toLowerCase(), total: r.total }]);
+      }
+      const paypalSeen = new Set<string>();
+      const paypal = await readPayPalRefundsWithCoverage(store.statsId, since);
+      if (paypal.partial) refundsChecked = false;
+      for (const r of paypal.rows) {
+        const named = typeof r.capture === "string" && r.capture !== "";
+        const sales = named ? paypalSales.get(paypalPaymentId(r.capture)) : undefined;
+        const readable = named && typeof r.currency === "string" && Number.isSafeInteger(r.cents) && r.cents > 0;
+        if (!readable || (sales ?? []).some((sale) => sale.currency !== r.currency.toLowerCase() || sale.total !== r.cents)) refundsChecked = false;
+        else if (!paypalSeen.has(r.capture)) {
+          paypalSeen.add(r.capture);
+          refunds.set(paypalPaymentId(r.capture), (refunds.get(paypalPaymentId(r.capture)) ?? 0) + r.cents);
+        }
+      }
     } catch (error) {
       console.error("reading refunds for the affiliate book failed", error);
       refundsChecked = false;
@@ -3076,7 +3102,7 @@ export function withinMonths(from: number, paidAt: number, months: number): bool
  * never written down. A membership's payment counts while it falls within
  * the months agreed when it was sold; a plan's every payment counts.
  */
-async function recurringReferrals(store: Store, everyone: Affiliate[], since: number, deadline?: number): Promise<{ lines: Referral[]; complete: boolean }> {
+async function recurringReferrals(store: Store, everyone: Affiliate[], since: number, deadline?: number, named = true): Promise<{ lines: Referral[]; complete: boolean }> {
   const handles = saleHandles(store);
   const byId = new Map(everyone.map((a) => [a.id, a]));
   const found: { invoice: InvoiceLike; meta: Record<string, string> }[] = [];
@@ -3105,7 +3131,7 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
   const ids = [...new Set(found.map((f) => f.meta.product).filter((id): id is string => Boolean(id)))];
   // Named from the products' cards, not their whole listings (a title, not up to MAX_PRODUCT_BYTES a product). A
   // reading that fails, or answers in a shape not known, leaves the names empty and every line in, as it always did.
-  const titles = new Map([...(ids.length ? await readCardsFor(store, ids).catch(() => new Map<string, Card>()) : new Map<string, Card>())].map(([id, card]) => [id, card.title]));
+  const titles = new Map([...(named && ids.length ? await readCardsFor(store, ids).catch(() => new Map<string, Card>()) : new Map<string, Card>())].map(([id, card]) => [id, card.title]));
   const lines: Referral[] = [];
   for (const { invoice, meta } of found) {
     const total = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
@@ -3382,10 +3408,72 @@ function exactPairs(reply: unknown, what: string): [string, string][] {
   return out;
 }
 
+/** Whole cents from `least` up, held exactly (`1e999` parses to Infinity, `2 ** 53` is past exact). */
+const wholeCents = (value: unknown, least: number): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= least;
+
+/** A share as its writers store it: 0 (`Number(meta.via_rate) || 0`) to MAX_COMMISSION, two decimals when blended. */
+const exactShare = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_COMMISSION;
+
+/** How a sale found its affiliate, as writeReferral writes it; absent on older records (then `byCode`, or a click). */
+const STORED_HOW = new Set<unknown>(["click", "code", "buyer", "partner", "contact"]);
+
+/** A total of the public numbers, or UnknownReplyError when it is not a whole number held exactly (never "$∞" or "$0"). */
+function exactTotal(total: number, what: string): number {
+  if (!Number.isSafeInteger(total) || total < 0) throw new UnknownReplyError(what);
+  return total;
+}
+
+/** Absent (older records, in US dollars) or a three-letter code as Stripe writes it; anything else is of an unknown shape. */
+const exactCurrency = (value: unknown): boolean => value === undefined || (typeof value === "string" && /^[a-z]{3}$/.test(value));
+
 /**
- * Throws UnknownReplyError when a reply is not in its exact shape, so the
- * directory shows the program without numbers, never with zeros
- * (lib/affiliate-directory.ts, readDirectory).
+ * One record of a program's public numbers, read exactly: what the shared
+ * parser reads, or UnknownReplyError. The shared parsers drop a record they
+ * cannot read and default a missing number to 0, which their other callers
+ * rely on; the public numbers never show such a record as nothing or as 0.
+ */
+function exactAffiliate(raw: string): Affiliate {
+  const affiliate = parseAffiliate(raw);
+  if (!affiliate) throw new UnknownReplyError("a program's affiliate");
+  return affiliate;
+}
+
+/**
+ * A sale, read exactly as writeReferral writes it: its base in whole cents
+ * from 0 up, its share from 0 to MAX_COMMISSION, its currency absent or
+ * Stripe's code, `self` absent or true/false, `how` absent or one it writes
+ * (`byCode` absent or true/false on older records).
+ */
+function exactReferral(raw: string): Referral {
+  const referral = parseReferral(raw);
+  const value = referral ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  if (
+    !referral ||
+    !value ||
+    !wholeCents(value.base, 0) ||
+    !exactShare(value.rate) ||
+    !exactCurrency(value.currency) ||
+    (value.self !== undefined && typeof value.self !== "boolean") ||
+    (value.how !== undefined && !STORED_HOW.has(value.how)) ||
+    (value.byCode !== undefined && typeof value.byCode !== "boolean")
+  ) {
+    throw new UnknownReplyError("a program's sale");
+  }
+  return referral;
+}
+
+/** A payment the creator wrote down, read exactly as addPayout writes it: whole cents from 1 up, its currency absent or Stripe's code. */
+function exactPayout(raw: string): Payout {
+  const payout = parsePayout(raw);
+  const value = payout ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  if (!payout || !value || !wholeCents(payout.cents, 1) || !exactCurrency(value.currency)) throw new UnknownReplyError("a program's payment");
+  return payout;
+}
+
+/**
+ * Throws UnknownReplyError when a reply, or a record inside it, is not in its
+ * exact shape, so the directory shows the program without numbers, never
+ * with zeros (lib/affiliate-directory.ts, readDirectory).
  */
 export async function programNumbers(store: Store): Promise<ProgramNumbers | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
@@ -3409,26 +3497,33 @@ export async function programNumbers(store: Store): Promise<ProgramNumbers | nul
   });
   const sales = exactPairs(replies[2], "a program's sales");
   const payouts = exactPairs(replies[3], "a program's payments");
-  const approved = people
-    .map(([, raw]) => parseAffiliate(raw))
-    .filter((a): a is Affiliate => a !== null && a.status === "approved");
+  const approved = people.map(([, raw]) => exactAffiliate(raw)).filter((a) => a.status === "approved");
   const currency = store.currency.toLowerCase();
   const referrals = sales
-    .map(([, raw]) => parseReferral(raw))
-    .filter((r): r is Referral => r !== null && !r.self && (r.currency || "usd").toLowerCase() === currency);
-  const earned = (r: Referral) => commissionOn(r.base, r.rate);
+    .map(([, raw]) => exactReferral(raw))
+    .filter((r) => !r.self && (r.currency || "usd").toLowerCase() === currency);
+  // Every sum is checked as it grows: once past exact, adding more can never bring it back.
+  const total = (values: number[], what: string) => values.reduce((sum, n) => exactTotal(sum + exactTotal(n, what), what), 0);
+  // commissionOn multiplies before it divides: past exact, the product rounds, and so would the commission.
+  const earned = (r: Referral) => {
+    if (!(r.base * r.rate <= Number.MAX_SAFE_INTEGER)) throw new UnknownReplyError("a program's earnings");
+    return commissionOn(r.base, r.rate);
+  };
   const byClick = referrals.filter((r) => r.how === "click");
   return {
     affiliates: approved.length,
-    clicks: clicks.reduce((sum, n) => sum + n, 0),
+    clicks: total(clicks, "a program's clicks"),
     clickSales: byClick.length,
-    clickEarnedCents: byClick.reduce((sum, r) => sum + earned(r), 0),
+    clickEarnedCents: total(byClick.map(earned), "a program's earnings"),
     sales: referrals.length,
-    earnedCents: referrals.reduce((sum, r) => sum + earned(r), 0),
-    paidCents: payouts
-      .map(([, raw]) => parsePayout(raw))
-      .filter((p): p is Payout => p !== null && (p.currency || "usd").toLowerCase() === currency)
-      .reduce((sum, p) => sum + p.cents, 0),
+    earnedCents: total(referrals.map(earned), "a program's earnings"),
+    paidCents: total(
+      payouts
+        .map(([, raw]) => exactPayout(raw))
+        .filter((p) => (p.currency || "usd").toLowerCase() === currency)
+        .map((p) => p.cents),
+      "a program's payments",
+    ),
     since: approved.reduce((first, a) => (first === 0 || (a.decidedAt > 0 && a.decidedAt < first) ? a.decidedAt : first), 0),
   };
 }

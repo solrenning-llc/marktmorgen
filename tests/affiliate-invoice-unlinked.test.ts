@@ -1,8 +1,9 @@
 /**
  * A paid membership or plan invoice that Stripe gives whole but that cannot be
  * linked to one payment intent (paid in parts by two, by a charge with no
- * payment intent, by a payment record, more payments than one page shows, or
- * no paid payment listed) is not a reading that failed: reloading does not
+ * payment intent, by a payment record, or no paid payment listed, its
+ * payments read to the end: tests/affiliate-invoice-payments-more.test.ts) is
+ * not a reading that failed: reloading does not
  * change it (second money pre-review of claude5/affiliate-refund-list-exact).
  *
  * It used to set invoicesChecked false, so the studio said "reload to try
@@ -106,7 +107,9 @@ async function main(): Promise<void> {
     ["paid in parts by two payment intents", payments([paid("pi_inv_1"), paid("pi_inv_9")])],
     ["paid by a charge with no payment intent", payments([{ object: "invoice_payment", status: "paid", payment: { type: "charge", charge: "ch_1" } }])],
     ["paid by a payment record", payments([{ object: "invoice_payment", status: "paid", payment: { type: "payment_record", payment_record: "pr_1" } }])],
-    ["more payments than the page shows", payments([paid("pi_inv_1")], { has_more: true })],
+    // Moved to the controls below (rule 23; third money pre-review of claude5/affiliate-refund-list-exact2): a page
+    // saying there is more is followed (tests/affiliate-invoice-payments-more.test.ts), so "more than the page shows"
+    // is no longer unlinked; it is unlinked only once read to the end.
     ["no paid payment listed", payments([])],
     ["only a canceled attempt listed", payments([paid("pi_old_1", { status: "canceled" })])],
   ] as const) {
@@ -132,6 +135,9 @@ async function main(): Promise<void> {
     ["payments absent", { payments: null }],
     ["payments not a list", { payments: { object: "list", data: paid("pi_inv_1"), has_more: false } }],
     ["has_more absent on its payments", { payments: { object: "list", data: [paid("pi_inv_1")] } }],
+    // Moved here from the part above (rule 23): more payments than the page shows, with no last id to go on from, is
+    // not known, never unlinked (third money pre-review of claude5/affiliate-refund-list-exact2).
+    ["more payments than the page shows, with no last id to go on from", { payments: payments([paid("pi_inv_1")], { has_more: true }) }],
     ["a payment row with a status Stripe does not give", { payments: payments([paid("pi_inv_1", { status: "settled" })]) }],
     ["a paid payment intent row with no id", { payments: payments([paid({ object: "payment_intent" })]) }],
     ["amount_paid as text", { amount_paid: "3000" }],

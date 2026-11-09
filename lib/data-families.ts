@@ -102,7 +102,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
-  "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
+  "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:soldbefore:", "nl:stamp:problem:", "nl:stats:",
   "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
@@ -396,6 +396,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:slink:": T("nl:slink:store:"), "nl:slink:store:": E,
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,
+  // A store whose earlier sales were not all read: one mark, erased with it (lib/yearly-offer.ts, soldBeforeUnknownKey).
+  "nl:soldbefore:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),
   "nl:stats:": E,
   "nl:stock:": E, "nl:stock:lock:": E,

@@ -7,10 +7,10 @@
  * magnets, say) and more after them was "not known" on every pass: the
  * five-minute sweep asked Stripe again on every pass, for good, and the
  * yearly offer never went out. Now the pages are followed with
- * starting_after up to SOLD_BEFORE_PAGES; past that ceiling the first sale
- * is noted as this sale's day, no offer is made (whether the store sold
- * before is not known, and an offer on a store that has sold for years would
- * be wrong), and later passes stop at the note without asking Stripe.
+ * starting_after up to SOLD_BEFORE_PAGES; past that ceiling no first sale is
+ * noted and no offer is made (whether the store sold before is not known,
+ * and an offer on a store that has sold for years would be wrong), and later
+ * passes stop at a separate mark without asking Stripe.
  */
 import { claimHandle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { firstSaleAt, noteFirstSale } from "@/lib/yearly-offer";
@@ -92,7 +92,11 @@ async function main() {
     const first = await noteFirstSale(store, [sale(store.handle)], true);
     is("pages asked on the first pass, each after the last one read", asked.map(([, after]) => after), Array.from({ length: SOLD_BEFORE_PAGES }, (_, p) => (p === 0 ? "" : lastOf(store.handle, p - 1))));
     is("no offer made", [first, emails.length - sent], [false, 0]);
-    is("the first sale noted as this sale's day, so the next pass stops at it", await firstSaleAt(store), NOW - 60);
+    // Changed (rule 23; third money pre-review of claude5/affiliate-refund-list-exact2, MEDIUM 2): this sale's day was
+    // noted as the first sale, which the studio printed as "made its first sale on" for a store that may have sold for
+    // years. Now no day is given (0), and a separate mark, nl:soldbefore:, stops the next pass
+    // (tests/yearly-offer-sold-before-stop.test.ts).
+    is("no first-sale day given; the separate mark stops the next pass", await firstSaleAt(store), 0);
     asked = [];
     for (let pass = 0; pass < 288; pass += 1) await noteFirstSale(store, [sale(store.handle)], true);
     is("a day of passes after it: no Stripe call, no offer", [asked.length, emails.length - sent], [0, 0]);

@@ -2703,8 +2703,8 @@ export type Book = {
   invoicesChecked: boolean;
   /**
    * Paid membership and plan invoices read whole that could not be linked to
-   * one payment intent (paid in parts, by a charge or a payment record, more
-   * payments than one page shows, or none paid listed): left out of the book,
+   * one payment intent (paid in parts, by a charge or a payment record, or none
+   * paid listed, its payments read to the end): left out of the book,
    * no commission on them, and reading again does not change that. Absent
    * means none (an affiliate's own slice of a kept book).
    */
@@ -2748,37 +2748,104 @@ const UNLINKED_PAYMENT_TYPES = new Set(["charge", "payment_record"]);
 const UNLINKED = "unlinked" as const;
 
 /**
- * The one payment intent a paid invoice was paid by, from its expanded `payments` list (API 2026-08-26.dahlia).
- * null when the list cannot be read (not a list, `has_more` not a yes or no, a row that is not an invoice payment
- * with a status Stripe gives one, a paid row naming a payment intent with no id, or a kind of payment not known):
- * the book is then not whole, and the next reading tries again. UNLINKED when it reads whole but names no one
- * payment intent: paid in parts by two, by a charge or a payment record, more payments than the page shows, or no
- * paid row at all; the payment its refund would name is not known, so no commission is paid on it, and reading it
- * again would give the same (recurringReferrals counts it apart). Open and canceled attempts are passed over.
+ * How many more pages of one invoice's payments are read past the page the invoice gives (GET /v1/invoice_payments,
+ * a hundred a page), and only within the invoice pages the book already waits on (INVOICE_PAGES: recurringReferrals
+ * shares them), so BOOK_STRIPE_PAGES, and what a reading of the book costs, do not move. An invoice whose payments
+ * are not read whole within them is not known (invoicesChecked false), never "unlinked".
  */
-function invoiceIntentOf(payments: unknown): string | typeof UNLINKED | null {
+export const INVOICE_PAYMENT_PAGES = 3;
+
+/** What an invoice's payments read so far say: the payment intents paid, and whether a paid one is not a payment intent. */
+type PaymentTally = { intents: Set<string>; unlinked: boolean };
+
+/**
+ * Adds one page of an invoice's payments to `tally`. False when a row does not read: not an invoice payment with a
+ * status Stripe gives one, a paid row naming a payment intent with no id, or a kind of payment not known. Open and
+ * canceled attempts are passed over.
+ */
+function tallyPayments(rows: readonly unknown[], tally: PaymentTally): boolean {
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+    const { status, payment } = row as { status?: unknown; payment?: unknown };
+    if (typeof status !== "string" || !INVOICE_PAYMENT_STATES.has(status)) return false;
+    if (status !== "paid") continue;
+    if (!payment || typeof payment !== "object" || Array.isArray(payment)) return false;
+    const { type, payment_intent: raw } = payment as { type?: unknown; payment_intent?: unknown };
+    if (typeof type === "string" && UNLINKED_PAYMENT_TYPES.has(type)) {
+      tally.unlinked = true;
+      continue;
+    }
+    if (type !== undefined && type !== "payment_intent") return false;
+    const id = typeof raw === "string" ? raw : raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as { id?: unknown }).id : undefined;
+    if (typeof id !== "string" || !id) return false;
+    tally.intents.add(id);
+  }
+  return true;
+}
+
+/**
+ * The one payment intent a paid invoice was paid by, from its expanded `payments` list (API 2026-08-26.dahlia) and,
+ * when that list says there is more (has_more true), the rest of it from GET /v1/invoice_payments?invoice=…, followed
+ * with starting_after from the last payment read, up to INVOICE_PAYMENT_PAGES pages and only while the book's shared
+ * `budget` of Stripe pages and its `deadline` (stripeWait) allow: the paid one can be past ten failed or canceled
+ * attempts (third money pre-review of claude5/affiliate-refund-list-exact2).
+ *
+ * null when the list is not known whole: it cannot be read (not a list, `has_more` not a yes or no, a row that does not
+ * read: tallyPayments), a page asked for does not read as a list of this invoice's payments, the call fails, there is
+ * more with no last id to go on from, or the ceiling, the budget or the deadline comes first. The book is then not
+ * whole, and the next reading tries again. UNLINKED when it reads whole and names no one payment intent: paid in parts
+ * by two, by a charge or a payment record, or no paid payment at all; the payment its refund would name is not known,
+ * so no commission is paid on it, and reading it again would give the same (recurringReferrals counts it apart). A list
+ * already shown to be paid in parts or by a charge is UNLINKED without asking for the rest, which could not undo that.
+ */
+async function invoiceIntentOf(
+  store: Store,
+  invoice: string,
+  payments: unknown,
+  budget: { pages: number },
+  deadline: number | undefined,
+): Promise<string | typeof UNLINKED | null> {
   if (!payments || typeof payments !== "object" || Array.isArray(payments)) return null;
   const listed = payments as { data?: unknown; has_more?: unknown };
   if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return null;
-  const intents = new Set<string>();
-  let unlinked = listed.has_more;
-  for (const row of listed.data as unknown[]) {
-    if (!row || typeof row !== "object" || Array.isArray(row)) return null;
-    const { status, payment } = row as { status?: unknown; payment?: unknown };
-    if (typeof status !== "string" || !INVOICE_PAYMENT_STATES.has(status)) return null;
-    if (status !== "paid") continue;
-    if (!payment || typeof payment !== "object" || Array.isArray(payment)) return null;
-    const { type, payment_intent: raw } = payment as { type?: unknown; payment_intent?: unknown };
-    if (typeof type === "string" && UNLINKED_PAYMENT_TYPES.has(type)) {
-      unlinked = true;
-      continue;
+  const tally: PaymentTally = { intents: new Set<string>(), unlinked: false };
+  if (!tallyPayments(listed.data as unknown[], tally)) return null;
+  let more = listed.has_more;
+  let last = (listed.data.at(-1) as { id?: unknown } | undefined)?.id;
+  for (let page = 0; more; page += 1) {
+    if (tally.unlinked || tally.intents.size > 1) return UNLINKED;
+    if (typeof last !== "string" || !last) return null;
+    if (page >= INVOICE_PAYMENT_PAGES || budget.pages < 1) return null;
+    const wait = stripeWait(deadline);
+    if (wait === null) return null;
+    budget.pages -= 1;
+    let read: StripePage;
+    try {
+      const reply: unknown = await onAccount(
+        "GET",
+        store.stripeAccountId as string,
+        `/invoice_payments?${new URLSearchParams({ invoice, limit: "100", starting_after: last })}`,
+        undefined,
+        AFF_SUB_STRIPE_VERSION,
+        undefined,
+        wait,
+      );
+      if (!plainObject(reply) || ownField(reply, "object") !== "list") return null;
+      // Every row an invoice payment of this invoice, with its id: a row of another invoice proves nothing of this one.
+      read = readStripePage(reply, (row) => {
+        const of = ownField(row, "invoice");
+        const named = typeof of === "string" ? of : plainObject(of) ? ownField(of, "id") : undefined;
+        return ownField(row, "object") === "invoice_payment" && named === invoice;
+      });
+    } catch (error) {
+      console.error("reading the rest of an invoice's payments for the affiliate book failed", store.handle, error);
+      return null;
     }
-    if (type !== undefined && type !== "payment_intent") return null;
-    const id = typeof raw === "string" ? raw : raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as { id?: unknown }).id : undefined;
-    if (typeof id !== "string" || !id) return null;
-    intents.add(id);
+    if (read.unreadable || !tallyPayments(read.rows, tally)) return null;
+    more = read.hasMore;
+    last = read.lastId ?? undefined;
   }
-  return !unlinked && intents.size === 1 ? [...intents][0] : UNLINKED;
+  return !tally.unlinked && tally.intents.size === 1 ? [...tally.intents][0] : UNLINKED;
 }
 
 /** An invoice's tax in cents, from `total_taxes` (a list of amounts); null when it cannot be read. */
@@ -3295,12 +3362,16 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
   const found: { invoice: InvoiceLike; meta: Record<string, string> }[] = [];
   let after = "";
   let complete = false;
+  // The Stripe pages this reading may wait on (INVOICE_PAGES): the invoice pages first, then the rest of an invoice's
+  // payments (invoiceIntentOf), so following those never adds a page to BOOK_STRIPE_PAGES.
+  const budget = { pages: INVOICE_PAGES };
   for (let page = 0; page < INVOICE_PAGES; page += 1) {
     const query = new URLSearchParams({ limit: "100", status: "paid", "created[gte]": String(Math.max(0, since)) });
     query.append("expand[]", "data.payments");
     if (after) query.set("starting_after", after);
     const wait = stripeWait(deadline);
     if (wait === null) break;
+    budget.pages -= 1;
     const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoices?${query}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, wait)) as { data?: unknown; has_more?: unknown };
     // An unreadable page is not "no membership payments" (stripePage): it throws, and the book says invoicesChecked false.
     const { rows, next } = stripePage(listed, "a page of paid invoices");
@@ -3338,7 +3409,8 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     }
     if (total === 0) continue;
     const tax = invoiceTaxOf(invoice.total_taxes);
-    const pi = invoiceIntentOf(invoice.payments);
+    // A tax that does not read leaves the invoice out before any more of its payments is asked for.
+    const pi = tax === null ? null : await invoiceIntentOf(store, invoice.id, invoice.payments, budget, deadline);
     if (tax === null || pi === null) {
       complete = false;
       continue;

@@ -40,6 +40,7 @@
  * second email.
  */
 import { noteFirstSale } from "@/lib/yearly-offer";
+import { PLANS_ON_SALE } from "@/lib/opening";
 import { noteTestSales } from "@/lib/headline-test";
 import { revokeRefundedGifts } from "@/lib/gifts";
 import { revokeRefundedPreorders } from "@/lib/preorders";
@@ -485,9 +486,10 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     }
     // The store's first sale ever, noted once, with the yearly plan offered
     // at the moment it is most worth keeping (lib/yearly-offer.ts). Not on the
-    // demo's account, which canConfirm leaves out.
+    // demo's account, which canConfirm leaves out. Its reading of earlier sales keeps to the sweep's deadline: what it
+    // could not read before it is not known, and the next pass asks again.
     if (paid.length && canConfirm(store)) {
-      await noteFirstSale(store, paid).catch((error) => console.error("noting a first sale failed", store.handle, error));
+      await noteFirstSale(store, paid, PLANS_ON_SALE, deadline).catch((error) => console.error("noting a first sale failed", store.handle, error));
     }
     // A sale paid from a page running a test counts for the version its buyer was shown, once (lib/headline-test.ts).
     if (paid.some((row) => row.metadata?.ab)) {

@@ -131,11 +131,13 @@ async function main(): Promise<void> {
   }
 
   part("A payment read whole with no one payment intent: not counted, nothing sent, the book still whole");
-  // Rule 23: these four were "not checked" (invoicesChecked false), which asked for a reload that changes nothing.
+  // Rule 23: these were "not checked" (invoicesChecked false), which asked for a reload that changes nothing.
   // They are read whole, so the book stays checked and counts them apart (tests/affiliate-invoice-unlinked.test.ts).
   for (const [what, pays] of [
     ["paid by a charge with no payment intent", payments([{ object: "invoice_payment", status: "paid", payment: { type: "charge", charge: "ch_1" } }])],
-    ["a list of payments with more after it", payments([paid("pi_inv_1")], { has_more: true })],
+    // Moved to the part below (rule 23; third money pre-review of claude5/affiliate-refund-list-exact2): a list with
+    // more after it is followed (tests/affiliate-invoice-payments-more.test.ts); with no last id to go on from it is
+    // not known, never unlinked.
     ["two paid payments by different payment intents", payments([paid("pi_inv_1"), paid("pi_inv_9")])],
     ["no paid payment at all", payments([paid("pi_old_1", { status: "canceled" })])],
   ] as const) {
@@ -146,6 +148,8 @@ async function main(): Promise<void> {
   part("A payment that cannot be read: the invoice is not counted, the book says so, nothing is sent");
   for (const [what, pays] of [
     ["a list of payments with has_more absent", { object: "list", data: [paid("pi_inv_1")] }],
+    // Moved here from the part above (rule 23): more after it, and no last id to go on from.
+    ["a list of payments with more after it and no last id", payments([paid("pi_inv_1")], { has_more: true })],
     ["payments absent", null],
     ["payments not a list", { object: "list", data: paid("pi_inv_1"), has_more: false }],
     ["a payment row with no status", payments([paid("pi_inv_1", { status: undefined })])],

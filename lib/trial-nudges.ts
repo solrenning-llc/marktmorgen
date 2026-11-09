@@ -35,7 +35,7 @@ import { productCount } from "@/lib/catalog";
 import { nextChecks, storeChecks } from "@/lib/store-coach";
 import { studioPath } from "@/lib/studio-route";
 import { type Store, storeForHandle } from "@/lib/store";
-import { firstSaleKey } from "@/lib/yearly-offer";
+import { firstSaleKey, soldBeforeUnknownKey } from "@/lib/yearly-offer";
 
 const DAY = 86_400;
 /** The days of the trial an email goes on: the fourth and the tenth, counted from the first. */
@@ -125,20 +125,25 @@ export function dueNudge(subscription: Record<string, unknown>, nowSeconds: numb
  * answers that nothing is kept, null when the read failed or the reply is in any other shape. lib/yearly-offer.ts
  * writes the seconds, or (since Claude 5 on #2722) the milliseconds of claimValue with a point and a random part; any
  * positive whole number before the point is a sale. firstSaleAt there reads an unknown as 0, which here would tell a
- * store that sold that it has not, so it is not used.
+ * store that sold that it has not, so it is not used. A store whose earlier sales were not all read has no first-sale
+ * day but did sell (soldBeforeUnknownKey holds the day of the sale the sweep saw, in the same form): it is read too, so
+ * it is never told it has not sold (third money pre-review of claude5/affiliate-refund-list-exact2).
  */
 async function firstSaleKnown(store: Pick<Store, "sid" | "handle">): Promise<number | null> {
   let replies: unknown[] | null;
   try {
-    replies = repliesFor(await redisPipeline([["GET", firstSaleKey(store)]]), 1);
+    replies = repliesFor(await redisPipeline([["GET", firstSaleKey(store)], ["GET", soldBeforeUnknownKey(store)]]), 2);
   } catch {
     return null;
   }
   if (!replies) return null;
-  const [raw] = replies;
-  if (raw === null) return 0;
-  if (typeof raw !== "string" || !/^[1-9][0-9]{0,15}(\.[0-9]+)?$/.test(raw)) return null;
-  return Math.floor(Number(raw));
+  const days: number[] = [];
+  for (const raw of replies) {
+    if (raw === null) continue;
+    if (typeof raw !== "string" || !/^[1-9][0-9]{0,15}(\.[0-9]+)?$/.test(raw)) return null;
+    days.push(Math.floor(Number(raw)));
+  }
+  return days.length ? days[0] : 0;
 }
 
 /**

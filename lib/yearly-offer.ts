@@ -37,9 +37,18 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_NAMES, PLAN_PRICES, type Tier, yearSaving } from "@/lib/plan";
 import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
+import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 
 /** Kept for good: the day a store first sold does not change. */
 export const firstSaleKey = (store: Pick<Store, "sid" | "handle">) => `nl:firstsale:${store.sid || `h:${store.handle}`}`;
+/**
+ * Kept for as long as the store is (erased when it closes: CLOSING, lib/data-families.ts): its earlier checkouts were
+ * read to SOLD_BEFORE_PAGES with no paid sale and more after them, so whether it sold before is not known. It only
+ * stops the search, so later passes do not ask Stripe again; it is not a day: firstSaleAt and the studio never read it
+ * (third money pre-review of claude5/affiliate-refund-list-exact2). Its value is the sale's day the sweep saw, in the
+ * form of firstSaleKey's, so the trial nudges read the store as one that sold (lib/trial-nudges.ts).
+ */
+export const soldBeforeUnknownKey = (store: Pick<Store, "sid" | "handle">) => `nl:soldbefore:${store.sid || `h:${store.handle}`}`;
 /** One offer per subscription, ever. */
 const offeredKey = (subscription: string) => `nl:yearly-offer:${subscription}`;
 
@@ -101,29 +110,38 @@ export async function firstSaleAt(store: Pick<Store, "sid" | "handle">): Promise
 /**
  * Notes the first sale among a store's paid checkouts, if it is the first
  * ever seen, and makes the yearly offer. Safe to call with the same rows on
- * every pass: only the first call that finds a sale does anything.
+ * every pass: only the first call that finds a sale does anything. With
+ * `deadline` (epoch milliseconds, the sweep's), Stripe is asked nothing past
+ * it, and what was not read is not known: nothing is noted, and the next pass
+ * asks again.
  */
-export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale = PLANS_ON_SALE): Promise<boolean> {
+export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale = PLANS_ON_SALE, deadline?: number): Promise<boolean> {
   if (!isRedisConfigured() || !store.stripeAccountId) return false;
   const sales = paid.filter(isSale);
   if (!sales.length) return false;
-  // Asked of Redis first, so a store that has sold before costs one read a pass.
-  // Read exactly (CX-123 rule 24, L9): only an exact 0 goes on; 1 or an unknown answer stops here this pass.
-  const known = repliesFor(await redisPipeline([["EXISTS", firstSaleKey(store)]]), 1);
-  if (!known || countOf(known[0]) !== 0) return false;
+  // Asked of Redis first, so a store that has sold before, or whose earlier sales are not known, costs one read a pass.
+  // Read exactly (CX-123 rule 24, L9): only an exact 0 for each goes on; 1 or an unknown answer stops here this pass.
+  const known = repliesFor(await redisPipeline([["EXISTS", firstSaleKey(store)], ["EXISTS", soldBeforeUnknownKey(store)]]), 2);
+  if (!known || countOf(known[0]) !== 0 || countOf(known[1]) !== 0) return false;
   const at = Math.min(...sales.map((row) => (typeof row.created === "number" && row.created > 0 ? row.created : Math.floor(Date.now() / 1000))));
   // The pass only sees the last day. A store that sold before this was built
   // is not making its first sale today, and must not be told it is: its own
   // Stripe account is asked once for anything paid earlier.
-  const earlier = await soldBefore(store, at);
-  if (earlier === null) return false; // Stripe could not be asked: the next pass asks again.
+  const earlier = await soldBefore(store, at, deadline);
+  if (earlier === null) return false; // Stripe could not be asked, or not before the deadline: the next pass asks again.
+  if (earlier === UNKNOWN_EARLIER) {
+    // Past the ceiling of pages, whether the store sold before is not known: a store that may have sold for years is
+    // given no first-sale day (the studio would print it) and no offer. Only the search is stopped, by its own mark,
+    // so later passes stop at the EXISTS above without asking Stripe again (third money pre-review of
+    // claude5/affiliate-refund-list-exact2). A mark whose writing is not known is let go if it is ours, and the next
+    // pass reads again.
+    const stop = claimValue(at);
+    if ((await claimMark(soldBeforeUnknownKey(store), null, stop)) === "unknown") await releaseMark(soldBeforeUnknownKey(store), stop);
+    return false;
+  }
   // The first sale's day is noted once, for good: ours only on OK or our own value read back. The value is the day in
   // seconds and a random part (claimValue), so no other run writes it, and firstSaleAt still reads the day.
-  // Past the ceiling of pages (UNKNOWN_EARLIER) this sale's day is noted, so later passes stop at the EXISTS above
-  // without asking Stripe again; no offer is made on it below, as a store that may have sold for years is not told
-  // this is its first sale.
-  const unknownEarlier = earlier === UNKNOWN_EARLIER;
-  const day = unknownEarlier ? at : earlier || at;
+  const day = earlier || at;
   const value = claimValue(day);
   const noted = await claimMark(firstSaleKey(store), null, value);
   if (noted === "unknown") {
@@ -132,7 +150,7 @@ export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale 
     await releaseMark(firstSaleKey(store), value);
     return false;
   }
-  if (noted !== "ours" || unknownEarlier || earlier) return false;
+  if (noted !== "ours" || earlier) return false;
   const offered = await offerOnce(store, plansOnSale).catch((error) => {
     console.error("offering the yearly plan failed", store.handle, error);
     return "no" as const;
@@ -148,8 +166,8 @@ export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale 
 
 /**
  * How many pages of earlier checkouts soldBefore follows. A store with more completed checkouts than this and no
- * paid sale among them (free lead magnets, say) is not known to have sold before or not: its first sale is then
- * noted as this one's day so later passes stop asking, and no offer is made (UNKNOWN_EARLIER).
+ * paid sale among them (free lead magnets, say) is not known to have sold before or not: no first sale is noted, no
+ * offer is made, and soldBeforeUnknownKey stops later passes from asking (UNKNOWN_EARLIER).
  */
 export const SOLD_BEFORE_PAGES = 5;
 /** soldBefore's answer past SOLD_BEFORE_PAGES: whether the store sold before is not known, and it is not asked again. */
@@ -157,23 +175,32 @@ const UNKNOWN_EARLIER = "unknown" as const;
 
 /**
  * When the store was first paid for something before `at`, in seconds: 0 when
- * never, null when its Stripe account could not be asked (the next pass asks
- * again), UNKNOWN_EARLIER when SOLD_BEFORE_PAGES pages were read with no paid
- * sale and more after them. Stripe lists newest first and the pages are
+ * never, null when its Stripe account could not be asked, or not before
+ * `deadline` (the next pass asks again), UNKNOWN_EARLIER when SOLD_BEFORE_PAGES
+ * pages were read with no paid sale and more after them. No page is asked
+ * with less than a second left before `deadline`, and each waits at most what
+ * is left (the sweep's whole pass has 12 s, a Stripe call up to
+ * STRIPE_TIMEOUT_MS). Stripe lists newest first and the pages are
  * followed with starting_after, so the oldest paid sale of the first page
  * that has one is written down; for a store with more earlier sales that is a
  * later day than the first, which is still a day before this one, and all
  * the answer has to tell is that.
  */
-async function soldBefore(store: Store, at: number): Promise<number | null | typeof UNKNOWN_EARLIER> {
+async function soldBefore(store: Store, at: number, deadline: number | undefined): Promise<number | null | typeof UNKNOWN_EARLIER> {
   const handles = saleHandles(store);
   try {
     let after = "";
     for (let page = 0; page < SOLD_BEFORE_PAGES; page += 1) {
+      const left = deadline === undefined ? STRIPE_TIMEOUT_MS : deadline - Date.now();
+      if (left < 1_000) return null;
       const listed = await onAccount(
         "GET",
         store.stripeAccountId as string,
         `/checkout/sessions?limit=100&status=complete&created[lt]=${at}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+        undefined,
+        undefined,
+        undefined,
+        Math.min(STRIPE_TIMEOUT_MS, Math.floor(left)),
       );
       // A page that is not a list is not "never sold" (CX-123 rule 24): it is not known, and the next pass asks again.
       if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of earlier checkouts that is not a list");

@@ -38,6 +38,7 @@ import { lockedOut, lockedUntil } from "@/lib/two-step";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { withinEssentialLimit } from "@/lib/request-guard";
 import { forceAllowance, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { refreshPeriod } from "@/lib/billing-sync";
@@ -135,7 +136,13 @@ export async function resolveAccess(
     if (!access) return { ok: false, reason: "gone" };
   } else {
     const remembered = wanted.remembered ?? "";
-    if (STORE_ID_PATTERN.test(remembered)) access = await pick(remembered);
+    // Only a preference: a remembered store whose team answers in an unknown shape is "not this one" (rule 24:
+    // no role is granted on it), and the person's own store is used, never a studio closed by another store's record.
+    if (STORE_ID_PATTERN.test(remembered))
+      access = await pick(remembered).catch((error: unknown) => {
+        if (error instanceof UnknownReplyError) return null;
+        throw error;
+      });
     if (!access) {
       const own = await storeForEmail(email);
       if (own) access = { email, store: own, ref: storeRef(own), role: "owner" };

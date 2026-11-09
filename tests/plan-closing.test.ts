@@ -137,6 +137,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return json({ data: [...running.entries()].filter(([handle]) => query.includes(`'${handle}'`)).map(([, subscription]) => subscription), has_more: false });
     }
     if (path === "/subscriptions") return json({ data: [], has_more: false });
+    // A closing day expires the store's open plan checkouts (lib/closing-plan-guard.ts); none is open here.
+    if (path === "/checkout/sessions" && method === "GET") return json({ object: "list", data: [], has_more: false });
     const one = [...running.values()].find((subscription) => path === `/subscriptions/${String(subscription.id)}`);
     if (one) return json(one);
     return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);

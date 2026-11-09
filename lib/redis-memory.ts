@@ -137,6 +137,22 @@ export class MemoryRedis {
           this.run(["EXPIRE", who, seconds]);
           return 1;
         }
+        // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
+        if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, listKey, id, kept] = args;
+          this.live(listKey);
+          if (!this.data.has(listKey)) return null;
+          for (const raw of this.list(listKey).slice(0, Number(kept))) {
+            if (!raw.includes(`"id":"${id}"`)) continue;
+            try {
+              const value = JSON.parse(raw) as unknown;
+              if (!value || typeof value !== "object" || Array.isArray(value) || (value as { id?: unknown }).id === id) return raw;
+            } catch {
+              return raw;
+            }
+          }
+          return null;
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;
@@ -1153,16 +1169,18 @@ export class MemoryRedis {
           for (const k of keys) this.live(k);
           let ours = true;
           for (let i = 0; i < n; i += 1) {
-            if (this.data.get(keys[i]) !== argv[1 + i]) ours = false;
-            const hold = this.data.get(keys[n + i]);
-            if (hold !== undefined && !(hold instanceof Map)) return -1;
+            const lock = this.data.get(keys[i]), hold = this.data.get(keys[n + i]);
+            // GET and HEXISTS on a key of another type fail the script, as Redis does.
+            if (lock !== undefined && typeof lock !== "string") throw new Error("WRONGTYPE");
+            if (hold !== undefined && !(hold instanceof Map)) throw new Error("WRONGTYPE");
+            if (lock !== argv[1 + i]) ours = false;
             if (!(hold instanceof Map) || !hold.has(pending)) ours = false;
           }
-          if (ours) return 1;
-          for (let i = 0; i < n; i += 1) {
-            const hold = this.data.get(keys[n + i]);
-            if (hold instanceof Map) this.run(["HDEL", keys[n + i], pending]);
+          if (ours) {
+            for (let i = 0; i < n; i += 1) this.run(["DEL", keys[i]]);
+            return 1;
           }
+          for (let i = 0; i < n; i += 1) if (this.data.get(keys[n + i]) instanceof Map) this.run(["HDEL", keys[n + i], pending]);
           return 0;
         }
         if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
@@ -1173,6 +1191,7 @@ export class MemoryRedis {
           for (const k of keys) this.live(k);
           for (const k of keys) {
             const hold = this.data.get(k);
+            if (hold !== undefined && !(hold instanceof Map)) throw new Error("WRONGTYPE");
             if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
           }
           for (const k of keys) this.run(["HDEL", k, argv[1]]);

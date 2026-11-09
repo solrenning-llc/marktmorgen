@@ -18,6 +18,8 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
+  slow: "Too many calendar addresses were tried in the last few minutes. Nothing was saved. Wait ten minutes, then try again.",
+  busy: "We could not check this just now, so the calendar was not read or saved. Try again in a moment.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
 };
 

@@ -15,9 +15,10 @@
  *   nl:wb:<account>:<subscription>     that membership's email went
  *   nl:wb:once:<statsId>:<hash>        that person heard about that product lately
  *   nl:wb:link:<token>                 who a link in an email is for
+ *   nl:wb:open:<token>                 the checkout that link opened, while Stripe keeps it open
  *   nl:wb:n:<statsId>                  how many have been sent, for the studio
  */
-import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consent";
+import { type DigitalConsent, DigitalConsentMissing, deliversDigitally, validConsent } from "@/lib/digital-consent";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
@@ -25,7 +26,7 @@ import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { onAccount, platformKey } from "@/lib/stripe-account";
+import { CHECKOUT_OPEN_SECONDS, onAccount, platformKey } from "@/lib/stripe-account";
 import { readStripePage } from "@/lib/stripe-list";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
@@ -59,6 +60,19 @@ const sentKey = (account: string, sub: string) => `nl:wb:${account}:${sub}`;
 const onceKey = (statsId: string, email: string, product: string) =>
   `nl:wb:once:${statsId}:${sha(`nimbus-wb-once:${normaliseEmail(email)}|${product}`).slice(0, 32)}`;
 const linkKey = (token: string) => `nl:wb:link:${token}`;
+const openKey = (token: string) => `nl:wb:open:${token}`;
+/**
+ * One link, one checkout (Claude 5's first review of #3482): the checkout a link opened is handed back to every later
+ * press while Stripe keeps it open, so two tabs never make two. Stripe closes a checkout 24 hours after it opens unless
+ * told sooner, and one holding a limited unit at CHECKOUT_OPEN_SECONDS; each is handed back for less than that.
+ */
+const OPEN_KEPT_SECONDS = 23 * 3600;
+const OPEN_KEPT_HELD_SECONDS = CHECKOUT_OPEN_SECONDS - 120;
+/** While one press is opening the checkout, longer than a Stripe request may take (lib/fetch-timeout.ts, STRIPE_TIMEOUT_MS). */
+const OPENING_SECONDS = 60;
+/** The longest checkout address kept to hand back (tests/store-data-registry.ts prices the key at it). */
+export const OPEN_URL_MAX = 1_000;
+const CHECKOUT_URL = /^https:\/\/\S+$/;
 const countKey = (statsId: string) => `nl:wb:n:${statsId}`;
 
 /** A day as the store's language writes it: "October 8, 2026", "8 de octubre de 2026". */
@@ -407,7 +421,9 @@ export async function readWinBack(store: Store, product: string, token: string):
   }
 }
 
-export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "member" | "limited" };
+export type OpenResult =
+  | { ok: true; url: string }
+  | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "member" | "limited" | "opening" };
 
 /** The checkout a come-back link opens: this product, this address, the offer applied, no second trial. */
 export async function openWinBack(
@@ -436,13 +452,27 @@ export async function openWinBack(
   const running = store.stripeAccountId ? await runningFor(store.stripeAccountId, normaliseEmail(grant.email), product.id) : null;
   if (running === true) return { ok: false, reason: "member" };
   if (running === null) return { ok: false, reason: "refused" };
+  // The box is asked of every press, the one handed back an open checkout as well (lib/digital-consent.ts).
+  if (deliversDigitally(product, option ?? null) && !validConsent(consent)) return { ok: false, reason: "consent" };
+  // One link, one checkout: a press while another is opening it waits, and one after it gets the same checkout.
+  const claim = claimValue();
+  const claimed = await claimMark(openKey(token), OPENING_SECONDS, claim);
+  if (claimed !== "ours") {
+    if (claimed === "unknown") return { ok: false, reason: "refused" };
+    return keptCheckout(token);
+  }
+  let opened = "";
   try {
     // A limited product holds a unit while the checkout is open, as any other checkout does.
-    const held = await withStockHold(store, product, (holding) =>
-      createCheckout(store, product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: holding, digitalConsent: consent }),
-    );
+    let holding = false;
+    const held = await withStockHold(store, product, (hold) => {
+      holding = hold;
+      return createCheckout(store, product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: hold, digitalConsent: consent });
+    });
     if (!held.ok) return { ok: false, reason: "unavailable" };
-    return { ok: true, url: held.value.url };
+    opened = held.value.url;
+    await keepCheckout(token, opened, holding ? OPEN_KEPT_HELD_SECONDS : OPEN_KEPT_SECONDS);
+    return { ok: true, url: opened };
   } catch (error) {
     // A coupon the creator deleted in their own dashboard, most likely: said
     // plainly, with the ordinary way back, rather than a checkout at a price
@@ -452,6 +482,46 @@ export async function openWinBack(
     // The box to start access at once was not checked: said beside it, nothing opened.
     if (error instanceof DigitalConsentMissing) return { ok: false, reason: "consent" };
     console.error("opening a come-back checkout failed", store.handle, error);
+    return { ok: false, reason: "refused" };
+  } finally {
+    // Nothing opened: the next press may open one.
+    if (!opened) await releaseMark(openKey(token), claim);
+  }
+}
+
+/**
+ * Keeps the checkout a link opened, to hand back to the next press. Only a checkout address of the expected shape and
+ * size is kept; one that cannot be kept lets the claim run out at OPENING_SECONDS, so a later press opens another,
+ * exactly as before this was kept. Never throws: the checkout is open whatever happens here.
+ */
+async function keepCheckout(token: string, url: string, seconds: number): Promise<void> {
+  if (!CHECKOUT_URL.test(url) || url.length > OPEN_URL_MAX) return;
+  try {
+    const reply = repliesFor(await redisPipeline([["SET", openKey(token), url, "EX", seconds]]), 1);
+    if (!reply || reply[0] !== "OK") console.error("keeping a come-back checkout to hand back got an unknown reply");
+  } catch (error) {
+    console.error("keeping a come-back checkout to hand back failed", error);
+  }
+}
+
+/**
+ * What a press gets when another press holds the link's checkout (CX-123 rule 24): the checkout address kept, the
+ * same one; "opening" while the other press is still opening it, or when it ran out between the two reads; anything
+ * else is unknown, and nothing is opened on it.
+ */
+async function keptCheckout(token: string): Promise<OpenResult> {
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", openKey(token)]]), 1);
+    if (!reply) return { ok: false, reason: "refused" };
+    const kept = reply[0];
+    if (kept === null) return { ok: false, reason: "opening" };
+    if (typeof kept !== "string") return { ok: false, reason: "refused" };
+    if (CHECKOUT_URL.test(kept) && kept.length <= OPEN_URL_MAX) return { ok: true, url: kept };
+    // A claim's own value (lib/claim-mark.ts): the time it was taken, then a random part.
+    if (/^\d{13}\.\d{9}$/.test(kept)) return { ok: false, reason: "opening" };
+    return { ok: false, reason: "refused" };
+  } catch (error) {
+    console.error("reading a come-back link's open checkout failed", error);
     return { ok: false, reason: "refused" };
   }
 }

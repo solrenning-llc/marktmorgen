@@ -229,6 +229,13 @@ async function main(): Promise<void> {
   is("Xia: a checkout Stripe refuses opens nothing", [await press(xiaLink), checkouts.length - failed], ["refused", 0]);
   const retried = await press(xiaLink);
   is("Xia: the next press opens one", [retried.startsWith("https://checkout.stripe.com/"), checkouts.length - failed], [true, 1]);
+  // What the link's kept checkout holds is read exactly (CX-123 rule 24): anything else refuses, nothing opened.
+  customerEmail.set("cus_WesOld000001", "wes@example.com");
+  subsBody.set("cus_WesOld000001", sub("sub_WesEnded0001", "canceled"));
+  const wesLink = await comeBackLink(statsId, "wes@example.com");
+  await redisPipeline([["SET", `nl:wb:open:${wesLink}`, "not a checkout", "EX", 600]]);
+  const wes = checkouts.length;
+  is("Wes: a kept value of another shape refuses, no checkout", [await press(wesLink), checkouts.length - wes], ["refused", 0]);
   // A press told to wait, or to try again, sees the offer's button again beside the words.
   for (const status of ["opening", "limited"]) {
     const retry = await page({ back: zoeLink, status });

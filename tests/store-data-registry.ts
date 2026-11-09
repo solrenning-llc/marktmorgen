@@ -1034,6 +1034,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:wb:link:@lib/winback-send.ts": short("A come-back link", "own", 60, LINK_BYTES, MAIL("come back")),
   "nl:wb:n:@lib/winback-send.ts": short("Come-back offers counted", "day", 62, 128),
   "nl:wb:once:@lib/winback-send.ts": short("An address told of a product", "own", 60, KEY, MAIL("come back")),
+  // At most one a link, a day at the most: the checkout address it opened (up to OPEN_URL_MAX), or a claim's value.
+  "nl:wb:open:@lib/winback-send.ts": short("The checkout a come-back link opened, handed back to a second press", "own", 1, KEY + 1_000, MAIL("come back")),
   "nl:yearask:@lib/yearly-ask.ts": { what: "A member asked to go yearly", parts: [item(MARK, "One a membership, five years: counted as for good.", "membership")] },
   "nl:yearask:count:@lib/yearly-ask.ts": short("Asks counted a month", "day", 62, 128),
   "nl:yearask:cursor@lib/yearly-ask.ts": company("Where the yearly ask stopped", "One key, the company's job."),

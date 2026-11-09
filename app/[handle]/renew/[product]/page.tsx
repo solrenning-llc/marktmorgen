@@ -23,11 +23,16 @@ type Params = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-export async function generateMetadata({ params }: Params): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Params): Promise<Metadata> {
   const decoded = decodeURIComponent((await params).handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
+  const query = await searchParams;
+  const words = membershipWords(store?.language);
+  // The tab says what the heading says. The heading reads the link itself (below); the tab only follows the button's
+  // own answer, so it never reads the link a second time.
+  const running = query.status === "member" && typeof query.back === "string" && query.back.length > 0;
   return {
-    title: `${membershipWords(store?.language).endedTitle} — Marktmorgen`,
+    title: `${running ? words.runningTitle : words.endedTitle} — Marktmorgen`,
     robots: { index: false, follow: false },
   };
 }
@@ -79,6 +84,14 @@ export default async function RenewPage({ params, searchParams }: Params) {
   const kept = Boolean(grant && selling && !priceGone && !offer);
   // "price" in the address says nothing by itself: only the product does.
   const said = status === "price" ? undefined : notices[status];
+  // The come-back button refused because a membership of this product has not ended (lib/winback-send.ts, openWinBack):
+  // said with its own heading, and no way to a second membership is drawn, at the offer's price or the usual one. The
+  // usual "Renew" checkout cannot tell who presses it before Stripe's page asks for an address, so it is not offered here.
+  // Only with the link that was refused, never from the address alone.
+  const member = Boolean(status === "member" && grant && product);
+  // Words that ask to press the offer's button again keep that button beside them.
+  const retry = status === "opening" || status === "limited";
+  const stopped = Boolean(said) && !retry;
   // Where the prices offered today are: the product's own page, while buyers can see it.
   const pricesLink = priceGone && product && !product.hidden ? product : null;
 
@@ -104,11 +117,13 @@ export default async function RenewPage({ params, searchParams }: Params) {
         <div className="st-card mt-6 p-6 sm:p-9">
           <p className="st-label">{m.membershipLabel}</p>
           <h1 className="font-display mt-1 text-3xl font-semibold leading-tight tracking-[-0.02em]">
-            {m.endedTitle}
+            {member ? m.runningTitle : m.endedTitle}
           </h1>
-          <p className="st-muted mt-4 text-lg leading-relaxed">
-            {product ? (priceGone ? m.endedClosed(product.title) : m.endedBody(product.title)) : m.endedGone(store.name)}
-          </p>
+          {member ? null : (
+            <p className="st-muted mt-4 text-lg leading-relaxed">
+              {product ? (priceGone ? m.endedClosed(product.title) : m.endedBody(product.title)) : m.endedGone(store.name)}
+            </p>
+          )}
 
           {back && (!offer || said || priceGone) ? (
             <div className="st-note mt-6 text-sm" role="status">
@@ -123,7 +138,15 @@ export default async function RenewPage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
-          {offer && product && !said && !priceGone ? (
+          {member ? (
+            canManage(store) ? (
+              <p className="mt-7">
+                <Link href={`/@${store.handle}/manage`} className="btn st-btn btn-lg btn-block">
+                  {m.manageLink}
+                </Link>
+              </p>
+            ) : null
+          ) : offer && product && !stopped && !priceGone ? (
             <form action="/api/store/come-back/open" method="post" className="mt-7">
               <input type="hidden" name="handle" value={store.handle} />
               <input type="hidden" name="product" value={product.id} />
@@ -166,7 +189,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
             </p>
           ) : null}
 
-          {product && !priceGone ? (
+          {product && !priceGone && !member ? (
             <p className="mt-4 text-center text-sm">
               <Link href={productPath(store, product)} className="st-footer-link font-semibold">
                 {m.see(product.title)}
@@ -175,7 +198,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
           ) : null}
 
           <div className="mt-7 space-y-3 border-t pt-6 text-sm" style={{ borderColor: "var(--st-line)" }}>
-            {canManage(store) ? (
+            {canManage(store) && !member ? (
               <p className="st-muted">
                 {m.failedBefore}
                 <Link href={`/@${store.handle}/manage`} className="font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>

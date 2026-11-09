@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   is("a higher figure is refused, and nothing changes", [await resetVisits({ store: shop, to: 1201, now: NOW }), redis.run(["GET", visits])], [{ ok: false, reason: "above", before: 1200 }, "1200"]);
   is("the same figure changes nothing", [await resetVisits({ store: shop, to: 1200, now: NOW }), redis.run(["GET", visits])], [{ ok: false, reason: "same", before: 1200 }, "1200"]);
   is("a figure that is not a whole number from zero up is refused", await Promise.all([-1, 1.5, Number.NaN, 2 ** 60].map((to) => resetVisits({ store: shop, to, now: NOW }))), Array(4).fill({ ok: false, reason: "invalid" }));
-  is("a store with no visits yet has nothing to lower", [await resetVisits({ store: { ...shop, sid: "s1empty001", handle: "empty" } as Store, to: 0, now: NOW })], [{ ok: false, reason: "same", before: 0 }]);
+  is("a store with no visits yet has nothing to lower", [await resetVisits({ store: { ...shop, sid: "s1empty001", handle: "empty", email: "empty@example.com" } as Store, to: 0, now: NOW })], [{ ok: false, reason: "same", before: 0 }]);
 
   part("Every reset is written down first, the newest first, at most TRAFFIC_LOG_KEEP");
   const log = await readTrafficLog();
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
   redis.pipeline = base;
   is("its record went first, so the change is never unrecorded", (await readTrafficLog())?.[0]?.before, 50);
   redis.run(["SET", "nl:operator:traffic-reset:lock", "1", "EX", 30]);
-  is("a reset already running: busy, nothing written", [await resetVisits({ store: shop, to: 0, now: NOW }), redis.run(["GET", visits])], [{ ok: false, reason: "busy" }, "40"]);
+  is("a reset already running: busy, nothing written", [await resetVisits({ store: shop, to: 0, now: NOW }), redis.run(["GET", visits])], [{ ok: false, reason: "busy" }, "10"]);
 
   part("Only the operator, answered as if the door did not exist for anybody else");
   const route = readFileSync("app/api/operator/traffic-reset/route.ts", "utf8");

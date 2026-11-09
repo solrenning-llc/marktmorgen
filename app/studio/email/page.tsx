@@ -72,7 +72,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const [counts, used, listedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
     usedThisMonth(store.listId, windowId(store)),
-    readBroadcastHeads(store.listId, payStudio).catch((): BroadcastHeads | null => null),
+    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever (main's 57ca6e5a3).
+    readBroadcastHeads(store.listId, payStudio, 30, { expired: "skip" }).catch((): BroadcastHeads | null => null),
     readFlowListStrict(store.listId).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one
     // command, where reading every card was one per product (lib/catalog.ts).
@@ -168,7 +169,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
         ) : allowance === 0 ? (
           <div className="card mt-8 p-6 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</p>
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>
               <span className="tag tag-brand">{priceWords("pro", "month")}</span>
             </div>
             <ul className="mt-4 space-y-2 text-ink-soft">

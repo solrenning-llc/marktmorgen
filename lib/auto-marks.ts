@@ -66,7 +66,8 @@ const fromStudio = (store: Store): PayFirst => async (units) => {
  */
 export async function readMarks(store: Store, from: string, to: string, now = Date.now(), pay: PayFirst = fromStudio(store)): Promise<AutoMark[]> {
   const [emails, products] = await Promise.all([
-    readBroadcastHeads(store.listId, pay, MARK_EMAILS).then((read) => (read.ok ? read.heads : []), () => []),
+    // An email whose record expired is gone, left out (as main's listBroadcasts read it), never "no marks" for all.
+    readBroadcastHeads(store.listId, pay, MARK_EMAILS, { expired: "skip" }).then((read) => (read.ok ? read.heads : []), () => []),
     readListings(store).catch(() => []),
   ]);
   return marksFrom({ emails, products, sales: [...(store.pastSales ?? []), store.sale], from, to, now });

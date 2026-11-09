@@ -178,6 +178,24 @@ async function main(): Promise<void> {
     await writeEmails(store, [], small);
   }
 
+  // Merge of #3034 with main (57ca6e5a3, decision 2 of C4-20261108-0217): with { expired: "skip" }, as the page asks,
+  // a record Redis says is gone is a campaign gone after RECORD_DAYS, left out; anything else still throws.
+  part("4. With expired: skip, as the page reads them, a record that is gone is left out, known");
+  {
+    const small = (i: number) => `${SMALL}<p>${i}</p>`;
+    const skipping = (broadcasts as unknown as { readBroadcastHeads: (l: string, p: typeof pay, n?: number, o?: { expired?: "skip" }) => ReturnType<Reader> }).readBroadcastHeads;
+    const runSkip = () => watched(() => skipping(listId, pay, undefined, { expired: "skip" }), null);
+    await writeEmails(store, ids.slice(0, 8), small);
+    await pipeline([["DEL", emailKey(ids[4])]]);
+    const skipped = await runSkip();
+    is("the seven left are read, the gone one left out", skipped.result !== "threw" && skipped.result.ok ? skipped.result.heads.map((h) => h.id) : skipped.result, [...ids.slice(0, 4), ...ids.slice(5, 8)]);
+    is("without the option, the same list still could not be read", (await run()).result, "threw");
+    await writeEmails(store, ids.slice(0, 8), small);
+    await pipeline([["SET", emailKey(ids[4]), record(store, ids[4], small(4), { listId: "another-list" })]]);
+    is("with the option, a record of another list still could not be read", (await runSkip()).result, "threw");
+    await writeEmails(store, [], small);
+  }
+
   done();
 }
 

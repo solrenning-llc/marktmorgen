@@ -21,9 +21,9 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { needData, takeData } from "@/lib/store-data";
 import { dataBytes, utf8Length } from "@/lib/store-data-rules";
-import { repliesFor } from "@/lib/redis-reply";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
 import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
 import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonth } from "@/lib/mail";
@@ -236,14 +236,60 @@ async function save(b: Broadcast): Promise<void> {
   if (!Array.isArray(response) || response.length !== 1 || response[0] !== "OK") throw new Error("Campaign progress write could not be confirmed");
 }
 
-/** The store's broadcasts, newest first. */
+/** The ids LRANGE answered, when they are exactly a list of ids this code writes (rule 24, repliesFor/stringList); null otherwise. Pure. */
+function listedIds(response: unknown, limit: number): string[] | null {
+  const ids = stringList(repliesFor(response, 1)?.[0]);
+  if (!ids || ids.length > limit || !ids.every((id) => BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) return null;
+  return ids;
+}
+
+/**
+ * How many of the newest `limit` broadcasts there are and how many bytes
+ * their records hold, before they are read: for a reading that pays for its
+ * size first (lib/mcp-tools.ts, emailsTool). Null when a size did not come back.
+ */
+export async function broadcastSizes(listId: string | null, limit = 30): Promise<{ count: number; bytes: number } | null> {
+  if (!listId || !isRedisConfigured()) return { count: 0, bytes: 0 };
+  // Only Redis's own list of ids: any other answer is unknown, never "no campaigns".
+  const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
+  if (!list) return null;
+  if (!list.length) return { count: 0, bytes: 0 };
+  const replies = repliesFor(await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)])), list.length);
+  if (!replies) return null;
+  const lengths = replies.map(countOf);
+  if (lengths.some((n) => n === null)) return null;
+  // A broadcast added between this and the reading is a few bytes more, bounded by how fast a store writes them.
+  return { count: list.length, bytes: (lengths as number[]).reduce((a, b) => a + b, 0) };
+}
+
+export class BroadcastsUnreadable extends Error {
+  constructor(what: string) {
+    super(`The store's campaigns could not be read: ${what}`);
+    this.name = "BroadcastsUnreadable";
+  }
+}
+
+/**
+ * The store's broadcasts, newest first, read exactly (rule 24). A record Redis answers as its own nil is a campaign
+ * whose record expired (it is written before its id is listed, and kept RECORD_DAYS): left out, known. A list of
+ * ids in another shape, a record that does not read, or one of another id or list throws BroadcastsUnreadable, never
+ * read as fewer or no campaigns. Records read as before (parse, with its documented defaults).
+ */
 export async function listBroadcasts(listId: string | null, limit = 30): Promise<Broadcast[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
+  const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
+  if (!list) throw new BroadcastsUnreadable("the list of campaigns");
   if (!list.length) return [];
-  const rows = await redisPipeline(list.map((id) => ["GET", bcKey(id)]));
-  return rows.map(parse).filter((b): b is Broadcast => b !== null);
+  const rows = repliesFor(await redisPipeline(list.map((id) => ["GET", bcKey(id)])), list.length);
+  if (!rows) throw new BroadcastsUnreadable("the campaigns' records");
+  const out: Broadcast[] = [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (rows[i] === null) continue;
+    const b = parse(rows[i]);
+    if (!b || b.id !== list[i] || b.listId !== listId) throw new BroadcastsUnreadable("a campaign's record");
+    out.push(b);
+  }
+  return out;
 }
 
 
@@ -285,7 +331,13 @@ async function readBroadcastForWork(id: string): Promise<Broadcast | null> {
 }
 
 /** A studio snapshot is all-or-unavailable; missing rows must not look like no campaigns. */
-export async function listBroadcastsStrict(listId: string | null, limit = 30): Promise<Broadcast[]> {
+/**
+ * With `expired: "skip"`, an id whose record Redis answers as its own nil is left out: the record is written before
+ * its id enters the list (createBroadcast) and lives RECORD_DAYS under its own EXPIRE while the list never expires, so
+ * nil is a campaign that is gone, known. Every other answer still throws (rule 24). Without it, one missing record
+ * withholds the whole list, as before.
+ */
+export async function listBroadcastsStrict(listId: string | null, limit = 30, options: { expired?: "skip" } = {}): Promise<Broadcast[]> {
   if (!listId) return [];
   if (!isRedisConfigured()) throw new Error("Campaign storage is unavailable");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid campaign history limit");
@@ -296,7 +348,12 @@ export async function listBroadcastsStrict(listId: string | null, limit = 30): P
   if (!ids.length) return [];
   const rows = await redisPipeline(ids.map(id => ["GET", bcKey(id as string)]));
   if (!Array.isArray(rows) || rows.length !== ids.length) throw new Error("Campaign records are incomplete");
-  return ids.map((id, i) => parseStoredBroadcast(rows[i], id as string, listId));
+  const out: Broadcast[] = [];
+  for (let i = 0; i < ids.length; i += 1) {
+    if (options.expired === "skip" && rows[i] === null) continue;
+    out.push(parseStoredBroadcast(rows[i], ids[i] as string, listId));
+  }
+  return out;
 }
 
 /** A one-off email as a list of them shows it: every field but its body. */
@@ -405,7 +462,13 @@ export function broadcastHeadsBytes(sizes: readonly number[], growth = 0): numbe
 }
 
 /** The emails a reading will read, newest first, and each one's size without its body, as measured (measureBroadcastHeads). */
-export type MeasuredHeads = { listId: string | null; ids: string[]; sizes: number[] };
+export type MeasuredHeads = { listId: string | null; ids: string[]; sizes: number[]; expired?: "skip" };
+/**
+ * `expired: "skip"`, as listBroadcastsStrict's option (main's 57ca6e5a3, decision 2 of C4-20261108-0217): an id whose
+ * record Redis answers as not there (the script's -1, its own nil) is a campaign gone after RECORD_DAYS, left out,
+ * known. Any other answer still throws. Without it, nothing changes.
+ */
+export type HeadsOptions = { expired?: "skip" };
 /** The emails measured, or the sentence of the caller that would not pay for measuring them (nothing measured). */
 export type Measured = ({ ok: true } & MeasuredHeads) | { ok: false; refused: string };
 
@@ -444,8 +507,8 @@ function headOf(raw: unknown, id: string, listId: string): BroadcastHead | null 
  * shorter list. Without what `pay` takes, nothing is read and the refusal
  * says why.
  */
-export async function readBroadcastHeads(listId: string | null, pay: PayFirst, limit = 30): Promise<BroadcastHeads> {
-  const measured = await measureBroadcastHeads(listId, limit, (count) => pay(broadcastSizesUnits(count)));
+export async function readBroadcastHeads(listId: string | null, pay: PayFirst, limit = 30, options: HeadsOptions = {}): Promise<BroadcastHeads> {
+  const measured = await measureBroadcastHeads(listId, limit, (count) => pay(broadcastSizesUnits(count)), options);
   if (!measured.ok) return { ok: false, refused: measured.refused };
   if (!measured.ids.length) return { ok: true, heads: [] };
   const paid = await pay(broadcastHeadsUnits(measured.sizes));
@@ -464,7 +527,7 @@ export async function readBroadcastHeads(listId: string | null, pay: PayFirst, l
  * the rest aside with what it reads). With no email, nothing is taken. An
  * index or a record that is not one throws.
  */
-export async function measureBroadcastHeads(listId: string | null, limit: number, paySizes: PaySizes): Promise<Measured> {
+export async function measureBroadcastHeads(listId: string | null, limit: number, paySizes: PaySizes, options: HeadsOptions = {}): Promise<Measured> {
   if (!listId) return { ok: true, listId, ids: [], sizes: [] };
   if (!isRedisConfigured()) throw new Error("Campaign storage is unavailable");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid campaign history limit");
@@ -477,8 +540,11 @@ export async function measureBroadcastHeads(listId: string | null, limit: number
   const paid = await paySizes(ids.length);
   if (paid.ok !== true) return { ok: false, refused: paid.message };
   const sized = await headsOf((ids as string[]).map(bcKey), null);
-  if (sized.some((size) => typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0)) throw new Error("Campaign records are incomplete");
-  return { ok: true, listId, ids: ids as string[], sizes: sized as number[] };
+  // With expired: "skip", a record that is not there (-1) is a campaign gone, left out; every other answer is checked.
+  const skip = options.expired === "skip";
+  const kept = (ids as string[]).flatMap((id, i) => (skip && sized[i] === -1 ? [] : [{ id, size: sized[i] }]));
+  if (kept.some(({ size }) => typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0)) throw new Error("Campaign records are incomplete");
+  return { ok: true, listId, ids: kept.map(({ id }) => id), sizes: kept.map(({ size }) => size as number), ...(skip ? { expired: "skip" as const } : {}) };
 }
 
 /**
@@ -495,19 +561,26 @@ export async function readMeasuredHeads(measured: MeasuredHeads, regrow: Regrow)
   const { listId, ids: wanted, sizes } = measured;
   if (!listId || !wanted.length) return { ok: true, heads: [] };
   if (wanted.length !== sizes.length) throw new Error("Campaign records are incomplete");
+  // With expired: "skip" (HeadsOptions), one that expired since it was measured (-1) is gone, left out, known.
+  const gone = new Set<number>();
+  const isGone = (slot: unknown) => measured.expired === "skip" && slot === -1;
   const first = await headsOf(wanted.map(bcKey), sizes);
+  first.forEach((slot, i) => isGone(slot) && gone.add(i));
   const heads = wanted.map((id, i) => headOf(first[i], id, listId));
-  const again = wanted.flatMap((id, i) => (heads[i] ? [] : [{ i, id, size: sizes[i] }]));
+  const again = wanted.flatMap((id, i) => (heads[i] || gone.has(i) ? [] : [{ i, id, size: sizes[i] }]));
   if (again.length) {
     // Grown since its size was asked, or not one: read once more, paid first, no further than a send can write on it.
     const grown = again.map(({ size }) => size);
     const more = await regrow(broadcastHeadsUnits(grown, EMAIL_GROWTH_BYTES), grown);
     if (more.ok !== true) return { ok: false, refused: more.message };
     const second = await headsOf(again.map(({ id }) => bcKey(id)), again.map(({ size }) => size + EMAIL_GROWTH_BYTES));
-    again.forEach(({ i, id }, j) => (heads[i] = headOf(second[j], id, listId)));
+    again.forEach(({ i, id }, j) => {
+      if (isGone(second[j])) gone.add(i);
+      heads[i] = headOf(second[j], id, listId);
+    });
   }
-  if (heads.some((head) => head === null)) throw new Error("Invalid campaign record");
-  return { ok: true, heads: heads as BroadcastHead[] };
+  if (heads.some((head, i) => head === null && !gone.has(i))) throw new Error("Invalid campaign record");
+  return { ok: true, heads: heads.filter((head, i) => !gone.has(i)) as BroadcastHead[] };
 }
 
 /**

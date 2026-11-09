@@ -43,11 +43,12 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 // Hooks on the in-memory Redis: one off-shape answer for a record, and a change slipped in after a read of a sale.
 const real = redis.pipeline.bind(redis);
 let offShape: string | null = null;
+let keepOff = false;
 let slipIn: { ref: string; write: string } | null = null;
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const one = commands.length === 1 ? commands[0] : null;
   if (offShape && one?.[0] === "HGET" && /^nl:aff:[^:]+:people$/.test(String(one[1])) && one[2] === offShape) {
-    offShape = null;
+    if (!keepOff) offShape = null;
     return [42];
   }
   const result = await real(commands);
@@ -131,7 +132,10 @@ async function main(): Promise<void> {
   {
     const { store, statsId } = await setup();
     offShape = BEA;
+    keepOff = true;
     await noteSession(store, order("cs_shape2", "kai@example.com"));
+    keepOff = false;
+    offShape = null;
     is("the recruit's own record off-shape: both tiers wait", [(await kept(statsId, "cs_shape2"))?.buyerUnknown, (await kept(statsId, "cs_shape2"))?.selfUnknown], [1, 1]);
   }
 

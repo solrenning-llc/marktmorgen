@@ -25,6 +25,8 @@ import { addMonthsMs, allowanceWindow, anchorAfter, windowAt, windowId, type All
 import { takeAllowance } from "@/lib/store-allowance";
 import { ALLOWANCE_KINDS, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { MOST_CORRECT_READING } from "@/lib/receiving-costs";
+import { netOf, worstCost } from "./plan-cost-model";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -471,6 +473,15 @@ async function main(): Promise<void> {
     clock = Date.UTC(2027, 1, 11, 12);
     await setSubscription(owner, plan("month", per(Date.UTC(2027, 1, 10, 12), 1)));
     is("10d: a renewal written in its grace keeps the anchor", (await read()).allowanceAnchor, { subscriptionId: SUB, start: START, end: Date.UTC(2027, 0, 1, 12) });
+
+    part("11. The worst month this keeps: one window per paid month, every limit used (the figures in the PR body)");
+    // The repository's own model: a month's receipts after every fee and reserve (netOf, lib/receiving-costs.ts), less
+    // every cost line at its limit (worstCost, tests/plan-cost-registry.ts), then the LC rule's taxes on that profit:
+    // IRPF 15% and IOF 0.38% (MOST_CORRECT_READING), the IOF taken on the profit sent home before the IRPF.
+    const taxShare = (MOST_CORRECT_READING.profitTaxBps + MOST_CORRECT_READING.incomingExchangeIofBps) / 10_000;
+    const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
+    is("11: Store, Studio and Scale keep 45.12, 313.84 and 703.28 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.12", "313.84", "703.28"]);
+    is("11: and 37.06, 258.72 and 580.01 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.72", "580.01"]);
   } finally {
     Date.now = realNow;
   }

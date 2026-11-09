@@ -202,13 +202,17 @@ export class MemoryRedis {
           }
           return out;
         }
-        // lib/contacts.ts CONTACT_WRITE_IF: a contact's row written only while it and the address's deleted mark hold what was read.
-        if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && args[0] === "2" && args.length === 9) {
-          const [list, marks, field, was, value, print, markWas, lift] = args.slice(1);
+        // lib/contacts.ts CONTACT_WRITE_IF: a contact's row written only while it and the address's deleted mark hold what was read, with its counts.
+        if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && args[0] === "4" && args.length === 13) {
+          const [list, marks, agreedCount, leftCount, field, was, value, print, markWas, lift, agreed, left] = args.slice(1);
           const sha1 = (text: unknown) => (typeof text === "string" ? createHash("sha1").update(text).digest("hex") : "");
-          if (sha1(this.run(["HGET", list, field])) !== was || sha1(this.run(["HGET", marks, print])) !== markWas) return 0;
+          if (sha1(this.run(["HGET", list, field])) !== was) return 0;
+          if (print !== "" && sha1(this.run(["HGET", marks, print])) !== markWas) return 0;
           this.run(["HSET", list, field, value]);
-          if (lift === "1") this.run(["HDEL", marks, print]);
+          if (lift === "1" && print !== "") this.run(["HDEL", marks, print]);
+          if (agreed === "1") this.run(["INCR", agreedCount]);
+          if (left === "1") this.run(["INCR", leftCount]);
+          else if (left === "-1") this.run(["DECR", leftCount]);
           return 1;
         }
         // lib/order-data.ts ORDER_WRITE_IF_SAME: each check, then ORDER_WRITE as it is on the rest.

@@ -63,11 +63,11 @@ async function intercept<T>(when: (commands: Commands) => boolean, answer: Answe
 }
 const isLinkRead = (c: Commands) => c.length === 1 && c[0]?.[0] === "GET" && String(c[0][1]).startsWith("nl:mail:unsub:");
 const isRowRead = (c: Commands) => c.length === 1 && c[0]?.[0] === "HGET" && String(c[0][1]).startsWith("nl:store:leads:");
-// Claude 5, consent audit of 9 November 2026 (rule 23): the press now writes the row only over the one it read, in
-// one script (lib/contacts.ts unsubscribe, CAS_HSET), and counts the leaving after it; the pipeline found here is that
-// write. Every answer injected below, and what each case proves, is as it was.
+// Claude 5, consent audit of 9 November 2026 (rule 23): the press now writes the row only over the one it read, with
+// the count of those who left, in one script (lib/contacts.ts unsubscribe, CONTACT_WRITE_IF); the pipeline found here
+// is that write. Every answer injected below, and what each case proves, is as it was.
 const isUnsubWrite = (c: Commands) =>
-  c.length === 1 && c[0]?.[0] === "EVAL" && String(c[0][1]).startsWith("-- marktmorgen:contact-cas-hset:v1\n") && String(c[0][3]).startsWith("nl:store:leads:");
+  c.length === 1 && c[0]?.[0] === "EVAL" && String(c[0][1]).startsWith("-- marktmorgen:contact-write-if:v1\n") && String(c[0][3]).startsWith("nl:store:leads:");
 
 let listId = "";
 let handle = "";

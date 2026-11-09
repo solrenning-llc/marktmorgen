@@ -38,7 +38,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
-import { liftCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
+import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, dataKey, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite, orderWriteIfSame } from "@/lib/order-data";
@@ -269,13 +269,15 @@ export async function upsertContact(
     const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
     // A yes only undoes an unsubscribe when it was given after it: a thank-you
     // page reloaded, or a download link opened again, repeats an old tick.
-    const saidAt = Date.parse(input.at || now);
+    // With no `at`, now; a time given as "" or that does not parse is not known to be after anything.
+    const saidAt = Date.parse(input.at === undefined ? now : input.at);
     const leftAt = Date.parse(before?.unsubAt || "");
     const resubscribe =
       Boolean(before?.unsub) &&
       input.agreed &&
       input.explicit &&
-      (!Number.isFinite(leftAt) || !Number.isFinite(saidAt) || saidAt > leftAt);
+      Number.isFinite(saidAt) &&
+      (!Number.isFinite(leftAt) || saidAt > leftAt);
     const titles = before ? [...before.titles] : [];
     if (input.title && !titles.includes(input.title)) titles.push(input.title);
     const ids = before ? [...before.ids] : [];
@@ -306,11 +308,9 @@ export async function upsertContact(
     if (clicks) next.clicks = clicks;
     if (deleted && !agreed) delete next.clicks;
     await needContacts(room, [{ before, next }]);
-    const rest: (string | number)[][] = [];
-    if (agreed && !before?.agreed) rest.push(["INCR", agreedKey(listId)]);
-    if (resubscribe) rest.push(["DECR", unsubKey(listId)]);
-    if (input.sid) rest.push(...joinedCommands(input.sid, email));
-    const written = await writeContactIf(listId, email, raw, mark, next, deleted && ownYes, rest, room);
+    const counts = { agreed: agreed && !before?.agreed, left: resubscribe ? -1 : 0 } as const;
+    const joined = input.sid ? joinedCommands(input.sid, email) : [];
+    const written = await writeContactIf(listId, email, raw, mark, next, deleted && ownYes, counts, joined, room);
     if (written) return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
     // Changed meanwhile: what it took of the room goes back, and it is read again.
     await settleContacts(room, [{ before, next }], [false]);
@@ -318,28 +318,35 @@ export async function upsertContact(
   throw new Error("a contact kept changing while it was written");
 }
 
-/** How many times a contact is read again when it changed between the read and the write. */
+/**
+ * How many times a contact is read again when it changed between the read and the write. upsertContact at its
+ * worst, every round lost to a change made in between: 3 x (3 reads + the deleted mark's time + the stores joined,
+ * 2 + the script, 1) = 21 commands, all inside an order's or a sign-up's own work (ORDER_COMPUTE); without a race,
+ * the commands it always made.
+ */
 const CONTACT_WRITE_TRIES = 3;
 
 /**
  * Whether something that happened at `at` (an ISO time) is after the deletion whose mark holds `mark`, the second
  * it was written: only from the next whole second on, since the deletion may have been made at any moment of its
  * own. With no `at` it happens now, after a mark already read. Anything not read exactly (a mark that is not a
- * count of seconds, a time that does not parse) is not after.
+ * count of seconds, a time given as "" or that does not parse) is not after.
  */
 function afterDeletion(mark: string | null, at: string | undefined): boolean {
   if (mark === null || !/^(0|[1-9][0-9]{0,15})$/.test(mark)) return false;
-  if (at === undefined || at === "") return true;
+  if (at === undefined) return true;
   const when = Date.parse(at);
   return Number.isFinite(when) && when >= (Number(mark) + 1) * 1000;
 }
 
 /**
- * A contact's row written only while it and the address's deleted mark hold what was read, in one step: KEYS[1]
- * the list, KEYS[2] the store's deleted marks (lib/suppression.ts); ARGV[1] the address, ARGV[2] the SHA-1 of its
- * row as read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark, ARGV[5] the SHA-1 of the mark's
- * value as read ("" for none), ARGV[6] "1" to lift it with the write (their own yes, given after the deletion).
- * Answers 1 written, 0 changed.
+ * A contact's row written only while it and the address's deleted mark hold what was read, with the counts that go
+ * with it, in one step: KEYS[1] the list, KEYS[2] the store's deleted marks (lib/suppression.ts), KEYS[3] the
+ * list's count of those who agreed, KEYS[4] of those who left; ARGV[1] the address, ARGV[2] the SHA-1 of its row as
+ * read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark ("" when the mark is not looked at),
+ * ARGV[5] the SHA-1 of the mark's value as read ("" for none), ARGV[6] "1" to lift it with the write (their own
+ * yes, given after the deletion), ARGV[7] "1" to count one more who agreed, ARGV[8] "1" or "-1" for one more or
+ * one fewer who left. Answers 1 written, 0 changed (nothing written).
  */
 const CONTACT_WRITE_IF = [
   // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
@@ -348,24 +355,29 @@ const CONTACT_WRITE_IF = [
   'local seen = ""',
   "if cur then seen = redis.sha1hex(cur) end",
   "if seen ~= ARGV[2] then return 0 end",
-  'local held = redis.call("HGET", KEYS[2], ARGV[4])',
-  'local markSeen = ""',
-  "if held then markSeen = redis.sha1hex(held) end",
-  "if markSeen ~= ARGV[5] then return 0 end",
+  'if ARGV[4] ~= "" then',
+  '  local held = redis.call("HGET", KEYS[2], ARGV[4])',
+  '  local markSeen = ""',
+  "  if held then markSeen = redis.sha1hex(held) end",
+  "  if markSeen ~= ARGV[5] then return 0 end",
+  "end",
   'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
-  'if ARGV[6] == "1" then redis.call("HDEL", KEYS[2], ARGV[4]) end',
+  'if ARGV[6] == "1" and ARGV[4] ~= "" then redis.call("HDEL", KEYS[2], ARGV[4]) end',
+  'if ARGV[7] == "1" then redis.call("INCR", KEYS[3]) end',
+  'if ARGV[8] == "1" then redis.call("INCR", KEYS[4]) elseif ARGV[8] == "-1" then redis.call("DECR", KEYS[4]) end',
   "return 1",
 ].join("\n");
 
 /**
- * Writes one contact's row, the lifting of its deleted mark when `lift`, and `rest` (counters, the stores the
- * address joined), only while the row is still `raw` and the mark still `mark` (consent audit of 9 November
- * 2026: a read and then a plain HSET wrote an unsubscribe, a complaint or a deletion made in between over).
- * An order's are written by lib/order-data.ts and charged there at what they add, all in one script
- * (ORDER_WRITE_IF_SAME); anybody else's row in CONTACT_WRITE_IF, then `rest`. True when written, false when the
- * row or the mark changed meanwhile (nothing written). A reply in another shape is read back: the row holding
- * exactly what was to be written (and the mark gone, when lifted) means the script ran; anything else throws
- * UnknownReplyError, never "not written" nor "written".
+ * Writes one contact's row, the lifting of its deleted mark when `lift`, and its counts, only while the row is
+ * still `raw` and the mark still `mark` (consent audit of 9 November 2026: a read and then a plain HSET wrote an
+ * unsubscribe, a complaint or a deletion made in between over). The stores the address joined (`joined`, how
+ * "delete me from every store" finds this one) are written first: one left over when the row is not is harmless,
+ * a row without it is not. An order's are written by lib/order-data.ts and charged there at what they add, all in
+ * one script (ORDER_WRITE_IF_SAME); anybody else's in CONTACT_WRITE_IF, the counts with the row. True when
+ * written, false when the row or the mark changed meanwhile (nothing written). A reply in another shape is read
+ * back: the row holding exactly what was to be written (and the mark gone, when lifted) means the script ran,
+ * counts and all; anything else throws UnknownReplyError, never "not written" nor "written".
  */
 async function writeContactIf(
   listId: string,
@@ -375,7 +387,8 @@ async function writeContactIf(
   mark: string | null,
   next: Contact,
   lift: boolean,
-  rest: (string | number)[][],
+  counts: { agreed: boolean; left: -1 | 0 | 1 },
+  joined: (string | number)[][],
   room: ContactRoom,
 ): Promise<boolean> {
   const key = leadsKey(listId);
@@ -385,24 +398,51 @@ async function writeContactIf(
   const was = typeof raw === "string" ? sha1(raw) : "";
   const markWas = mark === null ? "" : sha1(mark);
   if (room && isOrderRoom(room) && dataKey(room.order)) {
-    const commands: (string | number)[][] = [["HSET", key, email, value], ...(lift ? [liftCommand(listId, email)] : []), ...rest];
+    const commands: (string | number)[][] = [
+      ...joined,
+      ["HSET", key, email, value],
+      ...(lift ? [liftCommand(listId, email)] : []),
+      ...(counts.agreed ? [["INCR", agreedKey(listId)]] : []),
+      ...(counts.left === 1 ? [["INCR", unsubKey(listId)]] : counts.left === -1 ? [["DECR", unsubKey(listId)]] : []),
+    ];
     return (await orderWriteIfSame(room.order, [{ key, field: email, sha1: was }, { key: marks, field: print, sha1: markWas }], commands)) !== null;
   }
-  let written: boolean;
+  if (joined.length) {
+    if (room && isOrderRoom(room)) await orderWrite(room.order, joined);
+    else await redisPipeline(joined);
+  }
+  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts);
+}
+
+/**
+ * CONTACT_WRITE_IF for one row: true written, false changed meanwhile. `mark` null leaves the deleted mark unlooked
+ * at (unsubscribe: the row's own check keeps a deleted person from being written back). A reply in another shape is
+ * read back, as writeContactIf says; with `strict`, it is unknown at once (UnknownReplyError), never read back.
+ */
+async function writeRowIf(
+  listId: string,
+  email: string,
+  was: string,
+  value: string,
+  mark: { print: string; markWas: string; mark: string | null; lift: boolean } | null,
+  counts: { agreed: boolean; left: -1 | 0 | 1 },
+  strict = false,
+): Promise<boolean> {
+  const key = leadsKey(listId);
+  const marks = suppressedKey(listId);
+  const args = [email, was, value, mark?.print ?? "", mark?.markWas ?? "", mark?.lift ? "1" : "0", counts.agreed ? "1" : "0", String(counts.left)];
+  let result: unknown;
   try {
-    const result = repliesFor(await redisPipeline([["EVAL", CONTACT_WRITE_IF, 2, key, marks, email, was, value, print, markWas, lift ? "1" : "0"]]), 1)?.[0];
-    if (result !== 0 && result !== 1) throw new Error("unexpected answer");
-    written = result === 1;
-  } catch {
-    const read = repliesFor(await redisPipeline([["HGET", key, email], ["HGET", marks, print]]), 2);
-    if (!read || read[0] !== value || (lift ? read[1] !== null : read[1] !== mark)) throw new UnknownReplyError("a contact's write");
-    written = true;
+    result = repliesFor(await redisPipeline([["EVAL", CONTACT_WRITE_IF, 4, key, marks, agreedKey(listId), unsubKey(listId), ...args]]), 1)?.[0];
+    if (result !== 0 && result !== 1) throw new UnknownReplyError("a contact's write");
+  } catch (error) {
+    if (strict) throw error instanceof UnknownReplyError ? error : new UnknownReplyError("a contact's write");
+    const read = repliesFor(await redisPipeline([["HGET", key, email], ["HGET", marks, mark?.print || "-"]]), 2);
+    const markFits = !mark ? true : mark.lift ? read?.[1] === null : read?.[1] === mark.mark;
+    if (!read || read[0] !== value || !markFits) throw new UnknownReplyError("a contact's write");
+    return true;
   }
-  if (written && rest.length) {
-    if (room && isOrderRoom(room)) await orderWrite(room.order, rest);
-    else await redisPipeline(rest);
-  }
-  return written;
+  return result === 1;
 }
 
 /**
@@ -974,7 +1014,8 @@ export async function readUnsubToken(
 
 /**
  * Takes an address off the list for good. Safe to press twice. The row is
- * written only over the one read (CAS_HSET), so a deletion, a complaint or a
+ * written only over the one read, with the count of those who left
+ * (CONTACT_WRITE_IF), so a deletion, a complaint or a
  * purchase noted in the same moment is never written over, and a person
  * deleted meanwhile is never written back (consent audit of 9 November 2026):
  * their row gone, the deletion has already done what the press asked, and the
@@ -997,11 +1038,9 @@ export async function unsubscribe(token: string): Promise<{ listId: string; emai
     const { clicks: _left, ...kept } = contact;
     void _left;
     const next: Contact = { ...kept, unsub: true, unsubAt: new Date().toISOString() };
-    const reply = repliesFor(await redisPipeline([["EVAL", CAS_HSET, 1, leadsKey(listId), email, sha1(raw), JSON.stringify(next)]]), 1)?.[0];
-    const each = repliesFor(reply, 1);
-    if (!each || (each[0] !== 0 && each[0] !== 1)) throw new UnknownReplyError("an unsubscribe's write");
-    if (each[0] === 0) continue;
-    if (contact.agreed) await redisPipeline([["INCR", unsubKey(listId)]]);
+    // Counted with those who left in the same step as the row; exactly 1 or 0, anything else unknown (rule 24).
+    const written = await writeRowIf(listId, email, sha1(raw), JSON.stringify(next), null, { agreed: false, left: contact.agreed ? 1 : 0 }, true);
+    if (!written) continue;
     return first;
   }
   throw new Error("a contact kept changing while it was unsubscribed");
@@ -1198,7 +1237,10 @@ return 0`;
 export async function forgetContactPerson(listId: string | null, rawEmail: string): Promise<number> {
   if (!listId || !isRedisConfigured()) return 0;
   const email = normaliseEmail(rawEmail);
-  const [raw] = await redisPipeline([["HGET", leadsKey(listId), email]]);
+  // The erasure's mark, written again as the row goes (the last of its steps, lib/person-erasure.ts): a yes given
+  // while the erasure ran (a join confirmed with its link, lib/store-join.ts) lifted the one written first, and the
+  // person must not end with neither a row nor a mark (pre-review of 9 November 2026).
+  const [raw] = await redisPipeline([["HGET", leadsKey(listId), email], suppressCommand(listId, email)]);
   const contact = parseContact(raw);
   if (!contact) return 0;
   const commands: (string | number)[][] = [["HDEL", leadsKey(listId), email]];

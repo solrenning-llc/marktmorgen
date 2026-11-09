@@ -288,7 +288,9 @@ async function main() {
   }
   {
     // P6: the stores an address joined (lib/joined-stores.ts) are how "delete me from every store" finds this one.
-    const list = "pre_p6", email = "joiner@example.com";
+    // A store id of the shape the index keeps (32 hex characters, lib/joined-stores.ts): ROOM's own is not one, so
+    // with it nothing is ever indexed and the check could not tell a fix from the defect.
+    const list = "pre_p6", email = "joiner@example.com", sid = "0123456789abcdef0123456789abcdef";
     let wrote = false;
     redis.pipeline = async (commands: Commands) => {
       if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v1"))) {
@@ -298,10 +300,11 @@ async function main() {
       if (wrote && commands.some((c) => c[0] === "SADD" && String(c[1]).startsWith("nl:lib:joined:"))) throw new Error("synthetic network failure");
       return real(commands);
     };
-    await upsertContact(list, email, { agreed: true, explicit: true, source: "free", sid: ROOM.sid, at: new Date().toISOString() }, ROOM).catch(() => null);
+    await upsertContact(list, email, { agreed: true, explicit: true, source: "free", sid, at: new Date().toISOString() }, ROOM).catch(() => null);
     redis.pipeline = real;
-    const listed = joinedKeys(email).some((k) => redis.run(["SISMEMBER", k, ROOM.sid]) === 1);
-    is("P6: a row written is always findable by \"delete me from every store\"", row(list, email) === null || listed, true);
+    const listed = joinedKeys(email).some((k) => redis.run(["SISMEMBER", k, sid]) === 1);
+    is("P6: control: the row was written", row(list, email) !== null, true);
+    is("P6: a row written is always findable by \"delete me from every store\"", listed, true);
   }
   {
     // The counts go with the row, in the same step: a round trip lost after it never leaves them behind.

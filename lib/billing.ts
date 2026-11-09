@@ -361,7 +361,9 @@ export async function trialOfferedTo(
       const read = readStripePage(listed, (row) => {
         const started = ownField(row, "trial_start");
         const meta = ownField(row, "metadata");
-        return ownField(row, "customer") === customer && hasOwnField(row, "trial_start") && (started === null || (Number.isSafeInteger(started) && (started as number) >= 0)) && plainObject(meta);
+        // A store field Stripe holds is always a word; one that is present and not a word is unknown, never "none".
+        const named = plainObject(meta) && hasOwnField(meta, "store") ? ownField(meta, "store") : "";
+        return ownField(row, "customer") === customer && hasOwnField(row, "trial_start") && (started === null || (Number.isSafeInteger(started) && (started as number) >= 0)) && plainObject(meta) && typeof named === "string";
       }, SUBSCRIPTION_PATTERN);
       const before = read.rows.some((row) => {
         const named = ownField(ownField(row, "metadata") as Record<string, unknown>, "store");

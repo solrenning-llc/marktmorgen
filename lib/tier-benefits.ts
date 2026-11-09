@@ -366,6 +366,32 @@ export async function undoGiven(store: Store, benefit: unknown, sub: unknown, pe
   return { ok: true, undone: removed === 1 };
 }
 
+// ------------------------------------------------------------------ the copy
+
+/**
+ * What a person's copy holds of their marks (lib/person-copy.ts): which
+ * benefit, which period, when it was marked given. Only reading. The
+ * teammate who pressed the button is theirs and left out. Throws when the
+ * marks, or the benefits their words come from, cannot be read in their exact
+ * shape: a copy that leaves marks out is not the copy.
+ */
+export async function benefitMarksOf(store: Store, person: string): Promise<{ benefit: string; period: string; at: number }[]> {
+  if (!store.statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
+  const marks = (await readMarks(store.statsId, [person])).get(person);
+  if (!marks) return [];
+  if (marks === "unknown") throw new UnknownReplyError("a person's benefit marks");
+  if (marks.size === 0) return [];
+  const benefits = await readBenefits(store);
+  if (!benefits) throw new UnknownReplyError("the membership benefits");
+  const text = new Map(benefits.map((b) => [b.id, b.text]));
+  const out: { benefit: string; period: string; at: number }[] = [];
+  for (const [f, given] of marks) {
+    const [benefit, , period] = f.split(":");
+    out.push({ benefit: text.get(benefit) ?? benefit, period: period ?? "", at: given.at });
+  }
+  return out.sort((a, b) => a.at - b.at || a.benefit.localeCompare(b.benefit));
+}
+
 // ------------------------------------------------------------------ erasure
 
 /** A deleted person's marks (lib/person-erasure.ts): how many keys went. Throws when the answer cannot be read. */

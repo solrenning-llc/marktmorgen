@@ -24,7 +24,15 @@
  * edit or publish it (isHeldForReport): the law asks for what was reported to
  * be kept for a year from the report (18 U.S.C. § 2258A(h), as the REPORT Act
  * amended it), and a creator could otherwise delete it from the studio.
+ *
+ * Unit 3a: while the mark is there, nobody but the store's owner reads what the
+ * product holds: its course pages and worksheets, its podcast page, feed and
+ * episodes, its PDF preview, its shared card, its file from the studio (the
+ * team is refused) and the AI writing help (refused for everyone, so nothing
+ * of it goes to an AI provider). A mark that cannot be read refuses the same
+ * way (holdState, contentOpenTo).
  */
+import { emailForSession, normaliseEmail } from "@/lib/auth";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
@@ -54,6 +62,44 @@ export async function isHeldForReport(store: Pick<Store, "statsId" | "handle">, 
   if (value === null) return false;
   if (value === "1") return true;
   throw new Error("A preservation hold could not be read");
+}
+
+/** A product's hold as a reader sees it; "unknown" is a mark that could not be read, refused like "held". */
+export type HoldState = "held" | "free" | "unknown";
+
+/**
+ * Whether the product is held, for whatever would read or hand out its content
+ * (unit 3a): never throws, and a mark that cannot be read is "unknown", which
+ * every reader refuses exactly as it refuses "held", never shows the content.
+ */
+export async function holdState(store: Pick<Store, "statsId" | "handle">, productId: string): Promise<HoldState> {
+  try {
+    return (await isHeldForReport(store, productId)) ? "held" : "free";
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return "unknown";
+  }
+}
+
+/**
+ * Whether this session is the store's owner: the only person who reads a
+ * held product, from its own pages or the studio. Never someone on the team,
+ * a student or a listener. Anything not known is a no.
+ */
+export async function isOwnerSession(store: Pick<Store, "email">, session: string | undefined): Promise<boolean> {
+  if (!session) return false;
+  const email = await emailForSession(session).catch(() => null);
+  return Boolean(email) && normaliseEmail(email as string) === normaliseEmail(store.email);
+}
+
+/**
+ * Whether a product's content may be shown to this session: always while it
+ * is not held; while it is held, or its mark cannot be read, only to the
+ * store's owner. The owner is asked first, so their own pages read no mark.
+ */
+export async function contentOpenTo(store: Pick<Store, "statsId" | "handle" | "email">, productId: string, session: string | undefined): Promise<boolean> {
+  if (await isOwnerSession(store, session)) return true;
+  return (await holdState(store, productId)) === "free";
 }
 
 /**

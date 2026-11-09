@@ -142,10 +142,12 @@ export const COMMANDS = {
    * code under both): the day's first time, which also writes the day's
    * visit and starts the day's count of it, and each time after. The day's
    * count sends its expiry with every count since November 7, 2026 (finding
-   * L1 on #2888), one command more each time after the first.
+   * L1 on #2888), one command more each time after the first. Since
+   * November 9, 2026 one more each time: whether the podcast is held for a
+   * child-safety report (lib/child-safety.ts, holdState).
    */
-  feedFirst: 13,
-  feed: 10,
+  feedFirst: 14,
+  feed: 11,
 };
 
 /** Answering one page and its count: two calls, a tenth of a second of work, and memory held while the database is waited on. */

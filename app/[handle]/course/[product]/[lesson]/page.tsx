@@ -6,6 +6,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { holdState } from "@/lib/child-safety";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
@@ -87,6 +88,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
   if (!product?.course) redirect(`/@${store.handle}`);
   const jar = await cookies();
   const access = await courseAccess(store, product, jar);
+  // A product held for a child-safety report is read by the store's owner only (lib/child-safety.ts): not its
+  // students, not the team, not a visitor on a preview; a hold that cannot be read refuses the same way. They go
+  // where an id that does not exist goes.
+  if (!access.learner?.owner && (await holdState(store, product.id)) !== "free") redirect(`/@${store.handle}`);
   // A draft is not: only its students and the store's owner and team, signed
   // in, see anything of it, a free preview included (MM-SA-30). Anyone else
   // goes where an id that does not exist goes, before its lessons are read.

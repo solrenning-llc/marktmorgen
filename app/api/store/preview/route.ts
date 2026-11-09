@@ -6,6 +6,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { plain, serveFile } from "@/lib/serve-file";
 import { MAX_PREVIEW_PAGES, previewCopy } from "@/lib/pdf-preview";
 import { clientAddress, withinEssentialLimit } from "@/lib/request-guard";
+import { holdState } from "@/lib/child-safety";
 
 /** Making a preview the first time reads the whole PDF: give it the time a big one needs. */
 export const maxDuration = 60;
@@ -27,6 +28,11 @@ export async function GET(request: NextRequest) {
   if (!(await takePublicRequest(store))) return plain(429, "This store can't show previews right now. Try again later.");
   const product = await readListing(store, (params.get("product") ?? "").slice(0, 40));
   if (!product || product.hidden || product.preview < 1 || !product.file) return plain(404, "This product has no preview.");
+  // A product held for a child-safety report (lib/child-safety.ts) shows no page of itself, even when taking it off
+  // the store did not go through; a hold that cannot be read is not a yes.
+  const hold = await holdState(store, product.id);
+  if (hold === "held") return plain(404, "This product has no preview.");
+  if (hold === "unknown") return plain(503, "This store can't show previews right now. Try again later.");
   const copy = await previewCopy(product.file, product.preview, store);
   if (!copy) return plain(404, "This product has no preview right now.");
   return serveFile(copy, { paid: false });

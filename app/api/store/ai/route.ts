@@ -34,6 +34,7 @@ import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
+import { holdState } from "@/lib/child-safety";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
@@ -45,6 +46,9 @@ const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call"
  * Who may ask is who may write that thing: products and courses need the
  * products permission, an email the one to write drafts (lib/team-roles.ts).
  */
+/** The kinds of writing help that read a product named by `product` (quiz and feedback name it by `id`). */
+const HELD_KINDS = new Set(["page", "review", "block", "headline", "fill", "alt", "translate", "posts", "reply"]);
+
 export async function POST(request: NextRequest) {
   // A review or a translation sends the page being edited, which may be long, and
   // twice as long with a second version being tested (lib/sales-page.ts, MAX_PAGE_BYTES).
@@ -54,6 +58,16 @@ export async function POST(request: NextRequest) {
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return fail("slow", 429);
   const notes = text(body.notes, MAX_AI_NOTES + 100);
+
+  // Nothing of a product held for a child-safety report (lib/child-safety.ts) goes to an AI provider: not its
+  // file, page, lessons or reviews, for anyone, its owner included. Checked before anything of it is read; a
+  // hold that cannot be read is not a yes.
+  const named = body.kind === "quiz" || body.kind === "feedback" ? text(body.id, 40) : HELD_KINDS.has(String(body.kind)) ? text(body.product, 40) : "";
+  if (named) {
+    const hold = await holdState(store, named);
+    if (hold === "held") return fail("held_for_report", 409);
+    if (hold === "unknown") return fail("unavailable", 503);
+  }
 
   const answer = async <T,>(result: Promise<{ ok: true; value: T; left: number } | { ok: false; reason: string }>) => {
     const done = await result;

@@ -1,0 +1,5 @@
+{
+  "next/headers": "security/next-headers.ts",
+  "next/server": "next-server-after-world.ts",
+  "next/og": "child-safety-access-og.ts"
+}

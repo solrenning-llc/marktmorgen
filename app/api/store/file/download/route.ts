@@ -11,6 +11,7 @@ import {
 import { recordDelivery } from "@/lib/delivery";
 import { isRedisConfigured } from "@/lib/redis";
 import { fileHeaders } from "@/lib/request-guard";
+import { holdState } from "@/lib/child-safety";
 
 /**
  * Gives the creator back the file they uploaded.
@@ -59,6 +60,14 @@ export async function GET(request: NextRequest) {
 
   const id = request.nextUrl.searchParams.get("id") ?? "";
   if (!id) return new Response("Which file?", { status: 400 });
+
+  // The file of a product held for a child-safety report (lib/child-safety.ts) is the store's owner's only:
+  // nobody else on the team downloads it. A hold that cannot be read is not a yes.
+  if (access.access.role !== "owner") {
+    const hold = await holdState(access.access.store, id);
+    if (hold === "held") return new Response("This product is on hold, so only the store's owner can download its file.", { status: 403, headers: { "Cache-Control": "private, no-store" } });
+    if (hold === "unknown") return new Response("We could not check this file right now. Try again in a moment.", { status: 503, headers: { "Cache-Control": "private, no-store" } });
+  }
 
   const found = await productFile(ref, id);
   if (!found) return new Response("No file on that product.", { status: 404 });

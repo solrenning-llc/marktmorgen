@@ -1,13 +1,16 @@
 /**
- * The Redis script of lib/meet-connect.ts, read from the file itself, answers the same on the stand-in
+ * The Redis scripts of lib/meet-connect.ts, read from the file itself, answer the same on the stand-in
  * (lib/redis-memory.ts) as on Redis (CX-123 rules 24 and 30): KEEP_UNLESS_GONE keeps a store's new meeting
  * connection, indexed first, only while the renewal lock is the writer's and no deletion of that account was
- * confirmed since its consent flow began (forgetUser's mark).
+ * confirmed since its consent flow began (forgetUser's mark); KEEP_TEST_UNLESS_GONE keeps a test meeting
+ * (lib/meet-test.ts) only while the store's connection is there and listed under the account it was made on, no
+ * deletion of that account was confirmed since the make or the move began, and the record is still the one read.
  *
  * It refuses a call of the wrong shape (key or argument count, a cutoff that is not a time, an empty token,
  * connection or store) with -1 before touching anything, so a caller's slip is an unknown reply
  * (UnknownReplyError), never a connection kept. An index of another type is Redis's own error, with no connection
- * kept outside it.
+ * kept outside it. The test meeting's script refuses its own wrong shapes the same way; an index, a mark or a record of
+ * another type is Redis's own error, with nothing written.
  *
  * With REDIS_ARITY_SERVER naming a Redis 7 server binary, the same cases are run on a private one (a Unix socket in
  * the temporary directory, no TCP port) and must answer exactly as the stand-in does. The harness is the one of
@@ -27,8 +30,15 @@ const source = readFileSync("lib/meet-connect.ts", "utf8");
 /** The script as lib/meet-connect.ts defines it; "" when it does not, which its own test below fails on. */
 const K = source.match(/const KEEP_UNLESS_GONE = `([\s\S]*?)`;/)?.[1] ?? "";
 
+/** The test meeting's script as lib/meet-connect.ts defines it; "" when it does not. */
+const T = source.match(/const KEEP_TEST_UNLESS_GONE = `([\s\S]*?)`;/)?.[1] ?? "";
+
 test("lib/meet-connect.ts defines the script", () => {
   assert.match(K, /^-- marktmorgen:meet-keep:v1\n/);
+});
+
+test("lib/meet-connect.ts defines the test meeting's script", () => {
+  assert.match(T, /^-- marktmorgen:meet-test-keep:v1\n/);
 });
 
 type Arg = string | number;
@@ -76,6 +86,55 @@ const CASES: Case[] = [
   keep("a negative key count is Redis's own error", [], [-1, ...KEYS, "T", "J", 1001, "s1"], "error"),
   keep("more keys than arguments is Redis's own error", [], [9, ...KEYS, "T"], "error"),
 ];
+
+// The test meeting's script: the store's connection ("conn"), the stores listed under the account it was made on
+// ("idx"), that account's deletion mark ("gone") and the test meeting's record ("test").
+const TKEYS = ["conn", "idx", "gone", "test"];
+const CONNECTED: Arg[][] = [["SET", "conn", "C"], ["SADD", "idx", "s1"]];
+const tk = (name: string, setup: Arg[][], run: Arg[], reply: number | "error", record: unknown = null, after: Arg[][] = [["GET", "test"]]): Case => ({
+  name: `test meeting: ${name}`,
+  setup: [...CONNECTED, ...setup],
+  run: ["EVAL", T, ...run],
+  reply,
+  after,
+  state: [record],
+});
+const tcall = (had: Arg = "", cutoff: Arg = 1001, store: Arg = "s1", value: Arg = "V"): Arg[] => [4, ...TKEYS, store, value, cutoff, had];
+
+CASES.push(
+  tk("keeps a new one while the store is connected and listed, with no deletion since", [], tcall(), 1, "V"),
+  tk("keeps a moved one over the record it read", [["SET", "test", "OLD"]], tcall("OLD"), 1, "V"),
+  tk("keeps it when the deletion is older than the make", [["SET", "gone", "1000"]], tcall(), 1, "V"),
+  tk("keeps nothing once the connection is gone", [["DEL", "conn"]], tcall(), 2),
+  tk("keeps nothing once the store is not listed under the account", [["SREM", "idx", "s1"], ["SADD", "idx", "s2"]], tcall(), 2),
+  tk("keeps nothing once the account's list is gone", [["DEL", "idx"]], tcall(), 2),
+  tk("keeps nothing when the deletion is at the make's start", [["SET", "gone", "1001"]], tcall(), 2),
+  tk("keeps nothing when the deletion is after the make's start", [["SET", "gone", "2000"]], tcall(), 2),
+  tk("keeps nothing when the mark does not read as a time", [["SET", "gone", "soon"]], tcall(), 2),
+  tk("keeps nothing when the mark is empty", [["SET", "gone", ""]], tcall(), 2),
+  tk("keeps nothing when the mark is longer than sixteen digits", [["SET", "gone", "12345678901234567"]], tcall(), 2),
+  tk("a new one does not write over one made meanwhile", [["SET", "test", "OTHER"]], tcall(), 3, "OTHER"),
+  tk("a moved one is not written back once the record was deleted", [], tcall("OLD"), 3),
+  tk("a moved one is not written over a record changed meanwhile", [["SET", "test", "NEW"]], tcall("OLD"), 3, "NEW"),
+  tk("a gone connection is said before a changed record", [["DEL", "conn"], ["SET", "test", "OTHER"]], tcall(), 2, "OTHER"),
+  tk("a list of another type is Redis's error, with nothing written", [["DEL", "idx"], ["SET", "idx", "text"]], tcall(), "error"),
+  tk("a mark of another type is Redis's error, with nothing written", [["SADD", "gone", "x"]], tcall(), "error"),
+  tk("a record of another type is Redis's error, with nothing written", [["SADD", "test", "x"]], tcall(), "error", "set", [["TYPE", "test"]]),
+  tk("a cutoff of 0 is refused", [], tcall("", 0), -1),
+  tk("a negative cutoff is refused", [], tcall("", -5), -1),
+  tk("a cutoff that is not a whole number is refused", [], tcall("", "1.5"), -1),
+  tk("a cutoff with a leading zero is refused", [], tcall("", "01001"), -1),
+  tk("a cutoff longer than sixteen digits is refused", [], tcall("", "12345678901234567"), -1),
+  tk("an empty store is refused", [], tcall("", 1001, ""), -1),
+  tk("an empty record is refused", [], tcall("", 1001, "s1", ""), -1),
+  tk("a key too few is refused", [], [3, ...TKEYS.slice(0, 3), "s1", "V", 1001, ""], -1),
+  tk("a key too many is refused", [], [5, ...TKEYS, "more", "s1", "V", 1001, ""], -1),
+  tk("an argument too many is refused", [], [...tcall(), "extra"], -1),
+  tk("an argument too few is refused", [], tcall().slice(0, -1), -1),
+  tk("a key count with a leading zero is Redis's own error", [], ["04", ...TKEYS, "s1", "V", 1001, ""], "error"),
+  tk("a negative key count is Redis's own error", [], [-1, ...TKEYS, "s1", "V", 1001, ""], "error"),
+  tk("more keys than arguments is Redis's own error", [], [9, ...TKEYS, "s1"], "error"),
+);
 
 function onStandIn(c: Case): { reply: unknown; state: unknown[] } {
   const store = new MemoryRedis();

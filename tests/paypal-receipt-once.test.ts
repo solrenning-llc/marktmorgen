@@ -35,7 +35,9 @@
  *       the new receipt; a keep whose reply is not exact sends nothing; a store from before lists is given one first;
  *   L:  the person deleted after paying while their receipt is still owed (the first try refused): the next try writes
  *       nothing of them again (their purchase, their library, their erasure notes, nothing that names them), sends
- *       nothing and takes the order off the list; a person deleted before they pay again is handed the new order.
+ *       nothing and takes the order off the list; a person deleted before they pay again is handed the new order; a
+ *       deletion that completes during a try, after its check, takes the order off the list in that try; a deletion
+ *       mark whose reply is not exact writes nothing and keeps the order owed.
  */
 import { createHash } from "node:crypto";
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -651,8 +653,11 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = pipelineK4;
   }
-  // The store's list written once, between the pin's read and the keep: the commands that try adds, at most.
-  const listWrite = sentK4.findIndex(keepsReceipt) - sentK4.findIndex((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:pin:")) - 1;
+  // The store's list written once, before the hand-over reads the person's deletion mark (nothing in between for a
+  // store with a list: the paid record's last write, then that read): the commands that try adds, at most.
+  const markRead = sentK4.findIndex((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"));
+  const paidWrite = sentK4.findLastIndex((c, i) => i < markRead && String(c[1]).startsWith("nl:ppsell:sales:"));
+  const listWrite = markRead > paidWrite && paidWrite >= 0 ? markRead - paidWrite - 1 : -1;
   console.log(`        the list's write added ${listWrite} commands to that try`);
   is("the list's write, once in a store's life, adds at most the 7 commands the registry adds for it (commandsPerReceiptTry)", listWrite > 0 && listWrite <= 7, true);
   is("its receipt is sent once", copies(buyerK4).length, 1);
@@ -703,6 +708,61 @@ async function main(): Promise<void> {
   is("the next try sends the receipt", copies(buyerL2).length, 2);
   is("the purchase is still theirs", redis.run(["EXISTS", importedKey(statsId, buyerL2)]), 1);
   is("and the order leaves the list", (await listed()).includes(l2), false);
+
+  part("L: the deletion completes during a try, after its check: the receipt gone and its sender kept, the order leaves in that try");
+  startOfNextDay();
+  resendMode = "422";
+  const buyerL3 = "erased-during-try@example.com";
+  const l3 = await pay(21, buyerL3);
+  is("the return route's try: refused by Resend (422)", copies(buyerL3).length, 1);
+  resendMode = "up";
+  {
+    // Holds the try's read of the kept receipt and its sender until the deletion completes.
+    const pipeline = redis.pipeline.bind(redis);
+    let entered!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>((resolve) => (entered = resolve));
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let held = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (held || !commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:pin:"))) return pipeline(commands);
+      held = true;
+      entered();
+      await released;
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    ahead += 6 * 60_000;
+    const trying = delivery.sweepPayPal(await fresh(), Date.now() + 10_000);
+    await reached;
+    const erasedL3 = await erasePerson(await fresh(), buyerL3, { kind: "person" });
+    is("the deletion completes", erasedL3.ok, true);
+    release();
+    await trying;
+    redis.pipeline = pipeline;
+  }
+  is("nothing more was sent to them", copies(buyerL3).length, 1);
+  is("the order leaves the list in that try", (await listed()).includes(l3), false);
+  is("and nothing of their receipt is kept", redis.run(["GET", mailKeyOf(l3)]), null);
+
+  part("L: the deletion mark's reply not in its exact shape: nothing of the person written, the order stays owed");
+  startOfNextDay();
+  resendMode = "422";
+  const buyerL4 = "odd-mark@example.com";
+  const l4 = await pay(22, buyerL4);
+  const erasedL4 = await erasePerson(await fresh(), buyerL4, { kind: "person" });
+  is("the deletion completes", erasedL4.ok, true);
+  resendMode = "up";
+  const isMark = (c: (string | number)[]) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:");
+  for (const odd of [5, "soon", ["1"], undefined]) {
+    const undo = after(isMark, () => [odd]);
+    await sweep(6 / 60);
+    undo();
+    is(`a mark read as ${JSON.stringify(odd) ?? "nothing"}: nothing of them handed over again`, redis.run(["EXISTS", importedKey(statsId, buyerL4)]), 0);
+    is("nothing sent", copies(buyerL4).length, 1);
+    is("the order is still owed", (await listed()).includes(l4), true);
+  }
+  await sweep(6 / 60);
+  is("read exactly at the next sweep: nothing written, and the order leaves the list", [redis.run(["EXISTS", importedKey(statsId, buyerL4)]), (await listed()).includes(l4)], [0, false]);
 
   done();
 }

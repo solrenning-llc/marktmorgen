@@ -21,6 +21,7 @@ import { deriveKey } from "@/lib/secret-box";
 import { createHash } from "node:crypto";
 import { noteForErasure } from "@/lib/erasure-index";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { countOrder } from "@/lib/orders";
 
 /**
  * Where lib/email.ts keeps the sender of a key's email (its pinKey), written just before the first request made under
@@ -169,6 +170,32 @@ local written = redis.call("SET", KEYS[1], ARGV[1], "NX", "EX", ARGV[2])
 return {written and 1 or 0, redis.call("GET", KEYS[1])}`;
 
 /**
+ * The store's list id, where the prints of its deleted people are kept (lib/suppression.ts). A store from before lists
+ * is given its list first (ensureListId, as an erasure does), so a deletion is always checked where it is written.
+ * Throws UnknownReplyError when the store does not read: nothing of the order is handed over, and it stays owed.
+ */
+async function deletionListId(store: Store): Promise<string> {
+  const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId ?? null;
+  if (!listId) throw new UnknownReplyError("the store's list, to check a deletion before a PayPal hand-over");
+  return listId;
+}
+
+/**
+ * Whether the person was deleted from the store at or after the payment: the same print and the same rule as
+ * KEEP_RECEIPT (erasePerson writes the print before it deletes anything, and it is kept). False when there is none,
+ * or when they were deleted before they paid again. One HGET, read exactly (CX-123 rule 24): nothing, or a time in
+ * seconds; any other reply throws UnknownReplyError, so nothing of them is written and the order stays owed.
+ */
+async function erasedSincePaid(listId: string, paid: Paid): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, paid.email)]]), 1);
+  const mark = replies?.[0];
+  if (!replies || (mark !== null && (typeof mark !== "string" || !/^[0-9]{1,12}$/.test(mark)))) {
+    throw new UnknownReplyError("a person's deletion mark, before a PayPal hand-over");
+  }
+  return mark !== null && Number(mark) >= paid.at;
+}
+
+/**
  * The receipt an order's every try sends: the one kept from its first try, word for word, so a sender asked again is
  * given the same bytes under the same key (the guarded Resend transport's attempt is its path, body and key; other
  * words would be another attempt and another request after an answer that was not known; second money review of
@@ -178,15 +205,18 @@ return {written and 1 or 0, redis.call("GET", KEYS[1])}`;
  * - None kept and no sender kept for its key (pinnedSenderKey, written by lib/email.ts just before the first request):
  *   no request was ever made under the key, so the receipt just made is kept, noted for the person's deletion
  *   (lib/erasure-index.ts), in one step that refuses it when the person was deleted at or after the payment
- *   (KEEP_RECEIPT): "erased", and nothing is sent. Otherwise what is kept is sent. A store from before lists is given
- *   its list first (ensureListId, as an erasure does), so the deletion is always checked where it is written.
- * - None kept but a sender kept: a request was made with words now gone (deleted with the person, or lost). Null:
- *   nothing is sent with other words, and the order waits out its window (RECEIPT_RETRY_SECONDS).
+ *   (KEEP_RECEIPT): "erased", and nothing is sent. Otherwise what is kept is sent. `listId` is the store's
+ *   (deletionListId), given its list before the hand-over.
+ * - None kept but a sender kept: a request was made with words now gone (deleted with the person, or lost). Their
+ *   print read after the receipt was found gone (erasedSincePaid; erasePerson writes it before deleting the receipt):
+ *   deleted at or after the payment, "erased", and the order leaves the list; otherwise null: nothing is sent with
+ *   other words, and the order waits out its window (RECEIPT_RETRY_SECONDS).
  *
  * Throws UnknownReplyError when a reply is not exactly what its command answers: nothing is sent, the order stays.
  */
-async function sameReceipt(store: Store, paid: Paid, made: PayPalReceipt): Promise<PayPalReceipt | "erased" | null> {
+async function sameReceipt(store: Store, paid: Paid, made: PayPalReceipt, listId: string | null): Promise<PayPalReceipt | "erased" | null> {
   if (!isRedisConfigured()) return made;
+  if (!listId) throw new UnknownReplyError("the store's list, to check a deletion where a PayPal receipt is kept");
   const key = receiptMailKey(paid.order);
   const seen = repliesFor(await redisPipeline([["GET", key], ["GET", pinnedSenderKey(made.idempotencyKey)]]), 2);
   if (!seen || (seen[0] !== null && typeof seen[0] !== "string") || (seen[1] !== null && seen[1] !== "ses" && seen[1] !== "resend")) {
@@ -194,13 +224,12 @@ async function sameReceipt(store: Store, paid: Paid, made: PayPalReceipt): Promi
   }
   if (typeof seen[0] === "string") return keptReceipt(seen[0], made);
   if (seen[1] !== null) {
+    if (await erasedSincePaid(listId, paid)) return "erased";
     console.error("a PayPal purchase's receipt is no longer kept, though a request was made under its key; not sent in other words", paid.order);
     return null;
   }
   const value = JSON.stringify(made);
   if (Buffer.byteLength(value) > RECEIPT_MAIL_BYTES) throw new Error("a PayPal receipt weighs more than RECEIPT_MAIL_BYTES; not kept, so not sent");
-  const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId ?? null;
-  if (!listId) throw new UnknownReplyError("the store's list, to check a deletion where a PayPal receipt is kept");
   const [add, trim, expire] = noteForErasure(store.statsId, made.to, key);
   if (add?.[0] !== "ZADD" || trim?.[0] !== "ZREMRANGEBYSCORE" || expire?.[0] !== "EXPIRE" || add[1] !== trim[1] || add[1] !== expire[1]) {
     throw new Error("a PayPal receipt could not be noted for the person's deletion; not kept, so not sent");
@@ -255,6 +284,20 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     if (store.statsId) await handedOver(store.statsId, paid.order);
     return "gone";
   }
+  // The person deleted from the store at or after the payment (erasedSincePaid): nothing of them is handed over or
+  // written again (the purchase, the library, the course, the link's grant, the receipt, the affiliate's and partners'
+  // notes, the webhooks), nothing is sent, and the order leaves the list; it is still one of the month's orders
+  // (countOrder, once an order). Checked before the hand-over's first write for them, not in one step with it: those
+  // writes are other modules' (grantImported, recordEnrollment, ordersLinkWithToken), so a deletion that completes
+  // between this read and them can find them written once more; the receipt is checked again where it is kept
+  // (KEEP_RECEIPT), and the next try finds the print and writes nothing.
+  const listId = store.statsId && isRedisConfigured() ? await deletionListId(store) : null;
+  if (store.statsId && listId && (await erasedSincePaid(listId, paid))) {
+    console.error("a PayPal purchase's person was deleted from the store after paying; nothing of them is handed over or written again", store.handle, paid.order);
+    await countOrder(store, `paypal:${paid.order}`, paid.cents);
+    await handedOver(store.statsId, paid.order);
+    return "handed";
+  }
   const base = storeBase(store);
   // What receiptMayGo answered, when the receipt was asked about (not when the hand-over stopped before it), and
   // whether the receipt was refused because its person was deleted from the store at or after the payment.
@@ -277,7 +320,7 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     },
     // deliverPayPal makes no receipt without a stats id; with none, nothing could be noted for deletion, and none is kept.
     keep: async (receipt) => {
-      const kept = await sameReceipt(store, paid, receipt);
+      const kept = await sameReceipt(store, paid, receipt, listId);
       if (kept !== "erased") return kept;
       asked.erased = true;
       return null;

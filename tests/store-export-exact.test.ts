@@ -275,7 +275,7 @@ async function main(): Promise<void> {
   await ensureStatsId(stripeOwner);
   await ensureStoreId(stripeOwner);
   await setSubscription(stripeOwner, { customerId: "cus_exportexacts", subscriptionId: "sub_exportexacts", active: true, tier: "creator", period: paidPeriod() });
-  await setStripeAccount(stripeOwner, "acct_TestExportExact1", true);
+  await setStripeAccount(stripeOwner, "acct_TestExport01", true);
   const stripeStore = (await storeForEmail(stripeOwner))!;
   stripeMode = "pages";
   stripePage = 0;

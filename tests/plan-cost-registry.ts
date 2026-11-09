@@ -1199,12 +1199,13 @@ export const COST_LINES: CostLine[] = [
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.
       { file: "app/api/store/assistant-memory/route.ts", names: ["guardStoreWrite", "forgetMemory"] },
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },
-      // A rename keeps the weekly team list by the store's id first (one SISMEMBER, a SADD and a RENAME at the most) inside the one
+      // A rename keeps the weekly team list by the store's id first (a SADD, a RENAMENX and, when the id already holds a list,
+      // a DEL of the address's older one: three commands at the most) inside the one
       // studio request its settings write takes: twenty commands with the take, held in tests/weekly-link-by-sid.test.ts. Letting
       // an address go takes its old list out with one DEL (9 November 2026).
       { file: "app/api/store/rename/route.ts", names: ["guardStoreWrite", "keepWeeklyTeamById(store)"] },
       { file: "app/api/store/release/route.ts", names: ["guardStoreWrite", "forgetWeeklyTeamAt(store"] },
-      { file: "lib/stats-report.ts", names: ["SISMEMBER\", teamKey(sid), LIST_SET", "[\"RENAME\", from, teamKey(sid)]", "[[\"DEL\", addressTeamKey(handle)]]"] },
+      { file: "lib/stats-report.ts", names: ["[[\"SADD\", from, LIST_SET]]", "[\"RENAMENX\", from, teamKey(sid)]", "[[\"DEL\", from]]", "[[\"DEL\", addressTeamKey(handle)]]"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).

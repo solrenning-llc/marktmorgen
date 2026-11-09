@@ -2,7 +2,6 @@ import type { NextRequest } from "next/server";
 import { renameHandle } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { keepWeeklyTeamById } from "@/lib/stats-report";
-import { UnknownReplyError } from "@/lib/redis-reply";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -18,8 +17,16 @@ export async function POST(request: NextRequest) {
 
   try {
     // Who on the team gets the weekly email, if still kept under the current address, goes to the store's id
-    // before the address changes, so the rename loses nobody (lib/stats-report.ts, keepWeeklyTeamById).
+    // before the address changes, so the rename loses nobody (lib/stats-report.ts, keepWeeklyTeamById). Whatever
+    // stops it, Redis's own error included (RENAMENX of a list the owner's save took out meanwhile), comes before the
+    // address is touched, so the answer can truthfully say the address was not changed.
     await keepWeeklyTeamById(store);
+  } catch (error) {
+    console.error("the team list could not be kept by the store's id; the address was not changed", error);
+    return Response.json({ ok: false, error: "not_confirmed" }, { status: 503 });
+  }
+
+  try {
     const result = await renameHandle(ref, handle);
     if (!result.ok) {
       return Response.json(
@@ -29,10 +36,7 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: true, handle: result.store.handle });
   } catch (error) {
-    if (error instanceof UnknownReplyError) {
-      console.error("the team list could not be kept by the store's id; the address was not changed", error);
-      return Response.json({ ok: false, error: "not_confirmed" }, { status: 503 });
-    }
+    // Here the address may or may not have changed: never "not changed" (lib/store.ts, renameHandle).
     console.error("changing an address failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

@@ -76,6 +76,17 @@ export class MemoryRedis {
     return made;
   }
 
+  /**
+   * Whether Redis would hold the key: a set, hash, list or sorted set read here before it was written is kept empty
+   * by this stand-in, but Redis never holds an empty one (RENAME and RENAMENX read it so).
+   */
+  private holds(key: string): boolean {
+    const held = this.data.get(key);
+    if (held === undefined) return false;
+    if (held instanceof Set || held instanceof Map) return held.size > 0;
+    return typeof held === "string" || held.length > 0;
+  }
+
   private set(key: string): Set<string> {
     const held = this.data.get(key);
     if (held instanceof Set) return held;
@@ -1274,7 +1285,7 @@ export class MemoryRedis {
         if (args.length !== 1) throw new Error("ERR wrong number of arguments for 'rename' command");
         this.live(key);
         const held = this.data.get(key);
-        if (held === undefined) throw new Error("ERR no such key");
+        if (held === undefined || !this.holds(key)) throw new Error("ERR no such key");
         const to = args[0];
         const ends = this.until.get(key);
         this.data.delete(key);
@@ -1283,6 +1294,25 @@ export class MemoryRedis {
         this.until.delete(to);
         if (ends !== undefined) this.until.set(to, ends);
         return "OK";
+      }
+      case "RENAMENX": {
+        // As RENAME, but never over a key the new name holds: 1 when moved, 0 when the new name is taken (both kept),
+        // Redis's error when there is no such key (lib/stats-report.ts, keepWeeklyTeamById).
+        if (args.length !== 1) throw new Error("ERR wrong number of arguments for 'renamenx' command");
+        this.live(key);
+        const held = this.data.get(key);
+        if (held === undefined || !this.holds(key)) throw new Error("ERR no such key");
+        const to = args[0];
+        this.live(to);
+        // Redis answers 0 when both names are the same: the new name is held (by the key itself).
+        if (to === key || this.holds(to)) return 0;
+        const ends = this.until.get(key);
+        this.data.delete(key);
+        this.until.delete(key);
+        this.data.set(to, held);
+        this.until.delete(to);
+        if (ends !== undefined) this.until.set(to, ends);
+        return 1;
       }
       case "DUMP": {
         // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key

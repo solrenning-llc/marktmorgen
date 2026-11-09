@@ -96,21 +96,24 @@ async function main(): Promise<void> {
     is("the list is unchanged by it", await teamOf(s), ["ben@example.com"]);
   }
 
-  part("The owner's new list saved between the rename's SISMEMBER and its move survives, and the old list is taken out");
+  part("The owner's new list saved while the rename runs, before its move, survives, and the old list is taken out");
   {
     const owner = "p2@example.com";
     const s = await paidStore(owner, "ptwo", "P2");
     redis.run(["SADD", "nl:weekly:to:ptwo", "ana@example.com"]);
+    // Kept as it was before setWeeklyTeam takes it out: what the rename's request still finds under the address.
     let once = true;
+    let count = 0;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      const out = await real(commands);
-      if (once && commands[0]?.[0] === "SISMEMBER" && commands[0][1] === `nl:weekly:team:${s.sid}`) {
+      count += commands.length;
+      if (once && commands[0]?.[0] === "SADD" && commands[0][1] === "nl:weekly:to:ptwo") {
         once = false;
         redis.pipeline = real;
         await report.setWeeklyTeam(s, ["ben@example.com"]);
+        redis.run(["SADD", "nl:weekly:to:ptwo", "ana@example.com"]);
         redis.pipeline = again;
       }
-      return out;
+      return real(commands);
     }) as typeof redis.pipeline;
     const again = redis.pipeline;
     const [status] = await rename(owner, s, "ptwo-new");
@@ -118,6 +121,7 @@ async function main(): Promise<void> {
     is("renamed", status, 200);
     is("the owner's saved list survives the rename", await teamOf(await fresh(owner)), ["ben@example.com"]);
     is("no list is left under the address let go of", redis.run(["EXISTS", "nl:weekly:to:ptwo"]), 0);
+    is(`the rename, its DEL included, stays inside a studio request's twenty commands (${count})`, count <= 20, true);
   }
 
   part("The owner's new list saved between the mark and the move: the rename is refused as not confirmed, the list survives");
@@ -170,6 +174,9 @@ async function main(): Promise<void> {
     memory.run(["SADD", "taken", "b"]);
     is("onto a name already held: 0, both kept", [memory.run(["RENAMENX", "from", "taken"]), memory.run(["SMEMBERS", "from"]), memory.run(["SMEMBERS", "taken"])], [0, ["a"], ["b"]]);
     is("onto a free name: 1, moved whole", [memory.run(["RENAMENX", "from", "free"]), memory.run(["EXISTS", "from"]), memory.run(["SMEMBERS", "free"])], [1, 0, ["a"]]);
+    memory.run(["SMEMBERS", "read-before"]);
+    memory.run(["SADD", "from", "c"]);
+    is("onto a name only read before, never written: 1, moved (Redis holds no empty set)", [memory.run(["RENAMENX", "from", "read-before"]), memory.run(["SMEMBERS", "read-before"])], [1, ["c"]]);
     let error = "";
     try {
       memory.run(["RENAMENX", "nothing", "else"]);

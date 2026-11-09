@@ -22,6 +22,7 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
+  not_confirmed: "Your address was not changed. Try again in a minute.",
   server_error: "We could not confirm whether your address changed. Reload this page to check before trying again.",
 };
 

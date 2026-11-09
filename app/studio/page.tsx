@@ -1645,10 +1645,12 @@ export default async function StudioPage({
                       weeklyAi={may("settings") && aiAvailableFor(store) && store ? store.weeklyAi : undefined}
                       weeklyTeam={
                         team && store
-                          ? {
-                              members: team.members.filter((m) => can(m.role, "stats")).map((m) => m.email.toLowerCase()),
-                              chosen: (await chosen) ?? [],
-                            }
+                          ? await (async () => {
+                              // Only current members who see the numbers: a list left under this address by a store
+                              // before it, or a member since taken out, is never shown nor sent to the browser.
+                              const statsMembers = team.members.filter((m) => can(m.role, "stats")).map((m) => m.email.toLowerCase());
+                              return { members: statsMembers, chosen: ((await chosen) ?? []).filter((email) => statsMembers.includes(email)) };
+                            })()
                           : null
                       }
                       goal={(await goal).cents}

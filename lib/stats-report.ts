@@ -428,7 +428,9 @@ const membersOf = (list: string[]): string[] =>
 /**
  * Who the owner chose, read exactly (CX-123 rule 24) in one pipeline of at most two commands: the list kept by the
  * store's id once it is set there (LIST_SET); until then, the list written before under its current address, the
- * only one the code before read. Never one under an address the store used before (pre-review P2 of
+ * only one the code before read. The address is read first and the id second: a pipeline is not atomic, and a
+ * rename's move (keepWeeklyTeamById) landing between the two reads then finds the list in one place or the other,
+ * never in neither (pre-review of claude5/email-stop-by-sid-2, L3). Never one under an address the store used before (pre-review P2 of
  * claude5/email-stop-by-sid-2): after a rename there the owner chose again under the new address, so an older list
  * read now would bring back members taken out or stopped since. A rename sets the list by the id first
  * (keepWeeklyTeamById), so a rename loses nobody. Any answer of another shape throws, never "nobody".
@@ -437,14 +439,15 @@ export async function weeklyTeam(store: TeamOwner): Promise<string[]> {
   if (!isRedisConfigured()) return [];
   const sid = teamIdOf(store);
   const current = typeof store.handle === "string" && store.handle !== "" ? addressTeamKey(store.handle) : null;
-  const commands = [...(sid ? [["SMEMBERS", teamKey(sid)]] : []), ...(current ? [["SMEMBERS", current]] : [])];
+  const commands = [...(current ? [["SMEMBERS", current]] : []), ...(sid ? [["SMEMBERS", teamKey(sid)]] : [])];
   if (!commands.length) return [];
   const replies = repliesFor(await redisPipeline(commands), commands.length);
   const lists = replies?.map(stringList);
   if (!lists || lists.some((list) => list === null)) throw new UnknownReplyError("who gets the weekly email");
-  const [first, second] = lists as string[][];
-  if (sid && first.includes(LIST_SET)) return membersOf(first);
-  return membersOf(sid ? second ?? [] : first);
+  const byAddress = current ? (lists[0] as string[]) : [];
+  const byId = sid ? (lists[commands.length - 1] as string[]) : null;
+  if (byId && byId.includes(LIST_SET)) return membersOf(byId);
+  return membersOf(byAddress);
 }
 
 /** The owner's choice, kept by the store's id and marked set (LIST_SET); a list written before under any address it owns is taken out with it. */
@@ -460,11 +463,16 @@ export async function setWeeklyTeam(store: TeamOwner, emails: string[]): Promise
   confirmedWrite(replies, [keys.length, clean.length + 1], "who gets the weekly email");
 }
 
-/** A member's own stop: their address out of the list, wherever the store's list is kept. */
+/**
+ * A member's own stop: their address out of the list, wherever the store's list is kept. The id's list is taken out of
+ * last (pre-review of claude5/email-stop-by-sid-2, A1): the only way onto it is a rename's move from the address,
+ * already taken out of when the move lands later, or the owner's own save, a new choice. So a 0 from every SREM
+ * means the member was on no list at that moment, and "stopped" is true without reading the list again.
+ */
 export async function leaveWeeklyTeam(store: TeamOwner, email: string): Promise<void> {
   if (!isRedisConfigured()) return;
   const sid = teamIdOf(store);
-  const keys = [...(sid ? [teamKey(sid)] : []), ...ownedAddresses(store).map(addressTeamKey)];
+  const keys = [...ownedAddresses(store).map(addressTeamKey), ...(sid ? [teamKey(sid)] : [])];
   const address = email.trim().toLowerCase();
   if (address === LIST_SET) return;
   confirmedWrite(await redisPipeline(keys.map((key) => ["SREM", key, address])), keys.map(() => 1), "a team member's weekly email stop");
@@ -472,25 +480,32 @@ export async function leaveWeeklyTeam(store: TeamOwner, email: string): Promise<
 
 /**
  * Before the store's address changes (app/api/store/rename/route.ts): the list it reads now, while still kept under
- * its current address, goes to its id, so a rename loses nobody. One SISMEMBER; when the id's list is not set yet,
- * a SADD of the mark into the address's list, confirmed, then one RENAME, which moves the whole list to the id at
- * once (a pipeline is not atomic; RENAME is one command, so the list is never in neither place). With no list under
- * the address the mark alone makes an empty list, set, so a list left under the next address is never read. Any
- * answer of another shape throws UnknownReplyError, and the route renames nothing on it. Three commands at most.
+ * its current address, goes to its id, so a rename loses nobody. A SADD of the mark into the address's list,
+ * confirmed, then one RENAMENX, which moves the whole list to the id at once (a pipeline is not atomic; RENAMENX is
+ * one command, so the list is never in neither place). With no list under the address the mark alone makes an empty
+ * list, set, so a list left under the next address is never read.
+ *
+ * RENAMENX, never RENAME (pre-review of claude5/email-stop-by-sid-2, M2): the owner may save a new list by the id
+ * while the rename runs, and RENAME would put the older address list over it. When RENAMENX answers 0 the id already
+ * holds a list, which only the owner's save or an earlier move writes, always marked set: it wins, and the address's
+ * list, never read again, is taken out at once with one DEL, confirmed, rather than left to wait for the address to
+ * be let go (should it ever lapse another way, the next store there would find it). The same path serves a store
+ * whose list was moved by an earlier rename, so no SISMEMBER is asked first, and a rename stays at three commands.
+ * When the owner's save took the address's list out between the mark and the move, RENAMENX answers Redis's "no such
+ * key" (lib/redis.ts throws it): the route then changes nothing and says so (not_confirmed), and the next try moves
+ * nothing over the id's list. Any answer of another shape throws UnknownReplyError.
  */
 export async function keepWeeklyTeamById(store: TeamOwner): Promise<void> {
   if (!isRedisConfigured()) return;
   const sid = teamIdOf(store);
   // No id, no team copy is sent (the weekly job sends to a team only with one), so there is nothing to keep.
   if (!sid || typeof store.handle !== "string" || store.handle === "") return;
-  const set = repliesFor(await redisPipeline([["SISMEMBER", teamKey(sid), LIST_SET]]), 1);
-  const flag = set ? countOf(set[0]) : null;
-  if (flag !== 0 && flag !== 1) throw new UnknownReplyError("whether the team list is kept by the store's id (SISMEMBER)");
-  if (flag === 1) return;
   const from = addressTeamKey(store.handle);
   confirmedWrite(await redisPipeline([["SADD", from, LIST_SET]]), [1], "the team list marked set before it moves to the store's id");
-  const moved = repliesFor(await redisPipeline([["RENAME", from, teamKey(sid)]]), 1);
-  if (!moved || moved[0] !== "OK") throw new UnknownReplyError("the team list moved to the store's id (RENAME)");
+  const moved = repliesFor(await redisPipeline([["RENAMENX", from, teamKey(sid)]]), 1);
+  const answer = moved ? countOf(moved[0]) : null;
+  if (answer !== 0 && answer !== 1) throw new UnknownReplyError("the team list moved to the store's id (RENAMENX)");
+  if (answer === 0) confirmedWrite(await redisPipeline([["DEL", from]]), [1], "the address's older team list taken out");
 }
 
 /**

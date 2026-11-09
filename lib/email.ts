@@ -748,11 +748,6 @@ async function dispatchBatch(
 /* ------------------------------------------------------------------ */
 
 const pinKey = (key: string) => `nl:mail:pin:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
-/**
- * Where the sender of a key's email is kept: written just before the first request made under the key, so a caller
- * that finds it knows a request may have been made (lib/paypal-delivery.ts never sends other words under it).
- */
-export const pinnedSenderKey = pinKey;
 /** How long the sender a key's email went to is kept: a day, as long as SES's once-mark and Resend's own key. */
 export const PINNED_SENDER_SECONDS = 86_400;
 type Sender = "ses" | "resend";

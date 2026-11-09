@@ -385,6 +385,7 @@ async function main(): Promise<void> {
   mail.setSesOutcome("ok");
   is("control: Amazon takes it, one request", [await sendEmailPinned(message("h-ok@example.com", "h:ok")), sesTo("h-ok@example.com"), resendTo("h-ok@example.com")], [true, 1, 0]);
   is("control: the key is kept for Amazon", redis.run(["GET", pinOf("h:ok")]), "ses");
+  is("lib/paypal-delivery.ts names the sender's key as lib/email.ts writes it", redis.run(["GET", delivery.pinnedSenderKey("h:ok")]), "ses");
 
   mail.setSesOutcome("refused");
   is("a refusal Amazon gave: Resend sends it in the same call", await sendEmailPinned(message("h-refused@example.com", "h:refused")), true);

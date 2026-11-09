@@ -18,8 +18,16 @@ import type { Store } from "@/lib/store";
 import { creditPayPalSale } from "@/lib/affiliates";
 import { emitEvent } from "@/lib/webhooks";
 import { deriveKey } from "@/lib/secret-box";
-import { pinnedSenderKey } from "@/lib/email";
+import { createHash } from "node:crypto";
 import { noteForErasure } from "@/lib/erasure-index";
+
+/**
+ * Where lib/email.ts keeps the sender of a key's email (its pinKey), written just before the first request made under
+ * the key, so finding it means a request may have been made. Spelled here because lib/email.ts is reserved by another
+ * unit; tests/paypal-receipt-once.test.ts holds the two spellings equal through a real pinned send.
+ */
+export const pinnedSenderKey = (key: string) =>
+  `nl:mail:pin:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
 
 /**
  * Paid PayPal orders still owed their hand-over (handOverKey in lib/paypal-sales.ts): settle puts each one there with
@@ -143,7 +151,7 @@ function keptReceipt(raw: string, made: PayPalReceipt): PayPalReceipt {
  * #3387). A product or store edited between tries changes nothing that is sent.
  *
  * - Kept: that one, read in its exact shape (keptReceipt).
- * - None kept and no sender kept for its key (lib/email.ts pinnedSenderKey, written just before the first request):
+ * - None kept and no sender kept for its key (pinnedSenderKey, written by lib/email.ts just before the first request):
  *   no request was ever made under the key, so the receipt just made is kept (SET NX, read back by the same
  *   pipeline's GET; noted first for the person's deletion, lib/erasure-index.ts), and what is kept is sent.
  * - None kept but a sender kept: a request was made with words now gone (deleted with the person, or lost). Null:

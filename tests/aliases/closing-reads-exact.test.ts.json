@@ -1,0 +1,5 @@
+{
+  "@/lib/studio-route": "closing-route-studio.ts",
+  "@/lib/opening": "closing-route-opening.ts",
+  "@/lib/contract-funding": "closing-route-funding.ts"
+}

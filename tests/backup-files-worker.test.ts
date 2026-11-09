@@ -24,7 +24,10 @@
  *     taken as copied when its origin ignored Range, sent no ETag, or the
  *     bucket's reply did not read exactly (rule 24);
  *   - a run past its subrequest budget, or a heartbeat on any run that is not
- *     a finished, alarm-free day;
+ *     a finished, alarm-free day, or no heartbeat on a day whose only missing
+ *     files have their deletion record (expected, never an orphan);
+ *   - an orphan alarm repeated every day: it is raised when the orphan is
+ *     first seen and again when its 90-day end comes;
  *   - an object's name in what goes to the alarm hook.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -187,6 +190,10 @@ async function main(): Promise<void> {
   setListing("blob", S, objects("blob", S, 7));
   report = await runAt(6);
   is("a listing after the empty one starts the orphan clock only now, and deletes nothing", [deletesIn(files).length, report.alarms.find((a) => a.code === "orphans")?.count], [0, 3]);
+  report = await runAt(7);
+  is("the orphan alarm is not repeated the next day", [has(report, "orphans"), deletesIn(files).length], [false, 0]);
+  report = await runAt(50);
+  is("nor any day in between", [has(report, "orphans"), deletesIn(files).length], [false, 0]);
   report = await runAt(6 + BACKUP_FILES_ORPHAN_DAYS - 1);
   is("three objects missing without a record are kept 89 days, with the orphan alarm and the day they go", [deletesIn(files).length, report.alarms.find((a) => a.code === "orphans")?.count, report.alarms.find((a) => a.code === "orphans")?.on], [0, 3, iso(DAY0 + (6 + BACKUP_FILES_ORPHAN_DAYS) * DAY)]);
   report = await runAt(6 + BACKUP_FILES_ORPHAN_DAYS);
@@ -268,6 +275,7 @@ async function main(): Promise<void> {
   is("a due record while the listing fails: held, with the date it will be applied anyway", [deletesIn(files).length, held?.count, held?.on], [0, 15, iso(at1 + BACKUP_FILES_HOLD_MAX_DAYS * DAY)]);
   report = await runAt(60);
   is("still held, and alarmed, every day of the hold", [deletesIn(files).length, report.alarms.find((a) => a.code === "deletions_held")?.count], [0, 30]);
+  is("each day of the hold, the alarm gives the date the first held record will be applied anyway", report.alarms.find((a) => a.code === "deletions_held")?.on, iso(at1 + BACKUP_FILES_HOLD_MAX_DAYS * DAY));
   report = await runAt(91);
   is("90 days after the record: applied even while the guard holds", [deletesIn(files).length, copies().length], [15, 85]);
   report = await runAt(92);
@@ -438,12 +446,13 @@ async function main(): Promise<void> {
   await runAt(0);
   world.records = [{ source: "blob", key: six[0].key, recordedAt: DAY0 + DAY + 60_000, reason: "creator_deleted" }];
   setListing("blob", S, six.slice(1));
-  await runAt(1);
+  report = await runAt(1);
+  is("a file missing with its deletion record inside its 30 days is expected: no orphan, no alarm, the heartbeat", [codes(report), report.heartbeat], [[], true]);
   const asks = () => world.calls.filter((c) => c.url.includes("page=deletions")).map((c) => new URL(c.url).searchParams.get("cursor"));
   world.calls = [];
   report = await runAt(2);
   is("the next day asks from the point the last read ended", asks(), ["r1"]);
-  is("no second copy of a record already received, no share counted twice", [files.under(`deletions/${iso(DAY0 + 2 * DAY)}/`).length, has(report, "records_share"), has(report, "records_share_source")], [0, false, false]);
+  is("no second copy of a record already received, no share counted twice", [files.under(`deletions/${iso(DAY0 + 2 * DAY)}/`).length, has(report, "records_share"), report.heartbeat], [0, false, true]);
 
   part("a resume point the site no longer keeps: alarm, then read again from the oldest kept");
   world.recordsKeptFrom = 5;

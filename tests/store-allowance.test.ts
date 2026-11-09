@@ -12,7 +12,7 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
 import { ALLOWANCE_KINDS, STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, allowanceListWords } from "@/lib/store-allowance-rules";
-import { admitNonPaying, poolThisMonth } from "@/lib/free-pool";
+import { admitNonPaying, poolPlace, poolThisMonth } from "@/lib/free-pool";
 import { FREE_POOL_BASE_STORES, PAID_STORES_PER_FREE_STORE, PAYING_INDEX, freePoolSize } from "@/lib/free-pool-rules";
 import { sendEmail } from "@/lib/email";
 import { countStudio } from "@/lib/studio-route";
@@ -81,15 +81,17 @@ test("stores that pay nothing share the month's places, which grow with the stor
   assert.equal(freePoolSize(0), FREE_POOL_BASE_STORES);
   assert.equal(freePoolSize(PAID_STORES_PER_FREE_STORE * 3 + 1), FREE_POOL_BASE_STORES + 3);
   assert.equal(await admitNonPaying(paying(3)), true, "a store that pays needs no place");
-  for (let i = 0; i < FREE_POOL_BASE_STORES; i += 1) assert.equal(await admitNonPaying(free(i)), true, `place ${i}`);
+  // Only the creator's own work takes a place (TODOS-51 C): the public side only reads whether one is held.
+  assert.equal(await admitNonPaying(free(0)), false, "the public side never takes a place");
+  for (let i = 0; i < FREE_POOL_BASE_STORES; i += 1) assert.equal(await poolPlace(free(i)), "in", `place ${i}`);
   assert.equal(await admitNonPaying(free(0)), true, "a place held is kept");
-  assert.equal(await admitNonPaying(free(FREE_POOL_BASE_STORES)), false, "past the places");
+  assert.equal(await poolPlace(free(FREE_POOL_BASE_STORES)), "full", "past the places");
   const pooled = await takeAllowance(free(FREE_POOL_BASE_STORES + 1), "studio");
   assert.ok(!pooled.ok && pooled.reason === "pool" && /full for this month/.test(pooled.message));
   // Paying stores open more places, and a store turned away asks again later.
   await redis.pipeline(Array.from({ length: PAID_STORES_PER_FREE_STORE }, (_, i) => ["SADD", PAYING_INDEX, `payer${i}`]));
   assert.deepEqual(await poolThisMonth(), { taken: FREE_POOL_BASE_STORES, size: FREE_POOL_BASE_STORES + 1 });
-  assert.equal(await admitNonPaying(free(FREE_POOL_BASE_STORES + 2)), true);
+  assert.equal(await poolPlace(free(FREE_POOL_BASE_STORES + 2)), "in");
   // Each has only its own small figures.
   assert.equal((await takeAllowance(free(0), "studio", NON_PAYING_ALLOWANCES.none.studio)).ok, true);
   assert.equal((await takeAllowance(free(0), "studio")).ok, false);

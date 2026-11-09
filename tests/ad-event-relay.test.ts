@@ -24,6 +24,7 @@ import { NO_PIXELS } from "@/lib/pixels";
 import { readOrder } from "@/lib/store-checkout";
 import { claimHandle, ensureStatsId, setAdsServer, setPixels, setStripeAccount, storeForEmail } from "@/lib/store";
 import { POST } from "@/app/api/store/ads-event/route";
+import { poolPlace } from "@/lib/free-pool";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -128,6 +129,8 @@ async function main(): Promise<void> {
   for (const p of ["meta", "tiktok", "google", "pinterest"] as const) await ads.setServerToken(store.statsId!, p, TOKENS[p], { account: "549755885175" });
   await setAdsServer(OWNER, ["meta", "tiktok", "google", "pinterest"]);
   store = (await storeForEmail(OWNER))!;
+  // The store pays nothing: it holds this month's place by its creator's own work (TODOS-51 C).
+  await poolPlace(store, Date.now());
   const meta = await ads.adsCheckout({ headers: new Headers({ "x-forwarded-for": "203.0.113.200" }), cookies: { get: (name: string) => (name in cookies() ? { value: cookies()[name] } : undefined) } }, store, NOW);
   sessions = [
     {

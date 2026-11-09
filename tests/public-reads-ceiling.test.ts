@@ -47,6 +47,7 @@ import { paidStoreSitemap, sitemapSize, storeSitemap } from "@/lib/store-sitemap
 import { savePost } from "@/lib/store-blog";
 import { clientDayShare, requestLimitFor } from "@/lib/traffic-rules";
 import { takePublicRequest } from "@/lib/traffic";
+import { poolPlace } from "@/lib/free-pool";
 import { PUBLIC_LISTING_BYTES } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -714,6 +715,9 @@ async function main(): Promise<void> {
   const nextId = () => (n++).toString(16).padStart(10, "0");
   for (let i = 0; i < 14; i += 1) await savePost(mapShop.statsId, null, { title: `Post ${i}`, body: "Words.", product: null, draft: false }, nextId, ROOM, 1_000 + i);
   mapShop = (await storeForEmail(MAP))!;
+  // Its subscription ids are not Stripe's shape, so setSubscription writes no plan and the store pays nothing:
+  // it holds this month's place by its creator's own work (TODOS-51 C).
+  await poolPlace(mapShop, Date.now());
 
   const mapSize = await watched(() => sitemapSize(mapShop));
   is("counted with one command", mapSize.names, ["ZCARD"]);

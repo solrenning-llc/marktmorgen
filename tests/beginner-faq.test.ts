@@ -12,7 +12,7 @@
 import { UNPAID_ROOM, tryBeforePaying, uploadsWait } from "@/lib/beginner-faq";
 import { ALLOWANCE_KINDS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { allowanceWindow } from "@/lib/allowance-window";
-import { admitNonPaying } from "@/lib/free-pool";
+import { admitNonPaying, poolPlace } from "@/lib/free-pool";
 import { AUTOMATIC_UPLOAD_CAPS } from "@/lib/upload-budget-policy";
 import { FREE_POOL_BASE_STORES } from "@/lib/free-pool-rules";
 import { TRIAL_DAYS } from "@/lib/plan";
@@ -32,9 +32,13 @@ const inTrial = allowanceWindow(trialStore as never, now);
 const without = allowanceWindow(noPlan as never, now);
 is("counted over the whole trial in a trial, by calendar month (UTC) without a plan", [inTrial ? inTrial.end - inTrial.start : null, without ? new Date(without.start).getUTCDate() : null, without ? new Date(without.start).getUTCHours() : null], [TRIAL_DAYS * DAY, 1, 0]);
 const others = Array.from({ length: FREE_POOL_BASE_STORES + 1 }, (_, i) => ({ ...noPlan, sid: `pool-${i}` }));
+// Only the creator's own work takes a place (TODOS-51 C): the public side only reads whether one is held.
+const before: boolean[] = [];
+for (const store of [trialStore, ...others]) before.push(await admitNonPaying(store as never, now));
+is("a trial or no plan holding no place is not let through, and the public side takes none", before.some(Boolean), false);
 const admitted: boolean[] = [];
-for (const store of [trialStore, ...others]) admitted.push(await admitNonPaying(store as never, now));
-is("a trial or no plan takes one of the month's places, and past them is refused; a paying store never needs one", [admitted.slice(0, FREE_POOL_BASE_STORES).every(Boolean), admitted[FREE_POOL_BASE_STORES], admitted[FREE_POOL_BASE_STORES + 1], await admitNonPaying(paying as never, now)], [true, false, false, true]);
+for (const store of [trialStore, ...others]) admitted.push((await poolPlace(store as never, now)) === "in");
+is("a trial or no plan takes one of the month's places by its creator's own work, and past them is refused; a paying store never needs one", [admitted.slice(0, FREE_POOL_BASE_STORES).every(Boolean), admitted[FREE_POOL_BASE_STORES], admitted[FREE_POOL_BASE_STORES + 1], await admitNonPaying(paying as never, now)], [true, false, false, true]);
 
 part("The answer, in both states");
 const today = tryBeforePaying("A thing", "a thing", false, TRIAL_DAYS);

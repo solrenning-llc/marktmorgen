@@ -13,6 +13,7 @@ import type { NextRequest } from "next/server";
 import { GET as licence } from "@/app/api/store/licence/route";
 import { addProduct, claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
+import { poolPlace } from "@/lib/free-pool";
 import { requestLimitFor } from "@/lib/traffic-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -56,6 +57,9 @@ async function main(): Promise<void> {
   const made = await addProduct(OWNER, "Plugin", "", "19", null);
   if (!made.ok) throw new Error("no product");
   const shop = (await storeForEmail(OWNER))!;
+  // Its subscription ids are not Stripe's shape, so setSubscription writes no plan and the store pays nothing:
+  // it holds this month's place by its creator's own work (TODOS-51 C).
+  await poolPlace(shop, Date.now());
   const url = `https://marktmorgen.com/api/store/licence?store=keyshop&product=${made.product.id}&key=ABCD-EFGH-IJKL-MNOP`;
   const first = await licence(asked(url));
   is("with room: answered", first.status, 200);

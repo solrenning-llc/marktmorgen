@@ -59,6 +59,7 @@ import { STORE_SCOPE, readToken } from "@/lib/page-read";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { addMonthsMs, allowanceWindow } from "@/lib/allowance-window";
+import { poolPlace } from "@/lib/free-pool";
 import { REQUEST_COMMANDS } from "./plan-cost-registry";
 
 /** A store's window at a moment (lib/allowance-window.ts): its billing month when it pays, the calendar month or its trial otherwise. */
@@ -238,6 +239,8 @@ async function main(): Promise<void> {
   part("A store with no plan to charge rests at the visits it has");
   const cyd = await storeWith("cyd", "none");
   const cydStore = (await storeForEmail(cyd.email))!;
+  // A store that pays nothing holds this month's place by its creator's own work (TODOS-51 C).
+  await poolPlace(cydStore, Date.now());
   is("before a plan, and after one, it has a few hundred", [visitLimitFor(cydStore), SETUP_VISITS, SETUP_VISITS * 5 <= VISITS_INCLUDED.creator], [SETUP_VISITS, 500, true]);
   await visited(cyd, monthKey(), publicVisitLimit(SETUP_VISITS) - 1);
   is("one short of where public pages stop, its pages are open", await isResting(cydStore), false);
@@ -252,6 +255,7 @@ async function main(): Promise<void> {
   is("a store whose plan ended is held to the same figure", [visitLimitFor(deeStore), await isResting(deeStore)], [SETUP_VISITS, true]);
   const eve = await storeWith("eve", "trial", "scale");
   const eveStore = (await storeForEmail(eve.email))!;
+  await poolPlace(eveStore, Date.now());
   is("a free trial has its own figure, whichever plan it is a trial of, no more than the smallest plan's", [visitLimitFor(eveStore), TRIAL_VISITS <= VISITS_INCLUDED.creator], [TRIAL_VISITS, true]);
   // A free trial is one window, from the day it began (lib/allowance-window.ts).
   await visited(eve, windowOf(eveStore), publicVisitLimit(TRIAL_VISITS) - 1);
@@ -260,6 +264,8 @@ async function main(): Promise<void> {
   is("and rests there", [open, await isResting(eveStore)], [false, true]);
   await setSubscription(eve.email, { active: true, trialEnds: 0, period: paidPeriod() });
   is("a paid Scale plan starts its own billing month, below its own larger threshold", await isResting((await storeForEmail(eve.email))!), false);
+  // The creator's own work takes the new month's place (TODOS-51 C).
+  await poolPlace(cydStore, Date.now() + 40 * DAY);
   is("when the month turns, so are a resting store's", await isResting(cydStore, Date.now() + 40 * DAY), false);
   is("an acknowledged unused month remains open", await isResting({ ...cydStore, email: "nobody-with-visits@example.com" }), false);
 

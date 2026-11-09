@@ -26,6 +26,7 @@ import { passFits, roomPass, slotOf } from "@/lib/chat-pass";
 import { lastSaid, parseChatSetting, quietFor, room, say } from "@/lib/community-chat";
 import { monthKey } from "@/lib/delivery";
 import { allowanceWindow } from "@/lib/allowance-window";
+import { poolPlace } from "@/lib/free-pool";
 import { claimHandle, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
 import { isResting, recordParts, recordVisit, trafficIn, visitedFolders, visitsIn } from "@/lib/traffic";
 import { PARTS_PER_VISIT, ROOM_IDLE_PARTS, ROOM_LIVE_PARTS, SETUP_VISITS, VISITS_INCLUDED, partsWords, roomHourWords } from "@/lib/traffic-rules";
@@ -155,6 +156,8 @@ async function main(): Promise<void> {
   part("A store with no plan to charge");
   await claimHandle("free@example.com", "nobill", "No Bill", "");
   const unpaid = (await storeForEmail("free@example.com"))!;
+  // A store that pays nothing holds this month's place by its creator's own work (TODOS-51 C).
+  await poolPlace(unpaid, t1);
   const free = await storeFolder("free@example.com");
   const some = leave(await grantRoom(unpaid, OTHER, { key: ANA, owner: false }, true, true, t1));
   is("is given leave while it has visits left, counted like any other", [some.live, (await trafficIn(free, calendar)).parts], [true, ROOM_LIVE_PARTS]);

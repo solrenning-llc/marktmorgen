@@ -67,13 +67,15 @@ async function main() {
           taken = true;
           return [null];
         }
-        if (taken && commands.length === 1 && command[0] === "GET" && command[1] === key) return [...reply];
+        // admitNonPaying only reads the place (TODOS-51 C): its one read gets the same inexact reply.
+        if ((taken || caller === "admitNonPaying") && commands.length === 1 && command[0] === "GET" && command[1] === key) return [...reply];
         return pipeline(commands);
       };
       const value = caller === "poolPlace" ? await poolPlace(free, now) : await admitNonPaying(free, now);
       redis.pipeline = pipeline;
       const expected = caller === "poolPlace" ? name === "exact refusal control" ? "full" : "unknown" : false;
-      is(`${caller} ${name}: full pool never authorizes from an unknown reread`, [value, (await pipeline([["GET", key]]))[0], Number((await pipeline([["GET", count]]))[0])], [expected, "0", FREE_POOL_BASE_STORES]);
+      // The creator's path is refused by the concurrent request's mark; the public side never takes a place, so it writes none.
+      is(`${caller} ${name}: full pool never authorizes from an unknown reread`, [value, (await pipeline([["GET", key]]))[0], Number((await pipeline([["GET", count]]))[0])], [expected, caller === "poolPlace" ? "0" : null, FREE_POOL_BASE_STORES]);
     }
   }
   redis.clear();

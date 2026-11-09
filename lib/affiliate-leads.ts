@@ -38,7 +38,7 @@ import type { Store } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { readMoves } from "@/lib/call-records";
 import { forgetBookSnapshot } from "@/lib/affiliate-book-snapshot";
-import { affiliateCookieName, affiliatesOn, attributedAffiliate, canonicalEmail, payAddress, readAffiliate } from "@/lib/affiliates";
+import { type Affiliate, affiliateCookieName, affiliatesOn, attributedAffiliate, canonicalEmail, ownBuyer, readAffiliate } from "@/lib/affiliates";
 import { creditsContacts, viaCookieName } from "@/lib/affiliate-setting";
 import {
   LEAD_REASONS,
@@ -112,9 +112,9 @@ export function visitCookies(request: { cookies: { get(name: string): { value: s
   return { via: request.cookies.get(viaCookieName(handle))?.value, session: request.cookies.get(affiliateCookieName(handle))?.value };
 }
 
-function isOwn(store: Store, affiliate: { email: string; paypal: string }, email: string): boolean {
-  const person = canonicalEmail(email);
-  return person === canonicalEmail(store.email) || person === canonicalEmail(affiliate.email) || person === canonicalEmail(payAddress(affiliate));
+/** The affiliate's own address, or the creator's: the same rule as a sale's (ownBuyer). One that cannot be told earns no lead. */
+function isOwn(store: Store, affiliate: Affiliate, email: string): boolean {
+  return ownBuyer(store, affiliate, email) !== false;
 }
 
 /**

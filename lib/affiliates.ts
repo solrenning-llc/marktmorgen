@@ -326,6 +326,13 @@ export function canApply(store: Store): boolean {
   return affiliatesOn(store) && isSenderConfigured();
 }
 
+/**
+ * The records, as read, whose PayPal payout address was written but does not read as an address: whether a buyer is
+ * that affiliate cannot be told (ownBuyer). Kept beside the record read, never written with it: a record changed and
+ * written back is a new object, read again before it is judged.
+ */
+const payAddressUnread = new WeakSet<Affiliate>();
+
 function parseAffiliate(raw: unknown): Affiliate | null {
   if (typeof raw !== "string") return null;
   try {
@@ -334,7 +341,7 @@ function parseAffiliate(raw: unknown): Affiliate | null {
     if (typeof value.email !== "string" || typeof value.code !== "string") return null;
     const status: AffiliateStatus =
       value.status === "approved" || value.status === "declined" || value.status === "removed" ? value.status : "pending";
-    return {
+    const affiliate: Affiliate = {
       id: value.id,
       email: value.email,
       code: value.code,
@@ -365,9 +372,26 @@ function parseAffiliate(raw: unknown): Affiliate | null {
       })(),
       warned: Number.isInteger(value.warned) && Number(value.warned) > 0 ? Number(value.warned) : 0,
     };
+    // None set (absent, null or empty) is no payout address of their own; anything else that is not one is unread.
+    if (value.paypal !== undefined && value.paypal !== null && value.paypal !== "" && !affiliate.paypal) payAddressUnread.add(affiliate);
+    return affiliate;
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a buyer is the affiliate themself or the creator, one inbox however it is written (canonicalEmail): the
+ * address they joined with, the PayPal address they are paid at, or the store's own. The one rule for a sale, a
+ * membership payment and a lead (lib/affiliate-leads.ts). Null when it cannot be told: no record read, or a payout
+ * address that does not read; a caller pays nothing then, never taking the buyer for somebody else.
+ */
+export function ownBuyer(store: Pick<Store, "email">, affiliate: Affiliate | null | undefined, buyer: string): boolean | null {
+  if (!affiliate || payAddressUnread.has(affiliate)) return null;
+  const person = canonicalEmail(buyer);
+  if (!person) return false;
+  // A store record always carries its owner's address; a stand-in without one only skips that comparison.
+  return [store.email, affiliate.email, payAddress(affiliate)].some((mine) => typeof mine === "string" && mine !== "" && canonicalEmail(mine) === person);
 }
 
 /** Where an affiliate is paid through PayPal: the address they asked for, or the one they joined with. */
@@ -2407,10 +2431,18 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string):
   await notePartners(store, { ...sale, buyer: paid.email });
 }
 
+/**
+ * Whether a sale through an affiliate is their own purchase, which earns nothing and counts toward no bonus (ownBuyer).
+ * One that cannot be told is taken as theirs, said in the log: never a commission on a sale that may be their own.
+ */
 async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean> {
   if (!buyer) return false;
-  const affiliate = await readAffiliate(store, aff);
-  return Boolean(affiliate) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer);
+  return ownSale(store, aff, ownBuyer(store, await readAffiliate(store, aff), buyer));
+}
+
+function ownSale(store: Pick<Store, "statsId">, aff: string, own: boolean | null): boolean {
+  if (own === null) console.error(`an affiliate's sale earns nothing: whether the buyer is affiliate ${aff} could not be read (store ${store.statsId ?? ""})`);
+  return own !== false;
 }
 
 /**
@@ -3255,7 +3287,7 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
       total,
       currency: readCurrencyCode(invoice.currency),
       rate: Number(meta.via_rate) || 0,
-      self: Boolean(affiliate && buyer) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer),
+      self: Boolean(buyer) && ownSale(store, meta.via, ownBuyer(store, affiliate, buyer)),
       how: "recurring",
       promotion: affiliatePromotionFrom(meta) ?? undefined,
     });

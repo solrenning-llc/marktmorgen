@@ -336,7 +336,8 @@ async function main(): Promise<void> {
   const productRoute = readFileSync("app/api/store/product/route.ts", "utf8");
   is("the product route tries it three times and logs a failure", [productRoute.includes("dropReviews(removed.store.statsId, id).catch(() => [] as string[])"), productRoute.includes("await dropReviews(removed.store.statsId, id, 3).catch((error: unknown) => {")], [false, true]);
 
-  // The refund pass: a busy review stops it, and the reviews it already marked still leave the store's quotes.
+  // The refund pass: a busy review is left for the next pass, the pass reads on past it (Claude 5's audit of the Stripe
+  // reads, A3), and the reviews it marked leave the store's quotes.
   // Two products, so only the second one's lock (a product's) is held.
   const mixIds: string[] = [];
   for (const [i, text] of ["Lovely glaze mixes, clear steps", "Great colours and clear notes"].entries()) {
@@ -366,7 +367,7 @@ async function main(): Promise<void> {
   await redis.pipeline([["DEL", `nl:rev:lock:${statsId}:${mixId}`]]);
   globalThis.fetch = keep;
   const quotesAfter = (await storeForEmail(OWNER))!.quotes ?? [];
-  is("the pass stops at the busy review, the first marked", [pass, (await readReview(statsId, mixIds[0], freeOne.id))?.refunded, (await readReview(statsId, mixId, busyOneReview.id))?.refunded], ["thrown", true, false]);
+  is("the pass reads on past the busy review, the first marked, the busy one left for the next pass", [pass, (await readReview(statsId, mixIds[0], freeOne.id))?.refunded, (await readReview(statsId, mixId, busyOneReview.id))?.refunded], ["done", true, false]);
   is("and the store's quotes are refreshed for what it marked, the refunded review left out", [JSON.stringify(quotesAfter) !== quotesBefore, quotesAfter.some((q) => q.t.includes("Lovely glaze mixes"))], [true, false]);
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));

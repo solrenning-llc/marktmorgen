@@ -29,6 +29,7 @@
  *   nl:rev:link:<hash>             -> the order and address a review link is for, 60 days
  *   nl:rev:refunds:since:<statsId> -> how far the refund pass has read
  *   nl:rev:refunds:seen:<statsId>  -> refunds already handled
+ *   nl:rev:refunds:pass:<statsId>  -> where a pass over the refunds stands, seven days after it last moved
  */
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
@@ -278,6 +279,54 @@ const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
 const REFUND_PAGES = 3;
 const anchorKey = (statsId: string) => `nl:rev:refunds:since:${statsId}`;
 const seenKey = (statsId: string) => `nl:rev:refunds:seen:${statsId}`;
+/**
+ * Where a pass over a store's refunds stands, kept between runs (Claude 5's audit of the Stripe reads, A3): a pass reads
+ * the window from its anchor to its end, newest first, and may take several runs. Without it every run read the same
+ * newest pages again, and a refund past them was never read.
+ */
+const passKey = (statsId: string) => `nl:rev:refunds:pass:${statsId}`;
+/** How long a pass is kept without moving: well past the runs it takes; one left behind starts again from the anchor. */
+const REFUND_PASS_SECONDS = 7 * 86_400;
+/** A refund's id as the pass keeps it, to read on from (Stripe's `starting_after`). */
+const REFUND_CURSOR = /^[A-Za-z0-9_]{3,255}$/;
+/**
+ * The Redis commands one run sends for its place in a store's refunds, outside the rows it reads (CX-123 rule 24): one
+ * GET of the anchor and one of the pass, then at most three writes, either the pass kept (SET, with the anchor and the
+ * read set's expiry written as before when the store had no anchor yet) or, at the end of a pass, the pass deleted and,
+ * unless the pass left something unknown and the anchor cannot move, the anchor written and the read set's expiry
+ * renewed. The pass is one key a store, under 400 bytes, kept
+ * REFUND_PASS_SECONDS. A run still reads at most REFUND_PAGES pages of refunds.
+ */
+export const REVIEW_REFUND_PLACE_COMMANDS = 5;
+
+/**
+ * A pass over the refunds: `from` the anchor it began at (the window starts 300 seconds before), `start` when it began
+ * (the anchor never moves past it), `after` the last refund it read to the end, `newest` the latest refund it handled,
+ * and `floor` the earliest one it left unknown (null when none), below which the anchor stays.
+ */
+type RefundPass = { from: number; start: number; after: string; newest: number; floor: number | null };
+
+const passSeconds = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/** A kept pass read exactly; anything else is no pass, and a new one starts from the anchor, which never moved past it. */
+function readRefundPass(raw: unknown): RefundPass | null {
+  if (typeof raw !== "string") return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!plainObject(value)) return null;
+  const from = ownField(value, "from");
+  const start = ownField(value, "start");
+  const after = ownField(value, "after");
+  const newest = ownField(value, "newest");
+  const floor = ownField(value, "floor");
+  if (!passSeconds(from) || !passSeconds(start) || !passSeconds(newest) || (floor !== null && !passSeconds(floor))) return null;
+  if (typeof after !== "string" || !REFUND_CURSOR.test(after) || start < from || newest < from) return null;
+  return { from, start, after, newest, floor };
+}
 
 /** Whether a store has any review, so the refund pass is worth a call to Stripe. */
 export async function storeHasReviews(store: Store): Promise<boolean> {
@@ -290,96 +339,183 @@ export async function storeHasReviews(store: Store): Promise<boolean> {
  * Reads the refunds made on the creator's account since the last pass and
  * marks every review a fully refunded payment paid for. A partial refund
  * changes nothing. Returns how many reviews it marked.
+ *
+ * A run reads at most REFUND_PAGES pages. A pass from the anchor to the end of
+ * the window may take several runs: where it stands is kept (passKey), so the
+ * next run goes on from the last refund read instead of the newest one again
+ * (Claude 5's audit of the Stripe reads, A3: 300 newer partial refunds kept a
+ * full refund unread and its review counting its stars). A run that resumes a
+ * pass first reads the newest page, so a refund made meanwhile does not wait
+ * for the pass. A refund left unknown (a review busy just then, a row that
+ * does not read) never holds the pass back, only the anchor: the anchor moves
+ * at the end of a pass, never past such a refund, so the next pass reads it
+ * again.
  */
 export async function markRefundedReviews(store: Store, deadline: number): Promise<number> {
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
+  const account = store.stripeAccountId;
   const now = Math.floor(Date.now() / 1000);
-  const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
+  const [anchorRaw, passRaw] = await redisPipeline([["GET", anchorKey(statsId)], ["GET", passKey(statsId)]]);
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
-  const since = Math.max(0, anchor - 300);
-  let newest = anchor;
+  // A pass an earlier run began goes on from where it stopped (A3); none, or one in an unknown shape, begins at the
+  // anchor, which never moved past anything a pass left unread.
+  const kept = readRefundPass(passRaw);
+  const pass: RefundPass = kept ? { ...kept } : { from: anchor, start: now, after: "", newest: anchor, floor: null };
+  // A little overlap, so a refund created in the second the last pass read is
+  // not missed; the set of refunds already read keeps it from counting twice.
+  const since = Math.max(0, pass.from - 300);
   let marked = 0;
-  let after = "";
-  let complete = false;
-  // A failed or unfinished read of the lost disputes keeps the anchor.
-  let unsure = false;
-  let lostRead: LostRead | null = null;
-  try {
-    for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
-      const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
-      query.append("expand[]", "data.charge");
-      if (after) query.set("starting_after", after);
-      // The page in its exact shape (lib/stripe-list.ts), each row by the refunds' own rule (refundRowKnown,
-      // lib/refunds.ts: its id, time, status, payment and charge.refunded as Stripe gives them). A page in another
-      // shape, or a row not readable, keeps the anchor (unsure), so no refund on it is passed over; the readable
-      // rows are still marked (Codex P on #2774).
-      let listed: StripePage;
-      try {
-        listed = readStripePage(await onAccount("GET", store.stripeAccountId, `/refunds?${query}`), refundRowKnown);
-      } catch (error) {
-        if (!(error instanceof StripeListUnreadable)) throw error;
-        console.error("reading refunds for reviews: a page in another shape", error);
-        unsure = true;
-        break;
-      }
-      if (listed.unreadable) unsure = true;
-      const refunds: Row[] = listed.rows;
-      // A dispute closed as lost marks its reviews as a
-      // full refund does (lib/refunds.ts, queue 388 [TB14]): read once, with
-      // the first page, from Stripe's closing events (kept thirty days).
-      const lost = page === 0 ? await lostDisputesOrRetry(store.stripeAccountId, since, deadline, lostCursorKey("rev", statsId)) : null;
-      if (lost) lostRead = lost;
-      if (lost && !lost.complete) unsure = true;
-      // What gives back on the page, and which of it an earlier pass already took: one request for the page, and
-      // nothing written again for one already taken (each pass reads the last days' refunds again).
-      const full = [...(lost?.rows ?? []), ...refunds]
-        .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
-        .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
-      const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
-      for (const [i, refund] of full.entries()) {
-        if (Number(seen[i]) !== 1) {
+  /** The anchor stays at or below a refund of this pass left unknown: the next pass reads it again. */
+  const hold = (created: number) => {
+    pass.floor = pass.floor === null ? created : Math.min(pass.floor, created);
+  };
+
+  /**
+   * Rows read: each that gives back in full, and that no earlier pass already took, marks its reviews and is then
+   * taken. One request for the rows, and nothing written again for one already taken (each pass reads the last days'
+   * refunds again). `inPass` false for the newest page a resuming run reads first, which never moves the pass: a refund
+   * of the pass's window it leaves unknown is read again by the pass, and a newer one is in the next pass's window.
+   */
+  const take = async (rows: Row[], inPass: boolean): Promise<void> => {
+    const full = rows
+      .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
+      .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
+    const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
+    for (const [i, refund] of full.entries()) {
+      if (Number(seen[i]) !== 1) {
+        try {
           if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi);
-          // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
-          await redisPipeline([
-            ["SADD", seenKey(statsId), refund.id],
-            ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
-          ]);
+        } catch (error) {
+          // A review busy just now, or one that did not read: the refund is not taken, and the anchor stays at or
+          // below it, so the next pass tries it again; the pass reads on past it (A3; it used to stop the run there,
+          // so the refunds behind it were never read while it stayed busy).
+          console.error("marking a refunded payment's reviews failed; tried again in the next pass", error);
+          if (inPass) hold(refund.created);
+          continue;
         }
-        newest = Math.max(newest, refund.created);
+        // Taken only once its reviews are marked.
+        await redisPipeline([
+          ["SADD", seenKey(statsId), refund.id],
+          ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+        ]);
       }
-      if (!listed.hasMore) {
-        complete = true;
+      if (inPass) pass.newest = Math.max(pass.newest, refund.created);
+    }
+  };
+
+  /**
+   * One page of refunds from `after` (the newest when empty), in its exact shape (lib/stripe-list.ts), each row by the
+   * refunds' own rule (refundRowKnown, lib/refunds.ts: its id, time, status, payment and charge.refunded as Stripe gives
+   * them); null when the page itself is in another shape, which is not "no refunds" (Codex P on #2774).
+   */
+  const readPage = async (after: string): Promise<StripePage | null> => {
+    const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
+    query.append("expand[]", "data.charge");
+    if (after) query.set("starting_after", after);
+    try {
+      return readStripePage(await onAccount("GET", account, `/refunds?${query}`), refundRowKnown);
+    } catch (error) {
+      if (!(error instanceof StripeListUnreadable)) throw error;
+      console.error("reading refunds for reviews: a page in another shape", error);
+      return null;
+    }
+  };
+
+  // A dispute closed as lost marks its reviews as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once a
+  // run, with the first page of refunds that reads, from Stripe's closing events (kept thirty days), from their own
+  // kept place in the same window.
+  let lost: LostRead | null = null;
+  const readLost = async () => {
+    if (lost) return;
+    const read = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("rev", statsId));
+    lost = read;
+    await take(read.rows, true);
+  };
+
+  let ended = false;
+  // A cursor Stripe answers it does not know: the pass starts again from the anchor, which never moved past it.
+  let restart = false;
+  try {
+    let pages = REFUND_PAGES;
+    if (pass.after && Date.now() < deadline) {
+      // Resuming a pass: the newest refunds first, so one made meanwhile does not wait for the pass to end.
+      pages -= 1;
+      const top = await readPage("");
+      if (top) {
+        await readLost();
+        await take(top.rows, false);
+      }
+    }
+    for (let page = 0; page < pages && Date.now() < deadline; page += 1) {
+      let listed: StripePage | null;
+      try {
+        listed = await readPage(pass.after);
+      } catch (error) {
+        if (!pass.after || !(error instanceof StripeError) || (error.status !== 400 && error.status !== 404)) throw error;
+        console.error("a store's kept place in its refunds for reviews is not known to Stripe; read again from the anchor", error);
+        restart = true;
         break;
       }
-      // More pages, and no readable last row to read them from: not complete.
-      if (!listed.lastId) break;
-      after = listed.lastId;
+      // A page in another shape: the pass stays where it is and reads it again (CX-123 rule 30).
+      if (!listed) break;
+      await readLost();
+      // A row that cannot be read proves nothing: the pass reads on past it, but the anchor stays where this pass
+      // began, so the next pass reads it again (CX-123 rule 24). The readable rows are still marked.
+      if (listed.unreadable > 0) hold(since);
+      await take(listed.rows, true);
+      if (!listed.hasMore) {
+        ended = true;
+        break;
+      }
+      // The pass goes on from the last row that reads: one that does not is read again from there, never skipped. A
+      // page with no row that reads leaves the rest unknown; the next run tries again.
+      const last = listed.rows.at(-1);
+      if (!last) break;
+      pass.after = last.id as string;
     }
   } finally {
-    // A refunded review leaves "What buyers say" on the store page (lib/store-quotes.ts), also when a busy review
-    // stopped the pass after others were marked.
+    // A refunded review leaves "What buyers say" on the store page (lib/store-quotes.ts), also when an error stopped
+    // the pass after others were marked.
     if (marked > 0) await refreshStoreQuotes(store);
   }
-  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
-  // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
-  // meanwhile is read from the top next run (review of #2158, inbox C4-24).
-  if (lostRead) {
-    if (!(await confirmLostRead(lostRead, seenKey(statsId)))) unsure = true;
-    else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
+
+  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead), every run.
+  // Set inside readLost, which the type checker does not follow.
+  const lostRead = lost as LostRead | null;
+  const lostKept = lostRead ? await confirmLostRead(lostRead, seenKey(statsId)) : false;
+  if (ended) {
+    // The end of a pass: the anchor moves to the newest refund it handled (a sweep of the lost disputes that went on
+    // from a kept place no further than the newest closing it read, so a dispute closed meanwhile is read from the top
+    // next run; review of #2158, inbox C4-24), never past when the pass began, nor past a refund it left unknown, nor
+    // at all while the lost disputes were not all read and handled. The read refunds outlive it. A pass that left
+    // something unknown and cannot move the anchor leaves it as it is, so it lapses as it always did (reviews of
+    // #2158), unless the store has none yet: then it keeps the one the pass began at, as below.
+    let top = pass.newest;
+    if (!lostRead || !lostKept || !lostRead.complete) hold(since);
+    else top = lostRead.resumed ? lostRead.newest : Math.max(top, lostRead.newest);
+    const moved = Math.max(pass.from, Math.min(top, pass.start, pass.floor ?? Number.POSITIVE_INFINITY));
+    const writes: (string | number)[][] = [["DEL", passKey(statsId)]];
+    if (pass.floor === null || moved > pass.from || !(Number(anchorRaw) > 0)) {
+      writes.unshift(["SET", anchorKey(statsId), String(moved), "EX", REFUND_LOOKBACK_SECONDS * 2], ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400]);
+    }
+    await redisPipeline(writes);
+    return marked;
   }
-  // The place moves only past what was read to the end, sure and inside its time. A store with no place yet keeps
-  // the one it started from, so the next run reads the same window and the lost disputes' kept place still counts; its
-  // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
-  // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
-  const done = complete && !unsure && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", anchorKey(statsId), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
-  else if (!(Number(anchorRaw) > 0)) {
-    await redisPipeline([
-      ["SET", anchorKey(statsId), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
+  // A pass not at its end is kept only when it moved, so one that cannot move lapses and starts again from the anchor.
+  // A store with no anchor yet keeps the one its pass began at, so the next run reads the same window and the lost
+  // disputes' kept place still counts; its refunds already read are kept as long (reviews of #2158).
+  const next = JSON.stringify(pass);
+  const writes: (string | number)[][] = [];
+  if (restart) writes.push(["DEL", passKey(statsId)]);
+  else if (pass.after && next !== passRaw) writes.push(["SET", passKey(statsId), next, "EX", REFUND_PASS_SECONDS]);
+  if (!(Number(anchorRaw) > 0)) {
+    writes.push(
+      ["SET", anchorKey(statsId), String(pass.from), "EX", REFUND_LOOKBACK_SECONDS * 2],
       ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
-    ]);
+    );
   }
+  if (writes.length) await redisPipeline(writes);
   return marked;
 }
 

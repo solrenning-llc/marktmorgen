@@ -386,7 +386,9 @@ async function main(): Promise<void> {
   const passAgain = await markRefundedReviews(paid, Date.now() + 30_000);
   redis.pipeline = realPass;
   globalThis.fetch = keep;
-  is("a pass over refunds already taken: one request reads the page's, nothing written for them (#2066 review)", [passAgain, passRequests.filter((r) => r.includes("SISMEMBER")).length, passRequests.filter((r) => r.includes("SADD")).length], [0, 1, 0]);
+  // Rule 23: counted the request holding SISMEMBER; the page's rows are now read with one SMISMEMBER (Claude 5's
+  // pre-review of claude5/plan-refund-own-dispute), still one request and nothing written.
+  is("a pass over refunds already taken: one request reads the page's, nothing written for them (#2066 review)", [passAgain, passRequests.filter((r) => r.includes("SMISMEMBER")).length, passRequests.filter((r) => r.includes("SADD")).length], [0, 1, 0]);
 
   const fifth = await addProduct(OWNER, "Wheel Basics", "", "45");
   if (!fifth.ok) throw new Error("no product");

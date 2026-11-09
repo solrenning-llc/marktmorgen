@@ -36,11 +36,18 @@
  *     balance transaction's currency is the account's settlement currency,
  *     which may differ); otherwise "unknown";
  *   - a dispute (Stripe's dispute `status`): open, or a status this code does
- *     not know, means no refund now (the bank may return it); `lost` and
- *     `prevented` for the whole charge mean the money went back that way
- *     already, and for part of it "unknown" (the rest is not decided here); `won` and
- *     `warning_closed` let the policy apply again (statuses read on
- *     docs.stripe.com/api/disputes/object, 31/10/2026);
+ *     not know, means no refund now (the bank may return it); `lost` for the
+ *     whole charge means the money went back that way already, and for part of
+ *     it "unknown" (the rest is not decided here); `won` and `warning_closed`
+ *     let the policy apply again (statuses read on
+ *     docs.stripe.com/api/disputes/object, 31/10/2026). `prevented` is read by
+ *     the money the dispute itself moved (`disputeMoneyGone`, the caller's
+ *     reading of its balance transactions; rule 30, Claude 5's pre-review of
+ *     claude5/plan-refund-own-dispute): Stripe gives it both to a resolution,
+ *     refunded to the buyer, and to a block, the network stopping it while the
+ *     money stays with us. Money withdrawn and kept is given back, as `lost`;
+ *     nothing withdrawn, or all of it reinstated, lets the policy apply, as
+ *     `won`; not read is "unknown", never paid and never denied for good;
  *   - tax shown on top comes back with the part refunded, in proportion,
  *     rounded down; for the guarantee the whole payment, tax included;
  *   - anything that is not a whole, non-negative number of cents, or a
@@ -76,6 +83,11 @@ export type PlanRefundCharge = {
   disputeStatus: string | null;
   /** The dispute's amount (`dispute.amount`), or null when there is none. */
   disputedCents: number | null;
+  /**
+   * For a `prevented` dispute, whether its own balance transactions took the money and kept it (disputeMoneyGone in
+   * lib/plan-refund.ts): true given back, false not; null or absent when it could not be read (then "unknown").
+   */
+  disputeMoneyGone?: boolean | null;
 };
 
 export type PlanRefundInput = {
@@ -98,7 +110,8 @@ export type PlanRefund =
   | { kind: "none"; reason: "not_paid" | "nothing_paid" | "dispute_open" | "dispute_returned" | "already_refunded" | "outside_window" | "renewal" | "switch_charge" | "months_used" | "fee_kept" }
   | { kind: "unknown"; reason: "unreadable" | "split_payment" | "switch_yearly" | "dispute_partial" | "billing_reason" | "fee_unread" | "monthly_price_unknown" | "currency" };
 
-const RETURNED = new Set(["lost", "prevented"]);
+/** The statuses whose money always went back to the buyer. `prevented` is read by its money (disputeMoneyGone). */
+const RETURNED = new Set(["lost"]);
 const SETTLED = new Set(["won", "warning_closed"]);
 const OWN_CHARGE = new Set(["subscription_create", "subscription_cycle"]);
 const SWITCH_CHARGE = new Set(["subscription_update"]);
@@ -144,11 +157,15 @@ export function planRefund(input: PlanRefundInput): PlanRefund {
   if (c.amountCents === 0) return { kind: "none", reason: "nothing_paid" };
 
   if (c.disputeStatus !== null) {
-    if (RETURNED.has(c.disputeStatus)) {
+    // A prevented dispute by its own money: kept, read as lost; none kept, as won; not read, unknown (never "none",
+    // which would deny for good a guarantee that may be owed, and never the guarantee, which may pay twice).
+    const prevented = c.disputeStatus === "prevented";
+    if (prevented && typeof c.disputeMoneyGone !== "boolean") return { kind: "unknown", reason: "unreadable" };
+    if (RETURNED.has(c.disputeStatus) || (prevented && c.disputeMoneyGone === true)) {
       if (c.disputedCents !== null && c.disputedCents < c.amountCents) return { kind: "unknown", reason: "dispute_partial" };
       return { kind: "none", reason: "dispute_returned" };
     }
-    if (!SETTLED.has(c.disputeStatus)) return { kind: "none", reason: "dispute_open" };
+    if (!SETTLED.has(c.disputeStatus) && !prevented) return { kind: "none", reason: "dispute_open" };
   }
 
   const left = c.amountCents - c.refundedCents;

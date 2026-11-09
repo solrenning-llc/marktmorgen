@@ -364,7 +364,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:reading:day:@lib/store-readings.ts": { what: "A store's readings of the day, and of them the heavy ones", parts: [capped(4 * KEY, "Two counts a store a UTC day, kept two days.")] },
   // C4-33 (4): a product update's searches for its buyers, from a count of their own.
   "nl:cal:tok:@lib/calendar-sync.ts": { what: "The store's calendar file's token", parts: [capped(KEY, "One a store.")] },
-  "nl:meet:rf:@lib/call-meetings.ts": short("Refunds already handled for meetings, kept sixty-one days after the last one read", "order", 61, MARK),
+  "nl:meet:rf:@lib/call-meetings.ts": { what: "Refunds already handled for meetings, kept sixty-one days after the last one read", parts: [per("order", 61, MARK, "Refunds already handled for meetings, kept sixty-one days after the last one read"), capped(16 * KB, "Refunds Stripe has not finished, kept for a later look: at most HELD_REFUND_MAX_KEPT members of at most 270 bytes, each let go at the latest HELD_REFUND_MAX_SECONDS after it was made.", src("lib/held-refunds.ts", "HELD_REFUND_MAX_KEPT", "HELD_REFUND_MAX_SECONDS"))] },
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },
   "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token", parts: [item(KEY, "One per package, kept with it.", "call")] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
@@ -648,7 +648,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:leave:@lib/leave-flow.ts": short("Leavers counted a month", "day", 62, 128),
   "nl:lc:@lib/lesson-comment-notify.ts": short("A student told of an answer, once in a while", "buyer", 1),
   "nl:lc:@lib/lesson-comments.ts": { what: "Lesson comments", room: ["lib/lesson-comments.ts"] },
-  "nl:keys:@lib/licence-keys.ts": { what: "License keys: the pool, every key added, who got which", room: ["lib/licence-keys.ts"], parts: [item(512, "A key given: its record and who got it.", "membership"), capped(64 * KB, "The refunds already handled (sixty-one days after the last one read) and the marks.")] },
+  "nl:keys:@lib/licence-keys.ts": { what: "License keys: the pool, every key added, who got which", room: ["lib/licence-keys.ts"], parts: [item(512, "A key given: its record and who got it.", "membership"), capped(64 * KB, "The refunds already handled (sixty-one days after the last one read) and the marks."), capped(16 * KB, "Refunds Stripe has not finished, kept for a later look: at most HELD_REFUND_MAX_KEPT members of at most 270 bytes, each let go at the latest HELD_REFUND_MAX_SECONDS after it was made.", src("lib/held-refunds.ts", "HELD_REFUND_MAX_KEPT", "HELD_REFUND_MAX_SECONDS"))] },
   // ---------------------------------------------------------------- lib/ m
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
   "nl:mail:mk:@lib/mail-clicks.ts": { what: "The stop token a link key was made from: one a contact, counted with it (TOKEN_BYTES)", room: ["lib/contacts.ts"] },
@@ -827,6 +827,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rlm:@lib/request-guard.ts": short("Monthly counts by their scope", "day", 62, 128),
   "nl:rev:ask:due@lib/review-ask.ts": company("Review asks due", "One sorted set for every store: each an order's, gone when asked."),
   "nl:rev:link:@lib/review-proof.ts": short("A review link, sixty days", "monthly", 60, LINK_BYTES, MAIL("review ask")),
+  "nl:rev:refunds:held:@lib/review-proof.ts": { what: "Refunds Stripe has not finished, kept for a later look by the reviews' refund pass", parts: [capped(16 * KB, "Refunds Stripe has not finished, kept for a later look: at most HELD_REFUND_MAX_KEPT members of at most 270 bytes, each let go at the latest HELD_REFUND_MAX_SECONDS after it was made.", src("lib/held-refunds.ts", "HELD_REFUND_MAX_KEPT", "HELD_REFUND_MAX_SECONDS"))] },
   "nl:rev:refunds:seen:@lib/review-proof.ts": { what: "Refunds already handled for reviews", parts: [capped(64 * KB, "Sixty-one days after the last one read.")] },
   "nl:rev:refunds:since:@lib/review-proof.ts": { what: "How far refunds were read", parts: [capped(KEY, "One a store.")] },
   "nl:none@lib/review-requests.ts": company("A key that is never written", "Read in place of a list a store does not have."),

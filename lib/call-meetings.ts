@@ -27,13 +27,15 @@
  *
  *   nl:meet:rf:<callsId>:since   the time refunds were read up to, in seconds
  *   nl:meet:rf:<callsId>:seen    refunds already read
+ *   nl:meet:rf:<callsId>:held    refunds Stripe has not finished, kept for a later look (lib/held-refunds.ts)
  */
 import { whereOf } from "@/lib/call-place";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
-import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack, unfinishedRefund } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { keepRefunds, readHeldRefunds, releaseHeld } from "@/lib/held-refunds";
 import { readListing } from "@/lib/catalog";
 import { markBookingsChanged, readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
@@ -52,6 +54,7 @@ const INTENT = /^pi_[A-Za-z0-9]{6,200}$/;
 
 const anchorKey = (callsId: string) => `nl:meet:rf:${callsId}:since`;
 const seenKey = (callsId: string) => `nl:meet:rf:${callsId}:seen`;
+const heldKey = (callsId: string) => `nl:meet:rf:${callsId}:held`;
 
 export type MeetingsRun = { done: number; failed: number; switched: number; told: number; refunds: number };
 
@@ -180,8 +183,11 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   // A failed or unfinished read of the lost disputes keeps the anchor.
   let unsure = false;
   let lostRead: LostRead | null = null;
-  // The time of the oldest refund read that Stripe has not finished and that gives nothing back yet (Infinity: none).
-  let waiting = Number.POSITIVE_INFINITY;
+  // Refunds Stripe had not finished when an earlier run read them, kept by id with an end (lib/held-refunds.ts; rule 30):
+  // those that now give everything back are read with the first page, as a refund of the window is.
+  const held = await readHeldRefunds(account, heldKey(callsId), nowSeconds, deadline);
+  // Every row handled this run, so one listed twice (kept and in the window) is handled once.
+  const handledIds = new Set<string>();
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
@@ -194,22 +200,31 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("meet", callsId)) : null;
     if (lost) lostRead = lost;
     if (lost && !lost.complete) unsure = true;
-    const rows = [...(lost?.rows ?? []), ...refunds];
+    // A refund Stripe has not finished (requires_action, or pending on a charge not refunded in full yet) is kept for a
+    // later look before the anchor can move past it (rule 30; review of #3188): once it goes through it is read back
+    // by its id and the meeting ends, however many refunds came after it.
+    // One that cannot be kept (its id or time does not read, or too many kept): the anchor stays where it was.
+    if (!(await keepRefunds(heldKey(callsId), refunds, nowSeconds))) unsure = true;
+    const rows = [...(lost?.rows ?? []), ...(page === 0 ? held.rows : []), ...refunds];
+    // Which of the page's rows that give back an earlier run already read: one command for the page.
+    const givers = rows.map((row) => (typeof row.id === "string" ? row.id : "")).filter((id, i) => id && rowGivesBack(rows[i]));
+    const flags = givers.length ? ((await redisPipeline([["SMISMEMBER", seenKey(callsId), ...givers]]))[0] as unknown[]) : [];
+    if (!Array.isArray(flags) || flags.length !== givers.length) throw new Error("The refunds already read did not read");
+    const seenBefore = new Set(givers.filter((_, i) => Number(flags[i]) === 1));
     for (const refund of rows) {
       if (Date.now() >= deadline) break;
       const id = typeof refund.id === "string" ? refund.id : "";
-      const created = typeof refund.created === "number" ? refund.created : 0;
-      if (!id) continue;
+      // A row with no readable time never moves the anchor, either way.
+      const created = typeof refund.created === "number" && Number.isSafeInteger(refund.created) ? refund.created : 0;
+      if (!id || handledIds.has(id)) continue;
       if (!rowGivesBack(refund)) {
-        // A refund Stripe has not finished (requires_action, or pending on a charge not refunded in full yet) holds
-        // the anchor at its time (rule 30; review of #3188): once it goes through it is read again and the meeting
-        // ends. Moved past it, it was older than every later run's window and the paid call's meeting never ended.
-        if (unfinishedRefund(refund)) waiting = Math.min(waiting, created);
-        else newest = Math.max(newest, created);
+        newest = Math.max(newest, created);
         continue;
       }
-      const [seen] = await redisPipeline([["SISMEMBER", seenKey(callsId), id]]);
-      if (Number(seen) === 1) {
+      if (seenBefore.has(id)) {
+        handledIds.add(id);
+        const release = releaseHeld(heldKey(callsId), held, id);
+        if (release.length) await redisPipeline(release);
         newest = Math.max(newest, created);
         continue;
       }
@@ -220,7 +235,9 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         await redisPipeline([
           ["SADD", seenKey(callsId), id],
           ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
+          ...releaseHeld(heldKey(callsId), held, id),
         ]);
+        handledIds.add(id);
         newest = Math.max(newest, created);
         continue;
       }
@@ -250,7 +267,9 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       await redisPipeline([
         ["SADD", seenKey(callsId), id],
         ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
+        ...releaseHeld(heldKey(callsId), held, id),
       ]);
+      handledIds.add(id);
       newest = Math.max(newest, created);
     }
     const last = refunds[refunds.length - 1];
@@ -272,7 +291,7 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", anchorKey(callsId), String(Math.min(Math.max(newest, anchor), Math.max(waiting, since))), "EX", REFUND_KEEP_SECONDS * 2]]);
+  if (done) await redisPipeline([["SET", anchorKey(callsId), String(Math.max(newest, anchor)), "EX", REFUND_KEEP_SECONDS * 2]]);
   else if (!(Number(anchorRaw) > 0)) {
     await redisPipeline([
       ["SET", anchorKey(callsId), String(anchor), "EX", REFUND_KEEP_SECONDS * 2],

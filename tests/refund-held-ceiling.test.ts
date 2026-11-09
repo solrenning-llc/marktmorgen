@@ -12,12 +12,13 @@
  *   - an unfinished refund, past the job's pages of later refunds, never read again once it goes through;
  *   - an anchor moved backwards by a row with no `created`;
  *   - an unfinished refund kept past HELD_REFUND_MAX_SECONDS, or read back more often than HELD_REFUND_RECHECK_SECONDS;
- *   - a kept refund let go on a reply that is not its own.
+ *   - a kept refund let go on a reply that is not its own;
+ *   - more than HELD_REFUND_MAX_KEPT kept, or one not kept and the anchor moved past it all the same.
  */
 import { syncMeetings } from "@/lib/call-meetings";
 import { MEET_STORES } from "@/lib/meet-links";
 import { revokeRefunded } from "@/lib/licence-keys";
-import { HELD_REFUND_MAX_SECONDS, HELD_REFUND_RECHECK_SECONDS } from "@/lib/held-refunds";
+import { HELD_REFUND_MAX_KEPT, HELD_REFUND_MAX_SECONDS, HELD_REFUND_RECHECK_SECONDS } from "@/lib/held-refunds";
 import { KIND } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -25,7 +26,6 @@ import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_prerev_anchor_ceiling_only";
 const ACCOUNT = "acct_1TestPrerevCeil01";
-const NOW = Math.floor(Date.now() / 1000);
 const realNow = Date.now;
 let shift = 0;
 Date.now = () => realNow() + shift;
@@ -89,13 +89,16 @@ type Job = { name: string; run: () => Promise<unknown>; anchor: string; held: st
 
 async function scenarios(job: Job): Promise<void> {
   redis.clear();
+  // Each job from the clock as it stands: the first job's runs move it on by more than a month.
+  const NOW = Math.floor(Date.now() / 1000);
   part(`${job.name}: a quiet run while a refund is unfinished`);
   const held = refund(`${job.name}Held01`, NOW - 30_000, "requires_action", false);
   refunds = [held];
   // 150 later full refunds, handled over several runs (each run looks up at most its REFUND_LOOKUPS).
   for (let i = 0; i < 150; i += 1) refunds.push(refund(`${job.name}Later${String(i).padStart(4, "0")}x`, NOW - 29_000 + i * 60, "succeeded", true));
   await job.run();
-  for (let k = 0; k < 20; k += 1) {
+  // Enough runs for the slower job: a license key's refund may take three lookups of its twenty a run.
+  for (let k = 0; k < 40; k += 1) {
     step();
     await job.run();
   }
@@ -176,6 +179,19 @@ async function scenarios(job: Job): Promise<void> {
   step();
   await job.run();
   is("failed: let go", await keptOf(job.held), []);
+
+  part(`${job.name}: at most HELD_REFUND_MAX_KEPT kept; one more keeps the anchor instead`);
+  redis.clear();
+  const t = Math.floor(Date.now() / 1000);
+  const fill: (string | number)[] = [];
+  for (let i = 0; i < HELD_REFUND_MAX_KEPT; i += 1) fill.push(t + 86_400, `re_${job.name}Fill${String(i).padStart(4, "0")}x|${t - 60}`);
+  await orig([["ZADD", job.held, ...fill]]);
+  const extra = refund(`${job.name}Extra01`, t - 120, "requires_action", false);
+  refunds = [extra, refund(`${job.name}After01`, t - 60, "succeeded", true)];
+  await job.run();
+  const kept = await keptOf(job.held);
+  is("the set stays at its cap", [kept.length, kept.includes(String(extra.id))], [HELD_REFUND_MAX_KEPT, false]);
+  is("and the anchor does not move past the one not kept", (await anchorOf(job.anchor)) <= t - 120, true);
 }
 
 async function main(): Promise<void> {

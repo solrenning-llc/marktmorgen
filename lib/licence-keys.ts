@@ -67,7 +67,7 @@ import { readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
 // On its own line, so open pull requests that change the refunds import above still merge cleanly.
-import { unfinishedRefund } from "@/lib/refunds";
+import { keepRefunds, readHeldRefunds, releaseHeld } from "@/lib/held-refunds";
 import {
   MAX_PREFIX_LENGTH,
   MIN_GROUPS,
@@ -470,6 +470,8 @@ export async function setRevoked(
 
 const refundAnchorKey = (store: Store) => `nl:keys:${store.statsId}:refunds:since`;
 const refundSeenKey = (store: Store) => `nl:keys:${store.statsId}:refunds:seen`;
+/** Refunds Stripe has not finished, kept for a later look (lib/held-refunds.ts). */
+const refundHeldKey = (store: Store) => `nl:keys:${store.statsId}:refunds:held`;
 /** How far back the first look goes, and how long a refund is remembered as read. */
 const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
 /** Pages of a hundred refunds, and payments looked up, per store per run. */
@@ -557,9 +559,13 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // anchor stays, so the next run looks at it again.
   let unsure = false;
   let lostRead: LostRead | null = null;
-  // The time of the oldest refund read that Stripe has not finished and that gives nothing back yet (Infinity: none).
-  let waiting = Number.POSITIVE_INFINITY;
   const handles = saleHandles(store);
+  // Refunds Stripe had not finished when an earlier run read them, kept by id with an end (lib/held-refunds.ts; rule 30):
+  // those that now give everything back are read with the first page, as a refund of the window is.
+  const heldKey = refundHeldKey(store);
+  const held = await readHeldRefunds(account, heldKey, now, deadline);
+  // Every row handled this run, so one listed twice (kept and in the window) is handled once.
+  const handledIds = new Set<string>();
 
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
@@ -571,20 +577,27 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : null;
     if (lost) lostRead = lost;
     if (lost && !lost.complete) unsure = true;
-    const rows = [...(lost?.rows ?? []), ...refunds];
+    // A refund Stripe has not finished is kept for a later look before the anchor can move past it (rule 30; review of
+    // #3188): once it goes through it is read back by its id and its key is revoked, however many refunds came after.
+    // One that cannot be kept (its id or time does not read, or too many kept): the anchor stays where it was.
+    if (!(await keepRefunds(heldKey, refunds, now))) unsure = true;
+    const rows = [...(lost?.rows ?? []), ...(page === 0 ? held.rows : []), ...refunds];
+    // Which of the page's rows that give back an earlier run already read: one command for the page.
+    const givers = rows.map((row) => (typeof row.id === "string" ? row.id : "")).filter((id, i) => id && rowGivesBack(rows[i]));
+    const flags = givers.length ? ((await redisPipeline([["SMISMEMBER", refundSeenKey(store), ...givers]]))[0] as unknown[]) : [];
+    if (!Array.isArray(flags) || flags.length !== givers.length) throw new Error("The refunds already read did not read");
+    const seenBefore = new Set(givers.filter((_, i) => Number(flags[i]) === 1));
     for (const refund of rows) {
       if (Date.now() >= deadline) break;
       const id = typeof refund.id === "string" ? refund.id : "";
-      const created = typeof refund.created === "number" ? refund.created : 0;
-      if (!id) continue;
-      if (!rowGivesBack(refund)) {
-        // A refund Stripe has not finished holds the anchor at its time (rule 30; review of #3188): a later full
-        // refund never moves the read past it, so it is read again once it goes through and its key is revoked.
-        if (unfinishedRefund(refund)) waiting = Math.min(waiting, created);
-        continue;
-      }
-      const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
-      if (Number(seen) === 1) {
+      // A row with no readable time never moves the anchor.
+      const created = typeof refund.created === "number" && Number.isSafeInteger(refund.created) ? refund.created : 0;
+      if (!id || handledIds.has(id)) continue;
+      if (!rowGivesBack(refund)) continue;
+      if (seenBefore.has(id)) {
+        handledIds.add(id);
+        const release = releaseHeld(heldKey, held, id);
+        if (release.length) await redisPipeline(release);
         newest = Math.max(newest, created);
         continue;
       }
@@ -595,7 +608,9 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         await redisPipeline([
           ["SADD", refundSeenKey(store), id],
           ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+          ...releaseHeld(heldKey, held, id),
         ]);
+        handledIds.add(id);
         newest = Math.max(newest, created);
         continue;
       }
@@ -652,7 +667,9 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       await redisPipeline([
         ["SADD", refundSeenKey(store), id],
         ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+        ...releaseHeld(heldKey, held, id),
       ]);
+      handledIds.add(id);
       newest = Math.max(newest, created);
     }
     const last = refunds[refunds.length - 1];
@@ -677,7 +694,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
   // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  if (done) await redisPipeline([["SET", refundAnchorKey(store), String(Math.min(Math.max(newest, anchor), Math.max(waiting, since))), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  if (done) await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   else if (!(Number(anchorRaw) > 0)) {
     await redisPipeline([
       ["SET", refundAnchorKey(store), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],

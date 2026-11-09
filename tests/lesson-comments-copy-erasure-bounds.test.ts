@@ -12,6 +12,17 @@
  *      walk it in HSCAN pages, so each call's work and time have a ceiling, and the erasure counts its pages.
  *   4. LOW: copyReadWork counts the EVAL and the HSCAN it runs, both billed (docs/backup.md); and the name a student
  *      chose, which the erasure deletes (lib/person-data.ts), is in the copy even without a comment.
+ *
+ * Rule 24 and the final pre-review of the branch (Claude 5, 9 November 2026):
+ *
+ *   5. MEDIUM, older: the commands FORGET_LESSON_COMMENTS runs for each comment it deletes (HDEL, ZREM, HINCRBY...)
+ *      were counted nowhere, and nothing bounded how many it could delete. They are counted in the erasure's size
+ *      (commentTakes), the script deletes no more than it is given, and it runs at most four for each.
+ *   6. MEDIUM: the erasure was charged for the pages of the course's record as it was counted (erasureSize), then
+ *      counted it again before it walked and walked as far as the new count allowed. It walks no further, and deletes
+ *      no more, than what was charged; past it the walk stops and says so.
+ *   7. LOW: a step's HMGET were counted twice a step whatever HSCAN answered; a step of more than 1,000 fields is
+ *      refused before anything changes, so they are.
  */
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { COPIERS } from "@/lib/person-copy";
@@ -20,8 +31,8 @@ import { FORGET_LESSON_COMMENTS, FORGET_PASSES, LESSON_COMMENTS_OF, copyReadWork
 import { serializeComment, type LessonComment } from "@/lib/lesson-comments-rules";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
-import { ERASE_PER, erasureWork, type ErasureScope } from "@/lib/erasure-rules";
-import { erasureSize } from "@/lib/person-erasure";
+import { ERASE_PER, erasureWork, type ErasureScope, type ErasureSize } from "@/lib/erasure-rules";
+import { ERASERS, erasureSize } from "@/lib/person-erasure";
 import { dataUsed, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -83,6 +94,45 @@ async function measured<T>(run: () => Promise<T>): Promise<{ value: T; commands:
   } finally {
     redis.pipeline = pipeline;
   }
+}
+
+/**
+ * What `run` sends and what the erasure's script runs inside: each pipeline's commands, and, inside every step of
+ * FORGET_LESSON_COMMENTS, its HSCAN (scanStep, not a command of the stand-in) and every command it runs, which
+ * Upstash bills one by one (docs/backup.md).
+ */
+async function everyCommand<T>(run: () => Promise<T>): Promise<{ value: T | undefined; error: string; outside: number; inside: number; steps: number }> {
+  const own = redis.run;
+  const seen = { outside: 0, inside: 0, steps: 0 };
+  let depth = 0;
+  redis.run = function (this: typeof redis, command: (string | number)[]) {
+    const step = command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:lesson-comments-forget:");
+    if (depth > 0) seen.inside += 1;
+    else seen.outside += 1;
+    if (step) {
+      seen.steps += 1;
+      seen.inside += 1;
+      depth += 1;
+    }
+    try {
+      return own.call(this, command);
+    } finally {
+      if (step) depth -= 1;
+    }
+  } as typeof redis.run;
+  try {
+    let value: T | undefined;
+    const error = await failed(async () => { value = await run(); });
+    return { value, error, ...seen };
+  } finally {
+    redis.run = own;
+  }
+}
+
+/** The commands an erasure of this size counts for its courses, past what every erasure counts. */
+function courseCommands(size: ErasureSize): number {
+  const { products: _p, deals: _d, conversations: _c, dmConversations: _m, roomMessages: _r, events: _e, certificates: _t, ...courseParts } = size;
+  return erasureWork(courseParts).commands - erasureWork({}).commands;
 }
 
 async function main(): Promise<void> {
@@ -195,6 +245,66 @@ async function main(): Promise<void> {
   };
   for (const dir of ["app", "lib", "components"]) walk(dir);
   is("nothing outside lib/person-copy.ts calls copyPerson", callers, []);
+
+  const freshScope = () => ({ ...scope, courses: scope.courses.map((c) => ({ ...c })) }) as ErasureScope;
+  const eraser = ERASERS.find((e) => e.module === "lib/lesson-comments.ts")!;
+
+  part("9. Every command the erasure runs, a script's inside too, is within what it counts (rule 24)");
+  redis.clear();
+  // Ana's 40 threads with two answers of Ben under each, and Ben's 30 threads with an answer of Ana under each.
+  const many: LessonComment[] = [];
+  for (let k = 0; k < 40; k += 1) {
+    const thread = comment({ id: id("at", k), by: ana, at: now - 50_000 + k });
+    many.push(thread, comment({ id: id("ba", k), by: ben, at: now - 40_000 + k, parent: thread.id }), comment({ id: id("bb", k), by: ben, at: now - 30_000 + k, parent: thread.id }));
+  }
+  for (let k = 0; k < 30; k += 1) {
+    const thread = comment({ id: id("bt", k), by: ben, at: now - 20_000 + k, lesson: L2 });
+    many.push(thread, comment({ id: id("aa", k), by: ana, at: now - 10_000 + k, parent: thread.id, lesson: L2 }));
+  }
+  keep(many);
+  const scope9 = freshScope();
+  const counted9 = courseCommands(await erasureSize(scope9));
+  const ran9 = await everyCommand(() => eraser.run(scope9, [], new Set()));
+  is("it finishes", ran9.error, "");
+  is("her 70 and the 80 answers under her threads go", ran9.value, 150);
+  is("only Ben's 30 threads are kept", (await redis.pipeline([["HLEN", `nl:lc:${COURSE}:c`]]))[0], 30);
+  is(`every command it runs (${ran9.outside} sent and ${ran9.inside} inside its ${ran9.steps} steps) is within what it counts (${counted9})`,
+    ran9.outside + ran9.inside <= counted9, true);
+
+  part("10. Comments written after the erasure was counted: it walks no further, and deletes no more, than it was charged for");
+  redis.clear();
+  keep(mine);
+  const scope10 = freshScope();
+  const counted10 = courseCommands(await erasureSize(scope10));
+  const later: LessonComment[] = [];
+  for (let k = 0; k < 3_000; k += 1) later.push(comment({ id: id("n", k), by: ben, at: now - 5_000 + k }));
+  keep(later);
+  const ran10 = await everyCommand(() => eraser.run(scope10, [], new Set()));
+  is("the walk stops where it was counted and says so, never walks on unpaid", ran10.error !== "", true);
+  is(`what it ran (${ran10.outside} sent and ${ran10.inside} inside) is within what was counted (${counted10})`,
+    ran10.outside + ran10.inside <= counted10, true);
+
+  // FORGET_LESSON_COMMENTS's own arguments, as forgetLessonCommentsPerson sends them: KEYS the comments, the newest,
+  // the answer counts, each lesson's comments; ARGV the student, the cursor, the COUNT, the mode, ENTRY_BYTES,
+  // DATA_STEP_BYTES, the most it may delete, then each lesson's id.
+  const step = (count: number, most: number, mode = "all") => ["EVAL", FORGET_LESSON_COMMENTS, 4, `nl:lc:${COURSE}:c`, `nl:lc:${COURSE}:all`, `nl:lc:${COURSE}:r`, `nl:lc:${COURSE}:l:${L1}`, ana, "0", count, mode, 128, 16, most, L1];
+
+  part("11. A step that would delete more than it was given deletes nothing");
+  redis.clear();
+  keep([0, 1, 2].map((k) => comment({ id: id("as", k), by: ana, at: now - 100 + k })));
+  keep([0, 1].map((k) => comment({ id: id("bs", k), by: ben, at: now - 50 + k })));
+  is("given two for her three, it is refused", (await redis.pipeline([step(200, 2)]))[0], ["x"]);
+  is("and all five are kept", (await redis.pipeline([["HLEN", `nl:lc:${COURSE}:c`]]))[0], 5);
+  const given3 = (await redis.pipeline([step(200, 3)]))[0] as unknown[];
+  is("given three, her three go", [given3[0], given3[1], given3[3]], ["0", 3, 0]);
+
+  part("12. A step HSCAN answers with more than 1,000 fields is refused before anything changes");
+  redis.clear();
+  const crowd: LessonComment[] = [];
+  for (let k = 0; k < 1_200; k += 1) crowd.push(comment({ id: id("c", k), by: ben, at: now - 9_000 + k }));
+  keep([comment({ id: id("a", 7), by: ana, at: now - 10_000 }), ...crowd]);
+  is("a step of 1,201 fields is refused", (await redis.pipeline([step(1_500, 10)]))[0], ["x"]);
+  is("and nothing went", (await redis.pipeline([["HLEN", `nl:lc:${COURSE}:c`]]))[0], 1_201);
   done();
 }
 

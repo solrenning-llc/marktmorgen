@@ -1,9 +1,9 @@
-import { withinStore } from "@/lib/metered-limits";
+import { withinStoreWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { readOrder } from "@/lib/store-checkout";
+import { readOrderAdmitted, takeBuyerRequest } from "@/lib/order-lookup";
 import {
   BUYER_COOKIE,
   buyerFingerprint,
@@ -50,14 +50,13 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
   // A press may email the buyer a link, so it is counted like the other
   // forms that send one: per connection, and per order.
-  if (
-    !(await withinStore("course-start", `${clientAddress(request)}|${store.handle}`, 10, 3600, store, "buyer")) ||
-    !(await withinLimit("course-start-order", sessionId.slice(0, 220), 5, 3600))
-  ) {
-    return away(`/@${store.handle}`);
-  }
-
-  const order = await readOrder(store, sessionId);
+  // The press is counted after the id is known to be an order's (lib/order-lookup.ts): a made-up number spends nothing
+  // of the buyers' reserve, and a paid order takes one buyers' request.
+  const order = await readOrderAdmitted(store, sessionId, {
+    lookup: async () => ((await withinLimit("course-start-order", sessionId.slice(0, 220), 5, 3600)) ? withinStoreWhy("course-start", `${clientAddress(request)}|${store.handle}`, 10, 3600, store, "lookup") : "tries"),
+    paid: () => takeBuyerRequest(store),
+  });
+  if (order.state === "slow" || order.state === "resting") return away(`/@${store.handle}`);
   if (order.state !== "paid" || order.gift || order.group || order.preorder) return away(`/@${store.handle}`);
   // The course named, when this order hands it over (lib/order-courses.ts): in a bundle, or a cart's product after its first.
   const product = courseToStart(order, asked);

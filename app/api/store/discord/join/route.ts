@@ -1,9 +1,9 @@
-import { withinStore } from "@/lib/metered-limits";
+import { withinStore, withinStoreWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { fromAnotherSite, limited, clientAddress } from "@/lib/request-guard";
-import { readOrder } from "@/lib/store-checkout";
+import { readOrderAdmitted, takeBuyerRequest } from "@/lib/order-lookup";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { authorizeUrl, isDiscordConfigured, redirectUri } from "@/lib/discord";
 import { readServer, startTrip } from "@/lib/discord-store";
@@ -34,11 +34,17 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
   const page = (status: string) => new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/discord?status=${status}`, "Cache-Control": "no-store" } });
   if (!isDiscordConfigured() || !store.sid || !(await readServer(storeKey(store)))) return page("off");
-  if (!(await withinStore("discord-join", clientAddress(request), 20, 600, store, "buyer"))) return page("failed");
+  // A link from the buyer's orders reads no order: it takes one buyers' request, as before. An order number is counted
+  // after it is known to be one (lib/order-lookup.ts): made-up ids never spend the buyers' reserve.
+  if (!sessionId && !(await withinStore("discord-join", clientAddress(request), 20, 600, store, "buyer"))) return page("failed");
 
   let email: string | null = null;
   if (sessionId) {
-    const order = await readOrder(store, sessionId);
+    const order = await readOrderAdmitted(store, sessionId, {
+      lookup: () => withinStoreWhy("discord-join", clientAddress(request), 20, 600, store, "lookup"),
+      paid: () => takeBuyerRequest(store),
+    });
+    if (order.state === "slow" || order.state === "resting") return page("failed");
     email = order.state === "paid" && !order.gift && !order.group ? order.email : null;
   } else if (token) {
     email = await ordersGrant(store, token);

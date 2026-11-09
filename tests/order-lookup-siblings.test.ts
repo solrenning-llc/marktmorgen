@@ -96,12 +96,17 @@ async function main(): Promise<void> {
     is(`${label}: none of the 400 reached Stripe`, lookups - before, 0);
     is(`${label}: the buyers' reserve is whole`, await buyersLeft(store, now), reserve);
 
-    part(`${label}: a real paid order takes exactly one buyers' request`);
+    part(`${label}: a real paid order counts its lookup on the public side and takes exactly one buyers' request`);
     const fresh = await build();
     const at = Date.now();
     const freshTotal = requestLimitFor(fresh, at / 1000);
+    const freshReserve = freshTotal - publicVisitLimit(freshTotal);
+    // One public request of room: the lookup takes it, the paid order then takes one of the buyers' reserve.
+    await takePublicRequest(fresh, "public", at, publicVisitLimit(freshTotal) - 1);
+    const asked = lookups;
     await post(route, path, "192.0.2.1", PAID);
-    is(`${label}: the buyers' side gave one request less than it holds`, await buyersLeft(fresh, at), freshTotal - 1);
+    is(`${label}: Stripe was asked once`, lookups - asked, 1);
+    is(`${label}: the buyers' reserve gave one request less than it holds`, await buyersLeft(fresh, at), freshReserve - 1);
   }
   done();
 }

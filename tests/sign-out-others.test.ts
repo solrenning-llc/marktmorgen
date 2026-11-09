@@ -17,7 +17,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, emailForSession, endOtherSessions, openSession, sessionMark } from "@/lib/auth";
 import { POST as signOutOthers } from "@/app/api/auth/signout-others/route";
 import { openLockedSession } from "@/lib/two-step";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 
 type Command = (string | number)[];
 type Answer = { reply: unknown } | "throw" | null;
@@ -52,6 +52,7 @@ const isSessionRead = (c: Command) => c[0] === "GET" && String(c[1]).startsWith(
 const isSetRead = (c: Command) => c[0] === "SMEMBERS" && String(c[1]).startsWith("nl:auth:sessions:");
 const DONE = `${SITE}/studio/devices?status=out-others`;
 const UNKNOWN = `${SITE}/studio/devices?status=out-others-unknown`;
+const REAUTH = `${SITE}/studio/devices?status=out-others-reauth`;
 const cookieCleared = (response: Response) => response.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=;`));
 
 // ---- The function ------------------------------------------------------------------------------------------------
@@ -165,6 +166,35 @@ test("a session let in without its second step (locked) may not log the others o
   assert.equal(await emailForSession(laptop), OWNER);
 });
 
+test("a session that is not fresh (a cookie that walked off) may not log the owner out and stay in (Claude 3 on #3459)", async () => {
+  // Unlike "Log out of all devices", this keeps the presser logged in, so it needs a login from the last
+  // FRESH_LOGIN_SECONDS, as adding a passkey or a recovery address does; otherwise a stolen cookie could log the
+  // owner out everywhere, again each time they came back.
+  redis.clear();
+  const owner = await openSession(OWNER);
+  const stolen = await openSession(OWNER);
+  advance(16 * 60 * 1000);
+  const response = await signOutOthers(post(stolen));
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get("location"), REAUTH);
+  assert.deepEqual([await emailForSession(owner), await emailForSession(stolen)], [OWNER, OWNER], "nothing is closed");
+  // A fresh login (the owner's own, just now) still may.
+  const fresh = await openSession(OWNER);
+  const done = await signOutOthers(post(fresh));
+  assert.equal(done.headers.get("location"), DONE);
+  assert.deepEqual([await emailForSession(owner), await emailForSession(stolen), await emailForSession(fresh)], [null, null, OWNER]);
+});
+
+test("a freshness read that is not an exact answer is not fresh: nothing is closed", async () => {
+  redis.clear();
+  const here = await openSession(OWNER);
+  const laptop = await openSession(OWNER);
+  const isFreshRead = (c: Command) => c[0] === "EXISTS" && String(c[1]).startsWith("nl:auth:fresh:");
+  const response = await tampered((c) => (isFreshRead(c) ? { reply: "1" } : null), () => signOutOthers(post(here)));
+  assert.equal(response.headers.get("location"), REAUTH);
+  assert.equal(await emailForSession(laptop), OWNER);
+});
+
 test("a request from another site is refused before anything is read", async () => {
   redis.clear();
   const here = await openSession(OWNER);
@@ -193,4 +223,20 @@ test("the studio links to the page, and the page asks before it closes anything 
   // One h1, and the page names the region it lives in.
   assert.equal(page.match(/<h1\b/g)?.length, 1);
   assert.match(page, /<main id="content"/);
+});
+
+test("the page asks a session that is not fresh to log in again, in plain words, with a way to do it", () => {
+  const page = read("app/studio/devices/page.tsx");
+  assert.match(page, /"out-others-reauth"/);
+  assert.match(page, /For your safety, log in again to log out your other devices\./);
+  assert.match(page, /href="\/signin"/);
+});
+
+test("the page promises no more than the code does (Claude 3 on #3459, rule 27)", () => {
+  const page = read("app/studio/devices/page.tsx");
+  // A login that finishes during the sign-out may stay open, so the page never says "every other device is logged out".
+  assert.doesNotMatch(page, /Every other device is logged out/);
+  assert.match(page, /Every other device that was logged in is now logged out\./);
+  // API keys are not sessions: a script holding one keeps working until the key is revoked.
+  assert.match(page, /API keys are not affected/);
 });

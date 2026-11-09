@@ -7,10 +7,12 @@ export type AffiliateCommissionLine = {
   promotion?: AffiliatePromotion | null;
 };
 /**
- * What the creator's list says under a held sale (lib/affiliates.ts, holdLine): why, and that it stays held. There is
- * no way in the studio to set a commission by hand, so nothing else is offered.
+ * What the creator's list says under a held sale (lib/affiliates.ts, holdLine): why, promising nothing (the amount
+ * refunded is never read). There is no way in the studio to set a commission by hand, so nothing else is offered.
  */
-export const HELD_PARTLY_REFUNDED = "PayPal refunded part of this payment. The amount refunded is not known here, so no commission is paid on it. It stays held.";
+export const HELD_PARTLY_REFUNDED = "PayPal refunded part of this payment. The amount refunded can't be seen here, so this sale earns nothing.";
+/** And under a commission paid before PayPal refunded part of the sale (lib/affiliates.ts, paidBeforeHold). */
+export const PAID_PARTLY_REFUNDED = "This commission was paid before PayPal refunded part of the payment. The amount refunded can't be seen here, so nothing is taken back from later commissions.";
 /**
  * What a commission line shows as its amount: the word for held (`held`, in the reader's language) for a sale held
  * because PayPal refunded part of it (lib/affiliates.ts, holdLine), never an amount it does not earn; otherwise its

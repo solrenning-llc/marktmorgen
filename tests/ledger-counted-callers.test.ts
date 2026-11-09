@@ -102,7 +102,8 @@ async function main(): Promise<void> {
   const shop = await load();
   await upsertContact(shop.listId as string, "ann@example.com", { agreed: true, explicit: true, source: "import" }, ROOM);
   const ledgerKey = `nl:stats:${shop.statsId}:ledger`;
-  const copy = () => redisPipeline([["SET", ledgerKey, JSON.stringify({ c: shop.currency, p: false, r: [["ann@example.com", 9000, Date.now(), "direct", 2]], v: 6 })]]);
+  // Rule 23: the kept copy's shape is 7 since it says why it is partial (m, q; lib/segments.ts LEDGER_SHAPE), was 6.
+  const copy = () => redisPipeline([["SET", ledgerKey, JSON.stringify({ c: shop.currency, p: false, m: false, q: false, r: [["ann@example.com", 9000, Date.now(), "direct", 2]], v: 7 })]]);
   // The studio's counter of the month running now (a scheduled email may hold in later months' counters too).
   const nowKey = () => redis.keys().find((key) => key.startsWith("nl:allow:studio:") && key.endsWith(`:${windowId(shop)}`))!;
   const keyAt = (ms: number) => nowKey().replace(/:[^:]+$/, `:${windowAt(shop, ms)!.id}`);

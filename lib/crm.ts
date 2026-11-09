@@ -232,21 +232,32 @@ export function readPageMark(statsId: string, person: string, mark: unknown, now
 }
 
 /** The person's generation as it is now (generationKey): what a page reads with them, and a save from it carries. */
+/**
+ * A generation exactly as GET answers it (rule 24): null is a person never
+ * deleted (0), a decimal string of a safe whole number is that generation;
+ * a missing slot, a number, a fraction, a sign, a leading zero or any other
+ * text is unknown (-1), never 0 (independent review of #2287, LOW 2). An
+ * unknown generation signs no page mark (pageMark) and is never written over.
+ */
+function generationOf(raw: unknown): number {
+  if (raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(raw)) return -1;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : -1;
+}
+
 export async function readGeneration(statsId: string | null, person: string): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["GET", generationKey(statsId, person)]]);
-  const n = Number(raw ?? 0);
-  return Number.isSafeInteger(n) && n >= 0 ? n : 0;
+  const replies = await redisPipeline([["GET", generationKey(statsId, person)]]);
+  return Array.isArray(replies) && replies.length === 1 ? generationOf(replies[0]) : -1;
 }
 
 /** Several people's generations at once, in one trip: what a workflow step reads when it starts, before it sets their values. */
 export async function readGenerations(statsId: string, persons: string[]): Promise<number[]> {
   if (!persons.length || !isRedisConfigured()) return persons.map(() => 0);
   const replies = await redisPipeline(persons.map((person) => ["GET", generationKey(statsId, person)]));
-  return persons.map((_, i) => {
-    const n = Number(replies[i] ?? 0);
-    return Number.isSafeInteger(n) && n >= 0 ? n : -1;
-  });
+  // A reply slot that is missing is unknown, as is every slot of an envelope that is not an array.
+  return persons.map((_, i) => (Array.isArray(replies) && i < replies.length ? generationOf(replies[i]) : -1));
 }
 
 /**

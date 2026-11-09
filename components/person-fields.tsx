@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/leave-guard";
-import { crmAnswer } from "@/lib/crm-response";
+import { crmAnswer, crmRefusalMessage } from "@/lib/crm-response";
 import { NewTab } from "@/components/new-tab";
 import { toast } from "@/components/toast";
 import { type CrmField, crmPhone, crmUrl, MAX_FIELD_VALUE, severalPicked, whatsappLink } from "@/lib/crm-rules";
@@ -53,17 +53,7 @@ export function PersonFields({ person, fields, initial, mark }: { person: string
         setWriteUnconfirmed(true);
         setMessage("This change could not be confirmed and may already be saved. Keep a copy of your values, then reload and check the contact before trying again. Saving is paused until you reload.");
       } else {
-        setMessage(
-          answer.error === "value"
-            ? "This field cannot keep that value. Your entry is still here; correct it and try again."
-            : answer.error === "unknown"
-                ? "This person or this field is no longer in your store, so nothing was saved. Reload the page to see your contacts as they are now."
-                : answer.error === "studio_used"
-                  ? "Your studio has no requests left this month, so nothing was saved. Your entry is still here."
-                  : answer.error === "unavailable"
-                    ? "This could not be counted right now, so nothing was saved. Your entry is still here; try again in a minute."
-                    : "This change was refused. Your entry is still here; check your access and try again.",
-        );
+        setMessage(crmRefusalMessage(answer.error));
       }
     } catch {
       uncertain.current = true;

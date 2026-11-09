@@ -100,7 +100,7 @@ async function main(): Promise<void> {
     for (let i = 0; i < 3; i += 1) await sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
   });
   const value = (await readValues(statsId, person, fields)).lvl001 ?? "";
-  const notes = ((await readRun(flowId, personOf("ana@example.com")))?.events ?? []).filter((e) => e.kind === "field").map((e) => e.note);
+  const notes = ((await readRun(flowId, personOf("ana@example.com")))?.events ?? []).filter((e) => e.kind === "field" && e.state !== "attempted").map((e) => e.note);
   is("nothing is written", value, "");
   is("the step says the person could not be read, never that they were deleted", [notes.length > 0, notes.some((n) => /deleted/.test(n)), notes.every((n) => /could not be read/.test(n))], [true, false, true]);
 }

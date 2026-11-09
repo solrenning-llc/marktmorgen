@@ -815,6 +815,12 @@ async function actOnPeople(
       return each(emails, "failed", `“${field.name}” was not set: the people could not be read just now.`);
     }
     for (const [i, email] of emails.entries()) {
+      // A generation that could not be read is never taken for a deletion (lib/crm.ts, readGenerations): nothing is
+      // written, and the step says it could not read the person (independent review of #2287, LOW 2).
+      if (!(generations[i] >= 0)) {
+        out.push({ email, state: "failed", note: `“${field.name}” was not set: this person could not be read just now.` });
+        continue;
+      }
       try {
         // And only while this run still holds its lease, checked in the write itself: a deletion takes it away (Codex G, #2287).
         out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store, generations[i], at.lease ? { key: LEASE, ...at.lease(email) } : undefined)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });

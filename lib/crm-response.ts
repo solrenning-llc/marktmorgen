@@ -21,6 +21,21 @@ function currentDeal(raw: unknown): CrmCurrentDeal | null {
   return { deal: deal as Deal, version };
 }
 
+/**
+ * What a contact field shows when its save was refused. A page whose mark
+ * cannot save ("stale": opened longer ago than PAGE_MARK_SECONDS, or its
+ * person could not be read when it was drawn) is told to reload: trying again
+ * from it never helps (independent review of #2287, LOW 1).
+ */
+export function crmRefusalMessage(error: string): string {
+  if (error === "stale") return "This page was opened too long ago to save from. Copy your entry, then reload the page and try again.";
+  if (error === "value") return "This field cannot keep that value. Your entry is still here; correct it and try again.";
+  if (error === "unknown") return "This person or this field is no longer in your store, so nothing was saved. Reload the page to see your contacts as they are now.";
+  if (error === "studio_used") return "Your studio has no requests left this month, so nothing was saved. Your entry is still here.";
+  if (error === "unavailable") return "This could not be counted right now, so nothing was saved. Your entry is still here; try again in a minute.";
+  return "This change was refused. Your entry is still here; check your access and try again.";
+}
+
 /** Transport or ambiguous replies cannot prove that a CRM write did not happen. */
 export function crmAnswer(responseOk: boolean, raw: unknown): CrmAnswer {
   const uncertain: CrmAnswer = { ok: false, error: "crm_write_unconfirmed" };

@@ -48,7 +48,10 @@
  */
 import { createHash } from "node:crypto";
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { claimHandle, ensureStatsId, addProduct, editProduct, setProductLink, setSubscription, setPayPalSeller, setAffiliateSetting, storeForEmail, type Store } from "@/lib/store";
+import { claimHandle, ensureStatsId, addProduct, editProduct, setProductCourse, setProductLink, setSubscription, setPayPalSeller, setAffiliateSetting, storeForEmail, type Store } from "@/lib/store";
+import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
+import { emailKey, storeKey } from "@/lib/learn";
+import { ROOM } from "./data-room";
 import { forgetNoted, noteForErasure } from "@/lib/erasure-index";
 import { liftCommand } from "@/lib/suppression";
 import { importedKey } from "@/lib/imported-purchases";
@@ -957,6 +960,100 @@ async function main(): Promise<void> {
   await sweep(6 / 60);
   undoM10();
   is("the refund is told, its buyer's address left out", (await refundOf(m10))?.buyer, { email: null, name: null });
+
+  part("N: the person's own deletion completes between a try's purchase write and its later writes: the course and the affiliate bond it wrote are taken back");
+  startOfNextDay();
+  resendMode = "up";
+  let courseN = emptyCourse();
+  const lessonN = editCourse(courseN, { op: "lesson-add", moduleId: courseN.modules[0].id, title: "One" });
+  if (!lessonN.ok) throw new Error("no lesson");
+  courseN = lessonN.course;
+  await saveCourse(courseN, ROOM);
+  const addedN = await addProduct("owner@example.com", "Bread Course", "", "49", null);
+  if (!addedN.ok) throw new Error("no course product");
+  const setN = await setProductCourse("owner@example.com", addedN.product.id, { id: courseN.id, lessons: 1 });
+  if (!setN.ok) throw new Error("not a course");
+  await setAffiliateSetting("owner@example.com", { ...NO_AFFILIATES, enabled: true, percent: 30, lifetime: true });
+  const AFF_N = "0a1b2c3d4e5f";
+  const OTHER_AFF = "9f8e7d6c5b4a";
+  for (const id of [AFF_N, OTHER_AFF]) {
+    redis.run(["HSET", `nl:aff:${statsId}:people`, id, JSON.stringify({ id, email: `${id}@example.com`, code: `c${id}`, status: "approved", appliedAt: 1, decidedAt: 1, note: "" })]);
+  }
+  const bondKeyN = `nl:aff:${statsId}:bond`;
+  const bondOf = (buyer: string) => createHash("sha256").update(`nimbus-aff-bond:${statsId}:${buyer}`).digest("hex").slice(0, 32);
+  const ledgerOf = async (buyer: string) => `nl:learn:enr:${storeKey(await fresh())}:${emailKey(buyer)}`;
+  const courseListing: Listing = (await readListing(await fresh(), addedN.product.id))!;
+  /** Pays for the course through the return route, with the affiliate's visit; `during` runs while the pipeline sent right after the purchase write is held. */
+  const payCourse = async (n: number, buyer: string, during?: () => Promise<void>): Promise<string> => {
+    buyerFor = buyer;
+    const opened = await openOrder(await fresh(), courseListing, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT, via: { aff: AFF_N, rate: 30 } });
+    if (!opened.ok) throw new Error(opened.reason);
+    const pipeline = redis.pipeline.bind(redis);
+    let entered!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>((resolve) => (entered = resolve));
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let wrote = false;
+    let held = false;
+    if (during) {
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        if (held) return pipeline(commands);
+        if (!wrote) {
+          if (commands.some(writesPurchase)) wrote = true;
+          return pipeline(commands);
+        }
+        held = true;
+        entered();
+        await released;
+        return pipeline(commands);
+      }) as typeof redis.pipeline;
+    }
+    const paying = paypalReturn(new NextRequest(`https://marktmorgen.com/api/store/paypal/return?store=harbor&token=${opened.order}`, { headers: { host: "marktmorgen.com", "x-forwarded-for": `198.51.100.${n}` } }));
+    if (during) {
+      await reached;
+      await during();
+      release();
+    }
+    await paying;
+    redis.pipeline = pipeline;
+    return opened.order;
+  };
+
+  const buyerN0 = "course-bond-control@example.com";
+  const n0 = await payCourse(40, buyerN0);
+  is("control: with no deletion, the try writes the purchase, the course and the bond", [purchasesOf(buyerN0), redis.run(["HEXISTS", await ledgerOf(buyerN0), addedN.product.id]), redis.run(["HGET", bondKeyN, bondOf(buyerN0)])], [1, 1, AFF_N]);
+  is("control: and leaves the list", (await listed()).includes(n0), false);
+
+  const buyerN1 = "erased-after-purchase-write@example.com";
+  const n1 = await payCourse(41, buyerN1, async () => {
+    const erased = await erasePerson(await fresh(), buyerN1, { kind: "person" });
+    is("the deletion completes while the try is held after its purchase write", erased.ok, true);
+    is("control: the deletion took the purchase that try wrote", purchasesOf(buyerN1), 0);
+  });
+  is("nothing was sent to them", copies(buyerN1).length, 0);
+  is("the order leaves the list in that try", (await listed()).includes(n1), false);
+  is("the purchase stays taken", purchasesOf(buyerN1), 0);
+  is("the course that try wrote after the deletion is taken back", redis.run(["HEXISTS", await ledgerOf(buyerN1), addedN.product.id]), 0);
+  is("the affiliate bond that try wrote after the deletion is taken back", redis.run(["HEXISTS", bondKeyN, bondOf(buyerN1)]), 0);
+  await sweeps(2);
+  is("later sweeps leave nothing of them", [purchasesOf(buyerN1), redis.run(["HEXISTS", await ledgerOf(buyerN1), addedN.product.id]), redis.run(["HEXISTS", bondKeyN, bondOf(buyerN1)]), copies(buyerN1).length], [0, 0, 0, 0]);
+
+  part("N: a course and a bond written after the deletion by a later order are kept by the take-back");
+  startOfNextDay();
+  await setAffiliateSetting("owner@example.com", { ...NO_AFFILIATES, enabled: true, percent: 30, lifetime: true, rule: "first" });
+  const buyerN2 = "erased-then-later-order@example.com";
+  const laterStart = String(Math.floor(Date.now() / 1000) + 3_600);
+  const n2 = await payCourse(42, buyerN2, async () => {
+    const erased = await erasePerson(await fresh(), buyerN2, { kind: "person" });
+    is("the deletion completes while the try is held after its purchase write", erased.ok, true);
+    // What a later order of theirs writes, by another affiliate, with its own start.
+    redis.run(["HSET", await ledgerOf(buyerN2), addedN.product.id, laterStart]);
+    redis.run(["HSET", bondKeyN, bondOf(buyerN2), OTHER_AFF]);
+  });
+  is("the order leaves the list in that try", (await listed()).includes(n2), false);
+  is("the later order's course is kept, with its own start", redis.run(["HGET", await ledgerOf(buyerN2), addedN.product.id]), laterStart);
+  is("the later order's bond to another affiliate is kept", redis.run(["HGET", bondKeyN, bondOf(buyerN2)]), OTHER_AFF);
+  await setAffiliateSetting("owner@example.com", { ...NO_AFFILIATES, enabled: true, percent: 30 });
 
   done();
 }

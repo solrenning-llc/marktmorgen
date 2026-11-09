@@ -52,6 +52,7 @@ const DAY_SECONDS = 86_400;
 const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,128}$/;
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,128}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,128}$/;
+const CHARGE_STATUSES = new Set(["succeeded", "pending", "failed"]);
 
 /** One payment the refund gives back: its charge, the amount for it, and when it was paid (seconds). */
 export type PlanRefundPart = { chargeId: string; paymentIntent: string; invoiceId: string; cents: number; paidAtSeconds: number };
@@ -80,6 +81,12 @@ export type PlanRefundReading =
 type Row = Record<string, unknown>;
 const obj = (v: unknown): Row | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Row) : null);
 const idOf = (v: unknown): string => (typeof v === "string" ? v : typeof obj(v)?.id === "string" ? String(obj(v)!.id) : "");
+/**
+ * Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing.
+ * A reply that is not an object (a JSON null, a string, a number) is not its own either, never a TypeError (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : Number.NaN);
 
 class Spent extends Error {}
@@ -106,7 +113,29 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
     if (calls > MAX_CALLS || Date.now() > deadline) throw new Spent();
     return onPlatformAt(AT, "GET", path);
   };
-  const list = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).map(obj).filter((r): r is Row => r !== null) : []);
+  const list = (page: Row, maximum: number, object = "list"): Row[] | null => {
+    if (page.object !== object || typeof page.has_more !== "boolean" || !Array.isArray(page.data) || page.data.length > maximum) return null;
+    const rows = page.data.map(obj);
+    return rows.every((row): row is Row => row !== null) ? rows : null;
+  };
+  const embedded = (value: unknown): Row[] | null => {
+    const data = obj(value)?.data;
+    if (!Array.isArray(data)) return null;
+    const rows = data.map(obj);
+    return rows.every((row): row is Row => row !== null) ? rows : null;
+  };
+  const chargeHistoryRow = (row: Row): boolean =>
+    typeof row.id === "string" &&
+    CHARGE_ID.test(row.id) &&
+    typeof row.status === "string" &&
+    CHARGE_STATUSES.has(row.status) &&
+    typeof row.paid === "boolean" &&
+    row.paid === (row.status === "succeeded") &&
+    typeof row.created === "number" &&
+    Number.isSafeInteger(row.created) &&
+    row.created >= 0;
+  const customerSearchRow = (row: Row): boolean =>
+    typeof row.id === "string" && CUSTOMER_PATTERN.test(row.id) && typeof row.email === "string";
 
   try {
     const sub = await get(`/subscriptions/${encodeURIComponent(subscriptionId)}?expand[]=customer`);
@@ -122,7 +151,11 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
 
     const paidPage = await get(`/invoices?${new URLSearchParams({ subscription: subscriptionId, status: "paid", limit: "100" })}`);
     // A trial's invoice is paid with no charge: not a payment.
-    const paid = list(paidPage).filter((r) => idOf(r.subscription) === subscriptionId && idOf(r.charge) !== "");
+    const paidRows = list(paidPage, 100);
+    if (!paidRows || paidRows.some((r) => !INVOICE_ID.test(idOf(r.id)) || idOf(r.subscription) !== subscriptionId || r.status !== "paid" || (r.charge !== null && !CHARGE_ID.test(idOf(r.charge))))) {
+      return { refund: { kind: "unknown", reason: "unreadable" } };
+    }
+    const paid = paidRows.filter((r) => idOf(r.charge) !== "");
     if (!paid.length) return { refund: { kind: "none", reason: "no_plan_payment" } };
 
     /** Reads an invoice's charge and judges it by the rules. */
@@ -135,13 +168,15 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       let disputeStatus: string | null = null;
       let disputedCents: number | null = null;
       if (charge.disputed === true) {
-        const disputes = list(await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`));
+        const disputes = list(await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`), 10);
+        if (!disputes) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
         disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
         disputedCents = num(disputes[0].amount);
       }
-      const lines = list(obj(invoice.lines) ?? {});
+      const lines = embedded(invoice.lines);
+      if (!lines) return { refund: { kind: "unknown", reason: "unreadable" } };
       const line = lines.find((l) => l.type === "subscription");
       const price = obj(line?.price);
       const interval = obj(price?.recurring)?.interval;
@@ -179,14 +214,16 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
 
     // The customer's first succeeded charge, if the list shows them all.
     const chargesPage = await get(`/charges?${new URLSearchParams({ customer: customer.id, limit: "100" })}`);
-    const succeeded = list(chargesPage).filter((c) => c.status === "succeeded" && c.paid === true && Number.isFinite(num(c.created)));
+    const chargeRows = list(chargesPage, 100);
+    if (!chargeRows || chargeRows.some((row) => !chargeHistoryRow(row))) return { refund: { kind: "unknown", reason: "unreadable" } };
+    const succeeded = chargeRows.filter((c) => c.status === "succeeded" && c.paid === true && Number.isFinite(num(c.created)));
     const windowStart = nowSeconds - REFUND_DAYS * DAY_SECONDS;
     const oldestListed = succeeded.reduce<Row | null>((a, c) => (!a || num(c.created) < num(a.created) ? c : a), null);
     let first: Row | null = null;
     if (chargesPage.has_more === true) {
       // Over a page: every charge not listed is older than the oldest listed, of any status (a page of declined charges
       // holds no succeeded one, and the first payment may be on the next page). Inside the window if that one is.
-      const listedTimes = list(chargesPage).map((c) => num(c.created));
+      const listedTimes = chargeRows.map((c) => num(c.created));
       if (!listedTimes.length || listedTimes.some((t) => !Number.isFinite(t)) || Math.min(...listedTimes) >= windowStart) {
         return { refund: { kind: "unknown", reason: "too_many" } };
       }
@@ -196,7 +233,14 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       if (succeeded.some((c) => num(c.created) >= windowStart) && !succeeded.some((c) => num(c.created) < windowStart)) {
         return { refund: { kind: "unknown", reason: "too_many" } };
       }
-    } else if (chargesPage.has_more === false) first = oldestListed;
+    } else if (chargesPage.has_more === false) {
+      first = oldestListed;
+      // A still-pending charge created before the apparent first success may later settle and become the true first
+      // payment. Until Stripe resolves it, the once-per-person guarantee cannot be decided safely.
+      if (first && chargeRows.some((c) => c.status === "pending" && num(c.created) < num(first!.created))) {
+        return { refund: { kind: "unknown", reason: "unreadable" } };
+      }
+    }
     else return { refund: { kind: "unknown", reason: "unreadable" } };
 
     let personPaidBefore = false;
@@ -208,20 +252,29 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       for (const email of emails) {
         const found = await get(`/customers/search?${new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" })}`);
         if (found.has_more === true) return { refund: { kind: "unknown", reason: "too_many" } };
-        for (const c of list(found)) if (typeof c.email === "string" && normaliseEmail(c.email) === email && idOf(c.id) !== customer.id) others.add(idOf(c.id));
+        const foundRows = list(found, 100, "search_result");
+        if (!foundRows || foundRows.some((row) => !customerSearchRow(row))) return { refund: { kind: "unknown", reason: "unreadable" } };
+        for (const c of foundRows) if (typeof c.email === "string" && normaliseEmail(c.email) === email && idOf(c.id) !== customer.id) others.add(idOf(c.id));
       }
       if (others.size > MAX_OTHER_CUSTOMERS) return { refund: { kind: "unknown", reason: "too_many" } };
       for (const other of others) {
         if (!CUSTOMER_PATTERN.test(other)) return { refund: { kind: "unknown", reason: "unreadable" } };
         const page = await get(`/charges?${new URLSearchParams({ customer: other, "created[lt]": String(before), limit: "100" })}`);
-        if (list(page).some((c) => c.status === "succeeded" && c.paid === true)) personPaidBefore = true;
+        const rows = list(page, 100);
+        if (!rows || rows.some((row) => !chargeHistoryRow(row))) return { refund: { kind: "unknown", reason: "unreadable" } };
+        if (rows.some((c) => c.status === "pending")) return { refund: { kind: "unknown", reason: "unreadable" } };
+        if (rows.some((c) => c.status === "succeeded" && c.paid === true)) personPaidBefore = true;
         else if (page.has_more === true) return { refund: { kind: "unknown", reason: "too_many" } };
       }
       // …or the same card.
       const fingerprint = obj(obj(first.payment_method_details)?.card)?.fingerprint;
       if (!personPaidBefore && typeof fingerprint === "string" && /^[A-Za-z0-9]{4,64}$/.test(fingerprint)) {
         const found = await get(`/charges/search?${new URLSearchParams({ query: `payment_method_details.card.fingerprint:"${fingerprint}" AND status:"succeeded" AND created<${before}`, limit: "10" })}`);
-        if (list(found).some((c) => idOf(c.id) !== idOf(first!.id) && num(c.created) < before)) personPaidBefore = true;
+        const foundRows = list(found, 10, "search_result");
+        if (!foundRows || foundRows.some((row) => !chargeHistoryRow(row) || row.status !== "succeeded" || row.paid !== true)) {
+          return { refund: { kind: "unknown", reason: "unreadable" } };
+        }
+        if (foundRows.some((c) => idOf(c.id) !== idOf(first!.id) && num(c.created) < before)) personPaidBefore = true;
       }
       if (!personPaidBefore) {
         const invoiceId = idOf(first.invoice);
@@ -266,6 +319,8 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
           // own earlier plans (started again since) is this store's: not decided here, never a silent no.
           if (!INVOICE_ID.test(invoiceId)) return { refund: { kind: "unknown", reason: "unreadable" } };
           const earlier = await get(`/invoices/${encodeURIComponent(invoiceId)}?expand[]=subscription`);
+          // Another invoice's reply, or one with no id: whose the first payment was is not known, so not decided here.
+          if (!isOwnReply(earlier, invoiceId)) return { refund: { kind: "unknown", reason: "unreadable" } };
           const named = obj(obj(earlier.subscription)?.metadata)?.store;
           const handles = new Set([store.handle, ...store.previousHandles]);
           if (typeof named === "string" && handles.has(named)) return { refund: { kind: "unknown", reason: "not_this_store" } };

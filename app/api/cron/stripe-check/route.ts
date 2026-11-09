@@ -1,11 +1,13 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isDemoCheckoutConfigured } from "@/lib/demo-store";
 import { type Check, verifyCartShipping, verifyPackages, verifyTaxDocuments, verifyTiers } from "@/lib/verify-stripe";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { SITE_URL } from "@/lib/site-url";
+import { STATUS_CHECKS, statusRunCommands } from "@/lib/status-page";
 
 // A run takes about half a minute, most of it Stripe charging and updating
 // test subscriptions; room is left so a slow day at Stripe is not cut off.
@@ -39,9 +41,16 @@ export async function GET(request: NextRequest) {
     const ok = checks.length > 0 && checks.every((c) => c.ok);
     // In Vercel's logs for every run, passing or not.
     console.log(`stripe-check ${ok ? "pass" : "FAIL"}: ${checks.map((c) => `${c.ok ? "PASS" : "FAIL"} ${c.check} (${c.detail})`).join(" | ")}`);
-    const [previous] = await redisPipeline([["GET", LAST]]);
+    const read = repliesFor(await redisPipeline([["GET", LAST]]), 1);
+    const previous = read?.[0];
     const failedBefore = typeof previous === "string" && previous.includes('"ok":false');
-    await redisPipeline([["SET", LAST, JSON.stringify({ at: Date.now(), ok, checks }), "EX", 30 * 86_400]]);
+    // An unknown reply is not an earlier pass either: no "passing again" is
+    // claimed, but a recovery it may hide is said in the log, not dropped.
+    if (ok && (!read || (previous !== null && typeof previous !== "string"))) {
+      console.error('stripe-check passes, but the previous result could not be read: no "passing again" notice was sent');
+    }
+    const at = Date.now();
+    await redisPipeline([["SET", LAST, JSON.stringify({ at, ok, checks }), "EX", 30 * 86_400]]);
     if ((!ok || failedBefore) && isSenderConfigured()) {
       await sendEmail({ meter: { by: "company" },
         from: NIMBUS_FROM,
@@ -56,6 +65,9 @@ export async function GET(request: NextRequest) {
         ].join("\n"),
       }).catch((error) => console.error("sending the Stripe check result failed", error));
     }
+    // Kept for the public status page (lib/status-page.ts), after the save and the notice and apart from them, so
+    // its failure stops neither: its time and result only. Every check here is an answer from Stripe's test mode.
+    await redisPipeline(statusRunCommands(STATUS_CHECKS[1].key, at, ok)).catch((error) => console.error("keeping the Stripe check's run for the status page failed", error));
     return Response.json({ ok, checks }, { headers: { "Cache-Control": "no-store" } });
   } finally {
     await redisPipeline([["DEL", "nl:stripe-check:lock"]]).catch(() => {});

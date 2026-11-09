@@ -433,7 +433,8 @@ export function render(
   const header = t.band
     ? `<div style="background:${t.band.fill};color:${t.band.ink};border-radius:16px;padding:16px 24px;margin:0 0 12px">${top}</div>`
     : `<div style="color:${t.text};padding:0 4px 16px">${top}</div>`;
-  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="color-scheme" content="${t.scheme}"><meta name="supported-color-schemes" content="${t.scheme}"></head><body style="margin:0;padding:0;background:${t.page}">
+  // The subject as the document's title and the character set said, for an app or browser that opens the HTML on its own.
+  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title><meta name="color-scheme" content="${t.scheme}"><meta name="supported-color-schemes" content="${t.scheme}"></head><body style="margin:0;padding:0;background:${t.page}">
 <div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:${t.bodyFont};font-size:16px;line-height:1.6;color:${t.text};background:${t.page}">
 ${header}
 <div style="background:${t.card};color:${t.text};border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, t.button.fill, t)}</div>
@@ -546,7 +547,17 @@ export async function sendTo(
     }
     // In a sequence, those who allowed their link use to be seen get links that say so (lib/mail-clicks.ts).
     const counting = tag?.medium === "sequence" ? new Set<string>() : undefined;
-    const tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    // Who may still be written to, and their links, read in their exact shape (lib/contacts.ts tokensFor): an
+    // unknown answer is not "they all left", so nobody in this batch is counted as gone. Nothing went to the
+    // provider, so what was taken for it is given back and the batch is tried again later.
+    let tokens: Map<string, string>;
+    try {
+      tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    } catch {
+      await release(store, chunk.length);
+      await rampBack(watched, chunk.length);
+      return { done, rest: emails.slice(i), stopped: "retry" };
+    }
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
     const messages: BatchMessage[] = chunk
       .filter((email) => tokens.has(email))

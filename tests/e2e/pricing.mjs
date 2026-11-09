@@ -36,6 +36,13 @@ export async function checkPricing({browser,LOCAL,axeSource,is}){
    for(const price of ["$69","$449","$999"])check(await page.locator("[data-plan-prices] [data-pricing-card]").filter({hasText:price+"a month"}).count()+await page.locator("[data-plan-prices] [data-pricing-card]").filter({hasText:price+" a month"}).count()>=1,"pricing shows "+price+" a month "+width);
    for(const price of ["$690","$4,490","$9,990"])check(text.includes("Or "+price+" once a year"),"pricing shows "+price+" a year "+width);
    check(await page.locator("main a[href='/proof/comparisons']").count()===1,"real comparison destination "+width);
+   // Each card's itemized-list disclosure is its own streamed Suspense boundary, and React 19.2 batches
+   // those reveals (a later one waits until 300 ms after the previous). The prices above are outside the
+   // boundaries, so they can be read before the Studio and Scale disclosures move into main. Collecting
+   // the summaries then would skip some, and an insertion during a step shifts which element "nth=i"
+   // names between the focus and the read (verify runs of 7 November 2026). Wait until no boundary in
+   // main is still pending; a reveal that never happens still times out and fails here.
+   await page.waitForFunction(()=>!document.querySelector('main template[id^="B:"]'),null,{timeout:10000});
    for(const summary of await page.locator("main summary").all()){
     await summary.focus();
     check(await summary.evaluate(node=>node===document.activeElement),"FAQ summary has keyboard focus "+width);

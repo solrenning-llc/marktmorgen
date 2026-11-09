@@ -1,5 +1,6 @@
 "use client";
 
+import { StudioEmptyState } from "@/components/empty-state";
 import { FORM_STARTERS } from "@/lib/form-starters";
 import { FormAnswers } from "@/components/form-answers";
 import { FormResponseDeal } from "@/components/form-response-deal";
@@ -202,7 +203,7 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
 
       {saved.length === 0 && draft === null ? (
         <div className="mt-6 rounded-2xl bg-paper p-4 text-sm text-ink-soft ring-1 ring-line" data-form-starters="">
-          <p>No forms yet. Make one, then add a Form block to one of your pages under Pages and choose it there.</p>
+          <StudioEmptyState compact title="No forms yet" body="Make one, then add a Form block to one of your pages under Pages and choose it there." />
           {/* A ready example (487 [IT4], item 5): it opens in the editor below, unsaved, for you to change and save. */}
           <h3 id="form-starters-title" className="mt-3 font-semibold text-ink">Or start from an example</h3>
           <ul className="mt-2 space-y-2" aria-labelledby="form-starters-title">

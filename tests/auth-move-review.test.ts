@@ -165,7 +165,11 @@ async function main() {
     [true, true, true, false, 1, 0],
   );
   is("the notices never name the recovery address when it did not come along either", viaDomain.toldFrom.includes(RECOVERY) || viaDomain.toldTo.includes(RECOVERY), false);
-  is("and the link they give is this site's own", viaDomain.toldFrom.includes("https://marktmorgen.com/signin"), true);
+  // Rule 23 (#3326, CodeQL "Incomplete URL substring sanitization"): the link was found as a substring of the text, which
+  // a longer address holding it would also pass; every link in the notice is now read as an address, each must be this
+  // site's own origin, and one of them must be its sign-in page.
+  const links = (viaDomain.toldFrom.match(/https?:\/\/[^\s<>"')]+/g) ?? []).map((each) => new URL(each.replace(/[.,;:]+$/, "")));
+  is("and the link they give is this site's own", [links.length > 0, links.every((each) => each.origin === "https://marktmorgen.com"), links.some((each) => each.pathname === "/signin")], [true, true, true]);
   part("the carry failed on the read: nothing is left keyed by the old sign-in address");
   const stale = await move(RECOVERY, (from) => [unreadOld(from)]);
   is("no recovery address is left behind under the old sign-in address", stale.fromKey, null);

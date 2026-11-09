@@ -2352,7 +2352,8 @@ export async function notePartners(
     (a) => a.status === "approved" && lines.some((line) => shareOn(a.share, line.product) > 0),
   );
   if (!holders.length) return;
-  const buyer = sale.buyer ? normaliseEmail(sale.buyer) : "";
+  // One inbox however it is written (canonicalEmail), as an affiliate's own purchase is matched.
+  const buyer = sale.buyer ? canonicalEmail(sale.buyer) : "";
   const commands: (string | number)[][] = [];
   for (const partner of holders) {
     const theirs = lines.filter((line) => shareOn(partner.share, line.product) > 0);
@@ -2371,7 +2372,7 @@ export async function notePartners(
       currency: readCurrencyCode(sale.currency),
       percent: shareOn(partner.share, theirs[0].product),
       // A 50% partner buying their own product at 50% off is not a sale.
-      self: Boolean(buyer) && normaliseEmail(partner.email) === buyer,
+      self: Boolean(buyer) && canonicalEmail(partner.email) === buyer,
       ...(whole ? {} : { whole: sale.base }),
     };
     commands.push(["HSETNX", sharesKey(store.statsId), `${sale.ref}:${partner.id}`, JSON.stringify(earning)]);

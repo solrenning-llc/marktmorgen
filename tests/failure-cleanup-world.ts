@@ -9,6 +9,11 @@ export const files = new Map<string, { bytes: Uint8Array; contentType: string; a
 export const deleted: string[] = [];
 /** Every call the code under test made to the file store, by kind (tests/page-picture-check-cost.test.ts counts them). */
 export const calls = { head: 0, get: 0, put: 0, del: 0, list: 0 };
+/**
+ * Names whose next head, or next get, fails once as a passing outage of the file store would (a timeout, a 5xx, a reset):
+ * not "not found" and not "not a picture", only unknown (tests/page-picture-check-cost.test.ts, Claude 2 on #2843).
+ */
+export const outage = { head: new Set<string>(), get: new Set<string>() };
 
 function stat(pathname: string) {
   const file = files.get(pathname);
@@ -25,11 +30,13 @@ function missing(pathname: string): Error {
 
 export async function head(pathname: string) {
   calls.head += 1;
+  if (outage.head.delete(pathname)) throw new Error("fetch failed: ETIMEDOUT");
   return stat(pathname);
 }
 
 export async function get(pathname: string) {
   calls.get += 1;
+  if (outage.get.delete(pathname)) throw new Error("fetch failed: ECONNRESET");
   const file = files.get(pathname);
   if (!file) return null;
   const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(file.bytes); controller.close(); } });

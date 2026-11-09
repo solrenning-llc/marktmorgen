@@ -18,7 +18,7 @@ import { addProduct, addStoreLink, claimHandle, ensureStatsId, imageFolder, setP
 import { readListing } from "@/lib/catalog";
 import { MAX_PAGE_PICTURES, MAX_PICTURES } from "@/lib/sales-page";
 import { store as redis } from "./redis-stub";
-import { calls, files } from "./failure-cleanup-world";
+import { calls, files, outage } from "./failure-cleanup-world";
 import { done, is, part } from "./check";
 import { POST as door } from "@/app/api/store/image/upload/route";
 import { POST as pageRoute } from "@/app/api/store/page/route";
@@ -161,6 +161,68 @@ async function main(): Promise<void> {
   calls.head = 0;
   calls.get = 0;
   is("the product's picture named for the link: refused as another record's, and never read", [await result(await linkImage(post("/api/store/link-image", session, linkBody(main)))), calls.head, calls.get], [[400, "in_use"], 0, 0]);
+  // Claude 2 on #2843 (6750890970, MEDIUM): a passing outage of the file store is unknown, never "not a picture". The
+  // creator's fresh picture is kept, the save is refused as one to try again (server_error: "Try again in a moment"),
+  // and the save tried again checks it and saves, within the one check its note is counted at (tests/plan-cost-registry.ts,
+  // pictureCheckBlob: a head with every try, a read, and the clean-up head's share). Only a read that proves a file is
+  // not a picture deletes it, and only a file stored after its note (the second check dropTakenPictures makes).
+  part("A passing outage of the file store while a page is saved: nothing deleted, refused to try again, and the retry saves");
+  const blip = await upload({ productId: id });
+  outage.head.add(blip);
+  calls.head = 0;
+  calls.get = 0;
+  is("the head fails once: refused as one to try again", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0006", [blip]) }))), [500, "server_error"]);
+  is("and the creator's fresh picture is kept", files.has(blip), true);
+  is("the save tried again: checked and saved", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0006", [blip]) }))), [200, "ok"]);
+  is("asked about within one check in all: the failed head, then a head and a read", [calls.head, calls.get], [2, 1]);
+  is("saved again as it is: nothing new to check", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0006", [blip]) }))), calls.head + calls.get], [[200, "ok"], 3]);
+
+  const siteBlip = await upload({ pageId: "pagepage01" });
+  outage.head.add(siteBlip);
+  is("the same on a store page: refused as one to try again", await result(await sitePage(post("/api/store/site-page", session, { action: "save", id: "pagepage01", page: pictures("pics0007", [siteBlip]) }))), [500, "server_error"]);
+  is("the picture kept", files.has(siteBlip), true);
+  is("and the save tried again saves", await result(await sitePage(post("/api/store/site-page", session, { action: "save", id: "pagepage01", page: pictures("pics0007", [siteBlip]) }))), [200, "ok"]);
+
+  const twice = await upload({ productId: id });
+  outage.head.add(twice);
+  calls.head = 0;
+  calls.get = 0;
+  is("an outage on the first try: refused to try again", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0008", [twice]) }))), [500, "server_error"]);
+  outage.head.add(twice);
+  is("and again on the second: refused to try again, still kept", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0008", [twice]) }))), files.has(twice)], [[500, "server_error"], true]);
+  is("a third save: it is not given back twice, so it is refused as never checked, and still kept", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0008", [twice]) }))), files.has(twice)], [[400, "pictures"], true]);
+  is("two heads in all and no read: within its one check", [calls.head, calls.get], [2, 0]);
+
+  const unread = await upload({ productId: id });
+  outage.get.add(unread);
+  calls.head = 0;
+  calls.get = 0;
+  is("the read fails: refused to try again, and kept", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0009", [unread]) }))), files.has(unread)], [[500, "server_error"], true]);
+  is("its one read spent, it is never read again: a later save is refused as never checked, and it is still kept", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0009", [unread]) }))), files.has(unread), calls.head, calls.get], [[400, "pictures"], true, 1, 1]);
+
+  const before = await upload({ productId: id });
+  files.set(before, { bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]), contentType: "image/jpeg", at: 1 });
+  is("a file that is not a picture but was stored before its note: refused", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0010", [before]) }))), [400, "pictures"]);
+  is("and kept: only a file stored after the door noted it is this save's to delete", files.has(before), true);
+
+  // Claude 2 on #2843 (LOW 2): a copy the product already shows whose size its record cannot vouch for (a legacy
+  // bytes 0) is left out, unread, as a failing copy is; the picture itself is not refused for it.
+  part("A product's own copy with a size its record cannot vouch for: left out, unread, the picture still attached");
+  const second = await addProduct(OWNER, "Second guide", "", "19", null);
+  if (!second.ok) throw new Error("setup");
+  const otherId = second.product.id;
+  const ownMain = await upload({ productId: otherId });
+  const ownSmall = await upload({ productId: otherId });
+  const ownBody = { action: "attach", id: otherId, path: ownMain, width: 1200, height: 800, alt: "A second guide", small: { path: ownSmall, width: 800 } };
+  is("attached fresh from the door", await result(await productImage(post("/api/store/image", session, ownBody))), [200, "ok"]);
+  const ownImage = (await readListing((await storeForEmail(OWNER))!, otherId))?.image ?? null;
+  if (!ownImage?.small) throw new Error("setup");
+  await setProductImage(OWNER, otherId, { ...ownImage, small: { ...ownImage.small, bytes: 0 } });
+  calls.head = 0;
+  calls.get = 0;
+  const answered = await result(await productImage(post("/api/store/image", session, ownBody)));
+  const after = (await readListing((await storeForEmail(OWNER))!, otherId))?.image ?? null;
+  is("sent again: the picture attached, the copy left out, and nothing read", [answered, after?.path, after?.small ?? null, calls.head, calls.get], [[200, "ok"], ownMain, null, 0, 0]);
   done();
 }
 

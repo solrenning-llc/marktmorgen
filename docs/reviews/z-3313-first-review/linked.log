@@ -1,0 +1,268 @@
+
+FILE aws-sign.test.ts
+
+The date
+  ok    as Amazon writes it
+
+Amazon's worked example: listing users
+  ok    the whole authorization header
+  ok    with the host and the date it was signed with
+
+Amazon's test suite
+  ok    get-vanilla
+
+What must change the signature
+  ok    the body
+  ok    the region
+  ok    the secret
+  ok    the minute
+  ok    and the same request signs the same way twice
+
+Amazon's file store examples: a signature in the headers
+  ok    the hash of no body
+  ok    fetching the first ten bytes of an object
+  ok    storing an object whose name has a character to escape
+  ok    listing objects, with a query
+
+Amazon's file store example: a signature in the address
+  ok    the whole address a browser is handed
+  ok    a header that is signed is named in the address
+  ok    and a piece of another size does not carry the same signature
+  ok    nor does another piece of the same upload
+  ok    nor a fetch of the same path
+
+18 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE backup-store.test.ts
+
+Off until the owner's own settings exist, and never on the sold files' bucket or keys
+  ok    no settings: off
+  ok    the sold files' bucket: off
+  ok    the sold files' key: off
+  ok    a malformed account: off
+  ok    its own bucket and key: on
+  ok    a bucket in the EU jurisdiction: its own address
+  ok    an unknown jurisdiction: off
+
+Written once, read back whole, through the read-back the backup needs
+  ok    one object, under backups/, named by its id
+  ok    create-only, and signed with it
+  ok    every request signed, the body's hash the body's
+  ok    the round trip never deletes
+
+It lists its own objects and deletes one by its id (inbox C4-49: the run's retention)
+  ok    one page under backups/, signed, at most 1,000 names
+  ok    only its own objects, each with the time the bucket wrote it and its size; another name is never offered for deletion
+  ok    a long listing goes on from where it stopped
+  ok    not a listing: refused, never read as an empty bucket
+  ok    a truncated listing with nowhere to go on: refused, never read as an empty bucket
+  ok    a time that is not one: refused, never read as an empty bucket
+  ok    no size: refused, never read as an empty bucket
+  ok    a count that does not match: refused, never read as an empty bucket
+  ok    a delete: of that object only, signed
+  ok    an id that is not one: refused before any request
+  ok    a delete answered 403: refused, never taken as done
+
+What is never taken as a backup
+  ok    an id that is not one: refused before any request
+  ok    a second write under the same id: refused (412), the first kept
+  ok    a read past its cap: refused
+  ok    and so when the store states no length, counted as it streams
+  ok    a cap that is not a count of bytes: refused
+  ok    an answer of 303: refused, never taken as written or read
+  ok    an answer of 409: refused, never taken as written or read
+  ok    an answer of 503: refused, never taken as written or read
+  ok    a missing object: refused
+  ok    an unreachable store: refused
+
+32 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":25,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (74.654166ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (186.987758ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (36.795664ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.164574ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.219974ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.122085ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.40215ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (66.342833ms)
+✔ every store figure taken in the code is a kind a line prices (44.109881ms)
+✔ every email sent names a meter, and each file only the meters it may use (86.527315ms)
+✔ the units a figure is taken in cost at least what they stand for (9.121038ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.814593ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.203459ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.240535ms)
+✔ Path page and its actual usage count fit its reserved studio page (2.737082ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.116707ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (1.140721ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.144148ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (3.31513ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.13212ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (4.072999ms)
+✔ Path push fits its reserved studio requests (0.091138ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.056767ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.055825ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.08577ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (68.291714ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 611.380127
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (131.501585ms)
+✔ each family is bounded one way at least, and what it says can be checked (46.33217ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.041966ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.176886ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.366102ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.849124ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.190007ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 197.488895
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE test-alias-sidecars.test.ts
+
+Two pull requests, each with the aliases of its own test
+  ok    A's test gets A's aliases
+  ok    B's test gets B's, and not A's next/headers
+  ok    a test with no file of its own keeps only the central list
+
+Merged together, the two pull requests do not touch the same line
+  ok    editing the central list, the two pull requests conflict
+  ok    with a file per test, they share no file
+  ok    and neither touches tests/test-config.mjs
+
+What a test's file may say
+  ok    a target starting "@/" is read from the repository root
+  ok    the central default is there without a file of its own
+  ok    null takes a central default away for that test only
+  ok    a target that does not exist is refused by name
+  ok    a value that is not a path or null is refused
+  ok    a file that is not one object is refused
+  ok    a file that does not parse is refused
+
+13 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE accessibility-inventory.test.ts
+
+Every source stays visible in the accessibility inventory; inventory is not a pass
+  ok    all page templates mapped
+  ok    all layout templates mapped
+  ok    all error/loading/not-found boundaries mapped
+  ok    all shared TSX components mapped
+  ok    all API route sources mapped
+
+Generated route templates retain gaps instead of claiming fixture coverage
+  ok    generator keeps the checked inventory current
+  ok    home route
+  ok    dynamic course route
+  ok    groups and parallel slots are not URL segments
+  ok    catch-all route
+  ok    optional catch-all route
+  ok    ambiguous or non-page source is refused app/api/x/route.ts
+  ok    ambiguous or non-page source is refused elsewhere/page.tsx
+  ok    ambiguous or non-page source is refused app/(.)photo/page.tsx
+  ok    ambiguous or non-page source is refused app/[[broken]/page.tsx
+  ok    source generator never certifies untested pages
+
+16 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE platform-us-english.test.ts
+
+American English guard distinguishes prose from compatibility identifiers
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    existing non-English buyer copy is outside this policy
+  ok    mixed buyer dictionaries retain other languages
+  ok    separate foreign buyer declarations remain unchanged
+  ok    American prose passes
+  ok    single-word test title is also checked
+  ok    test output titles are also platform-maintained text
+  ok    test data can exercise a forbidden sample
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+
+All current app, component, library and test-diagnostic sources
+  ok    real source inventory is scanned
+  ok    platform prose and diagnostic titles use American spelling
+
+42 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3313review-78BUMV

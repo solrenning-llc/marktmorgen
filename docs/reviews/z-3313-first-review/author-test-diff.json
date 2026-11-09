@@ -1,0 +1,4 @@
+{
+  "diff": "",
+  "explanation": "All four final author test files are byte-identical to the test-only RED commit; the base has no source modules, so baseline failures are compiler missing-module diagnostics before any semantic child, not behavioral RED assertions."
+}

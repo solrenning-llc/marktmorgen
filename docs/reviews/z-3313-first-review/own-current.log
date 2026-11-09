@@ -1,0 +1,66 @@
+
+FILE z-3313-admission.proof.ts
+ADMISSION_UNKNOWN {"bad":null,"status":503,"used":"1","commands":2,"bytes":119,"list":0,"token":0}
+  ok    unknown ACK does not list null
+ADMISSION_UNKNOWN {"bad":[],"status":503,"used":"1","commands":2,"bytes":119,"list":0,"token":0}
+  ok    unknown ACK does not list []
+ADMISSION_UNKNOWN {"bad":["OK"],"status":503,"used":"1","commands":2,"bytes":119,"list":0,"token":0}
+  ok    unknown ACK does not list ["OK"]
+ADMISSION_UNKNOWN {"bad":["OK",1,"extra"],"status":503,"used":"1","commands":2,"bytes":119,"list":0,"token":0}
+  ok    unknown ACK does not list ["OK",1,"extra"]
+ADMISSION_UNKNOWN {"bad":["OK","1"],"status":503,"used":"1","commands":2,"bytes":119,"list":0,"token":0}
+  ok    unknown ACK does not list ["OK","1"]
+ADMISSION_UNKNOWN {"bad":["OK",0],"status":503,"used":"1","commands":2,"bytes":119,"list":0,"token":0}
+  ok    unknown ACK does not list ["OK",0]
+ADMISSION_UNKNOWN {"bad":["OK",1.5],"status":503,"used":"1","commands":2,"bytes":119,"list":0,"token":0}
+  ok    unknown ACK does not list ["OK",1.5]
+ADMISSION_UNKNOWN {"bad":["?",1],"status":503,"used":"1","commands":2,"bytes":119,"list":0,"token":0}
+  ok    unknown ACK does not list ["?",1]
+  ok    daily ceiling before provider
+  ok    confirmed empty consumes one count and no token
+  ok    one object: paid page, one get-only token, one local signer
+  ok    signed answer contains no signing credential
+  ok    r2 remains off before Redis/provider
+  ok    bunny remains off before Redis/provider
+
+14 checks, all passing.
+Z_VOLUME {"runs":34,"mocks":3,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3313-secret-reuse.proof.ts
+  ok    existing production R2 access id is refused
+  FAIL  new backup read access id must also be refused
+        expected null
+        got      "0123456789abcdef0123456789abcdef"
+DORMANT_SECRET_REUSE {"status":200,"list":1,"token":0}
+  FAIL  under only a synthetic review, reused read id cannot authenticate
+        expected [404,0]
+        got      [200,1]
+
+3 checks, 2 failing.
+Z_VOLUME {"runs":2,"mocks":1,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3313-r2-xml.proof.ts
+  ok    healthy empty listing
+DORMANT_R2_XML {"body":"not XML<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>","textBytes":76,"threw":false,"answer":{"objects":[],"next":null}}
+  FAIL  malformed XML must stay unknown
+        expected true
+        got      false
+DORMANT_R2_XML {"body":"<Unclosed><ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>","textBytes":79,"threw":false,"answer":{"objects":[],"next":null}}
+  FAIL  malformed XML must stay unknown
+        expected true
+        got      false
+DORMANT_R2_XML {"body":"<ListBucketResult><Unclosed><IsTruncated>false</IsTruncated></ListBucketResult>","textBytes":79,"threw":false,"answer":{"objects":[],"next":null}}
+  FAIL  malformed XML must stay unknown
+        expected true
+        got      false
+  ok    one bounded mock GET per attempt
+
+5 checks, 3 failing.
+Z_VOLUME {"runs":0,"mocks":4,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3313review-vcnb9t

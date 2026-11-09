@@ -1,0 +1,7 @@
+import ts from 'typescript';
+const roots=["app/api/backup/files/route.ts", "lib/backup-files-contract.ts", "lib/backup-files-source.ts", "lib/backup-files-r2.ts", "lib/backup-files-review.ts", "lib/data-families.ts", "tests/plan-cost-registry.ts", "tests/store-data-registry.ts", "tests/backup-files-contract.test.ts", "tests/backup-files-route.test.ts", "tests/backup-files-off.test.ts", "tests/backup-files-r2.test.ts", "tests/backup-files-world.ts", "tests/backup-files-review-fixture.ts", "docs/reviews/z-3313-first-review/z-3313-admission.proof.ts", "docs/reviews/z-3313-first-review/z-3313-secret-reuse.proof.ts", "docs/reviews/z-3313-first-review/z-3313-r2-xml.proof.ts"];
+const read=ts.readConfigFile('tsconfig.json',ts.sys.readFile),config=ts.parseJsonConfigFileContent(read.config,ts.sys,process.cwd()),options={...config.options,noEmit:true,incremental:false};
+const program=ts.createProgram(roots,options),diagnostics=ts.getPreEmitDiagnostics(program);
+console.log(JSON.stringify({roots:roots.length,sources:program.getSourceFiles().length,target:ts.ScriptTarget[options.target],strict:options.strict,moduleResolution:ts.ModuleResolutionKind[options.moduleResolution],diagnostics:diagnostics.length}));
+if(diagnostics.length)console.log(ts.formatDiagnosticsWithColorAndContext(diagnostics,{getCanonicalFileName:x=>x,getCurrentDirectory:()=>process.cwd(),getNewLine:()=> '\n'}));
+process.exitCode=diagnostics.length?1:0;

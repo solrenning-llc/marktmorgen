@@ -1,0 +1,210 @@
+
+FILE backup-files-contract.test.ts
+
+the bounds of item 8, matched to the route's pages
+  ok    a page holds at most 1,000 entries and 1 MB
+  ok    a complete listing of one source of one store is at most 10 pages
+  ok    so a store can hold at most pages × entries objects a source and still list complete
+  ok    the objects copied for one store a month are the 10,000 priced (docs/backup-costs-2026-11-08.md, 5b), never more than one complete listing
+  ok    a signed URL lasts 15 minutes
+  ok    each source's folder
+
+a good page reads as itself, from an object or from its text
+  ok    the object
+  ok    the text
+  ok    an incomplete page with a cursor
+  ok    a page cut off with nothing signed yet is incomplete, never empty-and-complete
+  ok    over the bound: incomplete for good, no cursor
+  ok    an empty, complete listing of a folder that is confirmed empty
+
+every unknown shape throws
+  ok    not an object
+  ok    an extra field
+  ok    a missing field
+  ok    another version or kind
+  ok    an unknown source, or bunny (not built)
+  ok    a store that is not a folder
+  ok    complete with a cursor
+  ok    complete with another reason
+  ok    incomplete with nothing to go on from
+  ok    incomplete and called done
+  ok    over_bound with a cursor
+  ok    an unknown reason
+  ok    a cursor with characters outside base64url
+  ok    a complete flag that is not a boolean
+  ok    entries that are not a list
+  ok    more than 1,000 entries
+  ok    more than 1 MB
+
+every unknown entry throws
+  ok    an extra or a missing field
+  ok    an entry of another source
+  ok    a key outside the store's folder
+  ok    a key with a control character, or empty after the folder
+  ok    the same key twice
+  ok    an empty or spaced etag
+  ok    a size that is negative, fractional, a string or unsafe
+  ok    a plain-http, credentialed or unparsable URL
+  ok    an expiry that is not a positive whole time
+
+deletion records, on their own page
+  ok    a good page of records
+  ok    every reason the contract knows
+  ok    an unknown reason, date or extra field
+  ok    a files page is never read as records, nor records as files
+  ok    complete with a cursor, or incomplete without
+
+43 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE backup-files-route.test.ts
+
+off without its own secret: 404, with no listing and nothing reached
+  ok    no secret set
+  ok    nothing listed, signed or counted
+  ok    a secret under 32 characters counts as unset
+  ok    a secret equal to CRON_SECRET counts as unset
+  ok    a secret equal to BLOB_READ_WRITE_TOKEN counts as unset
+  ok    a call with no authorization is a 404
+  ok    a call with a wrong authorization is a 404
+  ok    a call with a wrong authorization is a 404
+  ok    a call with a wrong authorization is a 404
+  ok    a call with a wrong authorization is a 404
+  ok    still nothing listed, signed or counted
+
+only lists and signs: no method that writes or deletes
+  ok    GET is the only handler
+
+a page of 1,000 entries: exactly one token call, get-only, for '*'
+  ok    answered 200, complete, 1,000 entries
+  ok    one listing call, of the store's folder, 1,000 at most
+  ok    exactly ONE token call
+  ok    get only, every pathname, 15 minutes at most
+  ok    one local signature per entry, each a private get
+  ok    each entry is the listed object, its etag and size, and its signed URL
+  ok    each URL expires when the token does, or sooner
+  ok    no clientSigningToken, Blob write token or route secret in the answer
+  ok    the database: the day's count only (SET NX EX, INCRBY)
+
+an empty folder: no token call, complete only because the listing said so
+  ok    complete, empty, no token
+
+an unreadable or malformed listing is a 503, never an empty, complete page (rule 24)
+  ok    the store cannot be reached: 503 with no entries
+  ok    no answer: 503 with no entries
+  ok    blobs not a list: 503 with no entries
+  ok    hasMore missing: 503 with no entries
+  ok    hasMore true without a cursor: 503 with no entries
+  ok    more than 1,000 entries: 503 with no entries
+  ok    an entry without its etag: 503 with no entries
+  ok    an entry outside the store's folder: 503 with no entries
+  ok    a size that is not a count: 503 with no entries
+  ok    the same object twice: 503 with no entries
+  ok    the token cannot be issued: 503 with no entries
+  ok    a token without its signing key: 503 with no entries
+  ok    a token that has run out: 503 with no entries
+
+pages: a cursor to go on from, and a store over its pages is never complete
+  ok    first page: incomplete, more, with a cursor
+  ok    the cursor asks the provider for its own next page
+  ok    second page: the rest, complete
+  ok    the 10th page with more behind it: over_bound, incomplete, no cursor
+
+the internal cutoff: an incomplete page with a cursor, and a resume that loses and repeats nothing
+  ok    stopped while signing: incomplete, cutoff, with a cursor
+  ok    together, every entry once
+  ok    the resume read the same provider page again
+  ok    past the cutoff before listing: nothing asked, incomplete with a cursor
+  ok    long names: stopped under 1 MB, incomplete with a cursor
+  ok    and the page still parses
+
+the day's reviewed pages: counted before the provider, and refused past them
+  ok    past the review's 40 a day: 429, nothing listed
+  ok    a count that does not read as a whole number: 503, nothing listed
+  ok    a database that cannot be reached: 503, nothing listed
+
+sources whose provider details are unconfirmed stay off; deletion records are not kept yet
+  ok    r2: 503 source_off, nothing listed or counted
+  ok    bunny: 503 source_off, nothing listed or counted
+  ok    deletion records: 503, never an empty, complete page
+
+a request it does not understand is refused before any work
+  ok    no source: 400
+  ok    an unknown source: 400
+  ok    a store that is not a folder: 400
+  ok    an unknown parameter: 400
+  ok    a cursor that is not one: 400
+  ok    a cursor of another store: 400
+  ok    a cursor past the store's pages: 400
+  ok    nothing listed or counted for any of them
+  ok    a good cursor reads back as itself
+
+60 checks, all passing.
+Z_VOLUME {"runs":96,"mocks":49,"over":false}
+backup files: a listing could not be read Error
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read Error
+backup files: a listing could not be read BackupFilesSourceError
+backup files: a listing could not be read BackupFilesSourceError
+
+Z_STATUS 0 null
+
+FILE backup-files-off.test.ts
+
+no review of the route's cost: off, even with its secret
+  ok    the review is null on main
+  ok    404
+  ok    nothing listed, signed or counted
+
+3 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE backup-files-r2.test.ts
+
+its own read-only key, never the site's
+  ok    set up from the read-only key
+  ok    off without it
+  ok    off when the read key is the site's read-write key
+  ok    off with a malformed account or bucket
+
+a presigned GET of one object, for the time asked
+  ok    the object, signed, 900 s, with the read-only key's id
+  ok    the site's key and both secrets are not in it
+
+a listing read in its exact shape, or not at all
+  ok    two objects, their etags and sizes, and the token to go on
+  ok    one signed GET, list-type 2, the prefix, 1,000 at most
+  ok    the token is sent back
+  ok    an empty folder, confirmed
+  ok    a refusal (403): a failure, never an empty listing
+  ok    a store that is down (503): a failure, never an empty listing
+  ok    not a listing: a failure, never an empty listing
+  ok    a listing cut short: a failure, never an empty listing
+  ok    no IsTruncated: a failure, never an empty listing
+  ok    truncated without its token: a failure, never an empty listing
+  ok    an entry without its ETag: a failure, never an empty listing
+  ok    an entry with two keys: a failure, never an empty listing
+  ok    an entry outside the prefix: a failure, never an empty listing
+  ok    a size that is not a count: a failure, never an empty listing
+  ok    an escape it does not know: a failure, never an empty listing
+  ok    a key count that does not match: a failure, never an empty listing
+  ok    the same key twice: a failure, never an empty listing
+  ok    every request was a signed GET
+
+24 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":16,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3313review-0Wqmit

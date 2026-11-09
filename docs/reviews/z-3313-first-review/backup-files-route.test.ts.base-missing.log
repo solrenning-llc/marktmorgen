@@ -1,0 +1,104 @@
+fatal: path 'lib/backup-files-contract.ts' exists on disk, but not in '787c8748ab9124fb861235c59e8e6b221c101bdc'
+✘ [ERROR] Command failed: git show 787c8748ab9124fb861235c59e8e6b221c101bdc:lib/backup-files-contract.ts
+fatal: path 'lib/backup-files-contract.ts' exists on disk, but not in '787c8748ab9124fb861235c59e8e6b221c101bdc'
+ [plugin bounded-focal]
+
+    tests/backup-files-route.test.ts:27:109:
+      27 │ ...esPage, type BackupFilesPage } from "@/lib/backup-files-contract";
+         ╵                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  This error came from the "onLoad" callback registered here:
+
+    ../../03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1426:20:
+      1426 │       let promise = setup({
+           ╵                     ^
+
+    at setup (file:///workspace/scratch/9378b617fa73/z-3313-review/docs/reviews/z-3313-first-review/runner.mjs:12:228)
+    at handlePlugins (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1426:21)
+    at buildOrContextImpl (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1139:5)
+    at Object.buildOrContext (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:963:5)
+    at /workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:2320:15
+    at new Promise (<anonymous>)
+    at Object.build (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:2319:25)
+    at build (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:2170:51)
+    at file:///workspace/scratch/9378b617fa73/z-3313-review/docs/reviews/z-3313-first-review/runner.mjs:12:8
+
+fatal: path 'app/api/backup/files/route.ts' exists on disk, but not in '787c8748ab9124fb861235c59e8e6b221c101bdc'
+✘ [ERROR] Command failed: git show 787c8748ab9124fb861235c59e8e6b221c101bdc:app/api/backup/files/route.ts
+fatal: path 'app/api/backup/files/route.ts' exists on disk, but not in '787c8748ab9124fb861235c59e8e6b221c101bdc'
+ [plugin bounded-focal]
+
+    tests/backup-files-route.test.ts:26:23:
+      26 │ import * as route from "@/app/api/backup/files/route";
+         ╵                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  This error came from the "onLoad" callback registered here:
+
+    ../../03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1426:20:
+      1426 │       let promise = setup({
+           ╵                     ^
+
+    at setup (file:///workspace/scratch/9378b617fa73/z-3313-review/docs/reviews/z-3313-first-review/runner.mjs:12:228)
+    at handlePlugins (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1426:21)
+    at buildOrContextImpl (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1139:5)
+    at Object.buildOrContext (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:963:5)
+    at /workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:2320:15
+    at new Promise (<anonymous>)
+    at Object.build (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:2319:25)
+    at build (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:2170:51)
+    at file:///workspace/scratch/9378b617fa73/z-3313-review/docs/reviews/z-3313-first-review/runner.mjs:12:8
+
+fatal: path 'lib/backup-files-source.ts' exists on disk, but not in '787c8748ab9124fb861235c59e8e6b221c101bdc'
+✘ [ERROR] Command failed: git show 787c8748ab9124fb861235c59e8e6b221c101bdc:lib/backup-files-source.ts
+fatal: path 'lib/backup-files-source.ts' exists on disk, but not in '787c8748ab9124fb861235c59e8e6b221c101bdc'
+ [plugin bounded-focal]
+
+    tests/backup-files-route.test.ts:28:75:
+      28 │ ...RouteSecret, decodeFilesCursor } from "@/lib/backup-files-source";
+         ╵                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  This error came from the "onLoad" callback registered here:
+
+    ../../03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1426:20:
+      1426 │       let promise = setup({
+           ╵                     ^
+
+    at setup (file:///workspace/scratch/9378b617fa73/z-3313-review/docs/reviews/z-3313-first-review/runner.mjs:12:228)
+    at handlePlugins (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1426:21)
+    at buildOrContextImpl (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1139:5)
+    at Object.buildOrContext (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:963:5)
+    at /workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:2320:15
+    at new Promise (<anonymous>)
+    at Object.build (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:2319:25)
+    at build (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:2170:51)
+    at file:///workspace/scratch/9378b617fa73/z-3313-review/docs/reviews/z-3313-first-review/runner.mjs:12:8
+
+/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 3 errors:
+tests/backup-files-route.test.ts:26:23: ERROR: [plugin: bounded-focal] Command failed: git show 787c8748ab9124fb861235c59e8e6b221c101bdc:app/api/backup/files/route.ts
+fatal: path 'app/api/backup/files/route.ts' exists on disk, but not in '787c8748ab9124fb861235c59e8e6b221c101bdc'
+
+tests/backup-files-route.test.ts:27:109: ERROR: [plugin: bounded-focal] Command failed: git show 787c8748ab9124fb861235c59e8e6b221c101bdc:lib/backup-files-contract.ts
+fatal: path 'lib/backup-files-contract.ts' exists on disk, but not in '787c8748ab9124fb861235c59e8e6b221c101bdc'
+
+tests/backup-files-route.test.ts:28:75: ERROR: [plugin: bounded-focal] Command failed: git show 787c8748ab9124fb861235c59e8e6b221c101bdc:lib/backup-files-source.ts
+fatal: path 'lib/backup-files-source.ts' exists on disk, but not in '787c8748ab9124fb861235c59e8e6b221c101bdc'
+
+    at failureErrorWithLog (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1211:25
+    at runOnEndCallbacks (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1592:45)
+    at buildResponseToResult (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/03338083f777/h2-3216-focal/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1

@@ -602,6 +602,22 @@ function matches(opened: Opened, capture: CaptureRow, payee: unknown): boolean {
 const ORDER_KEPT_FROM_OPENING_SECONDS = 30 * 86_400;
 
 /**
+ * The room PayPal is asked to take a payment with: a day before the record's ceiling at least (Claude 5's second money
+ * review of #3411, MEDIUM). With less, a ceiling passing between the check here and the renewal reaching Redis ends the
+ * record while Redis still answers 1, and a payment taken and then not written down would leave the sweep no record to
+ * write it from. A day is far above the capture's own calls (TIMEOUT_MS each) and the longest a function runs, and
+ * leaves the sweep, every few minutes, many rounds to write a taken payment down before the record ends.
+ */
+const CAPTURE_ROOM_SECONDS = 86_400;
+
+/**
+ * How long an order PayPal may have taken a payment for is kept from the answer, when that answer comes back after the
+ * record's ceiling (watchLater). Shorter than CAPTURE_ROOM_SECONDS by far more than any function runs, so an answer to a
+ * capture asked with its room always keeps the ceiling itself; only an answer held past a day reaches this.
+ */
+const KEPT_AFTER_LATE_ANSWER_SECONDS = 6 * 3_600;
+
+/**
  * When an order's record ends at the latest, in unix seconds: thirty days from its opening (`opened.at`, whole seconds,
  * as openOrder writes it). A record without such a time is not known (rule 24): it throws, and PayPal is not asked.
  */
@@ -611,18 +627,20 @@ function keptUntil(opened: Opened): number {
 }
 
 /**
- * Keeps an order PayPal has not settled for the sweep to ask about, until thirty days from its opening. False, and
- * nothing written, once that time has passed: the order is not kept past it (captureOrder answers as for a record
- * that ended).
+ * Keeps an order PayPal has not settled for the sweep to ask about, until thirty days from its opening. It runs only
+ * after PayPal was asked, when the payment may have been taken, so it never lets the record end (Claude 5's second
+ * money review of #3411): an answer that comes back after that ceiling, which the day's room before asking
+ * (CAPTURE_ROOM_SECONDS) leaves to a function held past a day, keeps the record KEPT_AFTER_LATE_ANSWER_SECONDS from the
+ * answer instead, so the sweep can still write down a payment PayPal completes. Ending the record there could leave a
+ * charged buyer with nothing written down; keeping it a few hours more holds no more than the order already held.
  */
-async function watchLater(order: string, opened: Opened): Promise<boolean> {
-  const until = keptUntil(opened);
-  if (Math.floor(Date.now() / 1000) >= until) return false;
+async function watchLater(order: string, opened: Opened): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const until = Math.max(keptUntil(opened), now + KEPT_AFTER_LATE_ANSWER_SECONDS);
   await redisPipeline([
     ["SET", orderKey(order), JSON.stringify(opened), "EXAT", String(until)],
-    ["ZADD", pendingKey(opened.s), String(Math.floor(Date.now() / 1000)), order],
+    ["ZADD", pendingKey(opened.s), String(now), order],
   ]);
-  return true;
 }
 
 /**
@@ -633,7 +651,8 @@ async function watchLater(order: string, opened: Opened): Promise<boolean> {
  * days from its opening, as watchLater keeps it (Claude 3's first money review of #3404, LOW 1; one rule for the
  * ceiling, Claude 5): the sweep reads the order by its record and lets go of an entry whose record has ended, so a
  * capture asked for late in the record's first three days keeps it as long as the sweep may need it, and never past
- * thirty days from the opening. Past them, nothing is sent and the order is "gone". Both answers read exactly
+ * thirty days from the opening. PayPal is asked only with a day's room before them (CAPTURE_ROOM_SECONDS; Claude 5's
+ * second money review of #3411): with less, nothing is sent and the order is "gone". Both answers read exactly
  * (rule 24): the ZADD 0 or 1 and the EXPIREAT 1 or 0; anything else, or no answer, throws, and PayPal is not asked to
  * take anything, so a buyer is never charged for an order the sweep could not find. "gone" when the EXPIREAT answers 0
  * (the record ended since it was read: PayPal is not asked, and the sweep lets go of the entry), "added" when this call
@@ -644,7 +663,7 @@ async function watchLater(order: string, opened: Opened): Promise<boolean> {
  */
 async function watchFirst(order: string, opened: Opened): Promise<"added" | "there" | "gone"> {
   const until = keptUntil(opened);
-  if (Math.floor(Date.now() / 1000) >= until) return "gone";
+  if (Math.floor(Date.now() / 1000) + CAPTURE_ROOM_SECONDS >= until) return "gone";
   const replies = repliesFor(
     await redisPipeline([
       ["ZADD", pendingKey(opened.s), String(Math.floor(Date.now() / 1000)), order],
@@ -709,7 +728,8 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   const opened = await readOpened(order);
   if (!opened || opened.s !== store.statsId) return { ok: false, reason: "unknown" };
   // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown,
-  // and a record ended since it was read, or thirty days past its opening, is no order to take a payment for).
+  // and a record ended since it was read, or less than a day from thirty past its opening, is no order to take a payment
+  // for).
   const watched = await watchFirst(order, opened);
   if (watched === "gone") return { ok: false, reason: "unknown" };
   const watchedHere = watched === "added";
@@ -735,14 +755,14 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
       done = {};
     }
     if (!captureIn(done).capture) {
-      if (!(await watchLater(order, opened))) return { ok: false, reason: "unknown" };
+      await watchLater(order, opened);
       return { ok: false, reason: "error" };
     }
   }
   const { capture, payee, email } = captureIn(done);
   // Taken, but the answer does not say how: the buyer may have paid, so the sweep asks PayPal again (CX-123 rule 24).
   if (!capture) {
-    if (!(await watchLater(order, opened))) return { ok: false, reason: "unknown" };
+    await watchLater(order, opened);
     return { ok: false, reason: "pending" };
   }
   if (!matches(opened, capture, payee)) {
@@ -750,11 +770,11 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
     return { ok: false, reason: "mismatch" };
   }
   if (!email || typeof capture.id !== "string") {
-    if (!(await watchLater(order, opened))) return { ok: false, reason: "unknown" };
+    await watchLater(order, opened);
     return { ok: false, reason: "error" };
   }
   if (capture.status === "PENDING") {
-    if (!(await watchLater(order, opened))) return { ok: false, reason: "unknown" };
+    await watchLater(order, opened);
     return { ok: false, reason: "pending" };
   }
   if (capture.status !== "COMPLETED") return { ok: false, reason: "declined" };

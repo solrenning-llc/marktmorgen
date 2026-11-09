@@ -18,7 +18,9 @@ import type { Store } from "@/lib/store";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_closed_store_renewals_exact_only";
 
-const ACCOUNT = "acct_1RenewalsExact01";
+// Synthetic and shorter than 16 characters after the prefix, so the public data check (scripts/check_public_data.py,
+// provider-account) does not take it for a real Stripe account id; it still matches STRIPE_ACCOUNT_PATTERN (lib/store.ts).
+const ACCOUNT = "acct_1RenewExact01";
 const HANDLE = "renewals-exact";
 const MEMBER = "sub_RenewalsMember01";
 const SECOND = "sub_RenewalsMember02";

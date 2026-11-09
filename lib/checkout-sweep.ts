@@ -56,7 +56,7 @@ import { enroll, readFlows } from "@/lib/flows";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
-import { AFFILIATE_ID_PATTERN, type Affiliate, VIA_PENDING_META, affiliatesOn, listPartners, notePayPalPendings, notePendingDue, notePendingLinks, noteSession } from "@/lib/affiliates";
+import { AFFILIATE_ID_PATTERN, type Affiliate, VIA_PENDING_META, affiliatesOn, listPartners, notePayPalPendings, notePendingDue, notePendingLinks, noteSession, settleUnconfirmed } from "@/lib/affiliates";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
@@ -398,6 +398,16 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       if (failed) counts.failed += failed;
     } catch (error) {
       console.error("reading a store's pending PayPal affiliate links failed", store.handle, error);
+    }
+  }
+  // A sale whose second tier waits for its buyer's address (lib/affiliates.ts settleUnconfirmed): read again, a batch a
+  // run, and decided by itself. Only a store with a program on: one command a run, and only that.
+  if (affiliatesOn(store) && (store.stripeAccountId || store.paypalSeller)) {
+    try {
+      const unconfirmed = await settleUnconfirmed(store, undefined, deadline);
+      if (unconfirmed.failed) counts.failed += unconfirmed.failed;
+    } catch (error) {
+      console.error("reading a store's sales with an unconfirmed buyer failed", store.handle, error);
     }
   }
   if (reviewed) {

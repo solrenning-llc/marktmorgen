@@ -1005,14 +1005,19 @@ export async function revokeRefundedGroups(
     }
     const charge = refund.charge as { refunded?: unknown } | null;
     if (refund.status !== "succeeded" || charge?.refunded !== true) return true;
+    // Through already when kept read through, or when its own amount covers the charge; otherwise only once the
+    // charge's refunds are read below.
+    const through = decided || wholeOnItsOwn(refund);
     const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
     const handled = countOf(looked?.[0]);
     const groupId = looked?.[1];
-    if (!looked || handled === null || handled > 1 || (groupId !== null && typeof groupId !== "string")) return false;
+    // Left unknown before it was read through: held for the next pass, never kept on the retry list, which reads what
+    // it keeps as through.
+    if (!looked || handled === null || handled > 1 || (groupId !== null && typeof groupId !== "string")) return through ? false : "hold";
     if (handled === 1) return true;
     // A succeeded part of the charge: through only once the charge's succeeded refunds add up to it. Read after the
     // handled mark, so a refund already handled asks Stripe nothing more.
-    if (!decided && !wholeOnItsOwn(refund)) {
+    if (!through) {
       if (lookups <= 0) return "hold";
       lookups -= 1;
       try {

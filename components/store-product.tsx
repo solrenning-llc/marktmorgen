@@ -1,6 +1,6 @@
 import { EmailField } from "@/components/email-field";
 import { GiftTypedKeeper } from "@/components/gift-typed-keeper";
-import { giftProblemField, isGiftReturnNotice } from "@/lib/gift-typed";
+import { giftProblemField, groupProblemField, isGiftReturnNotice } from "@/lib/gift-typed";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
 import { fromPrice, lengthList, listedLengths } from "@/lib/call-lengths";
@@ -442,6 +442,13 @@ export function GroupBox({ store, product, problem = "", consentAgain = false }:
   const notice = isGiftReturnNotice(problem) && Object.hasOwn(w.notices, problem) ? w.notices[problem] : null;
   const reason = Object.hasOwn(problems, problem) ? problems[problem] : notice ? `${notice.title}. ${notice.body}` : "";
   const reasonId = `group-error-${product.id}`;
+  const peopleId = `group-people-${product.id}`;
+  const optionId = `group-option-${product.id}`;
+  // Tied to the field it is about, as on the gift form (3.3.1, 4.1.2): how many people or the option list is marked
+  // invalid, points to the words and takes the focus; any other reason is the alert and takes the focus itself. An
+  // option refused on a product with none to choose is such a reason.
+  const field = reason ? groupProblemField(problem) : null;
+  const wrong = field === "option" && givableOptions(product).length === 0 ? null : field;
   return (
     <details id="group" className="mt-4 scroll-mt-24 rounded-2xl px-4 py-3" style={{ border: "1px solid var(--st-line)" }} open={Boolean(problem)}>
       <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold" style={{ color: "var(--st-text)" }}>
@@ -451,13 +458,14 @@ export function GroupBox({ store, product, problem = "", consentAgain = false }:
         <input type="hidden" name="handle" value={store.handle} />
         <input type="hidden" name="product" value={product.id} />
         {reason ? (
-          <p id={reasonId} className="st-note text-sm" role="alert" tabIndex={-1}>{reason}</p>
+          <p id={reasonId} className="st-note text-sm" role={wrong ? undefined : "alert"} tabIndex={-1}>{reason}</p>
         ) : null}
-        <GiftTypedKeeper form="group" handle={store.handle} productId={product.id} problem={problem} reasonId={reason ? reasonId : undefined} />
-        <GivenOptionPicker store={store} product={product} each />
+        <GiftTypedKeeper form="group" handle={store.handle} productId={product.id} problem={problem} focusId={wrong === "people" ? peopleId : wrong === "option" ? optionId : undefined} reasonId={reason ? reasonId : undefined} />
+        <GivenOptionPicker store={store} product={product} each id={optionId} invalid={wrong === "option"} describedBy={reasonId} />
         <label className="block">
           <span className="st-label">{w.howManyPeople}</span>
           <input
+            id={peopleId}
             className="st-field mt-2"
             type="number"
             name="people"
@@ -467,6 +475,8 @@ export function GroupBox({ store, product, problem = "", consentAgain = false }:
             step={1}
             defaultValue={DEFAULT_PEOPLE}
             inputMode="numeric"
+            aria-invalid={wrong === "people" || undefined}
+            aria-describedby={wrong === "people" ? reasonId : undefined}
           />
         </label>
         {deliversDigitally(product) ? <DigitalConsentBox id={`dc-group-${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain && problem === "consent"} /> : null}

@@ -64,6 +64,19 @@ export function giftProblemField(problem: string): GiftTypedField | null {
 }
 
 /**
+ * The field a reason from the server belongs to on the group form (GroupBox),
+ * as giftProblemField for the gift form: how many people for a number that
+ * cannot be sold ("people") or that one payment cannot carry ("amount", whose
+ * words say to try fewer people), the option list for "option"; null for a
+ * reason no field can fix, which is then the alert.
+ */
+export function groupProblemField(problem: string): GroupTypedField | null {
+  if (problem === "people" || problem === "amount") return "people";
+  if (problem === "option") return "option";
+  return null;
+}
+
+/**
  * The store's own notices (buyer words `notices`) a checkout refused after the
  * gift was written down sends back to the gift form (app/api/store/checkout/
  * route.ts): someone else holding the last unit, the store's orders paused,

@@ -224,6 +224,17 @@ async function main() {
     const after = await s.read();
     is("a newer record that is not paying is kept too, and the old tab is told it is not confirmed", [after.subscriptionId, after.subscriptionActive, billingOf(stale)], [NEW, false, "unconfirmed"]);
   }
+  {
+    const s = await shop(11);
+    const NEW = "sub_R18SamePlan11";
+    subscriptions.set(NEW, subscription(NEW, s.customer, s.handle, "active"));
+    checkout("cs_test_R18SameSessn0011", s.customer, NEW, s.handle);
+    let first: string | null = null;
+    meanwhile.set(NEW, async () => { first = billingOf(await s.come("cs_test_R18SameSessn0011")); });
+    const second = await s.come("cs_test_R18SameSessn0011");
+    is("the same paid checkout back in two tabs at once: the first starts the plan", [first, plan(await s.read())], ["on", [NEW, true, true, ""]]);
+    is("and the second is told the plan is on, the one it just paid for, not that the store already pays", billingOf(second), "on");
+  }
   is("the way back only reads Stripe: nothing was created, changed or canceled there", posts, 0);
   done();
 }

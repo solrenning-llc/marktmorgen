@@ -34,6 +34,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { readFileSync } from "node:fs";
+import { CHECKOUT_OPEN_SECONDS } from "@/lib/stripe-account";
 
 process.env.RESEND_API_KEY = "re_test_welcome_only_a_stand_in";
 process.env.STRIPE_SECRET_KEY = "sk_test_welcome_end_only_a_stand_in";
@@ -222,6 +224,20 @@ async function main(): Promise<void> {
   wb = await comeBack(back);
   is("control: the come-back checkout opens", wb.opened, "opened");
   is("no after_expiration recovery on it either", wb.body?.has("after_expiration[recovery][enabled]"), false);
+
+  part("What the creator is told: the offer the buyer sees ends about half an hour early (pre-review, VR 2)");
+  // Rule 23: new assertions, red on 6a4fdd4dbc. The creator picks "24 hours" or a 14-day link, and the buyer's offer
+  // ends CHECKOUT_OPEN_SECONDS before that; the setting, the help and the come-back bullet now say so.
+  is("'about half an hour' stays true of the time a checkout is kept open", CHECKOUT_OPEN_SECONDS >= 25 * 60 && CHECKOUT_OPEN_SECONDS <= 35 * 60, true);
+  const early = /ends about half an hour (early|before)[^.]*so a last payment still fits/;
+  const said = {
+    welcome: readFileSync("components/welcome-offer-editor.tsx", "utf8"),
+    help: readFileSync("lib/help-content.ts", "utf8"),
+    comeBack: readFileSync("components/winback-editor.tsx", "utf8"),
+  };
+  is("the welcome offer's setting says so", early.test(said.welcome), true);
+  is("the help on the welcome offer says so", early.test(said.help.slice(said.help.indexOf("Can I give a countdown offer"))), true);
+  is("the come-back offer's setting says so", /The link works for \$\{OFFER_DAYS\} days[^`]*about half an hour[^`]*so a last payment still fits/.test(said.comeBack), true);
   done();
 }
 

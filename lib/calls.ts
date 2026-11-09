@@ -92,7 +92,7 @@ import { calendarBusy } from "@/lib/calendar-sync";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 import { emitEvent } from "@/lib/webhooks";
 import { recordLead } from "@/lib/affiliate-leads";
-import { VIDEO_ROOM_NOTE, isVideoRoom, roomOf } from "@/lib/call-rooms";
+import { VIDEO_ROOM_NOTE, isVideoRoom, roomKind, roomOf } from "@/lib/call-rooms";
 import { alertCreator } from "@/lib/phone-alerts";
 import { MEET_STORES, callMeeting, callMoved, linkUpdates } from "@/lib/meet-links";
 import type { MeetRecord } from "@/lib/meet-records";
@@ -251,6 +251,23 @@ async function readDiary(callsId: string): Promise<string[]> {
   const flat = one ? stringList(one[0]) : null;
   if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a call diary's holds");
   return flat;
+}
+
+/**
+ * The store's one-to-one team bookings still to come, with their hosts' ids,
+ * from the diary alone (one HGETALL, nothing written): for the five-minute
+ * job's look for a meeting on the calendar of a host who has left the team
+ * (lib/call-meetings.ts). A diary that cannot be read throws (readDiary).
+ */
+export async function teamBookingsAhead(store: Store, now: number): Promise<{ session: string; product: string; start: number; end: number; hosts: string[] }[]> {
+  if (!store.callsId || !isRedisConfigured()) return [];
+  const out: { session: string; product: string; start: number; end: number; hosts: string[] }[] = [];
+  for (const { entry } of readEntries(await readDiary(store.callsId))) {
+    const team = teamOf(entry);
+    if (!team || entry.until !== 0 || entry.e <= now || !entry.session || !entry.p) continue;
+    out.push({ session: entry.session, product: entry.p, start: entry.start, end: entry.e, hosts: team.hosts });
+  }
+  return out;
 }
 
 async function heldAndBooked(store: Store, now: number): Promise<(TeamBusy & { field: string })[]> {
@@ -1551,7 +1568,11 @@ async function tellMoved(input: {
       `Was: ${at(from.start, setup.tz)}`,
       "",
       "The old time is free again for somebody else. The calendar file attached has the new time; delete the old event from your calendar if it is still there.",
-      ...(place ? ["", `In person, at: ${placeLine(place)}`] : room ? ["", `${video ? "The video room" : "The meeting link"}: ${room}`, ...(video ? [VIDEO_ROOM_NOTE] : [])] : []),
+      ...(place
+        ? ["", `In person, at: ${placeLine(place)}`]
+        : room
+          ? ["", `${video ? "The video room" : "The meeting link"}: ${room}`, ...(video ? [VIDEO_ROOM_NOTE] : [])]
+          : ["", `You have not set a meeting link, so send them one before the call${email ? ` at ${email}` : ""}.`]),
       "Every booking is also in your studio, under Upcoming calls.",
     ].join("\n"),
     ...(email ? { replyTo: email } : {}),
@@ -2091,10 +2112,18 @@ export async function tellNewLink(input: {
   previous: string;
   people: PaidCall[];
   origin: string;
+  /**
+   * The meeting was on the own calendar of a host who has left the team, and
+   * was given up there (lib/meet-links.ts, replaceFormerHost): `meeting.link`
+   * is the store's own meeting, the call's room, or "" when the call has no
+   * link at all, and the owner is told why.
+   */
+  formerHost?: boolean;
 }): Promise<number> {
   if (!writesAboutBookings(input.store)) return 0;
   const { store, product, meeting, previous, people, origin } = input;
   const setup = product.call;
+  if (input.formerHost) return tellFormerHostLink({ store, product, meeting, previous, people, origin });
   const name = meeting.provider === "google" ? "Google Meet" : "Zoom";
   let told = 0;
   // The buyers' emails speak the store's language (lib/buyer-words/booking.ts).
@@ -2141,6 +2170,70 @@ export async function tellNewLink(input: {
       ...(previous ? [`It replaces the link they were given before: ${previous}`] : []),
       "",
       `${told} ${told === 1 ? "person was" : "people were"} emailed the new link.`,
+    ].join("\n"),
+    idempotencyKey: `meet-link:${meeting.scope}:${meeting.updates}:creator`.slice(0, 256),
+  }).catch(() => false);
+  return told;
+}
+
+/**
+ * tellNewLink for a meeting given up on the calendar of a host who has left
+ * the team: each buyer is emailed the link that replaces it (or, with none,
+ * that the store will send one), with a calendar file that replaces the one
+ * sent before, and the owner is told why and what was given. Never the host.
+ */
+async function tellFormerHostLink(input: { store: Store; product: CallListing; meeting: MeetRecord; previous: string; people: PaidCall[]; origin: string }): Promise<number> {
+  const { store, product, meeting, previous, people, origin } = input;
+  const setup = product.call;
+  const link = meeting.link;
+  const kind = roomKind(link || null);
+  let told = 0;
+  const b = bookingWords(store.language);
+  const locale = LANGUAGES[parseLanguage(store.language)].locale;
+  for (const call of people) {
+    if (!call.email) continue;
+    const tz = isTimeZone(call.buyerTz) ? call.buyerTz : setup.tz;
+    const note = link ? `${b.icsJoin(link)}${kind === "room" ? `\n\n${b.videoRoomNote}` : ""}` : b.icsWillSend(store.name);
+    const invite = Buffer.from(
+      callInvite({ uid: call.session, start: call.start, end: call.end, title: product.title, storeName: store.name, room: link || null, note, sequence: call.moves + meeting.updates, words: b }),
+    ).toString("base64");
+    const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+      from: storeSender(store),
+      to: call.email,
+      subject: b.newLinkSubject(product.title, store.name),
+      text: [
+        b.newLinkHead(product.title, store.name),
+        "",
+        `${readableTime(call.start, tz, locale)} (${zoneName(call.start, tz, locale)})`,
+        "",
+        ...(link ? [`${b.roomLabels[kind]}${b.colon}${link}`, ...(kind === "room" ? [b.videoRoomNote] : [])] : [b.willSendLink(store.name)]),
+        ...(previous ? [b.oldLink(previous)] : []),
+        "",
+        b.replacesFile,
+        `${store.name}${b.colon}${origin}/@${store.handle}`,
+        b.toCancel(store.name),
+      ].join("\n"),
+      replyTo: store.email,
+      attachments: [{ filename: "call.ics", content: invite }],
+      idempotencyKey: `meet-link:${meeting.scope}:${meeting.updates}:${call.session}`.slice(0, 256),
+    }).catch(() => false);
+    if (sent) told += 1;
+  }
+  const emails = people.map((p) => p.email).filter((e): e is string => !!e);
+  await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+    from: `"Marktmorgen" <${senderAddress()}>`,
+    to: store.email,
+    subject: `New link: ${product.title}, ${readableTime(meeting.start, setup.tz)}`,
+    text: [
+      `The meeting for ${product.title} was on the Google Calendar of a host who is no longer on your team. It was removed from their calendar, so they no longer see the buyer or the time.`,
+      "",
+      `${readableTime(meeting.start, setup.tz)} (${zoneName(meeting.start, setup.tz)}, your time zone)`,
+      link
+        ? `The booking now has ${kind === "room" ? "a private video room" : kind === "meet" ? "your own Google Meet link" : kind === "zoom" ? "your own Zoom link" : "your meeting link"}: ${link}`
+        : `You have not set a meeting link, so send them one before the call${emails.length ? ` at ${emails.join(", ")}` : ""}.`,
+      ...(previous ? [`It replaces the link they were given before: ${previous}`] : []),
+      "",
+      `${told} ${told === 1 ? "person was" : "people were"} emailed${link ? " the new link" : ""}.`,
     ].join("\n"),
     idempotencyKey: `meet-link:${meeting.scope}:${meeting.updates}:creator`.slice(0, 256),
   }).catch(() => false);

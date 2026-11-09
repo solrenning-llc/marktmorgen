@@ -121,38 +121,58 @@ function brokenHook(store: StoreRef) {
 }
 
 /**
- * Whether the host whose own Google Calendar a team booking's meeting is on
- * (by host id, lib/host-calendar.ts) is still on the store's team, read the
- * way a new booking reads it (lib/team-booking.ts, possibleHosts). That
- * event carries the buyer's address and the call's time: nothing is made or
- * moved on the calendar of somebody taken off the team. The owner is never
- * off it, so their own calendar reads nothing. A team that cannot be read is
- * not known (rule 24): only the owner's, never a host who may have left.
+ * The host ids of the store's team now, the owner's among them, read the way
+ * a new booking reads it (lib/team-booking.ts, possibleHosts): one GET of the
+ * team record. Null when the team cannot be read: not known (rule 24).
  */
-async function stillHosts(store: Pick<Store, "email" | "sid">, host: string): Promise<boolean> {
-  if (!host || host === hostId(store.email)) return true;
+export async function teamHostIds(store: Pick<Store, "email" | "sid">): Promise<Set<string> | null> {
   try {
-    return (await possibleHosts(store)).some((email) => hostId(email) === host);
+    return new Set((await possibleHosts(store)).map((email) => hostId(email)));
   } catch (error) {
-    console.error("reading the team for a meeting's host failed; nothing is done on their calendar", error);
-    return false;
+    console.error("reading the team for a meeting's host failed; nothing is done on a host's calendar", error);
+    return null;
   }
+}
+
+/**
+ * Whether the host whose own Google Calendar a team booking's meeting is on
+ * (by host id, lib/host-calendar.ts) is still on the store's team, in `team`
+ * (teamHostIds). That event carries the buyer's address and the call's time:
+ * nothing is made or moved on the calendar of somebody taken off the team.
+ * The owner is never off it, so their own calendar reads nothing. A team that
+ * cannot be read is not known (rule 24): only the owner's, never a host who
+ * may have left.
+ */
+function onTeam(store: Pick<Store, "email">, team: Set<string> | null, host: string): boolean {
+  if (!host || host === hostId(store.email)) return true;
+  return team !== null && team.has(host);
+}
+
+/** stillHosts for one host: the team read only when the host is not the owner. */
+async function stillHosts(store: Pick<Store, "email" | "sid">, host: string): Promise<boolean> {
+  if (onTeam(store, null, host)) return true;
+  return onTeam(store, await teamHostIds(store), host);
 }
 
 /** Where a deletion on the calendar of a host who left waits for the five-minute job, apart from the booking's own record. */
 const leftScope = (scope: string) => `${scope}:left`;
 
 /**
- * A booking's meeting on the own calendar of a host who has left the team:
- * deleted there, never moved, and the booking's record given up, so the
- * meeting at its new time is the store's own (callMoved) or, when the call
- * makes none, the call's room (lib/call-rooms.ts). A deletion Google did not
- * confirm is written down under leftScope for the five-minute job to try
- * again, so the booking's own record is free for what replaces it.
+ * A booking's meeting on the own calendar of `host`, who has left the team:
+ * deleted there, never moved, and the booking's record given up (gone), so
+ * what replaces it is the store's own meeting or, when the call makes none,
+ * the call's room (lib/call-rooms.ts reads a gone record as no meeting). Its
+ * `updates` counts the link that changes, so a calendar file sent with the
+ * new one replaces every one sent before. A deletion Google did not confirm
+ * is written down under leftScope for the five-minute job to try again, so
+ * the booking's own record is free for what replaces it. Returns the record
+ * given up, with the link the people booked had; null when nothing was
+ * there to give up (done already, or not on that host's calendar).
  */
-async function leaveFormerHost(store: StoreRef, scope: string): Promise<void> {
+export async function leaveFormerHost(store: StoreRef, scope: string, host: string): Promise<MeetRecord | null> {
+  let given: MeetRecord | null = null;
   await onRecord(scope, async (record) => {
-    if (record.gone || !record.host) return null;
+    if (record.gone || !record.host || record.host !== host) return null;
     if (record.made && record.id) {
       const left: MeetRecord = { ...record, scope: leftScope(scope), gone: true, todo: "delete", tries: 0, next: 0, error: "" };
       try {
@@ -166,8 +186,39 @@ async function leaveFormerHost(store: StoreRef, scope: string): Promise<void> {
         }
       }
     }
-    return { ...record, gone: true, todo: "", tries: 0, next: 0, error: "" };
+    // On nobody's calendar any more: what is left there waits under leftScope.
+    given = { ...record, gone: true, todo: "", tries: 0, next: 0, error: "", updates: record.updates + 1, host: "", calendar: "" };
+    return given;
   });
+  return given;
+}
+
+/**
+ * A one-to-one team booking whose meeting is on the own calendar of `host`,
+ * who has left the team: that meeting is given up (leaveFormerHost) and the
+ * booking gets the store's own meeting for its time, made as a booking's is
+ * (callMeeting, with no team), or the call's room when it makes none. Returns
+ * what the people booked are to be told (lib/calls.ts, tellNewLink): the
+ * meeting, whose link is "" when the call has no link at all, and the link
+ * they had. Null when nothing was given up.
+ */
+export async function replaceFormerHost(
+  store: Store,
+  product: CallProduct,
+  booking: { session: string; start: number; end: number; email: string | null; host: string },
+): Promise<{ meeting: MeetRecord; previous: string } | null> {
+  if (!store.callsId) return null;
+  const scope = callScope(store.callsId, { group: false, session: booking.session, product: product.id, start: booking.start });
+  const given = await leaveFormerHost(store, scope, booking.host);
+  if (!given) return null;
+  const { session, start, end } = booking;
+  const made = await callMeeting({ store, product, session, start, end, buyerEmail: booking.email }).catch((error) => {
+    console.error("making the store's meeting for a host who left failed", error);
+    return null;
+  });
+  if (made && !made.gone) return { meeting: made, previous: given.link };
+  const room = whereOf(product.call).kind === "place" ? null : await roomOf(store.callsId, { product: product.id, setup: product.call, session, start, end }).catch(() => null);
+  return { meeting: { ...given, start, end, link: room ?? "", made: false }, previous: given.link };
 }
 
 function nextTry(record: MeetRecord, now: number): MeetRecord {
@@ -274,9 +325,9 @@ export async function meetingFor(ask: MeetingAsk): Promise<MeetRecord> {
       tries: 0,
       next: 0,
       error: "",
-      // A meeting that replaces one removed (a host who left the team, leaveFormerHost) is a new link:
-      // counted, so a calendar file sent with it replaces every one sent before.
-      updates: found ? found.updates + 1 : 0,
+      // A meeting that replaces one given up (a host who left the team, leaveFormerHost) keeps its count,
+      // which already counts this new link, so a calendar file sent with it replaces every one sent before.
+      updates: found ? found.updates : 0,
       gone: false,
       host: ask.host ?? "",
       calendar: ask.calendar ?? "",
@@ -455,7 +506,13 @@ export async function cancelMeeting(store: StoreRef, scope: string): Promise<Mee
 export type RetryOutcome =
   | { kind: "done" | "failed" | "skipped"; record: MeetRecord }
   /** A meeting that had failed was made: the people booked have to be told its link. */
-  | { kind: "switched"; record: MeetRecord; previous: string };
+  | { kind: "switched"; record: MeetRecord; previous: string }
+  /**
+   * A move or a guest list still to do on the own calendar of a host who has
+   * left the team: nothing was done or written; the caller replaces the
+   * meeting (replaceFormerHost) and tells the people booked.
+   */
+  | { kind: "former-host"; record: MeetRecord };
 
 /**
  * One try of what a record still has to do, for the five-minute job.
@@ -470,10 +527,16 @@ export async function retryRecord(store: StoreRef & Pick<Store, "sid">, scope: s
       return null;
     }
     // Nothing is made or moved on the calendar of a host who has left the
-    // team: the buyer keeps the link they were given. Removing is still done.
+    // team. A meeting not made yet is not made there: the buyer keeps the link
+    // they were given, which works. A move or a guest list still to do is
+    // left to the caller, which deletes the event there and gives the booking
+    // the store's own meeting (replaceFormerHost). Removing is still done.
     if (record.todo !== "delete" && !record.gone && record.host && !(await stillHosts(store, record.host))) {
-      const why = record.todo === "create" ? "not made" : "not changed";
-      const gaveUp = { ...record, todo: "" as const, next: 0, error: `${why}: the host it is for is no longer on your team` };
+      if (record.todo !== "create") {
+        outcome = { kind: "former-host", record };
+        return null;
+      }
+      const gaveUp = { ...record, todo: "" as const, next: 0, error: "not made: the host it is for is no longer on your team" };
       outcome = { kind: "failed", record: gaveUp };
       return gaveUp;
     }
@@ -583,8 +646,11 @@ export async function callMeeting(input: {
   if (whereOf(setup).kind === "place") return null;
   const organizer = input.team?.hosts[0];
   const written = organizer && setup.meet !== "zoom" ? await hostWriteTarget(store, organizer).catch(() => null) : null;
-  // Never on the calendar of a host taken off the team since the time was held (stillHosts).
-  const target = written && (await stillHosts(store, written.host)) ? written : null;
+  // Never on the calendar of a host taken off the team since the time was held, nor with one as a guest:
+  // the team is read once, for them all (teamHostIds), and only when a host's own calendar would be used.
+  const others = (input.team?.hosts ?? []).slice(1);
+  const team = written && [written.host, ...others.map((h) => hostId(h))].some((h) => !onTeam(store, null, h)) ? await teamHostIds(store) : null;
+  const target = written && onTeam(store, team, written.host) ? written : null;
   const provider = target ? "google" : setup.meet;
   if (!provider) return null;
   const group = isGroup(setup);
@@ -593,7 +659,7 @@ export async function callMeeting(input: {
   const record = await meetingFor({
     store,
     provider,
-    ...(target ? { host: target.host, calendar: target.calendar, alsoInvite: await stillOnTeam(store, (input.team?.hosts ?? []).slice(1)) } : {}),
+    ...(target ? { host: target.host, calendar: target.calendar, alsoInvite: others.filter((h) => onTeam(store, team, hostId(h))) } : {}),
     scope,
     group,
     product: product.id,
@@ -615,13 +681,6 @@ export async function callMeeting(input: {
     await redisPipeline([["ZADD", MEET_STORES, end, `${store.callsId}|${store.handle}`]]).catch(() => {});
   }
   return record;
-}
-
-/** The hosts of a collective call still on the team, put on its guest list: never one who has left. */
-async function stillOnTeam(store: Store, hosts: string[]): Promise<string[]> {
-  const kept: string[] = [];
-  for (const host of hosts) if (await stillHosts(store, hostId(host))) kept.push(host);
-  return kept;
 }
 
 /**
@@ -647,8 +706,7 @@ export async function callMoved(input: {
     // On the own calendar of a host who has left the team: deleted there, never moved, and the
     // store's own meeting (or the call's room) takes the new time, so the move's emails carry it.
     if (own.host && !own.gone && !(await stillHosts(store, own.host))) {
-      await leaveFormerHost(store, one);
-      await callMeeting({ store, product, session, start: input.start, end: input.end, buyerEmail: input.email });
+      await replaceFormerHost(store, product, { session, start: input.start, end: input.end, email: input.email, host: own.host });
       return;
     }
     await moveMeeting(store, one, input.start, input.end, setup.tz);

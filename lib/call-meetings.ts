@@ -27,6 +27,17 @@
  *
  *   nl:meet:rf:<callsId>:since   the time refunds were read up to, in seconds
  *   nl:meet:rf:<callsId>:seen    refunds already read
+ *
+ * Hosts who left. A team booking's meeting can be on the own Google Calendar
+ * of its host (lib/host-calendar.ts), with the buyer on the guest list. Once
+ * an hour for each store with meetings still to come (the run whose
+ * five-minute slot is the store's), its diary's team bookings to come are
+ * read (lib/calls.ts, teamBookingsAhead) and its team once; a booking whose
+ * meeting is on the calendar of somebody no longer on the team has it
+ * deleted there and is given the store's own meeting or the call's room
+ * (lib/meet-links.ts, replaceFormerHost), and the people booked are emailed
+ * the new link (tellNewLink). A team, a diary or a list of bookings that
+ * cannot be read changes nothing that run. Nothing is written to find them.
  */
 import { whereOf } from "@/lib/call-place";
 import { saleHandles } from "@/lib/store";
@@ -38,13 +49,21 @@ import { readListing } from "@/lib/catalog";
 import { markBookingsChanged, readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
 import { MEET_STORES, callRefunded, dropScope, dueScopes, retryRecord } from "@/lib/meet-links";
-import { type PaidCall, isCallProduct, paidCalls, tellNewLink } from "@/lib/calls";
+import { type PaidCall, isCallProduct, paidCalls, teamBookingsAhead, tellNewLink } from "@/lib/calls";
 import { eventStillWants, readEventScope } from "@/lib/event-meetings";
 import type { Store } from "@/lib/store";
 import { isClaimId, isHostId, releaseClaim } from "@/lib/host-claims";
+// Hosts who left the team (formerHosts, below).
+import { leaveFormerHost, replaceFormerHost, teamHostIds } from "@/lib/meet-links";
+import { callScope, readRecords } from "@/lib/meet-records";
+import { hostId } from "@/lib/host-claims";
 
 const BATCH = 40;
 const REFUND_STORES = 20;
+/** Stores looked at for hosts who left: read from the list per run, each looked at in its own five-minute slot of the hour. */
+const HOST_STORES = 240;
+const SLOTS = 12;
+const SLOT_MS = 300_000;
 const REFUND_PAGES = 2;
 const REFUND_LOOKUPS = 10;
 const REFUND_KEEP_SECONDS = 30 * 86_400;
@@ -116,6 +135,31 @@ export async function syncMeetings(
       return null;
     });
     if (!outcome) continue;
+    if (outcome.kind === "former-host") {
+      // A move or a guest list still to do on the calendar of a host who left: deleted there instead, and the
+      // booking given the store's own meeting or the room. Unknown product or bookings: tried again next run.
+      const product = await readListing(store, record.product);
+      const list = await paidFor(store);
+      if (!list) continue;
+      if (!product || !isCallProduct(product)) {
+        await leaveFormerHost(store, scope, outcome.record.host);
+        continue;
+      }
+      const booked = list.filter((c) => c.session === record.session);
+      const replaced = await replaceFormerHost(store, product, {
+        session: record.session,
+        start: outcome.record.start,
+        end: outcome.record.end,
+        email: booked[0]?.email ?? null,
+        host: outcome.record.host,
+      });
+      if (!replaced) continue;
+      run.switched += 1;
+      if (booked.length && whereOf(product.call).kind !== "place") {
+        run.told += await tellNewLink({ store, product, ...replaced, people: booked, origin, formerHost: true }).catch(() => 0);
+      }
+      continue;
+    }
     if (outcome.kind === "done") run.done += 1;
     if (outcome.kind === "failed") run.failed += 1;
     if (outcome.kind === "switched") {
@@ -137,7 +181,69 @@ export async function syncMeetings(
     console.error("reading refunds for meetings failed", error);
     return 0;
   });
+  if (Date.now() < deadline) {
+    await formerHosts(storeFor, paidFor, deadline, origin, run).catch((error) => console.error("looking for hosts who left failed", error));
+  }
   return run;
+}
+
+/** Which of the hour's five-minute runs looks at a store: the same one every hour. */
+function slotOf(callsId: string): number {
+  let h = 0;
+  for (const c of callsId) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return h % SLOTS;
+}
+
+/** Hosts who left, for the stores whose slot this run is (above). */
+async function formerHosts(
+  storeFor: (handle: string) => Promise<Store | null>,
+  paidFor: (store: Store) => Promise<PaidCall[] | null>,
+  deadline: number,
+  origin: string,
+  run: MeetingsRun,
+): Promise<void> {
+  const now = Date.now();
+  const slot = Math.floor(now / SLOT_MS) % SLOTS;
+  const [raw] = await redisPipeline([["ZRANGEBYSCORE", MEET_STORES, now, now + 400 * 86_400_000, "LIMIT", 0, HOST_STORES]]);
+  const members = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  for (const member of members) {
+    if (Date.now() > deadline) break;
+    const [callsId, handle] = member.split("|");
+    if (!callsId || !handle || slotOf(callsId) !== slot) continue;
+    const store = await storeFor(handle).catch(() => null);
+    if (!store || store.callsId !== callsId) continue;
+    const ahead = await teamBookingsAhead(store, now).catch(() => null);
+    if (!ahead?.length) continue;
+    const owner = hostId(store.email);
+    // One read of the team for the store; one that cannot be read changes nothing (rule 24).
+    const team = await teamHostIds(store);
+    if (!team) continue;
+    const suspects = ahead.filter((b) => b.hosts.some((h) => h !== owner && !team.has(h)));
+    if (!suspects.length) continue;
+    const records = await readRecords(suspects.map((b) => callScope(callsId, { group: false, session: b.session, product: b.product, start: b.start })));
+    const left = suspects.flatMap((b, i) => {
+      const r = records[i];
+      return r && !r.gone && r.host && r.host !== owner && !team.has(r.host) ? [{ booking: b, record: r }] : [];
+    });
+    if (!left.length) continue;
+    const list = await paidFor(store);
+    if (!list) continue;
+    for (const { booking, record } of left) {
+      if (Date.now() > deadline) break;
+      const product = await readListing(store, booking.product);
+      if (!product || !isCallProduct(product)) {
+        await leaveFormerHost(store, record.scope, record.host);
+        continue;
+      }
+      const booked = list.filter((c) => c.session === booking.session);
+      const replaced = await replaceFormerHost(store, product, { session: booking.session, start: record.start, end: record.end, email: booked[0]?.email ?? null, host: record.host });
+      if (!replaced) continue;
+      run.switched += 1;
+      if (booked.length && whereOf(product.call).kind !== "place") {
+        run.told += await tellNewLink({ store, product, ...replaced, people: booked, origin, formerHost: true }).catch(() => 0);
+      }
+    }
+  }
 }
 
 /** Refunds in full since the last run, for every store with meetings still to come. */

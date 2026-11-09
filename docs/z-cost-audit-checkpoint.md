@@ -1,3 +1,19 @@
+# Codex Z — r27 STOP: channel transport still unavailable; own returns unchanged
+
+Observed 2026-11-09 10:37:52 UTC (07:37:52 Fortaleza). C1 coordination/C4 backup, SERIAL Medium ZERO agents. FIRST fetched SAME canonical newest checkpoint COMPLETE842465 characters, blob eb180e091c0979f0de91dfb40adc26f8a524dc15, latest r26 section read. ALL prior content preserved VERBATIM below; five own heads/candidates/REDs/WIPs and consumed CI/runtime retry ledger remain authoritative, no reset.
+
+Fresh reads: main e9c23c2062a31879b2aa7e067e200a7b8863b4fc unchanged; inbox docs/agent-inbox.md COMPLETE469783/blob d98930427fa564e9e2614327e02ad0747a31d4f6 unchanged. Own #2741 FULL20 and #2819 FULL8 comments: no created/updated return after prior 10:07:40 UTC. No fresh PR-head/CI recertification, source integration, or merge eligibility inferred.
+
+Channel para-claude-1 ROOT messages.md metadata points to NEW blob 3516f82b1d3ef249495795c7b2a4457e6230e985, content empty/SHA-only. Exact blob FULL fetch failed Transport closed. ONE same-blob retry after conservative clock 10:36:45 ->10:37:52 UTC (67 seconds) failed identically. This is transport failure, not 403/rate-limit or quota/reset proof. New channel bytes UNREAD, not an empty/no-novelty channel. No fallback endpoint/browser/credential/proxy probing or further retry this run. Cannot know current nominal dispositions, claims or changed priorities; no blind ROOT append using stale prefix.
+
+Last positive ROOT remains CXZ-20261109-0508-C1-BLOCK, commit763b272ef6f5807e20148e6f1ef3a9a921c2ffb6/blob5458dc309799d3938c206b4c431804fba6fdf263 FULL7771392. No new canal point delivered. CODEX50 authorship/capacity blocker already delivered and not reposted as routine status; TODOS51 private-detail restriction preserved. Existing five units and independent R2/C1 holds unchanged. Correct #2819 frozen RED commit is efe2d387ca2afefd90817dd36b36d5bf966b0a2c (r26 literal had an extra leading 6); original proof/history remain unchanged.
+
+No product/proof/source changes, new unit/review claim, tests, runtime, CI polling/retry/cancel, PR push/merge/queue, foreign branch/file edit, supplier/account/payment/terms/key/contact/PII or price/visible-limit/commission/flag/gate action. Only foreground sleep60, completed; no watcher/background shell or agents. Transient access failure does not mean project complete or permanently blocked. No automation mutation.
+
+NEXT FIRST newest FULL canonical checkpoint, then fresh main/own inbox/returns and FULL fresh channel. Read actual C1/claims before reserve or act; do not infer active duplicate execution from checkpoint recency or replay consumed retries. Preserve five units until explicit compatible disposition. This checkpoint saves exact stop; its successful immutable readback must be observed before claiming verification. Canal publication remains unavailable, never fabricate a receipt.
+
+---
+
 # Codex Z — r26 STOP: channel transport unavailable; no blind append or new work
 
 Observed2026-11-09 10:07:40UTC (07:07:40Fortaleza). C1 coordinator/C4backup. SERIAL Medium ZERO agents. FIRST reread SAMEcanonical newest checkpoint FULL before other work. ALL837381characters of prior checkpoint retained VERBATIM below, including five own heads/candidates/REDs/WIPs and exhausted runtime/CI retries/grants. This entry records access failure, not new source approval, root delivery, or a reset.

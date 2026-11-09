@@ -162,6 +162,29 @@ export async function readFields(statsId: string | null): Promise<CrmField[]> {
 }
 
 /**
+ * The store's fields exactly as saved, for a decision that writes: none only
+ * when none were ever saved. A reply in an unknown shape, or a saved list
+ * with an entry that does not read, throws CrmSchemaReadUnavailable, never
+ * "no fields" (CX-123 rules 24 and 30): a sequence's field step is never
+ * turned away, saved or ended as "removed" against fields that are not the
+ * store's.
+ */
+export async function readFieldsWhole(statsId: string | null): Promise<CrmField[]> {
+  if (!statsId || !isRedisConfigured()) return [];
+  try {
+    const response = await redisPipeline([["GET", fieldsKey(statsId)]]);
+    if (!Array.isArray(response) || response.length !== 1) throw new CrmSchemaReadUnavailable();
+    if (response[0] === null) return [];
+    if (typeof response[0] !== "string") throw new CrmSchemaReadUnavailable();
+    const raw: unknown = JSON.parse(response[0]);
+    if (!Array.isArray(raw)) throw new CrmSchemaReadUnavailable();
+    const fields = parseFields(raw);
+    if (fields.length !== raw.length) throw new CrmSchemaReadUnavailable();
+    return fields;
+  } catch { throw new CrmSchemaReadUnavailable(); }
+}
+
+/**
  * Saves the fields; the answers kept for a field that is gone go with it.
  * With `keepAll`, nothing is written when a field kept now would be gone
  * (CrmFieldsKept). The fields are read just before the write, not in the
@@ -169,19 +192,7 @@ export async function readFields(statsId: string | null): Promise<CrmField[]> {
  * but its answers are never deleted, since only fields read as gone are.
  */
 export async function writeFields(statsId: string, fields: CrmField[], keepAll = false): Promise<CrmField[]> {
-  let before: CrmField[];
-  try {
-    const response = await redisPipeline([["GET", fieldsKey(statsId)]]);
-    if (!Array.isArray(response) || response.length !== 1) throw new CrmSchemaReadUnavailable();
-    if (response[0] === null) before = [];
-    else {
-      if (typeof response[0] !== "string") throw new CrmSchemaReadUnavailable();
-      const raw: unknown = JSON.parse(response[0]);
-      if (!Array.isArray(raw)) throw new CrmSchemaReadUnavailable();
-      before = parseFields(raw);
-      if (before.length !== raw.length) throw new CrmSchemaReadUnavailable();
-    }
-  } catch { throw new CrmSchemaReadUnavailable(); }
+  const before = await readFieldsWhole(statsId);
   const gone = before.filter(f => !fields.some(n => n.id === f.id));
   if (keepAll && gone.length) throw new CrmFieldsKept();
   try {
@@ -233,12 +244,15 @@ export async function allValues(statsId: string | null, fields: CrmField[]): Pro
 
 /**
  * The store's pipelines: the saved ones once the creator has changed one,
- * and until then the board it always had, as the first pipeline.
+ * and until then the board it always had, as the first pipeline. A reply in
+ * an unknown shape, or a saved record that does not read, throws
+ * CrmSchemaReadUnavailable, never the default pipeline in its place (CX-123
+ * rules 24 and 30): a teammate's access, a deal's stage or a workflow step
+ * is never decided against pipelines that are not the store's.
  */
 export async function readPipelines(statsId: string | null): Promise<Pipeline[]> {
   if (!statsId || !isRedisConfigured()) return [firstPipeline(DEFAULT_STAGES)];
-  const [pipes, legacy] = await redisPipeline([["GET", pipesKey(statsId)], ["GET", stagesKey(statsId)]]);
-  return parsePipelines(json(pipes)) ?? [firstPipeline(parseStages(json(legacy)) ?? DEFAULT_STAGES)];
+  return (await pipelineSnapshot(statsId)).pipelines;
 }
 
 /** Every stage of every pipeline, in order: what a deal's stage is read against. */
@@ -258,9 +272,14 @@ async function pipelineSnapshot(statsId: string): Promise<{ raw: string; pipelin
       if (!pipelines) throw new CrmSchemaReadUnavailable();
       return { raw: pipes, pipelines };
     }
-    // Before any pipeline was saved, the board's own stages, as the board has always read them.
-    if (legacy !== null && typeof legacy !== "string") throw new CrmSchemaReadUnavailable();
-    return { raw: "", pipelines: [firstPipeline(parseStages(json(legacy)) ?? DEFAULT_STAGES)] };
+    // Before any pipeline was saved, the board's own stages, as the board has always read them; the defaults only
+    // when that record was never saved either. A board record that does not read whole is unknown (rule 30).
+    if (legacy === null) return { raw: "", pipelines: [firstPipeline(DEFAULT_STAGES)] };
+    if (typeof legacy !== "string") throw new CrmSchemaReadUnavailable();
+    const board = json(legacy);
+    const stages = parseStages(board);
+    if (!Array.isArray(board) || !stages || stages.length !== board.length) throw new CrmSchemaReadUnavailable();
+    return { raw: "", pipelines: [firstPipeline(stages)] };
   } catch { throw new CrmSchemaReadUnavailable(); }
 }
 

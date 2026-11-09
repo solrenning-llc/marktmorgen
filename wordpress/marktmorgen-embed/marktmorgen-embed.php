@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Marktmorgen Embed
  * Description: Puts a Marktmorgen product's checkout card, or a store's sign-up form, on a WordPress page with a shortcode: the same link and checkout script the Marktmorgen studio gives to paste, without pasting code.
- * Version: 0.1.0
+ * Version: 0.1.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: Marktmorgen
@@ -34,10 +34,10 @@ const MARKTMORGEN_MAX_TEXT = 60;
 
 /** The checkout script, the same bytes as lib/embed-sdk.ts loaderSource(), so its sha256 is the one the studio gives. */
 const MARKTMORGEN_LOADER = <<<'MMLOADER'
-/* Marktmorgen checkout script v1. What it does: https://marktmorgen.com/developers/checkout-script */
+/* Marktmorgen checkout script v2. What it does: https://marktmorgen.com/developers/checkout-script */
 (function(w,d){
 if(w.Marktmorgen)return;
-var O="https://marktmorgen.com",open=null,api={version:1,purchase:null,close:function(){shut("page")}};
+var O="https://marktmorgen.com",open=null,api={version:2,purchase:null,close:function(){shut("page")}};
 w.Marktmorgen=api;
 function copy(a,b){var c={},k;for(k in a)c[k]=a[k];for(k in b)c[k]=b[k];return c}
 function fire(t,detail,el){var e;try{e=new CustomEvent("marktmorgen:"+t,{detail:detail,bubbles:true})}catch(x){return}(el&&el.isConnected?el:d).dispatchEvent(e)}
@@ -52,17 +52,18 @@ if(u.origin!==O||p[1]!=="embed"||!p[2]||!p[3])return;
 var join=p[3]==="join",info={kind:join?"optin":"product",handle:decodeURIComponent(p[2]),product:join?null:p[3],mode:a.getAttribute("data-mm")==="page"?"page":"overlay"};
 if(info.mode==="page"){fire("open",info,a);return}
 e.preventDefault();if(open)return;fire("open",info,a);u.searchParams.set("mm","overlay");
-var box=d.createElement("div"),frame=d.createElement("iframe"),x=d.createElement("button"),name=(a.textContent||"").trim().slice(0,80)||"Checkout";
+var box=d.createElement("dialog"),frame=d.createElement("iframe"),x=d.createElement("button"),name=(a.textContent||"").trim().slice(0,80)||"Checkout";
 box.setAttribute("role","dialog");box.setAttribute("aria-modal","true");box.setAttribute("aria-label",name);
-box.style.cssText="position:fixed;inset:0;z-index:2147483646;display:flex;align-items:center;justify-content:center;padding:72px 16px 16px;background:rgba(17,14,36,.6)";
-frame.src=u.href;frame.title=name;frame.referrerPolicy="origin";
+box.style.cssText="position:fixed;inset:0;z-index:2147483646;display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0;padding:72px 16px 16px;background:rgba(17,14,36,.6)";
+frame.src=u.href;frame.title=name;frame.referrerPolicy="origin";frame.onload=function(){frame.onload=null;var f=d.activeElement;if(f===frame||f===box)try{frame.contentWindow.focus()}catch(x){}};
 frame.style.cssText="display:block;width:100%;max-width:400px;height:420px;max-height:calc(100vh - 96px);border:0;border-radius:24px;background:transparent";
 x.type="button";x.setAttribute("aria-label","Close");x.textContent="\u00d7";
 x.style.cssText="position:absolute;top:16px;right:16px;width:44px;height:44px;border:0;border-radius:999px;background:#fff;color:#15112e;font:600 26px/1 system-ui,sans-serif;cursor:pointer";
-x.onclick=function(){shut("button")};box.onclick=function(ev){if(ev.target===box)shut("backdrop")};
+x.onfocus=function(){x.style.outline="3px solid transparent";x.style.boxShadow="0 0 0 3px #15112e,0 0 0 6px #fff"};x.onblur=function(){x.style.outline="";x.style.boxShadow="none"};
+x.onclick=function(){shut("button")};box.onclick=function(ev){if(ev.target===box)shut("backdrop")};box.oncancel=function(ev){ev.preventDefault();shut("escape")};
 box.appendChild(frame);box.appendChild(x);
 open={box:box,frame:frame,el:a,info:info,over:d.documentElement.style.overflow};
-d.documentElement.style.overflow="hidden";w.addEventListener("message",hear);d.addEventListener("keydown",key,true);d.body.appendChild(box);frame.focus()
+d.documentElement.style.overflow="hidden";w.addEventListener("message",hear);d.addEventListener("keydown",key,true);d.body.appendChild(box);if(box.showModal)try{box.showModal()}catch(x){}frame.focus()
 });
 var mark=/^#mm-purchase=([a-z0-9]{6,40})\.(evt_[0-9a-f]{32})$/.exec(w.location.hash);
 if(mark){api.purchase={product:mark[1],order:mark[2]};try{history.replaceState(history.state,"",w.location.pathname+w.location.search)}catch(x){}

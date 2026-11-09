@@ -232,7 +232,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                 )}
               </section>
 
-              {health && health.members.length ? (
+              {health && (health.members.length || health.unscored) ? (
                 <section aria-labelledby="health-title" className="card mt-8 p-6 sm:p-8" data-member-health>
                   <h2 id="health-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">How each member is doing</h2>
                   <p className="mt-1 max-w-2xl text-sm text-ink-soft">
@@ -253,7 +253,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                       <dd className="text-sm text-ink-soft">{`a month, from members under 40${health.atRiskElsewhere ? `. ${health.atRiskElsewhere} of them ${health.atRiskElsewhere === 1 ? "pays" : "pay"} in another currency and ${health.atRiskElsewhere === 1 ? "is" : "are"} not added` : ""}`}</dd>
                     </div>
                   </dl>
-                  <div className="mt-5 overflow-x-auto" tabIndex={0} role="region" aria-label="Members, the lowest score first">
+                  {health.members.length ? <div className="mt-5 overflow-x-auto" tabIndex={0} role="region" aria-label="Members, the lowest score first">
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">
@@ -282,12 +282,13 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                  </div> : null}
                   {health.members.length > 25 ? <p className="mt-2 text-xs text-ink-soft">{`The 25 lowest of ${health.members.length} running members.`}</p> : null}
                   <ul className="mt-4 space-y-1 text-xs leading-relaxed text-ink-soft">
                     <li>Every member starts at 100. A failed payment Stripe is retrying takes off 40, a membership already canceled and running out what was paid for takes off 40, and a pause takes off 15.</li>
                     <li>{`Being away takes off up to ${AWAY_POINTS}, shared between the course and the community the membership includes: all of a place's share for never opening it after the first week, 90% for 30 days or more away, 40% for 14 to 29 days. While paused, being away is not counted.`}</li>
                     <li>A membership with neither a course nor a community has nothing here that says how much it is used, so its score is about paying alone. It is a rule, not a prediction.</li>
+                    {health.unscored ? <li>{`${health.unscored} running ${health.unscored === 1 ? "membership is" : "memberships are"}`} not counted here because Stripe did not send all their details. The numbers above leave them out and are partial.</li> : null}
                     {health.complete ? null : <li>Your Stripe account holds more memberships than one reading takes, so the oldest are not scored.</li>}
                   </ul>
                 </section>

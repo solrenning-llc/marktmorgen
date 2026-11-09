@@ -162,7 +162,8 @@ async function main(): Promise<void> {
   is("and its buyer is emailed the way in, once", out.map((e) => [([] as string[]).concat(e.to)[0], e.subject]), [["ana@example.com", "It is out: The Bread Book"]]);
   is("with the link to their purchases", out[0]?.text.includes("https://marktmorgen.com/@bakery/orders?for=ana%40example.com"), true);
   const [kept] = await redis.pipeline([["HGET", importedKey(STATS, "ana@example.com"), product.id]]);
-  is("written down under their address", JSON.parse(String(kept)).job, `pre:${session(1, "").id}`);
+  // The job says it does not ship, so the grant, which outlives the entry, keeps that (Claude 1's H on #2827).
+  is("written down under their address, as not shipped", JSON.parse(String(kept)).job, `pre:${session(1, "").id}:d`);
   is("marked given, and the refunded one marked refunded", [Boolean((await readPreorder(store, product.id, session(1, "").id))?.given), Boolean((await readPreorder(store, product.id, session(2, "").id))?.revoked)], [true, true]);
   is("nothing left to hand over, and run again it sends nothing", [await waitingCount(store, product.id), await runPreorderReleases(async () => store, async () => product, () => deps, Date.now() + 10_000)], [0, 0]);
 

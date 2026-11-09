@@ -9,7 +9,7 @@ import { redisPipeline } from "@/lib/redis";
 
 export { setAssistantPlan };
 export const DAY = 86_400;
-export const NOW = Date.UTC(2026, 11, 2) / 1000;
+export const NOW = Math.floor(Date.now() / 1000);
 
 type Row = Record<string, unknown>;
 export const world = {

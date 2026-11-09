@@ -1,0 +1,86 @@
+[
+  {
+    "path": "tests/community-member-links.test.ts",
+    "base": "cde4e3ee9b5741ea1a32933d293f9b297c358d5c",
+    "assertionCalls": 70,
+    "exact": true,
+    "sha256": "f1cacf66732ca2755e21aefb0711ecc39289bb3d9f820da8a02ed8dcb6b9e2b6"
+  },
+  {
+    "path": "tests/community-handle-erasure-orphan.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 6,
+    "exact": true,
+    "sha256": "82dabb70f0e1431943a6bf53ffe86f4ad3446392de14ccfffa8a0f532dcbbf92"
+  },
+  {
+    "path": "tests/community-handle-give-back-exact.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 9,
+    "exact": true,
+    "sha256": "788d61b56cfa8e306b92c6eedca36798bb3cdc83b998aea73a917c57c0788cec"
+  },
+  {
+    "path": "tests/community-handle-reserve-unknown.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 3,
+    "exact": true,
+    "sha256": "acd297323ef2dda8042a35ab3113073e57be9f45e4b2440b5b33de6d3afd799f"
+  },
+  {
+    "path": "tests/community-old-handle-after-failure.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 4,
+    "exact": true,
+    "sha256": "6c65bfddc8ece9e4b4a3c36201bbd16cacf52458df590de3c97ca3a9d47bc97d"
+  },
+  {
+    "path": "tests/community-old-handle-release.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 20,
+    "exact": true,
+    "sha256": "0373edf5c0f8e3bdfea1e9d38d9b015ef6d115ca21fe887480882d6be78cb20d"
+  },
+  {
+    "path": "tests/community-patch-member-exact.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 29,
+    "exact": true,
+    "sha256": "f16e7781f89931acd9f7151fc05818d12308674eb5346d727976493b5ad50b78"
+  },
+  {
+    "path": "tests/community-unsub-canonical-index.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 16,
+    "exact": true,
+    "sha256": "7378d2103fb6a68a811245a7e7250b64337aff887667e4251cfb9beaae2556fa"
+  },
+  {
+    "path": "tests/community-unsub-erasure-after-cas.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 3,
+    "exact": true,
+    "sha256": "42987662f8cb13516b47e3f3a4dbfb38166395bae9effa9e0c7bf439e61f1459"
+  },
+  {
+    "path": "tests/community-unsub-erasure-orphan.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 4,
+    "exact": true,
+    "sha256": "07a32930df7bd6e27a9e70f8ef71e0a65e9cc7d8528edd30a1931a848918ccea"
+  },
+  {
+    "path": "tests/community-unsub-token-race.test.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 16,
+    "exact": true,
+    "sha256": "5e864f30b09473ba76d252557a9721cf1c56138775acfdb0df7b36ddedd9179c"
+  },
+  {
+    "path": "tests/g3123-token-race-canonical.proof.ts",
+    "base": "44f4e252cf787afca1152a703ab82b59a104162e",
+    "assertionCalls": 6,
+    "exact": true,
+    "sha256": "744d4210feb00ec47982ef62fb5edd0c0cfb80f97b4aee532085c5bd9f4c3af5"
+  }
+]

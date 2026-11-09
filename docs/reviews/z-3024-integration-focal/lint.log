@@ -1,0 +1,21 @@
+
+/workspace/scratch/9378b617fa73/z-3024-focal/tests/community-handle-reserve-unknown.test.ts
+  17:20  warning  'part' is defined but never used  @typescript-eslint/no-unused-vars
+
+/workspace/scratch/9378b617fa73/z-3024-focal/tests/community-old-handle-after-failure.test.ts
+  12:10  warning  'forgetCommunityPerson' is defined but never used  @typescript-eslint/no-unused-vars
+  17:20  warning  'part' is defined but never used                   @typescript-eslint/no-unused-vars
+  78:9   warning  'handlesOf' is assigned a value but never used     @typescript-eslint/no-unused-vars
+
+/workspace/scratch/9378b617fa73/z-3024-focal/tests/community-unsub-erasure-after-cas.test.ts
+   6:10  warning  'readCommunityUnsub' is defined but never used  @typescript-eslint/no-unused-vars
+  14:7   warning  'gate' is assigned a value but never used       @typescript-eslint/no-unused-vars
+  29:16  warning  'stopPress' is defined but never used           @typescript-eslint/no-unused-vars
+  60:9   warning  'mailOf' is assigned a value but never used     @typescript-eslint/no-unused-vars
+
+/workspace/scratch/9378b617fa73/z-3024-focal/tests/community-unsub-erasure-orphan.test.ts
+  15:7   warning  'gate' is assigned a value but never used    @typescript-eslint/no-unused-vars
+  30:16  warning  'stopPress' is defined but never used        @typescript-eslint/no-unused-vars
+  61:9   warning  'mailOf' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 11 problems (0 errors, 11 warnings)

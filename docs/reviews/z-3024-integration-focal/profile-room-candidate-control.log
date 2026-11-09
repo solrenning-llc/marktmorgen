@@ -1,0 +1,18 @@
+
+FILE z-3024-profile-room.proof.ts
+  ok    the initial links are valid, mode=false
+  ok    initial record is fully paid mode=false
+PROFILE_ROOM {"stale":false,"before":1184,"afterFirst":528,"held":592,"physical":400,"rawBytes":257,"links":[{"network":"github","url":"https://github.com/short"}],"cmd":12,"jsonRequestBytes":9040}
+  ok    retained actual record remains paid mode=false
+  ok    the initial links are valid, mode=true
+  ok    initial record is fully paid mode=true
+PROFILE_ROOM {"stale":true,"before":1184,"afterFirst":528,"held":0,"physical":400,"rawBytes":257,"links":[{"network":"github","url":"https://github.com/short"}],"cmd":11,"jsonRequestBytes":8954}
+  FAIL  retained actual record remains paid mode=true
+        expected true
+        got      false
+
+6 checks, 1 failing.
+Z_VOLUME {"runs":111,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3024focal-L1smAw

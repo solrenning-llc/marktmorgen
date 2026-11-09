@@ -1,0 +1,130 @@
+{"roots":["app/[handle]/community/members/page.tsx","app/[handle]/community/you/page.tsx","app/api/store/community/route.ts","app/privacy/page.tsx","components/community-parts.tsx","components/member-link-boxes.tsx","lib/api-read-rules.ts","lib/buyer-words/community.ts","lib/community-walk.ts","lib/community.ts","lib/help-content.ts","lib/member-links.ts","lib/person-copy.ts","lib/person-data.ts","lib/store-socials.ts","tests/community-mail-read-world.ts","tests/community-member-links.test.ts","tests/community-handle-erasure-orphan.test.ts","tests/community-handle-give-back-exact.test.ts","tests/community-handle-reserve-unknown.test.ts","tests/community-old-handle-after-failure.test.ts","tests/community-old-handle-release.test.ts","tests/community-patch-member-exact.test.ts","tests/community-unsub-canonical-index.test.ts","tests/community-unsub-erasure-after-cas.test.ts","tests/community-unsub-erasure-orphan.test.ts","tests/community-unsub-token-race.test.ts","proofs/v/3024/profile-links.proof.ts","tests/g3123-token-race-canonical.proof.ts",".next/types/routes.d.ts","docs/reviews/z-3024-integration-focal/z-3024-profile-room.proof.ts","docs/reviews/z-3024-integration-focal/z-3024-v-bridge.proof.ts"],"sources":1155,"diagnostics":13,"target":"ES2017","strict":true,"moduleResolution":"Bundler"}
+[96mtests/community-handle-erasure-orphan.test.ts[0m:[93m68[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: false; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m68[0m     const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-handle-give-back-exact.test.ts[0m:[93m71[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: false; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m71[0m     const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-handle-reserve-unknown.test.ts[0m:[93m71[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: false; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m71[0m     const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-old-handle-after-failure.test.ts[0m:[93m72[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: false; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m72[0m     const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-old-handle-release.test.ts[0m:[93m77[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: false; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m77[0m     const record: Member = { k: key, e: email, n: `Old ${n}`, h: old, dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-old-handle-release.test.ts[0m:[93m85[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: false; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m85[0m     const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-patch-member-exact.test.ts[0m:[93m142[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: true; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m142[0m     const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [] };
+[7m   [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-unsub-canonical-index.test.ts[0m:[93m92[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: true; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m92[0m     const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t, q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-unsub-erasure-after-cas.test.ts[0m:[93m55[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: true; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m55[0m     const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-unsub-erasure-orphan.test.ts[0m:[93m56[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: true; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m56[0m     const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-unsub-token-race.test.ts[0m:[93m67[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: true; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m67[0m     const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/community-unsub-token-race.test.ts[0m:[93m139[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: true; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m139[0m     const ghost: Member = { k: memberKey("ghost@tokenrace.example"), e: "ghost@tokenrace.example", n: "", h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+[7m   [0m [91m          ~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.
+
+[96mtests/g3123-token-race-canonical.proof.ts[0m:[93m53[0m:[93m11[0m - [91merror[0m[90m TS2741: [0mProperty 's' is missing in type '{ k: string; e: string; n: string; h: string; dir: false; mail: true; at: number; seen: number; muted: false; removed: false; t: string; q: never[]; qa: number; qq: never[]; }' but required in type 'Member'.
+
+[7m53[0m     const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [] };
+[7m  [0m [91m          ~~~~~~[0m
+
+  [96mlib/community.ts[0m:[93m172[0m:[93m3[0m
+    [7m172[0m   s: Social[];
+    [7m   [0m [96m  ~[0m
+    's' is declared here.

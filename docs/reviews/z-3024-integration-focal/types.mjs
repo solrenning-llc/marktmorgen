@@ -1,0 +1,18 @@
+import {execFileSync} from 'node:child_process';
+import {relative} from 'node:path';
+import ts from 'typescript';
+import {readFileSync,existsSync} from 'node:fs';
+const config=ts.readConfigFile('tsconfig.json',ts.sys.readFile);
+if(config.error)throw Error(ts.flattenDiagnosticMessageText(config.error.messageText,'\n'));
+const parsed=ts.parseJsonConfigFileContent(config.config,ts.sys,process.cwd());
+const roots=JSON.parse(readFileSync('proofs/v/3024/types-roots.json','utf8'));
+if(existsSync('.next/types/routes.d.ts'))roots.push('.next/types/routes.d.ts');
+const options={...parsed.options,incremental:false,noEmit:true};
+roots.push('docs/reviews/z-3024-integration-focal/z-3024-profile-room.proof.ts','docs/reviews/z-3024-integration-focal/z-3024-v-bridge.proof.ts');
+const host=ts.createCompilerHost(options),originalRead=host.readFile;
+const changed=Object.keys(JSON.parse(readFileSync('proofs/v/3024/fixture-completion-counts.json','utf8')));
+if(process.env.Z_TYPE_RED)host.readFile=path=>{const rel=relative(process.cwd(),path).replaceAll('\\','/');return changed.includes(rel)?execFileSync('git',['show',process.env.Z_TYPE_RED+':'+rel],{encoding:'utf8',maxBuffer:262144}):originalRead(path);};
+const program=ts.createProgram(roots,options,host),diagnostics=ts.getPreEmitDiagnostics(program);
+console.log(JSON.stringify({roots,sources:program.getSourceFiles().length,diagnostics:diagnostics.length,target:ts.ScriptTarget[options.target],strict:options.strict,moduleResolution:ts.ModuleResolutionKind[options.moduleResolution]}));
+for(const d of diagnostics)console.log(ts.formatDiagnosticsWithColorAndContext([d],{getCanonicalFileName:x=>x,getCurrentDirectory:ts.sys.getCurrentDirectory,getNewLine:()=> '\n'}));
+process.exitCode=diagnostics.length?1:0;

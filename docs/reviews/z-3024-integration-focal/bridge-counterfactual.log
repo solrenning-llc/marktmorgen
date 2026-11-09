@@ -1,0 +1,41 @@
+
+FILE z-3024-v-bridge.proof.ts
+✖ profile links survive the current handle protocol, including a committed write with lost acknowledgement (31.800824ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.904164
+
+✖ failing tests:
+
+test at [stdin]:46144:27
+✖ profile links survive the current handle protocol, including a committed write with lost acknowledgement (31.800824ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+  + []
+  - [
+  -   {
+  -     network: 'github',
+  -     url: 'https://github.com/member'
+  -   }
+  - ]
+
+      at TestContext.<anonymous> ([stdin]:46165:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":50,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3024focal-9uU7SG

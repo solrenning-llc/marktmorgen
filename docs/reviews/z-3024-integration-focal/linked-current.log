@@ -1,0 +1,479 @@
+
+FILE community-handle-erasure-orphan.test.ts
+
+The member is erased after their new handle is claimed and before the record says so
+  ok    the erasure ran in between
+  ok    no handle stays tied to the erased member
+
+Two name changes at once: the handle the record no longer carries is given back
+  ok    the record carries the last name written
+  ok    only the handle the record carries points at the member
+  ok    and the erasure leaves none
+
+A plain name change still keeps the new handle and gives back the old one
+  ok    one handle, the record's
+
+6 checks, all passing.
+Z_VOLUME {"runs":221,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-handle-give-back-exact.test.ts
+  ok    applied: the caller still sees the lost answer
+  ok    applied: the record carries the new handle
+  ok    applied: the handle it carries stays tied to it
+  ok    double failure (empty): the caller sees the original failure
+  ok    double failure (empty): nothing was written on the record
+  ok    double failure (empty): the handle stays, the stated limit
+  ok    double failure (text): the caller sees the original failure
+  ok    double failure (text): nothing was written on the record
+  ok    double failure (text): the handle stays, the stated limit
+  ok    double failure (unreadable record): the caller sees the original failure
+  ok    double failure (unreadable record): nothing was written on the record
+  ok    double failure (unreadable record): the handle stays, the stated limit
+  ok    replaced: this change is written
+  ok    replaced: the record carries this change's handle
+  ok    replaced: the replaced handle is given back, this one kept
+
+15 checks, all passing.
+Z_VOLUME {"runs":89,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-handle-reserve-unknown.test.ts
+  ok    read: no claimed handle was written on the member
+  ok    read: healthy erasure completes and removes member
+G_HANDLE_FAILURE {"mode":"read","outcome":"thrown","remaining":[]}
+  ok    read: no claimed handle remains tied to erased person
+  ok    cas: no claimed handle was written on the member
+  ok    cas: healthy erasure completes and removes member
+G_HANDLE_FAILURE {"mode":"cas","outcome":"thrown","remaining":[]}
+  ok    cas: no claimed handle remains tied to erased person
+
+6 checks, all passing.
+Z_VOLUME {"runs":163,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-old-handle-after-failure.test.ts
+  ok    read: failed profile change is reported
+  ok    read: unchanged member still carries its original handle
+  ok    read: original handle still resolves to this unchanged member
+G_OLD_HANDLE {"mode":"read","original":"4f9eabfdde0e3c080561b6c5b7b3596f","other":"d0243dc71c844048936cc01e0075bfce","resolves":"4f9eabfdde0e3c080561b6c5b7b3596f"}
+  ok    read: rejected rename does not let another member take the old handle
+  ok    cas: failed profile change is reported
+  ok    cas: unchanged member still carries its original handle
+  ok    cas: original handle still resolves to this unchanged member
+G_OLD_HANDLE {"mode":"cas","original":"5e101753596b60e907ee42b9b42bfd16","other":"9c18c49e19151152709a40b67616d1d8","resolves":"5e101753596b60e907ee42b9b42bfd16"}
+  ok    cas: rejected rename does not let another member take the old handle
+
+8 checks, all passing.
+Z_VOLUME {"runs":97,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-old-handle-release.test.ts
+  ok    healthy: the record carries the new handle
+  ok    healthy: the new handle resolves to the member
+  ok    healthy: the old handle is given back once the change is saved
+  ok    healthy: another member then gets the plain old handle
+  ok    no handle: the record carries none
+  ok    no handle: the old handle is given back once the record says so
+  ok    applied-lost: the failure is still reported
+  ok    applied-lost: the record carries the new handle
+  ok    applied-lost: the new handle stays with the record
+  ok    applied-lost: the old handle the record no longer carries is given back
+  ok    double failure: the original failure is what the caller sees
+  ok    double failure: the record keeps the old handle
+  ok    double failure: the old handle still resolves to the member
+  ok    double failure: the new handle stays reserved (the stated limit)
+  ok    erased: nothing is written
+  ok    erased: the member as it was is returned
+  ok    erased: the new handle is given back
+  ok    erased: the old handle is given back too
+  ok    other owner: the change is saved
+  ok    other owner: a handle now held by somebody else is not deleted
+
+20 checks, all passing.
+Z_VOLUME {"runs":142,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-patch-member-exact.test.ts
+
+The stop link, when the member's record cannot be read for the change
+  ok    no reply at all: stopAnnouncements is not done
+  ok    no reply at all: the one-click stop answers 503, never "Unsubscribed."
+  ok    no reply at all: from the page it goes back with done=0
+  ok    no reply at all: and the emails are still on
+  ok    no reply at all: once the record reads, the stop is saved
+  ok    a hole where the record was: stopAnnouncements is not done
+  ok    a hole where the record was: the one-click stop answers 503, never "Unsubscribed."
+  ok    a hole where the record was: from the page it goes back with done=0
+  ok    a hole where the record was: and the emails are still on
+  ok    a hole where the record was: once the record reads, the stop is saved
+  ok    a number: stopAnnouncements is not done
+  ok    a number: the one-click stop answers 503, never "Unsubscribed."
+  ok    a number: from the page it goes back with done=0
+  ok    a number: and the emails are still on
+  ok    a number: once the record reads, the stop is saved
+  ok    text that is not a record: stopAnnouncements is not done
+  ok    text that is not a record: the one-click stop answers 503, never "Unsubscribed."
+  ok    text that is not a record: from the page it goes back with done=0
+  ok    text that is not a record: and the emails are still on
+  ok    text that is not a record: once the record reads, the stop is saved
+  ok    a record without its mute and removal: stopAnnouncements is not done
+  ok    a record without its mute and removal: the one-click stop answers 503, never "Unsubscribed."
+  ok    a record without its mute and removal: from the page it goes back with done=0
+  ok    a record without its mute and removal: and the emails are still on
+  ok    a record without its mute and removal: once the record reads, the stop is saved
+
+The stop link, when the change's write is answered in another shape
+  ok    no reply at all: the one-click stop answers 503, never "Unsubscribed."
+  ok    no reply at all: setMail itself is not done
+  ok    a hole: the one-click stop answers 503, never "Unsubscribed."
+  ok    a hole: setMail itself is not done
+  ok    one as text: the one-click stop answers 503, never "Unsubscribed."
+  ok    one as text: setMail itself is not done
+  ok    OK: the one-click stop answers 503, never "Unsubscribed."
+  ok    OK: setMail itself is not done
+  ok    two: the one-click stop answers 503, never "Unsubscribed."
+  ok    two: setMail itself is not done
+
+The stop page after a press that was not saved
+  ok    says it could not be saved, and offers the button again
+  ok    opened by hand, says nothing of the kind
+
+The stop door and page, when the link or its member cannot be read at all
+  ok    the member read as no reply at all: the one-click stop answers 503, not a crash
+  ok    the member read as no reply at all: the page still opens, says it could not open the link, offers no button and never says it is unknown
+  ok    the member read as no reply at all: emails still on
+  ok    the member read as a hole where the record was: the one-click stop answers 503, not a crash
+  ok    the member read as a hole where the record was: the page still opens, says it could not open the link, offers no button and never says it is unknown
+  ok    the member read as a hole where the record was: emails still on
+  ok    the member read as a number: the one-click stop answers 503, not a crash
+  ok    the member read as a number: the page still opens, says it could not open the link, offers no button and never says it is unknown
+  ok    the member read as a number: emails still on
+  ok    the member read as text that is not a record: the one-click stop answers 503, not a crash
+  ok    the member read as text that is not a record: the page still opens, says it could not open the link, offers no button and never says it is unknown
+  ok    the member read as text that is not a record: emails still on
+  ok    the member read as a record without its mute and removal: the one-click stop answers 503, not a crash
+  ok    the member read as a record without its mute and removal: the page still opens, says it could not open the link, offers no button and never says it is unknown
+  ok    the member read as a record without its mute and removal: emails still on
+  ok    the link read as no reply at all: readCommunityUnsub does not say there is no such link
+  ok    the link read as no reply at all: the one-click stop answers 503, never "Not found."
+  ok    the link read as no reply at all: the page never says the link is unknown
+  ok    the link read as a hole: readCommunityUnsub does not say there is no such link
+  ok    the link read as a hole: the one-click stop answers 503, never "Not found."
+  ok    the link read as a hole: the page never says the link is unknown
+  ok    the link read as a number: readCommunityUnsub does not say there is no such link
+  ok    the link read as a number: the one-click stop answers 503, never "Not found."
+  ok    the link read as a number: the page never says the link is unknown
+
+The creator's mute from a post
+  ok    no reply at all: never "muted-member" with nothing written
+  ok    no reply at all: and the member is not muted
+  ok    no reply at all: once it reads, the mute is written
+  ok    a hole where the record was: never "muted-member" with nothing written
+  ok    a hole where the record was: and the member is not muted
+  ok    a hole where the record was: once it reads, the mute is written
+  ok    a number: never "muted-member" with nothing written
+  ok    a number: and the member is not muted
+  ok    a number: once it reads, the mute is written
+  ok    text that is not a record: never "muted-member" with nothing written
+  ok    text that is not a record: and the member is not muted
+  ok    text that is not a record: once it reads, the mute is written
+  ok    a record without its mute and removal: never "muted-member" with nothing written
+  ok    a record without its mute and removal: and the member is not muted
+  ok    a record without its mute and removal: once it reads, the mute is written
+
+The studio's removal
+  ok    no reply at all: answered as not confirmed (503), never 404 "unknown"
+  ok    no reply at all: once it reads, the removal is written
+  ok    a hole where the record was: answered as not confirmed (503), never 404 "unknown"
+  ok    a hole where the record was: once it reads, the removal is written
+  ok    a number: answered as not confirmed (503), never 404 "unknown"
+  ok    a number: once it reads, the removal is written
+  ok    text that is not a record: answered as not confirmed (503), never 404 "unknown"
+  ok    text that is not a record: once it reads, the removal is written
+  ok    a record without its mute and removal: answered as not confirmed (503), never 404 "unknown"
+  ok    a record without its mute and removal: once it reads, the removal is written
+
+A member's stop link token
+  ok    an unknown read never hands out a stop link that was not kept
+  ok    and no token was written on the member
+  ok    once it reads, the token is kept and its link is known
+
+Controls: a record Redis says is not there (nil) behaves as before
+  ok    setMail hands back the member it was given
+  ok    the stop link answers 404 "Not found."
+  ok    the page says the link is not one we know
+  ok    the studio's removal answers 404 "unknown"
+  ok    the mute from a post answers as before
+  ok    and no record is made
+
+95 checks, all passing.
+Z_VOLUME {"runs":571,"mocks":0,"over":false}
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <Fragment>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <h1>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <button>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <Fragment>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <h1>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <button>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <Fragment>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <h1>. See https://react.dev/link/warning-keys for more information.
+
+Z_STATUS 0 null
+
+FILE community-unsub-canonical-index.test.ts
+
+Only the token the member holds is ever given a link record
+  ok    both sends embed the member's one token
+  ok    no record was ever written for another token
+  ok    the second send writes nothing: the record is already there
+
+A canonical token whose record is missing gets one (a send stopped after the CAS)
+  ok    the member's own token is returned
+  ok    its record is written, and only it
+  ok    the link stops the emails
+
+A record that could not be written is never returned as a link (rule 24)
+  ok    an off-shape SET NX reply throws
+  ok    the token stays canonical on the record
+  ok    a later send writes its record and embeds the same token
+  ok    and it is a working link
+
+An off-shape or foreign read of the record throws
+  ok    GET answered []
+  ok    GET answered [1]
+  ok    GET answered null
+  ok    GET answered ["somebody|else|handle"]
+
+A send holding the token of a member erased since then leaves no record
+  ok    tokenFor refuses
+  ok    nothing of the erased member is written back
+
+An erasure between the CAS and the record: the cleanup's reply is confirmed
+  ok    an unconfirmed delete is never read as done
+  ok    with a healthy delete the call refuses
+  ok    and nothing is left
+
+19 checks, all passing.
+Z_VOLUME {"runs":304,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-unsub-erasure-after-cas.test.ts
+
+Erasure after the member CAS applies but before tokenFor resumes
+G_ERASURE_AFTER_CAS {"answer":"thrown","erased":1,"orphanIndexes":0}
+  ok    erasure actually ran after the CAS
+  ok    the erased member stays absent
+  ok    tokenFor never recreates a stop-link index after erasure
+
+3 checks, all passing.
+Z_VOLUME {"runs":107,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-unsub-erasure-orphan.test.ts
+
+missing acknowledgement
+G_UNUSED_INDEX {"mode":"missing acknowledgement","returnedCanonical":true,"cleanupAttempts":0,"rowsBefore":1}
+  ok    missing acknowledgement: a returned link is usable before erasure
+  ok    missing acknowledgement: erasure completed through the real function
+  ok    missing acknowledgement: member no longer exists
+G_UNUSED_AFTER_ERASURE {"mode":"missing acknowledgement","remaining":0}
+  ok    missing acknowledgement: every stop-link record tied to this erased person is gone
+
+transport exception
+G_UNUSED_INDEX {"mode":"transport exception","returnedCanonical":true,"cleanupAttempts":0,"rowsBefore":1}
+  ok    transport exception: a returned link is usable before erasure
+  ok    transport exception: erasure completed through the real function
+  ok    transport exception: member no longer exists
+G_UNUSED_AFTER_ERASURE {"mode":"transport exception","remaining":0}
+  ok    transport exception: every stop-link record tied to this erased person is gone
+
+healthy cleanup
+G_UNUSED_INDEX {"mode":"healthy cleanup","returnedCanonical":true,"cleanupAttempts":0,"rowsBefore":1}
+  ok    healthy cleanup: a returned link is usable before erasure
+  ok    healthy cleanup: erasure completed through the real function
+  ok    healthy cleanup: member no longer exists
+G_UNUSED_AFTER_ERASURE {"mode":"healthy cleanup","remaining":0}
+  ok    healthy cleanup: every stop-link record tied to this erased person is gone
+
+12 checks, all passing.
+Z_VOLUME {"runs":287,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-unsub-token-race.test.ts
+
+Two first stop links made at once from the same member snapshot
+  ok    both jobs reached the write from the same old snapshot
+  ok    both jobs embed the one token the member holds
+  ok    every returned link is a working stop link
+  ok    the losing job's unused link record is not left behind
+  ok    pressing the link from the second job stops the emails
+  ok    the stop is saved
+
+A later job holding an old snapshot never replaces a link already sent
+  ok    the later job embeds the link already sent
+  ok    the member still holds the first link
+  ok    the link already sent still stops the emails
+
+setMemberToken keeps a token that is already there and says which one
+  ok    an empty record takes the token
+  ok    a second token for the same member is not written
+  ok    the record still holds the first
+
+An off-shape CAS answer is never read as a kept token (rule 24)
+  ok    CAS answered [null] throws
+  ok    CAS answered ["1"] throws
+  ok    CAS answered [] throws
+  ok    CAS answered null throws
+  ok    nothing was kept on the record
+
+A member with no record gets no stop link
+  ok    tokenFor refuses a member Redis says is not there
+  ok    and leaves no link record behind
+
+19 checks, all passing.
+Z_VOLUME {"runs":125,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3024-v-bridge.proof.ts
+✔ profile links survive the current handle protocol, including a committed write with lost acknowledgement (25.689487ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32.960617
+Z_VOLUME {"runs":71,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (119.898398ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (252.251957ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (50.025742ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.69236ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.208634ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.174603ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.566965ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (67.374818ms)
+✔ every store figure taken in the code is a kind a line prices (49.471997ms)
+✔ every email sent names a meter, and each file only the meters it may use (86.61459ms)
+✔ the units a figure is taken in cost at least what they stand for (9.389725ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.916241ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.181685ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.297839ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.590481ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.282746ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.322857ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.136005ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.820968ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.083566ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.313019ms)
+✔ Path push fits its reserved studio requests (0.08596ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.055364ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.061092ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.136837ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (38.143861ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 705.622895
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (87.129578ms)
+✔ each family is bounded one way at least, and what it says can be checked (19.295037ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (4.139554ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.061291ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.454495ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (6.871866ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.181273ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 125.607221
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE accessibility-inventory.test.ts
+
+Every source stays visible in the accessibility inventory; inventory is not a pass
+  ok    all page templates mapped
+  ok    all layout templates mapped
+  ok    all error/loading/not-found boundaries mapped
+  ok    all shared TSX components mapped
+  ok    all API route sources mapped
+
+Generated route templates retain gaps instead of claiming fixture coverage
+  ok    generator keeps the checked inventory current
+  ok    home route
+  ok    dynamic course route
+  ok    groups and parallel slots are not URL segments
+  ok    catch-all route
+  ok    optional catch-all route
+  ok    ambiguous or non-page source is refused app/api/x/route.ts
+  ok    ambiguous or non-page source is refused elsewhere/page.tsx
+  ok    ambiguous or non-page source is refused app/(.)photo/page.tsx
+  ok    ambiguous or non-page source is refused app/[[broken]/page.tsx
+  ok    source generator never certifies untested pages
+
+16 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3024focal-qxAjnH

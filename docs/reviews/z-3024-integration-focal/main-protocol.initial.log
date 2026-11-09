@@ -1,0 +1,118 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+... Skipped lines
+
+  'export async function setProfile(id: string, member: Member, change: {\n' +
+    '    name: string;\n' +
+    '    dir: boolean;\n' +
+    '    mail: boolean;\n' +
+    '    answers?: string[];\n' +
+...
+    '                mail: change.mail,\n' +
++   '                ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),\n' +
+-   '                ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {})\n' +
+    '            };\n' +
+    '        });\n' +
+    '    }\n' +
+    '    catch (error) {\n' +
+    '        await giveBackUnlessCarried(id, member.k, [handle, had]).catch(() => 0);\n' +
+
+    at file:///workspace/scratch/9378b617fa73/z-3024-focal/docs/reviews/z-3024-integration-focal/main-protocol.mjs:19:8
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'export async function setProfile(id: string, member: Member, change: {\n' +
+    '    name: string;\n' +
+    '    dir: boolean;\n' +
+    '    mail: boolean;\n' +
+    '    answers?: string[];\n' +
+    '    questions?: string[];\n' +
+    '}, room: DataStore): Promise<Member> {\n' +
+    '    const name = cleanLine(change.name, MAX_DISPLAY_NAME);\n' +
+    '    const answers = change.answers && change.questions ? answersFor(change.answers, change.questions, member.qa) : {};\n' +
+    '    const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers });\n' +
+    '    const grown = dataBytes([after]) - dataBytes([JSON.stringify(member)]) + (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0) - (member.n ? indexBytes([member.n]) + SET_ENTRY_BYTES : 0);\n' +
+    '    if (grown > 0)\n' +
+    '        await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);\n' +
+    '    else if (grown < 0)\n' +
+    '        await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);\n' +
+    '    const handle = await claimHandle(id, member.k, name, member.h);\n' +
+    '    const had = member.h && member.h !== handle ? member.h : "";\n' +
+    '    let replaced = "";\n' +
+    '    let saved: Member | null;\n' +
+    '    try {\n' +
+    '        saved = await patchMember(id, member.k, (now) => {\n' +
+    '            replaced = now.h;\n' +
+    '            return {\n' +
+    '                n: name,\n' +
+    '                h: handle,\n' +
+    '                dir: change.dir && Boolean(name),\n' +
+    '                mail: change.mail,\n' +
+    '                ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),\n' +
+    '            };\n' +
+    '        });\n' +
+    '    }\n' +
+    '    catch (error) {\n' +
+    '        await giveBackUnlessCarried(id, member.k, [handle, had]).catch(() => 0);\n' +
+    '        throw error;\n' +
+    '    }\n' +
+    '    if (!saved) {\n' +
+    '        await giveBackUnlessCarried(id, member.k, [handle, had]);\n' +
+    '        return member;\n' +
+    '    }\n' +
+    '    await giveBackUnlessCarried(id, member.k, [had, replaced && replaced !== handle ? replaced : ""]);\n' +
+    '    return saved;\n' +
+    '}',
+  expected: 'export async function setProfile(id: string, member: Member, change: {\n' +
+    '    name: string;\n' +
+    '    dir: boolean;\n' +
+    '    mail: boolean;\n' +
+    '    answers?: string[];\n' +
+    '    questions?: string[];\n' +
+    '}, room: DataStore): Promise<Member> {\n' +
+    '    const name = cleanLine(change.name, MAX_DISPLAY_NAME);\n' +
+    '    const answers = change.answers && change.questions ? answersFor(change.answers, change.questions, member.qa) : {};\n' +
+    '    const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers });\n' +
+    '    const grown = dataBytes([after]) - dataBytes([JSON.stringify(member)]) + (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0) - (member.n ? indexBytes([member.n]) + SET_ENTRY_BYTES : 0);\n' +
+    '    if (grown > 0)\n' +
+    '        await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);\n' +
+    '    else if (grown < 0)\n' +
+    '        await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);\n' +
+    '    const handle = await claimHandle(id, member.k, name, member.h);\n' +
+    '    const had = member.h && member.h !== handle ? member.h : "";\n' +
+    '    let replaced = "";\n' +
+    '    let saved: Member | null;\n' +
+    '    try {\n' +
+    '        saved = await patchMember(id, member.k, (now) => {\n' +
+    '            replaced = now.h;\n' +
+    '            return {\n' +
+    '                n: name,\n' +
+    '                h: handle,\n' +
+    '                dir: change.dir && Boolean(name),\n' +
+    '                mail: change.mail,\n' +
+    '                ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {})\n' +
+    '            };\n' +
+    '        });\n' +
+    '    }\n' +
+    '    catch (error) {\n' +
+    '        await giveBackUnlessCarried(id, member.k, [handle, had]).catch(() => 0);\n' +
+    '        throw error;\n' +
+    '    }\n' +
+    '    if (!saved) {\n' +
+    '        await giveBackUnlessCarried(id, member.k, [handle, had]);\n' +
+    '        return member;\n' +
+    '    }\n' +
+    '    await giveBackUnlessCarried(id, member.k, [had, replaced && replaced !== handle ? replaced : ""]);\n' +
+    '    return saved;\n' +
+    '}',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.22.1

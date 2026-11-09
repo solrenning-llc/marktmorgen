@@ -1,0 +1,120 @@
+
+FILE community-member-links.test.ts
+
+What a member may link to
+  ok    an Instagram profile is kept as its own address
+  ok    an address typed without https is read as https
+  ok    what a share button adds after ? or # is dropped
+  ok    a profile named by its query keeps it
+  ok    a handle with a dot after @ is a profile, not an email address
+  ok    the network itself is no one's profile
+  ok    a Substack is its own address under substack.com
+  ok    YouTube, TikTok, LinkedIn and GitHub profiles are kept
+  ok    a handle alone names no network, so it is not kept
+  ok    an email address is never a member's link
+  ok    a phone number (WhatsApp) is never a member's link
+  ok    a website that is no social network is not kept
+  ok    http is not kept
+  ok    a host that only looks like the network is not kept
+  ok    a network's own redirector to another site is not kept
+  ok    a query that carries another address is not kept, however it is written
+  ok    an address inside the path is not kept
+  ok    a redirector path or host is not kept even without a destination
+  ok    a stored redirector is left out when read back
+  ok    a profile's own query and path still pass
+  ok    an address with a user and password is not kept
+  ok    a script address is not kept
+  ok    an address longer than the limit is not kept
+  ok    email, WhatsApp and website are not among the networks
+
+The network is read from the host, before anything looks like an email address
+  ok    store socials: a dotted handle after @ in an address is the network's
+  ok    store socials: an address alone is still email
+
+Each link's words tell it apart
+  ok    one link on a network is named by the network
+  ok    two on the same network each say which
+
+What the form keeps
+  ok    kept in order, a repeat once however it is written, empty boxes ignored
+  ok    the same profile with a capital and a slash is a repeat
+  ok    a box turned away is counted
+  ok    a repeat is not a refusal
+  ok    at most three are kept, and a fourth is counted as turned away
+  ok    anything that is not text is ignored
+
+What a record gives back
+  ok    a stored entry the form would refuse today is left out
+  ok    never more than three
+  ok    anything that is not a list gives none
+
+Who is shown with links
+  ok    a listed, named member shows them
+  ok    not listed shows none
+  ok    no name shows none
+  ok    a muted member shows none, so the creator's mute stops a spammer's links at once
+  ok    a member taken out shows none
+
+Words, in every language of a store
+  ok    en: each link says whose profile and on which network, and holds the visible word
+  ok    en: the boxes have a legend, a note, and a label each
+  ok    en: a turned-away link is told, as a warning
+  ok    en: a box the rule would refuse says so beside it, before sending, with an example the rule keeps
+  ok    es: each link says whose profile and on which network, and holds the visible word
+  ok    es: the boxes have a legend, a note, and a label each
+  ok    es: a turned-away link is told, as a warning
+  ok    es: a box the rule would refuse says so beside it, before sending, with an example the rule keeps
+  ok    fr: each link says whose profile and on which network, and holds the visible word
+  ok    fr: the boxes have a legend, a note, and a label each
+  ok    fr: a turned-away link is told, as a warning
+  ok    fr: a box the rule would refuse says so beside it, before sending, with an example the rule keeps
+  ok    de: each link says whose profile and on which network, and holds the visible word
+  ok    de: the boxes have a legend, a note, and a label each
+  ok    de: a turned-away link is told, as a warning
+  ok    de: a box the rule would refuse says so beside it, before sending, with an example the rule keeps
+  ok    it: each link says whose profile and on which network, and holds the visible word
+  ok    it: the boxes have a legend, a note, and a label each
+  ok    it: a turned-away link is told, as a warning
+  ok    it: a box the rule would refuse says so beside it, before sending, with an example the rule keeps
+  ok    nl: each link says whose profile and on which network, and holds the visible word
+  ok    nl: the boxes have a legend, a note, and a label each
+  ok    nl: a turned-away link is told, as a warning
+  ok    nl: a box the rule would refuse says so beside it, before sending, with an example the rule keeps
+  ok    pt: each link says whose profile and on which network, and holds the visible word
+  ok    pt: the boxes have a legend, a note, and a label each
+  ok    pt: a turned-away link is told, as a warning
+  ok    pt: a box the rule would refuse says so beside it, before sending, with an example the rule keeps
+  ok    the note says links show only while listed
+
+The pages and the route
+  ok    the directory draws only shownLinks(m)
+  ok    each link has no referrer and is the member's own words
+  ok    each link is named by whose profile and where
+  ok    no link opens a new window
+  ok    the links are a list with its own name
+  ok    the member's page asks for them in a group with a legend
+  ok    one labeled box per link, an address keyboard, no browser check of its own
+  ok    the page says it sends links, so an older page never wipes them
+  ok    no box cuts a pasted address short without saying so
+  ok    each box is checked with the rule the server keeps by
+  ok    a refused box says why beside it and is marked invalid
+  ok    sending with a refused box stops and goes to it, keeping what was typed
+  ok    the route keeps them through the same rule, only from that page
+  ok    and says when one was turned away
+
+Erased, copied and said
+  ok    the member record they live in is erased with the person
+  ok    a person's copy of their data carries them
+  ok    the privacy page says what is kept and who sees it
+  ok    the help says it
+
+The member record keeps them, cleaned, and stays inside its size
+Z_VOLUME {"runs":3,"mocks":0,"over":false}
+UnknownReplyError: Redis answered a community member record in an unknown shape
+    at readMemberExact ([stdin]:48792:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async readMember ([stdin]:48784:11)
+    at async main ([stdin]:54517:47)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3024focal-vKL52N

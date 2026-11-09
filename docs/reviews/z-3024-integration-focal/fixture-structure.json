@@ -1,0 +1,57 @@
+[
+  {
+    "file": "tests/community-handle-erasure-orphan.test.ts",
+    "added": 1,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/community-handle-give-back-exact.test.ts",
+    "added": 1,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/community-handle-reserve-unknown.test.ts",
+    "added": 1,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/community-old-handle-after-failure.test.ts",
+    "added": 1,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/community-old-handle-release.test.ts",
+    "added": 2,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/community-patch-member-exact.test.ts",
+    "added": 1,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/community-unsub-canonical-index.test.ts",
+    "added": 1,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/community-unsub-erasure-after-cas.test.ts",
+    "added": 1,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/community-unsub-erasure-orphan.test.ts",
+    "added": 1,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/community-unsub-token-race.test.ts",
+    "added": 2,
+    "otherwiseSame": true
+  },
+  {
+    "file": "tests/g3123-token-race-canonical.proof.ts",
+    "added": 1,
+    "otherwiseSame": true
+  }
+]

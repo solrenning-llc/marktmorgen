@@ -98,6 +98,11 @@ async function main() {
   is("a give-back the room cannot take says so, and only shrinking asks for no count again", [await giveData(paid, [{ slot: "p:x", bytes: 1 }], now), await giveData(paid, [{ slot: "p:one", bytes: 0, set: true }], now), Number(redis.run(["HGET", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD]) ?? 0) - asksBefore], [false, false, 0]);
   await noteData(paid, [{ slot: "p:x", bytes: 1 }], now);
   is("a record written and not counted asks for every store to be counted again", Number(redis.run(["HGET", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD]) ?? 0) - asksBefore, 1);
+  // giveData and noteData kept the answer of a count that failed before it reached Redis as well (Claude 5's pre-review, 09/11/2026).
+  const unnamed = { ...paid, sid: 5 as unknown as string };
+  const outcomes = await Promise.all([giveData(unnamed, [{ slot: "p:x", bytes: 1 }], now), noteData(unnamed, [{ slot: "p:x", bytes: 1 }], now)].map((p) => p.then((value) => ({ value }), (error: unknown) => ({ error: String(error) }))));
+  is("a count that fails before Redis is the same failure: a give-back never throws, and a note asks for the count again", [outcomes, Number(redis.run(["HGET", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD]) ?? 0) - asksBefore], [[{ value: false }, { value: undefined }], 2]);
+  redis.run(["HINCRBY", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD, -1]);
   is("and one counted asks nothing", [await giveData({ ...paid, sid: "data-test-3" }, [{ slot: "p:x", bytes: 0, set: true }], now), (await noteData({ ...paid, sid: "data-test-3" }, [{ slot: "p:x", bytes: 1 }], now), Number(redis.run(["HGET", RECOUNT_STATE_KEY, RECOUNT_AGAIN_FIELD]) ?? 0) - asksBefore)], [true, 1]);
 
   part("Counts that never grow a hash past its most");

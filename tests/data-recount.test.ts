@@ -12,7 +12,9 @@ import { COUNTED_FAMILIES, ELSEWHERE_FAMILIES, countedInRoom } from "@/lib/data-
 import { IDS_KEY, LEGACY_SLOT, RECOUNT_PAGE, STATE_KEY, SUM_KEY, idsIn, measureKey, recountStep } from "@/lib/data-recount";
 import { DataCountUnconfirmed, RECOUNT_AGAIN_FIELD, dataKey, dataUsed, giveData, noteData } from "@/lib/store-data";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
+import { readFileSync } from "node:fs";
 import { FAMILIES } from "./store-data-registry";
+import { NOT_A_COST } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -138,6 +140,20 @@ async function main() {
   redis.run(["HSET", STATE_KEY, RECOUNT_AGAIN_FIELD, "x"]);
   const unreadable = await recountStep(Date.now() + 30_000);
   is("an ask that cannot be read is a count made again, and set back to none", [unreadable.done, unreadable.applied, redis.run(["HGET", STATE_KEY, RECOUNT_AGAIN_FIELD])], [true, 1, "0"]);
+
+  part("What counting again may cost at most, and where that cost is counted (rule 24, MR)");
+  // However many counts fail, the asks are one number: one count made again once the one running is done, never one each.
+  const startedBefore = redis.run(["HGET", STATE_KEY, "started"]);
+  for (let i = 0; i < 25; i += 1) redis.run(["HINCRBY", STATE_KEY, RECOUNT_AGAIN_FIELD, 1]);
+  const many = await recountStep(Date.now() + 30_000, Date.now() + 1);
+  const after = await recountStep(Date.now() + 30_000);
+  is("twenty-five asks start one count again, and the run after reads nothing", [many.done, redis.run(["HGET", STATE_KEY, "started"]) !== startedBefore, redis.run(["HGET", STATE_KEY, RECOUNT_AGAIN_FIELD]), after.pages, after.applied, after.stores], [true, true, "0", 0, 0, 0]);
+  // So a month holds at most one run an hour (the schedule, one at a time under its lock), each held to its pages and its minute.
+  const crons = (JSON.parse(readFileSync("vercel.json", "utf8")) as { crons: { path: string; schedule: string }[] }).crons.filter((c) => c.path === "/api/cron/recount");
+  is("the count is run once an hour at the most", [crons.length, /^[0-5]?[0-9] \* \* \* \*$/.test(crons[0]?.schedule ?? "")], [1, true]);
+  is("one run at a time, under a lock longer than a run may last", [readFileSync("app/api/cron/recount/route.ts", "utf8").includes('["SET", "nl:recount:lock", "1", "NX", "EX", 120]'), /export const maxDuration = 60;/.test(readFileSync("app/api/cron/recount/route.ts", "utf8"))], [true, true]);
+  const entry = NOT_A_COST.RECOUNT_RUNS_PER_DAY;
+  is("its worst month is in the cost registry, as the company's, never a plan's and never zero", [typeof entry, ...["744", "RECOUNT_PAGES", "RECOUNT_PAGE_KEYS", "company fixed cost", "never zero", "lib/llc-fixed-costs.ts"].map((word) => (entry ?? "").includes(word))], ["string", true, true, true, true, true, true]);
   done();
 }
 

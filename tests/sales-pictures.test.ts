@@ -26,7 +26,7 @@ import {
   parsePage,
   picturePaths,
 } from "@/lib/sales-page";
-import { claimPictures, dropPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { PageDropIncomplete, claimPictures, dropPage, picturesOfFailedDrop, releasePictures, writePage } from "@/lib/sales-page-store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
@@ -98,6 +98,28 @@ async function main(): Promise<void> {
   is("and the first page's picture is still its own", await releasePictures("stats1", "prod_a", [path(2)]), [path(2)]);
   await writePage("stats1", "prod_a", page, ROOM);
   is("a product removed takes its page's pictures with it", await dropPage("stats1", "prod_a", ROOM), [path(1)]);
+
+  part("A page dropped while its test's counts cannot be counted");
+  // The test's counts stay until they expire and are counted on their own: when not even the ask to count them
+  // again can be written (lib/store-data.ts, DataCountUnconfirmed), the page's pictures are still let go and given
+  // to the route to delete, never left kept and counted for good (Claude 5's pre-review, 09/11/2026).
+  const tested = parsePage({ blocks: [{ id: "hero0002", kind: "hero", headline: "Rye", sub: "", media: "none", video: null }, { id: "pics0005", kind: "pictures", heading: "", items: [picture(6)] }], test: { headline: "Rye in a day", sub: "" } });
+  is("a page with a test and a picture of its own", [tested.test !== null, await claimPictures("stats1", "prod_c", [path(6)])], [true, []]);
+  await writePage("stats1", "prod_c", tested, ROOM);
+  const real = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:")) || c[0] === "HINCRBY")) throw new Error("fetch failed");
+    return real(commands);
+  };
+  let dropped: unknown = null;
+  try {
+    await dropPage("stats1", "prod_c", ROOM);
+  } catch (error) {
+    dropped = error;
+  }
+  redis.pipeline = real;
+  is("the drop says it is incomplete, with the pictures it let go for the route to delete", [dropped instanceof PageDropIncomplete, picturesOfFailedDrop(dropped)], [true, [path(6)]]);
+  is("and the page itself is gone, its picture no longer its own", [redis.run(["GET", "nl:product:page:stats1:prod_c"]), redis.run(["HGET", "nl:product:pics:stats1", path(6)])], [null, null]);
 
   done();
 }

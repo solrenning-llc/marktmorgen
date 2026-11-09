@@ -213,7 +213,9 @@ test("product updates: an unknown erasure check sends nothing and leaves the job
   if (!started.ok) throw new Error(`not started: ${started.reason}`);
 
   const before = sent.length;
-  await assert.rejects(intercept(hasCheck, blankChecks(null), () => advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000)), UnknownReplyError);
+  // main's advanceUpdate (checkedUpdateRecipients) parks the job as "waiting" on an unknown check instead of throwing.
+  const held = await intercept(hasCheck, blankChecks(null), () => advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000));
+  assert.equal(held?.status, "waiting", "an unknown erasure check must leave the job to be tried again");
   assert.deepEqual(sent.slice(before).map((m) => m.to), [], "an update went out on an unknown erasure check");
   const waiting = await readUpdateJob(started.job.id);
   assert.notEqual(waiting?.status, "sent");

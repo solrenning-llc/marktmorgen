@@ -6,7 +6,8 @@
  * What goes to the model is the store's name, the line under it, the names
  * and short descriptions of the products it shows, and whatever the creator
  * typed into the box, with email addresses, links and phone numbers taken
- * out first and quoted as data that cannot close its quote. Never the
+ * out first and quoted as data that cannot close its quote (no angle
+ * bracket and no straight quote of theirs is sent as typed). Never the
  * owner's sign-in address, never a link of theirs, nothing about any buyer.
  *
  * Admission is the writing help's own (lib/ai.ts): one of the month's jobs
@@ -40,8 +41,8 @@ import {
 const encoder = new TextEncoder();
 const bytes = (text: string) => encoder.encode(text).byteLength;
 
-/** What the creator wrote cannot close the quote it is in. */
-const quoteSafe = (text: string) => text.replace(/</g, "‹").replace(/>/g, "›");
+/** What the creator wrote cannot close the quote it is in: no angle bracket and no straight quote of theirs goes as typed. */
+const quoteSafe = (text: string) => text.replace(/</g, "‹").replace(/>/g, "›").replace(/"/g, "”");
 
 /** A store's own words as they may be sent: one line, short, with addresses, links and phone numbers out, quote-safe. */
 const clean = (value: unknown, max: number) => quoteSafe(cleanVoice(typeof value === "string" ? value : "", max));
@@ -65,7 +66,7 @@ export type IdeaRequest = {
   prompt: string;
   /** What every number, deal and link in an idea is held to: the same words the model was sent. */
   facts: string;
-  /** Every product the store has, shown or hidden: never suggested again. */
+  /** The products on the store's first page (catalog.head): never suggested again. Not the whole catalog, which is not read for this. */
   titles: string[];
 };
 
@@ -130,8 +131,9 @@ const part = (value: unknown, max: number): string | null => {
  * with its three parts in their limits; never one with a money figure, a
  * percentage, earnings words, a guarantee, urgency or a deal, a link, an
  * address or a number the store's own words do not hold, nor the name of a
- * product the store has, nor the same idea twice. An idea that fails is left
- * out whole, never changed.
+ * product on the store's first page, nor the same idea twice. An idea that
+ * fails is left out whole, never changed; it is checked in its NFKC form, so a
+ * full-width or small-form sign or digit counts as the sign or digit.
  */
 export function keptIdeas(answer: string, facts: string, titles: readonly string[]): ProductIdea[] {
   const json = jsonIn(answer);
@@ -146,7 +148,7 @@ export function keptIdeas(answer: string, facts: string, titles: readonly string
     const who = part(fields.who, MAX_IDEA_WHO);
     const why = part(fields.why, MAX_IDEA_WHY);
     if (!title || !who || !why) continue;
-    const all = `${title}\n${who}\n${why}`;
+    const all = `${title}\n${who}\n${why}`.normalize("NFKC");
     if (IDEA_REFUSED.test(all) || DEAL_WORDS.test(all) || !heldToFacts(all, facts)) continue;
     const key = folded(title);
     if (taken.has(key)) continue;

@@ -7,12 +7,15 @@
  * how the studio reads the answer back. Nothing here calls a model, reads
  * or writes anything.
  *
- * An idea never carries a promise of earnings: no money figure, no
- * percentage, no earnings or income words, no guarantee and no urgency, in
- * any language a store sells in. Picking one only fills the name and the
+ * An idea that mentions prices or earnings is left out: a money figure, a
+ * currency's sign, code or word, a rate per month or week, a percentage,
+ * earnings, income, wealth or sales words, a guarantee or urgency, in the
+ * languages a store sells in (IDEA_REFUSED, a list that cannot be complete,
+ * behind the model's own instruction). Picking one only fills the name and the
  * short description of the new-product form; the creator changes them and
  * presses its own Add button, or does not.
  */
+import { CURRENCIES } from "@/lib/money";
 
 /** Ideas shown at the most, and asked of the model, so a refused one leaves room. */
 export const PRODUCT_IDEAS_SHOWN = 5;
@@ -38,16 +41,45 @@ export const MAX_IDEA_WHY = 200;
 
 export type ProductIdea = { title: string; who: string; why: string };
 
+/** A whole word or phrase, for words that may begin or end in a letter outside ASCII (where \b does not see a boundary). */
+const word = (alternatives: string) => `(?:^|[^\\p{L}\\p{N}])(?:${alternatives})(?![\\p{L}\\p{N}])`;
+
+/** A number followed by a rate of time: "5000 a month", "40/month", "40 al mes", "40 pro Monat". */
+const RATE = `\\d[\\d.,\\s]*k?\\s*(?:${[
+  "(?:a|an|per|each|every|/)\\s*(?:month|week|year|day|hour|mo|wk|yr|hr)s?",
+  "monthly|weekly|yearly|annually|per annum",
+  "(?:al|por|cada|a la)\\s+(?:mes|año|día|semana|hora)",
+  "(?:ao|por|cada|à)\\s+(?:mês|ano|dia|semana|hora)",
+  "(?:par|chaque|/)\\s*(?:mois|an|année|jour|semaine|heure)",
+  "(?:pro|im|je|jeden|jede|/)\\s*(?:monat|jahr|tag|woche|stunde)",
+  "(?:al|all'|per|ogni|a)\\s*(?:mese|anno|giorno|settimana|ora)",
+  "(?:per|elke|/)\\s*(?:maand|jaar|dag|week|uur)",
+].join("|")})(?![\\p{L}\\p{N}])`;
+
 /**
- * What keeps an idea from being shown, in every language a store sells in:
- * a currency sign or code, a percentage, earnings, income, revenue, profit
- * or money, a guarantee, and urgency. Numbers, deals and links are held to
- * the store's own words separately (heldToFacts, lib/store-assistant-rules.ts).
+ * What keeps an idea from being shown, in the languages a store sells in: a
+ * currency sign (any of Unicode's), the code of every currency a store may
+ * sell in (lib/money.ts) and currency words, a percentage, a rate per month
+ * or week after a number, earnings, income, revenue, profit, money, wealth
+ * and sales words with their stems, a guarantee, and urgency. Read after
+ * NFKC, so a full-width or small-form sign is the sign (keptIdeas). Numbers,
+ * deals and links are held to the store's own words separately (heldToFacts,
+ * lib/store-assistant-rules.ts). Any such list can miss a wording: the
+ * model's instruction comes first, and the box promises only what this keeps.
  */
 export const IDEA_REFUSED = new RegExp(
   [
-    "[$€£¥₹%]",
-    "\\b(?:usd|eur|gbp|cad|aud|chf|sek|nok|dkk|pln|jpy)\\b",
+    "[\\p{Sc}%‰]",
+    `\\b(?:${CURRENCIES.map((c) => c.code).join("|")})\\b`,
+    `\\d[\\d.,\\s]*(?:kr|zł|sfr)(?![\\p{L}\\p{N}])`,
+    RATE,
+    // Currency words, in the store languages
+    word("dollars?|d[oó]lar(?:es)?|dollar[oi]|bucks|quid|euros?|yen|francs?|franken|kronor|kroner|krona|krone|kronen|zlot(?:y|ys|ych)|złot\\p{L}*|pesos?|reais|cents?|centavos?|c[ée]ntimos?|centimes?|make bank"),
+    // Wealth, income and sales, with stems, in the store languages
+    word(
+      "(?:get|getting|grow|become|be) rich|riches|wealthy|lucr\\p{L}*|rentab\\p{L}*|financial(?:ly)? (?:freedom|independence|security)|quit your (?:day )?job|side (?:business|income|gig)|pay(?:s|ing|out|outs|check|checks|day)?|paid|sales?|sell(?:s|ing)? more|best[- ]?sell\\p{L}*",
+    ),
+    word("gan(?:a|as|an|amos|ar|ando|ado|ada|e|es|en|ancias?)|ganh\\p{L}*|ventas?|vendas?|ventes?|verkauf\\p{L}*|vendite|verkoop\\p{L}*|hacerse rico|ficar rico|devenir riche|richesse|reich werden|reichtum|diventare ricco|ricchezza|rijk worden|rijkdom|riqueza|libertad financiera|liberdade financeira|libert[ée] financi[èe]re|finanzielle freiheit|libert[àa] finanziaria|financi[ëe]le vrijheid"),
     // English
     "\\b(?:earn\\w*|income|revenue|profit\\w*|money|cash|salary|paycheck|wealth\\w*|millionaire|six[- ]figures?|passive|side hustle|per ?cent|percent(?:age)?|guarantee\\w*|proven|risk[- ]free|promise\\w*|hurry|today only|right now|act now|last chance|limited|don'?t miss|before it'?s gone)\\b",
     // Spanish
@@ -74,7 +106,7 @@ export const IDEAS_COPY = {
   notesExample: "I teach sourdough to busy parents. People often ask me how to keep a starter alive.",
   ask: "Get product ideas",
   asking: "Getting ideas…",
-  note: "These are ideas only. Nothing is saved or shown on your page until you press Add it. Ideas never include prices or earnings.",
+  note: "These are ideas only. Nothing is saved or shown on your page until you press Add it. Ideas that mention prices or earnings are left out.",
   badge: "AI suggestions",
   who: "Who it helps:",
   why: "Why it fits your store:",

@@ -278,6 +278,41 @@ async function main(): Promise<void> {
   is("controls: nothing taken back", await run(), 0);
   is("controls: both places still hold it", await kept.held(), 2);
   is("controls: the anchor moves to the newest refund", await anchorNow(), String(late + 900));
+  // The second money review of #3410 (Claude 3, MEDIUM): every succeeded part of a charge with a part still on its way
+  // spent one of the run's CHARGE_REFUND_LOOKUPS on every run, so ten newer such charges took the whole budget, run
+  // after run, and an older charge refunded in full in parts was never asked about: its places stayed.
+  part("ten newer charges with a part on its way never starve an older charge refunded in full in parts");
+  const busy: { pi: string; held: () => Promise<number> }[] = [];
+  for (let k = 20; k < 30; k += 1) busy.push(await make(k));
+  const older = await make(30);
+  const t0 = base + 10_000;
+  refunds = [
+    ...busy.flatMap((item, i) => [
+      row(`re_GrpBusyA0000${20 + i}`, t0 + 100 + 10 * i + 5, "succeeded", item.pi, true, 9800, 4900),
+      row(`re_GrpBusyB0000${20 + i}`, t0 + 100 + 10 * i, "pending", item.pi, true, 9800, 4900),
+    ]),
+    row("re_GrpOlderB00001", t0 + 1, "succeeded", older.pi, true, 9800, 4900),
+    row("re_GrpOlderA00001", t0, "succeeded", older.pi, true, 9800, 4900),
+  ];
+  const olderCharge = `ch_${older.pi.slice(3)}`;
+  const askedOf = (charge: string) => chargesAsked.filter((c) => c === charge).length;
+  let taken = 0;
+  for (let i = 0; i < 2; i += 1) taken += await run();
+  is("starved: within two runs the older charge's places are taken back", [taken, await older.held()], [2, 0]);
+  is("starved: its two parts asked Stripe about its charge once", askedOf(olderCharge), 1);
+  is("starved: the newer charges still hold both places each", (await Promise.all(busy.map((item) => item.held()))).every((n) => n === 2), true);
+  const busyCharge = `ch_${busy[0].pi.slice(3)}`;
+  const before = askedOf(busyCharge);
+  await run();
+  is("starved: a charge found with a part on its way is not asked again at once", askedOf(busyCharge), before);
+  const clock = Date.now;
+  try {
+    Date.now = () => clock() + 3_700_000;
+    await run();
+  } finally {
+    Date.now = clock;
+  }
+  is("starved: it is asked again once the recheck time passed", askedOf(busyCharge) > before, true);
   is("every created[gte] asked is a whole second", asked.every((s) => Number.isSafeInteger(s)), true);
   done();
 }

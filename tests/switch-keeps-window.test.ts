@@ -39,6 +39,9 @@ const SUB = "sub_SwitchKeeps0001";
 const priceId = (tier: Tier, cycle: Cycle) => `price_${tier}_${cycle}`;
 const fromPrice = (id: string) => { const [, tier, cycle] = id.split("_"); return { tier: tier as Tier, cycle: cycle as Cycle }; };
 let held: Record<string, unknown> = {};
+/** The one item of a stand-in subscription, with the fields read here. */
+type Item = { current_period_start: number; current_period_end: number; price: { id: string } };
+const itemOf = (subscription: Record<string, unknown>): Item => (subscription.items as { data: Item[] }).data[0];
 function subscription(id: string, tier: Tier, cycle: Cycle, startMs: number, status = "active", trialEnd = 0) {
   const endMs = addMonthsMs(startMs, cycle === "year" ? 12 : 1);
   return {
@@ -65,7 +68,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === `/subscriptions/${String(held.id)}` && method === "POST") {
     const price = body.get("items[0][price]");
     if (!price) return answer(held);
-    const item = (held.items as { data: Record<string, any>[] }).data[0];
+    const item = itemOf(held);
     const old = fromPrice(item.price.id), next = fromPrice(price);
     const trialEnd = Number(body.get("trial_end") ?? 0);
     // Stripe: an interval change resets the billing cycle anchor to now (outside a trial); the same interval keeps the period.
@@ -84,7 +87,7 @@ async function newStore(tier: Tier, cycle: Cycle, subId = SUB): Promise<string> 
   await claimHandle(owner, `switchkeeps${n}`, "Switch keeps shop", "");
   await ensureStatsId(owner);
   held = subscription(subId, tier, cycle, clock);
-  const item = (held.items as { data: Record<string, any>[] }).data[0];
+  const item = itemOf(held);
   await setSubscription(owner, { customerId: "cus_SwitchKeeps01", subscriptionId: subId, active: true, tier, cycle, trialEnds: 0, shared: false,
     period: { start: item.current_period_start, end: item.current_period_end, renews: true } });
   return owner;
@@ -167,7 +170,7 @@ async function main(): Promise<void> {
     after = await switchTo(owner, "pro", "year");
     is("the switch wrote an anchor bound to its subscription", after.allowanceAnchor?.subscriptionId, SUB);
     held = subscription("sub_SwitchKeeps0002", "creator", "month", clock);
-    const fresh = (held.items as { data: Record<string, any>[] }).data[0];
+    const fresh = itemOf(held);
     await setSubscription(owner, { subscriptionId: "sub_SwitchKeeps0002", active: true, tier: "creator", cycle: "month", trialEnds: 0, shared: false,
       period: { start: fresh.current_period_start, end: fresh.current_period_end, renews: true } });
     after = (await storeForEmail(owner))!;
@@ -177,7 +180,7 @@ async function main(): Promise<void> {
     after = await switchTo(owner, "creator", "year");
     const anchored = windowId(after, clock);
     await setSubscription(owner, { active: false });
-    const item = (held.items as { data: Record<string, any>[] }).data[0];
+    const item = itemOf(held);
     await setSubscription(owner, { active: true, tier: "creator", cycle: "year", trialEnds: 0, shared: false, period: { start: item.current_period_start, end: item.current_period_end, renews: true } });
     after = (await storeForEmail(owner))!;
     is("a plan seen stopped and running again on the same subscription keeps the window it had", windowId(after, clock), anchored);
@@ -403,6 +406,71 @@ async function main(): Promise<void> {
       if (id !== open.id) renamed.push(`${from} ${startDay} +${afterHours}h +${lateHours}h: ${open.id} -> ${id}`);
     }
     is("9b: 288 switches checked, none renames the window counted when it is written", [checked, renamed], [288, []]);
+
+    part("10. A skipped renewal whose stop the record does not show: one payment, one window (reviews of #3396)");
+    // One payment's windows, read inside its period from the moment it is written, and the allowance kinds they give whole.
+    const resumed = async (from: number, to: number) => {
+      const ids = new Set<string>();
+      let whole = 0;
+      for (const at of [from, to]) { clock = at; store = await read(); ids.add(String(windowId(store, clock))); whole += await drain(store); }
+      return [[...ids], whole];
+    };
+    // 10a (probe P2): the 10 February renewal is not paid and the stop never reaches the record (a lost webhook, the daily
+    // job not run); on 20 March only 10 March to 10 April is paid and written, straight over January's active period.
+    await switchedOn10December();
+    clock = Date.UTC(2027, 2, 20, 12);
+    await setSubscription(owner, plan("month", per(Date.UTC(2027, 2, 10, 12), 1, false)));
+    is("10a: no stop recorded: the payment after the skipped period opens one window, its own, each kind whole once",
+      await resumed(Date.UTC(2027, 2, 20, 12), Date.UTC(2027, 3, 5, 12)), [["2027-03-10"], 8]);
+    // 10b (probe P3): the stop is written on 12 February, then a Stripe read made before it (10 January to 10 February,
+    // active) lands after it and wipes the stop's day; on 20 March the paid 10 March to 10 April is written.
+    await switchedOn10December();
+    clock = Date.UTC(2027, 1, 12, 12);
+    await setSubscription(owner, { active: false });
+    await setSubscription(owner, plan("month", per(Date.UTC(2027, 0, 10, 12), 1)));
+    clock = Date.UTC(2027, 2, 20, 12);
+    await setSubscription(owner, plan("month", per(Date.UTC(2027, 2, 10, 12), 1, false)));
+    is("10b: a late active write over the stop: still one window for the one payment, each kind whole once",
+      await resumed(Date.UTC(2027, 2, 20, 12), Date.UTC(2027, 3, 5, 12)), [["2027-03-10"], 8]);
+    is("10b: the anchor is left behind", (await read()).allowanceAnchor ?? null, null);
+    // 10c: every day of the month, switch time, length of the skip and day the payment is written, the stop never
+    // recorded or wiped by a late active write: the period paid after the skip names one window, its own.
+    let swept = 0;
+    const twice: string[] = [];
+    for (const startDay of [1, 10, 15, 28, 29, 30, 31]) for (const afterHours of [1, 100, 300, 600]) for (const skipped of [1, 2, 3])
+      for (const lateDays of [0, 1, 5, 20]) for (const renews of [true, false]) for (const stop of ["never", "wiped"] as const) {
+        const begun = Date.UTC(2027, 0, startDay, 9);
+        const yearlyRecord = { subscriptionActive: true, subscriptionId: SUB, trialEnds: 0, planEndedAt: "", cycle: "year" as const, period: per(begun, 12) };
+        const switchedAt = begun + afterHours * 3_600_000;
+        const monthlyRecord = { ...yearlyRecord, cycle: "month" as const, period: per(switchedAt, 1) };
+        let rec: typeof monthlyRecord & { allowanceAnchor?: ReturnType<typeof anchorAfter> } = { ...monthlyRecord, allowanceAnchor: anchorAfter(yearlyRecord, monthlyRecord, switchedAt) };
+        // The one renewal paid, written on its day.
+        const paid = addMonthsMs(switchedAt, 1);
+        const renewed = { ...rec, period: per(paid, 1) };
+        rec = { ...renewed, allowanceAnchor: anchorAfter(rec, renewed, paid) };
+        if (stop === "wiped") {
+          // The stop is written after the unpaid renewal's grace, and a read made before it lands right after.
+          const stoppedAt = addMonthsMs(paid, 1) + 3 * DAY;
+          const stopped = { ...rec, subscriptionActive: false, period: null, planEndedAt: new Date(stoppedAt).toISOString() };
+          const stoppedRec = { ...stopped, allowanceAnchor: rec.allowanceAnchor };
+          const stale = { ...rec, planEndedAt: "" };
+          rec = { ...stale, allowanceAnchor: anchorAfter(stoppedRec, stale, stoppedAt + 60_000) };
+        }
+        const resumes = addMonthsMs(switchedAt, 2 + skipped);
+        const writtenAt = resumes + lateDays * DAY + 3_600_000;
+        const back = { ...rec, period: per(resumes, 1, renews) };
+        const after = { ...back, allowanceAnchor: anchorAfter(rec, back, writtenAt) };
+        const ids = new Set<string>();
+        for (let at = writtenAt; at < back.period.end * 1000; at += DAY) ids.add(String(windowId(after, at)));
+        swept += 1;
+        if (ids.size !== 1 || !ids.has(new Date(resumes).toISOString().slice(0, 10))) twice.push(`${startDay} +${afterHours}h skip ${skipped} late ${lateDays}d ${renews} ${stop}: ${[...ids].join(",")}`);
+      }
+    is("10c: 1,344 resumed periods, none opens a second window or the anchor's", [swept, twice.length, twice.slice(0, 3)], [1344, 0, []]);
+    // What the gap must not catch: the overdue invoice itself paid (7b) and a renewal paid in its grace keep the anchor.
+    await switchedOn10December();
+    clock = Date.UTC(2027, 1, 11, 12);
+    await setSubscription(owner, plan("month", per(Date.UTC(2027, 1, 10, 12), 1)));
+    is("10d: a renewal written in its grace keeps the anchor", (await read()).allowanceAnchor, { subscriptionId: SUB, start: START, end: Date.UTC(2027, 0, 1, 12) });
   } finally {
     Date.now = realNow;
   }

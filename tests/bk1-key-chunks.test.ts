@@ -27,6 +27,7 @@ import * as codec from "@/lib/backup-codec";
 import { backupPeakSets, runBackup, type BackupCostReview } from "@/lib/backup-run";
 import { backupAlarmSignal } from "@/lib/backup-alarm";
 import type { BackupBucket, BackupObjectStore } from "@/lib/backup-roundtrip";
+import { BACKUP_MONTH_MARK } from "@/lib/backup-store";
 import { redisPipelineBase64 } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -231,6 +232,15 @@ async function main(): Promise<void> {
     const fail = JSON.parse(String(redis.run(["GET", "nl:backup:last-fail"]) ?? "{}")) as { reason?: string; missing?: number };
     is("the owner's report: the state and how many keys", [fail.reason, fail.missing], ["export_key_over_ceiling", 1]);
     is("the alarm: a failure with that state, never a sign of life", backupAlarmSignal(second as never), { kind: "fail", reason: "export_key_over_ceiling" });
+
+    // A month's copy (lib/backup-run.ts) with a key over the ceiling: its set is in the month's folder, and the month
+    // is never marked verified, so the next run writes the month's copy again.
+    const marks = () => [...runStore.objects.keys()].filter((id) => BACKUP_MONTH_MARK.test(id)).length;
+    const before = marks();
+    clock = Date.parse("2026-12-01T03:00:00Z");
+    const month = (await runBackup({ now: clock, review, store: bucket, key, previousKeys: [] })) as unknown as { ok: boolean; reason?: string; id?: string };
+    is("a month's copy with a key over the ceiling: the state, its set in the month's folder, no month mark", [month.reason, month.id?.startsWith("monthly/2026-12/"), marks()], ["export_key_over_ceiling", true, before]);
+    is("the last good copy's mark is still unmoved", redis.run(["GET", "nl:backup:last-ok"]), mark);
   }
   done();
 }

@@ -228,6 +228,28 @@ async function main(): Promise<void> {
     const editor = readFileSync("components/product-editor.tsx", "utf8");
     is("the editor passes an unread view on to the panel", editor.includes("preordersUnread={preorders === null}"), true);
   }
+
+  // Rule-30 sibling on the same panel (studio inventory, app/studio/page.tsx:1750): the waitlist's own read failing
+  // was caught as {}, so the panel drew "Coming soon" unchecked with 0 confirmed, a state nobody read.
+  part("The studio says the waitlist could not be read, never off with 0 confirmed");
+  {
+    const html = renderToStaticMarkup(
+      createElement(WaitlistPanel, { productId: a, initial: null, waitlistUnread: true, suggestedAddress: "", preorders: null, price: "$29.00" } as Parameters<typeof WaitlistPanel>[0]),
+    );
+    is("it says so", html.includes("The waitlist could not be read just now"), true);
+    is("it draws no coming-soon switch it cannot vouch for", html.includes('type="checkbox"'), false);
+    is("nor a count of confirmed addresses", html.includes("confirmed address"), false);
+    is("nor a way to put it on sale", html.includes("Put it on sale"), false);
+    const read = renderToStaticMarkup(
+      createElement(WaitlistPanel, { productId: a, initial: null, suggestedAddress: "", preorders: null, price: "$29.00" }),
+    );
+    is("control: read, with no waitlist, it offers the switch", [read.includes('type="checkbox"'), read.includes("could not be read")], [true, false]);
+    const page = readFileSync("app/studio/page.tsx", "utf8");
+    is("the studio page never reads an unread waitlist as none", /waitlistViews\(.*\.catch\(\(\) => \(\{\}\)\)/.test(page), false);
+    is("and logs it", /waitlistViews\(.*\.catch\(\(error\) => \{ console\.error\("the studio could not read its waitlists", error\); return null; \}\)/.test(page), true);
+    const editor = readFileSync("components/product-editor.tsx", "utf8");
+    is("the editor passes an unread waitlist on to the panel", editor.includes("waitlistUnread={waitlists === null}"), true);
+  }
   done();
 }
 

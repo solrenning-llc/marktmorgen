@@ -158,6 +158,8 @@ const clicksKey = (id: string) => `nl:aff:${id}:clicks`;
 const paidClicksKey = (id: string) => `nl:aff:${id}:paid`;
 const salesKey = (id: string) => `nl:aff:${id}:sales`;
 const payoutsKey = (id: string) => `nl:aff:${id}:payouts`;
+/** The sales whose second tier waits for their buyer (buyerUnknown): each reference, scored by when it is next read. */
+const unconfirmedKey = (id: string) => `nl:aff:${id}:unconf`;
 /** A partner's share of one sale, keyed "<sale reference>:<partner id>". */
 const sharesKey = (id: string) => `nl:aff:${id}:shares`;
 const linkKey = (token: string) => `nl:aff:link:${sha(`nimbus-aff-link:${token}`).slice(0, 40)}`;
@@ -3261,7 +3263,12 @@ async function writeReferral(store: Store, referral: Referral, buyer: string): P
   const tier = await tierFor(store, referral.aff, buyer);
   // Once per sale, whichever of the thanks page and the five-minute job is
   // first, counted in the store's room at what it really adds (lib/order-data.ts).
-  await orderWrite(store, [["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify({ ...referral, ...tier })]]);
+  // A sale whose buyer is not confirmed goes on the list the five-minute job reads again (settleUnconfirmed), in the same
+  // write and before the sale: a reference with no sale, or already decided, is dropped from it by the job unread.
+  await orderWrite(store, [
+    ...(tier.buyerUnknown ? [["ZADD", unconfirmedKey(store.statsId), Math.floor(Date.now() / 1000), referral.ref]] : []),
+    ["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify({ ...referral, ...tier })],
+  ]);
 }
 
 /**
@@ -4221,6 +4228,97 @@ function tierOfInvoice(byId: Map<string, Affiliate>, aff: string, buyer: string,
   if (!recruit?.by) return {};
   if (!buyer) return paidAt >= TIER_BUYER_FROM ? { buyerUnknown: 1 } : {};
   return tierOwn(recruit, byId.get(recruit.by.id), buyer) ? { tierOff: 1 } : {};
+}
+
+/** Orders of a store the five-minute job reads again for their buyer's address in one run (settleUnconfirmed). */
+export const UNCONFIRMED_BATCH = 5;
+/** Seconds before an order that gave no address is read again; an order Stripe or Redis did not answer for is read again after an hour. */
+export const UNCONFIRMED_READ_AGAIN = 24 * 60 * 60;
+/** Days after the sale that an order is read again by itself; past them it waits for the creator's own approval (approveUnconfirmed). */
+export const UNCONFIRMED_DAYS = 14;
+const UNCONFIRMED_RETRY = 60 * 60;
+
+/**
+ * The address the buyer of one sale gave, read from where the sale was made: "" when that record names none, a thrown
+ * error when it does not answer or answers for another record. Stripe: one request (the checkout, the payment with its
+ * charge, or the invoice); PayPal: the paid record; nothing else is asked.
+ */
+async function buyerOf(store: Store, ref: string, deadline: number | undefined): Promise<string> {
+  const text = (x: unknown) => (typeof x === "string" ? x : "");
+  if (ref.startsWith("paypal:")) {
+    const paid = await readPaidExact(ref.slice(7));
+    if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
+    return paid ? paid.email : "";
+  }
+  if (!store.stripeAccountId) throw new StripeUnknownError("a sale's account");
+  const path = ref.startsWith("cs_") ? `/checkout/sessions/${ref}` : ref.startsWith("pi_") ? `/payment_intents/${ref}?expand[]=latest_charge` : ref.startsWith("in_") ? `/invoices/${ref}` : "";
+  if (!path || !/^[A-Za-z0-9_]{3,250}$/.test(ref)) throw new StripeUnknownError("a sale's kind");
+  const read = (await onAccount("GET", store.stripeAccountId, path, undefined, AFF_SUB_STRIPE_VERSION, undefined, pendingWait(deadline))) as Record<string, unknown>;
+  if (!read || read.id !== ref) throw new StripeUnknownError("a sale's order");
+  if (ref.startsWith("cs_")) return text((read.customer_details as { email?: unknown } | null | undefined)?.email);
+  if (ref.startsWith("in_")) return text(read.customer_email);
+  const charge = read.latest_charge && typeof read.latest_charge === "object" ? (read.latest_charge as { billing_details?: { email?: unknown } | null }) : null;
+  return text(read.receipt_email) || text(charge?.billing_details?.email);
+}
+
+/**
+ * The five-minute job's pass over a store's sales whose second tier waits as "buyer not confirmed" (buyerUnknown; owner,
+ * through Claude 1, 9 November 2026, 15h42): at most UNCONFIRMED_BATCH due ones a run, each one request to where the
+ * sale was made (buyerOf), decided as a new sale is (tierFor). An address found: the sale is rewritten without the
+ * waiting mark, and with tierOff when the buyer is the recruit or their inviter; no address: read again after
+ * UNCONFIRMED_READ_AGAIN; not answered: after an hour. Past UNCONFIRMED_DAYS, or already decided, a sale leaves the
+ * list unread and, still waiting, stays for the creator (approveUnconfirmed). Nothing personal is kept. Run by the
+ * sweep (lib/checkout-sweep.ts) for a store whose program is on.
+ */
+export async function settleUnconfirmed(store: Store, now = Math.floor(Date.now() / 1000), deadline?: number): Promise<{ decided: number; waiting: number; failed: number }> {
+  const out = { decided: 0, waiting: 0, failed: 0 };
+  if (!store.statsId || !isRedisConfigured()) return out;
+  const statsId = store.statsId;
+  const list = repliesFor(await redisPipeline([["ZRANGEBYSCORE", unconfirmedKey(statsId), "-inf", now, "LIMIT", 0, UNCONFIRMED_BATCH]]), 1);
+  const refs = list ? stringList(list[0]) : null;
+  if (!refs) throw new UnknownReplyError("the sales whose buyer is not confirmed");
+  if (!refs.length) return out;
+  const raws = repliesFor(await redisPipeline(refs.map((ref) => ["HGET", salesKey(statsId), ref])), refs.length);
+  if (!raws) throw new UnknownReplyError("the sales whose buyer is not confirmed");
+  const later = (ref: string, seconds: number) => ["ZADD", unconfirmedKey(statsId), now + seconds, ref];
+  for (const [i, ref] of refs.entries()) {
+    const raw = raws[i];
+    if (raw !== null && typeof raw !== "string") {
+      out.failed += 1;
+      continue;
+    }
+    const sale = parseReferral(raw);
+    // Not there any more, or decided already (by the creator, or by an earlier pass that lost its last write): off the list.
+    if (!sale || !sale.buyerUnknown || sale.at < now - UNCONFIRMED_DAYS * 86_400) {
+      await redisPipeline([["ZREM", unconfirmedKey(statsId), ref]]).catch(() => undefined);
+      continue;
+    }
+    try {
+      const buyer = await buyerOf(store, ref, deadline);
+      if (!buyer) {
+        await redisPipeline([later(ref, UNCONFIRMED_READ_AGAIN)]);
+        out.waiting += 1;
+        continue;
+      }
+      const tier = await tierFor(store, sale.aff, buyer);
+      if (tier.buyerUnknown) {
+        await redisPipeline([later(ref, UNCONFIRMED_RETRY)]);
+        out.waiting += 1;
+        continue;
+      }
+      const whole = JSON.parse(raw as string) as Record<string, unknown>;
+      delete whole.buyerUnknown;
+      await orderWrite(store, [["HSET", salesKey(statsId), ref, JSON.stringify({ ...whole, ...tier })]]);
+      await redisPipeline([["ZREM", unconfirmedKey(statsId), ref]]).catch(() => undefined);
+      out.decided += 1;
+    } catch (error) {
+      if (error instanceof PassTimeSpent) break;
+      out.failed += 1;
+      console.error("a sale's buyer could not be read; left waiting", ref, error instanceof Error ? error.message : "");
+      await redisPipeline([later(ref, UNCONFIRMED_RETRY)]).catch(() => undefined);
+    }
+  }
+  return out;
 }
 
 /** Whether a sale earns its affiliate's inviter a second tier: never on tierOff, waiting on buyerUnknown (tierLines, idleSweep). */

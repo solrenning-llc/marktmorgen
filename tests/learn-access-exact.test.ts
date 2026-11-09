@@ -54,7 +54,7 @@ let sends = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (!url.hostname.endsWith("stripe.com")) {
+  if (url.hostname !== "api.stripe.com") {
     sends += 1;
     return answer({ error: "no sending in this test" }, 500);
   }

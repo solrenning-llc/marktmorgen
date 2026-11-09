@@ -35,7 +35,7 @@ let down = false;
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
-  if (!url.hostname.endsWith("stripe.com")) return new Response(JSON.stringify({ error: "no sending in this test" }), { status: 500 });
+  if (url.hostname !== "api.stripe.com") return new Response(JSON.stringify({ error: "no sending in this test" }), { status: 500 });
   if (down) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
   const path = url.pathname.replace(/^\/v1/, "");
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false, url: `/v1${path}` }), { status: 200 });

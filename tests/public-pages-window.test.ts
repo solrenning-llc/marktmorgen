@@ -15,7 +15,11 @@
  *   before any token, product or page is read;
  * - the way to take an address off a wait list stays open past the public
  *   share, on the share kept for what people already have (who: "buyer"),
- *   still counted, and rests only when the whole window is used.
+ *   still counted, and rests only when the whole window is used;
+ * - a store's own page asks up to MAX_FORMS forms, one read each, more than
+ *   a later page's commands: it takes siteFormUnits of the window for them
+ *   once its blocks say how many, before it reads one, and rests when the
+ *   window cannot take them (lib/page-read-rules.ts).
  *
  * Synthetic store; nothing real is called.
  */
@@ -33,12 +37,15 @@ import { siteKey } from "@/lib/site-page-rules";
 import { waitlistTokenKey } from "@/lib/waitlist-tokens";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
+import { MAX_FORMS } from "@/lib/forms";
+import { siteFormUnits } from "@/lib/page-read-rules";
 import { isResting, takePublicRequest } from "@/lib/traffic";
 import { publicVisitLimit, requestLimitFor } from "@/lib/traffic-rules";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { paidPeriod } from "./billing-period-fixture";
+import { COMMANDS } from "./traffic-cost";
 import { done, is, part } from "./check";
 
 const OWNER = "public-pages-window@example.com";
@@ -47,6 +54,9 @@ const DRAWS = 25;
 const PAGE_ID = "ppwpage001";
 const PAGE_SLUG = "about";
 const PAGE_WORDS = "Kiln notes for the public";
+const FORMS_PAGE_ID = "ppwpage002";
+const FORMS_SLUG = "apply";
+const FORM_IDS = Array.from({ length: MAX_FORMS }, (_, i) => `ppwform${String(i).padStart(3, "0")}`);
 
 async function drawn(run: () => Promise<unknown>): Promise<string> {
   try {
@@ -95,6 +105,13 @@ const READS = /^nl:(join:t:|wl:t:|catalog:[^:]+:l:|product:page:)/;
 /** The keys of those reads among the commands sent, by family, whatever the command (GET, MGET, STRLEN...). */
 const readsIn = (commands: unknown[][]) => commands.flatMap((c) => c.slice(1).filter((a) => READS.test(String(a))).map((a) => String(a).split(":").slice(0, 3).join(":")));
 
+/** Takes, outside any connection's share, as many of the window's requests as bring its count to `target` (never fewer than one). */
+async function fillTo(store: Parameters<typeof takePublicRequest>[0], target: number): Promise<void> {
+  const probe = await watched(() => takePublicRequest(store, "buyer", Date.now(), 1, { shared: true }));
+  const used = Number((await redis.pipeline([["GET", String(probe.commands.find((c) => c[0] === "INCRBY")?.[1])]]))[0]);
+  if (target > used) await takePublicRequest(store, "buyer", Date.now(), target - used, { shared: true });
+}
+
 async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, HANDLE, "Public Pages Window", "Pots.");
@@ -104,9 +121,14 @@ async function main(): Promise<void> {
   const made = await addProduct(OWNER, "Glazing course", "", "0", null);
   if (!made.ok) throw new Error("product fixture was not created");
   const productId = made.product.id;
-  await setSitePages(OWNER, [{ id: PAGE_ID, slug: PAGE_SLUG, title: "About", nav: false, target: "", from: 0 }]);
+  await setSitePages(OWNER, [
+    { id: PAGE_ID, slug: PAGE_SLUG, title: "About", nav: false, target: "", from: 0 },
+    { id: FORMS_PAGE_ID, slug: FORMS_SLUG, title: "Apply", nav: false, target: "", from: 0 },
+  ]);
   const store = (await storeForEmail(OWNER))!;
   await writePage(store.statsId!, siteKey(PAGE_ID), { ...parsePage({}), blocks: [{ id: "blk001", kind: "text", heading: "", body: PAGE_WORDS }] } as never, ROOM);
+  // A page asking the most forms a store can have, each its own block.
+  await writePage(store.statsId!, siteKey(FORMS_PAGE_ID), { ...parsePage({}), blocks: [{ id: "blk000", kind: "text", heading: "", body: PAGE_WORDS }, ...FORM_IDS.map((form, i) => ({ id: `blk${String(i + 1).padStart(3, "0")}`, kind: "form", heading: "", form }))] } as never, ROOM);
   // A real link to take an address off the wait list (lib/waitlist.ts, joinWaitlist writes the same grant).
   const leave = randomBytes(24).toString("hex");
   await redis.pipeline([["SET", waitlistTokenKey(leave), JSON.stringify({ s: store.statsId, h: store.handle, p: productId, e: "ada@example.com", k: "leave" }), "EX", 3_600]]);
@@ -150,11 +172,34 @@ async function main(): Promise<void> {
     is(`${pages[i][0]}: each drawing takes a request of the store's window`, m.units >= DRAWS, true);
   }
 
-  part("With the public share of the window used up, the pages rest with the store, before reading anything");
+  part("What one drawing sends stays inside a later page's commands, with its count");
+  for (let i = 0; i < pages.length; i++) {
+    const { commands } = await watched(() => draw(i, 600 + i));
+    is(`${pages[i][0]}: at most ${COMMANDS.laterPage + COMMANDS.laterCount} commands`, commands.length <= COMMANDS.laterPage + COMMANDS.laterCount, true);
+  }
+
+  part(`A store's own page asking ${MAX_FORMS} forms takes their requests before it reads one`);
+  const formsPage = (k: number) => {
+    ask(`/@${HANDLE}/${FORMS_SLUG}?x=${k}`, "203.0.113.40");
+    return drawn(() => StoreOwnPage({ params: Promise.resolve({ handle, slug: FORMS_SLUG }), searchParams: Promise.resolve({ x: String(k) }) }));
+  };
+  const asked = await watched(() => formsPage(0));
+  const formReads = (commands: unknown[][]) => commands.filter((c) => String(c[1]).startsWith("nl:forms:")).length;
+  const firstForm = asked.commands.findIndex((c) => String(c[1]).startsWith("nl:forms:"));
+  const takenBefore = asked.commands.slice(0, firstForm).reduce((sum, c) => sum + (c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:") ? Number(c[2]) : 0), 0);
+  is("drawn, with its blocks", asked.out.includes(PAGE_WORDS), true);
+  is("it reads each form once", formReads(asked.commands), MAX_FORMS);
+  is(`it takes 1 + siteFormUnits(${MAX_FORMS}) of the window`, asked.units, 1 + siteFormUnits(MAX_FORMS));
+  is("and takes all of them before the first form is read", [firstForm > 0, takenBefore], [true, 1 + siteFormUnits(MAX_FORMS)]);
+
+  part("With room for the page's own request and not for its forms, it rests before reading one");
   const whole = requestLimitFor(store);
-  const probe = await watched(() => takePublicRequest(store, "buyer", Date.now(), 1, { shared: true }));
-  const used = Number((await redis.pipeline([["GET", String(probe.commands.find((c) => c[0] === "INCRBY")?.[1])]]))[0]);
-  await takePublicRequest(store, "buyer", Date.now(), publicVisitLimit(whole) - used, { shared: true });
+  await fillTo(store, publicVisitLimit(whole) - 1);
+  const short = await watched(() => formsPage(1));
+  is("rests with the store, no form read", [short.out.includes(speech(store).w.restingTitle), formReads(short.commands)], [true, 0]);
+
+  part("With the public share of the window used up, the pages rest with the store, before reading anything");
+  await fillTo(store, publicVisitLimit(whole));
   is("the store's public pages rest", await isResting(store), true);
   const restingTitle = speech(store).w.restingTitle;
   for (let i = 0; i < pages.length; i++) {
@@ -169,6 +214,9 @@ async function main(): Promise<void> {
       is(`${name}: resting, nothing behind it is read`, read, []);
     }
   }
+
+  const restingForms = await watched(() => formsPage(2));
+  is("the page asking forms rests, no form read", [restingForms.out.includes(restingTitle), formReads(restingForms.commands)], [true, 0]);
 
   part("With the whole window used, the way off the list rests too");
   await takePublicRequest(store, "buyer", Date.now(), whole, { shared: true });

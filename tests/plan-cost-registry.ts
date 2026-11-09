@@ -1337,7 +1337,9 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)"] },
-      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },
+      // The assignment door also asks the file store once whether the browser's name is already a file (one head, and
+      // a listing it may take back), after its buyer action is taken (9 November 2026).
+      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "head(pathname)", "dropTaskDoor(pathname)"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // Removing a like spends at most five commands after its buyer action is taken: EVAL, two ZSCOREs and two writes.

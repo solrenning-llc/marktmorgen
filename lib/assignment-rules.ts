@@ -135,6 +135,16 @@ export function ownsTaskPath(path: unknown, folder: string): path is string {
   return TASK_FILE_NAME.test(path.slice(folder.length));
 }
 
+/**
+ * The name a student's browser sends a file for an assignment under (components/lesson-task.tsx): a fresh id in the
+ * folder the lesson page gave it (taskFolder). The browser names it because @vercel/blob's uploadPresigned sends its
+ * PUT under the name it asked the door for, and the door signs exactly that name; the door checks it with ownsTaskPath
+ * and the kind of the file, never makes another one (the audit of 9 November 2026).
+ */
+export function taskUploadPath(folder: string, extension: string, id: string): string {
+  return `${folder}${id}.${extension}`;
+}
+
 /** The extension a file of this kind is kept under, or null for a kind not taken. */
 export function taskExtension(type: unknown): string | null {
   return typeof type === "string" && Object.hasOwn(TASK_FILE_TYPES, type) ? TASK_FILE_TYPES[type] : null;

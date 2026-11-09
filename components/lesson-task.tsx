@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
-import { MAX_ANSWER_TEXT, MAX_TASK_FILE_BYTES, type Submission, TASK_ACCEPT, TASK_FILE_TYPES } from "@/lib/assignment-rules";
+import { MAX_ANSWER_TEXT, MAX_TASK_FILE_BYTES, type Submission, TASK_ACCEPT, TASK_FILE_TYPES, taskUploadPath } from "@/lib/assignment-rules";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 
@@ -30,6 +30,7 @@ export function LessonTask({
   mode,
   where,
   storeName,
+  folder = "",
   language = "en",
 }: {
   prompt: string;
@@ -39,6 +40,11 @@ export function LessonTask({
   mode: "student" | "owner" | "visitor";
   where: { handle: string; product: string; lesson: string };
   storeName: string;
+  /**
+   * The student's own folder for this lesson's files (lib/assignment-rules.ts, taskFolder), given by the lesson page:
+   * the file is sent under a fresh name in it, the name the upload door checks and signs.
+   */
+  folder?: string;
   language?: LanguageCode;
 }) {
   const w = coursesWords(language);
@@ -71,7 +77,8 @@ export function LessonTask({
     if (chosen.size > MAX_TASK_FILE_BYTES) return setError(w.taskTooBig(MB));
     setUploading(0);
     try {
-      const done = await uploadPresigned(`task.${TASK_FILE_TYPES[type]}`, chosen, {
+      // A fresh name in this student's folder: the door signs exactly the name asked for, and the file is sent under it.
+      const done = await uploadPresigned(taskUploadPath(folder, TASK_FILE_TYPES[type], crypto.randomUUID().replace(/-/g, "")), chosen, {
         access: "private",
         handleUploadUrl: "/api/store/course/task/upload",
         clientPayload: JSON.stringify({ ...where, type }),

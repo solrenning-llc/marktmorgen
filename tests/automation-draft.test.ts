@@ -1,6 +1,7 @@
 /**
  * A workflow drafted with AI from a goal (20 [E3], lib/automation-draft.ts,
- * lib/automation-draft-ai.ts), through the studio's own routes. The model is
+ * lib/automation-draft-ai.ts), through its own studio route and the Email
+ * Studio's. The model is
  * played by a stand-in for `fetch`; the AI spending policy is the approving
  * test double every writing test uses (tests/ai-spend-regression-stub.ts).
  * What is checked:
@@ -22,7 +23,7 @@ import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { aiLeft, aiMonthKey } from "@/lib/ai";
-import { POST as AI } from "@/app/api/store/ai/route";
+import { POST as DRAFT } from "@/app/api/store/automation-draft/route";
 import { POST as MAIL } from "@/app/api/store/mail/route";
 import { readFlows } from "@/lib/flows";
 import { storeBase } from "@/lib/purchase-email";
@@ -222,7 +223,7 @@ async function main(): Promise<void> {
   let store = (await storeForEmail(OWNER))!;
   const start = await aiLeft(store);
 
-  const empty = await (await post(AI, "ai", { kind: "automation", notes: "   " })).json();
+  const empty = await (await post(DRAFT, "automation-draft", { notes: "   " })).json();
   is("without a goal nothing is asked or counted", [empty.error, asked.length, await aiLeft(store)], ["notes", 0, start]);
 
   reply.text = `Here it is:\n${JSON.stringify({
@@ -232,7 +233,7 @@ async function main(): Promise<void> {
     goal: { type: "product", product: "p1" },
     steps: [email(1, "Still thinking about the course?", `It is here when you are ready.\n${storeBase(store)}/p/${course.product.id}`)],
   })}`;
-  const drafted = await (await post(AI, "ai", { kind: "automation", notes: "Remind people who leave my course checkout, and stop once they buy." })).json();
+  const drafted = await (await post(DRAFT, "automation-draft", { notes: "Remind people who leave my course checkout, and stop once they buy." })).json();
   store = (await storeForEmail(OWNER))!;
   is("drafted, one job taken, one request at the bound", [drafted.ok, asked.length, asked[0]?.max, start - (await aiLeft(store))], [true, 1, AUTOMATION_DRAFT_CALL.outputTokens, 1]);
   is("the product is the store's own id, and its title comes back for the explanation", [drafted.value?.draft.productId, drafted.value?.titles[course.product.id]], [course.product.id, "Weeknight Course"]);
@@ -241,10 +242,10 @@ async function main(): Promise<void> {
   asked.length = 0;
   reply.text = JSON.stringify({ ...good(), trigger: "product", product: "p5" });
   const before = await aiLeft(store);
-  const invented = await (await post(AI, "ai", { kind: "automation", notes: "Something" })).json();
+  const invented = await (await post(DRAFT, "automation-draft", { notes: "Something" })).json();
   is("an answer naming what the store does not have is refused, and the started job stays counted", [invented.error, asked.length, before - (await aiLeft(store))], ["failed", 1, 1]);
   reply.status = 500;
-  const failed = await (await post(AI, "ai", { kind: "automation", notes: "Something" })).json();
+  const failed = await (await post(DRAFT, "automation-draft", { notes: "Something" })).json();
   is("a provider failure keeps the started job counted", [failed.error, before - (await aiLeft(store))], ["failed", 2]);
   reply.status = 200;
   redis.run(["SET", aiMonthKey(store, new Date())!, 0]);

@@ -35,7 +35,10 @@ is("nothing is drawn where the writing help is off", off, "");
 const box = renderToStaticMarkup(createElement(AutomationDraftBox, { ai: { on: true, left: 7 } }));
 is("a titled region, its title a heading", [/<section aria-labelledby="automation-draft-title"/.test(box), /<h2 id="automation-draft-title"[^>]*>Start a workflow from a goal<\/h2>/.test(box)], [true, true]);
 is("it says what happens before anything is asked", [box.includes("saved paused"), box.includes("nothing is sent until you switch it on")], [true, true]);
-is("the writing help's own box asks for the goal", box.includes("Draft a workflow with AI"), true);
+is("the goal has a visible label and its help is tied to it", [/<label[^>]*for="automation-goal"[^>]*>Your goal<\/label>/.test(box), /<textarea[^>]*id="automation-goal"[^>]*aria-describedby="automation-goal-help automation-goal-left"/.test(box)], [true, true]);
+is("one button drafts it, saying what is left this month", [/<button type="button"[^>]*>Draft a workflow<\/button>/.test(box), box.includes("7 left this month. Started attempts count, even if they fail.")], [true, true]);
+const unknown = renderToStaticMarkup(createElement(AutomationDraftBox, { ai: { on: true, left: 0, known: false } }));
+is("an allowance that could not be read is said, never shown as 0, and nothing can be started", [unknown.includes("We could not check your AI allowance just now."), unknown.includes("0 left"), /<button type="button"[^>]*disabled=""[^>]*>Draft a workflow<\/button>/.test(unknown)], [true, false, true]);
 is("a polite status region is there before anything is said in it", /role="status" aria-live="polite"/.test(box), true);
 
 const review = renderToStaticMarkup(createElement(DraftReview, { value, busy: false, onSave: () => {}, onDiscard: () => {} }));

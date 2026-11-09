@@ -1609,7 +1609,7 @@ export default async function StudioPage({
                     <p className="mt-1 text-sm text-ink-soft">
                       {/* A choose-your-price product held for the day is said in our words, never as Stripe's (lib/checkout-trouble.ts). */}
                       {trouble.last.code === PRICE_HELD_CODE
-                        ? `Those buyers could not pay. The last time, ${new Date(trouble.last.at).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })}: ${trouble.last.message} Leave the product's price active in your Stripe dashboard.`
+                        ? `Those buyers could not pay. The last time, ${new Date(trouble.last.at).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })}: ${trouble.last.message} Leave the product's price active in your Stripe dashboard. If you did not archive it, there is nothing for you to do.`
                         : `Those buyers could not pay. The last time, ${new Date(trouble.last.at).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })}, Stripe said: “${trouble.last.message}” If it mentions your account, open your Stripe dashboard; if it mentions a price, save the product again.`}
                     </p>
                   </div>

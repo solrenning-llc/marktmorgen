@@ -191,6 +191,12 @@ export function emailStopped(plan: { pro: boolean; renewalUnpaid: boolean; dispu
  * lib/pay-what-you-want.ts): a checkout that did not open, its message in our words, never Stripe's.
  */
 export const PRICE_HELD_CODE = "pwyw_price_held";
+/**
+ * How long, at most, such a product stays held from any moment it is held: the refusal count's own expiry
+ * (REFUSED_SECONDS in lib/pay-what-you-want.ts, which reads it from here and exports it again). Kept in this module,
+ * which asks nothing, so the checkup says the count's own term without reaching for Redis or Stripe.
+ */
+export const HELD_MOST_HOURS = 25;
 
 /**
  * Checkouts Stripe refused to open in the last 7 days; null when they could
@@ -214,7 +220,7 @@ export function checkoutCheck(trouble: { week: number; last: { message: string; 
       state: "problem",
       found: `A checkout did not open ${times} in the last 7 days. The last time: ${trouble.last.message}`,
       ifLeft: "A buyer who presses buy gets an error instead of the payment page, and that sale is lost.",
-      fix: { kind: "outside", where: "In your Stripe dashboard, leave the product's price active. Buying it starts again by itself within 25 hours." },
+      fix: { kind: "outside", where: `In your Stripe dashboard, leave the product's price active. If you did not archive it, there is nothing for you to do. Buying it starts again by itself within ${HELD_MOST_HOURS} hours.` },
     };
   }
   return {

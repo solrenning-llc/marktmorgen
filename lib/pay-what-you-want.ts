@@ -32,6 +32,7 @@ import type { Listing, Store } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import { type Currency, currencyRule } from "@/lib/money";
+import { HELD_MOST_HOURS } from "@/lib/checkup-rules";
 
 export type PayWhatYouWant = {
   /** What the buyer's box starts at on Stripe's page, in the currency's smallest unit. */
@@ -142,7 +143,7 @@ const KEEP_SECONDS = 365 * 24 * 60 * 60;
  * shapes, the oldest dropped first.
  */
 const refusedKey = (account: string, print: string) => `nl:pwyw:${account}:${print}:refused`;
-const REFUSED_SECONDS = 25 * 60 * 60;
+const REFUSED_SECONDS = HELD_MOST_HOURS * 60 * 60;
 export const REFUSED_MOST = 3;
 const REFUSED_HERE_MOST = 1_000;
 type HeldHere = Map<string, { count: number; until: number }>;
@@ -195,7 +196,7 @@ export class PwywPriceHeld extends Error {
   }
 }
 /** How long, at most, a product stays held from any moment it is held: the count's own expiry, set at each refusal. */
-export const HELD_MOST_HOURS = REFUSED_SECONDS / 3600;
+export { HELD_MOST_HOURS };
 const refusedCount = (value: unknown) => (typeof value === "string" && /^[1-9][0-9]{0,8}$/.test(value) ? Number(value) : typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0);
 
 /**

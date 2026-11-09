@@ -196,7 +196,7 @@ export const it: BuyerWords = {
     busy: { title: "Qualcun altro lo sta acquistando proprio ora", body: "Non è stato addebitato nulla. Premi di nuovo acquista tra un momento." },
     slow: { title: "Troppi tentativi in pochi minuti", body: "Non è stato addebitato nulla. Attendi qualche minuto, poi premi di nuovo acquista." },
     error: { title: "Non è stato possibile aprire la pagina di pagamento", body: "Non è stato addebitato nulla. Riprova tra un momento." },
-    "price-held": { title: "Al momento questo prodotto non si può acquistare", body: "Non è stato addebitato nulla. L'acquisto è in pausa per un massimo di 25 ore, perché il suo prezzo è stato reimpostato troppe volte. Riprova più tardi." },
+    "price-held": { title: "Al momento questo prodotto non si può acquistare", body: "Non è stato addebitato nulla. L'acquisto è in pausa per un massimo di 25 ore, perché il suo prezzo ha dovuto essere configurato di nuovo troppe volte. Riprova più tardi." },
     paused: { title: "Questo negozio non accetta nuovi ordini in questo momento", body: "Non è stato addebitato nulla. I nuovi ordini riaprono all'inizio del mese prossimo, o prima." },
     "paypal-declined": {
       title: "PayPal non ha accettato il pagamento",

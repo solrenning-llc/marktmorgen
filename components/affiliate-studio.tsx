@@ -196,6 +196,7 @@ export function AffiliateStudio({
   payouts,
   refundsChecked,
   invoicesChecked = true,
+  unlinkedInvoices = 0,
   today,
   currency = "usd",
   elsewhere = 0,
@@ -217,6 +218,8 @@ export function AffiliateStudio({
   refundsChecked: boolean;
   /** False when the invoices of memberships and plans could not all be read. */
   invoicesChecked?: boolean;
+  /** Paid invoices read whole with no one payment to link them to: no commission on them (Book.unlinkedInvoices). */
+  unlinkedInvoices?: number;
   today: string;
   /** The store's currency: what the totals and new payouts are in. */
   currency?: Currency;
@@ -624,7 +627,7 @@ export function AffiliateStudio({
 
         {leadsTotal > 0 ? <LeadReview leads={leads} total={leadsTotal} who={Object.fromEntries(rows.map((r) => [r.affiliate.id, r.affiliate.email]))} /> : null}
 
-        <AffiliateCommissionHistory lines={lines} total={linesTotal} who={who} refundsChecked={refundsChecked} invoicesChecked={invoicesChecked} />
+        <AffiliateCommissionHistory lines={lines} total={linesTotal} who={who} refundsChecked={refundsChecked} invoicesChecked={invoicesChecked} unlinkedInvoices={unlinkedInvoices} />
 
         {payouts.length ? (
           <section aria-labelledby="payouts-title" className="card p-6 sm:p-8">

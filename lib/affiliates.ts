@@ -2701,6 +2701,14 @@ export type Book = {
   refundsChecked: boolean;
   /** False when the invoices of memberships and plans could not all be read. */
   invoicesChecked: boolean;
+  /**
+   * Paid membership and plan invoices read whole that could not be linked to
+   * one payment intent (paid in parts, by a charge or a payment record, more
+   * payments than one page shows, or none paid listed): left out of the book,
+   * no commission on them, and reading again does not change that. Absent
+   * means none (an affiliate's own slice of a kept book).
+   */
+  unlinkedInvoices?: number;
 };
 
 /** A Stripe reply not in its exact shape: an UnknownReplyError, with Stripe named in what is logged. */
@@ -2732,29 +2740,45 @@ function knownCents(raw: unknown): number | null {
   return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
 }
 
+/** The statuses Stripe gives an invoice payment (API 2026-08-26.dahlia). */
+const INVOICE_PAYMENT_STATES = new Set(["open", "paid", "canceled"]);
+/** The kinds of payment an invoice payment names that are not a payment intent: a refund could not be matched to them. */
+const UNLINKED_PAYMENT_TYPES = new Set(["charge", "payment_record"]);
+/** An invoice read whole that has no one payment intent to link it to (invoiceIntentOf). */
+const UNLINKED = "unlinked" as const;
+
 /**
- * The one payment intent a paid invoice was paid by, from its expanded `payments` list (API 2026-08-26.dahlia):
- * the list whole (`has_more` false), each row an invoice payment with a status Stripe gives one, the paid rows
- * naming a payment intent as an id or expanded, all the same one. Open and canceled attempts are passed over.
- * Anything else, a charge with no payment intent included, is null: the payment its refund would name is not
- * known, so the invoice is not counted (recurringReferrals).
+ * The one payment intent a paid invoice was paid by, from its expanded `payments` list (API 2026-08-26.dahlia).
+ * null when the list cannot be read (not a list, `has_more` not a yes or no, a row that is not an invoice payment
+ * with a status Stripe gives one, a paid row naming a payment intent with no id, or a kind of payment not known):
+ * the book is then not whole, and the next reading tries again. UNLINKED when it reads whole but names no one
+ * payment intent: paid in parts by two, by a charge or a payment record, more payments than the page shows, or no
+ * paid row at all; the payment its refund would name is not known, so no commission is paid on it, and reading it
+ * again would give the same (recurringReferrals counts it apart). Open and canceled attempts are passed over.
  */
-function invoiceIntentOf(payments: unknown): string | null {
+function invoiceIntentOf(payments: unknown): string | typeof UNLINKED | null {
   if (!payments || typeof payments !== "object" || Array.isArray(payments)) return null;
   const listed = payments as { data?: unknown; has_more?: unknown };
-  if (!Array.isArray(listed.data) || listed.has_more !== false) return null;
+  if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return null;
   const intents = new Set<string>();
+  let unlinked = listed.has_more;
   for (const row of listed.data as unknown[]) {
     if (!row || typeof row !== "object" || Array.isArray(row)) return null;
     const { status, payment } = row as { status?: unknown; payment?: unknown };
-    if (status === "open" || status === "canceled") continue;
-    if (status !== "paid" || !payment || typeof payment !== "object" || Array.isArray(payment)) return null;
-    const raw = (payment as { payment_intent?: unknown }).payment_intent;
+    if (typeof status !== "string" || !INVOICE_PAYMENT_STATES.has(status)) return null;
+    if (status !== "paid") continue;
+    if (!payment || typeof payment !== "object" || Array.isArray(payment)) return null;
+    const { type, payment_intent: raw } = payment as { type?: unknown; payment_intent?: unknown };
+    if (typeof type === "string" && UNLINKED_PAYMENT_TYPES.has(type)) {
+      unlinked = true;
+      continue;
+    }
+    if (type !== undefined && type !== "payment_intent") return null;
     const id = typeof raw === "string" ? raw : raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as { id?: unknown }).id : undefined;
     if (typeof id !== "string" || !id) return null;
     intents.add(id);
   }
-  return intents.size === 1 ? [...intents][0] : null;
+  return !unlinked && intents.size === 1 ? [...intents][0] : UNLINKED;
 }
 
 /** An invoice's tax in cents, from `total_taxes` (a list of amounts); null when it cannot be read. */
@@ -3034,7 +3058,7 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
  * that prints no product, as the payout file (lib/affiliate-payouts.ts).
  */
 export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean } = {}): Promise<Book> {
-  if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, currency: store.currency, elsewhere: 0 };
+  if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, unlinkedInvoices: 0, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
   const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = await redisPipeline([
     ["HGETALL", peopleKey(statsId)],
@@ -3088,12 +3112,14 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
 
   // Each payment of a membership or plan sold through a link, read from its invoice.
   let invoicesChecked = true;
+  let unlinkedInvoices = 0;
   let recurringLines: Referral[] = [];
   if (store.stripeAccountId && everyone.length) {
     try {
       const read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400, limits.deadline, limits.titles !== false);
       recurringLines = read.lines.filter((r) => mine(r.aff));
       invoicesChecked = read.complete;
+      unlinkedInvoices = read.unlinked.filter((aff) => !only || aff === only).length;
     } catch (error) {
       console.error("reading invoices for the affiliate book failed", error);
       invoicesChecked = false;
@@ -3226,7 +3252,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     .sort((a, b) => b.owed - a.owed || b.affiliate.appliedAt - a.affiliate.appliedAt);
   const elsewhere =
     lines.filter((l) => l.currency !== store.currency).length + paid.filter((p) => p.currency !== store.currency).length;
-  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, currency: store.currency, elsewhere };
+  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, unlinkedInvoices, currency: store.currency, elsewhere };
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */
@@ -3263,7 +3289,7 @@ export function withinMonths(from: number, paidAt: number, months: number): bool
  * never written down. A membership's payment counts while it falls within
  * the months agreed when it was sold; a plan's every payment counts.
  */
-async function recurringReferrals(store: Store, everyone: Affiliate[], since: number, deadline?: number, named = true): Promise<{ lines: Referral[]; complete: boolean }> {
+async function recurringReferrals(store: Store, everyone: Affiliate[], since: number, deadline?: number, named = true): Promise<{ lines: Referral[]; complete: boolean; unlinked: string[] }> {
   const handles = saleHandles(store);
   const byId = new Map(everyone.map((a) => [a.id, a]));
   const found: { invoice: InvoiceLike; meta: Record<string, string> }[] = [];
@@ -3294,6 +3320,8 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
   // reading that fails, or answers in a shape not known, leaves the names empty and every line in, as it always did.
   const titles = new Map([...(named && ids.length ? await readCardsFor(store, ids).catch(() => new Map<string, Card>()) : new Map<string, Card>())].map(([id, card]) => [id, card.title]));
   const lines: Referral[] = [];
+  /** The affiliate of each invoice read whole with no one payment intent to link it to (UNLINKED). */
+  const unlinked: string[] = [];
   for (const { invoice, meta } of found) {
     const paidAt = Number(invoice.status_transitions?.paid_at) || Number(invoice.created) || 0;
     const plan = meta.kind === "plan";
@@ -3315,6 +3343,12 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
       complete = false;
       continue;
     }
+    // Read whole, but no refund could ever be matched to it: left out, no commission, and said so (unlinkedInvoices),
+    // never "not read", which would ask for a reload that changes nothing.
+    if (pi === UNLINKED) {
+      unlinked.push(meta.via);
+      continue;
+    }
     const affiliate = byId.get(meta.via);
     const buyer = typeof invoice.customer_email === "string" ? invoice.customer_email : "";
     lines.push({
@@ -3333,7 +3367,7 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
       promotion: affiliatePromotionFrom(meta) ?? undefined,
     });
   }
-  return { lines, complete };
+  return { lines, complete, unlinked };
 }
 
 /**

@@ -26,7 +26,7 @@ const emails: string[] = [];
 /** Every checkout-list request: [account, starting_after]. */
 let asked: [string, string][] = [];
 /** The pages each account gives, in order; a page's `after` is the starting_after it answers. */
-let pages = new Map<string, { after: string; body: unknown }[]>();
+const pages = new Map<string, { after: string; body: unknown }[]>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));

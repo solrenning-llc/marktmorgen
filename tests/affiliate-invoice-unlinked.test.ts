@@ -27,7 +27,7 @@ const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
 const EMPTY = { object: "list", data: [], has_more: false };
 
-let refundsBody: unknown = EMPTY;
+const refundsBody: unknown = EMPTY;
 let invoicesBody: unknown = EMPTY;
 const created: Record<string, unknown>[] = [];
 
@@ -87,8 +87,6 @@ function invoice(over: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
-// Rule 23 (merging #3189): a counted refund carries its currency, as Stripe always gives it.
-const refund = (over: Record<string, unknown> = {}) => ({ id: "re_1", object: "refund", status: "succeeded", payment_intent: "pi_inv_1", amount: 3000, currency: "usd", ...over });
 const list = (...data: unknown[]) => ({ object: "list", data, has_more: false });
 
 async function main(): Promise<void> {

@@ -10,7 +10,9 @@
  * was asked to pay the commission on money the buyer had back. An amount or
  * a tax that could not be read became 0, which dropped the payment without a
  * word or counted its tax as commission. Each is now a payment the book does
- * not count and says so (invoicesChecked false): nothing is paid on it.
+ * not count: one that cannot be read leaves the book not whole
+ * (invoicesChecked false), one read whole with no one payment intent is
+ * counted apart (unlinkedInvoices); nothing is paid on either.
  *
  * A refund whose status is requires_action is money that may go back: it is
  * taken off as a pending one is. Only failed and canceled refunds are passed
@@ -128,18 +130,27 @@ async function main(): Promise<void> {
     is(`${what}: read whole, refunded, nothing owed or sent`, await round(store), [true, true, 1, 0, 0]);
   }
 
-  part("A payment that cannot be named: the invoice is not counted, the book says so, nothing is sent");
+  part("A payment read whole with no one payment intent: not counted, nothing sent, the book still whole");
+  // Rule 23: these four were "not checked" (invoicesChecked false), which asked for a reload that changes nothing.
+  // They are read whole, so the book stays checked and counts them apart (tests/affiliate-invoice-unlinked.test.ts).
   for (const [what, pays] of [
     ["paid by a charge with no payment intent", payments([{ object: "invoice_payment", status: "paid", payment: { type: "charge", charge: "ch_1" } }])],
     ["a list of payments with more after it", payments([paid("pi_inv_1")], { has_more: true })],
+    ["two paid payments by different payment intents", payments([paid("pi_inv_1"), paid("pi_inv_9")])],
+    ["no paid payment at all", payments([paid("pi_old_1", { status: "canceled" })])],
+  ] as const) {
+    invoicesBody = list(invoice({ payments: pays }));
+    is(`${what}: not counted, checked, nothing sent`, await round(store), [true, true, 0, 0, 0]);
+  }
+
+  part("A payment that cannot be read: the invoice is not counted, the book says so, nothing is sent");
+  for (const [what, pays] of [
     ["a list of payments with has_more absent", { object: "list", data: [paid("pi_inv_1")] }],
     ["payments absent", null],
     ["payments not a list", { object: "list", data: paid("pi_inv_1"), has_more: false }],
     ["a payment row with no status", payments([paid("pi_inv_1", { status: undefined })])],
     ["a payment row with a status Stripe does not give", payments([paid("pi_inv_1", { status: "settled" })])],
-    ["two paid payments by different payment intents", payments([paid("pi_inv_1"), paid("pi_inv_9")])],
     ["an expanded payment intent with no id", payments([paid({ object: "payment_intent" })])],
-    ["no paid payment at all", payments([paid("pi_old_1", { status: "canceled" })])],
   ] as const) {
     invoicesBody = list(invoice({ payments: pays }));
     is(`${what}: not counted, not checked, nothing sent`, await round(store), [false, true, 0, 0, 0]);

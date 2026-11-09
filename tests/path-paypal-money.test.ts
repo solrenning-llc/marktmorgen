@@ -1,71 +1,243 @@
 /**
- * PayPal sales on the Path (12 [D9], unit 1).
+ * PayPal sales on the Path (12 [D9], unit 1; the money reviews on #3443).
  *
  * A PayPal order the store's own server captured (lib/paypal-sales.ts) counts
- * toward the first real sale and the levels only when it was taken through
- * PayPal's live API: a sandbox or local one is neither a real sale nor a test
- * purchase. Refunds PayPal confirmed in full are taken off, matched by the
- * capture; when the refunds cannot all be read, the money is unknown (null) and
- * no level moves on it. A store that sells through PayPal without Stripe is
- * read, not taken for zero. Synthetic store and orders, in-memory Redis.
+ * toward the first real sale and the levels only when:
+ *   - the order itself says it was taken through PayPal's live API (written on
+ *     the paid record when it was captured, never the reader's own setting:
+ *     Claude 6's M3);
+ *   - its refunds can be seen: the platform is a PayPal partner and the store
+ *     is still connected to the very PayPal account that took it, so the
+ *     refund watch asks about it (Claude 5's N1);
+ *   - PayPal never said it was refunded in part or reversed (Claude 6's M2,
+ *     L3): such a sale is taken off whole, since the amount kept is not read.
+ * Refunds PayPal confirmed in full are taken off, matched by the capture; a
+ * refund of a sale the Path did not count is never taken off another sale
+ * (L2). A reply off its shape is unknown: the money is null, never "no
+ * refunds" (M1), and a sales read off its shape is partial (L1).
+ * Synthetic store, orders, Stripe and PayPal stand-ins, in-memory Redis.
  */
 import { readFileSync } from "node:fs";
-import { claimHandle, ensureStatsId, ensureStoreId, setPayPalSeller, setSubscription, storeForEmail } from "@/lib/store";
-import { moneyFrom, readPathMoney, soldOf } from "@/lib/path-facts";
+import { claimHandle, ensureStatsId, ensureStoreId, setPayPalSeller, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { readPathMoney, soldOf } from "@/lib/path-facts";
 import { payPalSale } from "@/lib/stats";
-import { paypalPaymentId, type Paid } from "@/lib/paypal-sales";
+import { captureOrder, paypalPaymentId, readPayPalSales, watchPayPal, type Paid } from "@/lib/paypal-sales";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
-const order = (n: number) => `ORDER${String(n).padStart(10, "0")}`;
+const PARTNER = { PAYPAL_PARTNER_CLIENT_ID: "AZpartnerClientId0123456789", PAYPAL_PARTNER_SECRET: "EPpartnerSecret0123456789", PAYPAL_PARTNER_MERCHANT_ID: "PARTNERMERCH01", PAYPAL_BN_CODE: "NimbusLabs_SP" };
+const partnerOn = () => Object.assign(process.env, PARTNER);
+const partnerOff = () => { for (const key of Object.keys(PARTNER)) delete process.env[key]; };
+process.env.STRIPE_SECRET_KEY = "sk_test_path_paypal";
+delete process.env.PAYPAL_ENV;
+delete process.env.PAYPAL_API_BASE;
 
-function paid(statsId: string, n: number, cents: number, at: number): Paid {
-  return { store: statsId, order: order(n), capture: `CAPTURE${n}`, email: `buyer${n}@example.test`, product: "p1", cents, currency: "usd", at };
+const OWNER = "paypal-path@example.test";
+const SELLER = "MERCHANTPP01";
+const ACCOUNT = "acct_fixturepp01";
+const order = (n: number) => `ORDER${String(n).padStart(10, "0")}`;
+const now = Math.floor(Date.now() / 1000);
+
+/** PayPal's word on each capture (GET /v2/payments/captures/:id), and what a capture POST answers. */
+const captureStatus = new Map<string, string>();
+let sessions: Record<string, unknown>[] = [];
+const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const method = init?.method ?? "GET";
+  if (url.hostname === "api.stripe.com") {
+    const path = url.pathname.replace(/^\/v1/, "");
+    if (path === "/checkout/sessions") return answer({ object: "list", data: sessions, has_more: false });
+    if (path === "/payment_intents" || path === "/refunds") return answer({ object: "list", data: [], has_more: false });
+    return answer({}, 404);
+  }
+  if (url.hostname !== "api-m.paypal.com") return answer({ error: "unexpected" }, 404);
+  if (url.pathname === "/v1/oauth2/token") return answer({ access_token: "A21AApartner", token_type: "Bearer", expires_in: 32400 });
+  const captured = /^\/v2\/checkout\/orders\/([A-Z0-9]+)\/capture$/.exec(url.pathname)?.[1];
+  if (captured && method === "POST") {
+    return answer({
+      id: captured,
+      status: "COMPLETED",
+      payer: { email_address: "Buyer9@Example.test" },
+      purchase_units: [{ payee: { merchant_id: SELLER }, payments: { captures: [{ id: "CAPTURE9", status: "COMPLETED", amount: { currency_code: "USD", value: "29.00" } }] } }],
+    });
+  }
+  const cap = /^\/v2\/payments\/captures\/([A-Za-z0-9-]+)$/.exec(url.pathname)?.[1];
+  if (cap && method === "GET") return answer({ id: cap, status: captureStatus.get(cap) ?? "COMPLETED" });
+  return answer({ name: "RESOURCE_NOT_FOUND" }, 404);
+}) as typeof fetch;
+
+/** Replies bent on their way back, for the replies-off-their-shape checks; null leaves every reply as Redis gave it. */
+let bend: ((commands: (string | number)[][], replies: unknown[]) => unknown) | null = null;
+const realPipeline = redis.pipeline.bind(redis);
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  const replies = await realPipeline(commands);
+  return bend ? bend(commands, replies) : replies;
+}) as typeof redis.pipeline;
+const bendFirst = (prefix: string, verb: string, to: (replies: unknown[]) => unknown) => (commands: (string | number)[][], replies: unknown[]) =>
+  commands[0]?.[0] === verb && String(commands[0]?.[1]).startsWith(prefix) ? to(replies) : replies;
+
+function paid(statsId: string, n: number, cents: number, at: number, over: Partial<Paid> & Record<string, unknown> = {}): Paid {
+  return { store: statsId, order: order(n), capture: `CAPTURE${n}`, email: `buyer${n}@example.test`, product: "p1", cents, currency: "usd", at, live: true, merchant: SELLER, ...over } as Paid;
 }
 
-async function main(): Promise<void> {
-  part("A PayPal order, as the path reads it");
-  const one = payPalSale(paid("stats", 1, 2900, 1_800_000_000));
-  is("live API: a real sale", soldOf(one, true), { cents: 2900, currency: "usd", intent: paypalPaymentId("CAPTURE1"), live: true });
-  is("sandbox or local API: neither real nor a test purchase", soldOf(one, false).live, null);
-  const stripeRow = { cents: 1000, currency: "usd", paymentIntent: "pi_1", row: { livemode: false } };
-  is("a Stripe sale keeps its own livemode", soldOf(stripeRow, true).live, false);
-  const sandbox = moneyFrom([soldOf(one, false)], [], "usd", 0);
-  is("a sandbox PayPal order moves nothing", [sandbox.real, sandbox.cents, sandbox.test], [0, 0, false]);
+function writePaid(p: Paid, listed = true): void {
+  redis.run(["SET", `nl:ppsell:paid:${p.order}`, JSON.stringify(p)]);
+  if (listed) redis.run(["ZADD", `nl:ppsell:sales:${p.store}`, String(p.at), p.order]);
+}
 
-  part("A store that sells through PayPal only");
+/** A store with Stripe and PayPal connected, three live PayPal sales (2900, 4900 refunded in full, 1500), no Stripe sale. */
+async function setup(): Promise<{ store: Store; statsId: string }> {
   redis.clear();
-  const owner = "paypal-path@example.test";
-  await claimHandle(owner, "paypalpath", "PayPal Path", "");
-  await ensureStatsId(owner);
-  await ensureStoreId(owner);
-  await setSubscription(owner, { customerId: "cus_pp", subscriptionId: "sub_pp", active: true, tier: "pro", trialEnds: 0, period: paidPeriod() });
-  await setPayPalSeller(owner, "MERCHANTPP01");
-  const store = (await storeForEmail(owner))!;
+  partnerOn();
+  captureStatus.clear();
+  sessions = [];
+  bend = null;
+  await claimHandle(OWNER, "paypalpath", "PayPal Path", "");
+  await ensureStatsId(OWNER);
+  await ensureStoreId(OWNER);
+  await setSubscription(OWNER, { customerId: "cus_pp", subscriptionId: "sub_pp", active: true, tier: "pro", trialEnds: 0, period: paidPeriod() });
+  await setStripeAccount(OWNER, ACCOUNT, true);
+  await setPayPalSeller(OWNER, SELLER);
+  const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
-  const now = 1_800_000_000;
-  const orders = [paid(statsId, 1, 2900, now - 300), paid(statsId, 2, 4900, now - 200), paid(statsId, 3, 1500, now - 100)];
-  for (const o of orders) {
-    redis.run(["SET", `nl:ppsell:paid:${o.order}`, JSON.stringify(o)]);
-    redis.run(["ZADD", `nl:ppsell:sales:${statsId}`, String(o.at), o.order]);
-  }
-  // PayPal refunded the second in full.
+  for (const p of [paid(statsId, 1, 2900, now - 300), paid(statsId, 2, 4900, now - 200), paid(statsId, 3, 1500, now - 100)]) writePaid(p);
   redis.run(["ZADD", `nl:ppsell:refunded:${statsId}`, String(now - 50), order(2)]);
+  return { store, statsId };
+}
 
-  const live = await readPathMoney(store, now * 1000, { paypalLive: true });
-  is("read, not taken for zero: two real sales kept, the refunded one taken off", [live?.real, live?.cents, live?.test], [2, 4400, false]);
-  const sandboxStore = await readPathMoney(store, now * 1000, { paypalLive: false });
-  is("the same orders through a sandbox API: nothing real", [sandboxStore?.real, sandboxStore?.cents], [0, 0]);
+const money = async (store: Store) => {
+  const read = await readPathMoney(store, now * 1000);
+  return [read?.real, read?.cents];
+};
 
-  part("Refunds that cannot all be read leave the money unknown");
-  for (let i = 0; i < 501; i++) redis.run(["ZADD", `nl:ppsell:refunded:${statsId}`, String(now - 40 + i / 1000), `REFUND${String(i).padStart(10, "0")}`]);
-  const partial = await readPathMoney(store, now * 1000, { paypalLive: true });
-  is("money null: no level moves on it", partial?.cents, null);
+async function main(): Promise<void> {
+  part("A PayPal order, as the path reads it: by its own record");
+  {
+    const live = payPalSale(paid("stats", 1, 2900, now));
+    is("taken on the live API, its refunds watched: a real sale", soldOf(live, SELLER), { cents: 2900, currency: "usd", intent: paypalPaymentId("CAPTURE1"), live: true });
+    is("its refunds not watched (no partner or no PayPal connected): not counted", soldOf(live, null).live, null);
+    is("watched under another PayPal account than the one that took it: not counted", soldOf(live, "OTHERMERCH01").live, null);
+    is("taken on PayPal's sandbox: neither real nor a test purchase", soldOf(payPalSale(paid("stats", 1, 2900, now, { live: false })), SELLER).live, null);
+    is("a record from before the API was written on it: not counted", soldOf(payPalSale(paid("stats", 1, 2900, now, { live: undefined })), SELLER).live, null);
+    is("PayPal said it was refunded in part: not counted", soldOf(payPalSale(paid("stats", 1, 2900, now, { takenOff: "PARTIALLY_REFUNDED" })), SELLER).live, null);
+    is("PayPal said it was reversed: not counted", soldOf(payPalSale(paid("stats", 1, 2900, now, { takenOff: "REVERSED" })), SELLER).live, null);
+    is("a Stripe sale keeps its own livemode", soldOf({ cents: 1000, currency: "usd", paymentIntent: "pi_1", row: { livemode: false } }, SELLER).live, false);
+  }
+
+  part("Live PayPal sales counted, the one refunded in full taken off");
+  {
+    const { store } = await setup();
+    is("two real sales kept, 4400 kept", await money(store), [2, 4400]);
+  }
+
+  part("M3: whether an order is real is on the order, never on the deployment reading it");
+  {
+    const { store, statsId } = await setup();
+    writePaid(paid(statsId, 4, 7000, now - 90, { live: false }));
+    writePaid(paid(statsId, 5, 8000, now - 80, { live: undefined }));
+    is("a sandbox order and one without the field: not real, nothing added", await money(store), [2, 4400]);
+    // An order opened and captured on the live API (no PAYPAL_ENV, no stand-in): the paid record says so, and by whom.
+    redis.run(["SET", `nl:ppsell:o:${order(9)}`, JSON.stringify({ s: statsId, h: "paypalpath", p: "p1", c: 2900, cur: "usd", m: SELLER, at: now })]);
+    const captured = await captureOrder(store, order(9));
+    const kept = JSON.parse(String(redis.run(["GET", `nl:ppsell:paid:${order(9)}`]))) as Record<string, unknown>;
+    is("captured: its record carries the live API and the PayPal account that took it", [captured.ok, kept.live, kept.merchant], [true, true, SELLER]);
+    is("and it counts", await money(store), [3, 7300]);
+  }
+
+  part("M1: the refunds' range off its shape leaves the money unknown, never 'no refunds'");
+  {
+    const { store } = await setup();
+    const cases: [string, (replies: unknown[]) => unknown][] = [
+      ["its reply slot missing", () => []],
+      ["a reply that is not a list", () => ["1"]],
+      ["a null reply", () => [null]],
+      ["a list of an odd length (an order without its score)", () => [[order(2)]]],
+      ["a list with a number in it", () => [[order(2), now - 50]]],
+    ];
+    for (const [name, to] of cases) {
+      bend = bendFirst("nl:ppsell:refunded:", "ZRANGEBYSCORE", to);
+      is(`${name}: money null`, (await readPathMoney(store, now * 1000))?.cents, null);
+    }
+    // Only the MGET of the refunded records, the one after the refunds' range (the sales' own MGET reads the same keys).
+    let afterRange = false;
+    bend = (commands, replies) => {
+      if (commands[0]?.[0] === "ZRANGEBYSCORE" && String(commands[0]?.[1]).startsWith("nl:ppsell:refunded:")) afterRange = true;
+      else if (afterRange && commands[0]?.[0] === "MGET") return ["x"];
+      return replies;
+    };
+    const read = await readPathMoney(store, now * 1000);
+    is("the refunded records' MGET off its shape: money null", read?.cents, null);
+    bend = null;
+  }
+
+  part("M2 and L3: PayPal refunded part of a sale, or reversed it: the sale is taken off whole");
+  {
+    const { store, statsId } = await setup();
+    captureStatus.set("CAPTURE3", "PARTIALLY_REFUNDED");
+    captureStatus.set("CAPTURE1", "REVERSED");
+    redis.run(["ZADD", `nl:ppsell:watch:${statsId}`, "1", order(3)]);
+    await watchPayPal(store, Date.now() + 60_000, { handOver: async () => undefined, dropStart: async () => undefined });
+    is("refunded in part: 2900 left, one real sale", await money(store), [1, 2900]);
+    const third = JSON.parse(String(redis.run(["GET", `nl:ppsell:paid:${order(3)}`]))) as Record<string, unknown>;
+    is("the record says so, and the order is still watched for a refund in full", [third.takenOff, redis.run(["ZSCORE", `nl:ppsell:watch:${statsId}`, order(3)]) !== null], ["PARTIALLY_REFUNDED", true]);
+    redis.run(["ZADD", `nl:ppsell:watch:${statsId}`, "1", order(1)]);
+    await watchPayPal(store, Date.now() + 60_000, { handOver: async () => undefined, dropStart: async () => undefined });
+    is("reversed: nothing left", await money(store), [0, 0]);
+    captureStatus.set("CAPTURE1", "COMPLETED");
+    const clean = await setup();
+    redis.run(["ZADD", `nl:ppsell:watch:${clean.statsId}`, "1", order(1)]);
+    await watchPayPal(clean.store, Date.now() + 60_000, { handOver: async () => undefined, dropStart: async () => undefined });
+    const first = JSON.parse(String(redis.run(["GET", `nl:ppsell:paid:${order(1)}`]))) as Record<string, unknown>;
+    is("completed: nothing written on the record", first.takenOff, undefined);
+  }
+
+  part("N1: with the refund watch off, PayPal's sales are not counted");
+  {
+    let { store } = await setup();
+    sessions = [{ id: "cs_live_pp000001", object: "checkout.session", status: "complete", payment_status: "paid", amount_total: 1000, currency: "usd", created: now - 400, livemode: true, payment_intent: "pi_pp00000001", metadata: { store: "paypalpath", product: "p1" } }];
+    is("connected: the Stripe sale and the PayPal ones", await money(store), [3, 5400]);
+    store = (await setPayPalSeller(OWNER, null))!;
+    is("PayPal disconnected: only the Stripe sale", await money(store), [1, 1000]);
+    store = (await setPayPalSeller(OWNER, "OTHERMERCH01"))!;
+    is("another PayPal account connected: only the Stripe sale", await money(store), [1, 1000]);
+    store = (await setPayPalSeller(OWNER, SELLER))!;
+    partnerOff();
+    is("the platform's PayPal credentials taken away: only the Stripe sale", await money(store), [1, 1000]);
+    partnerOn();
+    is("all back: counted again", await money(store), [3, 5400]);
+  }
+
+  part("L2: a PayPal refund of a sale the Path did not count is never taken off another sale");
+  {
+    const { store, statsId } = await setup();
+    // A membership's first payment names no payment on its checkout: refunds no counted sale claims are taken off it.
+    sessions = [{ id: "cs_live_pp000002", object: "checkout.session", status: "complete", payment_status: "paid", mode: "subscription", amount_total: 2000, currency: "usd", created: now - 400, livemode: true, payment_intent: null, metadata: { store: "paypalpath", product: "p1" } }];
+    is("before: the membership and two PayPal sales", await money(store), [3, 6400]);
+    writePaid(paid(statsId, 6, 3000, now - 60), false);
+    redis.run(["ZADD", `nl:ppsell:refunded:${statsId}`, String(now - 40), order(6)]);
+    is("a PayPal sale not read, refunded: the membership still kept", await money(store), [3, 6400]);
+  }
+
+  part("L1: PayPal's sales read off their shape are partial, never 'no sales'");
+  {
+    const { statsId } = await setup();
+    bend = bendFirst("nl:ppsell:sales:", "ZREVRANGEBYSCORE", () => ["1"]);
+    is("the range not a list: partial", (await readPayPalSales(statsId, 0, 300)).partial, true);
+    bend = bendFirst("nl:ppsell:paid:", "MGET", () => [[JSON.stringify(paid(statsId, 1, 2900, now - 300))]]);
+    is("fewer records than orders: partial", (await readPayPalSales(statsId, 0, 300)).partial, true);
+    bend = null;
+    redis.run(["SET", `nl:ppsell:paid:${order(3)}`, "{not json"]);
+    const read = await readPayPalSales(statsId, 0, 300);
+    is("a record that does not read: left out, and partial", [read.sales.length, read.partial], [2, true]);
+  }
 
   part("The studio says so");
-  const notice = readFileSync("components/path-checkout-notice.tsx", "utf8");
-  is("no longer says PayPal sales do not count", [notice.includes("PayPal sales do not update"), notice.includes("Path counts your Stripe sales and your live PayPal sales, less refunds.")], [false, true]);
+  {
+    const notice = readFileSync("components/path-checkout-notice.tsx", "utf8");
+    is("Stripe and live PayPal sales, less refunds, toward the first sale and the levels", notice.includes("Path counts your Stripe sales and your live PayPal sales, less refunds, toward your first sale and levels."), true);
+  }
 
   done();
 }

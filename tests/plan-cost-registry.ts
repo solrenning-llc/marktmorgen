@@ -735,7 +735,16 @@ export const SCHEDULED_READS = { id: "scheduled-reads", each: BUYER_LEDGER, unit
 export const AGENDA_READ = request("heavy", 6 + TAKE_COMMANDS, AGENDA_TASKS_BYTES) + AGENDA_MAX_ROWS * AGENDA_ROW_SENT_BYTES * ORIGIN_PER_BYTE;
 export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
 
-export const PATH_READ = request("heavy", 26, LIFE_WRITE_MAX * 96 + 20_480) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
+/**
+ * What one Path money reading moves from the store's PayPal records at the most (lib/path-facts.ts, readPathMoney;
+ * Claude 6's M4 on #3443): its PayPal sales (readPaidSales: a range of PATH_SALE_PAGES hundred and one, then their
+ * records in one MGET) and its PayPal refunds in full (readPayPalRefundsWithCoverage: a range of PAYPAL_REFUNDS_READ
+ * and one with their scores, then their records in one MGET), each record at MAX_PAID_BYTES and each listed order
+ * and score at 64 bytes. Four commands, read by a PayPal-only store as by one that also sells through Stripe.
+ */
+export const PATH_PAYPAL_COMMANDS = 4;
+export const PATH_PAYPAL_BYTES = (PATH_SALE_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES + (PATH_SALE_PAGES * 100 + 1 + 2 * (PAYPAL_REFUNDS_READ + 1)) * 64;
+export const PATH_READ = request("heavy", 26 + PATH_PAYPAL_COMMANDS, LIFE_WRITE_MAX * 96 + 20_480 + PATH_PAYPAL_BYTES) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 
 /**
  * Review ceilings for a collection page's reads, paid for since 4 November 2026

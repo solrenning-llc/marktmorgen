@@ -220,6 +220,46 @@ async function main(): Promise<void> {
     is(`no token is signed in any of the ${splits} interleavings`, signed, 0);
   }
 
+  part("Owner's decision 16 (Store's video hours): a press holds a short block, never the whole lesson");
+  {
+    // Relayed by Claude 1, 9 November 2026: a shorter time for each lesson opened, the worst month's cost and the
+    // visible 4 hours unchanged. Before: one press of a 3 h 45 min lesson held 4 h, the whole Store month, so every
+    // other student of the store was told the time was busy for hours.
+    const block = (await import("@/lib/lesson-play-rules") as Record<string, unknown>).PLAY_BLOCK_SECONDS;
+    is("the block is half an hour", block, 30 * 60);
+    await fresh(3 * 3600 + 45 * 60, 0);
+    const first = await play(file, STORE_LIMIT, WINDOW);
+    is("a press of a 3 h 45 min lesson: a token of half an hour, no more", lifeOf(first) > 29 * 60 && lifeOf(first) <= 30 * 60, true);
+    is("and six units of five minutes held, not 45", await held(), 6);
+    let plays = 1;
+    for (let i = 0; i < 20; i += 1) if ((await play(file, STORE_LIMIT, WINDOW))?.kind === "stream") plays += 1;
+    is("Store, 4 h: eight students play at once, not one", plays, 8);
+    await fresh(10 * 60, 0);
+    const short = await play(file, STORE_LIMIT, WINDOW);
+    is("a ten-minute lesson: its own length and the pause room (25 min), under the block", lifeOf(short) > 24 * 60 && lifeOf(short) <= 25 * 60, true);
+    await fresh(15 * 60, 0);
+    is("a 15-minute lesson still plays whole on one press (15 + 15 min of pauses)", lifeOf(await play(file, STORE_LIMIT, WINDOW)) > 29 * 60, true);
+    for (const [code, set] of Object.entries(COURSES_WORDS)) {
+      const own = set as unknown as Record<string, unknown>;
+      const said = typeof own.playBlockRest === "function" ? (own.playBlockRest as (m: number) => string)(30) : "";
+      is(`${code}: the page says a press plays up to 30 minutes, and to press again`, said.includes("30"), true);
+    }
+    const page = read("app/[handle]/course/[product]/[lesson]/page.tsx");
+    is("the page draws the block's words and a Play lesson form under the player", page.includes("w.playBlockRest(") , true);
+  }
+
+  part("VR 2: a paid store whose hours are used is never told it has no paid plan");
+  {
+    for (const [code, set] of Object.entries(COURSES_WORDS)) {
+      const own = set as unknown as Record<string, unknown>;
+      is(`${code}: words of their own for a paid store's pause`, typeof own.pausedPaidRest, "function");
+    }
+    const en = coursesWords("en") as unknown as Record<string, unknown>;
+    const paid = typeof en.pausedPaidRest === "function" ? (en.pausedPaidRest as (s: string) => string)("Kiln Works") : "";
+    is("in English, no 'no paid plan' for a paid store", paid !== "" && !/no paid plan/.test(paid), true);
+    is("the page picks them by the store's standing", read("app/[handle]/course/[product]/[lesson]/page.tsx").includes("w.pausedPaidRest("), true);
+  }
+
   part("LEVE: the reading's own hold commands are priced");
   {
     const registry = read("tests/plan-cost-registry.ts");

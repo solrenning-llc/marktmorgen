@@ -145,7 +145,10 @@ async function main(): Promise<void> {
     is("the press answers with the lesson and a ticket, at the video", [first.status, first.location.startsWith(`${BASE}/@kilnworks/course/${id}/lesson000001?play=`), first.location.endsWith("#video"), /^[0-9a-f]{24}$/.test(first.play)], [303, true, true, true]);
     is("its playback is held", (await held()) > 0, true);
     const framed = await page("stranger", "lesson000001", { play: first.play });
-    is("the page framed with the ticket shows the player", framed.includes(PLAYER) && !framed.includes(`>${w.playLesson}</button>`), true);
+    is("the page framed with the ticket shows the player", framed.includes(PLAYER) && framed.indexOf(PLAYER) < framed.indexOf(`>${w.playLesson}</button>`), true);
+    // Owner's decision 16: a press plays a block of half an hour at most; the page says so, with Play lesson under it.
+    const said = (w as unknown as { playBlockRest?: (minutes: number) => string }).playBlockRest;
+    is("under the player, the block's words and a Play lesson button to go on", typeof said === "function" && framed.includes(inHtml(said(30))) && framed.includes(`>${w.playLesson}</button>`), true);
     const again = await page("stranger", "lesson000001", { play: first.play });
     is("the ticket is taken once: drawn again, the button, with no error said", again.includes(`>${w.playLesson}</button>`) && !again.includes(PLAYER) && !again.includes(inHtml(w.videoNotLoaded)), true);
     const other = await press("stranger");
@@ -219,6 +222,9 @@ async function main(): Promise<void> {
     await redis.pipeline([["DEL", HOLDS], ["SET", `nl:watch:sec:${folder}:${windowId(current)}`, String(LIMIT)]]);
     const drawn = await page("stranger");
     is("paused words, no button", drawn.includes(inHtml(w.pausedStrong)) && !drawn.includes(`>${w.playLesson}</button>`), true);
+    // VR 2: this store pays for its plan; it is never told it has none.
+    const paid = (w as unknown as { pausedPaidRest?: (store: string) => string }).pausedPaidRest;
+    is("a paid store's pause says its plan's hours are used, never that it has no paid plan", typeof paid === "function" && drawn.includes(inHtml(paid(current.name))) && !drawn.includes(inHtml(w.pausedRest(current.name))), true);
   }
 
   part("A student's presses are paced too");

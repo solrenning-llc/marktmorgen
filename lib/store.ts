@@ -62,6 +62,7 @@ import {
 import { type Recurring } from "@/lib/product-recurring";
 import { type StoreLook, DEFAULT_LOOK, parseLook } from "@/lib/store-look";
 import { PHOTO_ID_PATTERN } from "@/lib/photo-limits";
+import { photoKept } from "@/lib/store-photo";
 import { type CallSetup } from "@/lib/call-setup";
 import { type Pixels, NO_PIXELS, parsePixels } from "@/lib/pixels";
 import { type TaxSetting, NO_TAX, parseTax } from "@/lib/tax";
@@ -2999,6 +3000,22 @@ export async function setPhotoId(
     return { ok: true as const, store: next, was: store.photoId };
   });
   return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * The photo the studio shows: the store's own, or null once Redis confirms its
+ * record is gone (photoKept answers false), and then the store stops pointing
+ * at it, only while it still names that photo. That heals a remove whose DEL
+ * was confirmed but whose setPhotoId failed (a busy store; app/api/store/
+ * photo/route.ts deletes first), which left every page pointing at a deleted
+ * photo (LOW 1 of Claude 2's review of #3304). An unknown reply throws
+ * UnknownReplyError (CX-123 rule 24) and nothing is cleared: the caller keeps
+ * showing the photo, never "no photo" on a reply it could not read.
+ */
+export async function shownPhotoId(email: string, photoId: string | null): Promise<string | null> {
+  if (!photoId || (await photoKept(photoId))) return photoId;
+  await patchStore(email, (store) => (store.photoId === photoId ? { photoId: null } : null));
+  return null;
 }
 
 export type ProductResult =

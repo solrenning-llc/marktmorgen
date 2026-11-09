@@ -49,6 +49,7 @@ import {
   isFree,
   setAdsServer,
   setSubscription,
+  shownPhotoId,
   storeRef,
   storeFolder,
   type Listing,
@@ -1705,7 +1706,7 @@ export default async function StudioPage({
               <div id="look" className="scroll-mt-32">
                 <LookEditor
                   look={store.look}
-                  photoId={store.photoId}
+                  photoId={await shownPhotoId(ref, store.photoId).catch(() => store.photoId)}
                   name={store.name}
                   handle={store.handle}
                   currency={store.currency}

@@ -74,18 +74,39 @@ export async function writePhoto(bytes: Uint8Array, type: PhotoType): Promise<st
   return id;
 }
 
-/** The photo behind an id, or null when there is none. */
+/**
+ * The photo behind an id, or null when Redis confirms there is none (a GET
+ * that answers null). A kept text that is not what writePhoto stores
+ * ("type;base64"), or any other reply, throws UnknownReplyError (CX-123 rule
+ * 24): /api/photo/<id> then answers "try again", never "not found".
+ */
 export async function readPhoto(
   id: string,
 ): Promise<{ bytes: Uint8Array; type: PhotoType } | null> {
   if (!PHOTO_ID_PATTERN.test(id)) return null;
-  const [raw] = await redisPipeline([["GET", photoKey(id)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", photoKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a page photo read");
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a page photo read");
   const cut = raw.indexOf(";");
-  if (cut < 0) return null;
-  const type = raw.slice(0, cut);
-  if (type !== "image/jpeg" && type !== "image/png" && type !== "image/webp") return null;
+  const type = raw.slice(0, Math.max(cut, 0));
+  if (type !== "image/jpeg" && type !== "image/png" && type !== "image/webp") throw new UnknownReplyError("a page photo read");
   return { bytes: new Uint8Array(Buffer.from(raw.slice(cut + 1), "base64")), type };
+}
+
+/**
+ * Whether a photo's record is still kept: an EXISTS answered exactly 1 or 0.
+ * Any other reply throws UnknownReplyError (CX-123 rule 24), so a photo is
+ * never taken for gone on a reply that was not read. An id that is not a
+ * photo id is left as it is (true): nothing here decides about it.
+ */
+export async function photoKept(id: string): Promise<boolean> {
+  if (!PHOTO_ID_PATTERN.test(id)) return true;
+  const replies = repliesFor(await redisPipeline([["EXISTS", photoKey(id)]]), 1);
+  const kept = replies ? countOf(replies[0]) : null;
+  if (kept === null || kept > 1) throw new UnknownReplyError("a page photo looked for");
+  return kept === 1;
 }
 
 /**

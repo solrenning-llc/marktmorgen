@@ -6,7 +6,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataStore, dataKey, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type ThanksNote, parseNote } from "@/lib/thanks-note";
 
@@ -97,13 +97,41 @@ export async function readThanksNotes(statsId: string | null, productIds: string
  * when Redis answers the SET exactly "OK"; any other reply throws
  * UnknownReplyError (CX-123 rule 24), so the studio never says saved, nor marks
  * the product, for a note that may not be kept.
+ *
+ * The room of the larger of the note kept and the new one is taken first, and
+ * a note rewritten smaller is counted at its new size only after that "OK": on
+ * any other reply the old, larger note may still be kept, so its room stays
+ * counted (LOW 2 of Claude 2's review of #3304). The slot counted now is read
+ * exactly (null is none, else a whole number as text); any other reply throws
+ * UnknownReplyError before anything is written.
  */
 export async function writeThanksNote(statsId: string, productId: string, note: ThanksNote | null, room: DataStore): Promise<void> {
   if (!note) return forgetNote(statsId, productId, room);
   const json = JSON.stringify(note);
-  await needData(room, [{ slot: `tn:${productId}`, bytes: dataBytes([json], 1), set: true }]);
+  const slot = `tn:${productId}`;
+  const bytes = dataBytes([json], 1);
+  const held = await countedSlot(room, slot);
+  await needData(room, [{ slot, bytes: Math.max(held, bytes), set: true }]);
   const replies = repliesFor(await redisPipeline([["SET", noteKey(statsId, productId), json]]), 1);
   if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a note saved");
+  if (held > bytes) await giveData(room, [{ slot, bytes, set: true }]);
+}
+
+/**
+ * What a slot of the store's data room counts now: 0 when its HGET answers
+ * null (or the room has no key, where needData refuses anyway), else the
+ * whole number TAKE_DATA keeps as text. Any other reply throws
+ * UnknownReplyError (CX-123 rule 24).
+ */
+async function countedSlot(room: DataStore, slot: string): Promise<number> {
+  const key = dataKey(room);
+  if (!key) return 0;
+  const replies = repliesFor(await redisPipeline([["HGET", key, slot]]), 1);
+  const raw = replies ? replies[0] : undefined;
+  if (raw === null) return 0;
+  const held = typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw) ? Number(raw) : null;
+  if (held === null || !Number.isSafeInteger(held)) throw new UnknownReplyError("a note's counted room");
+  return held;
 }
 
 /** Forgets the note of a product that is gone, and gives back its room. */

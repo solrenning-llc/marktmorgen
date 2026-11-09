@@ -37,7 +37,7 @@ import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepId, type AiStepLine, type 
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
 import { writeProductIdeas } from "@/lib/product-ideas";
 import { writeFromPdf } from "@/lib/product-pdf-assist";
-import type { AiResult, AiStopped } from "@/lib/ai";
+import type { AiDraftedGiven, AiResult, AiStopped } from "@/lib/ai";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
@@ -386,7 +386,7 @@ async function pdfPagesOf(product: Parameters<typeof readableFile>[0]): Promise<
  * ends, then the result, so the studio can say what is running and offer to
  * stop. The first line is padding some browsers wait for.
  */
-function inSteps<T>(job: (onStep: (step: AiStepId, state: AiStepState) => void) => Promise<AiResult<T> | AiStopped>, failure: string): Response {
+function inSteps<T>(job: (onStep: (step: AiStepId, state: AiStepState) => void) => Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>>, failure: string): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -402,7 +402,9 @@ function inSteps<T>(job: (onStep: (step: AiStepId, state: AiStepState) => void) 
       try {
         const done = await job((step, state) => send({ step, state }));
         last = done.ok
-          ? { done: true, ok: true, value: done.value, left: done.left }
+          ? "returned" in done
+            ? { done: true, ok: true, value: done.value, left: done.left, returned: done.returned }
+            : { done: true, ok: true, value: done.value, left: done.left }
           : "returned" in done
             ? { done: true, ok: false, error: done.reason, returned: done.returned, left: done.left }
             : { done: true, ok: false, error: done.reason };

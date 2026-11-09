@@ -17,7 +17,7 @@
  * account of the pages, not the pages themselves, which are never turned
  * into text here. Nothing here saves anything.
  */
-import { type AiResult, type AiStopped, type AiStepsRun, jsonIn, readPdfThenWrite, writingRules } from "@/lib/ai";
+import { type AiDraftedGiven, type AiResult, type AiStopped, type AiStepsRun, jsonIn, readPdfThenWrite, writingRules } from "@/lib/ai";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { cleanVoice } from "@/lib/customer-voice";
 import { IDEA_REFUSED } from "@/lib/product-ideas-rules";
@@ -150,7 +150,7 @@ export async function writeFromPdf(
   input: Words & { pdf: Uint8Array },
   now = Date.now(),
   steps?: AiStepsRun,
-): Promise<AiResult<PdfProposal> | AiStopped> {
+): Promise<AiResult<PdfProposal> | AiStopped | AiDraftedGiven<PdfProposal>> {
   return readPdfThenWrite(store, input.pdf, now, steps, {
     maxTokens: PDF_ASSIST_OUTPUT_TOKENS,
     request: (fileFacts) => pdfAssistRequest(store, input, fileFacts),

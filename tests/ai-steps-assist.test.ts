@@ -34,9 +34,12 @@ function main(): void {
   is("a stop with what came back", readStepLine('{"done":true,"ok":false,"error":"stopped","returned":1,"left":2}'), { done: true, ok: false, error: "stopped", returned: 1, left: 2 });
   is("a stop not confirmed", readStepLine('{"done":true,"ok":false,"error":"stopped","returned":null,"left":null}'), { done: true, ok: false, error: "stopped", returned: null, left: null });
   is("a step not run, given back, though nobody asked to stop", readStepLine('{"done":true,"ok":false,"error":"failed","returned":1,"left":2}'), { done: true, ok: false, error: "failed", returned: 1, left: 2 });
+  is("a draft with the jobs of a step not run given back", readStepLine('{"done":true,"ok":true,"value":{"a":1},"left":3,"returned":9}'), { done: true, ok: true, value: { a: 1 }, left: 3, returned: 9 });
+  is("a draft whose give-back is not confirmed", readStepLine('{"done":true,"ok":true,"value":{"a":1},"left":3,"returned":null}'), { done: true, ok: true, value: { a: 1 }, left: 3, returned: null });
+  is("a PDF with nothing to write from", readStepLine('{"done":true,"ok":false,"error":"empty","returned":1,"left":2}'), { done: true, ok: false, error: "empty", returned: 1, left: 2 });
   is("nothing given back is not a give-back", readStepLine('{"done":true,"ok":false,"error":"failed","returned":0,"left":2}'), null);
   is("padding is skipped", readStepLine(`{"pad":"${" ".repeat(20)}"}`), "pad");
-  for (const bad of ["", "not json", '{"step":"cook","state":"started"}', '{"step":"read","state":"maybe"}', '{"done":true,"ok":true,"left":-1,"value":1}', '{"done":true,"ok":false,"error":"stopped","returned":"1","left":2}', "[1]"]) {
+  for (const bad of ["", "not json", '{"step":"cook","state":"started"}', '{"step":"read","state":"maybe"}', '{"done":true,"ok":true,"left":-1,"value":1}', '{"done":true,"ok":false,"error":"stopped","returned":"1","left":2}', '{"done":true,"ok":true,"value":1,"left":2,"returned":0}', '{"done":true,"ok":true,"value":1,"left":2,"returned":"9"}', '{"done":true,"ok":false,"error":"empty"}', "[1]"]) {
     is(`an unknown line is never taken for a step or a result: ${bad || "(empty)"}`, readStepLine(bad), null);
   }
 
@@ -54,6 +57,11 @@ function main(): void {
   part("Stopping, and a page of one step");
   const stopping = draw({ steps: two, states: { read: "running", write: "waiting" }, announce: "Stopping after this step.", elapsed: 15, canStop: true, stopping: true, onStop: () => {} });
   is("the button stays in place, says so, and does not take a second press", [/aria-disabled="true"/.test(stopping), stopping.includes("Stopping after this step")], [true, true]);
+  const late = draw({ steps: two, states: { read: "done", write: "running" }, announce: "Step 2 of 2: Writing your page", elapsed: 18, canStop: false, stopShown: true, stopping: false, onStop: () => {} });
+  const lateStop = /<button[^>]*>[^<]*Stop[^<]*<\/button>/.exec(late)?.[0] ?? "";
+  is("once writing starts, Stop stays where it is, unavailable, so focus on it is not dropped", [Boolean(lateStop), /aria-disabled="true"/.test(lateStop)], [true, true]);
+  is("and it says why", late.includes("Writing has started; it can no longer be stopped."), true);
+  is("still at least 44 by 44 pixels, its label centered", [/min-h-11/.test(lateStop), /min-w-11/.test(lateStop), /inline-flex/.test(lateStop), /items-center/.test(lateStop)], [true, true, true, true]);
   const one = draw({ steps: pageSteps(false), states: { write: "running" }, announce: "Step 1 of 1: Writing your page", elapsed: 3, canStop: false, stopping: false, onStop: () => {} });
   is("no Stop when nothing is left that would not be charged", /<button/.test(one), false);
   const ended = draw({ steps: two, states: { read: "done", write: "skipped" }, announce: "Stopped.", elapsed: 20, canStop: false, stopping: false, onStop: () => {} });

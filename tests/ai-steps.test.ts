@@ -32,7 +32,7 @@ import { refuse, reservations as spent } from "./ai-steps-spend-stub";
 
 type Step = { step: string; state: string };
 type Steps = { run: string; onStep: (step: "read" | "write", state: "started" | "done") => void };
-type Stopped = { ok: false; reason: "stopped"; returned: number | null; left: number | null };
+type Stopped = { ok: false; reason: "stopped" | "failed" | "empty"; returned: number | null; left: number | null };
 const writePage = ai.writePage as unknown as (
   store: Parameters<typeof ai.writePage>[0],
   input: Parameters<typeof ai.writePage>[1],
@@ -191,7 +191,7 @@ async function main(): Promise<void> {
   is("only the reading is sent", calls, 1);
   is("the reading stays counted; the page's job is given back", before - (await ai.aiLeft(store)), READ_PDF_JOBS);
   is("given back once, read in its exact shape", giveBacks(monthKey).map((c) => c[2]), [1]);
-  is("it says the writing step did not run, what came back and what is left", empty, { ok: false, reason: "failed", returned: 1, left: before - READ_PDF_JOBS });
+  is("it says the PDF gave nothing to write from, what came back and what is left", empty, { ok: false, reason: "empty", returned: 1, left: before - READ_PDF_JOBS });
   is("the writing step never said it started", seen, [
     { step: "read", state: "started" },
     { step: "read", state: "done" },
@@ -203,13 +203,14 @@ async function main(): Promise<void> {
   readingSays = JSON.stringify({ parts: [], format: "", for: "" });
   const plainEmpty = await writePage(store, input, Date.now());
   is("the page's job is given back there too", [calls, before - (await ai.aiLeft(store)), plainEmpty.ok], [1, READ_PDF_JOBS, false]);
+  is("and the answer without steps is unchanged: failed", plainEmpty.ok ? "drafted" : plainEmpty.reason, "failed");
 
   part("The same, with the give-back's reply unknown");
   fresh();
   readingSays = JSON.stringify({ parts: [], format: "", for: "" });
   unknownFor = (c) => c[0] === "DECRBY" && c[1] === monthKey;
   const emptyUnsure = await writePage(store, input, Date.now(), stepsOf("runemptyunsure01", []));
-  is("said as not confirmed, never as a number", emptyUnsure, { ok: false, reason: "failed", returned: null, left: null });
+  is("said as not confirmed, never as a number", emptyUnsure, { ok: false, reason: "empty", returned: null, left: null });
   is("one give-back sent, no retry", giveBacks(monthKey).length, 1);
 
   part("The writing step's money refused: it never reaches the model");
@@ -232,6 +233,29 @@ async function main(): Promise<void> {
   is("the reading, never sent, is not charged: its jobs are given back", [before - (await ai.aiLeft(store)), giveBacks(monthKey).map((c) => c[2])], [1, [READ_PDF_JOBS]]);
   is("what is left is said after the give-back", unread.ok ? unread.left : null, before - 1);
   is("the reading never says it is done", seen.some((s) => s.step === "read" && s.state === "done"), false);
+  is("the draft says how many jobs were given back", (unread as { returned?: unknown }).returned, READ_PDF_JOBS);
+
+  part("The same, with the give-back's reply unknown");
+  fresh();
+  before = await ai.aiLeft(store);
+  refuse.at = spent.count + 1;
+  unknownFor = (c) => c[0] === "DECRBY" && c[1] === monthKey;
+  const unreadUnsure = await writePage(store, { ...input, notes: "Forty dinners for busy parents." }, Date.now(), stepsOf("runreadunsure001", []));
+  is("the draft still comes back", unreadUnsure.ok ? unreadUnsure.value.headline : unreadUnsure.reason, DRAFT.headline);
+  is("what came back is said as not confirmed, never as a number", (unreadUnsure as { returned?: unknown }).returned, null);
+  is("one give-back sent, no retry", giveBacks(monthKey).length, 1);
+
+  part("A draft with every step run says nothing was given back");
+  fresh();
+  const whole2 = await writePage(store, input, Date.now(), stepsOf("runwholenogive01", []));
+  is("no give-back field on a draft with nothing given back", [whole2.ok, "returned" in whole2], [true, false]);
+
+  part("A stop whose mark cannot be confirmed kept is never taken as kept");
+  fresh();
+  unknownFor = (c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:");
+  is("an unknown reply to the mark is not a stop", await ai.markAiStop(store, "runsetunknown001"), false);
+  unknownFor = null;
+  is("a confirmed mark is", await ai.markAiStop(store, "runsetknown00001"), true);
 
   part("A run that is not one takes nothing");
   fresh();

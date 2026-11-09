@@ -73,8 +73,8 @@ export function ProductIdeas({
           setError(IDEAS_COPY.unconfirmed);
           return;
         }
+        // New ideas keep the undo: it still puts back what the boxes had before the first idea used.
         setIdeas(read);
-        setBefore(null);
         setStatus(ideasReadyWords(read.length));
         return;
       }

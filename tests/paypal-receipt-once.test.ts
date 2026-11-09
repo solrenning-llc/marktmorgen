@@ -12,10 +12,17 @@
  *   B:  Amazon's answer is lost, then no job runs for 25 hours: the late sweep sends nothing more;
  *   C:  Resend alone answers 503 for 26 hours of five-minute runs: one request, one body;
  *   D:  an order a concurrent run took off the list while its receipt was being tried is not put back;
- *   E:  Amazon refuses it for the whole window: tried at most RECEIPT_TRIES_AT_MOST times, each try's Redis commands
- *       at most the registry's (PAYPAL_HAND_OVER_RETRY in tests/plan-cost-registry.ts; the Resend side is held by
- *       tests/paypal-handover-cost.test.ts).
+ *   E:  Amazon refuses it for the account, then Resend refuses it for the whole window: Amazon is asked once, Resend
+ *       at most RECEIPT_TRIES_AT_MOST times, each try's Redis commands at most the registry's (PAYPAL_HAND_OVER_RETRY
+ *       in tests/plan-cost-registry.ts; the account refusal, with the owner told, is the longest try measured, longer
+ *       than a message refusal; Resend alone is held by tests/paypal-handover-cost.test.ts);
+ *   F:  Amazon refuses it for the account, then is down for 23 hours: Resend sends it in the same try (review
+ *       6739456860, probe D);
+ *   G:  Amazon refuses it every time while ready: Resend sends it in the same try, Amazon is not asked again (probe D2);
+ *   H:  sendEmailPinned alone: a refusal moves the key to Resend in the same call; a lost answer, a once-mark another
+ *       try took meanwhile, or a move whose reply is not exact sends nothing more.
  */
+import { createHash } from "node:crypto";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
 import { type Listing, readListing } from "@/lib/catalog";
@@ -26,6 +33,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { PAYPAL_HAND_OVER_RETRY } from "./plan-cost-registry";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { sendEmailPinned } from "@/lib/email";
 import { NextRequest } from "next/server";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
 
@@ -36,8 +44,8 @@ const orders = new Map<string, Record<string, unknown>>();
 let made = 0;
 let buyerFor = "buyer@example.com";
 const orderId = (n: number) => `6P290127TN36471${String(n).padStart(2, "0")}`;
-/** What Resend answers: accepted, or a 503 (its answer not known to be a refusal). */
-let resendMode: "up" | "503" = "up";
+/** What Resend answers: accepted, a 503 (its answer not known to be a refusal), or a 422 (a refusal). */
+let resendMode: "up" | "503" | "422" = "up";
 /** Called on each Resend request before it is answered (probe D). */
 let onResendPost: (() => void) | null = null;
 /** Every Resend request: its idempotency key and body text. */
@@ -83,7 +91,9 @@ const mail = installSesMailFixture({
     const key = new Headers(init?.headers).get("idempotency-key") ?? "";
     for (const m of messages) resendPosts.push({ key, to: m.to[0] ?? "", text: m.text });
     onResendPost?.();
-    return resendMode === "503" ? json({ name: "service_unavailable", message: "synthetic outage" }, 503) : undefined;
+    if (resendMode === "503") return json({ name: "service_unavailable", message: "synthetic outage" }, 503);
+    if (resendMode === "422") return json({ name: "validation_error", message: "synthetic refusal" }, 422);
+    return json({ id: `resend_fixture_${resendPosts.length}` });
   },
 });
 
@@ -96,6 +106,9 @@ const startOfNextDay = () => {
   ahead += Math.ceil(now / DAY_MS) * DAY_MS + 60_000 - now;
 };
 const handOverKey = (statsId: string) => `nl:ppsell:handover:${statsId}`;
+const hashed = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 40);
+const pinOf = (key: string) => `nl:mail:pin:${hashed(key)}`;
+const onceOf = (key: string) => `nl:ses:once:${hashed(key)}`;
 
 async function main(): Promise<void> {
   redis.clear();
@@ -218,13 +231,32 @@ async function main(): Promise<void> {
   is("the receipt was tried once", resendTo(buyerD), 1);
   is("not put back on the list", (await listed()).includes(d), false);
 
-  part("E: Amazon refuses it for the whole window: bounded tries, each try's commands as the registry states");
+  /** Runs `then` after the first pipeline whose commands match `when`, once. */
+  const after = (when: (command: (string | number)[]) => boolean, then: (replies: unknown[]) => unknown[] | void) => {
+    const pipeline = redis.pipeline.bind(redis);
+    let fired = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = await pipeline(commands);
+      if (fired || !commands.some(when)) return replies;
+      fired = true;
+      return then(replies) ?? replies;
+    }) as typeof redis.pipeline;
+    return () => { redis.pipeline = pipeline; };
+  };
+
+  part("E: Amazon refuses it for the account, then Resend refuses it for the whole window: bounded tries and commands");
   startOfNextDay();
   mail.configure();
   await mail.setReady(true);
-  mail.setSesOutcome("refused");
+  mail.setSesOutcome(["account"]);
+  resendMode = "422";
   const buyerE = "ses-refused@example.com";
+  // The return route's try stops before sending (its first-try mark is not answered exactly), so the first try is a
+  // sweep's: refused by Amazon for the account, moved to Resend and refused there, the longest try, measured below.
+  const undoE = after((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ppsell:receipt:"), () => ["QUEUED"]);
   const e = await pay(6, buyerE);
+  undoE();
+  is("the return route's try sent nothing", copies(buyerE).length, 0);
   const paidKey = `nl:ppsell:paid:${e}`;
   let mostATry = 0;
   for (let run = 0; run < (26 * 3600) / 300; run += 1) {
@@ -246,11 +278,84 @@ async function main(): Promise<void> {
     mostATry = Math.max(mostATry, to - from + 1);
   }
   mail.setSesOutcome("ok");
-  console.log(`        tries: ${sesTo(buyerE)}, most commands a try: ${mostATry}`);
-  is("only Amazon was asked", resendTo(buyerE), 0);
-  is("tried more than once and at most RECEIPT_TRIES_AT_MOST times", sesTo(buyerE) > 1 && sesTo(buyerE) <= delivery.RECEIPT_TRIES_AT_MOST, true);
+  resendMode = "up";
+  console.log(`        tries: Amazon ${sesTo(buyerE)}, Resend ${resendTo(buyerE)}, most commands a try: ${mostATry}`);
+  is("Amazon was asked once: its refusal moved the receipt to Resend", sesTo(buyerE), 1);
+  is("Resend tried more than once and at most RECEIPT_TRIES_AT_MOST times", resendTo(buyerE) > 1 && resendTo(buyerE) <= delivery.RECEIPT_TRIES_AT_MOST, true);
   is("one try's Redis commands at most as the registry states", mostATry > 0 && mostATry <= Number((PAYPAL_HAND_OVER_RETRY as Record<string, number>).commandsPerReceiptTry), true);
   is("then off the list", (await listed()).includes(e), false);
+
+  /** Copies a sender accepted for this buyer: the ones that reached them. */
+  const delivered = (buyer: string) => mail.sent.filter((m) => m.to.includes(buyer));
+  const resendDelivered = (buyer: string) => mail.resend.filter((m) => m.to.includes(buyer)).length;
+
+  part("F: Amazon refuses it for the account, then is down for 23 hours: Resend sends it in the same try (probe D)");
+  startOfNextDay();
+  mail.configure();
+  await mail.setReady(true);
+  mail.setSesOutcome(["account"]);
+  const buyerF = "ses-account@example.com";
+  const f = await pay(7, buyerF);
+  await mail.setReady(false);
+  is("Amazon asked once and refused it", sesTo(buyerF), 1);
+  is("Resend sent it in the same try", resendDelivered(buyerF), 1);
+  is("the order left the list with its receipt", (await listed()).includes(f), false);
+  await sweeps(23);
+  is("one copy reached the buyer in 23 hours", delivered(buyerF).length, 1);
+  is("and no further request was made", copies(buyerF).length, 2);
+
+  part("G: Amazon refuses it every time while ready: Resend sends it in the same try (probe D2)");
+  startOfNextDay();
+  mail.configure();
+  await mail.setReady(true);
+  mail.setSesOutcome("refused");
+  const buyerG = "ses-refuses@example.com";
+  const g = await pay(8, buyerG);
+  await sweeps(8);
+  mail.setSesOutcome("ok");
+  is("Amazon asked once", sesTo(buyerG), 1);
+  is("Resend sent it once", [resendTo(buyerG), resendDelivered(buyerG)], [1, 1]);
+  is("one copy reached the buyer", delivered(buyerG).length, 1);
+  is("the order left the list", (await listed()).includes(g), false);
+
+  part("H: sendEmailPinned alone: only a refusal Amazon gave moves the key to Resend, in the same call");
+  const message = (to: string, key: string) => ({ meter: { by: "order" as const }, from: "Harbor Kitchen <orders@marktmorgen.com>", to, subject: "Your order", text: "Thanks.", idempotencyKey: key });
+  startOfNextDay();
+  mail.configure();
+  await mail.setReady(true);
+
+  mail.setSesOutcome("ok");
+  is("control: Amazon takes it, one request", [await sendEmailPinned(message("h-ok@example.com", "h:ok")), sesTo("h-ok@example.com"), resendTo("h-ok@example.com")], [true, 1, 0]);
+  is("control: the key is kept for Amazon", redis.run(["GET", pinOf("h:ok")]), "ses");
+
+  mail.setSesOutcome("refused");
+  is("a refusal Amazon gave: Resend sends it in the same call", await sendEmailPinned(message("h-refused@example.com", "h:refused")), true);
+  is("one request to each, one copy delivered", [sesTo("h-refused@example.com"), resendTo("h-refused@example.com"), delivered("h-refused@example.com").length], [1, 1, 1]);
+  is("the key is now kept for Resend", redis.run(["GET", pinOf("h:refused")]), "resend");
+  mail.setSesOutcome("ok");
+  is("a later call goes only to Resend, under the same key", [await sendEmailPinned(message("h-refused@example.com", "h:refused")), sesTo("h-refused@example.com")], [true, 1]);
+
+  mail.setSesOutcome(["lost"]);
+  is("a lost answer: no request to Resend", [await sendEmailPinned(message("h-lost@example.com", "h:lost")), sesTo("h-lost@example.com"), resendTo("h-lost@example.com")], [false, 1, 0]);
+  is("the key stays kept for Amazon", redis.run(["GET", pinOf("h:lost")]), "ses");
+  is("a later call sends nothing more", [await sendEmailPinned(message("h-lost@example.com", "h:lost")), copies("h-lost@example.com").length], [false, 1]);
+
+  mail.setSesOutcome("refused");
+  // Another try of the key takes Amazon's once-mark right after this one let it go.
+  let undo = after((c) => c[0] === "DEL" && c[1] === onceOf("h:raced"), () => { redis.run(["SET", onceOf("h:raced"), "1", "EX", 86_400]); });
+  const raced = await sendEmailPinned(message("h-raced@example.com", "h:raced"));
+  undo();
+  is("a refusal while another try holds the once-mark: nothing sent to Resend", [raced, sesTo("h-raced@example.com"), resendTo("h-raced@example.com")], [false, 1, 0]);
+  is("the key stays kept for Amazon", redis.run(["GET", pinOf("h:raced")]), "ses");
+
+  undo = after((c) => c[0] === "SET" && c[1] === pinOf("h:odd") && c.includes("XX"), () => ["QUEUED"]);
+  const odd = await sendEmailPinned(message("h-odd@example.com", "h:odd"));
+  undo();
+  is("a refusal whose move to Resend is not answered exactly: nothing sent to Resend", [odd, sesTo("h-odd@example.com"), resendTo("h-odd@example.com")], [false, 1, 0]);
+
+  mail.setSesOutcome(["account"]);
+  is("an account refusal: Resend sends it in the same call", [await sendEmailPinned(message("h-account@example.com", "h:account")), resendDelivered("h-account@example.com")], [true, 1]);
+  mail.setSesOutcome("ok");
 
   done();
 }

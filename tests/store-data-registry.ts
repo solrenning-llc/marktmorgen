@@ -764,6 +764,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:paid:@lib/paypal-sales.ts": short("A PayPal order paid", "order", 400, KB, KIND("paypal")),
   "nl:ppsell:pending:@lib/paypal-sales.ts": short("Orders whose payment PayPal holds, until it completes", "order", 30, MARK, KIND("paypal")),
   "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),
+  // A PayPal order hands over one product, never a membership or a call (lib/paypal-sales.ts), so its kind is its own.
+  // A field of "paypal:" and a capture id of up to 64 characters, a time of up to 12 digits, ORDER_ENTRY_BYTES and a
+  // quarter more, rounded up (lib/order-data.ts): 192 bytes; 256 with the key's own share.
+  "nl:ppsell:back:@lib/paypal-sales.ts": { what: "PayPal payments refunded in full, kept for good for the affiliate book's lines (9 November 2026)", parts: [item(256, "One field per refunded PayPal order, written through lib/order-data.ts.", "paypal")] },
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window", "order", 180, MARK, KIND("paypal")),
   "nl:ppsell:handover:@lib/paypal-sales.ts": short("Paid orders still owed their hand-over, from being written down until handed over (lib/paypal-delivery.ts)", "order", 400, MARK, KIND("paypal")),

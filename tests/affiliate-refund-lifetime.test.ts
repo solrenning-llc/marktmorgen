@@ -208,6 +208,13 @@ async function main(): Promise<void> {
   is("not checked", garbled.checked, false);
   is("nothing offered", garbled.to.size, 0);
 
+  part("Unknown: the set's listing not exact is a reading that covered nothing, never \"no refunds\" (rule 24)");
+  await setup();
+  await redis.pipeline([["ZADD", `nl:ppsell:refunded:${SID}`, String(NOW), ORDER]]);
+  const listing = await answering("ZRANGEBYSCORE", `nl:ppsell:refunded:${SID}`, "garbled", () => offered());
+  is("not checked", listing.checked, false);
+  is("nothing offered", listing.to.size, 0);
+
   part("The refund seen twice, in the lasting record and in the set, counts once");
   await setup();
   captures.set(CAPTURE, "REFUNDED");

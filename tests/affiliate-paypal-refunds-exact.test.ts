@@ -122,10 +122,15 @@ async function main(): Promise<void> {
   await held("A refund in cents that are not a number", { ...paid, cents: "abc" });
   await held("A refund with no cents", { ...paid, cents: undefined });
 
-  part("A listed refund whose kept record is gone: the read is partial, nothing is paid");
+  // Changed 9 November 2026 (tests/affiliate-refund-lifetime.test.ts, P4): a listed refund whose paid record is gone
+  // used to leave the whole book unchecked, which blocked every affiliate's payment for good once a record expired
+  // before its mark. It is still a refund in full of that order, so of this sale's line: the book stays checked and
+  // the line's commission is taken back (was: "the book is not checked" false; nothing passed then, nothing now).
+  part("A listed refund whose kept record is gone: a refund in full of its line, the book still checked, nothing paid on it");
   await setup(null, true);
   const gone = await offered();
-  is("the book is not checked", gone.checked, false);
+  is("the book stays checked", gone.checked, true);
+  is("no commission", gone.commission, 0);
   is("nothing passes the refund guard", gone.through, 0);
 
   // `others` refunds of other sales, each with its record, listed before this sale's own refund.

@@ -400,7 +400,8 @@ export const POST_META_BYTES = 2_048;
 export const SITEMAP_LINE_BYTES = 300;
 /**
  * Working out an affiliate program's book, besides what scales: the book
- * counted (eight), the seven hashes, the PayPal refunds' set, two reads of
+ * counted (eight), the seven hashes, the PayPal refunds' set and the ones
+ * kept for good (one HMGET for the book's PayPal payments), two reads of
  * listings, the lock taken, read and let go, the kept book's state read
  * again under it and its previous marks, and the parts written to a draft
  * that is renamed into place.

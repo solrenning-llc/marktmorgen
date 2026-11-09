@@ -8,15 +8,17 @@
  *
  * Now the copy reads the person's own set (nl:payreq:p:<sid>:<person>), the
  * same index the erasure deletes by, whole: its size is read before anything
- * else, so a set past what a person can have is refused before a record is
- * read; any reply that does not read exactly fails the copy, never a copy
- * handed over with a part silently missing.
+ * else, so a set past the most a store keeps is refused before a record is
+ * read; then a page of members at a time, orphans (records gone) skipped
+ * however many; any reply that does not read exactly fails the copy, never a
+ * copy handed over with a part silently missing.
  */
 import { personKey } from "@/lib/person-key";
 import { KEEP_DAYS, MAX_PER_PERSON, type PaymentRequest } from "@/lib/payment-request-rules";
-import { createRequest, forgetRequestsPerson, readRequest } from "@/lib/payment-request-store";
+import { COPY_MEMBERS_MAX, COPY_PAGE_MEMBERS, COPY_PAGES_MAX, COPY_READ_COMMANDS_MAX, createRequest, forgetRequestsPerson, readRequest } from "@/lib/payment-request-store";
 import { COPIERS } from "@/lib/person-copy";
 import { erasureScope } from "@/lib/person-erasure";
+import { NOT_A_COST } from "./plan-cost-registry";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -117,18 +119,32 @@ async function main(): Promise<void> {
   for (const [what, reply] of [["no reply", []], ["null", [null]], ["a string", ["3"]], ["below zero", [-1]], ["a fraction", [1.5]]] as const) {
     is(`the set's size read as ${what}: the copy fails`, await under(onSet("SCARD", reply), () => copier(scope)), "threw");
   }
-  is("a set past what a person can have: the copy fails", await under(onSet("SCARD", [MAX_PER_PERSON * 2 + 1]), () => copier(scope)), "threw");
-  is("and not one member or record was read for it (its cost is bounded before reading)", sent.some((c) => c[0] === "SMEMBERS" || c[0] === "MGET"), false);
+  // Changed assertions (rule 23, review of the whole copy, 9 November 2026): the ceiling was MAX_PER_PERSON x 2 (48),
+  // which orphan members (records gone, still in the set) could pass and lock the copy for good
+  // (tests/payment-request-copy-orphans.test.ts); it is now COPY_MEMBERS_MAX, the most a store keeps on any plan, and
+  // the members are read in SSCAN pages, so "not one member" is no SSCAN and no MGET.
+  is("a set past the most a store keeps: the copy fails", await under(onSet("SCARD", [COPY_MEMBERS_MAX + 1]), () => copier(scope)), "threw");
+  is("and not one member or record was read for it (its cost is bounded before reading)", sent.some((c) => c[0] === "SSCAN" || c[0] === "SMEMBERS" || c[0] === "MGET"), false);
+  // Changed assertions (rule 23, same review): the members come in SSCAN pages ([cursor, members]), not one SMEMBERS
+  // list, so each odd shape is now one of a page; a member given twice is no longer a failure (SSCAN may give one
+  // twice), it is read once (below).
   for (const [what, reply] of [
     ["no reply", []],
     ["null", [null]],
-    ["a member that is not an id", [[mine[0], "not-an-id"]]],
-    ["a member that is not a string", [[mine[0], 7]]],
-    ["the same member twice", [[mine[0], mine[0]]]],
-    ["more members than a person can have", [Array.from({ length: MAX_PER_PERSON * 2 + 1 }, (_, i) => hex(i, "d"))]],
+    ["a page that is not a cursor and its members", [[mine[0], mine[1]]]],
+    ["a cursor that is not digits", [["x", [mine[0]]]]],
+    ["a member that is not an id", [["0", [mine[0], "not-an-id"]]]],
+    ["a member that is not a string", [["0", [mine[0], 7]]]],
+    ["more members than a store keeps", [["0", Array.from({ length: COPY_MEMBERS_MAX + 1 }, (_, i) => hex(i, "d"))]]],
   ] as const) {
-    is(`its members read as ${what}: the copy fails`, await under(onSet("SMEMBERS", reply), () => copier(scope)), "threw");
+    is(`its members read as ${what}: the copy fails`, await under(onSet("SSCAN", reply), () => copier(scope)), "threw");
   }
+  is("a walk not at its end after COPY_PAGES_MAX pages: the copy fails", await under(onSet("SSCAN", [["7", []]]), () => copier(scope)), "threw");
+  is("and it read no more than COPY_PAGES_MAX pages", sent.filter((c) => c[0] === "SSCAN").length, COPY_PAGES_MAX);
+  is("a member a page gives twice is read once", await under(onSet("SSCAN", [["0", [mine[0], mine[0]]]]), async () => {
+    const twice = (await copier(scope)) as PaymentRequest[];
+    if (ids(twice).join() !== mine[0]) throw new Error(`read as ${ids(twice).join()}`);
+  }), "returned");
   const onRecords = (reply: (keys: (string | number)[]) => unknown) => (c: (string | number)[]) => (c[0] === "MGET" && String(c[1]).startsWith("nl:payreq:r:") ? reply(c.slice(1)) : undefined);
   const record = (await readRequest(mine[0]))!;
   for (const [what, reply] of [
@@ -141,6 +157,41 @@ async function main(): Promise<void> {
   ] as const) {
     is(`its records read as ${what}: the copy fails`, await under(onRecords(reply), () => copier(scope)), "threw");
   }
+
+  part("A page at a time, as Redis pages a set: every live one, orphans skipped, the cost bounded");
+  // 2,000 orphan members (records gone) beside her 23 live requests; SSCAN answered a page of COUNT at a time from a
+  // cursor, as Redis does for a set this size (the stub answers it whole).
+  const orphans = Array.from({ length: 2_000 }, (_, i) => hex(i, "a0"));
+  await redis.pipeline([["SADD", set, ...orphans]]);
+  const commandsSent: (string | number)[][] = [];
+  redis.pipeline = async (commands) => {
+    commandsSent.push(...commands);
+    const [c] = commands;
+    if (commands.length === 1 && c[0] === "SSCAN" && c[1] === set) {
+      const [members] = (await original([["SMEMBERS", set]])) as string[][];
+      const sorted = [...members].sort();
+      const from = Number(c[2]);
+      const count = Number(c[4]);
+      const next = from + count >= sorted.length ? "0" : String(from + count);
+      return [[next, sorted.slice(from, from + count)]];
+    }
+    return original(commands);
+  };
+  let paged: PaymentRequest[] = [];
+  try {
+    paged = (await copier(scope)) as PaymentRequest[];
+  } finally {
+    redis.pipeline = original;
+  }
+  is("every live one of hers, past 2,000 orphans", ids(paged), mine.filter((_, i) => i !== 5).sort());
+  is("pages of COPY_PAGE_MEMBERS asked for", commandsSent.filter((c) => c[0] === "SSCAN").every((c) => c[4] === COPY_PAGE_MEMBERS), true);
+  is("no MGET reads more than COPY_PAGE_MEMBERS records", commandsSent.filter((c) => c[0] === "MGET").every((c) => c.length - 1 <= COPY_PAGE_MEMBERS), true);
+  is("the commands sent stay within COPY_READ_COMMANDS_MAX", commandsSent.length <= COPY_READ_COMMANDS_MAX, true);
+  is("and only reads: nothing was written or taken off", commandsSent.every((c) => ["SCARD", "SSCAN", "MGET"].includes(String(c[0]))), true);
+  is("the orphans are still members (the copy writes nothing)", (await redis.pipeline([["SCARD", set]]))[0], mine.length + orphans.length);
+  await redis.pipeline([["SREM", set, ...orphans]]);
+  is("the copy's worst read, in commands", COPY_READ_COMMANDS_MAX, 315);
+  is("its cost is in the registry, said to be uncharged while copyPerson has no caller", /no caller/.test(NOT_A_COST.COPY_READ_COMMANDS_MAX ?? "") && /never zero/.test(NOT_A_COST.COPY_READ_COMMANDS_MAX ?? ""), true);
 
   part("The erasure deletes by the same set: the old one goes, nobody else's");
   await forgetRequestsPerson(sid, TESS);

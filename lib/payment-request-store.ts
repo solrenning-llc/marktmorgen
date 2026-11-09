@@ -43,6 +43,7 @@ import {
   KEEP_DAYS,
   MAX_PER_PERSON,
   OPEN_DAYS,
+  REQUEST_LIMITS,
   type PaymentRequest,
   type RequestDraft,
   newRequestId,
@@ -51,7 +52,6 @@ import {
   requestLimitsFor,
   statusOf,
 } from "@/lib/payment-request-rules";
-// Under its own name, so it never collides with the reply helpers other work imports by name above.
 import * as copyReply from "@/lib/redis-reply";
 
 const DAY = 86_400_000;
@@ -134,7 +134,17 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
       ["EXPIRE", person, keep],
     ]);
     const [open, kept, mine] = [Number(counts[5]), Number(counts[6]), Number(counts[7])];
-    const undo = () => redisPipeline([["ZREM", openKey(store.sid), request.id], ["ZREM", storeKey(store.sid), request.id], ["SREM", person, request.id]]).catch(() => undefined);
+    const undo = async () => {
+      try {
+        await redisPipeline([["ZREM", openKey(store.sid), request.id], ["ZREM", storeKey(store.sid), request.id], ["SREM", person, request.id]]);
+      } catch (error) {
+        // Never swallowed: the refusal still stands (no record was written), but the id stays in the store's open and
+        // kept lists and in the person's set without a record, counted, until the person's next request prunes the set
+        // and the lists' own pruning (age, listRequests) reaches it; the copy skips it meanwhile
+        // (requestsOfPersonWhole). Only the random id is logged, never the person.
+        console.error("undoing a refused payment request failed; its id stays counted without a record", request.id, error);
+      }
+    };
     if (![open, kept, mine].every(Number.isSafeInteger)) {
       await undo();
       return unavailable();
@@ -258,78 +268,15 @@ export async function listRequests(store: Store, now = Date.now()): Promise<Paym
 }
 
 /**
- * One person's requests in the store, from their own set (at most
- * MAX_PER_PERSON, and twice that read at most): two commands whatever the
- * store keeps, for a page about one buyer (lib/buyer-waiting.ts). A record
- * gone is skipped; one that does not read as this store's is null, never a
- * guess.
+ * The requests among `ids` whose records `values` holds, slot for slot (an
+ * MGET's reply), for both readers of one person's set: a record that ran out
+ * (null) is left out; one that does not read as this store's request under
+ * its own id, made for this person, throws, never a guess. Their own set
+ * names only their requests, so one of another store, id or person is not
+ * read as theirs.
  */
-export async function requestsOfPerson(store: Pick<Store, "sid">, email: string): Promise<PaymentRequest[] | null> {
-  if (!isRedisConfigured() || !store.sid) return null;
-  try {
-    const [members] = await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]);
-    if (!Array.isArray(members)) return null;
-    const ids = members.map(String).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
-    if (!ids.length) return [];
-    const [values] = await redisPipeline([["MGET", ...ids.map(recordKey)]]);
-    if (!Array.isArray(values) || values.length !== ids.length) return null;
-    const out: PaymentRequest[] = [];
-    ids.forEach((id, i) => {
-      const raw = values[i];
-      if (raw === null) return;
-      const request = typeof raw === "string" ? parseRequest(JSON.parse(raw)) : null;
-      if (!request || request.sid !== store.sid || request.id !== id) throw new Error("Payment request record unreadable");
-      out.push(request);
-    });
-    return out;
-  } catch (error) {
-    console.error("reading a person's payment requests failed", error);
-    return null;
-  }
-}
-
-/**
- * The most members a person's set is read with for their copy: MAX_PER_PERSON
- * kept, and as many again whose records ran out and are not yet taken off
- * (createRequest takes those off before it counts). A set past it is not one
- * the code makes, so the copy fails rather than read part of it.
- */
-const COPY_MEMBERS_MAX = MAX_PER_PERSON * 2;
-
-/**
- * Every request the store keeps for one person, newest first, for the copy
- * of their data (619 [SZ3], lib/person-copy.ts; R19 MEDIUM 2, 9 November
- * 2026): from their own set, the index the erasure deletes by
- * (forgetRequestsPerson), never from the store's list, of which a copy would
- * read only the newest (the plan's kept figure, 20 once the plan ended) while
- * a request is kept KEEP_DAYS. Read whole and exactly (rule 24), three
- * commands at the most whatever the store keeps: the set's size first, so a
- * set past COPY_MEMBERS_MAX is refused before one member or record is read
- * (what a copy reads is bounded before it is read: 48 ids and 48 records);
- * then its members, each a request id, once; then their records in one MGET.
- * A record that ran out is left out. One that does not read as this store's
- * request to this person, or any reply of another shape, throws, so the copy
- * fails (lib/person-copy.ts, copyPerson) rather than being handed over with a
- * request silently missing.
- */
-export async function requestsOfPersonWhole(store: Pick<Store, "sid">, email: string): Promise<PaymentRequest[]> {
-  if (!isRedisConfigured() || !store.sid) throw new Error("a person's payment requests cannot be read here");
-  const person = personSet(store.sid, email);
-  const sized = copyReply.repliesFor(await redisPipeline([["SCARD", person]]), 1);
-  const size = sized ? copyReply.countOf(sized[0]) : null;
-  if (size === null) throw new copyReply.UnknownReplyError("the count of a person's payment requests");
-  if (size > COPY_MEMBERS_MAX) throw new Error(`a person's payment requests are more than the ${COPY_MEMBERS_MAX} their copy reads`);
-  if (size === 0) return [];
-  const listed = copyReply.repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
-  const ids = listed ? copyReply.stringList(listed[0]) : null;
-  if (!ids || ids.length > COPY_MEMBERS_MAX || new Set(ids).size !== ids.length || !ids.every((id) => ID_PATTERN.test(id))) {
-    throw new copyReply.UnknownReplyError("a person's payment requests");
-  }
-  if (!ids.length) return [];
-  const read = copyReply.repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
-  const values = read ? copyReply.listSlots(read[0]) : null;
-  if (!values || values.length !== ids.length) throw new copyReply.UnknownReplyError("a person's payment requests' records");
-  const whose = personKey(store.sid, email);
+function personsRequests(sid: string, email: string, ids: readonly string[], values: readonly unknown[]): PaymentRequest[] {
+  const whose = personKey(sid, email);
   const out: PaymentRequest[] = [];
   ids.forEach((id, i) => {
     const raw = values[i];
@@ -342,13 +289,113 @@ export async function requestsOfPersonWhole(store: Pick<Store, "sid">, email: st
         request = null;
       }
     }
-    // Their own set names only their requests: one of another store, another id or another person is not read as theirs.
-    if (!request || request.id !== id || request.sid !== store.sid || personKey(store.sid, request.email) !== whose) {
+    if (!request || request.id !== id || request.sid !== sid || personKey(sid, request.email) !== whose) {
       throw new copyReply.UnknownReplyError("a person's payment request");
     }
     out.push(request);
   });
-  return out.sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1));
+  return out;
+}
+
+/**
+ * One person's requests in the store, from their own set (at most
+ * MAX_PER_PERSON, and twice that read at most): two commands whatever the
+ * store keeps, for a page about one buyer (lib/buyer-waiting.ts). A record
+ * gone is skipped; one that does not read as this store's request to this
+ * person (personsRequests) is null, never a guess.
+ */
+export async function requestsOfPerson(store: Pick<Store, "sid">, email: string): Promise<PaymentRequest[] | null> {
+  if (!isRedisConfigured() || !store.sid) return null;
+  try {
+    const [members] = await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]);
+    if (!Array.isArray(members)) return null;
+    const ids = members.map(String).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
+    if (!ids.length) return [];
+    const [values] = await redisPipeline([["MGET", ...ids.map(recordKey)]]);
+    if (!Array.isArray(values) || values.length !== ids.length) return null;
+    return personsRequests(store.sid, email, ids, values);
+  } catch (error) {
+    console.error("reading a person's payment requests failed", error);
+    return null;
+  }
+}
+
+/** The members one page of a person's set is read with for their copy (SSCAN's COUNT), and the most records one MGET of it reads. */
+export const COPY_PAGE_MEMBERS = MAX_PER_PERSON * 2;
+/**
+ * The most members a person's set is read with for their copy: the most
+ * requests a store keeps on any plan (REQUEST_LIMITS), live ones and orphans
+ * (members whose records ran out, or whose creation was undone while the
+ * undo was lost) together, which createRequest takes off only when the next
+ * request for the person is made. A set past it is not one the code makes,
+ * so the copy fails rather than read part of it.
+ */
+export const COPY_MEMBERS_MAX = Math.max(...Object.values(REQUEST_LIMITS).map((limit) => limit.kept));
+/**
+ * The most SSCAN pages the copy reads before it calls the set unknown. A
+ * page holds about COPY_PAGE_MEMBERS members, fewer where Redis walks empty
+ * buckets, so twice the pages the members fill is room for that.
+ */
+export const COPY_PAGES_MAX = 2 * Math.ceil(COPY_MEMBERS_MAX / COPY_PAGE_MEMBERS);
+/**
+ * The most Redis commands one person's copy of their requests sends: the
+ * set's size, its pages, and an MGET for each COPY_PAGE_MEMBERS new members
+ * of a page (one more a page at most, for its remainder). Not yet charged to
+ * anything: copyPerson (lib/person-copy.ts) has no caller, and its cost must be
+ * counted before any door gives the copy (NOT_A_COST in tests/plan-cost-registry.ts).
+ */
+export const COPY_READ_COMMANDS_MAX = 1 + COPY_PAGES_MAX + COPY_PAGES_MAX + Math.floor(COPY_MEMBERS_MAX / COPY_PAGE_MEMBERS);
+
+/**
+ * Every request the store keeps for one person, newest first, for the copy
+ * of their data (619 [SZ3], lib/person-copy.ts; R19 MEDIUM 2, 9 November
+ * 2026): from their own set, the index the erasure deletes by
+ * (forgetRequestsPerson), never from the store's list, of which a copy would
+ * read only the newest (the plan's kept figure, 20 once the plan ended) while
+ * a request is kept KEEP_DAYS. Read whole and exactly (rules 24 and 30): the
+ * set's size first, so a set past COPY_MEMBERS_MAX is refused before one
+ * member or record is read; then its members a page of COPY_PAGE_MEMBERS at
+ * a time (SSCAN), each a request id, a member SSCAN gives twice read once;
+ * then each page's records, COPY_PAGE_MEMBERS to an MGET, at most
+ * COPY_READ_COMMANDS_MAX commands in all. A member whose record ran out (an
+ * orphan) is skipped, however many there are. Nothing is written: an orphan
+ * is not taken off here, because a member whose record is not yet written
+ * may be a request still being made (createRequest adds the id before its
+ * record), and taking that one off would leave a live request out of the
+ * index its erasure deletes by. One that does not read as this store's
+ * request to this person, a page or reply of another shape, or a walk not
+ * at its end after COPY_PAGES_MAX pages, throws, so the copy fails
+ * (lib/person-copy.ts, copyPerson) rather than being handed over with a
+ * request silently missing.
+ */
+export async function requestsOfPersonWhole(store: Pick<Store, "sid">, email: string): Promise<PaymentRequest[]> {
+  if (!isRedisConfigured() || !store.sid) throw new Error("a person's payment requests cannot be read here");
+  const person = personSet(store.sid, email);
+  const sized = copyReply.repliesFor(await redisPipeline([["SCARD", person]]), 1);
+  const size = sized ? copyReply.countOf(sized[0]) : null;
+  if (size === null) throw new copyReply.UnknownReplyError("the count of a person's payment requests");
+  if (size > COPY_MEMBERS_MAX) throw new Error(`a person's payment requests are more than the ${COPY_MEMBERS_MAX} their copy reads`);
+  if (size === 0) return [];
+  const seen = new Set<string>();
+  const out: PaymentRequest[] = [];
+  let cursor = "0";
+  for (let round = 0; round < COPY_PAGES_MAX; round += 1) {
+    const page = copyReply.scanPage(await redisPipeline([["SSCAN", person, cursor, "COUNT", COPY_PAGE_MEMBERS]]));
+    if (!page || !page.items.every((id) => ID_PATTERN.test(id))) throw new copyReply.UnknownReplyError("a page of a person's payment requests");
+    const fresh = [...new Set(page.items)].filter((id) => !seen.has(id));
+    for (const id of fresh) seen.add(id);
+    if (seen.size > COPY_MEMBERS_MAX) throw new Error(`a person's payment requests are more than the ${COPY_MEMBERS_MAX} their copy reads`);
+    for (let at = 0; at < fresh.length; at += COPY_PAGE_MEMBERS) {
+      const ids = fresh.slice(at, at + COPY_PAGE_MEMBERS);
+      const read = copyReply.repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
+      const values = read ? copyReply.listSlots(read[0]) : null;
+      if (!values || values.length !== ids.length) throw new copyReply.UnknownReplyError("a person's payment requests' records");
+      out.push(...personsRequests(store.sid, email, ids, values));
+    }
+    cursor = page.next;
+    if (cursor === "0") return out.sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1));
+  }
+  throw new copyReply.UnknownReplyError(`a person's payment requests, not at their end after ${COPY_PAGES_MAX} pages,`);
 }
 
 /** How many of the store's requests are open now. */

@@ -345,7 +345,7 @@ export const ADDRESS_LINKS_END = Date.parse("2026-11-09T00:00:00.000Z");
  * the address before. Its current address since its last rename (renamedAt) or since it was made (createdAt);
  * an address it used before, since before its last rename at the latest. A store without an id yet is only ever
  * sent such links, and holds the address it had before ids. A time missing from a record older than the field is
- * before; one that does not read is not known, and the link changes nothing (there is a newer link, and a reply).
+ * before; one that does not read is not known, and the link changes nothing (the newest email has a link that does).
  * One case stays out of reach: an address let go of and taken again before ADDRESS_LINKS_END, as on main before.
  */
 export function addressLinkHolds(store: Pick<Store, "sid" | "handle" | "previousHandles" | "createdAt" | "renamedAt">, handle: string): boolean {
@@ -416,33 +416,48 @@ const ownedAddresses = (store: TeamOwner): string[] =>
   [...new Set([store.handle, ...[...(store.previousHandles ?? [])].reverse()].filter((h) => typeof h === "string" && h !== ""))];
 
 /**
- * Who the owner chose, read exactly (CX-123 rule 24) in one pipeline of at most three commands: the list kept by
- * the store's id; while there is none, a list written before under its current address; while there is neither,
- * the ones under the addresses it still owns (SUNION). Never under an address it let go of: that one is carried
- * to the id before it goes (carryWeeklyTeam). Any answer of another shape throws, never "nobody".
+ * Kept in the id's list beside the addresses, so a list the owner set, even an empty one, is told apart from no list
+ * at all: a set Redis holds cannot be empty, and an empty list read as "none" would bring back one written before.
+ * Never an email address (no "@"), so never sent to.
+ */
+const LIST_SET = ":set";
+
+const membersOf = (list: string[]): string[] =>
+  [...new Set(list.filter((e) => e !== LIST_SET).map((e) => e.trim().toLowerCase()))].sort().slice(0, MAX_WEEKLY_TEAM);
+
+/**
+ * Who the owner chose, read exactly (CX-123 rule 24) in one pipeline of at most two commands: the list kept by the
+ * store's id once it is set there (LIST_SET); until then, the list written before under its current address, the
+ * only one the code before read. Never one under an address the store used before (pre-review P2 of
+ * claude5/email-stop-by-sid-2): after a rename there the owner chose again under the new address, so an older list
+ * read now would bring back members taken out or stopped since. A rename sets the list by the id first
+ * (keepWeeklyTeamById), so a rename loses nobody. Any answer of another shape throws, never "nobody".
  */
 export async function weeklyTeam(store: TeamOwner): Promise<string[]> {
   if (!isRedisConfigured()) return [];
   const sid = teamIdOf(store);
-  const [current, ...before] = ownedAddresses(store).map(addressTeamKey);
-  const commands = [...(sid ? [["SMEMBERS", teamKey(sid)]] : []), ...(current ? [["SMEMBERS", current]] : []), ...(before.length ? [["SUNION", ...before]] : [])];
+  const current = typeof store.handle === "string" && store.handle !== "" ? addressTeamKey(store.handle) : null;
+  const commands = [...(sid ? [["SMEMBERS", teamKey(sid)]] : []), ...(current ? [["SMEMBERS", current]] : [])];
   if (!commands.length) return [];
   const replies = repliesFor(await redisPipeline(commands), commands.length);
   const lists = replies?.map(stringList);
   if (!lists || lists.some((list) => list === null)) throw new UnknownReplyError("who gets the weekly email");
-  const chosen = (lists as string[][]).find((list) => list.length > 0) ?? [];
-  return [...new Set(chosen.map((e) => e.trim().toLowerCase()))].sort().slice(0, MAX_WEEKLY_TEAM);
+  const [first, second] = lists as string[][];
+  if (sid && first.includes(LIST_SET)) return membersOf(first);
+  return membersOf(sid ? second ?? [] : first);
 }
 
-/** The owner's choice, kept by the store's id; a list written before under any address it owns is taken out with it. */
+/** The owner's choice, kept by the store's id and marked set (LIST_SET); a list written before under any address it owns is taken out with it. */
 export async function setWeeklyTeam(store: TeamOwner, emails: string[]): Promise<void> {
   if (!isRedisConfigured()) return;
   const sid = teamIdOf(store);
   if (!sid) throw new Error("a store without an id keeps no team list");
-  const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))].slice(0, MAX_WEEKLY_TEAM);
+  const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter((e) => e !== "" && e !== LIST_SET))].slice(0, MAX_WEEKLY_TEAM);
   const keys = [teamKey(sid), ...ownedAddresses(store).map(addressTeamKey)];
-  const replies = await redisPipeline([["DEL", ...keys], ...(clean.length ? [["SADD", teamKey(sid), ...clean]] : [])]);
-  confirmedWrite(replies, clean.length ? [keys.length, clean.length] : [keys.length], "who gets the weekly email");
+  // DEL and SADD are each one command, so each is whole; should the SADD be refused after the DEL, nobody gets a
+  // copy (never somebody taken out) and the owner is told it was not saved.
+  const replies = await redisPipeline([["DEL", ...keys], ["SADD", teamKey(sid), LIST_SET, ...clean]]);
+  confirmedWrite(replies, [keys.length, clean.length + 1], "who gets the weekly email");
 }
 
 /** A member's own stop: their address out of the list, wherever the store's list is kept. */
@@ -451,28 +466,41 @@ export async function leaveWeeklyTeam(store: TeamOwner, email: string): Promise<
   const sid = teamIdOf(store);
   const keys = [...(sid ? [teamKey(sid)] : []), ...ownedAddresses(store).map(addressTeamKey)];
   const address = email.trim().toLowerCase();
+  if (address === LIST_SET) return;
   confirmedWrite(await redisPipeline(keys.map((key) => ["SREM", key, address])), keys.map(() => 1), "a team member's weekly email stop");
 }
 
 /**
- * Before the store lets go of `handle` (app/api/store/release/route.ts): a list still kept under that address is
- * carried to the store's id as the store reads it now, and every list under its addresses is taken out, so the
- * store keeps it and the next store at the address does not inherit it. One EXISTS, and only when there is one,
- * the read and one write. Any answer of another shape throws UnknownReplyError, so nothing is let go on it.
+ * Before the store's address changes (app/api/store/rename/route.ts): the list it reads now, while still kept under
+ * its current address, goes to its id, so a rename loses nobody. One SISMEMBER; when the id's list is not set yet,
+ * a SADD of the mark into the address's list, confirmed, then one RENAME, which moves the whole list to the id at
+ * once (a pipeline is not atomic; RENAME is one command, so the list is never in neither place). With no list under
+ * the address the mark alone makes an empty list, set, so a list left under the next address is never read. Any
+ * answer of another shape throws UnknownReplyError, and the route renames nothing on it. Three commands at most.
  */
-export async function carryWeeklyTeam(store: TeamOwner, handle: string): Promise<void> {
-  if (!isRedisConfigured() || handle === store.handle || !(store.previousHandles ?? []).includes(handle)) return;
-  const there = repliesFor(await redisPipeline([["EXISTS", addressTeamKey(handle)]]), 1);
-  const flag = there ? countOf(there[0]) : null;
-  if (flag !== 0 && flag !== 1) throw new UnknownReplyError("a team list under an address about to be let go (EXISTS)");
-  if (flag === 0) return;
+export async function keepWeeklyTeamById(store: TeamOwner): Promise<void> {
+  if (!isRedisConfigured()) return;
   const sid = teamIdOf(store);
-  if (!sid) {
-    // No id, no team copy is sent (the weekly job sends to a team only with one): the address's list just goes.
-    confirmedWrite(await redisPipeline([["DEL", addressTeamKey(handle)]]), [1], "a team list under an address let go of");
-    return;
-  }
-  await setWeeklyTeam(store, await weeklyTeam(store));
+  // No id, no team copy is sent (the weekly job sends to a team only with one), so there is nothing to keep.
+  if (!sid || typeof store.handle !== "string" || store.handle === "") return;
+  const set = repliesFor(await redisPipeline([["SISMEMBER", teamKey(sid), LIST_SET]]), 1);
+  const flag = set ? countOf(set[0]) : null;
+  if (flag !== 0 && flag !== 1) throw new UnknownReplyError("whether the team list is kept by the store's id (SISMEMBER)");
+  if (flag === 1) return;
+  const from = addressTeamKey(store.handle);
+  confirmedWrite(await redisPipeline([["SADD", from, LIST_SET]]), [1], "the team list marked set before it moves to the store's id");
+  const moved = repliesFor(await redisPipeline([["RENAME", from, teamKey(sid)]]), 1);
+  if (!moved || moved[0] !== "OK") throw new UnknownReplyError("the team list moved to the store's id (RENAME)");
+}
+
+/**
+ * Before the store lets go of `handle` (app/api/store/release/route.ts): a list under that address is never read
+ * (weeklyTeam reads the id's or the current address's), so it is taken out, and the next store at the address
+ * does not inherit it. One DEL; any answer of another shape throws UnknownReplyError, so nothing is let go on it.
+ */
+export async function forgetWeeklyTeamAt(store: TeamOwner, handle: string): Promise<void> {
+  if (!isRedisConfigured() || handle === store.handle || !(store.previousHandles ?? []).includes(handle)) return;
+  confirmedWrite(await redisPipeline([["DEL", addressTeamKey(handle)]]), [1], "a team list under an address let go of");
 }
 
 /** A team member's stop link token signed for an address, as before 9 November 2026 (see weeklyToken). */

@@ -122,7 +122,7 @@ async function main() {
   await setWeeklyTeam(store, [MEMBER]);
   is("healthy set: kept", await weeklyTeam(store), [MEMBER]);
   await setWeeklyTeam(store, []);
-  is("healthy empty set (DEL alone): nobody", await weeklyTeam(store), []);
+  is("healthy empty set (DEL, then the mark alone): nobody", await weeklyTeam(store), []);
   const TEAM_UNKNOWN: [string, unknown][] = [
     ["no reply at all", []],
     ["one reply for two commands", [1]],
@@ -134,7 +134,9 @@ async function main() {
     ["SADD answered undefined", [1, undefined]],
     ["SADD answered an object", [1, {}]],
     ["SADD answered minus one", [1, -1]],
-    ["SADD answered two for one member", [1, 2]],
+    // Rule 23: the SADD now writes the mark that the list is set (LIST_SET) beside the one member, so 2 is valid;
+    // the case is three for two (the red version: two for one member).
+    ["SADD answered three for two members", [1, 3]],
   ];
   for (const [name, whole] of TEAM_UNKNOWN) {
     redis.pipeline = real;

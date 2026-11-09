@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { normaliseHandle, releaseHandle } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { carryStops } from "@/lib/store-stop";
-import { WEEKLY_OFF_SET, carryWeeklyTeam } from "@/lib/stats-report";
+import { WEEKLY_OFF_SET, forgetWeeklyTeamAt } from "@/lib/stats-report";
 import { HEARD_OFF_SET } from "@/lib/heard";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
@@ -22,8 +22,9 @@ export async function POST(request: NextRequest) {
     // A stop the creator wrote while this address was the store's (the numbers emails, the question after paying)
     // goes to the store's id first: an address let go of is never read for its stops (lib/store-stop.ts).
     await carryStops([WEEKLY_OFF_SET, HEARD_OFF_SET], store, normaliseHandle(handle));
-    // Who on the team gets the weekly email, if still kept under this address, goes to the store's id the same way.
-    await carryWeeklyTeam(store, normaliseHandle(handle));
+    // A team list still under this address is never read (the store's is kept by its id or its current address):
+    // it is taken out, so the next store at the address does not inherit it.
+    await forgetWeeklyTeamAt(store, normaliseHandle(handle));
     const result = await releaseHandle(ref, handle);
     if (!result.ok) {
       return Response.json(

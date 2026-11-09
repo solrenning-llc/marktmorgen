@@ -1268,6 +1268,22 @@ export class MemoryRedis {
       }
       case "EXISTS":
         return this.data.has(key) ? 1 : 0;
+      case "RENAME": {
+        // A key moved whole, with its time to live, over whatever the new name held: "OK", or Redis's error when
+        // there is no such key (lib/stats-report.ts, keepWeeklyTeamById).
+        if (args.length !== 1) throw new Error("ERR wrong number of arguments for 'rename' command");
+        this.live(key);
+        const held = this.data.get(key);
+        if (held === undefined) throw new Error("ERR no such key");
+        const to = args[0];
+        const ends = this.until.get(key);
+        this.data.delete(key);
+        this.until.delete(key);
+        this.data.set(to, held);
+        this.until.delete(to);
+        if (ends !== undefined) this.until.set(to, ends);
+        return "OK";
+      }
       case "DUMP": {
         // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key
         // name or its time to live, as DUMP's is; RESTORE below is the only reader of it. Null for a missing key.

@@ -12,9 +12,11 @@
  *    may have taken it after another store let it go.
  * 2. Who on the team gets the weekly email (nl:weekly:to:<address>) was lost
  *    when the store was renamed: the members stopped getting it. It is now kept
- *    by the store's id, a list written before under an address the store still
- *    owns is still read, and one under an address it lets go of goes to the id
- *    first, so the next store at that address never inherits it.
+ *    by the store's id, marked set; a list written before is read under the
+ *    current address only (as before), moved whole to the id before a rename,
+ *    and one under an address used before is never read (after a rename on main
+ *    the owner chose again, so it would bring back members taken out since) and
+ *    is taken out before that address is let go, so no other store inherits it.
  *
  * Synthetic data only; no request leaves the process.
  */

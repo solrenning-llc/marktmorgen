@@ -1024,6 +1024,9 @@ async function actOnDeals(
   return out;
 }
 
+/** What a step waiting on a store switched off after notices says (sendDueSteps). */
+const SWITCHED_OFF_WAIT = "Waiting: your store is switched off after notices about its content. It goes on by itself once your store is back on.";
+
 /**
  * People at a step that has to wait: each wait is counted on their run, and
  * each is tried again when lib/flow-retry.ts says, or stops there with
@@ -1207,6 +1210,20 @@ export async function sendDueSteps(
         const note = !flow.active ? "The workflow was paused, so this run ended here." : !step ? "This step was removed from the workflow, so this run ended here." : "Email is not part of this store's plan now, so this run ended here.";
         await noteRuns(flow.id, emails.map((email) => ({ email, index, stepId: step?.id ?? "", kind: "run", state: "ended" as const, note, to: -1, status: "ended" as const })), now).catch(() => {});
       }
+      return;
+    }
+    // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule
+    // 24): no step is done, an email or an action. Each waits as every other wait does (waitOrStop: counted on the
+    // run, tried again a day later, MAX_WAITS_PER_RUN times at the most, then the run stops, saying why), queued only
+    // while its lease entry is still there. Nothing is claimed, so an attempt an earlier try left open stays open.
+    if (store.suspended) {
+      const waiting = await waitOrStop(flow.id, group, index, emails.map((email) => ({ email, reason: "switched_off" as const, note: SWITCHED_OFF_WAIT })), now);
+      const out = await queueHeld(waiting.queue);
+      const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
+      counts.later += later;
+      counts.dropped += emails.length - later;
+      const ended = waiting.outcomes.filter((o) => o.state === "failed");
+      await noteRuns(flow.id, ended.map((o) => ({ email: o.email, index, stepId: step.id, kind: step.action ? step.action.do : "email", state: "ended" as const, note: o.note, to: -1, status: "ended" as const })), now).catch((error) => console.error("writing workflow history failed", error));
       return;
     }
     // With the rows, who still holds this step's lease entry. Taken out by another workflow's step since this batch was

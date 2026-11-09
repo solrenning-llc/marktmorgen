@@ -28,7 +28,8 @@ export function LessonNotesKept({ handle, product, language = "en" }: { handle: 
 
   useEffect(() => {
     if (step === "asking") keep.current?.focus();
-    else if (step === "done" || step === "failed" || step === "slow") said.current?.focus();
+    // While deleting, the question and its focused button are gone: focus goes to the status that says so (N3).
+    else if (step === "busy" || step === "done" || step === "failed" || step === "slow") said.current?.focus();
     else if (step === "idle" && back.current) {
       back.current = false;
       opener.current?.focus();

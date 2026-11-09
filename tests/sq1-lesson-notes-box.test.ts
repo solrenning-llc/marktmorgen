@@ -10,7 +10,10 @@
  *       leaving the page stays guarded until it is saved;
  *   L5  a refusal that trying again cannot help (closed) says what to do;
  *   L6  deleting a whole note offers to undo it;
- *   L7  the count is not spoken before the student types.
+ *   L7  the count is not spoken before the student types;
+ *   N3  on the ended course's page (components/lesson-notes-kept.tsx), focus
+ *       never falls to the page while the course's notes are being deleted
+ *       (Claude 6's LEVE N3 on #3031, comment 6732128148).
  */
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
@@ -191,4 +194,72 @@ async function main() {
   }
 }
 
-main().then(done);
+/** components/lesson-notes-kept.tsx under the same minimal hook runtime: which of its refs was focused, in order. */
+async function keptFocus(): Promise<void> {
+  part("N3: focus never falls to the page while the course's notes are deleted");
+  const code = transpileModule(readFileSync("components/lesson-notes-kept.tsx", "utf8"), { compilerOptions: { module: ModuleKind.CommonJS, jsx: JsxEmit.ReactJSX } }).outputText;
+  const slots: unknown[] = [];
+  const focused: number[] = [];
+  let at = 0;
+  let pending: (() => void)[] = [];
+  let answer: ((r: { json: () => Promise<unknown> }) => void) | null = null;
+  const exports: { LessonNotesKept?: (props: unknown) => El } = {};
+  const react = {
+    useState(init: unknown) {
+      const k = at++;
+      if (!(k in slots)) slots[k] = init;
+      return [slots[k], (next: unknown) => { slots[k] = next; render(); }];
+    },
+    // An element's ref (null at first) stands for the element: focusing it is recorded by its hook's place.
+    useRef(init: unknown) {
+      const k = at++;
+      if (!(k in slots)) slots[k] = { current: init === null ? { focus: () => focused.push(k) } : init };
+      return slots[k];
+    },
+    useEffect(fn: () => unknown, deps: unknown[]) {
+      const k = at++;
+      const prev = slots[k] as { deps: unknown[] } | undefined;
+      if (!prev || deps.some((d, j) => !Object.is(d, prev.deps[j]))) pending.push(() => { slots[k] = { deps }; fn(); });
+    },
+  };
+  runInNewContext(code, {
+    exports,
+    fetch: () => new Promise((resolve) => { answer = resolve; }),
+    require: (name: string) => {
+      if (name === "react") return react;
+      if (name === "react/jsx-runtime") { const jsx = (type: unknown, props: Record<string, unknown>) => ({ type, props }); return { jsx, jsxs: jsx, Fragment: "fragment" }; }
+      if (name === "@/lib/buyer-words/lesson-notes") return words;
+      throw Error("Unexpected dependency " + name);
+    },
+  });
+  let tree!: El;
+  function render() {
+    at = 0;
+    pending = [];
+    tree = exports.LessonNotesKept!({ handle: "shop", product: "prod", language: "en" });
+    for (const run of pending) run();
+  }
+  render();
+  const all = (node: unknown, out: El[] = []): El[] => {
+    if (Array.isArray(node)) node.forEach((n) => all(n, out));
+    else if (node && typeof node === "object" && "props" in node) { out.push(node as El); all((node as El).props.children, out); }
+    return out;
+  };
+  const text = (node: unknown): string => Array.isArray(node) ? node.map(text).join("") : typeof node === "string" ? node : node && typeof node === "object" && "props" in node ? text((node as El).props.children) : "";
+  const button = (said: string) => all(tree).find((e) => e.type === "button" && text(e.props.children) === said);
+  const status = all(tree).find((e) => e.props.role === "status");
+  const statusRef = status?.props.ref as { current: { focus: () => void } } | undefined;
+  const placeOf = (ref: unknown) => slots.indexOf(ref);
+  (button(en.clearAll)!.props.onClick as () => void)();
+  const keepRef = button(en.clearNo)?.props.ref;
+  is("setup: asking moves focus to keeping the notes", focused.at(-1), placeOf(keepRef));
+  const yes = button(en.clearYes);
+  const deleting = (yes!.props.onClick as () => Promise<void>)();
+  is("while deleting, the question (and the focused button) is gone", [button(en.clearYes), text(all(tree).find((e) => e.props.role === "status")?.props.children)], [undefined, en.clearing]);
+  is("and focus is on the status that says Deleting…, not on the page", focused.at(-1), placeOf(statusRef));
+  answer!({ json: async () => ({ ok: true }) });
+  await deleting;
+  is("once deleted, focus stays on the status that says so", [focused.at(-1), text(all(tree).find((e) => e.props.role === "status")?.props.children)], [placeOf(statusRef), en.clearedAll]);
+}
+
+main().then(keptFocus).then(done);

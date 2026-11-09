@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { cookies } from "next/headers";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { ensureListId, normaliseHandle, storeForHandle, storeRef } from "@/lib/store";
 import { findLesson, isOpen, lessonsInOrder, readCourse } from "@/lib/course";
 import { readCourseListing } from "@/lib/catalog";
 import { courseAccess } from "@/lib/learn";
@@ -77,6 +77,10 @@ export async function POST(request: NextRequest) {
   if (!(await withinLimit("lesson-note", who, NOTE_SAVES_PER_HOUR, 3_600))) return no("slow", 429);
   // A save is one of the store's buyer actions (lib/buyer-actions.ts).
   if (!(await takeBuyerAction(store))) return no("resting", 503);
+  // Without a list, a deleted person's print could not be checked by the save: the store is given its list first, as
+  // the erasure does before writing the print (lib/person-erasure.ts erasureScope; Claude 6's LEVE N2a on #3031).
+  const listId = store.listId || (await ensureListId(storeRef(store)))?.listId;
+  if (!listId) return no("unavailable", 503);
 
   const saved = await saveNote({
     statsId: store.statsId,
@@ -87,7 +91,7 @@ export async function POST(request: NextRequest) {
     was: body.was,
     room: store,
     // A save on its way while the person is deleted writes nothing (Claude 2's review of #3031, M3).
-    erasure: { listId: store.listId, email: access.learner.email },
+    erasure: { listId, email: access.learner.email },
   });
   if (saved.ok) return Response.json({ ok: true, text: saved.text }, { headers: NO_STORE });
   const status = saved.reason === "invalid" || saved.reason === "too_long" ? 400 : saved.reason === "unknown" ? 503 : 409;

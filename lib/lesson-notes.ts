@@ -26,7 +26,8 @@
  * shorter or emptied note is always taken, and gives its room back. The rest
  * of the room always stays the creator's, who can neither see nor delete
  * students' notes. A count that cannot be read refuses a new or longer note
- * and never blocks an emptying.
+ * and never blocks an emptying, and nothing is given back to it: it stays as
+ * it is, so it keeps refusing growth (Claude 6's MÉDIO N1 on #3031).
  *
  * One step, never two. A save names the note it started from (`was`); the
  * script writes only while the note kept is exactly the one the save read,
@@ -81,11 +82,23 @@ export const TALLY_BYTES = dataBytes([TALLY, "9999999999"], 1);
 /** What one note weighs in the data room: its field, its stored value and its entry. */
 const noteBytes = (field: string, value: string) => dataBytes([field, value], 1);
 
-/** The data room's own steps (TAKE_DATA) for the notes' slot, grown or shrunk by `bytes`, inside a script whose KEYS[1] is the room. */
+/**
+ * The data room's own steps (TAKE_DATA) for the notes' slot, grown or shrunk by `bytes`, inside a script whose KEYS[1]
+ * is the room; and the notes' count in it read exactly (noteCount): absent is 0, anything but a whole number is nil.
+ * TAKE_DATA reads a slot it cannot read as 0 and deletes it once shrunk to 0, so a count that cannot be read is never
+ * given to it: a shortened, emptied or deleted note then gives nothing back, and the count stays as it is, refusing
+ * growth (Claude 6's MÉDIO N1 on #3031, comment 6732128148).
+ */
 const NOTE_ROOM = `local function noteRoom(limit, always, month, bytes)
   local KEYS = {KEYS[1]}
   local ARGV = {limit, always, month, 'a', '${NOTES_SLOT}', bytes}
 ${TAKE_DATA}
+end
+local function noteCount()
+  local raw = redis.call('HGET', KEYS[1], '${NOTES_SLOT}')
+  if not raw then return 0 end
+  if raw ~= '0' and not string.match(raw, '^[1-9]%d*$') then return nil end
+  return tonumber(raw)
 end`;
 
 /**
@@ -103,7 +116,9 @@ end`;
  * {4, 0} the student's own weight passed; {5, 0} the notes' share of the room
  * full ("notes_full"); {-1, 0} what it cannot read, the notes' count in the
  * room among it (absent is none yet; anything but a whole number is unknown,
- * never zero). Modelled by lib/redis-memory.ts.
+ * never zero). A shorter or emptied note under a count that cannot be read is
+ * still written, gives nothing back and leaves the count as it is (it keeps
+ * refusing growth; N1): {1, the room's total}. Modelled by lib/redis-memory.ts.
  */
 export const NOTE_SAVE = `-- marktmorgen:lesson-note-save:v1
 ${NOTE_ROOM}
@@ -139,18 +154,19 @@ local now = had - oldB + newB
 if now < 0 then return {-1, 0} end
 local delta = newB - oldB
 if had == 0 and now > 0 then delta = delta + tally elseif had > 0 and now == 0 then delta = delta - tally end
+local all = noteCount()
 if delta > 0 then
   if now > mine then return {4, 0} end
-  local raw = redis.call('HGET', KEYS[1], '${NOTES_SLOT}')
-  local all = 0
-  if raw then
-    if raw ~= '0' and not string.match(raw, '^[1-9]%d*$') then return {-1, 0} end
-    all = tonumber(raw)
-  end
+  if not all then return {-1, 0} end
   if all + delta > share then return {5, 0} end
 end
-local taken = noteRoom(ARGV[1], '0', ARGV[2], tostring(delta))
-if taken[1] ~= 1 then return taken end
+local taken
+if all then
+  taken = noteRoom(ARGV[1], '0', ARGV[2], tostring(delta))
+  if taken[1] ~= 1 then return taken end
+else
+  taken = {1, tonumber(redis.call('HGET', KEYS[1], '#') or '0') or 0}
+end
 if json == '' then redis.call('HDEL', KEYS[2], field) else redis.call('HSET', KEYS[2], field, json) end
 if now > 0 then redis.call('HSET', KEYS[2], '${TALLY}', tostring(now)) else redis.call('HDEL', KEYS[2], '${TALLY}') end
 return taken`;
@@ -161,7 +177,8 @@ return taken`;
  * room, in one step. The notes are always deleted: only giving their weight
  * back depends on the tally, and a tally that cannot be read gives nothing
  * back (the room stays fuller than it is, never storage unpaid; third review
- * of #3031, M1). Answers {notes deleted, the room's answer, -1 for a weight
+ * of #3031, M1), and so does a notes' count in the room that cannot be read,
+ * left as it is (N1). Answers {notes deleted, the room's answer, -1 for a weight
  * not given back}, or {-1, 0} for arguments it cannot read (nothing deleted).
  * Modelled by lib/redis-memory.ts.
  */
@@ -178,6 +195,7 @@ if not sum then return {n, 1} end
 local had = tonumber(sum)
 if not had or had < 0 or had ~= math.floor(had) then return {n, -1} end
 if had == 0 then return {n, 1} end
+if not noteCount() then return {n, -1} end
 local taken = noteRoom(ARGV[1], '1', ARGV[2], tostring(-(had + tally)))
 return {n, taken[1]}`;
 
@@ -190,7 +208,8 @@ return {n, taken[1]}`;
  * counts UTF-8 bytes), in one step: a student may empty their notes also once
  * their access has ended (third review of #3031, M2). The notes are always
  * deleted; their weight is given back only when the tally can be read and
- * holds it (else the room stays fuller). Answers {notes deleted, the room's
+ * holds it, and the notes' count in the room can be read (else the room stays
+ * fuller and the count is left as it is, N1). Answers {notes deleted, the room's
  * answer, -1 for a weight not given back}, or {-1, 0} for arguments it cannot
  * read (nothing deleted). Modelled by lib/redis-memory.ts.
  */
@@ -221,6 +240,7 @@ if left == 0 then
 else
   redis.call('HSET', KEYS[2], '${TALLY}', tostring(left))
 end
+if not noteCount() then return {#gone, -1} end
 local taken = noteRoom(ARGV[1], '1', ARGV[2], tostring(-back))
 return {#gone, taken[1]}`;
 

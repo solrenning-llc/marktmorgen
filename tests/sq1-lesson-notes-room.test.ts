@@ -18,7 +18,13 @@
  *       blocks an emptying;
  *   R5  deleting the person gives the notes' room back to the notes' count;
  *   R6  the studio line, and the student's sentence in the store's seven
- *       languages, announced in the box's live region.
+ *       languages, announced in the box's live region;
+ *   R7  an unknown count is left as it is by a shortened or emptied note, a
+ *       course's notes deleted and the person deleted: the notes still go,
+ *       nothing is given back to a count that cannot be read, and a new note
+ *       is still refused afterwards (Claude 6's MÉDIO N1 on #3031, comment
+ *       6732128148: the room's own steps read it as 0 and deleted it, so the
+ *       notes then grew again from 0 past the tenth).
  *
  * Rule 23 (merge of #3031's two fix branches): every student's notes are
  * counted in one slot of the room (lib/lesson-notes.ts NOTES_SLOT, the room's
@@ -30,7 +36,7 @@
 import { readFileSync } from "node:fs";
 import { emailKey } from "@/lib/learn";
 import * as notesLib from "@/lib/lesson-notes";
-import { TALLY_BYTES, forgetLessonNotesPerson, readNote, saveNote } from "@/lib/lesson-notes";
+import { TALLY_BYTES, clearCourseNotes, forgetLessonNotesPerson, readNote, saveNote } from "@/lib/lesson-notes";
 import * as dataLib from "@/lib/store-data";
 import { takeData, type DataStore } from "@/lib/store-data";
 import * as rulesLib from "@/lib/store-data-rules";
@@ -228,6 +234,44 @@ async function erasure(): Promise<void> {
   is("what is left is far below one big note", left < 16_000, true);
 }
 
+async function unknownCountKept(): Promise<void> {
+  part("R7: an unknown count is never given back to, so it keeps refusing a new note");
+  const field = typeof data.NOTES_TOTAL_FIELD === "string" ? data.NOTES_TOTAL_FIELD : "ln#";
+  const OTHER = "d".repeat(32);
+  for (const bad of ["garbage", "-5", "1.5", ""]) {
+    await clear();
+    const who = emailKey("r7-who@example.com");
+    const gone = emailKey("r7-gone@example.com");
+    const late = emailKey("r7-late@example.com");
+    for (let n = 0; n < 3; n++) {
+      await saveNote({ statsId: STATS, learner: who, courseId: COURSE, lessonId: lessonId(n), text: `Note ${n}, kept before the count broke.`, was: "", room: SHOP });
+      await saveNote({ statsId: STATS, learner: who, courseId: OTHER, lessonId: lessonId(n), text: `Other course ${n}.`, was: "", room: SHOP });
+    }
+    await saveNote({ statsId: STATS, learner: gone, courseId: COURSE, lessonId: lessonId(0), text: "A note of a person then deleted.", was: "", room: SHOP });
+    await real([["HSET", ROOM_KEY, field, bad]]);
+    const [total] = await real([["HGET", ROOM_KEY, "#"]]);
+    const label = JSON.stringify(bad);
+    const refused = async (step: string, n: number) => {
+      const [slot] = await real([["HGET", ROOM_KEY, field]]);
+      const added = await saveNote({ statsId: STATS, learner: late, courseId: COURSE, lessonId: lessonId(20 + n), text: "A new note.", was: "", room: SHOP });
+      is(`${label}, after ${step}: the count is left as it was, and a new note is still refused as unknown`, [slot, added.ok ? "saved" : added.reason], [bad, "unknown"]);
+    };
+    const shrunk = await saveNote({ statsId: STATS, learner: who, courseId: COURSE, lessonId: lessonId(0), text: "Short.", was: "Note 0, kept before the count broke.", room: SHOP });
+    is(`${label}: a note may still be shortened`, [shrunk.ok, (await readNote(STATS, who, COURSE, lessonId(0))).state], [true, "kept"]);
+    await refused("a shortened note", 0);
+    const emptied = await saveNote({ statsId: STATS, learner: who, courseId: COURSE, lessonId: lessonId(1), text: "", was: "Note 1, kept before the count broke.", room: SHOP });
+    is(`${label}: a note may still be emptied, and it is gone`, [emptied.ok, (await readNote(STATS, who, COURSE, lessonId(1))).state], [true, "none"]);
+    await refused("an emptied note", 1);
+    is(`${label}: a course's notes are still deleted`, await clearCourseNotes(STATS, who, OTHER, SHOP), 3);
+    await refused("a course's notes deleted", 2);
+    is(`${label}: deleting the person still deletes their notes`, await forgetLessonNotesPerson(STATS, gone, SHOP), 1);
+    await refused("the person deleted", 3);
+    // Nothing is given back while the count cannot be read: the room stays fuller than it is, never storage unpaid.
+    const [after] = await real([["HGET", ROOM_KEY, "#"]]);
+    is(`${label}: the room's total is never lowered by what could not be counted`, Number(after) >= Number(total), true);
+  }
+}
+
 function studio(): void {
   part("R6: the studio line, and the student's sentence");
   const line = rules.studentNotesLine as ((used: number | null, room: number) => string) | undefined;
@@ -254,6 +298,7 @@ void (async () => {
   await race();
   await unknownCount();
   await erasure();
+  await unknownCountKept();
   studio();
   done();
 })();

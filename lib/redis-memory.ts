@@ -1035,14 +1035,16 @@ export class MemoryRedis {
           let delta = newB - oldB;
           if (had === 0 && now > 0) delta += tally;
           else if (had > 0 && now === 0) delta -= tally;
+          // The notes' count in the room, read exactly: absent is none yet, anything but a whole number is unknown.
+          const all = this.noteCount(this.run(["HGET", room, NOTES_TOTAL_FIELD]));
           if (delta > 0) {
             if (now > mine) return [4, 0];
-            // The notes' count in the room, read exactly: absent is none yet, anything but a whole number is unknown.
-            const all = this.noteCount(this.run(["HGET", room, NOTES_TOTAL_FIELD]));
             if (all === null) return [-1, 0];
             if (all + delta > share) return [5, 0];
           }
-          const taken = this.storeData([room, limit, "0", month, "a", NOTES_TOTAL_FIELD, String(delta)]);
+          // An unknown count is never given to the room's steps (which read it as 0 and delete it): a shorter or
+          // emptied note gives nothing back and the count stays, refusing growth (N1 on #3031).
+          const taken = all === null ? [1, Number(this.run(["HGET", room, "#"]) ?? "0") || 0] : this.storeData([room, limit, "0", month, "a", NOTES_TOTAL_FIELD, String(delta)]);
           if (!Array.isArray(taken) || taken[0] !== 1) return taken;
           if (json === "") this.run(["HDEL", notes, field]);
           else this.run(["HSET", notes, field, json]);
@@ -1062,6 +1064,7 @@ export class MemoryRedis {
           const had = Number(sum);
           if (!Number.isInteger(had) || had < 0) return [n, -1];
           if (had === 0) return [n, 1];
+          if (this.noteCount(this.run(["HGET", room, NOTES_TOTAL_FIELD])) === null) return [n, -1];
           const taken = this.storeData([room, limit, "1", month, "a", NOTES_TOTAL_FIELD, String(-(had + tally))]);
           return [n, Array.isArray(taken) ? taken[0] : -1];
         }
@@ -1088,6 +1091,7 @@ export class MemoryRedis {
             back += tally;
             this.run(["HDEL", notes, "#"]);
           } else this.run(["HSET", notes, "#", String(left)]);
+          if (this.noteCount(this.run(["HGET", room, NOTES_TOTAL_FIELD])) === null) return [gone.length, -1];
           const taken = this.storeData([room, limit, "1", month, "a", NOTES_TOTAL_FIELD, String(-back)]);
           return [gone.length, Array.isArray(taken) ? taken[0] : -1];
         }
@@ -1898,7 +1902,7 @@ export class MemoryRedis {
     return [charged, ...replies];
   }
 
-  /** lib/lesson-notes.ts NOTE_SAVE: the notes' count in a room read exactly; absent is 0, anything but a whole number is unknown (null). */
+  /** lib/lesson-notes.ts NOTE_ROOM noteCount: the notes' count in a room read exactly; absent is 0, anything but a whole number is unknown (null). */
   private noteCount(value: unknown): number | null {
     if (value === null || value === undefined) return 0;
     if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;

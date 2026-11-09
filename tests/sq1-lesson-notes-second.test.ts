@@ -230,7 +230,9 @@ function promises(): void {
   const privacy = read("app/privacy/page.tsx");
   is("the policy no longer promises the download 'at any time'", /notes as a text file at any time/.test(privacy), false);
   is("the policy says the notes stay after access ends until the student empties them or is deleted", /after their access to the course ends/.test(privacy), true);
-  is("the route saves with the store's list and the student's address, so a save on its way during an erasure writes nothing", /erasure: \{ listId: store\.listId, email: access\.learner\.email \}/.test(route), true);
+  // Rule 23 (Claude 6's LEVE N2a on #3031, comment 6732128148): a store without a list is given one before the save, as
+  // the erasure does before writing the print, so the print is always checked; the save then names that list.
+  is("the route saves with the store's list and the student's address, so a save on its way during an erasure writes nothing", /erasure: \{ listId, email: access\.learner\.email \}/.test(route) && /const listId = store\.listId \|\| \(await ensureListId\(storeRef\(store\)\)\)\?\.listId;\s*if \(!listId\) return no\("unavailable", 503\);/.test(route), true);
   const page = read("app/[handle]/course/[product]/[lesson]/page.tsx");
   is("the page shows the box only on a lesson the route lets them save (not one held behind a quiz)", /const note = student && open && !blocker \? await readNote\(/.test(page), true);
 }

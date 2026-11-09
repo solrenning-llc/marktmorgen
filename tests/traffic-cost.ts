@@ -124,16 +124,20 @@ export const COMMANDS = {
    * one visitor in READ_SAMPLE: one command, and an expiry the first time a
    * block of a sales page is counted at all, which is once per block and not
    * per visit. Until October 11, 2026 this went through the store's general
-   * count at seven commands and was in none of these sums. Held at 12 since
-   * 4 November 2026 (639 [GL7](25), the cost lane's CX-35): the token's mark,
-   * the window's count of readings and its expiry, the count of the reading
-   * (one script) and each record's expiry the first time, six measured at the
-   * most (tests/page-read-ceiling.test.ts), with room. Readings are no longer
+   * count at seven commands and was in none of these sums. 13 since
+   * 9 November 2026, every command billed as Upstash bills it, a script's
+   * inner calls too (tests/page-read-worst-commands.test.ts): the token's mark
+   * (1), the window's count of readings and its expiry (2), the reading that
+   * reaches the window's ceiling marks it (1), the capped count of both
+   * records at their most (EVAL, 2 HLEN, 2 HMGET, 2 HINCRBY: 7) and, its
+   * answer lost, both records' expiry again (2). It was 12 from 4 November
+   * 2026 (639 [GL7](25), the cost lane's CX-35), with a script counted as one
+   * command. Readings are no longer
    * one of the window's public requests and have a ceiling of their own, so
    * every one the ceiling allows is priced on its own line
    * (tests/plan-cost-registry.ts, page-readings), and not inside visitCost.
    */
-  readBeacon: 12,
+  readBeacon: 13,
   /**
    * Handing a member's page ten minutes' leave to ask the room, at the
    * route that knows who is asking: the store, the community's settings,

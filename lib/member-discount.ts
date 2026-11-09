@@ -23,6 +23,14 @@ const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const PROMO_PATTERN = /^promo_[A-Za-z0-9]{6,64}$/;
 /** The statuses of a membership still running, as lib/membership-manage.ts counts them. */
 const LIVE = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
+/**
+ * Every status Stripe gives a subscription at API_VERSION ("Subscription
+ * object", status enum), the same list lib/billing.ts reads plans with. Any
+ * other value is not one Stripe sends, so the row is unknown (Codex S
+ * corrective focal of #2912, M2 residual): only a recognized status that is
+ * not running (canceled, incomplete, incomplete_expired) leaves it out.
+ */
+const STRIPE_SUB_STATUSES = new Set([...LIVE, "canceled", "incomplete", "incomplete_expired"]);
 const MAX_CUSTOMERS = 20;
 
 /** One of a member's running memberships of this store, as the studio shows it. */
@@ -59,14 +67,15 @@ function onePage(value: unknown, what: string): Raw[] {
 
 /**
  * Whether a row is one Stripe could have sent for a customer or a
- * subscription: its id, and for a subscription its status and its metadata
- * object, readable (Codex S second review of #2912, residual of M2). A row
+ * subscription: its id, and for a subscription a status Stripe has and its
+ * metadata object, readable (Codex S second review of #2912, residual of M2;
+ * its corrective focal: a non-empty status is not enough). A row
  * that is not is unknown, never left out as "not a membership": only a
  * readable row is filtered by status, store or kind.
  */
 const readableCustomer = (row: Raw): boolean => typeof row.id === "string" && CUSTOMER_PATTERN.test(row.id);
 const readableSub = (row: Raw): boolean =>
-  typeof row.id === "string" && SUB_PATTERN.test(row.id) && typeof row.status === "string" && row.status !== "" && !!row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata);
+  typeof row.id === "string" && SUB_PATTERN.test(row.id) && typeof row.status === "string" && STRIPE_SUB_STATUSES.has(row.status) && !!row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata);
 
 /** Whether Stripe says a subscription already has a discount on it (old `discount` or new `discounts`). */
 export function hasDiscount(sub: Raw): boolean {

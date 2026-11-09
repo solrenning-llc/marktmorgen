@@ -2508,6 +2508,8 @@ async function decidePending(store: Store, raw: unknown, atSeconds: number): Pro
     if (!affiliate || pending.own === affiliate.id) return { kind: "none" };
     // Their own browser could not be told apart at checkout: never credited automatically, the creator decides.
     if (pending.own === "?") return { kind: "unknown" };
+    // Every product of the order taken out of the program earns nothing, whatever the affiliate's own share.
+    if (pending.shares.size && [...pending.shares.values()].every((kept) => kept === "x")) return { kind: "none" };
     if (ownShareChangedSince(affiliate, atSeconds)) return { kind: "share", affiliate };
     return { kind: "credit", affiliate, pending };
   } catch (error) {
@@ -2529,7 +2531,7 @@ async function decidePending(store: Store, raw: unknown, atSeconds: number): Pro
  *   untold            refused REFUSED_TRIES times, said in the sweep's log.
  * From the moment a notice is due, nothing about the sale is credited automatically, whatever a later read says.
  */
-type TellWhy = "unread" | "membership" | "unsure" | "lead" | "share";
+type TellWhy = "unread" | "membership" | "unsure" | "lead" | "share" | "first";
 type PendingMark =
   | `seen:${number}`
   | `offers:${string}:${number}`
@@ -2540,7 +2542,7 @@ type PendingMark =
   | "told"
   | "uncertain"
   | "untold";
-const TELL_WHYS: readonly TellWhy[] = ["unread", "membership", "unsure", "lead", "share"];
+const TELL_WHYS: readonly TellWhy[] = ["unread", "membership", "unsure", "lead", "share", "first"];
 
 /** A pending link's mark, read exactly: null when nothing was decided, UnknownReplyError for an answer of another shape. */
 async function readPendingMark(statsId: string, ref: string): Promise<string | null> {
@@ -2578,7 +2580,8 @@ export function pendingNotice(
   const studio = `${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`;
   const first = {
     unread: `An order on ${store.name} came through an affiliate's link that could not be read when the buyer paid, and it still could not be read when it was checked again later. The code on the link was ${code}.`,
-    share: `An order on ${store.name} came through the link of the affiliate with the code ${code}. The link was read afterwards, but the share it was sold at is not known now (the program's share for it was not kept, or the affiliate's own share changed since the sale), so it was not credited automatically.`,
+    share: `An order on ${store.name} came through the link of the affiliate with the code ${code}. The link was read afterwards, but the share it was sold at is not known now: the program's share for it was not kept, or the affiliate has a share of their own that is not known to date from before the sale (it may have been set or moved after it, or its date was not kept). So it was not credited automatically.`,
+    first: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. The affiliate is on its subscription, so its renewals are credited to them, but the payment its first invoice was paid by could not be read, so that first payment is not counted.`,
     membership: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. The link could not be read when the buyer paid, or could not be put on the subscription afterwards, so its payments are not credited to them.`,
     unsure: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. We could not confirm whether the affiliate was put on its subscription: Stripe did not answer.`,
     lead: `A call booked on ${store.name} came through the link of the affiliate with the code ${code}. The sale was credited to them, but its lead could not be written down, so the lead is not counted.`,
@@ -2589,6 +2592,7 @@ export function pendingNotice(
     membership: "No commission is counted for its payments. The buyer was charged as usual and has their membership.",
     unsure: "Before paying anything for it, look in your affiliates' book: if its payments appear there under the affiliate, they are counted already.",
     lead: "No lead payment is counted for it.",
+    first: "No commission is counted for the first payment; the ones after it are counted as usual.",
   }[why];
   return {
     to: store.email,
@@ -2680,10 +2684,26 @@ function creditedMeta(meta: Record<string, string>, affiliate: Affiliate, pendin
   return { meta: out, earns };
 }
 
-/** How long a Stripe request may take inside the pass's deadline; UnknownReplyError when none is left (rule 24: the order waits). */
+/** The pass's time was spent before Stripe could be asked: nothing is known, nothing is said, the order waits for the next pass. */
+export class PassTimeSpent extends Error {
+  constructor() {
+    super("the pass's time was spent before Stripe could be asked");
+    this.name = "PassTimeSpent";
+  }
+}
+
+/** Stripe answered a pending link's read in a shape not known, or not at all (rule 24): never taken for an answer. */
+export class StripeUnknownError extends Error {
+  constructor(what: string) {
+    super(`Stripe answered ${what} in an unknown shape`);
+    this.name = "StripeUnknownError";
+  }
+}
+
+/** How long a Stripe request may take inside the pass's deadline; PassTimeSpent when none is left (rule 24: the order waits). */
 function pendingWait(deadline: number | undefined): number {
   const wait = stripeWait(deadline);
-  if (wait === null) throw new UnknownReplyError("the pass's time, spent before Stripe could be asked");
+  if (wait === null) throw new PassTimeSpent();
   return wait;
 }
 
@@ -2726,20 +2746,20 @@ async function creditOffersOf(store: Store, row: SessionLike & { id: string }, a
       if (meta?.kind === "upsell" && meta.parent === row.id) await notePendingOffer(store, pi, row.id, aff);
     }
     if (!read.hasMore) {
-      if (read.unreadable) throw new UnknownReplyError("a buyer's payment");
+      if (read.unreadable) throw new StripeUnknownError("a buyer's payment");
       return;
     }
-    if (!read.lastId) throw new UnknownReplyError("a page of a buyer's payments");
+    if (!read.lastId) throw new StripeUnknownError("a page of a buyer's payments");
     after = read.lastId;
   }
-  throw new UnknownReplyError("more of a buyer's payments than are read");
+  throw new StripeUnknownError("more of a buyer's payments than are read");
 }
 
 /** A Stripe subscription's own affiliate (metadata via), read exactly: "" for none, UnknownReplyError when it does not answer. */
 async function subscriptionVia(store: Store, subscription: string, deadline?: number): Promise<{ via: string; rate: string }> {
   const read = await onAccount("GET", store.stripeAccountId as string, `/subscriptions/${subscription}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, pendingWait(deadline));
   const meta = read.metadata as Record<string, unknown> | null | undefined;
-  if (read.id !== subscription || !meta || typeof meta !== "object") throw new UnknownReplyError("a membership's subscription");
+  if (read.id !== subscription || !meta || typeof meta !== "object") throw new StripeUnknownError("a membership's subscription");
   return { via: typeof meta.via === "string" ? meta.via : "", rate: typeof meta.via_rate === "string" ? meta.via_rate : "" };
 }
 
@@ -2754,13 +2774,13 @@ async function creditFirstPayment(store: Store, row: SessionLike & { id: string 
   const total = typeof row.amount_total === "number" ? row.amount_total : 0;
   if (total <= 0) return;
   const invoice = typeof row.invoice === "string" ? row.invoice : "";
-  if (!/^in_[A-Za-z0-9]{3,250}$/.test(invoice)) throw new UnknownReplyError("a membership's first invoice");
+  if (!/^in_[A-Za-z0-9]{3,250}$/.test(invoice)) throw new StripeUnknownError("a membership's first invoice");
   const read = (await onAccount("GET", store.stripeAccountId as string, `/invoices/${invoice}?expand[]=payments`, undefined, AFF_SUB_STRIPE_VERSION, undefined, pendingWait(deadline))) as {
     id?: unknown;
     payments?: { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | null;
   };
   const pi = read.id === invoice ? (read.payments?.data ?? []).filter((p) => p.status === undefined || p.status === "paid").map((p) => p.payment?.payment_intent).find((x): x is string => typeof x === "string" && /^pi_/.test(x)) : undefined;
-  if (!pi) throw new UnknownReplyError("a membership's first payment");
+  if (!pi) throw new StripeUnknownError("a membership's first payment");
   const tax = typeof row.total_details?.amount_tax === "number" ? row.total_details.amount_tax : 0;
   const buyer = typeof row.customer_details?.email === "string" ? row.customer_details.email : "";
   await writeReferral(store, {
@@ -2795,7 +2815,7 @@ async function creditMembership(store: Store, row: SessionLike & { id: string },
   if (rate === null) return null;
   if (months <= 0 || rate <= 0) return false;
   const subscription = typeof row.subscription === "string" ? row.subscription : "";
-  if (!/^sub_[A-Za-z0-9]{3,250}$/.test(subscription) || !store.stripeAccountId) throw new UnknownReplyError("a membership's subscription");
+  if (!/^sub_[A-Za-z0-9]{3,250}$/.test(subscription) || !store.stripeAccountId) throw new StripeUnknownError("a membership's subscription");
   const at = typeof row.created === "number" ? row.created : Math.floor(Date.now() / 1000);
   const body = new URLSearchParams({
     "metadata[via]": affiliate.id,
@@ -2811,7 +2831,7 @@ async function creditMembership(store: Store, row: SessionLike & { id: string },
   } catch (error) {
     console.error("putting an affiliate on a membership's subscription did not answer; read back", row.id, error instanceof Error ? error.message : "");
   }
-  if (!put && (await subscriptionVia(store, subscription, deadline)).via !== affiliate.id) throw new UnknownReplyError("a membership's subscription changed");
+  if (!put && (await subscriptionVia(store, subscription, deadline)).via !== affiliate.id) throw new StripeUnknownError("a membership's subscription changed");
   await creditFirstPayment(store, row, affiliate.id, rate, deadline);
   return true;
 }
@@ -2853,6 +2873,8 @@ const PENDING_DUE_KEY = "nl:aff:pend:due";
 export const PENDING_DUE_BATCH = 20;
 /** An order the listing read within this long is left to it, not read again from the list in the same run. */
 const PENDING_DUE_IDLE = 600;
+/** An order read within this long was read in this run already (the job runs every five minutes): not read again. */
+const PENDING_READ_AGAIN = 240;
 
 const isFinal = (mark: string) => /^(credited:[0-9a-f]{12}|none|told|uncertain|untold)$/.test(mark);
 
@@ -2886,14 +2908,20 @@ export async function notePendingLinks(
       typeof row.id === "string" && isSettled(row) && handles.has(row.metadata?.store ?? "") && typeof row.metadata?.[VIA_PENDING_META] === "string",
   );
   if (!marked.length) return counts;
-  const reply = repliesFor(await redisPipeline([["MGET", ...marked.map((row) => pendingKey(statsId, row.id))]]), 1);
+  // Each order's mark, and when the sweep last read it (its score on the company's list), in one round trip.
+  const lastRead = store.sid ? marked.map((row) => ["ZSCORE", PENDING_DUE_KEY, `${store.sid}|${row.id}`]) : [];
+  const reply = repliesFor(await redisPipeline([["MGET", ...marked.map((row) => pendingKey(statsId, row.id))], ...lastRead]), 1 + lastRead.length);
   const marks = reply ? repliesFor(reply[0], marked.length) : null;
-  if (!marks) {
+  if (!reply || !marks) {
     counts.failed.push(...marked.map((row) => row.id));
     return counts;
   }
   for (const [i, row] of marked.entries()) {
     const mark = marks[i];
+    // Read already in this run (through the company's list, before the store's listing): not read twice, so a
+    // refused notice is tried once a run (REFUSED_TRIES) and a read is never paid for twice.
+    const readAt = store.sid ? Number(reply[1 + i]) : NaN;
+    if (reply[1 + i] !== null && Number.isFinite(readAt) && readAt > now - PENDING_READ_AGAIN && readAt <= now) continue;
     const final = await notePendingOne(store, row, mark, now, counts, owners, partners, send, deadline).catch((error: unknown) => {
       counts.failed.push(row.id);
       console.error("a pending affiliate link was left for the next run", row.id, error instanceof Error ? error.message : "");
@@ -3043,13 +3071,24 @@ async function tellMembership(store: Store, row: SessionLike & { id: string }, r
   const statsId = store.statsId as string;
   const subscription = typeof row.subscription === "string" ? row.subscription : "";
   let on: { via: string; rate: string } | null = null;
+  // The pass's time spent is not Stripe failing to answer: it is thrown, and the order waits for the next pass.
+  const notTimeSpent = <T>(error: unknown): T | null => {
+    if (error instanceof PassTimeSpent) throw error;
+    return null;
+  };
   if (/^sub_[A-Za-z0-9]{3,250}$/.test(subscription) && store.stripeAccountId) {
-    on = await subscriptionVia(store, subscription, deadline).catch(() => null);
+    on = await subscriptionVia(store, subscription, deadline).catch(notTimeSpent<{ via: string; rate: string }>);
   } else {
     on = { via: "", rate: "" };
   }
   if (on && AFFILIATE_ID_PATTERN.test(on.via) && /^\d{1,3}(\.\d+)?$/.test(on.rate)) {
-    await creditFirstPayment(store, row, on.via, Number(on.rate), deadline);
+    // On the subscription, so its renewals are credited; its first payment too, unless its invoice still names no
+    // payment at the deadline: then the creator is told that one is not counted, never left untold (rule 24).
+    const first = await creditFirstPayment(store, row, on.via, Number(on.rate), deadline).then(() => true, notTimeSpent<boolean>);
+    if (!first) {
+      countTold(counts, await tellPending(store, row.id, raw, "first", send));
+      return isFinal((await readPendingMark(statsId, row.id)) ?? "");
+    }
     await writePendingMark(statsId, row.id, `credited:${on.via}`);
     counts.credited += 1;
     return true;
@@ -3074,14 +3113,26 @@ export async function notePendingDue(now = Math.floor(Date.now() / 1000), deadli
     const [sid, session] = member.split("|");
     try {
       const store = sid ? await storeForId(sid) : null;
-      const mark = store?.statsId && /^cs_[A-Za-z0-9_]{3,250}$/.test(session ?? "") ? await readPendingMark(store.statsId, session) : null;
-      if (!store || !store.stripeAccountId || mark === null || isFinal(mark)) {
+      const valid = Boolean(store?.statsId && store.stripeAccountId && /^cs_[A-Za-z0-9_]{3,250}$/.test(session ?? ""));
+      const mark = valid ? await readPendingMark(store!.statsId as string, session) : null;
+      // Its store gone, or decided already: off the list.
+      if (!valid || (mark !== null && isFinal(mark))) {
         await redisPipeline([["ZREM", PENDING_DUE_KEY, member]]);
         continue;
       }
-      const row = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${session}`, undefined, undefined, undefined, pendingWait(deadline));
-      if (row.id !== session) throw new UnknownReplyError("a pending order's checkout");
-      const counts = await notePendingLinks(store, [row as SessionLike], now, undefined, undefined, send, deadline);
+      let row: Record<string, unknown> | null = null;
+      try {
+        row = await onAccount("GET", store!.stripeAccountId as string, `/checkout/sessions/${session}`, undefined, undefined, undefined, pendingWait(deadline));
+        if (row.id !== session) throw new StripeUnknownError("a pending order's checkout");
+      } catch (error) {
+        // Its mark expired (two days undecided) and its checkout does not read either: the creator is told, with
+        // what is known, before it leaves the list; never dropped untold. Otherwise read again at the next run.
+        if (mark !== null || error instanceof PassTimeSpent) throw error;
+        await tellPending(store!, session, undefined, "unread", send);
+        if (isFinal((await readPendingMark(store!.statsId as string, session)) ?? "")) await redisPipeline([["ZREM", PENDING_DUE_KEY, member]]);
+        continue;
+      }
+      const counts = await notePendingLinks(store!, [row as SessionLike], now, undefined, undefined, send, deadline);
       if (counts.failed.length) failed += 1;
     } catch (error) {
       failed += 1;

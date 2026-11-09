@@ -38,7 +38,8 @@ const ANA = "aaaaaaaaaaaa";
 
 // A small Stripe: subscriptions keep what a POST put on them; invoices, refunds, offers and sessions as set.
 const subs = new Map<string, Record<string, string>>();
-const postMode: "ok" | "lost-then-down" = "ok";
+// Typed wide so the branch kept from the second review type-checks (the proof had it narrowed to "ok").
+const postMode = "ok" as "ok" | "lost-then-down";
 const getSubDown = false;
 let posts = 0;
 let calls = 0;

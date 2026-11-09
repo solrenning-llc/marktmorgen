@@ -42,7 +42,8 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
-import { FINAL_INDEX } from "@/lib/closing-holds";
+import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
@@ -215,10 +216,14 @@ export async function markShut(store: Pick<Store, "handle" | "previousHandles" |
 /** When the closing day of the store that sold under this address began, and its last plan ended, while that is still known. */
 export async function shutOf(handle: string): Promise<ClosingTimes | null> {
   if (!handle || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", shutKey(handle)]]);
-  if (raw === null || raw === undefined) return null;
-  const [since, ended] = String(raw).split("|").map(Number);
-  return Number.isFinite(since) && since > 0 ? { since, ended: Number.isFinite(ended) && ended > 0 ? ended : 0 } : null;
+  // Read exactly (rule 30; Claude 5's second money review of #3279): only Redis's null is "no mark". Anything else
+  // must be the mark as markShut writes it, "since|ended" (or "since" alone, as older marks were), or it throws:
+  // never "not closing", which would keep a payment for a store already removed.
+  const raw = repliesFor(await redisPipeline([["GET", shutKey(handle)]]), 1)?.[0];
+  if (raw === null) return null;
+  const mark = typeof raw === "string" ? /^([1-9][0-9]*)(?:\|(0|[1-9][0-9]*))?$/.exec(raw) : null;
+  if (!mark) throw new UnknownReplyError("a closed store's address mark");
+  return { since: Number(mark[1]), ended: Number(mark[2] ?? 0) };
 }
 
 /** When the closing day of the store that sold under this address began, while that is still known. */
@@ -233,10 +238,10 @@ export async function shutSince(handle: string): Promise<number | null> {
  */
 export async function closingSince(store: Store): Promise<ClosingTimes | null> {
   if (!store.planEndedAt || !isRedisConfigured()) return null;
-  const [score] = await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)]]);
-  if (score === null || score === undefined || !Number.isFinite(Number(score))) return null;
+  // Read exactly (finalScoreOf, rule 24): a score that is missing or not a number throws, never "not closing".
+  const ended = finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)]]));
+  if (ended === null) return null;
   // The line's score is the end of the plan (lib/plan-closing.ts, closingDay).
-  const ended = Number(score);
   const marked = await shutOf(store.handle);
   return { since: marked?.since ?? ended, ended };
 }

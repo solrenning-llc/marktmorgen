@@ -26,7 +26,7 @@
  */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { type Affiliate, type Line, addPayout, bookCsv, creditPayPalSale, bookSize, readBook, tierLines } from "@/lib/affiliates";
+import { type Affiliate, type Line, type Payout, addPayout, paidBeforeHold, bookCsv, creditPayPalSale, bookSize, readBook, tierLines } from "@/lib/affiliates";
 import { buyerLedger } from "@/lib/segments";
 import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
 import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
@@ -169,14 +169,16 @@ async function main(): Promise<void> {
   // the three places that promise it (the affiliate's terms, a partner share, a partner's invitation) says so.
   // Rule 23 (pre-review of 3b4b8ac4e1, MEDIUM 1): the sentence no longer says "until the amount refunded is known",
   // which never happens (the amount is not read, and the watch lets the order go after PayPal's 180 days).
+  // Rule 23 (pre-review of 61b851bdbe, LEVE): each sentence now also says a commission already paid on the sale is
+  // kept, as the line "paid, partly refunded" shows.
   const paypalHeld: Record<string, string> = {
-    en: "A sale paid with PayPal and partly refunded earns nothing, because the amount refunded can't be seen here.",
-    es: "Una venta pagada con PayPal y reembolsada en parte no genera nada, porque aquí no se puede ver el importe reembolsado.",
-    fr: "Une vente payée avec PayPal et partiellement remboursée ne rapporte rien, car le montant remboursé n'est pas visible ici.",
-    de: "Ein mit PayPal bezahlter und teilweise erstatteter Verkauf bringt nichts ein, weil der erstattete Betrag hier nicht sichtbar ist.",
-    it: "Una vendita pagata con PayPal e rimborsata in parte non fa guadagnare nulla, perché qui l'importo rimborsato non è visibile.",
-    nl: "Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, levert niets op, omdat het terugbetaalde bedrag hier niet te zien is.",
-    pt: "Uma venda paga com PayPal e parcialmente reembolsada não gera nada, porque o valor reembolsado não pode ser visto aqui.",
+    en: "A sale paid with PayPal and partly refunded earns nothing, because the amount refunded can't be seen here; a commission already paid on it is kept.",
+    es: "Una venta pagada con PayPal y reembolsada en parte no genera nada, porque aquí no se puede ver el importe reembolsado; la comisión ya pagada por ella se mantiene.",
+    fr: "Une vente payée avec PayPal et partiellement remboursée ne rapporte rien, car le montant remboursé n'est pas visible ici ; une commission déjà payée sur cette vente est conservée.",
+    de: "Ein mit PayPal bezahlter und teilweise erstatteter Verkauf bringt nichts ein, weil der erstattete Betrag hier nicht sichtbar ist; eine dafür bereits gezahlte Provision bleibt bestehen.",
+    it: "Una vendita pagata con PayPal e rimborsata in parte non fa guadagnare nulla, perché qui l'importo rimborsato non è visibile; una commissione già pagata su di essa resta.",
+    nl: "Een verkoop die met PayPal is betaald en gedeeltelijk is terugbetaald, levert niets op, omdat het terugbetaalde bedrag hier niet te zien is; een commissie die er al voor is betaald, blijft staan.",
+    pt: "Uma venda paga com PayPal e parcialmente reembolsada não gera nada, porque o valor reembolsado não pode ser visto aqui; uma comissão já paga sobre ela é mantida.",
   };
   is("no language promises the amount will be known", Object.values(AFFILIATES_WORDS).every((w) => !w.termRefunds.includes("until the amount refunded is known") && !w.termRefunds.includes("known")), true);
   is("seven languages", Object.keys(AFFILIATES_WORDS).sort(), Object.keys(paypalHeld).sort());
@@ -322,6 +324,46 @@ async function main(): Promise<void> {
   const unnamed = await offered();
   is("the book is not checked", unnamed.checked, false);
   is("nothing passes the refund guard", unnamed.through, 0);
+
+  part("Paid before the partial refund, read the safe way (pre-review of 61b851bdbe, HIGH A and B)");
+  {
+    const T0 = 1_800_000_000;
+    const DAY = 86_400;
+    const row = (pi: string, at: number, commission: number, status: Line["status"], whole?: number): Line =>
+      ({ ref: `cs_${pi}`, pi, aff: "a1", at, product: "p", title: "T", base: 1000, total: 1000, currency: "usd", rate: 30, self: false, how: "click", refunded: status === "refunded" ? 1000 : 0, commission, status, ...(whole !== undefined ? { whole } : {}) }) as Line;
+    const pay = (cents: number, at: number): Payout => ({ id: `po_${at}`, aff: "a1", cents, currency: "usd", date: "2027-01-01", reference: "x", at: at * 1000 });
+    const owedOf = (lines: Line[], payouts: Payout[]) => lines.reduce((sum, l) => sum + l.commission, 0) - payouts.reduce((sum, p) => sum + p.cents, 0);
+    // A: H sold, paid in full the next day; Y sold after that payment; H's partial refund seen later still.
+    const a = [row("pi_H", T0, 0, "held", 300), row("pi_Y", T0 + 2 * DAY, 300, "earned")];
+    const aPays = [pay(300, T0 + DAY)];
+    const aOut = paidBeforeHold(a, aPays, new Map([["pi_H", T0 + 3 * DAY]]), "usd");
+    is("A: the payout after H and before Y paid H", [aOut[0].status, aOut[0].commission], ["paid, partly refunded", 300]);
+    is("A: Y, sold after it, is still owed in full", owedOf(aOut, aPays), 300);
+    // B: X sold and paid before H existed, then refunded in full; H sold after the payout and held.
+    const b = [row("pi_X", T0, 0, "refunded"), row("pi_H", T0 + 2 * DAY, 0, "held", 300)];
+    const bPays = [pay(300, T0 + DAY)];
+    const bOut = paidBeforeHold(b, bPays, new Map([["pi_H", T0 + 3 * DAY]]), "usd");
+    is("B: a payout made before H was sold never paid it: held, 0", [bOut[1].status, bOut[1].commission], ["held", 0]);
+    is("B: X's refund still takes its paid commission back", owedOf(bOut, bPays), -300);
+    // C, the other way round: X paid before H, then H paid after it was sold, then H's partial refund seen.
+    const c = [row("pi_X", T0, 300, "earned"), row("pi_H", T0 + 2 * DAY, 0, "held", 300)];
+    const cPays = [pay(300, T0 + DAY), pay(300, T0 + 2 * DAY + 3600)];
+    const cOut = paidBeforeHold(c, cPays, new Map([["pi_H", T0 + 3 * DAY]]), "usd");
+    is("C: the payout after H, beyond X's original commission, paid H", [cOut[1].status, cOut[1].commission], ["paid, partly refunded", 300]);
+    is("C: nothing owed either way", owedOf(cOut, cPays), 0);
+    // D: as C, but X is refunded in full since: its original commission still counts as what the first payout paid.
+    const d = [row("pi_X", T0, 0, "refunded"), row("pi_H", T0 + 2 * DAY, 0, "held", 300)];
+    const dOut = paidBeforeHold(d, cPays, new Map([["pi_H", T0 + 3 * DAY]]), "usd");
+    is("D: H paid by the second payout, X's refund still taken back", [dOut[1].status, owedOf(dOut, cPays)], ["paid, partly refunded", -300]);
+    // E: a payout after H that only covered another sale sold between them: H was not paid.
+    const e = [row("pi_H", T0, 0, "held", 300), row("pi_Z", T0 + DAY, 300, "earned")];
+    const ePays = [pay(300, T0 + 2 * DAY)];
+    const eOut = paidBeforeHold(e, ePays, new Map([["pi_H", T0 + 3 * DAY]]), "usd");
+    is("E: one payout of 300 for two sales of 300 is not taken to have paid the held one", [eOut[0].status, owedOf(eOut, ePays)], ["held", 0]);
+    // F: a payout after the partial refund was seen never counts for H.
+    const fOut = paidBeforeHold([row("pi_H", T0, 0, "held", 300)], [pay(300, T0 + 4 * DAY)], new Map([["pi_H", T0 + 3 * DAY]]), "usd");
+    is("F: held", fOut[0].status, "held");
+  }
 
   part("P3 for a partial refund: the refunds' set expires, the sale stays held for good (kept like a refund in full)");
   await setup();

@@ -222,6 +222,27 @@ export function parseLead(raw: unknown): LeadRecord | null {
 }
 
 /**
+ * A kept lead read exactly, or null (CX-123 rule 24): every field in the type recordLead and decideLeads write it
+ * with, so nothing that settles the caps, the budget or a booking's readiness (its time, amount, currency, terms,
+ * state, call's end, payment) and nothing a person's copy reads (the address) is ever filled in with a default.
+ * parseLead fills a field of another type with 0, "usd" or "open", which can take a lead out of the month's budget
+ * or the day's cap; it is what the book shows, never what a decision, a credit or a deletion is made from.
+ */
+export function parseLeadExact(raw: unknown): LeadRecord | null {
+  const lead = parseLead(raw);
+  if (!lead) return null;
+  // parseLead read it as a JSON object with its id, affiliate and kind: what is left is every other field's type.
+  const v = JSON.parse(raw as string) as Record<string, unknown>;
+  const whole = (x: unknown) => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+  if (!(["at", "end", "paid", "cents", "hold", "daily", "budget", "d"] as const).every((k) => whole(v[k]))) return null;
+  if (!(["ref", "pi", "title", "email"] as const).every((k) => typeof v[k] === "string")) return null;
+  if (typeof v.currency !== "string" || !/^[a-z]{3}$/.test(v.currency)) return null;
+  if (v.state !== "open" && v.state !== "approved" && v.state !== "reversed") return null;
+  if (v.why !== "" && !(LEAD_REASONS as readonly unknown[]).includes(v.why)) return null;
+  return lead;
+}
+
+/**
  * Every lead as it stands now, in the order they were confirmed.
  *
  * `refunded` is what Stripe says was given back on a payment (bookings only);

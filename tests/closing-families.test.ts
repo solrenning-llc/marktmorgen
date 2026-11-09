@@ -38,6 +38,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   // A store's picture uploads not yet put on anything (a capped part): each note goes when its picture is taken or swept,
   // and the daily sweep reaches a note PICTURE_SWEEP_AFTER_SECONDS after its door, so the list is gone within three days of the last.
   "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_SWEEP_AFTER_SECONDS"],
+  // A buyer's withdrawal from an order (EU art. 11a, 588 [KB9]): written with its expiry.
+  "nl:withdraw:": ["lib/withdrawal.ts", "WITHDRAWAL_KEEP_DAYS"],
 };
 /** A person's records across stores that hold a store's id among others and run out by the quarter (lib/joined-stores.ts), and the file that writes them. */
 const PERSON_RECORDS: Record<string, string> = {

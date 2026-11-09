@@ -103,6 +103,15 @@ function main(): void {
     ["size-unknown", "size-unknown", "size-unknown", "type-unknown", "date-unknown", "no-title", "bad-id"],
   );
   is("and none of them is chosen", publicEpisodes(sizeUnknown).episodes.length, 0);
+  is(
+    "a date past what RFC 822 can write (year 10000 or beyond Date's range) is unknown, never written",
+    publicEpisodes([
+      { episode: episode("far000000001", "Year 10000", 253_402_300_800), visibility: "public" },
+      { episode: episode("far000000002", "Beyond Date", 9_000_000_000_000), visibility: "public" },
+    ]).left.map((l) => l.reason),
+    ["date-unknown", "date-unknown"],
+  );
+
 
   part("The public feed");
   const input: PublicFeedInput = {
@@ -150,6 +159,19 @@ function main(): void {
     is("size round trip", back.show.episodes[0]?.bytes, 1000);
     is("date round trip", back.show.episodes[0]?.at, 1_790_600_000);
   }
+
+  part("Every date is written as RFC 822");
+  const last = episode("last00000001", "Last second of 9999", 253_402_300_799);
+  const lastXml = publicFeedXml({ ...input, episodes: [{ episode: last, visibility: "public" }] });
+  is("the last second RFC 822 can write", lastXml.includes("<pubDate>Fri, 31 Dec 9999 23:59:59 GMT</pubDate>"), true);
+  const far = publicFeedXml({ ...input, episodes: [{ episode: episode("far000000002", "Beyond Date", 9_000_000_000_000), visibility: "public" }] });
+  is("an episode with a date past that is left out, never Invalid Date", [far.includes("Invalid Date"), far.includes("<item>")], [false, false]);
+  const dates = [...xml.matchAll(/<pubDate>([^<]*)<\/pubDate>/g)].map((m) => m[1]);
+  is(
+    "each pubDate in the feed is an RFC 822 date",
+    dates.length > 0 && dates.every((d) => /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), [0-3][0-9] (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{4} [0-2][0-9]:[0-5][0-9]:[0-5][0-9] GMT$/.test(d)),
+    true,
+  );
 
   part("No buyer data and nothing unknown is published");
   is("an audio address with a buyer's feed token is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://marktmorgen.com/api/store/podcast/play/${TOKEN}/${e.id}` })), "buyer-data");

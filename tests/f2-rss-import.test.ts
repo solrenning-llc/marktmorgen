@@ -175,6 +175,45 @@ function main(): void {
   is("bytes that are not UTF-8", reason(parseRssImport(new Uint8Array([0x3c, 0x72, 0x73, 0x73, 0xff, 0xfe, 0x3e]))), "not-utf8");
   is("a declared encoding other than UTF-8", reason(parseRssImport(feed([item(1)], "", '<?xml version="1.0" encoding="ISO-8859-1"?>\n'))), "not-utf8");
   is("a date that cannot be read", reason(parseRssImport(feed([item(1, { pubDate: "sometime in spring" })]))), "bad-date");
+  part("Dates: RFC 822 only, as RSS requires; anything else is unknown, never guessed (rule 24)");
+  const dateOf = (pubDate: string) => {
+    const r = parseRssImport(feed([item(1, { pubDate })]));
+    return r.ok ? r.show.episodes[0]?.at : r.reason;
+  };
+  const nov9 = Date.UTC(2026, 10, 9, 10, 0, 0) / 1000;
+  for (const bad of [
+    "Episode 12",
+    "hello 1",
+    "TBD 5",
+    "5",
+    "Mon, 09 Nov 2026 10:00:00",
+    "2026-11-09T10:00",
+    "2026-11-09T10:00:00Z",
+    "11/09/2026",
+    "31 Feb 2026 10:00:00 GMT",
+    "Tue, 09 Nov 2026 10:00:00 GMT",
+    "09 Nov 26 10:00:00 GMT",
+    "09 Nov 2026 24:00:00 GMT",
+    "09 Nov 2026 10:60:00 GMT",
+    "09 Nov 2026 10:00:00 +2400",
+    "09 Nov 2026 10:00:00 A",
+    "09 Nov 2026 10:00:00 CET",
+    "09 November 2026 10:00:00 GMT",
+    "Mon, 09 Nov 2026 10:00:00 GMT trailing",
+  ]) {
+    is(`"${bad}" is refused as a date that cannot be read`, dateOf(bad), "bad-date");
+  }
+  const badDate = parseRssImport(feed([item(1, { pubDate: "11/09/2026" })]));
+  is("the refusal says which episode and what a readable date looks like", badDate.ok ? "ok" : /Episode 1.*Mon, 09 Nov 2026 10:00:00 GMT/.test(badDate.detail), true);
+  is("RFC 822 with GMT", dateOf("Mon, 09 Nov 2026 10:00:00 GMT"), nov9);
+  is("no weekday, one-digit day, no seconds", dateOf("9 Nov 2026 10:00 GMT"), nov9);
+  is("UT and Z mean GMT", [dateOf("09 Nov 2026 10:00:00 UT"), dateOf("09 Nov 2026 10:00:00 Z")], [nov9, nov9]);
+  is("a numeric offset is applied, never the server's time zone", [dateOf("Mon, 09 Nov 2026 07:00:00 -0300"), dateOf("Mon, 09 Nov 2026 11:30:00 +0130")], [nov9, nov9]);
+  is("US zone names", [dateOf("Mon, 09 Nov 2026 05:00:00 EST"), dateOf("Mon, 09 Nov 2026 03:00:00 PDT")], [nov9, nov9]);
+  is("names in any letter case", dateOf("mon, 09 nov 2026 10:00:00 gmt"), nov9);
+  is("a leap-year day", dateOf("Tue, 29 Feb 2028 00:00:00 GMT"), Date.UTC(2028, 1, 29) / 1000);
+  is("29 Feb in a common year is refused", dateOf("29 Feb 2027 00:00:00 GMT"), "bad-date");
+
   is("a size that is not a whole number", reason(parseRssImport(feed([item(1, { enclosure: '<enclosure url="https://a.example/1.mp3" length="12x" type="audio/mpeg"/>' })]))), "bad-length");
   is("a negative size", reason(parseRssImport(feed([item(1, { enclosure: '<enclosure url="https://a.example/1.mp3" length="-5" type="audio/mpeg"/>' })]))), "bad-length");
 
@@ -185,6 +224,9 @@ function main(): void {
   is("file:", audio('<enclosure url="file:///etc/passwd" type="audio/mpeg"/>'), "audio-not-https");
   is("credentials in the address", audio('<enclosure url="https://user:pw@cdn.example.com/1.mp3" type="audio/mpeg"/>'), "audio-not-https");
   is("localhost", audio('<enclosure url="https://localhost/1.mp3" type="audio/mpeg"/>'), "audio-not-https");
+  is("localhost with a trailing dot", audio('<enclosure url="https://localhost./1.mp3" type="audio/mpeg"/>'), "audio-not-https");
+  is("a .localhost name with a trailing dot", audio('<enclosure url="https://foo.localhost./1.mp3" type="audio/mpeg"/>'), "audio-not-https");
+  is("an ordinary name with a trailing dot is still a public name", audio('<enclosure url="https://cdn.example.com./1.mp3" type="audio/mpeg"/>'), "ok");
   is("an IP address", audio('<enclosure url="https://169.254.169.254/latest/meta-data" type="audio/mpeg"/>'), "audio-not-https");
   is("an IPv6 address", audio('<enclosure url="https://[::1]/1.mp3" type="audio/mpeg"/>'), "audio-not-https");
   is("not an address", audio('<enclosure url="not a url" type="audio/mpeg"/>'), "audio-not-https");
@@ -196,6 +238,15 @@ function main(): void {
     const r = parseRssImport(feed([item(1)]).replace("https://cdn.example.com/show/cover.jpg", "http://cdn.example.com/show/cover.jpg"));
     return r.ok ? [r.show.image, r.show.imageRefused] : r.reason;
   })(), [null, true]);
+  part("Notes with many unclosed tags are read in linear time");
+  const open = "<a".repeat(1999);
+  const flagged = parseRssImport(feed([item(1, { description: `<![CDATA[${open}]]>` }), item(2, { description: "<![CDATA[a <b>bold</b> word]]>" })]));
+  is("unclosed tags are not markup, a closed one is", flagged.ok ? flagged.show.episodes.map((e) => e.notesHaveMarkup) : flagged.reason, [false, true]);
+  const slow = feed(Array.from({ length: 300 }, (_, n) => item(n + 1, { description: `<![CDATA[${open}]]>` })));
+  const started = performance.now();
+  const many = parseRssImport(slow);
+  const took = performance.now() - started;
+  is("300 such episodes parse well under 400 ms", [many.ok, took < 400], [true, true]);
   is("no request was made by any of it", fetched, 0);
 }
 

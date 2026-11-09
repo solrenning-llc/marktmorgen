@@ -38,6 +38,8 @@ async function main(): Promise<void> {
   is("set up from the read-only key", [config?.key.accessKeyId, config?.endpoint, config?.bucket], ["route-read-only-key-id-0000", `https://${ACCOUNT}.r2.cloudflarestorage.com`, "marktmorgen-files"]);
   is("off without it", backupFilesR2Config({ ...env, BACKUP_FILES_R2_READ_KEY_ID: "", BACKUP_FILES_R2_READ_SECRET: "" }), null);
   is("off when the read key is the site's read-write key", [backupFilesR2Config({ ...env, BACKUP_FILES_R2_READ_KEY_ID: env.R2_ACCESS_KEY_ID }), backupFilesR2Config({ ...env, BACKUP_FILES_R2_READ_SECRET: env.R2_SECRET_ACCESS_KEY })], [null, null]);
+  // Claude 2's LOW 2 (6732231752): the backup bucket's own key is no read-only key of the files bucket either.
+  is("off when the read key is the backup bucket's key", [backupFilesR2Config({ ...env, BACKUP_R2_ACCESS_KEY_ID: env.BACKUP_FILES_R2_READ_KEY_ID }), backupFilesR2Config({ ...env, BACKUP_R2_SECRET_ACCESS_KEY: env.BACKUP_FILES_R2_READ_SECRET })], [null, null]);
   is("off with a malformed account or bucket", [backupFilesR2Config({ ...env, R2_ACCOUNT_ID: "x" }), backupFilesR2Config({ ...env, R2_BUCKET: "A_B" })], [null, null]);
 
   part("a presigned GET of one object, for the time asked");
@@ -45,6 +47,24 @@ async function main(): Promise<void> {
   const url = new URL(presignR2Get(config!, `${PREFIX}owner/abc/f a.pdf`, 900, at));
   is("the object, signed, 900 s, with the read-only key's id", [url.origin, url.pathname, url.searchParams.get("X-Amz-Expires"), url.searchParams.get("X-Amz-Credential")?.startsWith("route-read-only-key-id-0000/20261108/auto/s3/"), url.searchParams.has("X-Amz-Signature")], [`https://${ACCOUNT}.r2.cloudflarestorage.com`, `/marktmorgen-files/${PREFIX}owner/abc/f%20a.pdf`, "900", true, true]);
   is("the site's key and both secrets are not in it", [url.toString().includes(env.R2_ACCESS_KEY_ID), url.toString().includes(env.R2_SECRET_ACCESS_KEY), url.toString().includes(env.BACKUP_FILES_R2_READ_SECRET)], [false, false, false]);
+
+  part("a key the signed address would change is refused, never signed as another object (Claude 2's LOW 1)");
+  {
+    const other = "0123456789abcdef0123456789abcdef";
+    const outcome = (key: string) => {
+      try {
+        const signed = new URL(presignR2Get(config!, key, 900, at));
+        const exact = signed.pathname.split("/").map((piece) => decodeURIComponent(piece)).join("/") === `/${config!.bucket}/${key}`;
+        return exact && !signed.searchParams.has("x-id") && signed.hash === "" ? "exact" : "another";
+      } catch {
+        return "refused";
+      }
+    };
+    for (const key of [`${PREFIX}../${other}/secret.pdf`, `${PREFIX}%2e%2e/${other}/secret.pdf`, `${PREFIX}./a.pdf`, `${PREFIX}a?x-id=PutObject`, `${PREFIX}a#frag`, `${PREFIX}a\\b.pdf`]) {
+      is(`${JSON.stringify(key.slice(PREFIX.length))}: refused, or signed for exactly that key`, outcome(key) !== "another", true);
+    }
+    is("control: a plain key is signed for exactly itself", outcome(`${PREFIX}owner/abc/f a.pdf`), "exact");
+  }
 
   part("a listing read in its exact shape, or not at all");
   const calls: { method: string; url: string; auth: string }[] = [];
@@ -93,6 +113,12 @@ async function main(): Promise<void> {
     ["an escape it does not know", () => { body = result(contents(`${PREFIX}a&#x41;`)); }],
     ["a key count that does not match", () => { body = result(contents(`${PREFIX}a`)).replace("<MaxKeys>", "<KeyCount>2</KeyCount><MaxKeys>"); }],
     ["the same key twice", () => { body = result(contents(`${PREFIX}a`) + contents(`${PREFIX}a`)); }],
+    // Codex Z's LOW 2 (5820335923) and Claude 2's confirmation: text before the listing, or an element left open or
+    // closed out of turn, is not a whole listing.
+    ["text before the listing", () => { body = `garbage${result("")}`; }],
+    ["an element left open", () => { body = result("<Unclosed>"); }],
+    ["an element left open, with text", () => { body = result("<Unclosed>é"); }],
+    ["an element closed out of turn", () => { body = result("<Owner></Name></Owner>"); }],
   ] as const) {
     is(`${what}: a failure, never an empty listing`, await fails(arrange), true);
   }

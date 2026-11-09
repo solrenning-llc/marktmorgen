@@ -82,6 +82,15 @@ async function main(): Promise<void> {
     process.env.BACKUP_FILES_ROUTE_SECRET = process.env[other];
     is(`a secret equal to ${other} counts as unset`, [(await call(`?source=blob&store=${STORE}`, `Bearer ${process.env[other]}`)).status, backupFilesRouteSecret()], [404, null]);
   }
+  // Claude 2's LOW 2 and Codex Z's LOW 1: equal to any other setting of the site (the files bucket's read key id, the
+  // backup bucket's key, the database's or Stripe's token), the route's secret counts as unset.
+  {
+    const value = "a-shared-value-of-at-least-thirty-two-characters";
+    for (const other of ["BACKUP_FILES_R2_READ_KEY_ID", "BACKUP_R2_ACCESS_KEY_ID", "BACKUP_R2_SECRET_ACCESS_KEY", "KV_REST_API_TOKEN", "UPSTASH_REDIS_REST_TOKEN", "STRIPE_SECRET_KEY"]) {
+      is(`a secret equal to ${other} counts as unset`, backupFilesRouteSecret({ BACKUP_FILES_ROUTE_SECRET: value, [other]: ` ${value} ` }), null);
+    }
+    is("control: a secret of its own is taken", backupFilesRouteSecret({ BACKUP_FILES_ROUTE_SECRET: value, STRIPE_SECRET_KEY: `${value}-other` }), value);
+  }
   reset();
   blobWorld.pages = [listing(blobs(0, 3))];
   for (const auth of [null, "Bearer wrong-secret-of-the-same-length-000000", `Bearer ${SECRET}x`, SECRET, `Basic ${SECRET}`]) {

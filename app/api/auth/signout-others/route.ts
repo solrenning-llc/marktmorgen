@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
-import { SESSION_COOKIE, endOtherSessions, sessionEmail } from "@/lib/auth";
+import { SESSION_COOKIE, endOtherSessions, isFreshSession, sessionEmail } from "@/lib/auth";
 import { fromAnotherSite } from "@/lib/request-guard";
 import { lockedUntil } from "@/lib/two-step";
 
@@ -30,6 +30,10 @@ export async function POST(request: NextRequest) {
   if (!email) return away("/signin");
   // A session let in without its second step cannot log the others out (lib/two-step.ts), as with signout-all.
   if ((await lockedUntil(id)) > 0) return away("/studio?two-step=locked");
+  // Unlike signout-all, this keeps the presser logged in, so it needs a login from the last FRESH_LOGIN_SECONDS, as
+  // adding a passkey does: a session cookie that walked off could otherwise log the owner out everywhere and stay in
+  // (Claude 3 on #3459). A freshness read that is not exact is not fresh (lib/auth.ts isFreshSession); nothing is closed.
+  if (!(await isFreshSession(id))) return away("/studio/devices?status=out-others-reauth");
 
   const ended = await endOtherSessions(email, id);
   return away(`/studio/devices?status=${ended === null ? "out-others-unknown" : "out-others"}`);

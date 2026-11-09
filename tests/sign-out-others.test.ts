@@ -229,7 +229,7 @@ test("the page asks a session that is not fresh to log in again, in plain words,
   const page = read("app/studio/devices/page.tsx");
   assert.match(page, /"out-others-reauth"/);
   assert.match(page, /For your safety, log in again to log out your other devices\./);
-  assert.match(page, /href="\/signin"/);
+  assert.match(page, /href="\/signin\?to=login"/);
 });
 
 test("the page promises no more than the code does (Claude 3 on #3459, rule 27)", () => {

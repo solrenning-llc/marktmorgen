@@ -28,7 +28,13 @@ async function main() {
   is("empty page with more results stays unavailable", await read([{ data: [], has_more: true }]), null);
   is("missing cursor stays unavailable", await read([{ data: [paid("", now - 20 * day)], has_more: true }]), null);
   is("paid checkout without its date stays unavailable", await read([{ data: [{ ...paid("cs_1", now), created: null }], has_more: false }]), null);
-  is("capped history stays unavailable", await read([{ data: [paid("cs_1", now - 20 * day)], has_more: true }]), null);
+  // Three different pages, each with more after it (9 November 2026): the one page answered again on every call that
+  // stood here before is now unknown at the second call, since Stripe never answers a session twice in one walk.
+  is("capped history stays unavailable", await read([
+    { data: [paid("cs_1", now - 20 * day)], has_more: true },
+    { data: [paid("cs_2", now - 30 * day)], has_more: true },
+    { data: [paid("cs_3", now - 40 * day)], has_more: true },
+  ]), null);
   is("history cap remains three calls", calls, 3);
   is("complete third page is available", await read([
     { data: [paid("cs_1", now - 20 * day)], has_more: true },

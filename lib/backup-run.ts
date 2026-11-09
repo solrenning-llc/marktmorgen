@@ -118,6 +118,23 @@
  * as a verified one (a failed try's leftover is no copy) or none is more than
  * the limit larger.
  *
+ * One key a request, a deadline, and a copy resumed (C1-20261109-1525-C4-68 items 2 and 3): the copy reads one key
+ * a request (BACKUP_DUMP_BATCH), so at most one key is read past the byte cap. No key is begun past
+ * BACKUP_COPY_DEADLINE_MS from the run's start, the 700 s cutoff less the room for the request in flight and the
+ * parts and manifest still to close (BACKUP_COPY_STOP_ROOM_MS). A run that reaches it stops cleanly: the open part
+ * is closed and read back, and the progress (the last key name handled, the parts so far, their counts, the copy's
+ * start and its folder) is kept in nl:backup:progress; the run is "copy_incomplete": no manifest, never the last good
+ * copy, never verified, never a month's copy, nothing pruned, no sign of life, and the day's count is not raised past
+ * its limit, so the day's next run goes on. The set window is the UTC day of the copy's first run: a run of that day
+ * resumes it (a new walk, only the names after the cursor copied, into parts sealed with the copy's start) and closes
+ * it with the manifest; the first run of a later day leaves it (its parts are then a failed try's leftovers) and
+ * starts a new copy. A progress whose parts the listing no longer shows is left the same way. Keys that change between
+ * the runs: a key copied before the pause stays as it was copied (changed or deleted after); a key made after the
+ * pause under a name before the cursor is not in this set (it is in the next); after the cursor, every key is copied
+ * as it is when its turn comes. A copy is never a point in time, and a resumed one spans up to its day. A progress
+ * that cannot be read is never taken as none: the run is "resume_unreadable", writes nothing and lets the progress go,
+ * so the next run starts afresh; a database answer of the wrong shape is "mark_error".
+ *
  * Called by app/api/cron/backup/route.ts, scheduled in vercel.json twice a
  * day (the day's run and its new try); off while BACKUP_COST_REVIEW is null,
  * before any command is sent.
@@ -125,9 +142,9 @@
 import { randomUUID } from "node:crypto";
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
 import { BackupObjectLockedError, type BackupBucket, type BackupListedObject, type BackupObjectStore } from "@/lib/backup-roundtrip";
-import { MAX_PARTS, copyInParts, isManifestEnvelope, manifestBound, openManifest, runStoredBound } from "@/lib/backup-parts";
-import { BACKUP_LIST_PAGE_KEYS, BACKUP_MONTH_MARK, BACKUP_OBJECT_ID, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
-import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
+import { MAX_PARTS, copyInParts, isManifestEnvelope, manifestBound, openManifest, runStoredBound, validProgress, type CopyProgress } from "@/lib/backup-parts";
+import { BACKUP_LIST_PAGE_KEYS, BACKUP_MONTH_MARK, BACKUP_OBJECT_ID, BACKUP_STORE_TIMEOUT_MS, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
+import { REDIS_TIMEOUT_MS, timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock, type Held } from "@/lib/redis-lock";
 
@@ -160,11 +177,12 @@ export const BACKUP_COST_REVIEW: BackupCostReview | null = null;
 export const BACKUP_RUNS_PER_DAY = 2;
 /**
  * Commands a run sends besides the walk and the copy: the lock (SET NX EX), the day's count (SET NX with its expiry,
- * INCRBY), the last good copy read when room must be made (GET), one outcome (the last good copy, the count raised
- * past the day's limit, a failed deletion's note; or the failure), and the lock let go only if it is its own (EVAL,
- * and the GET and DEL inside it, which Upstash bills one by one; where scripts do not run, the same GET and DEL).
+ * INCRBY), the paused copy's progress read (GET), the last good copy read when room must be made (GET), one outcome
+ * (the last good copy, the count raised past the day's limit, a failed deletion's note; or the failure; and the
+ * progress kept or let go), and the lock let go only if it is its own (EVAL, and the GET and DEL inside it, which
+ * Upstash bills one by one; where scripts do not run, the same GET and DEL).
  */
-export const BACKUP_RUN_COMMANDS = 10;
+export const BACKUP_RUN_COMMANDS = 12;
 /**
  * The most a run's listing, deletions and copy may last, in ms (independent review of #2175): every request inside is
  * given up by then and none is sent after it (lib/fetch-timeout.ts, withCutoff), and the walk, each part and the
@@ -190,15 +208,33 @@ export const BACKUP_LOCK_MS = 900_000;
  */
 export const BACKUP_MIN_RETENTION_DAYS = BACKUP_BUCKET_LOCK_DAYS + 2;
 /**
- * Keys copied per request. The whole batch is read before the byte cap can refuse it, so lib/backup-cost.ts prices this
- * many keys at Upstash's record cap in every run (line "upstash-overshoot"): a smaller batch lowers that line.
+ * Keys copied per request: one (C1-20261109-1525-C4-68 item 2; 100 until 9 November 2026). The batch is read before
+ * the byte cap can refuse it, so lib/backup-cost.ts prices this many keys at Upstash's record cap in every run (line
+ * "upstash-overshoot"). One key a request is one round trip a key, so a database at the caps may take more than one
+ * run: the copy stops at BACKUP_COPY_DEADLINE_MS and the next run of the day goes on (tests/bk1-resume.test.ts
+ * measures it).
  */
-export const BACKUP_DUMP_BATCH = 100;
+export const BACKUP_DUMP_BATCH = 1;
+/** One part closed: written and read back, each at the bucket's request timeout (lib/backup-store.ts). */
+export const BACKUP_PART_CLOSE_MS = 2 * BACKUP_STORE_TIMEOUT_MS;
+/** Room for sealing (gzip and AES of up to 4 MiB) and for the clocks, besides the requests below. */
+export const BACKUP_STOP_MARGIN_MS = 15_000;
+/**
+ * What must still fit between the copy's deadline and the run's cutoff: the key request in flight when it passes (one
+ * database request at its timeout), a part a row overflows into, and the open part closed at the pause or the
+ * manifest when the copy ends, each written and read back at the bucket's timeout, and the margin: 140 s.
+ */
+export const BACKUP_COPY_STOP_ROOM_MS = REDIS_TIMEOUT_MS + 3 * BACKUP_PART_CLOSE_MS + BACKUP_STOP_MARGIN_MS;
+/** No key is begun past this, from the run's start: 560 s, below the 700 s cutoff (C1-20261109-1525-C4-68 item 3). */
+export const BACKUP_COPY_DEADLINE_MS = BACKUP_RUN_CUTOFF_MS - BACKUP_COPY_STOP_ROOM_MS;
 const DAY_MS = 86_400_000;
 const STALE_MS = 48 * 3_600_000;
 const LAST_OK = "nl:backup:last-ok";
 const LAST_FAIL = "nl:backup:last-fail";
 const LOCK = "nl:backup:lock";
+/** A paused copy's progress (C1-20261109-1525-C4-68 item 3), kept two days at the most: its window is one UTC day. */
+const PROGRESS = "nl:backup:progress";
+const PROGRESS_SECONDS = 2 * 86_400;
 /** The owner's report when the last good copy was found gone from the bucket. */
 const LOST_NOTE = "last good copy lost";
 /**
@@ -322,8 +358,13 @@ export type BackupRunResult =
         | "off_review" | "off_store" | "off_key" | "busy" | "already_ran" | "mark_error"
         | "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked" | "room_shrunk"
         | "export_limits" | "export_budget" | "export_cutoff" | "export_scan_pages" | "export_too_many" | "export_too_big" | "export_too_many_parts" | "export_unreadable" | "export_error"
-        | "verify";
+        | "verify" | "resume_unreadable";
     }
+  /**
+   * Stopped at its deadline (BACKUP_COPY_DEADLINE_MS): `keys` copied so far in `parts` verified parts, never a set,
+   * never the last good copy; the day's next run goes on from its progress.
+   */
+  | { ok: false; reason: "copy_incomplete"; keys: number; bytes: number; parts: number }
   /**
    * A key over the backup's ceiling (BACKUP_KEY_MAX_BYTES, lib/backup-parts.ts): every other key copied as a verified
    * set (`id`), but `missing` keys left out, so it is never the last good copy: the mark stays on the previous one,
@@ -461,7 +502,10 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
     return { ok: false, reason: "mark_error" };
   }
 
-  const cutoff = Date.now() + Math.min(options.cutoffMs ?? BACKUP_RUN_CUTOFF_MS, BACKUP_RUN_CUTOFF_MS);
+  const started = Date.now();
+  const cutoff = started + Math.min(options.cutoffMs ?? BACKUP_RUN_CUTOFF_MS, BACKUP_RUN_CUTOFF_MS);
+  // No key begun past it (C1-20261109-1525-C4-68 item 3): the copy pauses and the day's next run goes on.
+  const stopAt = started + BACKUP_COPY_DEADLINE_MS;
   // Set when the last good copy was found lost while making room: the owner's report says so.
   let lost = false;
   // The base and hold the outcome keeps with the new copy's mark, or the mark left as it is: until the prune's check
@@ -469,14 +513,43 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   let mark = "keep" as MarkPlan;
   let markReply: Promise<unknown> | null = null;
   const readMark: MarkReader = () => (markReply ??= redisPipeline([["GET", LAST_OK]]));
+  // What the outcome does with the progress: keep it as it is, keep a new one, or let it go.
+  let progress: { set: string } | "keep" | "drop" = "keep";
   const result: BackupRunResult = await withCutoff(cutoff, async () => {
-    const room = await makeRoom(review, store, readers, now, readMark);
+    // A paused copy of the same UTC day, read exactly (rule 24): one reply, text or nothing.
+    let resume: StoredProgress | null;
+    let had: boolean;
+    try {
+      const reply: unknown = await redisPipeline([["GET", PROGRESS]]);
+      if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) return { ok: false, reason: "mark_error" };
+      had = reply[0] !== null;
+      resume = reply[0] === null ? null : readProgress(reply[0]);
+    } catch (error) {
+      if (!(error instanceof UnreadableProgress)) return { ok: false, reason: "mark_error" };
+      progress = "drop";
+      return { ok: false, reason: "resume_unreadable" };
+    }
+    // Its window is the UTC day of its first run: a later day starts a new copy.
+    if (resume && (resume.at > now || dayOf(resume.at) !== dayOf(now))) resume = null;
+    const resumeIds = resume ? resume.progress.parts.map((part) => (resume!.folder ?? "") + part.id) : [];
+    const room = await makeRoom(review, store, readers, now, readMark, resumeIds);
     lost = room.lost;
     if (!room.ok) return { ok: false, reason: room.reason };
-    // The month's copy (inbox C4-37 item 4): written in a folder of its own while the bucket shows no mark for the month.
+    // Its parts must all still be there, or it is never resumed: the run copies afresh.
+    if (resume && !resumeIds.every((id) => room.listed.some((o) => o.id === id))) resume = null;
+    // The month's copy (inbox C4-37 item 4): written in a folder of its own while the bucket shows no mark for the month;
+    // a resumed copy stays in the folder its first run chose.
     const month = monthOf(now);
-    const folder = room.listed.some((o) => BACKUP_MONTH_MARK.exec(o.id)?.[1] === month) ? null : `monthly/${month}/${randomUUID()}/`;
-    const copied = await copy(review, store, key, now, folder);
+    const folder = resume ? resume.folder : room.listed.some((o) => BACKUP_MONTH_MARK.exec(o.id)?.[1] === month) ? null : `monthly/${month}/${randomUUID()}/`;
+    const copied = await copy(review, store, key, now, folder, resume, stopAt);
+    if (!copied.ok && copied.reason === "copy_incomplete") {
+      // Kept for the day's next run, with the copy's start and folder; never a set, never pruned after.
+      const value = JSON.stringify({ v: 1, at: resume?.at ?? now, folder, progress: copied.progress });
+      progress = Buffer.byteLength(value, "utf8") <= progressBound(review) ? { set: value } : "drop";
+      return { ok: false, reason: "copy_incomplete", keys: copied.keys, bytes: copied.bytes, parts: copied.parts };
+    }
+    // Closed (a set, whole or with keys left out): its progress is done with.
+    if (copied.ok || copied.reason === "export_key_over_ceiling") progress = had ? "drop" : "keep";
     // A failed day deletes nothing after it (Codex G on e95705e66): the last good copy stays, past the retention if
     // need be, until a new one is verified.
     if (!copied.ok) return copied;
@@ -505,8 +578,12 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
               : lost
                 ? [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: "last_good_copy_lost", note: LOST_NOTE }), "EX", keep]]
                 : []),
+            ...progressCommands(progress),
           ]
-        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason, ...("missing" in result ? { missing: result.missing, set: result.id } : {}), ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep]],
+        : [
+            ["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason, ...("missing" in result ? { missing: result.missing, set: result.id } : {}), ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep],
+            ...progressCommands(progress),
+          ],
     );
   } catch {
     // The copy stands as it is; a lost note only makes the report look older.
@@ -514,6 +591,32 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   await letGo();
   return result;
 }
+
+/** The progress as kept: the copy's start (its window's moment), its folder, and where it stopped. */
+type StoredProgress = { at: number; folder: string | null; progress: CopyProgress };
+/** A kept progress that cannot be read: never taken as none (rule 24). */
+class UnreadableProgress extends Error {}
+const FOLDER = /^monthly\/\d{4}-(?:0[1-9]|1[0-2])\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/$/;
+
+/** The kept progress read exactly: its version, a moment, a folder of a month's copy or none, and a valid progress. */
+function readProgress(raw: string): StoredProgress {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    const { v, at, folder, progress, ...rest } = parsed as Record<string, unknown>;
+    if (v !== 1 || Object.keys(rest).length > 0 || !isCount(at) || (folder !== null && (typeof folder !== "string" || !FOLDER.test(folder)))) throw new Error("not a progress");
+    return { at, folder, progress: validProgress(progress) };
+  } catch {
+    throw new UnreadableProgress();
+  }
+}
+
+/** The most a kept progress weighs, in bytes: a manifest's bound for the review's parts (priced in lib/backup-cost.ts). */
+export const progressBound = (review: BackupCostReview) => manifestBound(runLimits(review).maxParts);
+
+/** The outcome's command for the progress: none, a new one kept two days, or the old one let go. */
+const progressCommands = (plan: { set: string } | "keep" | "drop"): (string | number)[][] =>
+  plan === "keep" ? [] : plan === "drop" ? [["DEL", PROGRESS]] : [["SET", PROGRESS, plan.set, "EX", PROGRESS_SECONDS]];
 
 /** Every object of the backup's own, read whole within backupListPages pages; null when the listing is longer. */
 async function listAll(review: BackupCostReview, store: BackupBucket): Promise<BackupListedObject[] | null> {
@@ -648,6 +751,7 @@ async function makeRoom(
   key: Uint8Array[],
   now: number,
   readMark: MarkReader,
+  resumeIds: readonly string[] = [],
 ): Promise<{ ok: true; deleted: number; lost: boolean; listed: BackupListedObject[] } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked" | "room_shrunk"; lost: boolean }> {
   const need = objectBound(review);
   const objects = setObjects(review);
@@ -672,6 +776,8 @@ async function makeRoom(
       keep = await verifiedInBucket(store, key, listed, months);
     }
     for (const id of months) keep.add(id);
+    // The paused copy this run goes on with: its parts are this run's set, never room.
+    for (const id of resumeIds) keep.add(id);
     // While the prune is held, every object written before the hold began is kept (a good, pre-shrink set), and room
     // is made only from the held copies, oldest first, the newest one too: each is a copy of the shrunk or blind
     // database, and every set from before is kept whole.
@@ -837,17 +943,39 @@ async function copy(
   key: Uint8Array,
   now: number,
   folder: string | null,
-): Promise<Exclude<BackupRunResult, { ok: true }> | { ok: true; id: string; keys: number; bytes: number; parts: number }> {
+  resume: StoredProgress | null,
+  stopAt: number,
+): Promise<
+  | Exclude<BackupRunResult, { ok: true } | { reason: "copy_incomplete" }>
+  | { ok: false; reason: "copy_incomplete"; keys: number; bytes: number; parts: number; progress: CopyProgress }
+  | { ok: true; id: string; keys: number; bytes: number; parts: number }
+> {
   // The copy in parts (lib/backup-parts.ts): every part verified as written, the set verified by its manifest last; a
   // month's copy with every object in its folder, its id the manifest's there.
   const into: BackupObjectStore = folder === null ? store : { putNew: (id, bytes) => store.putNew(folder + id, bytes), read: (id, most) => store.read(folder + id, most) };
   let done: Awaited<ReturnType<typeof copyInParts>>;
   try {
-    done = await copyInParts({ maxRows: review.maxRows, maxCommands: review.maxCommands - BACKUP_RUN_COMMANDS, ...runLimits(review), batch: BACKUP_DUMP_BATCH, now }, key, into);
+    // A resumed copy keeps its start as the moment its parts are sealed with, and reads the keys' ends against now.
+    done = await copyInParts(
+      {
+        maxRows: review.maxRows,
+        maxCommands: review.maxCommands - BACKUP_RUN_COMMANDS,
+        ...runLimits(review),
+        batch: BACKUP_DUMP_BATCH,
+        now: resume?.at ?? now,
+        readAt: now,
+        stopAt,
+        partMs: BACKUP_PART_CLOSE_MS,
+        ...(resume ? { resume: resume.progress } : {}),
+      },
+      key,
+      into,
+    );
   } catch {
     return { ok: false, reason: "export_error" };
   }
   if (done.ok) return { ok: true, id: (folder ?? "") + done.id, keys: done.keys, bytes: done.bytes, parts: done.parts };
+  if (done.reason === "paused") return { ok: false, reason: "copy_incomplete", keys: done.progress.keys, bytes: done.progress.bytes, parts: done.parts, progress: done.progress };
   // Sealing, a write or a read-back failed: every earlier set is left as it was.
   if (done.reason === "verify") return { ok: false, reason: "verify" };
   if (done.reason === "key_over_ceiling") return { ok: false, reason: "export_key_over_ceiling", id: (folder ?? "") + done.id, missing: done.missing, keys: done.keys, bytes: done.bytes, parts: done.parts };

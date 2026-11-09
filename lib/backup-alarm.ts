@@ -38,6 +38,9 @@ export function backupAlarmSignal(result: BackupRunResult): BackupAlarmSignal | 
     if (result.note === "last_good_copy_lost") return { kind: "fail", reason: result.note };
     return { kind: "alive" };
   }
+  // A copy stopped at its deadline (C1-20261109-1525-C4-68 item 3) is no sign of life and no failure yet: the day's
+  // next run goes on with it. If it never closes, the monitor's silence is the alarm.
+  if (result.reason === "copy_incomplete") return null;
   return SILENT.has(result.reason) ? null : { kind: "fail", reason: result.reason };
 }
 

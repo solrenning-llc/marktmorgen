@@ -42,21 +42,29 @@
  *     read (at most BACKUP_SCAN_PAGES, and no more than its commands allow) at
  *     500 names of 1,024 bytes, every copied byte as read (maxRunBytes counts
  *     the base64 DUMPs it keeps), each key's name sent twice, and the marks and
- *     the report's reads; the marks kept;
+ *     the report's reads, and a paused copy's progress read and written, each at
+ *     its bound (progressBound); the marks and the progress kept;
+ *   - resumed runs (C1-20261109-1525-C4-68 item 3): a copy that stops at its
+ *     deadline goes on in the day's next run, which walks the database again,
+ *     lists the bucket twice and reads the progress. Each is one of the 64 runs
+ *     above, priced at its full caps (every SCAN page, every copied byte, every
+ *     command, every object written and read back, the route's whole duration),
+ *     so a resumed run adds no run; the pause's own part is one of the review's
+ *     maxParts;
  *   - Vercel: one call a run held for the route's maximum duration at 2 GB,
  *     its CPU the whole time, at the repository's iad1 rates and, as a line of its own, the difference up to gru1,
  *     the dearest region (the project pins no region);
  *   - the four lines docs/backup-costs-2026-11-08.md (#3271, section 3, items 2, 3, 4 and 8) priced outside the code
  *     until 9 November 2026: that dearest region; one more billing block of each Upstash and Vercel unit, as R2's
- *     rounding (no page says they do not round up); the batch of DUMPs read before the byte cap refuses it, every key
- *     at Upstash's record cap; and every byte the function moves (Upstash, the set written and read back, the
+ *     rounding (no page says they do not round up); the batch of DUMPs read before the byte cap refuses it (one key
+ *     since 9 November 2026, BACKUP_DUMP_BATCH), every key at Upstash's record cap; and every byte the function moves (Upstash, the set written and read back, the
  *     objects read to find the verified copies, that batch) at Vercel's dearest transfer rate, a ceiling;
  *   - and the provider allowance (PROVIDER_CHARGES_BPS) on all of it.
  * No supplier's free quota is credited (MR). What the code cannot bound is in
  * BACKUP_COST_UNKNOWNS: while any is open, the fixed-cost line's reviewed
  * ceiling stays unknown, never zero.
  */
-import { BACKUP_DUMP_BATCH, BACKUP_RUN_COMMANDS, BACKUP_RUNS_PER_DAY, admitReview, backupKeptObjects, backupListPages, backupPeakSets, type BackupCostReview } from "@/lib/backup-run";
+import { BACKUP_DUMP_BATCH, BACKUP_RUN_COMMANDS, BACKUP_RUNS_PER_DAY, admitReview, backupKeptObjects, backupListPages, backupPeakSets, progressBound, type BackupCostReview } from "@/lib/backup-run";
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
 import { BACKUP_SCAN_PAGES, MAX_PARTS, manifestBound, runStoredBound } from "@/lib/backup-parts";
 import {
@@ -140,7 +148,7 @@ export const BACKUP_COST_UNKNOWNS = [
   "vercel-route: the route's maxDuration of 800 s (BACKUP_ROUTE_SECONDS) needs Fluid compute, and no deployment has accepted it yet",
   "vercel-rates: the Vercel rates were read on 7 October 2026 and not since",
   "vercel-transfer: whether Vercel bills the function's bytes sent to R2 and Upstash",
-  "upstash-overshoot: the last batch of DUMPs is read before the cap refuses it, and a key's size is not capped by the backup",
+  "upstash-overshoot: the last key's DUMP (a batch of one) is read before the cap refuses it, and a key's size is not capped by the backup",
   "scan-names: SCAN's COUNT is a hint, so a page's names are taken at 500, other products' key names in the shared database are not capped, and a name escaped in JSON can weigh more than its bytes",
   "refused-calls: nothing limits how many calls a day reach the run; each one refused at the lock sends two commands (the lock, the note in the report), at the day's count six, and is one Vercel call",
   "report-reads: no schedule calls the report yet, so its two reads a day are assumed",
@@ -187,13 +195,17 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
   const classB = up(((runs * (readBacks + kept)) / 1_000_000 + 1) * R2_CLASS_B_MICRO_USD_PER_MILLION);
   const commands = runs * review.maxCommands + days * BACKUP_REPORT_READS_PER_DAY;
   const upstashCommands = up((commands / 1_000_000) * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS);
+  // A paused copy's progress, at most a manifest's bound for the review's parts (lib/backup-run.ts refuses to keep a
+  // larger one): read once and written once a run.
+  const progress = progressBound(review);
   const runTransfer =
     scanPages * BACKUP_SCAN_NAMES_PER_PAGE * BACKUP_SCAN_NAME_BYTES
     + runBytes
     + review.maxRows * (2 * BACKUP_SCAN_NAME_BYTES + ANSWER_FRAME_BYTES)
-    + (MARK_KEYS * MARK_BYTES);
+    + (MARK_KEYS * MARK_BYTES)
+    + 2 * progress;
   const upstashTransfer = up(((runs * runTransfer) / GB) * UPSTASH_MICRO_USD_PER_GB_TRANSFER);
-  const marks = up(((MARK_KEYS * MARK_BYTES) / GB) * UPSTASH_MICRO_USD_PER_GB_MONTH);
+  const marks = up(((MARK_KEYS * MARK_BYTES + progress) / GB) * UPSTASH_MICRO_USD_PER_GB_MONTH);
   const hours = routeSeconds / 3_600;
   const vercel = up(runs * (VERCEL_FUNCTION_GB * hours * VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR + hours * VERCEL_CPU_MICRO_USD_PER_HOUR + VERCEL_CALL_MICRO_USD_PER_MILLION / 1_000_000));
   // The same calls at gru1, less what the line above already counts at iad1 (the invocation is priced alike).
@@ -222,8 +234,8 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
     { id: "r2-class-a", microUsd: classA, basis: `${runs} runs × (${objects} objects (parts, manifest, a month's mark) × 2 (written, then deleted) + 2 listings of ${listPages} page) + ${kept} objects alive at the month's start, deleted, plus one million of rounding` },
     { id: "r2-class-b", microUsd: classB, basis: `${runs} runs × (${readBacks} read-backs + up to ${kept} reads to find the verified copies to keep), plus one million of rounding` },
     { id: "upstash-commands", microUsd: upstashCommands, basis: `${runs} × ${review.maxCommands} commands + ${days} × ${BACKUP_REPORT_READS_PER_DAY} report reads` },
-    { id: "upstash-transfer", microUsd: upstashTransfer, basis: `${runs} runs × ${runTransfer} bytes: ${scanPages} SCAN pages of ${BACKUP_SCAN_NAMES_PER_PAGE} names of ${BACKUP_SCAN_NAME_BYTES} bytes, ${runBytes} copied bytes, each key's name sent twice, the marks and the report's reads` },
-    { id: "upstash-storage", microUsd: marks, basis: `${MARK_KEYS} marks of at most ${MARK_BYTES} bytes kept` },
+    { id: "upstash-transfer", microUsd: upstashTransfer, basis: `${runs} runs × ${runTransfer} bytes: ${scanPages} SCAN pages of ${BACKUP_SCAN_NAMES_PER_PAGE} names of ${BACKUP_SCAN_NAME_BYTES} bytes, ${runBytes} copied bytes, each key's name sent twice, the marks and the report's reads, a paused copy's progress of up to ${progress} bytes read and written` },
+    { id: "upstash-storage", microUsd: marks, basis: `${MARK_KEYS} marks of at most ${MARK_BYTES} bytes and a progress of up to ${progress} bytes kept` },
     { id: "vercel", microUsd: vercel, basis: `${runs} calls of ${routeSeconds} s at ${VERCEL_FUNCTION_GB} GB, CPU the whole time` },
     { id: "vercel-region", microUsd: region, basis: `the same ${runs} calls at gru1, the dearest region ($0.221 a CPU-hour, $0.0183 a GB-hour), less the iad1 rates above` },
     { id: "billing-blocks", microUsd: blocks, basis: `one more block of each unit: ${UPSTASH_COMMAND_BLOCK} Upstash commands, 1 GB of Upstash bandwidth, 1 GB-month of Upstash storage, 1 CPU-hour and 1 GB-hour at gru1` },

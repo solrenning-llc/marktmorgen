@@ -27,6 +27,7 @@ import { backupAlarmSignal } from "@/lib/backup-alarm";
 import { REDIS_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import type { BackupBucket } from "@/lib/backup-roundtrip";
 import { store as redis } from "./redis-stub";
+import { ROUND_TRIP_SECONDS } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 const C = backupRun as unknown as Record<string, unknown>;
@@ -74,14 +75,17 @@ const store: BackupBucket = {
   },
 };
 
-/** Database requests: each one waits the latency; DUMPs counted; SCAN paged when a test asks; a reply replaced on demand. */
+/**
+ * Database requests: each one waits the latency; DUMPs of the test's keys counted (the backup's own marks, nl:backup:*,
+ * are keys of ours too and copied with them); SCAN paged when a test asks; a reply replaced on demand.
+ */
 let dumps = 0;
 let pageScan = 0;
 let answerProgress: unknown = undefined;
 const real = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
   wait();
-  dumps += list.filter((c) => c[0] === "DUMP").length;
+  dumps += list.filter((c) => c[0] === "DUMP" && !String(c[1]).startsWith("nl:backup:")).length;
   if (answerProgress !== undefined && list.length === 1 && list[0][0] === "GET" && list[0][1] === PROGRESS) return [answerProgress];
   if (pageScan > 0 && list.length === 1 && list[0][0] === "SCAN") {
     const [, all] = (await real([["SCAN", "0", "MATCH", String(list[0][3])]]))[0] as [string, string[]];
@@ -122,6 +126,8 @@ const dumpOf = async (name: string) => Buffer.from(String((await real([["DUMP", 
 const ours = (r: Map<string, string>) => [...r.keys()].filter((k) => k.startsWith("nl:r:")).sort();
 const reasonOf = (r: BackupRunResult) => (r.ok ? "ok" : r.reason);
 const keysOf = (r: BackupRunResult) => ("keys" in r ? r.keys : -1);
+/** The keys of the result's set that are the test's, not the backup's own marks. */
+const testKeys = async (r: BackupRunResult) => (r.ok ? ours(await rowsOf(r.id)).length : -1);
 
 async function main(): Promise<void> {
   const D = Date.parse("2026-11-03T04:23:00Z");
@@ -151,8 +157,9 @@ async function main(): Promise<void> {
   latency = 0;
   const firstParts = [...objects.keys()].filter((id) => id !== old);
   is("incomplete: copy_incomplete, never ok", reasonOf(first), "copy_incomplete");
-  is("some keys copied, not all", keysOf(first) > 0 && keysOf(first) < 30, true);
-  is("one DUMP for each key it copied", dumps, keysOf(first));
+  is("some keys copied, not all", dumps > 0 && dumps < 30, true);
+  is("one DUMP for each key it copied (the marks it copied too among them)", keysOf(first) >= dumps && keysOf(first) <= dumps + 3, true);
+  const firstDumps = dumps;
   is("its parts written and kept, none of them a manifest, no month's mark", [firstParts.length > 0, firstParts.some((id) => isManifestEnvelope(objects.get(id)!)), firstParts.some((id) => id.endsWith("/verified"))], [true, false, false]);
   is("nothing pruned: the old copy is still there, nothing deleted", [objects.has(old), deletes.length], [true, 0]);
   is("never the last good copy: no mark, and the report says no good copy", [(await real([["GET", "nl:backup:last-ok"]]))[0], await backupStale(D + HOUR)], [null, true]);
@@ -168,8 +175,8 @@ async function main(): Promise<void> {
   at(D + 6 * HOUR);
   dumps = 0;
   const second = await runBackup({ now: D + 6 * HOUR, review, store, key });
-  is("complete", [second.ok, keysOf(second)], [true, 30]);
-  is("only the keys after the cursor read: no key DUMPed twice", dumps, 30 - keysOf(first));
+  is("complete", [second.ok, await testKeys(second)], [true, 30]);
+  is("only the keys after the cursor read: no key DUMPed twice", dumps, 30 - firstDumps);
   if (second.ok) {
     const manifest = openManifest(objects.get(second.id)!, key);
     const folder = second.id.slice(0, second.id.lastIndexOf("/") + 1);
@@ -191,7 +198,7 @@ async function main(): Promise<void> {
   at(D + 11 * DAY);
   dumps = 0;
   const nextDay = await runBackup({ now: D + 11 * DAY, review, store, key });
-  is("the day's copy paused; the next day's run copied every key afresh", [reasonOf(paused), nextDay.ok, keysOf(nextDay), dumps], ["copy_incomplete", true, 30, 30]);
+  is("the day's copy paused; the next day's run copied every key afresh", [reasonOf(paused), nextDay.ok, await testKeys(nextDay), dumps], ["copy_incomplete", true, 30, 30]);
   if (nextDay.ok) {
     const manifest = openManifest(objects.get(nextDay.id)!, key);
     const folder = nextDay.id.slice(0, nextDay.id.lastIndexOf("/") + 1);
@@ -203,7 +210,7 @@ async function main(): Promise<void> {
   latency = 20_000;
   const before = await runBackup({ now: D + 20 * DAY, review, store, key });
   latency = 0;
-  is("paused past k06 and before k28", [reasonOf(before), keysOf(before) > 6 && keysOf(before) < 28], ["copy_incomplete", true]);
+  is("paused past k06 and before k28", [reasonOf(before), keysOf(before) > 9 && keysOf(before) < 28], ["copy_incomplete", true]);
   const k03 = await dumpOf("nl:r:k03");
   const k05 = await dumpOf("nl:r:k05");
   redis.run(["SET", "nl:r:k03", "changed after its copy"]);
@@ -232,7 +239,7 @@ async function main(): Promise<void> {
   at(D + 30 * DAY + 6 * HOUR);
   dumps = 0;
   const fresh = await runBackup({ now: D + 30 * DAY + 6 * HOUR, review, store, key });
-  is("complete from the first key", [fresh.ok, keysOf(fresh), dumps], [true, 30, 30]);
+  is("complete from the first key", [fresh.ok, await testKeys(fresh), dumps], [true, 30, 30]);
   if (fresh.ok) is("captured at its own start", openManifest(objects.get(fresh.id)!, key).capturedAt, D + 30 * DAY + 6 * HOUR);
 
   part("A progress that cannot be read is never taken as none (rule 24)");
@@ -270,7 +277,8 @@ async function main(): Promise<void> {
     for (let i = 0; i < total; i += 1) redis.run(["SET", `nl:m:${String(i).padStart(5, "0")}`, "v".repeat(240)]);
     // 50 keys of ours a SCAN page: the walk takes the 200 pages a shared database may take (BACKUP_SCAN_PAGES).
     pageScan = 50;
-    latency = 250;
+    // The repository's round-trip ceiling for a database trip (a review ceiling far above a trip inside one region).
+    latency = ROUND_TRIP_SECONDS * 1_000;
     const runs: { keys: number; seconds: number; cpuMs: number; reason: string }[] = [];
     let closed: BackupRunResult | null = null;
     let copied = 0;

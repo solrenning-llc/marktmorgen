@@ -1,0 +1,11 @@
+{
+  "file": "tests/email-field-keyboards.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "1c2bd01e22064c9fe46bcd3d49ba269e0098079b",
+  "stdout": "  ok    the email fields the audit counted: 16 inputs (two with a type chosen in code), 23 EmailFields (the twenty-second: a buyer's withdrawal, 588 [KB9]; the twenty-third: a creator's withdrawal from their plan, 588 [KB9] unit 3) and 8 EmailInputs (the seventh: a member's address for a discount, 616 [WP15](8); the eighth: a member's address for free days, 641 [WG1])\n  ok    every one says whose address it is (autocomplete)\n  ok    someone else's address is not offered the creator's own\n  ok    nor is the address a store moves to (\"Move to\")\n\n4 checks, all passing.\nS_VOLUME {\"runs\":0,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

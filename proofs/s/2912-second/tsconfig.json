@@ -1,0 +1,29 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../app/api/store/manage/switch/route.ts",
+    "../../../app/api/store/member-free-days/route.ts",
+    "../../../app/studio/memberships/page.tsx",
+    "../../../components/member-free-days.tsx",
+    "../../../lib/agent-coverage.ts",
+    "../../../lib/buyer-profile.ts",
+    "../../../lib/buyer-words/free-days.ts",
+    "../../../lib/buyer-words/membership.ts",
+    "../../../lib/data-families.ts",
+    "../../../lib/member-discount.ts",
+    "../../../lib/member-free-days-rules.ts",
+    "../../../lib/member-free-days.ts",
+    "../../../lib/membership-numbers.ts",
+    "../../../lib/tier-switch.ts",
+    "../../../lib/yearly-switch-rules.ts",
+    "../../../lib/yearly-switch.ts",
+    "../../../proofs/s/2912-second/rows.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

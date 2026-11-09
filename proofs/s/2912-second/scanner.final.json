@@ -1,0 +1,6 @@
+{
+  "status": 0,
+  "stdout": "Public data check: 4721 tracked files; 0 file(s) require correction.\n",
+  "stderr": "",
+  "reason": "final staged set includes the two static receipts"
+}

@@ -1,0 +1,11 @@
+{
+  "file": "tests/member-free-days-switch.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "1c2bd01e22064c9fe46bcd3d49ba269e0098079b",
+  "stdout": "\nControl: a paying member with no free days\n  ok    the upgrade shows Stripe's prorated amount due\n\nA paying member given free days\n  ok    the free days are given\n  ok    Stripe now says trialing\n  ok    the switch page refuses while the free days run, and says why (never $0, never 'free trial')\n  ok    the switch itself is refused the same way\n  ok    nothing was sent to Stripe to switch\n  ok    no receipt says 'You are in your free trial'\n  ok    moving to yearly is refused the same way\n  ok    nothing was sent to Stripe for yearly either\n  ok    the words say so in every language, on the switch page and back on the membership page\n\nControl: a real free trial still switches as before\n  ok    in a real trial the switch is offered, nothing to pay now\n  ok    free days given inside a real trial leave it a trial\n  ok    so the switch is still offered as a trial's\n\n13 checks, all passing.\nS_VOLUME {\"runs\":166,\"attempts\":22,\"forwarded\":22}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

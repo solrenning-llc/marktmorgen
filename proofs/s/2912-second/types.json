@@ -1,0 +1,16 @@
+{
+  "command": [
+    "node",
+    "--max-old-space-size=1024",
+    "node_modules/typescript/bin/tsc",
+    "--noEmit",
+    "--project",
+    "proofs/s/2912-second/tsconfig.json"
+  ],
+  "roots": 17,
+  "status": 0,
+  "stdout": "",
+  "stderr": "",
+  "seconds": 13.435,
+  "timeout": 120
+}

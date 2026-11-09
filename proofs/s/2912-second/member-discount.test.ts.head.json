@@ -1,0 +1,11 @@
+{
+  "file": "tests/member-discount.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "1c2bd01e22064c9fe46bcd3d49ba269e0098079b",
+  "stdout": "\nWhat the studio is shown\n  ok    a discount, old or new shape, is seen\n  ok    another store's or a payment plan is not a membership here\n  ok    only this store's running memberships of that address\n  ok    with what each renewal costs\n  ok    nobody under that address: none\n\nPutting a code on\n  ok    not this member's membership: refused\n  ok    one with a discount already: refused, never replaced\n  ok    a code that is not active: refused\n  ok    nothing was sent to Stripe for any of them\n  ok    the code goes on\n  ok    with Stripe's promotion code field, on that membership, once\n  ok    Stripe refusing it by the code's rules is said as such\n\nThe studio\n  ok    only for a role that may change the store's codes\n  ok    the address field is labeled, the result announced, errors said\n\n14 checks, all passing.\nS_VOLUME {\"runs\":16,\"attempts\":18,\"forwarded\":18}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

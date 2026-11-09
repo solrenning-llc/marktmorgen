@@ -197,7 +197,10 @@ export default async function LeavePage({ params, searchParams }: Params) {
                 <button type="submit" className="btn btn-secondary btn-block mt-2" data-leave-cancel>
                   {m.leaveCancel}
                 </button>
-                <p className="st-muted mt-3 text-sm">{`${m.leaveConfirm} ${m.cancelNote}`}</p>
+                <p className="st-muted mt-3 text-sm">
+                  {/* Sold as a number of payments: this press cancels it, with no Stripe page after (lib/membership-manage.ts). */}
+                  {one.fixedEnd ? m.fixedCancelNote(one.periodEnd ? endDate(one.periodEnd) : "") : `${m.leaveConfirm} ${m.cancelNote}`}
+                </p>
               </form>
             </>
           )}

@@ -25,3 +25,20 @@ export const PLAY_REQUEST_UNITS = 2;
 export const PLAY_TICKET_SECONDS = 2 * 60;
 /** A token given again only while it has at least this long left. */
 export const PLAY_REUSE_MIN_SECONDS = 2 * 60;
+/**
+ * The most a press of Play holds and signs for, its token's life (the owner's decision 16, relayed by Claude 1 on
+ * 9 November 2026: on the Store's video hours, a shorter time for each lesson opened, the worst month's cost and the
+ * visible 4 hours unchanged). Before, a press asked for the lesson's whole length and LESSON_PAUSE_SECONDS, up to
+ * four hours: one press of a 3 h 45 min lesson held the Store's whole month, and its unused part came back only an
+ * interval and a reading after the token ran out. Half an hour, because:
+ *
+ *   - a lesson of up to 15 minutes, with its 15 minutes of pauses (lib/learn.ts, lessonTokenSeconds), still plays
+ *     whole on one press: a shorter block would cut short lessons too;
+ *   - it is six units of HOLD_UNIT_SECONDS: the Store's 4 hours (48 units) let eight students play at once, where one
+ *     long lesson took them all, and an unused block keeps at most half an hour from the others until it is read back;
+ *   - a student watching without a stop presses about twice an hour, far inside PLAYS_PER_LEARNER_WINDOW.
+ *
+ * The cost does not move: what is held is still the plan's own hours, and every press takes PLAY_REQUEST_UNITS of
+ * the store's public requests before its hold (tests/plan-cost-registry.ts).
+ */
+export const PLAY_BLOCK_SECONDS = 30 * 60;

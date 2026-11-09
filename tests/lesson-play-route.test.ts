@@ -167,7 +167,11 @@ async function main(): Promise<void> {
 
   part("Anonymous previews hold at most half of what is left; students still play");
   {
-    await redis.pipeline([["DEL", HOLDS]]);
+    // Eight hours left of the Studio's 32 measured: the half kept for students is reached before the store's hourly
+    // pace of anonymous presses (thirty presses of a half-hour block hold 15 hours at most, under 16, the owner's
+    // decision 16).
+    const LEFT = 8 * 3600;
+    await redis.pipeline([["DEL", HOLDS], ["SET", `nl:watch:sec:${folder}:${windowId(store)}`, String(LIMIT - LEFT)]]);
     let kept = "";
     let plays = 0;
     for (let i = 0; i < PREVIEW_PLAYS_PER_STORE_WINDOW; i += 1) {
@@ -177,7 +181,7 @@ async function main(): Promise<void> {
     }
     console.log(`anonymous presses that played before the rest was kept: ${plays}`);
     is("anonymous presses stop at the share kept for students", kept, "kept");
-    is("they hold no more than half the window", (await held()) * HOLD_UNIT_SECONDS <= (LIMIT * (10_000 - PREVIEW_KEEP_BPS)) / 10_000, true);
+    is("they hold no more than half of what is left", (await held()) * HOLD_UNIT_SECONDS <= (LEFT * (10_000 - PREVIEW_KEEP_BPS)) / 10_000, true);
     const said = await page("stranger", "lesson000001", { play: kept });
     is("the page says the time left is kept for students, beside the button", said.includes(inHtml(w.playKeptRest)) && said.includes(`>${w.playLesson}</button>`), true);
     const student = await press("student", "lesson000002");

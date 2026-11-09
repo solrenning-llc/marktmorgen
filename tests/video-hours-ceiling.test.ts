@@ -212,13 +212,15 @@ async function main(): Promise<void> {
     is("a count of what is held that cannot be read keeps the store in line", await due(), true);
   }
 
-  part("a lesson's token: its length and the pauses, never past four hours");
+  part("a lesson's token: its length and the pauses, never past a press's block");
   {
     await fresh(600, 0);
     is("a ten-minute lesson: 25 minutes", (await openings(1, STORE_LIMIT)).lives[0] <= 25 * 60, true);
     await fresh(3 * 3600, 0);
     const long = (await openings(1, STORE_LIMIT)).lives[0];
-    is("a three-hour lesson: three hours and a quarter", long > 3 * 3600 && long <= 3 * 3600 + 15 * 60, true);
+    // Rule 23 (the owner's decision 16, 9 November 2026): was "three hours and a quarter" (long > 3 h, <= 3 h 15 min).
+    // A press holds and signs a block of PLAY_BLOCK_SECONDS at most; the next press goes on (tests/lesson-play.test.ts).
+    is("a three-hour lesson: a block of half an hour", long > 29 * 60 && long <= 30 * 60, true);
     await fresh(0, 0);
     is("a length not known yet: half an hour", (await openings(1, STORE_LIMIT)).lives[0] <= 30 * 60, true);
     await fresh(600, STORE_LIMIT - 90);

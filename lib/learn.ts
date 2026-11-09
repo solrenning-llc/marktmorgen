@@ -47,6 +47,7 @@ import { PLAYER_SECONDS, isStreamConfigured, playerFor, streamRecord } from "@/l
 import { isStreamPath, shapeOf } from "@/lib/stream-rules";
 import { type HoldAnswer, holdPlayback, watchedForAdmission } from "@/lib/watch";
 import { HOLD_MIN_SECONDS, PREVIEW_KEEP_BPS } from "@/lib/watch-rules";
+import { PLAY_BLOCK_SECONDS } from "@/lib/lesson-play-rules";
 import { calendarWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
@@ -753,8 +754,10 @@ const UNKNOWN_LENGTH_TOKEN_SECONDS = 30 * 60;
  * How long a lesson's player token is asked to be good for: the video's length
  * and LESSON_PAUSE_SECONDS, at most PLAYER_SECONDS; UNKNOWN_LENGTH_TOKEN_SECONDS
  * when the length is not known. What is held, and so the token, may be less
- * (lib/watch.ts, holdPlayback); a token that runs out mid-lesson is a refresh
- * of the page, which the player resumes where it was (rememberPosition).
+ * (lib/watch.ts, holdPlayback), and a press of Play asks for PLAY_BLOCK_SECONDS
+ * at most (lib/lesson-play-rules.ts); a token that runs out mid-lesson is
+ * another press of Play lesson, and the player is asked to resume where it was
+ * (rememberPosition).
  */
 export function lessonTokenSeconds(videoSeconds: number): number {
   const known = Number.isSafeInteger(videoSeconds) && videoSeconds > 0;
@@ -801,7 +804,8 @@ export async function lessonVideo(file: ProductFile, limit: number | null = null
     // longer than that.
     let held: HoldAnswer = null;
     const player = await playerFor(file.pathname, Date.now(), async (record) => {
-      held = await holdPlayback(folder, window, limit, lessonTokenSeconds(record.seconds), Date.now(), how.anonymous === true ? PREVIEW_KEEP_BPS : 0);
+      // A block of PLAY_BLOCK_SECONDS at most (the owner's decision 16): the next press goes on.
+      held = await holdPlayback(folder, window, limit, Math.min(lessonTokenSeconds(record.seconds), PLAY_BLOCK_SECONDS), Date.now(), how.anonymous === true ? PREVIEW_KEEP_BPS : 0);
       return typeof held === "number" ? held : null;
     });
     const answer = held as HoldAnswer;

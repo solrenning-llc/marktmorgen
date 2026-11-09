@@ -25,7 +25,8 @@ import { readListing } from "@/lib/catalog";
 import { LessonComments } from "@/components/lesson-comments";
 import { commenterName, commentsOn, lessonComments } from "@/lib/lesson-comments";
 import { CREATOR_AUTHOR, SHOWN_THREADS, commentClock, threadsFor } from "@/lib/lesson-comments-rules";
-import { videoLimitFor } from "@/lib/plan-standing";
+import { costStandingOf, videoLimitFor } from "@/lib/plan-standing";
+import { PLAY_BLOCK_SECONDS } from "@/lib/lesson-play-rules";
 import { speech } from "@/lib/buyer-words";
 import { type CoursesWords, coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
@@ -140,6 +141,15 @@ export default async function LessonPage({ params, searchParams }: Params) {
     : played === "previews" ? w.playPreviewsRest
     : played === "error" ? w.playAgainRest
     : null;
+  // A press of Play (app/api/store/course/play/route.ts): a plain form, so it works with no script.
+  const playForm = (
+    <form action="/api/store/course/play" method="post">
+      <input type="hidden" name="handle" value={store.handle} />
+      <input type="hidden" name="product" value={product.id} />
+      <input type="hidden" name="lesson" value={lesson.id} />
+      <button type="submit" className="btn st-btn">{w.playLesson}</button>
+    </form>
+  );
   const [body, video, quiz, attempt, task, work] = await Promise.all([
     lesson.hasBody ? readBody(course.id, lesson.id) : Promise.resolve(""),
     lesson.video ? videoShown(lesson.video) : Promise.resolve(null),
@@ -219,7 +229,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
             <div id="video" tabIndex={-1}>
             {lesson.video ? (
               video?.kind === "stream" ? (
-                stamp ? (
+                <>
+                {stamp ? (
                   <StampedPlayer text={stamp} seed={`${course.id}:${who}`} enter={w.fullScreen} exit={w.exitFullScreen}>
                     {/* Stamped: the service's own full screen and picture in
                         picture are not given to its frame, since they would
@@ -259,7 +270,14 @@ export default async function LessonPage({ params, searchParams }: Params) {
                       }}
                     />
                   </div>
-                )
+                )}
+                {/* A press plays a block of PLAY_BLOCK_SECONDS at most (the owner's decision 16): said under the
+                    player, with Play lesson to go on, so a token that runs out is one more press (AX274: 3.3.5). */}
+                <div className="mt-4 flex flex-col items-start gap-3">
+                  <p className="st-note text-sm">{w.playBlockRest(PLAY_BLOCK_SECONDS / 60)}</p>
+                  {playForm}
+                </div>
+                </>
               ) : video?.kind === "file" ? (
                 stamp ? (
                   <StampedPlayer text={stamp} seed={`${course.id}:${who}`} enter={w.fullScreen} exit={w.exitFullScreen}>
@@ -312,12 +330,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                       <strong>{w.playWaitStrong}</strong>{` ${playNotice}`}
                     </p>
                   ) : null}
-                  <form action="/api/store/course/play" method="post">
-                    <input type="hidden" name="handle" value={store.handle} />
-                    <input type="hidden" name="product" value={product.id} />
-                    <input type="hidden" name="lesson" value={lesson.id} />
-                    <button type="submit" className="btn st-btn">{w.playLesson}</button>
-                  </form>
+                  {playForm}
                 </div>
               ) : video?.kind === "preparing" ? (
                 <p className="st-note mt-6" role="status">
@@ -325,7 +338,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 </p>
               ) : video?.kind === "paused" ? (
                 <p className="st-note mt-6" role="status">
-                  <strong>{w.pausedStrong}</strong>{` ${w.pausedRest(store.name)}`}
+                  {/* A paid store's pause is its plan's hours used, never "no paid plan" (VR 2). */}
+                  <strong>{w.pausedStrong}</strong>{` ${costStandingOf(store) === "paid" ? w.pausedPaidRest(store.name) : w.pausedRest(store.name)}`}
                 </p>
               ) : video?.kind === "failed" ? (
                 <p className="st-note mt-6">{w.videoFailed(store.name)}</p>

@@ -119,7 +119,12 @@ export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale 
   if (earlier === null) return false; // Stripe could not be asked: the next pass asks again.
   // The first sale's day is noted once, for good: ours only on OK or our own value read back. The value is the day in
   // seconds and a random part (claimValue), so no other run writes it, and firstSaleAt still reads the day.
-  const value = claimValue(earlier || at);
+  // Past the ceiling of pages (UNKNOWN_EARLIER) this sale's day is noted, so later passes stop at the EXISTS above
+  // without asking Stripe again; no offer is made on it below, as a store that may have sold for years is not told
+  // this is its first sale.
+  const unknownEarlier = earlier === UNKNOWN_EARLIER;
+  const day = unknownEarlier ? at : earlier || at;
+  const value = claimValue(day);
   const noted = await claimMark(firstSaleKey(store), null, value);
   if (noted === "unknown") {
     // It may have landed, and kept for good it would stop every later pass at its EXISTS before the offer is made
@@ -127,7 +132,7 @@ export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale 
     await releaseMark(firstSaleKey(store), value);
     return false;
   }
-  if (noted !== "ours" || earlier) return false;
+  if (noted !== "ours" || unknownEarlier || earlier) return false;
   const offered = await offerOnce(store, plansOnSale).catch((error) => {
     console.error("offering the yearly plan failed", store.handle, error);
     return "no" as const;
@@ -142,31 +147,48 @@ export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale 
 }
 
 /**
- * When the store was first paid for something before `at`, in seconds: 0 when
- * never, null when its Stripe account could not be asked. Stripe lists newest
- * first, so the oldest of the page read is written down; for a store with
- * more than a page of earlier sales that is a later day than the first, which
- * is still a day before this one, and all the answer has to tell is that.
+ * How many pages of earlier checkouts soldBefore follows. A store with more completed checkouts than this and no
+ * paid sale among them (free lead magnets, say) is not known to have sold before or not: its first sale is then
+ * noted as this one's day so later passes stop asking, and no offer is made (UNKNOWN_EARLIER).
  */
-async function soldBefore(store: Store, at: number): Promise<number | null> {
+export const SOLD_BEFORE_PAGES = 5;
+/** soldBefore's answer past SOLD_BEFORE_PAGES: whether the store sold before is not known, and it is not asked again. */
+const UNKNOWN_EARLIER = "unknown" as const;
+
+/**
+ * When the store was first paid for something before `at`, in seconds: 0 when
+ * never, null when its Stripe account could not be asked (the next pass asks
+ * again), UNKNOWN_EARLIER when SOLD_BEFORE_PAGES pages were read with no paid
+ * sale and more after them. Stripe lists newest first and the pages are
+ * followed with starting_after, so the oldest paid sale of the first page
+ * that has one is written down; for a store with more earlier sales that is a
+ * later day than the first, which is still a day before this one, and all
+ * the answer has to tell is that.
+ */
+async function soldBefore(store: Store, at: number): Promise<number | null | typeof UNKNOWN_EARLIER> {
   const handles = saleHandles(store);
   try {
-    const listed = await onAccount(
-      "GET",
-      store.stripeAccountId as string,
-      `/checkout/sessions?limit=100&status=complete&created[lt]=${at}`,
-    );
-    // A page that is not a list is not "never sold" (CX-123 rule 24): it is not known, and the next pass asks again.
-    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of earlier checkouts that is not a list");
-    const rows = listed.data as (Checkout & { payment_status?: unknown })[];
-    const sold = rows.filter((row) => row.payment_status === "paid" && isSale(row) && handles.has(row.metadata?.store ?? ""));
-    // No paid sale on this page is "never sold" only on the last page: with more after it (or no word on
-    // whether there is), an earlier sale may be on the next one, so it is not known and the next pass asks again.
-    if (!sold.length) {
-      if (listed.has_more !== false) throw new Error("Stripe gave a page of earlier checkouts with no sale that is not the last");
-      return 0;
+    let after = "";
+    for (let page = 0; page < SOLD_BEFORE_PAGES; page += 1) {
+      const listed = await onAccount(
+        "GET",
+        store.stripeAccountId as string,
+        `/checkout/sessions?limit=100&status=complete&created[lt]=${at}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+      );
+      // A page that is not a list is not "never sold" (CX-123 rule 24): it is not known, and the next pass asks again.
+      if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of earlier checkouts that is not a list");
+      const rows = listed.data as (Checkout & { id?: unknown; payment_status?: unknown })[];
+      const sold = rows.filter((row) => row.payment_status === "paid" && isSale(row) && handles.has(row.metadata?.store ?? ""));
+      if (sold.length) return Math.min(...sold.map((row) => (typeof row.created === "number" ? row.created : at)));
+      // No paid sale on this page is "never sold" only on the last page; with no word on whether there is more,
+      // or more with no last row to go on from, it is not known and the next pass asks again.
+      if (listed.has_more === false) return 0;
+      if (listed.has_more !== true) throw new Error("Stripe gave a page of earlier checkouts that does not say whether it is the last");
+      const last = rows.at(-1)?.id;
+      if (typeof last !== "string" || !last) throw new Error("Stripe gave a page of earlier checkouts with more after it and no last one to go on from");
+      after = last;
     }
-    return Math.min(...sold.map((row) => (typeof row.created === "number" ? row.created : at)));
+    return UNKNOWN_EARLIER;
   } catch (error) {
     console.error("asking a store's Stripe account about earlier sales failed", store.handle, error);
     return null;

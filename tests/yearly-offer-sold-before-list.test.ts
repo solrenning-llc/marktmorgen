@@ -61,9 +61,10 @@ async function main() {
   }
 
   part("A page of earlier checkouts with no paid sale that does not say it is the last");
-  const free = Array.from({ length: 100 }, (_, n) => ({ id: `cs_free_${n}`, created: NOW - 600, amount_total: 0, payment_status: "no_payment_required", metadata: { store: store.handle } }));
+  // Rule 23: "a full page of free checkouts with more after it" left this list. soldBefore now follows the pages
+  // (starting_after) up to SOLD_BEFORE_PAGES and, past them, notes this sale's day without an offer, so it is no
+  // longer "nothing written"; tests/yearly-offer-sold-before-pages.test.ts holds that case and the pages before it.
   for (const [what, body] of [
-    ["a full page of free checkouts with more after it", { object: "list", data: free, has_more: true }],
     ["an empty page with has_more absent", { object: "list", data: [] }],
     ["an empty page with has_more as text", { object: "list", data: [], has_more: "false" }],
   ] as const) {

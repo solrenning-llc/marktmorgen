@@ -77,7 +77,7 @@ async function shop(): Promise<{ store: NonNullable<Awaited<ReturnType<typeof st
 
 /** `count` full free pages, each saying there is more, the one after `after` the next. */
 function freePages(handle: string, count: number, end?: unknown): { after: string; body: unknown }[] {
-  const out = Array.from({ length: count }, (_, page) => ({ after: page === 0 ? "" : lastOf(handle, page - 1), body: { object: "list", data: free(handle, page), has_more: true } }));
+  const out: { after: string; body: unknown }[] = Array.from({ length: count }, (_, page) => ({ after: page === 0 ? "" : lastOf(handle, page - 1), body: { object: "list", data: free(handle, page), has_more: true } }));
   if (end !== undefined) out.push({ after: lastOf(handle, count - 1), body: end });
   return out;
 }

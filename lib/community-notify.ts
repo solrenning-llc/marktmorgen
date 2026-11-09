@@ -30,7 +30,7 @@
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
-import { pushMembers } from "@/lib/community-push";
+import { pushMembers, stillMembers } from "@/lib/community-push";
 import { communityWords } from "@/lib/buyer-words/community";
 import { type DataStore, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -86,7 +86,7 @@ function parse(raw: unknown): Notice | null {
 }
 
 /**
- * Files one thing for each of these people, leaving out whoever did it.
+ * Files one thing for each of these people who is still in, leaving out whoever did it.
  *
  * Never throws into the caller: a comment that failed to save because a
  * notification did would be a lost comment, and a notification that never
@@ -101,7 +101,14 @@ export async function tell(
   /** Where a phone should be sent, and by what name. Left out, none is sent. */
   phone?: { handle: string; who: string; language?: unknown },
 ): Promise<void> {
-  const who = [...new Set(to)].filter((one) => one && one !== notice.by);
+  const named = [...new Set(to)].filter((one) => one && one !== notice.by);
+  if (!named.length) return;
+  // Only the creator, or a member still in (lib/community-push.ts stillMembers): somebody taken out, never in or
+  // erased is told nothing, and a record that does not read tells nobody (CX-123 rule 24).
+  const who = await stillMembers(id, named).catch((error: unknown) => {
+    console.error("reading who a community notification reaches failed", error);
+    return [] as string[];
+  });
   if (!who.length) return;
   const row = JSON.stringify({ ...notice, words: notice.words.slice(0, SNIP), at: now() } satisfies Notice);
   try {

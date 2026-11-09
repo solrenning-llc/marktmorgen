@@ -388,30 +388,74 @@ export const SUMMARY_TRIES = 3;
 export type SummaryPart = "emailed" | "posted";
 
 /**
- * What a part's send came to: true or "sent" went; false or "refused" surely did not; "unknown" may have gone (a
- * chat post that timed out, was aborted, threw or got a 5xx: lib/chat-summary.ts, ChatPost).
+ * What a part's send came to: true or "sent" went; "refused" surely did not; "unknown" may have gone (a chat post
+ * the chat did not confirm: lib/chat-summary.ts, ChatPost). False is lib/email.ts's sendEmail answer, which is
+ * "refused" or "unknown" and cannot say which (an SES timeout or 5xx after acceptance, a once-key already held,
+ * Resend's unknown or idempotency conflict all answer false).
  */
 export type PartSend = boolean | "sent" | "refused" | "unknown";
 
 /**
- * Sends a part of the period's summary at most once (lib/claim-mark.ts): "sent" now; "earlier" when a previous run
- * of the same period sent it, so a run that tries the period again never sends it twice; "missed" when it did not
- * go, or when its mark answered in an unknown shape (rule 24: never sent on it), and then the mark is let go, while
- * it still holds this run's value, so a later run sends it. A send that throws is a miss. A send whose outcome is
- * unknown is a miss that keeps its mark (rule 24: it may have gone), so a later try answers "earlier" and never
- * sends it again. Never throws.
+ * How long a try of the owner's email stays covered by its idempotency key, with an hour to spare: SES's once-key
+ * (lib/email.ts) and Resend's idempotency each hold the key 24 hours. Inside it, another try under the same key does
+ * not deliver an email whose answer was lost; past it, nothing would stop it, so an email whose first try is older
+ * is not tried again (rule 24: a false may be an unknown, and an unknown is never sent blind).
  */
-export async function sendPart(period: SummaryPeriod, part: SummaryPart, send: () => Promise<PartSend>): Promise<"sent" | "earlier" | "missed"> {
+export const EMAIL_KEY_HOLDS_MS = 23 * 3_600_000;
+
+/**
+ * When a part was first tried this period, in ms, read exactly (rule 24): set now when it was never tried, else the
+ * earlier time; null when the answer has another shape. Kept as long as the part's mark.
+ */
+async function firstTried(period: SummaryPeriod, part: SummaryPart, now: number): Promise<number | null> {
+  const key = `${period.key}:${part}:first`;
+  try {
+    const replies = repliesFor(await redisPipeline([["SET", key, String(now), "NX", "EX", period.seconds], ["GET", key]]), 2);
+    if (!replies || (replies[0] !== "OK" && replies[0] !== null) || typeof replies[1] !== "string" || !/^\d{1,16}$/.test(replies[1])) return null;
+    const at = Number(replies[1]);
+    return Number.isSafeInteger(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sends a part of the period's summary at most once (lib/claim-mark.ts). "sent" now; "earlier" when a previous run
+ * of the same period sent it, so a run that tries the period again never sends it twice; "missed" when it surely
+ * did not go, or when its mark or its first try's time answered in an unknown shape (rule 24: never sent on it),
+ * and then the mark is let go, while it still holds this run's value, so a later run sends it; "unconfirmed" when
+ * it may have gone (an unknown answer, a throw), and then the mark is kept, so no later try sends it blind.
+ *
+ * With `keyHoldsMs` (the owner's email, EMAIL_KEY_HOLDS_MS), a false is let go only while the first try is that
+ * recent, since a try under the same key cannot deliver it twice; once the first try is older, the part is not
+ * tried again and is "unconfirmed". Without it, a false is "unconfirmed". Never throws.
+ */
+export async function sendPart(
+  period: SummaryPeriod,
+  part: SummaryPart,
+  send: () => Promise<PartSend>,
+  options: { keyHoldsMs?: number } = {},
+): Promise<"sent" | "earlier" | "missed" | "unconfirmed"> {
   const key = `${period.key}:${part}`;
   const value = claimValue();
   const got: Claimed = await claimMark(key, period.seconds, value);
   if (got === "taken") return "earlier";
   if (got === "ours") {
-    const answer: PartSend = await send().catch(() => false);
-    if (answer === true || answer === "sent") return "sent";
-    if (answer === "unknown") {
-      console.error(`stats-report: a ${part} part's outcome is unknown; its mark is kept, so it is not sent again this period`);
-      return "missed";
+    const window = options.keyHoldsMs;
+    const now = Date.now();
+    const first = window === undefined ? now : await firstTried(period, part, now);
+    if (first === null) {
+      console.error(`stats-report: when a ${part} part was first tried could not be read; that part is not sent this run`);
+    } else if (now - first >= (window ?? Infinity)) {
+      console.error(`stats-report: a ${part} part was first tried more than its key holds and never confirmed; its mark is kept, so it is not sent again this period`);
+      return "unconfirmed";
+    } else {
+      const answer: PartSend = await send().catch(() => "unknown" as const);
+      if (answer === true || answer === "sent") return "sent";
+      if (answer !== "refused" && !(answer === false && window !== undefined)) {
+        console.error(`stats-report: a ${part} part's outcome is unknown; its mark is kept, so it is not sent again this period`);
+        return "unconfirmed";
+      }
     }
   }
   if (got === "unknown") console.error(`stats-report: a ${part} mark answered in an unknown shape; that part is not sent this run`);

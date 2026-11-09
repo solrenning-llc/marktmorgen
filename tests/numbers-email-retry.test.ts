@@ -131,7 +131,8 @@ async function main(): Promise<void> {
   retry.chat = "channel";
   retry.postUnknown = true;
   body = await run(weekly, "/api/cron/weekly");
-  is("one post tried, counted as a miss", [retry.posts.length, body.failed, owner()], [1, 1, 0]);
+  is("one post tried, counted as unconfirmed, not as a miss", [retry.posts.length, body.unconfirmed, body.failed, owner()], [1, 1, 0, 0]);
+  is("the week stays claimed, so no later run reads the numbers again for it", held("nl:weekly:sent:"), true);
   retry.postUnknown = false;
   for (let i = 1; i <= TRIES; i += 1) {
     commands.length = 0;

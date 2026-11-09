@@ -7,7 +7,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimWeek, readNumbers, releaseWeek, sendPart, tryPeriodAgain, weekPeriod, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { EMAIL_KEY_HOLDS_MS, claimWeek, readNumbers, releaseWeek, sendPart, tryPeriodAgain, weekPeriod, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { readSpends } from "@/lib/ad-spend";
@@ -43,7 +43,9 @@ import type { AdSpend } from "@/lib/ad-spend-rules";
  * later run. The post and the owner's email are each marked once for the week
  * (lib/stats-report.ts, sendPart); one that did not go lets the week go, so a
  * later run sends what is missing and nothing twice, at most SUMMARY_TRIES
- * runs for the week. The team copies go with the owner's email, never before.
+ * runs for the week. One that may have gone is never sent again (rule 24): the
+ * owner's email is tried again only while its key still holds (EMAIL_KEY_HOLDS_MS).
+ * The team copies go with the owner's email, never before.
  */
 export const maxDuration = 60;
 const MAX_PER_RUN = 25;
@@ -60,7 +62,7 @@ export async function GET(request: NextRequest) {
   if (got === null) return Response.json({ ok: true, busy: true });
 
   const started = Date.now();
-  const out = { looked: 0, sent: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
+  const out = { looked: 0, sent: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0, unconfirmed: 0 };
   try {
     const now = new Date();
     const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
@@ -116,7 +118,12 @@ export async function GET(request: NextRequest) {
         if (lead) message.text = `In short: ${lead}\n\n${message.text}`;
       }
       let missed = false;
-      if (chat) missed = (await sendPart(period, "posted", () => postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`))) === "missed";
+      let unconfirmed = false;
+      if (chat) {
+        const post = await sendPart(period, "posted", () => postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`));
+        if (post === "missed") missed = true;
+        if (post === "unconfirmed") unconfirmed = true;
+      }
       if (!emailOff) {
         const owner = await sendPart(period, "emailed", () => sendEmail({ meter: { by: "company" },
           from: NIMBUS_FROM,
@@ -126,8 +133,9 @@ export async function GET(request: NextRequest) {
           headers: { "List-Unsubscribe": `<${stopUrl}>` },
           // One key for the period, so a try that the sender could not confirm is not sent again by a later try.
           idempotencyKey: `numbers-summary:${period.key}`,
-        }));
+        }), { keyHoldsMs: EMAIL_KEY_HOLDS_MS });
         if (owner === "missed") missed = true;
+        if (owner === "unconfirmed") unconfirmed = true;
         if (owner === "sent") {
           out.sent += 1;
           // The same email to the team members the owner chose, while they are on
@@ -141,9 +149,12 @@ export async function GET(request: NextRequest) {
         }
       }
       if (missed) {
-        // What did not go is sent by a later run, a bounded number of times; what went is not sent again.
+        // What did not go is sent by a later run, a bounded number of times; what went, or may have gone, is not sent again.
         out.failed += 1;
         await tryPeriodAgain(period);
+      } else if (unconfirmed) {
+        // Only what may have gone is left, and it is never sent blind: the week stays claimed, and no run reads it again.
+        out.unconfirmed += 1;
       } else if (emailOff) out.stopped += 1;
     }
     console.log(`weekly: ${JSON.stringify(out)}`);

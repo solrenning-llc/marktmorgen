@@ -102,7 +102,7 @@ import {
   RECURRING_ALWAYS,
   readViaCookie,
 } from "@/lib/affiliate-setting";
-import { productIds, readListings } from "@/lib/catalog";
+import { type Card, productIds, readCardsFor } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
 import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
@@ -1267,7 +1267,8 @@ export async function openAffiliateLink(store: Store, token: string, charge: Cha
   // unknown (UnknownReplyError) or the lock not held (LockBusyError): thrown before any write, the link kept.
   // Reading the people for it is paid first, at its worst, and given back down to what was read (paidPeople): from the
   // store's public requests for an emailed link, from the answering creator's studio requests in their studio (the
-  // caller's `charge`). Not taken: "resting", nothing read or written, the link or offer kept.
+  // caller's `charge`). Not taken: "resting", nothing read or written, the link or offer kept. Not known whether taken
+  // (the charge threw): UnknownReplyError, never "resting", nothing read or written, the link or offer kept.
   const share = grant.k === 1 ? grant.p : undefined;
   let made: Recorded;
   try {
@@ -1492,7 +1493,9 @@ export async function affiliateForSession(store: Store, session: string | undefi
 
 export async function endAffiliateSession(session: string | undefined): Promise<void> {
   if (!session || !AFFILIATE_TOKEN_PATTERN.test(session) || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", sessionKey(session)]]);
+  // 0 or 1 is done; any other answer leaves the session possibly open, so the sign-out never says it ended (rule 24).
+  const deleted = countOf(repliesFor(await redisPipeline([["DEL", sessionKey(session)]]), 1)?.[0]);
+  if (deleted === null || deleted > 1) throw new UnknownReplyError("the affiliate session's delete");
 }
 
 // ---- The creator's decisions ---------------------------------------------
@@ -1684,19 +1687,41 @@ export type Hold = {
    */
   force: (units: number) => Promise<void>;
 };
-/** Takes this many of the store's studio requests before the work they pay for: null when they were not taken. */
+/**
+ * Takes this many of the store's studio requests before the work they pay for: null when they were not taken. A
+ * charge that cannot tell whether they were taken throws: that is unknown, never "used up" (rule 24).
+ */
 export type Charge = (units: number) => Promise<Hold | null>;
 /** For a caller that already paid for the work, or a test of the work alone. */
 const PAID: Charge = async () => ({ give: async () => {}, force: async () => {} });
 /** Commands one take of studio requests uses itself, and its give-back (lib/studio-route.ts holdStudio). */
 const TAKE_COMMANDS = 6;
 type Taken = { units: number; hold: Hold };
-/** Takes, before the work, the studio requests `commands` commands and `bytes` bytes cost at most, with the take's own. */
+/**
+ * Takes, before the work, the studio requests `commands` commands and `bytes` bytes cost at most, with the take's own:
+ * null when they were not taken. A charge that threw is not known to have taken them or not (rule 24): logged and
+ * thrown as UnknownReplyError, never read as "used up"; nothing is read or written for it and nothing given back.
+ */
 async function take(charge: Charge, commands: number, bytes: number): Promise<Taken | null> {
   if (commands <= 0 && bytes <= 0) return { units: 0, hold: { give: async () => {}, force: async () => {} } };
   const units = bulkUnits(commands + TAKE_COMMANDS, bytes);
-  const hold = await charge(units).catch(() => null);
+  let hold: Hold | null;
+  try {
+    hold = await charge(units);
+  } catch (error) {
+    console.error("taking studio requests for an affiliate reading answered unknown", error);
+    throw error instanceof UnknownReplyError ? error : new UnknownReplyError("a take of studio requests");
+  }
   return hold ? { units, hold } : null;
+}
+/** As take, for a batch that names who it left out: "used" when not taken, "unavailable" when not known. */
+async function takeOrWhy(charge: Charge, commands: number, bytes: number): Promise<Taken | "used" | "unavailable"> {
+  try {
+    return (await take(charge, commands, bytes)) ?? "used";
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return "unavailable";
+    throw error;
+  }
 }
 /**
  * Once the part is done and measured, gives back what was taken beyond the measure, rounded up: the store pays what
@@ -1776,11 +1801,11 @@ const batchIds = (ids: readonly string[]) => [...new Set(ids)].slice(0, MAX_BULK
 
 /**
  * The records a batch asks about (one HMGET), taken first at their worst and settled at what was read: null when the
- * studio requests were not taken ("used"), or the reply was not exact ("unavailable", nothing given back).
+ * studio requests were not taken ("used"), or the take or the reply was not exact ("unavailable", nothing given back).
  */
 async function batchRecords(store: Store, ids: readonly string[], charge: Charge): Promise<Map<string, Read | null> | "used" | "unavailable"> {
-  const taken = await take(charge, 1, readBytes(ids.length));
-  if (!taken) return "used";
+  const taken = await takeOrWhy(charge, 1, readBytes(ids.length));
+  if (typeof taken === "string") return taken;
   const meter = meterOf();
   const records = await recordsExact(store, ids, meter).catch((error: unknown) => {
     if (error instanceof UnknownReplyError) return null;
@@ -1840,7 +1865,7 @@ async function batchPeople(now: Store, charge: Charge): Promise<Map<string, Read
  * checked, together, under ONE partner lock, against ONE read of the store and of the program's people: each one in
  * turn against the partners as they would stand with the ones before it approved (pre-review M2). Each part is taken
  * in studio requests first at its worst (`charge`, bulkUnits) and, once done, settled at what it really moved; one
- * that was not taken is left out as "used", nothing read or written for it.
+ * that was not taken is left out as "used", one not known to be taken as "unavailable", nothing read or written for it.
  */
 export async function decideMany(
   store: Store,
@@ -1887,8 +1912,8 @@ export async function decideMany(
     else plain.push({ id, raw: read.raw, change: (now) => (now.status === "pending" ? decided(now) : null) });
   }
   const writing = plain.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0) + shared.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES);
-  const writes = await take(charge, WRITE_COMMANDS * (plain.length + shared.length), writing);
-  if (!writes) return (leave([...plain.map((one) => one.id), ...shared], "used"), finish());
+  const writes = await takeOrWhy(charge, WRITE_COMMANDS * (plain.length + shared.length), writing);
+  if (typeof writes === "string") return (leave([...plain.map((one) => one.id), ...shared], writes), finish());
   const wrote = meterOf();
   for (const [id, result] of await writeBatch(store, plain, wrote)) outcome.set(id, result);
 
@@ -1971,8 +1996,9 @@ export async function undoMany(store: Store, before: Before[], decision: "approv
           : { ...affiliate, status: entry.status, decidedAt: entry.decidedAt },
     });
   }
-  const taken = await take(charge, WRITE_COMMANDS * writes.length, writes.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0));
-  if (!taken) return { undone: 0, left: writes.length, used: true };
+  const taken = await takeOrWhy(charge, WRITE_COMMANDS * writes.length, writes.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0));
+  // Not known whether taken: nothing written, all of them left to try again, and not said to be used up.
+  if (typeof taken === "string") return { undone: 0, left: writes.length, used: taken === "used" };
   const wrote = meterOf();
   let undone = 0;
   let notNow = 0;
@@ -2044,8 +2070,8 @@ async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charg
     else judged.push(ask);
   }
   const writing = plain.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 8), 0) + judged.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES);
-  const writes = await take(charge, WRITE_COMMANDS * (plain.length + judged.length), writing);
-  if (!writes) return (leave([...plain.map((one) => one.id), ...judged.map((ask) => ask.id)], "used"), finish());
+  const writes = await takeOrWhy(charge, WRITE_COMMANDS * (plain.length + judged.length), writing);
+  if (typeof writes === "string") return (leave([...plain.map((one) => one.id), ...judged.map((ask) => ask.id)], writes), finish());
   const wrote = meterOf();
   for (const [id, result] of await writeBatch(store, plain, wrote)) outcome.set(id, result);
 
@@ -3077,7 +3103,9 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     after = last.id;
   }
   const ids = [...new Set(found.map((f) => f.meta.product).filter((id): id is string => Boolean(id)))];
-  const titles = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p.title]));
+  // Named from the products' cards, not their whole listings (a title, not up to MAX_PRODUCT_BYTES a product). A
+  // reading that fails, or answers in a shape not known, leaves the names empty and every line in, as it always did.
+  const titles = new Map([...(ids.length ? await readCardsFor(store, ids).catch(() => new Map<string, Card>()) : new Map<string, Card>())].map(([id, card]) => [id, card.title]));
   const lines: Referral[] = [];
   for (const { invoice, meta } of found) {
     const total = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;

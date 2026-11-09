@@ -7,7 +7,7 @@ import { storeForHandle } from "@/lib/store";
 import { readCourse } from "@/lib/course";
 import { sendDripEmails } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
-import { staleTaskUploads } from "@/lib/assignment";
+import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
 
@@ -36,10 +36,19 @@ export async function GET(request: NextRequest) {
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
     const counts = await sendDripEmails(storeForHandle, readCourse, SITE_URL);
-    const stale = await staleTaskUploads().catch(() => [] as string[]);
-    if (stale.length) await deleteFile(stale).catch((error: unknown) => console.error("could not delete unused assignment uploads", error));
-    const pictures = await sweepCommunityUploads().catch(() => 0);
-    return Response.json({ ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures }, { headers: { "Cache-Control": "no-store" } });
+    const stale = await sweepTaskUploads(deleteFile).catch((error: unknown) => {
+      console.error("could not sweep unused assignment uploads", error);
+      return [] as string[];
+    });
+    // Not swept (the list could not be read exactly): said in the log and the answer, never "0 swept"; the next run sweeps.
+    const pictures = await sweepCommunityUploads().catch((error: unknown) => {
+      console.error("could not sweep unused community pictures", error);
+      return null;
+    });
+    return Response.json(
+      { ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures, ...(pictures === null ? { picturesFailed: true } : {}) },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error("sending course emails failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

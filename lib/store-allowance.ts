@@ -101,6 +101,31 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
 }
 
 /**
+ * Counts `n` of a kind that was already used, past the figure if it must
+ * (Claude 4, C4-20261106-1740/1810-C3: a read settled at what it really read,
+ * lib/cart-link-products.ts). Never a way to use more: it is only the true
+ * count of what was already spent, so the figure shows it and the next use is
+ * refused as usual. true once Redis confirms the count, false when it is not
+ * known.
+ */
+export async function forceAllowance(store: AllowanceStore, kind: AllowanceKind, n: number, now = Date.now()): Promise<boolean> {
+  if (!Number.isSafeInteger(n) || n < 1) return false;
+  const window = allowanceWindow(store, now);
+  const id = idOf(store);
+  if (!window || !id || !isRedisConfigured()) return false;
+  try {
+    const k = key(kind, id, window.id);
+    const reply: unknown = await redisPipeline([
+      ["SET", k, "0", "NX", "EX", keepSecondsFor(window, now)],
+      ["INCRBY", k, n],
+    ]);
+    return acknowledgedAllowanceCount(reply, n) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Gives back `n` of a kind that this same use took at `now` and did not need
  * (lib/api-guard.ts, holdMoreApi: a reading set aside at its most, then
  * measured). Only ever what was taken a moment before, in the same window;
@@ -227,7 +252,10 @@ export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonl
     const out: { kind: AllowanceKind; used: number; figure: number }[] = [];
     for (const [i, kind] of kinds.entries()) {
       const raw: unknown = reply[i];
-      if (raw !== null && typeof raw !== "string" && typeof raw !== "number") return null;
+      // Only what INCRBY writes is a count: a confirmed none (null), its decimal text with no sign, space, point,
+      // exponent, base prefix or leading zero, or the same whole number. Number() would read "", " ", "0x0", "0.0"
+      // and "0e4" as 0, an unknown count taken for nothing used (Codex Z on #3169).
+      if (raw !== null && typeof raw !== "number" && !(typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw))) return null;
       const n = raw === null ? 0 : Number(raw);
       if (!Number.isSafeInteger(n) || n < 0) return null;
       out.push({ kind, used: n, figure: allowanceFor(store, kind, now / 1000) });
@@ -243,16 +271,20 @@ export function allowanceUsedWords(store: AllowanceStore, kind: AllowanceKind, n
   return usedWords(kind, allowanceFor(store, kind, now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
-/** What has been taken of a kind in the store's window, for the studio; 0 when it cannot be read. */
+/**
+ * What has been taken of a kind in the store's window, read exactly (rule 24): null when it cannot be read (no
+ * window, no Redis, a lost or malformed reply), 0 only for a count never taken. Every decision that spends (a model
+ * call, an email) and every screen that says a figure reads this one, and a null is never room or "0 used".
+ */
+export async function allowanceUsedExact(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number | null> {
+  return (await allowancesUsedStrict(store, [kind], now))?.[0]?.used ?? null;
+}
+
+/**
+ * The same count with an unread one taken as 0. Kept only for the studio's main page (app/studio/page.tsx, held by
+ * another agent's unit; its "0 of N used" when the count is unread is still to be changed there) and for tests that
+ * measure what a call took. Never use it for a decision or a new screen: read allowanceUsedExact.
+ */
 export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {
-  const window = allowanceWindow(store, now);
-  const id = idOf(store);
-  if (!window || !id || !isRedisConfigured()) return 0;
-  try {
-    const [raw] = await redisPipeline([["GET", key(kind, id, window.id)]]);
-    const n = Number(raw);
-    return Number.isSafeInteger(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
+  return (await allowanceUsedExact(store, kind, now)) ?? 0;
 }

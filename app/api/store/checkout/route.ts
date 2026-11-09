@@ -6,6 +6,7 @@ import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { PwywPriceHeld } from "@/lib/pay-what-you-want";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
 import { activePlan } from "@/lib/product-extras";
@@ -336,6 +337,9 @@ export async function POST(request: NextRequest) {
     // changed: back to the form it belongs to, said beside the box. Refused
     // before Stripe is reached, so nothing is charged and no unit is held.
     if (error instanceof DigitalConsentMissing) return away(consentBack);
+    // Stripe kept answering wrong today for this product's choose-your-price Price (lib/pay-what-you-want.ts):
+    // not asked again until tomorrow, and said so plainly, rather than "try again in a moment".
+    if (error instanceof PwywPriceHeld) return away(`/@${store.handle}?status=price-held`);
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));

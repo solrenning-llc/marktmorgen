@@ -127,12 +127,50 @@ const KEEP_SECONDS = 365 * 24 * 60 * 60;
  * stands for: it is the Idempotency-Key's ending. Stripe keeps its reply to a key for 24 hours and answers it again to
  * the same key, so after a refusal the next checkout asks under a new key, or the refused reply would come back to
  * every buyer of the product for a day; checkouts asking at the same moment read the same count, so they still share
- * one key and make one Price. Kept a day and an hour, past Stripe's 24 hours, and dropped once a Price is kept: one of
- * the two at a time for a shape. Without Redis, the count is this server's own.
+ * one key and make one Price. Each refusal adds one with INCR, its expiry set in the same request, so a refusal that
+ * lands late never lowers it and the count never goes back to a key already answered wrong. It is never deleted, not
+ * even after a Price is kept (a checkout that then went back to the first key would be answered the refused reply
+ * again): it runs out by itself a day and an hour after the last refusal, past Stripe's 24 hours.
+ *
+ * Every new key may make a Price on the creator's account, so a Stripe that keeps answering wrong is asked under at
+ * most REFUSED_MOST new keys a day for a shape: past REFUSED_MOST refusals, a checkout fails at once, without asking
+ * Stripe, until the count runs out (PwywPriceHeld; the buyer is told plainly, nothing is charged). At most
+ * REFUSED_MOST + 1 Prices a day for a shape, then, the first key's and one for each new key.
+ *
+ * Without Redis, the count is this server's own: kept for the same 25 hours, and for at most REFUSED_HERE_MOST
+ * shapes, the oldest dropped first.
  */
 const refusedKey = (account: string, print: string) => `nl:pwyw:${account}:${print}:refused`;
 const REFUSED_SECONDS = 25 * 60 * 60;
-const refusedHere = new Map<string, number>();
+export const REFUSED_MOST = 3;
+const REFUSED_HERE_MOST = 1_000;
+const refusedHere = new Map<string, { count: number; until: number }>();
+const refusedHereNow = (refused: string, now: number) => {
+  const held = refusedHere.get(refused);
+  if (held && held.until > now) return held.count;
+  if (held) refusedHere.delete(refused);
+  return 0;
+};
+function refusedHereAdd(refused: string, now: number) {
+  const count = refusedHereNow(refused, now) + 1;
+  refusedHere.delete(refused);
+  if (refusedHere.size >= REFUSED_HERE_MOST) {
+    for (const [name, held] of refusedHere) if (held.until <= now) refusedHere.delete(name);
+    for (const name of refusedHere.keys()) {
+      if (refusedHere.size < REFUSED_HERE_MOST) break;
+      refusedHere.delete(name);
+    }
+  }
+  refusedHere.set(refused, { count, until: now + REFUSED_SECONDS * 1000 });
+}
+
+/** Stripe kept answering wrong today for this product's Price (REFUSED_MOST): the checkout fails before asking it. */
+export class PwywPriceHeld extends Error {
+  constructor() {
+    super("Stripe kept answering wrong for this choose-your-price Price today; not asked again until the count runs out");
+    this.name = "PwywPriceHeld";
+  }
+}
 const refusedCount = (value: unknown) => (typeof value === "string" && /^[1-9][0-9]{0,8}$/.test(value) ? Number(value) : typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0);
 
 /**
@@ -166,12 +204,15 @@ export async function pwywPriceId(
   const refused = refusedKey(account, print);
   const cache = isRedisConfigured();
 
-  let refusals = cache ? 0 : (refusedHere.get(refused) ?? 0);
+  let refusals = cache ? 0 : refusedHereNow(refused, Date.now());
   if (cache) {
-    const [kept, count] = await redisPipeline([["GET", key], ["GET", refused]]);
+    const [kept, count, left] = await redisPipeline([["GET", key], ["GET", refused], ["TTL", refused]]);
     if (!fresh && typeof kept === "string" && /^price_[A-Za-z0-9]{6,64}$/.test(kept)) return kept;
     refusals = refusedCount(count);
+    // A count left with no expiry (its EXPIRE never landed) would hold the product for good: it is given its day.
+    if (left === -1) await redisPipeline([["EXPIRE", refused, REFUSED_SECONDS]]).catch(() => {});
   }
+  if (refusals > REFUSED_MOST) throw new PwywPriceHeld();
 
   const body = new URLSearchParams({
     currency: store.currency,
@@ -193,11 +234,11 @@ export async function pwywPriceId(
   // one asks Stripe again under a new key instead of being answered this reply again for a day (rule 30).
   const written = { currency: store.currency, minimum: shape.minimum, preset: shape.preset, maximum: shape.maximum, tax: shape.tax, product: product.id };
   if (!isPwywPrice(price, written)) {
-    if (cache) await redisPipeline([["SET", refused, String(refusals + 1), "EX", REFUSED_SECONDS]]).catch(() => {});
-    else refusedHere.set(refused, refusals + 1);
+    if (cache) await redisPipeline([["INCR", refused], ["EXPIRE", refused, REFUSED_SECONDS]]).catch(() => {});
+    else refusedHereAdd(refused, Date.now());
     throw new Error("Stripe did not return the price just written");
   }
-  if (cache) await redisPipeline([["SET", key, price.id, "EX", KEEP_SECONDS], ["DEL", refused]]).catch(() => {});
-  else refusedHere.delete(refused);
+  // The count of refusals stays until it runs out: the next checkout asks under the key that was just answered right.
+  if (cache) await redisPipeline([["SET", key, price.id, "EX", KEEP_SECONDS]]).catch(() => {});
   return price.id;
 }

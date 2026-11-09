@@ -198,6 +198,7 @@ export const de: BuyerWords = {
     busy: { title: "Jemand anderes kauft das gerade", body: "Es wurde nichts berechnet. Klicken Sie gleich noch einmal auf Kaufen." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und klicken Sie dann erneut auf Kaufen." },
     error: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
+    "price-held": { title: "Dieses Produkt kann heute hier nicht gekauft werden", body: "Es wurde nichts berechnet. Der Zahlungsdienst hat den Preis, den Sie wählen, nicht richtig eingerichtet. Versuchen Sie es morgen noch einmal." },
     paused: { title: "Dieser Shop nimmt gerade keine neuen Bestellungen an", body: "Es wurde nichts berechnet. Neue Bestellungen sind ab Anfang nächsten Monats wieder möglich, oder früher." },
     "paypal-declined": {
       title: "PayPal hat die Zahlung nicht angenommen",

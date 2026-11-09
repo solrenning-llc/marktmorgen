@@ -5,7 +5,10 @@
  * checkout's refusal written last lowered it, and the next checkout asked again under a key Stripe had already
  * answered wrong. This Stripe keeps and replays its reply per Idempotency-Key, as Stripe does.
  */
-import { pwywPriceId } from "@/lib/pay-what-you-want";
+import { PwywPriceHeld, REFUSED_MOST, pwywPriceId } from "@/lib/pay-what-you-want";
+import { advance, store as redis } from "./redis-stub";
+import { wordsIn } from "@/lib/buyer-words";
+import { LANGUAGE_CODES } from "@/lib/store-language";
 import type { Listing, Store } from "@/lib/store";
 import { priceEcho } from "./stripe-price-echo";
 import { done, is, part } from "./check";
@@ -37,14 +40,23 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 const shop = { handle: "harbor", stripeAccountId: "acct_Harbor00001", currency: "usd", tax: { enabled: false, included: false } } as unknown as Store;
 const listing = (id: string) => ({ id, title: "Guide", priceCents: 500, recurring: null }) as unknown as Listing;
-const out = async (id: string) => { try { return await pwywPriceId(shop, listing(id), { suggestedCents: 900 } as never); } catch { return "refused"; } };
+const out = async (id: string) => { try { return await pwywPriceId(shop, listing(id), { suggestedCents: 900 } as never); } catch (e) { return e instanceof PwywPriceHeld ? "held" : "refused"; } };
 
 async function main() {
   process.env.STRIPE_SECRET_KEY = "sk_test_proof";
   part("P1: a reply Stripe always gets wrong (deterministic): Prices made on the creator's account");
-  wrong = true; made = 0;
-  for (let i = 0; i < 5; i++) await out("p1");
-  is("five refused checkouts make at most one Price (as before the delta)", made, 1);
+  wrong = true; made = 0; calls = 0;
+  const p1: string[] = [];
+  for (let i = 0; i < REFUSED_MOST + 3; i++) p1.push(await out("p1"));
+  // Rule 23 (claude5/switch-price-checked, review): was `made, 1` for five checkouts ("as before the delta": one key
+  // for a day), which no fix can keep, since a new key after a refusal is what lets a right reply through
+  // (tests/pwyw-refused-fresh-key.test.ts). The ceiling bounds the Prices instead: the first key's and one for each of
+  // REFUSED_MOST new keys, then no call to Stripe at all until the count runs out.
+  is("refused checkouts make at most REFUSED_MOST + 1 Prices", made, REFUSED_MOST + 1);
+  is("past REFUSED_MOST refusals Stripe is not asked", calls, REFUSED_MOST + 1);
+  is("and those checkouts fail as held, not as refused", p1, [...Array(REFUSED_MOST + 1).fill("refused"), "held", "held"]);
+  const [ttl] = await redis.pipeline([["TTL", redis.keys().find((name) => name.endsWith(":refused")) ?? ""]]);
+  is("the count is kept 25 hours after the last refusal", typeof ttl === "number" && ttl > 24 * 3600 && ttl <= 25 * 3600, true);
 
   part("P2: a slow checkout's refusal written late lowers the count");
   wrong = true; made = 0; calls = 0; holdCall = 1;
@@ -56,5 +68,17 @@ async function main() {
   wrong = false; holdCall = -1;
   const d = await out("p2");
   is("once Stripe answers right, the next buyer is not refused", d.startsWith("price_Right"), true);
+
+  part("The buyer of a held checkout is told plainly (app/api/store/checkout/route.ts, ?status=price-held)");
+  is("in every store language, nothing charged and when to try again", LANGUAGE_CODES.filter((code) => !(wordsIn(code).notices["price-held"]?.title && wordsIn(code).notices["price-held"]?.body)), []);
+  is("in plain US English", wordsIn("en").notices["price-held"], { title: "This product can't be bought here today", body: "Nothing was charged. The payment company did not set up the price you choose correctly. Try again tomorrow." });
+
+  part("P4: held until the count runs out, a day and an hour after the last refusal");
+  wrong = false; made = 0; calls = 0;
+  is("still held before the 25 hours", await out("p1"), "held");
+  is("without asking Stripe", calls, 0);
+  advance(25 * 3600 * 1000 + 1000);
+  kept.clear(); // Stripe forgets its reply to a key after 24 hours
+  is("then Stripe is asked again and the price written is used", (await out("p1")).startsWith("price_Right"), true);
 }
 main().then(done);

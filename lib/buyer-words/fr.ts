@@ -204,6 +204,7 @@ export const fr: BuyerWords = {
     busy: { title: "Quelqu'un est en train de l'acheter", body: "Rien n'a été débité. Cliquez de nouveau sur acheter dans un instant." },
     slow: { title: "Beaucoup de tentatives en quelques minutes", body: "Rien n'a été débité. Patientez quelques minutes, puis cliquez de nouveau sur acheter." },
     error: { title: "La page de paiement n'a pas pu s'ouvrir", body: "Rien n'a été débité. Réessayez dans un instant." },
+    "price-held": { title: "Ce produit ne peut pas être acheté ici aujourd'hui", body: "Rien n'a été débité. Le service de paiement n'a pas bien préparé le prix que vous choisissez. Réessayez demain." },
     paused: { title: "Cette boutique ne prend pas de nouvelles commandes pour le moment", body: "Rien n'a été débité. Les nouvelles commandes rouvrent au début du mois prochain, ou avant." },
     "paypal-declined": {
       title: "PayPal n'a pas accepté le paiement",

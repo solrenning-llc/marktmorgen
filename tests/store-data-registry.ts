@@ -727,7 +727,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pk:drop:@lib/passkeys.ts": company("Passkeys waiting to be removed", "An account's, until the day comes and it is applied at the next login or check."),
   "nl:pk:lock:@lib/passkeys.ts": company("An account's passkeys being changed", "An account's, seconds."),
   "nl:pk:reg:@lib/passkeys.ts": company("A passkey being added", "An account's, minutes."),
-  "nl:pwyw:@lib/pay-what-you-want.ts": short("A price made for a pay-what-you-want amount: at most one an order, a year", "order", 365, KEY),
+  "nl:pwyw:@lib/pay-what-you-want.ts": short("A price made for a pay-what-you-want amount, a year, and the count of Stripe replies refused for it, 25 hours after the last: at most one of each an order", "order", 365, KEY),
   "nl:agree:r:@lib/agreement-store.ts": room("A proposal or agreement: who it is for, each version's fingerprint and signature; counted with room for its signatures and its two index entries before it is written, until it goes by itself (recordRoomBytes)", "lib/agreement-store.ts"),
   "nl:agree:v:@lib/agreement-store.ts": room("One version's exact text, written once: counted before it is written, until its agreement goes by itself (versionRoomBytes)", "lib/agreement-store.ts"),
   "nl:agree:s:@lib/agreement-store.ts": room("The store's agreements, by when made: an entry each, counted with its record", "lib/agreement-store.ts"),

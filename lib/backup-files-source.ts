@@ -11,11 +11,39 @@
  *     never the same as another secret of the site): 404;
  *   - no review of the route's cost (lib/backup-files-review.ts, null until
  *     the owner approves it): 404, even with the secret;
- *   - a source whose provider details are not confirmed: R2 (whether its
- *     listing carries each object's ETag, lib/backup-files-r2.ts) and Bunny
- *     Stream (which token method the pull zone uses, its host, whether a
- *     video's original is kept, and what stands for a video's etag): 503
- *     "source_off". Only Vercel Blob is listed today.
+ *   - R2 while its own read-only key is not set (lib/backup-files-r2.ts
+ *     backupFilesR2Config: unset, malformed, or the site's read-write key):
+ *     503 "source_off", "r2_read_key_unset", before any count;
+ *   - Bunny Stream, always: 503 "source_off",
+ *     "bunny_zone_and_original_unconfirmed" (below).
+ *
+ * R2's listing carries each object's ETag: Cloudflare's own R2 examples show
+ * the ListObjectsV2 answer with `"ETag": "\"eb2b891dc67b81755d2b726d9110af16\""`
+ * on each entry (developers.cloudflare.com/r2/examples/aws/aws-cli/, "Last
+ * updated Oct 15, 2026"; .../aws-sdk-js-v3/, "Last updated Oct 26, 2026";
+ * both read 2026-11-09), and the S3 API compatibility page marks
+ * ListObjectsV2 implemented ("Last updated Oct 14, 2026"). An entry without
+ * one still fails the listing (lib/backup-files-r2.ts), never passes.
+ *
+ * Bunny Stream, read on bunny.net/docs 2026-11-09 (its pages carry no
+ * last-updated stamp; the Stream API's OpenAPI is version 1.6.21):
+ *   - confirmed: a file is signed with the pull zone's own "URL Token
+ *     Authentication Key", Basic (MD5, deprecated) or Advanced (HMAC-SHA256),
+ *     both accepted on one zone (cdn/security/token-authentication), never
+ *     with the library's API key, which can delete; the original is at
+ *     https://{pull_zone}.b-cdn.net/{video_id}/original
+ *     (stream/storage-structure); each video says `hasOriginal` and
+ *     `originalHash` ("Original uploaded file SHA256 hash"), which can stand
+ *     for its etag (api-reference/stream/manage-videos/get-video);
+ *   - NOT confirmed, so it stays off: the library's pull zone host and its
+ *     URL token key (neither is a setting of this site: BUNNY_STREAM_TOKEN_KEY
+ *     is the player's embed key, a different value); whether the owner's
+ *     library keeps originals, which must be on BEFORE a video is uploaded
+ *     (stream/encoding, "Keep original files"), and lib/stream.ts's record of
+ *     its setup does not say; and the original's byte size, which a video's
+ *     listing does not carry (`storageSize` is every file of the video): only
+ *     a call per video to its storage info (`originals`) gives it, a cost no
+ *     review covers.
  *
  * Who holds what: the Worker holds the route's secret and nothing else of
  * production. A stolen secret lists names and reads files for minutes; it can
@@ -68,15 +96,18 @@ export const BACKUP_FILES_CUTOFF_MS = 8_000;
 /** The hard end of a call, from its start, for every request inside it (lib/fetch-timeout.ts withCutoff), inside the route's 10 s. */
 export const BACKUP_FILES_REQUEST_MS = 9_000;
 
-/** Why a source is not listed, or null when it is. Changing one needs its provider detail confirmed from an official page first. */
+/** Why a source is never listed, or null when it may be. Changing one needs its provider detail confirmed from an official page first. */
 const SOURCE_OFF: Record<BackupFilesSource, string | null> = {
   blob: null,
-  r2: "r2_listing_etag_unconfirmed",
-  bunny: "bunny_signing_unconfirmed",
+  r2: null,
+  bunny: "bunny_zone_and_original_unconfirmed",
 };
 
-export function backupFilesSourceOff(source: BackupFilesSource): string | null {
-  return SOURCE_OFF[source];
+/** Why a source is not listed now, or null when it is: never-listed sources, and R2 while its own read-only key is not set. */
+export function backupFilesSourceOff(source: BackupFilesSource, env: Record<string, string | undefined> = process.env): string | null {
+  if (SOURCE_OFF[source]) return SOURCE_OFF[source];
+  if (source === "r2" && !backupFilesR2Config(env)) return "r2_read_key_unset";
+  return null;
 }
 
 /** Settings the route's secret may never equal: one secret stolen must never be another. */
@@ -226,7 +257,7 @@ function blobSigner(now: () => number): Signer {
 }
 
 function sourceOf(source: BackupFilesSource, now: () => number): { list: (prefix: string, cursor: string | null) => Promise<Listed>; sign: Signer } {
-  const off = SOURCE_OFF[source];
+  const off = backupFilesSourceOff(source);
   if (off) fail(`${source} is off (${off})`);
   if (source === "blob") return { list: listBlob, sign: blobSigner(now) };
   const config = backupFilesR2Config();

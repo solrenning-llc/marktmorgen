@@ -18,10 +18,14 @@
  *   - listing: S3 ListObjectsV2 (list-type=2, prefix, max-keys, continuation-
  *     token), as lib/vault.ts listVault already asks R2. Each <Contents> must
  *     hold exactly one Key, Size and ETag. That R2's answer carries the ETag
- *     is S3's documented shape, NOT confirmed from an R2 page in this work
- *     (developers.cloudflare.com was unreachable on 2026-11-08): so the route
- *     keeps this source off (lib/backup-files-source.ts), and an entry
- *     without its ETag fails the listing here, never passes as an empty one.
+ *     is shown on Cloudflare's own R2 pages: the aws CLI example ("Last
+ *     updated Oct 15, 2026") answers `aws s3api list-objects-v2` with
+ *     `"ETag": "\"eb2b891dc67b81755d2b726d9110af16\""` in each entry, and the
+ *     aws-sdk-js-v3 example ("Last updated Oct 26, 2026") ListObjectsV2Command
+ *     with `ETag: '"c4da329b38467509049e615c11b0c48a"'` (both under
+ *     developers.cloudflare.com/r2/examples/aws/, read 2026-11-09). These are
+ *     examples, not a schema: an entry without its ETag still fails the
+ *     listing here, never passes as an empty one.
  *
  * Settings, none set by this work: R2_ACCOUNT_ID and R2_BUCKET (the site's),
  * BACKUP_FILES_R2_READ_KEY_ID and BACKUP_FILES_R2_READ_SECRET (the read-only

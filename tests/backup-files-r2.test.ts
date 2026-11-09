@@ -1,10 +1,11 @@
 /**
  * 273 [BK1], files part 1: listing the production R2 bucket with a token of
  * its own and presigning one GET (lib/backup-files-r2.ts), against a
- * stand-in fetch. Nothing real is reached. The source stays off in the route
- * (lib/backup-files-source.ts) until whether R2's ListObjectsV2 answer carries
- * each object's ETag is confirmed from an official page: this module is held
- * here so that confirming it changes one line, and it fails closed meanwhile.
+ * stand-in fetch. Nothing real is reached. The route lists R2 only once its
+ * own read-only key is set (lib/backup-files-source.ts); that the
+ * ListObjectsV2 answer carries each object's ETag is shown on Cloudflare's
+ * own R2 example pages (lib/backup-files-r2.ts), and an entry without one
+ * still fails closed here.
  *
  * What fails here:
  *   - the site's own read-write key (R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY)

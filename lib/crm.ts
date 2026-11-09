@@ -337,6 +337,21 @@ async function dealSnapshot(statsId: string): Promise<{ id: string; before: stri
 }
 
 /**
+ * Writes KEYS[1] = ARGV[2] only while it still holds the exact text ARGV[1] read before ("" for none): {-1, length}
+ * when it changed, {-1} when it is gone, 1 when written. The plain compare-and-set that lib/webhooks.ts and
+ * lib/phone-alerts.ts reuse with one key, kept exactly as main ran it (crm-pipelines-save:v2) when the pipelines' own
+ * save took the CRM lock (SAVE_CRM_PIPELINES v3, Claude 6's focal on #2048): v3 with one key fails on a real Redis.
+ */
+export const COMPARE_AND_SET = `-- marktmorgen:crm-pipelines-save:v2
+local current = redis.call("GET", KEYS[1])
+if (current or "") ~= ARGV[1] then
+  if current then return {-1, string.len(current)} end
+  return {-1}
+end
+redis.call("SET", KEYS[1], ARGV[2])
+return 1`;
+
+/**
  * Saves the pipelines only while the store's CRM lock KEYS[2] is still the
  * change's own (ARGV[3]) and only over the exact record read before: a
  * concurrent change is never overwritten, and a change whose lock ran out
@@ -722,14 +737,15 @@ export class CrmDealsFull extends Error {
  * pipelines record read before (ARGV[1]; "" when none was saved), so a stage
  * or pipeline changed meanwhile never gets a deal (-1); only deals whose ids
  * are all new (-2 when one is there: never overwritten); only when all of
- * them fit under the ceiling (-3). Then the pipelines (ARGV[2], with the
- * first one's stages copied for the board's old key, ARGV[3]; "" keeps them)
- * and every deal. Answers { how many deals were written } or, when nothing
- * was, { -1, -2 or -3, the pipelines record as it is now ("" for none), then
- * each id already there and its deal as it is }, so the room taken for the
- * import goes back to what is really kept.
- *   KEYS: deals hash, pipelines record, first pipeline's stages copy
- *   ARGV: expected pipelines, new pipelines or "", stages copy, ceiling, then id, deal pairs
+ * them fit under the ceiling (-3); only while the store's CRM lock is still
+ * the import's own (-4 otherwise, checked first). Then the pipelines (ARGV[2],
+ * with the first one's stages copied for the board's old key, ARGV[3]; ""
+ * keeps them) and every deal. Answers { how many deals were written } or,
+ * when nothing was, { -1, -2, -3 or -4, the pipelines record as it is now
+ * ("" for none), then each id already there and its deal as it is }, so the
+ * room taken for the import goes back to what is really kept.
+ *   KEYS: deals hash, pipelines record, first pipeline's stages copy, the CRM lock
+ *   ARGV: expected pipelines, new pipelines or "", stages copy, ceiling, the lock's token, then id, deal pairs
  */
 export const IMPORT_CRM_DEALS = `-- marktmorgen:crm-deals-import:v3
 local current = redis.call("GET", KEYS[2]) or ""

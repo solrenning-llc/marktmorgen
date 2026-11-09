@@ -67,8 +67,10 @@ def main():
         print("PASS: 32 concurrent imports over one snapshot: exactly one is written")
         # The lock lost (run out, or another holder's now): nothing is written, and the record is answered as it is.
         redis.command("SET", lock, "someone-else")
-        assert redis.command("EVAL", script, 4, deals, pipes, stages, lock, "pipes-from-the-board", "", "", 9, token, "f", "deal-f")[0] == -4
+        stages_before = redis.command("GET", stages)
+        assert redis.command("EVAL", script, 4, deals, pipes, stages, lock, "pipes-from-the-board", "pipes-v3", "stages-v3", 9, token, "f", "deal-f") == [-4, "pipes-from-the-board"]
         assert redis.command("HEXISTS", deals, "f") == 0
+        assert redis.command("GET", pipes) == "pipes-from-the-board" and redis.command("GET", stages) == stages_before
         print("PASS: an import whose lock is no longer its own writes nothing")
     finally:
         assert all(key.startswith(prefix) for key in keys)

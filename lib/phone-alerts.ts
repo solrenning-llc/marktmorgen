@@ -61,7 +61,7 @@ import { maySendPathReminder } from "@/lib/path-reminder-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
+import { COMPARE_AND_SET } from "@/lib/crm";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { type Store, accountStores, setPhoneSales, storeRef } from "@/lib/store";
 import { normaliseEmail } from "@/lib/auth";

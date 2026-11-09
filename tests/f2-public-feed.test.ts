@@ -176,6 +176,13 @@ function main(): void {
   part("No buyer data and nothing unknown is published");
   is("an audio address with a buyer's feed token is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://marktmorgen.com/api/store/podcast/play/${TOKEN}/${e.id}` })), "buyer-data");
   is("an audio address with an email is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://x.example/${e.id}?to=dana@example.com` })), "buyer-data");
+  is("a store page is /@handle, and is published", refusal(() => publicFeedXml({ ...input, page: "https://marktmorgen.com/@harbor/podcast/radio" })), null);
+  is("an audio address under /@handle is published", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://marktmorgen.com/@harbor/podcast/${e.id}.mp3` })), null);
+  is("an address with a user before the host is refused", refusal(() => publicFeedXml({ ...input, page: "https://dana@marktmorgen.com/@harbor" })), "not-https");
+  is("an email in the query is refused, even under /@handle", refusal(() => publicFeedXml({ ...input, page: "https://marktmorgen.com/@harbor?email=dana@example.com" })), "buyer-data");
+  is("an escaped email in the query is refused", refusal(() => publicFeedXml({ ...input, page: "https://marktmorgen.com/@harbor?email=dana%40example.com" })), "buyer-data");
+  is("an email in the path is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://x.example/dana@example.com/${e.id}.mp3` })), "buyer-data");
+  is("an escaped buyer token is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://x.example/${"%66".repeat(48)}/${e.id}.mp3` })), "buyer-data");
   is("an audio address that is not https is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `http://media.example/${e.id}.mp3` })), "not-https");
   is("a page that is not https is refused", refusal(() => publicFeedXml({ ...input, page: "javascript:alert(1)" })), "not-https");
   is("an image that is not https is refused", refusal(() => publicFeedXml({ ...input, image: "http://x.example/a.jpg" })), "not-https");

@@ -165,7 +165,8 @@ const MESSAGES: Record<string, string> = {
 
 /**
  * Why a members import did not start: the file has more members than the emails that can go now (lib/imports.ts,
- * movedLeft). `opens` is the server's sentence on when the allowance opens again.
+ * startImport, which takes them for the whole file or none). `opens` is the server's sentence on when the allowance
+ * opens again.
  */
 function emailsMonthWords(left: number, members: number, opens?: string): string {
   const n = (v: number) => Math.max(0, Math.floor(v)).toLocaleString("en-US");
@@ -788,7 +789,7 @@ export function ImportTool({
                     {`Each member gets one email from ${storeName}'s name with their own link to keep their membership here, on your Stripe account. Nothing is charged until the date in the file, the day it would have renewed where it is now, so nobody pays twice for the same weeks; a date less than two days away is charged when they keep it. A member who has not kept it gets one reminder three days before that date. Nobody gets the membership without keeping it.`}
                   </p>
                   <p className="text-sm text-ink-soft">
-                    {`These emails count in a monthly allowance: on Store, up to ${IMPORT_ALLOWANCES.creator.movedEmails} a month; on Studio and Scale, they come out of your monthly emails. If the file has more members than can be emailed now, it is not imported, so nobody is left without their link.`}
+                    {`These emails count in a monthly allowance: on Store, up to ${IMPORT_ALLOWANCES.creator.movedEmails} a month; on Studio and Scale, they come out of your monthly emails. If the file has more members than can be emailed now, nothing is imported. Once it starts, the emails for all its members are set aside for it, so nothing else can use them first.`}
                   </p>
                   {!canEmail ? <p className="notice notice-warn text-sm">{MESSAGES.members_email}</p> : null}
                   <label htmlFor="import-stopped" className="flex cursor-pointer items-start gap-3">

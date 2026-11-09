@@ -57,7 +57,6 @@
  */
 import { DataRoomError } from "@/lib/store-data";
 import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
-import { admitNonPaying } from "@/lib/free-pool";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -85,7 +84,7 @@ import { csvLine, readConsent } from "@/lib/csv";
 import { grantImported, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
-import { giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, usedKey } from "@/lib/mail";
+import { giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
 import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
@@ -149,17 +148,47 @@ const utcMonth = (store: Store, now: number) => windowId(store, now);
 export async function reserveMoved(store: Store, n: number, now = Date.now()): Promise<number> {
   if (!Number.isSafeInteger(n) || n <= 0 || !store.sid) return 0;
   if (monthlyAllowance(store) > 0) return takeFromMonth(store, n);
+  try {
+    return await takeMovedCount(store, n, now);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return 0;
+    throw error;
+  }
+}
+
+/**
+ * reserveMoved for a caller that refuses on an unknown answer (a members import's start): the same rules and the same
+ * counter, but a count whose reply has another shape throws UnknownReplyError (CX-123 rule 24) instead of answering 0.
+ * What that reply may have taken is not given back.
+ */
+async function holdMoved(store: Store, n: number, now = Date.now()): Promise<number> {
+  if (!Number.isSafeInteger(n) || n <= 0 || !store.sid) return 0;
+  if (monthlyAllowance(store) > 0) return takeFromMonthExact(store, n);
+  return takeMovedCount(store, n, now);
+}
+
+/**
+ * Store's own figure (IMPORT_ALLOWANCES.creator.movedEmails a month): takes up to `n`, all over it given back at once.
+ * The replies are read exactly (CX-123 rule 24): the SET NX "OK" or nothing, the INCRBY a whole number (a give-back can
+ * take the count below zero); any other shape throws UnknownReplyError. Before, the count was read with Number(),
+ * which took a list or `true` for a small number.
+ */
+async function takeMovedCount(store: Store, n: number, now: number): Promise<number> {
   const cap = importAllowanceFor(store, now / 1000).movedEmails;
-  if (cap <= 0) return 0;
+  if (cap <= 0 || !store.sid) return 0;
   const window = utcMonth(store, now);
   if (!window) return 0;
   const key = movedKey(store.sid, window);
-  const [, total] = await redisPipeline([
-    ["SET", key, "0", "NX", "EX", 32 * 86_400],
-    ["INCRBY", key, n],
-  ]);
-  const counted = Number(total);
-  if (!Number.isSafeInteger(counted)) return 0;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "NX", "EX", 32 * 86_400],
+      ["INCRBY", key, n],
+    ]),
+    2,
+  );
+  const total = replies?.[1];
+  const counted = typeof total === "number" ? total : typeof total === "string" && /^(0|-?[1-9][0-9]{0,14})$/.test(total) ? Number(total) : NaN;
+  if (!replies || (replies[0] !== "OK" && replies[0] !== null) || !Number.isSafeInteger(counted)) throw new UnknownReplyError("the emails to people brought over this month");
   const over = Math.min(n, Math.max(0, counted - cap));
   if (over > 0) await redisPipeline([["DECRBY", key, over]]);
   return n - over;
@@ -171,39 +200,6 @@ export async function releaseMoved(store: Store, n: number, now = Date.now()): P
   if (monthlyAllowance(store) > 0) return giveBackToMonth(store, n);
   const window = utcMonth(store, now);
   if (window) await redisPipeline([["DECRBY", movedKey(store.sid, window), n]]);
-}
-
-/**
- * A monthly counter read exactly (CX-123 rule 24): a confirmed absent key is 0, a whole number (a give-back can take
- * it below zero) is itself; any other reply throws UnknownReplyError, never read as a month untouched.
- */
-async function counterExact(key: string, what: string): Promise<number> {
-  const replies = repliesFor(await redisPipeline([["GET", key]]), 1);
-  const raw = replies?.[0];
-  if (replies && raw === null) return 0;
-  if (typeof raw !== "string" || !/^(0|-?[1-9][0-9]{0,14})$/.test(raw)) throw new UnknownReplyError(what);
-  return Number(raw);
-}
-
-/**
- * How many emails to people brought over the store may still send now: what reserveMoved would let go, read from
- * the same counter without taking anything. 0 when none could go (no window known, no list, no place this month for
- * a store that does not pay). A counter that cannot be read throws (counterExact), so whoever decides on it refuses.
- */
-export async function movedLeft(store: Store, now = Date.now()): Promise<number> {
-  if (!store.sid) return 0;
-  const allowance = monthlyAllowance(store, now / 1000);
-  if (allowance > 0) {
-    const window = windowId(store, now);
-    if (!store.listId || !window || !(await admitNonPaying(store, now))) return 0;
-    const used = await counterExact(usedKey(store.listId, window), "the month's emails used");
-    return Math.min(allowance, Math.max(0, allowance - used));
-  }
-  const cap = importAllowanceFor(store, now / 1000).movedEmails;
-  const window = utcMonth(store, now);
-  if (cap <= 0 || !window) return 0;
-  const used = await counterExact(movedKey(store.sid, window), "the emails to people brought over this month");
-  return Math.min(cap, Math.max(0, cap - used));
 }
 
 /**
@@ -310,6 +306,13 @@ export type ImportJob = {
     source?: ImportSource;
   };
   finishedAt: number;
+  /**
+   * Members: the emails to people brought over still held for this import, taken for the whole file when it started
+   * (startImport), with the window and the counter they came from (the plan's monthly emails, or Store's own figure).
+   * Sent from as the members are emailed; what is left is given back when the import ends, only to that same window
+   * and counter. Absent on imports started before it existed, which take from the month as they send.
+   */
+  held?: { n: number; window: string; monthly: boolean };
 };
 
 const jobKey = (id: string) => `nl:import:${id}`;
@@ -435,20 +438,6 @@ export async function startImport(
   const ref = storeRef(store);
   if (kind === "contacts" && !store.listId && !(await ensureListId(ref))?.listId) return { ok: false, reason: "list" };
   if ((kind === "purchases" || kind === "products" || kind === "members") && !store.statsId) await ensureStatsId(ref);
-  // Every member is emailed their own link, and the creator stops the old renewals on that word: a file with more
-  // members than the emails that can go now does not start, so nobody is invited without being told (audit R46).
-  // Read before anything is claimed; a count that cannot be read throws, and nothing starts.
-  if (kind === "members") {
-    let current = store;
-    if (monthlyAllowance(store) > 0 && !store.listId) {
-      const listed = await ensureListId(ref);
-      if (!listed?.listId) return { ok: false, reason: "list" };
-      current = listed;
-    }
-    const left = await movedLeft(current);
-    if (expected > left) return { ok: false, reason: "emails_month", limit: left, opens: resetWords(current) };
-  }
-
   const id = randomBytes(12).toString("hex");
   // The slot's SET NX in its exact shape (sweep A3, CX-123 rule 24): "OK" is claimed, nothing is held by another;
   // any other answer throws, so an unknown one never starts a second import of the store.
@@ -474,6 +463,35 @@ export async function startImport(
     if (!again || (reclaimed !== "OK" && reclaimed !== null)) throw new UnknownReplyError("the store's import slot");
     if (reclaimed === null) return { ok: false, reason: "busy" };
   }
+  // Every member is emailed their own link, and the creator stops the old renewals on that word: the emails for the
+  // whole file are taken now, from the same counter and by the same rules as each send (reserveMoved), so nothing
+  // else can use them first (audit R46; review on #3384). A file with more members than can be emailed now does not
+  // start: what was taken is given back, the slot let go, and nothing is invited. A count that cannot be read throws
+  // (CX-123 rule 24), the slot let go, and nothing starts.
+  let held: ImportJob["held"];
+  if (kind === "members") {
+    try {
+      let current = store;
+      if (monthlyAllowance(store) > 0 && !store.listId) {
+        const listed = await ensureListId(ref);
+        if (!listed?.listId) {
+          await freeSlotOf(store.sid, id);
+          return { ok: false, reason: "list" };
+        }
+        current = listed;
+      }
+      const taken = await holdMoved(current, expected);
+      if (taken < expected) {
+        await releaseMoved(current, taken);
+        await freeSlotOf(store.sid, id);
+        return { ok: false, reason: "emails_month", limit: taken, opens: resetWords(current) };
+      }
+      held = { n: taken, window: windowId(current) ?? "", monthly: monthlyAllowance(current) > 0 };
+    } catch (error) {
+      await freeSlotOf(store.sid, id);
+      throw error;
+    }
+  }
   const job: ImportJob = {
     id,
     kind,
@@ -496,6 +514,7 @@ export async function startImport(
       source: input.source === "clickfunnels" && kind !== "members" ? "clickfunnels" : "csv",
     },
     finishedAt: 0,
+    ...(held ? { held } : {}),
   };
   await redisPipeline([saveJob(job), ["LPUSH", listKey(store.sid), id], ["LTRIM", listKey(store.sid), 0, LIST_SIZE - 1]]);
   return { ok: true, job };
@@ -551,7 +570,9 @@ export async function finishUpload(store: Store, id: string): Promise<{ ok: true
   if (job.state !== "receiving") return { ok: false, reason: "state" };
   job.state = job.total > 0 ? "queued" : "done";
   if (job.state === "done") job.finishedAt = Date.now();
+  const back = job.state === "done" ? heldLeft(job) : undefined;
   await redisPipeline([saveJob(job), ...(job.state === "queued" ? [["SADD", ACTIVE_KEY, id]] : [])]);
+  await giveBackHeld(job.sid, back, store);
   if (job.state === "done") await releaseBusy(job);
   // Past buyers are looked for on the list of purchases from now on.
   if (job.kind === "purchases" && job.state === "queued" && !store.pastBuyers) await setPastBuyers(storeRef(store));
@@ -562,9 +583,33 @@ async function cancelJob(job: ImportJob): Promise<ImportJob> {
   if (finished(job.state)) return job;
   job.state = "canceled";
   job.finishedAt = Date.now();
+  const back = heldLeft(job);
   await redisPipeline([saveJob(job), ["SREM", ACTIVE_KEY, job.id], ["DEL", rowsKey(job.id), seenKey(job.id), mailKey(job.id)]]);
+  await giveBackHeld(job.sid, back);
   await releaseBusy(job);
   return job;
+}
+
+/**
+ * What a members import still holds of the month's emails (ImportJob.held), taken off the job as it ends: the caller
+ * saves the job without it first, then gives it back (giveBackHeld), so a step tried again never gives it twice.
+ */
+function heldLeft(job: ImportJob): ImportJob["held"] {
+  const held = job.held;
+  if (!held || !Number.isSafeInteger(held.n) || held.n <= 0) return undefined;
+  job.held = { ...held, n: 0 };
+  return held;
+}
+
+/**
+ * Gives back what an ended import held and did not send, only to the window and the counter it was taken from: once
+ * the store's window or plan has changed, it stays counted where it was taken, never given to another month.
+ */
+async function giveBackHeld(sid: string, held: ImportJob["held"], store?: Store | null): Promise<void> {
+  if (!held) return;
+  const current = store ?? (await storeForId(sid));
+  if (!current || windowId(current) !== held.window || monthlyAllowance(current) > 0 !== held.monthly) return;
+  await releaseMoved(current, held.n);
 }
 
 /** Lets go of the store's slot, when it is this import's: a newer import's hold is kept. */
@@ -1298,9 +1343,16 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await unsent(portion);
     return "retry";
   }
-  // Then the store's month (its plan's emails, or Store's own figure): past it, the rest are not emailed.
-  const room = await reserveMoved(store, messages.length);
+  // Then the store's month (its plan's emails, or Store's own figure): past it, the rest are not emailed. A members
+  // import sends from what it took for the whole file when it started (ImportJob.held), saved as taken before the
+  // send, so an email that may have gone is never given back; one started before that takes from the month here.
+  const held = job.held;
+  const room = held ? Math.min(messages.length, Math.max(0, held.n)) : await reserveMoved(store, messages.length);
   const sending = messages.slice(0, room);
+  if (held && room > 0) {
+    held.n -= room;
+    await redisPipeline([saveJob(job)]);
+  }
   if (sending.length < messages.length) await releaseDay(messages.length - sending.length);
   if (sending.length === 0) {
     job.counts.unmailed += messages.length;
@@ -1310,7 +1362,8 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
   if (sent === "retry") {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
-    await releaseMoved(store, sending.length);
+    if (held) held.n += sending.length;
+    else await releaseMoved(store, sending.length);
     await releaseDay(sending.length);
     await unsent(portion);
     return "retry";
@@ -1401,7 +1454,9 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
             await note(job, [{ line: 0, column: "", problem: `The rows waited more than ${RAW_DAYS} days to be brought in, so the rest were let go. Start the import again with the rows not brought in yet.`, value: "" }], "errors");
             job.state = "failed";
             job.finishedAt = Date.now();
+            const back = heldLeft(job);
             await redisPipeline([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]]);
+            await giveBackHeld(job.sid, back, store);
             await releaseBusy(job);
             return job;
           }
@@ -1444,7 +1499,9 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
             if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);
             job.state = "failed";
             job.finishedAt = Date.now();
+            const back = heldLeft(job);
             await redisPipeline([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]]);
+            await giveBackHeld(job.sid, back, store);
             await releaseBusy(job);
             return job;
           }
@@ -1466,7 +1523,9 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
     }
     if (job.state === "done") {
       job.finishedAt = Date.now();
+      const back = heldLeft(job);
       await redisPipeline([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]]);
+      await giveBackHeld(job.sid, back, store);
       await releaseBusy(job);
     }
     return job;

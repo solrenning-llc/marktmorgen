@@ -12,6 +12,21 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, 
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+
+/**
+ * Claude 5, consent audit of 9 November 2026 (rule 23): an order's contact write is ORDER_WRITE behind its checks
+ * since then (lib/order-data.ts ORDER_WRITE_IF_SAME: written only over the row it was decided from), whose ARGV
+ * starts with the checks. The boundary is the same write, found under either header; this answers where its
+ * ORDER_WRITE part (the count of commands) starts in the EVAL, or -1 when it is not an order's write. Nothing else
+ * in this proof changed.
+ */
+const orderWriteAt = (c: (string | number)[] | undefined): number => {
+  if (c?.[0] !== "EVAL") return -1;
+  const keys = Number(c[2]);
+  if (String(c[1]).startsWith("-- marktmorgen:order-write:v1")) return 3 + keys;
+  if (String(c[1]).startsWith("-- marktmorgen:order-write-if-same:v1")) return 4 + keys + 4 * Number(c[3 + keys]);
+  return -1;
+};
 import { installSesMailFixture } from "./ses-mail-fixture";
 
 let sessions: unknown = [];
@@ -144,9 +159,9 @@ async function main(): Promise<void> {
     let recordHits=0;
     redis.pipeline=(async(commands:(string|number)[][])=>{
       const c=commands[0];
-      if(!recordHits&&c?.[0]==="EVAL"&&String(c[1]).startsWith("-- marktmorgen:order-write:v1")&&c.includes(leadsKey(store.listId!))){
+      if(!recordHits&&orderWriteAt(c)>=0&&c.includes(leadsKey(store.listId!))){
         recordHits++;
-        const n=Number(c[3+Number(c[2])]);
+        const n=Number(c[orderWriteAt(c)]);
         // The write did NOT land. Exact outer cardinality; unknown charged slot and unknown HSET/INCR results.
         // JSON round-trippable, deliberately not an invented valid HSET acknowledgement.
         return [[null,...Array.from({length:n},()=>null)]];
@@ -179,9 +194,9 @@ async function main(): Promise<void> {
     let recordHits=0;
     redis.pipeline=(async(commands:(string|number)[][])=>{
       const c=commands[0];
-      if(!recordHits&&c?.[0]==="EVAL"&&String(c[1]).startsWith("-- marktmorgen:order-write:v1")&&c.includes(leadsKey(store.listId!))){
+      if(!recordHits&&orderWriteAt(c)>=0&&c.includes(leadsKey(store.listId!))){
         recordHits++;
-        const n=Number(c[3+Number(c[2])]);
+        const n=Number(c[orderWriteAt(c)]);
         // The write did NOT land. Exact outer cardinality; known numeric charge0 but unknown HSET/INCR results.
         // JSON round-trippable, deliberately not an invented valid HSET acknowledgement.
         return [[0,...Array.from({length:n},()=>null)]];

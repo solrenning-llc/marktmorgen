@@ -1,0 +1,152 @@
+
+FILE z-2803-controls.proof.ts
+✖ creator includes full retry signing plus origin/CDN overhead (6.985388ms)
+✖ pro includes full retry signing plus origin/CDN overhead (0.632243ms)
+✖ scale includes full retry signing plus origin/CDN overhead (0.376278ms)
+✖ the signing call and whole-read assumption remain auditable (0.531682ms)
+✔ source checking keeps exact text while the two joined fixes keep the same amount (0.362847ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 1
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15.979025
+
+✖ failing tests:
+
+test at [stdin]:116649:139
+✖ creator includes full retry signing plus origin/CDN overhead (6.985388ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    ok(Math.abs(line3.monthlyUsd(tier) - expected) < 1e-10)
+
+      at TestContext.<anonymous> ([stdin]:116651:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:116649:139
+✖ pro includes full retry signing plus origin/CDN overhead (0.632243ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    ok(Math.abs(line3.monthlyUsd(tier) - expected) < 1e-10)
+
+      at TestContext.<anonymous> ([stdin]:116651:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:116649:139
+✖ scale includes full retry signing plus origin/CDN overhead (0.376278ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    ok(Math.abs(line3.monthlyUsd(tier) - expected) < 1e-10)
+
+      at TestContext.<anonymous> ([stdin]:116651:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:116654:30
+✖ the signing call and whole-read assumption remain auditable (0.531682ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    ok(line3.sources.some((x) => x.names.includes("issueSignedToken")))
+
+      at TestContext.<anonymous> ([stdin]:116655:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE picture-upload-costs.test.ts
+
+The official prices, with their source and date
+  ok    an upload (put) is an Advanced Operation, US$ 5 a million
+  ok    a head or a read is a Simple Operation, US$ 0.40 a million
+
+A put may be sent again: every try counted (Revisor 1 on #2803)
+  ok    the installed SDK's own default: 10 tries again
+  ok    a put counted as 1 + every try again
+  ok    the SDK's head goes through requestApi, so it is tried again
+  ok    the SDK's get is one plain fetch, never tried again
+  ok    a head counted with every try, as a put is
+
+The signing request is tried as a put is, and the reads cross from the file store (Claude 1 on #2803, 6708192310)
+  ok    the upload route asks for a signed token on every request
+  ok    the SDK's signing goes through requestApi, so it is tried again
+  FAIL  a signing request counted with every try, as a put is
+        expected 11
+        got      undefined
+  FAIL  the line names the signing call among its sources
+        expected true
+        got      false
+  FAIL  the basis says the reads pay Fast Origin Transfer and a CDN request
+        expected true
+        got      false
+
+Every studio picture upload's Blob operations, at the plan's studio ceiling
+  ok    a line of its own
+  ok    it says which pictures it covers: a product's, a link's and a page's (a review's photo and an email's picture are reported apart)
+  FAIL  creator: the studio figure, each request at its dearest
+        expected true
+        got      false
+  FAIL  pro: the studio figure, each request at its dearest
+        expected true
+        got      false
+  FAIL  scale: the studio figure, each request at its dearest
+        expected true
+        got      false
+  ok    its source and date are said, and why the read is counted whole
+
+18 checks, 6 failing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z2803-yJNbIJ

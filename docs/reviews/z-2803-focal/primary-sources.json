@@ -1,0 +1,14 @@
+{
+  "retrievedOn": "2026-11-09 UTC",
+  "sources": [
+    {
+      "url": "https://vercel.com/docs/vercel-blob/usage-and-pricing",
+      "facts": "Simple0.40/million; advanced5/million; URL access incursCDN; cache miss incursFOT; Blob0.05/GB published; model0.10/GB is higher. Private function-to-store transfer has Blob plusFOT. No signed-token-free exception established."
+    },
+    {
+      "url": "https://vercel.com/docs/manage-cdn-usage",
+      "facts": "Region-dependent pricing; displayed FOT0.06/GB/CDN2/million match model. No account region/settings verified."
+    }
+  ],
+  "billingLimits": "Unknown signing charge counted as11Advanced; fixed default SDK retries, no proof of arbitrary browser retry bound or refusedPUT billing; inherited C1 basis/decision note preserved."
+}

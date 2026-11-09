@@ -1,0 +1,26 @@
+[
+  {
+    "label": "old",
+    "status": 1,
+    "seconds": 2.975,
+    "bytes": 6077
+  },
+  {
+    "label": "head",
+    "status": 0,
+    "seconds": 4.965,
+    "bytes": 15876
+  },
+  {
+    "label": "types",
+    "status": 0,
+    "seconds": 13.627,
+    "bytes": 104
+  },
+  {
+    "label": "lint",
+    "status": 0,
+    "seconds": 3.371,
+    "bytes": 212
+  }
+]

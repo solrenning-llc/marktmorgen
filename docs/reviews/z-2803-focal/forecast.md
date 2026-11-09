@@ -1,0 +1,4 @@
+# Predeclared focal scope
+Complete pure five-case own root plus complete18 permanent, plan-margin/read-ceilings/margin-alignment: static/finite fixture arithmetic, forecast zero mock HTTP, no live route invocation. Each child20kALLnestedRedis100mockHTTPbefore-dispatch120s512MiB256KiB/types120s1024/networkDENY before graph/compiler/lint. OLD ONLY plan-cost-registry from4ef8e0ae, same FINAL oracles; no full historical root replay/grant borrowing/reset/raise/partition. Generated report scope margin-alignment/value rows only, not all MILP/generators/fullbuild/currentmaincomposition.
+
+Observed correction: read-ceilings is not pure; its complete root used2345ALLnestedRedis/11mockHTTP, under the predeclared20k/100 ceilings. Initial zero forecast was inaccurate, not a new grant/reset/partition; no rerun. All other complete admitted roots were0/0.

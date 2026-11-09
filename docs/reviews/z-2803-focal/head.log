@@ -1,0 +1,263 @@
+
+FILE z-2803-controls.proof.ts
+✔ creator includes full retry signing plus origin/CDN overhead (0.814949ms)
+✔ pro includes full retry signing plus origin/CDN overhead (0.120822ms)
+✔ scale includes full retry signing plus origin/CDN overhead (0.077587ms)
+✔ the signing call and whole-read assumption remain auditable (0.25176ms)
+✔ source checking keeps exact text while the two joined fixes keep the same amount (0.301405ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7.00789
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE picture-upload-costs.test.ts
+
+The official prices, with their source and date
+  ok    an upload (put) is an Advanced Operation, US$ 5 a million
+  ok    a head or a read is a Simple Operation, US$ 0.40 a million
+
+A put may be sent again: every try counted (Revisor 1 on #2803)
+  ok    the installed SDK's own default: 10 tries again
+  ok    a put counted as 1 + every try again
+  ok    the SDK's head goes through requestApi, so it is tried again
+  ok    the SDK's get is one plain fetch, never tried again
+  ok    a head counted with every try, as a put is
+
+The signing request is tried as a put is, and the reads cross from the file store (Claude 1 on #2803, 6708192310)
+  ok    the upload route asks for a signed token on every request
+  ok    the SDK's signing goes through requestApi, so it is tried again
+  ok    a signing request counted with every try, as a put is
+  ok    the line names the signing call among its sources
+  ok    the basis says the reads pay Fast Origin Transfer and a CDN request
+
+Every studio picture upload's Blob operations, at the plan's studio ceiling
+  ok    a line of its own
+  ok    it says which pictures it covers: a product's, a link's and a page's (a review's photo and an email's picture are reported apart)
+  ok    creator: the studio figure, each request at its dearest
+  ok    pro: the studio figure, each request at its dearest
+  ok    scale: the studio figure, each request at its dearest
+  ok    its source and date are said, and why the read is counted whole
+
+18 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-margin.test.ts
+a thousand visits past the plan would bring in $0.4392 and cost $0.2638, keeping 40% before tax
+✔ the email each plan may send is the number that is published (1.998904ms)
+✔ creator, on sale: every brake at its limit at once still turns a profit (11.830602ms)
+✔ creator, on sale: the margin left in that worst case is a real one (7.944201ms)
+✔ creator, on sale: no single brake is big enough to swallow the plan by itself (0.373824ms)
+✔ pro, on sale: every brake at its limit at once still turns a profit (7.110834ms)
+✔ pro, on sale: the margin left in that worst case is a real one (7.661034ms)
+✔ pro, on sale: no single brake is big enough to swallow the plan by itself (0.203537ms)
+✔ scale, on sale: every brake at its limit at once still turns a profit (1.638922ms)
+✔ scale, on sale: the margin left in that worst case is a real one (5.595849ms)
+✔ scale, on sale: no single brake is big enough to swallow the plan by itself (0.342406ms)
+✔ creator, on sale: paid by the year, the worst month still leaves a real margin (6.750401ms)
+✔ pro, on sale: paid by the year, the worst month still leaves a real margin (5.801139ms)
+✔ scale, on sale: paid by the year, the worst month still leaves a real margin (1.900085ms)
+✔ Scale keeps more than Pro does in its own worst month, monthly and yearly, where neither takes a share (14.374559ms)
+✔ a lesson video kept by the video service never costs more to keep than the storage brake allows for (0.103476ms)
+✔ an hour of video past what a plan covers brings in well over what it costs (0.111889ms)
+✔ a thousand visits past what a plan covers are not sold: at the published price they would not pay their way (0.996153ms)
+✔ a thousand orders past what a plan covers bring in well over what they cost (0.131839ms)
+✔ an order that paid a share is covered by it several times over, so it is not counted (0.223787ms)
+✔ free copies stop at the month's orders: the plan's when paid, a trial's in a trial, none without a plan (0.269256ms)
+✔ every place an order is handed over counts it (0.582178ms)
+✔ a store nobody can charge cannot be visited past the visits it has (0.324129ms)
+✔ lesson pages supply the store's video allowance (0.139681ms)
+✔ a store that pays nothing can cost next to nothing (0.134162ms)
+✔ a store whose plan ended stops costing more than a store with no plan, on a day that is set (8.477616ms)
+✔ historical video invoices retain their old allowance and rate (0.127843ms)
+✔ the free-download brake is smaller than the allowance that is published (0.061573ms)
+✔ a buyer's download is bounded by nothing, and that is on purpose (0.117588ms)
+✔ a break from the plan is paid for by the months before it, at its longest (5.057347ms)
+✔ the one exposure is the first payment refunded in full: bounded, once per account, and said in writing (4.339495ms)
+✔ creator, on sale: a yearly plan refunded in its first month, past the guarantee, still pays for that month and the days to closing (1.323977ms)
+✔ pro, on sale: a yearly plan refunded in its first month, past the guarantee, still pays for that month and the days to closing (1.413021ms)
+✔ scale, on sale: a yearly plan refunded in its first month, past the guarantee, still pays for that month and the days to closing (1.389506ms)
+✔ a refunded year keeps Stripe's card fee, and every page that summarises it says so (0.837944ms)
+✔ a yearly first payment asks the card's bank to authenticate, so a fraud dispute lands on the bank (0.451301ms)
+✔ while the share is off, nothing is taken from a sale and the prices on sale are today's (0.160432ms)
+✔ the commission variant decided on 18 October 2026: the same price list, no share published or taken (0.201094ms)
+✔ a share is rounded down, and never taken from nothing (0.169125ms)
+✔ the share cannot be switched on before the checkout, the refunds and the pages are ready for it (1.441604ms)
+ℹ tests 39
+ℹ suites 0
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 115.955768
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE read-ceilings.test.ts
+
+The booking calendar answers from its last good copy, never from the studio's requests
+  ok    the first answer makes the file, reading Stripe
+  ok    the next answers it from the copy, reading nothing from Stripe
+  ok    and neither took a single studio request
+  ok    past 4 answers in an hour the app is asked to come back, and nothing is read
+
+A sliding hour: an app asking late in an hour is not refused for the next one (light c)
+  ok    within sixty minutes, the 5th is refused
+  ok    just past the hour, at 11:10 (not 12:00), answered again
+  ok    a refusal is taken back from the count
+
+Made again a few times a day at most, each booking that day with its own credit (M3), and the copy stands when it cannot be
+  ok    the day's own 2 makings spent, then a booking each: made for the first 5 (the fifth among them), then the copy
+  ok    the next day the copy has grown old: made again
+  ok    an hour on, nothing changed and the copy young: the copy, nothing made
+  ok    the copy grown old and Stripe down: the copy is answered, not an error
+  ok    no copy at all and Stripe down: the route answers 503
+
+A making that fails is given back once a day; the second failure that day stays counted (inbox C4-53)
+  ok    the first failure gives its making back (1 a day): the day still has one
+  ok    the second failure that day is counted: the day's makings are used
+  ok    so with Stripe back, nothing is made until the next day
+  ok    the given-back count never goes below zero
+  ok    with no making left, an answer takes no count: the pace and one MGET
+  ok    the day's tries, made or failed, never pass the 7 priced makings, own makings left or not
+
+A deleted store's copy is never answered again (M2), by the route itself
+  ok    before: the route answers the file
+  ok    the store deleted (its handle let go): the route answers 404, and the copy is gone
+
+Each count keeps its expiry, and the copy has a size (L3, L4)
+  ok    a count found without an expiry gets one back
+  ok    a file past its ceiling is neither kept nor sent
+
+A new address keeps the last copy (light a)
+  ok    the copy is still there for the new address
+
+Refusals have a ceiling: past CALENDAR_REFUSED_PER_HOUR in an hour the address stops, and the studio says so (C4-33, light a)
+  ok    the 7 refusals the line prices leave the address as it is
+  ok    the refusal that stops it: the pace, its count and the stop, within a refused shape and the stop priced as one more (its token's two reads aside)
+  ok    one more: the address is let go
+  ok    the studio shows no address and says it was stopped, with when
+  ok    the studio makes a new one in its place and keeps saying why
+  ok    a new address the creator asks for clears the note
+  ok    the editor says the rule and how to keep the address: every 15 minutes or less often
+
+The file keeps what is still to come first
+  ok    every event still to come is kept, then the latest past ones
+  ok    the file holds at most CALENDAR_MAX_EVENTS events, the soonest
+  ok    the build's Stripe pages are lib/calls.ts's own
+  ok    the biggest buyers' prints looked up are lib/stats.ts's TOP_BUYERS
+  ok    the members' words looked up are lib/membership-numbers.ts's own bounds
+
+A real making, measured, within its count (M1, light d)
+  ok    each booking adds what the count gives it (0.00 <= 7)
+  ok    forty bookings, measured (19), within the count for forty (320)
+  ok    the shape holds the measured fixed part (10), every listing and every booking at its worst
+
+A store from before lists gets one the first time a reading would name someone, tried once a day: measured, within its shape, priced every day (reviews of fe4cb5e56 and 2c1af02e0)
+  ok    made, measured (6), within LIST_MADE_SHAPE less the lock's other tries and the head's reads (13)
+  ok    once there is one, nothing is written: one read
+  ok    the figures the shape is built from are the code's own
+  ok    priced every day of the month, once a day a store, in the store-readings line
+  ok    and no longer as a one-time line beside it
+  a day's try at a list (store-readings line): $0.0005 a day at most (144 commands)
+
+Every figure costs at least the worst it stands for
+  ok    a store's one-time all-time filling has its own line, once for each store (M4)
+  ok    the feed is a cost line of its own, every try of a making (its own and its credits, a failure given back included) and answer of the month at its worst
+  ok    every light shape is lighter than the heavy ones it is counted apart from
+  ok    the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light)
+  ok    the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload
+  ok    the readings figure is still the one sized under US$ 65: without the upload line, one more heavy reading a day would pass it
+  ok    which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden
+  ok    heavy readings stop at HEAVY_READINGS_PER_DAY, and a refused one is not counted
+  ok    a reading's count, measured: light 3, heavy 5, as READING_COUNT_COMMANDS less its GET and SET
+  ok    refused, with its DECRBY: light 4, heavy 7, inside what KEPT_READINGS_SHAPE prices for a page that reads nothing
+  ok    what is left of the day: two GET, and none left once used
+  ok    a store in its trial or past its plan keeps both, priced for it (M2)
+  calendar feed: a making $0.012347, an answer $0.000236, the month $3.5903
+  store readings: a reading at most $0.003787, the month $0.4084
+  its own once-a-store line (stats-life-fill): a store's first all-time filling $0.0820 once (40806 commands)
+
+The totals: a page of each store's studio, as the Terms say; its numbers from its own readings (M1)
+  ok    one store's visits and sales at the worst refunds (one command of 500 keys), measured (292), within their readings' count (799)
+  ok    the sales reading's bytes hold every PayPal record it reads at its heaviest
+  ok    looked at again within the fresh time: read from what was kept, a few commands
+  ok    the day's readings used and nothing kept: nothing read, said as used (never as no numbers), and no studio request taken for it
+  ok    the totals say a store so left out comes back at 00:00 UTC, on the reader's clock too (C4-33 (3))
+  ok    the page takes a page of each other store's studio and nothing more
+
+A handle taken by another store never brings the old copy back (M2-bis)
+  ok    the first store's copy is made
+  ok    deleted: gone, and the copy, which names buyers, deleted at once (light 1)
+  ok    that answer's commands, with the token's two, within CALENDAR_POLL_SHAPE (8 <= 9)
+  ok    the handle taken by another store: every answer is 404, the fifth too, and never the old copy
+  ok    and nothing of the old copy is kept, nor anyone's address in its place (light e)
+  ok    with the day's makings spent, the old copy is not answered either
+
+A renamed store keeps its feed (L-c)
+  ok    renamed
+  ok    its feed, still under the old handle in its settings, answers: no 404 by mistake
+  ok    the copy, young and unchanged
+  ok    a booking marked under the new handle is read by the calls id: made again at once
+
+A copy is kept only by the store that made it (light 3)
+  ok    it names what the handle led to and the store's own id
+  ok    a copy that names another store's id is not answered
+
+A deletion while the file is being made is not undone (light 2)
+  ok    the file made is neither answered nor kept: the feed is gone
+
+A store deleted from the studio forgets its feed at once (M2-bis, 1; light 6)
+  ok    the studio's delete answers by going back to the studio
+  ok    before: its settings and its copy were kept
+  ok    after: its settings, its copy and its address are gone
+
+77 checks, all passing.
+Z_VOLUME {"runs":2345,"mocks":11,"over":false}
+making a booking calendar failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:9094:11)
+    at async readCallSessions ([stdin]:53709:7)
+    at async paidCalls ([stdin]:53638:11)
+    at async [stdin]:121506:45
+    at async bookedCalendarFeed ([stdin]:17996:12)
+    at async GET ([stdin]:121501:20)
+    at async main ([stdin]:125685:23) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+a booking calendar file is larger than its ceiling, so it is neither kept nor sent 58337b5ac9ea434ca7608657cc714a12
+
+Z_STATUS 0 null
+
+FILE margin-alignment.test.ts
+✔ the dated report remains explicitly historical and matches its reproducible figures (83.598958ms)
+✔ the unchanged dearest receiving fee and every reserve use the whole amount charged (1.107941ms)
+✔ current TX cost budgets reserve the absolute evidence-bound tax and the final net cent (16.296247ms)
+✔ old tax math is available only in the explicitly archived model, never a live fallback (0.30481ms)
+✔ every full-use unit keeps its existing cost room under complete synthetic TX evidence (21.499564ms)
+✔ unknown real review cannot be replaced by a positive model or a zero tax allowance (0.360574ms)
+✔ archived thresholds preserve historical figures without proposing current prices or rights (31.524223ms)
+✔ the value presentation retains owner quotations and its dated tax-model rows (15.06481ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 177.184779
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z2803-wJEhNS

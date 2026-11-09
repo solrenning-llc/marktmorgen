@@ -780,12 +780,31 @@ async function keptSender(key: string): Promise<Sender | "none" | null> {
 }
 
 /**
+ * After Amazon said no to a key's email (viaAmazon exactly false: nothing was handed to it, and its once-mark was let
+ * go of), the key is kept for Resend instead. Amazon's once-mark is taken again first (SET NX), so no other try of the
+ * key can hand the email to Amazon from then on; only then is the kept sender moved (SET XX), by the one try holding
+ * that mark. True only when both replies are exactly "OK" (CX-123 rule 24): a mark another try holds, a kept sender
+ * gone, or any other reply sends nothing to Resend, and the caller tries again later.
+ */
+async function moveToResend(key: string): Promise<boolean> {
+  try {
+    const held = repliesFor(await redisPipeline([["SET", onceKey(key), "1", "NX", "EX", 86_400]]), 1);
+    if (!held || held[0] !== "OK") return false;
+    const moved = repliesFor(await redisPipeline([["SET", pinKey(key), "resend", "XX", "EX", PINNED_SENDER_SECONDS]]), 1);
+    return !!moved && moved[0] === "OK";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * sendEmail for an email its caller tries again under the same idempotencyKey until a sender takes it (a PayPal
  * receipt, lib/paypal-delivery.ts). The sender is kept for the key (PINNED_SENDER_SECONDS) just before its first
  * request, and every later try goes only to it, so an email whose answer was lost is never sent again by the other
- * sender, which has never seen the key. A kept sender that is not ready now sends nothing, and neither does a
- * refusal fall over to the other one: the caller tries again later. False without a key; without Redis it is
- * sendEmail. Every other email goes through sendEmail, unchanged.
+ * sender, which has never seen the key. A kept sender that is not ready now sends nothing: the caller tries again
+ * later. A refusal Amazon gave (viaAmazon exactly false, nothing handed over) moves the key to Resend and goes on to
+ * it in the same call, as sendEmail falls over (moveToResend); an unknown answer (null) stays kept for Amazon. False
+ * without a key; without Redis it is sendEmail. Every other email goes through sendEmail, unchanged.
  */
 export async function sendEmailPinned(message: OneMessage, runtime: ResendTransportRuntime = {}): Promise<boolean> {
   const key = message.idempotencyKey;
@@ -798,7 +817,11 @@ export async function sendEmailPinned(message: OneMessage, runtime: ResendTransp
     const kept = await keepSender(key, "ses");
     if (kept === "ses") {
       if (!(await metered(message.meter, 1))) return false;
-      return (await viaAmazon(message, to, key)) === true;
+      const amazon = await viaAmazon(message, to, key);
+      if (amazon !== false) return amazon === true;
+      if (!(await moveToResend(key))) return false;
+      // The SES path already took its allowance, as in sendEmail.
+      return viaResend(message, key, runtime, { preflight: async () => true, beforePost: async () => (await keepSender(key, "resend")) === "resend" });
     }
     if (kept !== "resend") return false;
   } else {

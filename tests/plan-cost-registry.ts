@@ -712,11 +712,12 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  * - commandsPerReceiptTry: every Redis command one such try sends, from the paid record's GET to the list's ZADD, the
  *   hand-over's rerun (its writes already there), the first-try mark, the link's grant and the kept sender included,
  *   at the most measured with either sender refusing (tests/paypal-handover-cost.test.ts for Resend,
- *   tests/paypal-receipt-once.test.ts for Amazon). The guarded Resend ledger's own EVALs are lib/resend-fallback-budget's.
+ *   tests/paypal-receipt-once.test.ts for Amazon): 28, with Amazon refusing for the account (the owner told), the key
+ *   moved to Resend and Resend refusing, all in one try (a refusal Amazon gave goes on to Resend in the same try). The guarded Resend ledger's own EVALs are lib/resend-fallback-budget's.
  *   PAYPAL_RECEIPT_RETRY_COMMANDS is their product: the most one order's receipt retries send.
  * Why the retry is the five-minute job's, not a plan's: NOT_A_COST.HAND_OVER_BATCH.
  */
-export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 18 } as const;
+export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 28 } as const;
 export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTriesPerOrder * PAYPAL_HAND_OVER_RETRY.commandsPerReceiptTry;
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**

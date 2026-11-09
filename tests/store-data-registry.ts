@@ -364,7 +364,14 @@ export const FAMILIES: Record<string, Family> = {
   "nl:reading:day:@lib/store-readings.ts": { what: "A store's readings of the day, and of them the heavy ones", parts: [capped(4 * KEY, "Two counts a store a UTC day, kept two days.")] },
   // C4-33 (4): a product update's searches for its buyers, from a count of their own.
   "nl:cal:tok:@lib/calendar-sync.ts": { what: "The store's calendar file's token", parts: [capped(KEY, "One a store.")] },
-  "nl:meet:rf:@lib/call-meetings.ts": short("Refunds already handled for meetings, kept sixty-one days after the last one read", "order", 61, MARK),
+  "nl:meet:rf:@lib/call-meetings.ts": {
+    what: "Refunds read for meetings: those handled (and a call's refund held for later, marked as one), where the read stands and its pass, and the day's alert of a call's refund pending more than seven days",
+    parts: [
+      per("order", 61, MARK, "Refunds already handled, and a call's refund held for later (one mark each), sixty-one days after the last one read."),
+      per("order", 1, KEY, "One alert mark a charge of a call's refund pending more than seven days, a day (the owner's decision 18)."),
+      capped(400, "Where a pass over the refunds for meetings stands: one a store, under 400 bytes, seven days after it last moved (A3)."),
+    ],
+  },
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },
   "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token", parts: [item(KEY, "One per package, kept with it.", "call")] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },

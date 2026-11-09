@@ -177,7 +177,11 @@ async function main(): Promise<void> {
     await run();
     eventsDown = false;
     const [after, placeTtl, seenTtl] = await redis.pipeline([["GET", key], ["TTL", key], ["TTL", seen]]);
-    is(`the ${label} job, unsure: the same place, left as it is, and the read refunds at least as long`, [after, Number(placeTtl) <= 1_000, Number(seenTtl) >= Number(placeTtl)], [before, true, true]);
+    // Rule 23 (pre-review of claude5/call-refunds-confirmed): the call job now reads its refunds in a pass and writes
+    // the place it cannot move again at the end of each pass, its time renewed, so a refund held for later (the owner's
+    // decision 18) never lets it lapse; the review job still leaves it as it is.
+    const renewed = label === "call";
+    is(`the ${label} job, unsure: the same place, ${renewed ? "its time renewed" : "left as it is"}, and the read refunds at least as long`, [after, Number(placeTtl) <= 1_000, Number(seenTtl) >= Number(placeTtl)], [before, !renewed, true]);
   }
 
   part("A first run that could not look up every refund keeps its window (review of #2158)");

@@ -12,7 +12,7 @@
  *   - a row that does not read (a pending refund with no time) never writes the anchor as "0".
  */
 import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { syncMeetings } from "@/lib/call-meetings";
+import { MEET_REFUND_PLACE_COMMANDS, MEET_REFUND_ROW_COMMANDS, syncMeetings } from "@/lib/call-meetings";
 import { callScope, readRecord, writeRecord, type MeetRecord } from "@/lib/meet-records";
 import { MEET_STORES } from "@/lib/meet-links";
 import { advance, store as redis } from "./redis-stub";
@@ -51,6 +51,15 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   }
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
+
+type Command = (string | number)[];
+const memory = redis.pipeline.bind(redis);
+/** Every command sent, for the job's cost. */
+let sent: Command[] = [];
+redis.pipeline = (async (commands: Command[]) => {
+  sent.push(...commands);
+  return memory(commands);
+}) as typeof redis.pipeline;
 
 const charge = (id: string, refunded: boolean, back: number) => ({ object: "charge", id, amount: 4900, amount_refunded: back, refunded });
 const refund = (id: string, pi: string, status: string, chargeRow: Record<string, unknown>, amount: number, created: number) => ({ id, object: "refund", created, status, amount, payment_intent: pi, charge: chargeRow });
@@ -134,7 +143,11 @@ async function main(): Promise<void> {
     refunds = [refund("re_TestRfPassWait1", pi, "pending", charge("ch_TestRfPassWait1", true, 4900), 4900, at)];
     await redis.pipeline([["SET", `nl:meet:rf:${callsId}:since`, String(at - 60), "EX", 60 * 86_400], ["DEL", `nl:meet:rf:${callsId}:pass`]]);
     lookedUp[pi] = 0;
+    sent = [];
     is("is said once in three runs", await alertsOver(3), 1);
+    // Its place and its one row, each run: the commands on the job's own keys stay inside what the registry prices.
+    const own = sent.filter((command) => String(command[1] ?? "").startsWith(`nl:meet:rf:${callsId}:`)).length;
+    is("each run sends at most MEET_REFUND_PLACE_COMMANDS + MEET_REFUND_ROW_COMMANDS on its own keys for one row", own <= 3 * (MEET_REFUND_PLACE_COMMANDS + MEET_REFUND_ROW_COMMANDS), true);
     is("its meeting stays", await gone(pi), false);
     is("and it is looked up once, not on every run", lookedUp[pi], 1);
     advance(86_400_000 + 60_000);

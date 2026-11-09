@@ -95,6 +95,8 @@ import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
+import { DEVICE_SENT_BYTES, MAX_MEMBER_DEVICES } from "@/lib/community-push";
+import { MAX_MENTIONS } from "@/lib/community-mentions";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
 import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
@@ -577,6 +579,19 @@ export const ORDERS_METERED_MOVES = COMMAND + MOVES_PER_MGET * (MOVE_BYTES + MOV
 export const LOCKED_UNTIL_STAR_COMMANDS = 3;
 /** What those commands add to a studio request, as UNIT_COST.studio takes them (the same sum, so no rounding is lost). */
 export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) - request("studio", 20 + TAKE_COMMANDS, 50_000);
+/**
+ * What one comment's push reads of the members' devices, at the most (lib/community-push.ts devicesOf): the twelve
+ * people it can tell (the post's author, the comment it answers, MAX_MENTIONS named), each with MAX_MEMBER_DEVICES
+ * devices, each sending at most DEVICE_SENT_BYTES (an endpoint over MAX_ENDPOINT_BYTES is refused when it is turned
+ * on, and a row over it is left out inside Redis). Inside UNIT_COST.buyer's 60,000 bytes with the rest of the action
+ * (tests/community-device-bytes.test.ts).
+ */
+export const COMMUNITY_DEVICES_READ = {
+  people: 2 + MAX_MENTIONS,
+  devices: MAX_MEMBER_DEVICES,
+  deviceBytes: DEVICE_SENT_BYTES,
+  bytes: (2 + MAX_MENTIONS) * MAX_MEMBER_DEVICES * DEVICE_SENT_BYTES,
+} as const;
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
@@ -593,7 +608,8 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   integration: request("wait", 10 + TAKE_COMMANDS, 20_000),
   // What a buyer does inside what they bought (lib/buyer-actions.ts): the
   // heaviest is a post or comment that tells up to eleven people, their
-  // devices pushed at once and waited on, its notices filed, its words
+  // devices pushed at once and waited on (their read at most
+  // COMMUNITY_DEVICES_READ.bytes), its notices filed, its words
   // indexed, and its deletion later. A hundred commands, 60 KB through the
   // database and on to the browser, and a door's file of up to 10 MB kept
   // for as long as an unused door may be.

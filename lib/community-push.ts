@@ -36,7 +36,7 @@
  *     gone, and its row goes with it.
  */
 import { redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { CREATOR } from "@/lib/community";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -51,6 +51,22 @@ const membersKey = (id: string) => `nl:cm:${id}:m`;
 
 /** How many devices one member may have listening. */
 export const MAX_MEMBER_DEVICES = 5;
+/**
+ * The longest endpoint a member's device is kept with, in bytes. No push service publishes a maximum: FCM, Mozilla
+ * autopush, Apple and WNS hand out a short path and an opaque token, in practice under 500 bytes (a working figure,
+ * not an official one; none is published). 640 leaves room above it and keeps twelve people's five devices inside
+ * one buyer action's read (tests/plan-cost-registry.ts, COMMUNITY_DEVICES_READ). lib/web-push.ts isPushEndpoint
+ * still allows 1,000 for the creator's own phone (lib/phone-alerts.ts); a member's device is held to this.
+ */
+export const MAX_ENDPOINT_BYTES = 640;
+/** Only characters a URL carries as they are and a JSON reply never escapes, so an endpoint weighs its length. */
+const PLAIN_ENDPOINT = /^https:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/;
+/** p256dh: a 65-byte point, 87 base64url characters (88 padded); auth: 16 bytes, 22 (24 padded); our key id: 8 hex. */
+const MAX_P256DH = 88;
+const MAX_AUTH = 24;
+const MAX_KID = 16;
+/** The most one device sends when its devices are read (DEVICES_TO_SEND): four JSON strings, each with two quotes and a comma. */
+export const DEVICE_SENT_BYTES = MAX_ENDPOINT_BYTES + MAX_P256DH + MAX_AUTH + MAX_KID + 4 * 3;
 const MAX_TITLE = 80;
 const MAX_BODY = 180;
 
@@ -70,28 +86,61 @@ export function publicKey(): string {
   return vapidKeys()?.publicKey ?? "";
 }
 
-function parseDevice(raw: string): MemberDevice | null {
-  try {
-    const v = JSON.parse(raw) as Partial<MemberDevice>;
-    // A device is kept flat, the way lib/web-push.ts hands it back; the
-    // reader wants the shape a browser sends, with the keys nested. Passing
-    // the stored shape straight back returns null for every row, and a push
-    // that never leaves looks exactly like a push nobody was owed.
-    const subscription = readSubscription({ endpoint: v.endpoint, keys: { p256dh: v.p256dh, auth: v.auth } });
-    if (!subscription || typeof v.kid !== "string" || !v.kid) return null;
-    return { ...subscription, kid: v.kid, addedAt: typeof v.addedAt === "number" ? v.addedAt : 0 };
-  } catch {
-    return null;
-  }
+/** Whether a subscription weighs no more than a stored device may (MAX_ENDPOINT_BYTES and the keys' own lengths). */
+function withinDeviceBytes(subscription: Subscription): boolean {
+  return Buffer.byteLength(subscription.endpoint) <= MAX_ENDPOINT_BYTES && PLAIN_ENDPOINT.test(subscription.endpoint)
+    && subscription.p256dh.length <= MAX_P256DH && subscription.auth.length <= MAX_AUTH;
 }
 
-async function devicesOf(id: string, who: string): Promise<MemberDevice[]> {
-  const [raw] = await redisPipeline([["HGETALL", pushKey(id, who)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
-  const out: MemberDevice[] = [];
-  for (let i = 1; i < flat.length; i += 2) {
-    const one = parseDevice(flat[i]);
-    if (one) out.push(one);
+type SentDevice = Subscription & { kid: string };
+
+/**
+ * A member's devices, as sending needs them: endpoint, p256dh, auth and key id, four strings a device, at most
+ * MAX_MEMBER_DEVICES, each within the bounds above (so a read sends at most MAX_MEMBER_DEVICES x DEVICE_SENT_BYTES).
+ * A row of any other shape, or over a bound (one kept before the bound was), is left out inside Redis, as a row that
+ * did not read always was: not sent to, not forgotten. The field (the endpoint again) never crosses the wire.
+ */
+const DEVICES_TO_SEND = [
+  "-- marktmorgen:community-devices:v1",
+  "local most = tonumber(ARGV[1])",
+  "local function plain(v, pattern, longest)",
+  "  return type(v) == \"string\" and #v <= tonumber(longest) and string.find(v, pattern) ~= nil",
+  "end",
+  "local out, found = {}, 0",
+  "for _, raw in ipairs(redis.call(\"HVALS\", KEYS[1])) do",
+  "  if found == most then break end",
+  "  local ok, d = pcall(cjson.decode, raw)",
+  "  if ok and type(d) == \"table\"",
+  "    and plain(d.endpoint, \"^https://[%w%-%._~:/%?#%[%]@!%$&'%(%)%*%+,;=%%]+$\", ARGV[2])",
+  "    and plain(d.p256dh, \"^[%w_%-]+=?=?$\", ARGV[3]) and plain(d.auth, \"^[%w_%-]+=?=?$\", ARGV[4])",
+  "    and plain(d.kid, \"^%w+$\", ARGV[5]) then",
+  "    found = found + 1",
+  "    out[#out + 1] = d.endpoint",
+  "    out[#out + 1] = d.p256dh",
+  "    out[#out + 1] = d.auth",
+  "    out[#out + 1] = d.kid",
+  "  end",
+  "end",
+  "return out",
+].join("\n");
+
+/**
+ * Read in its exact shape (CX-123 rule 24): a list of strings, four a device, at most MAX_MEMBER_DEVICES. Any other
+ * reply throws UnknownReplyError, and pushMembers sends nothing to that member and writes nothing.
+ */
+async function devicesOf(id: string, who: string): Promise<SentDevice[]> {
+  const reply = repliesFor(await redisPipeline([
+    ["EVAL", DEVICES_TO_SEND, 1, pushKey(id, who), MAX_MEMBER_DEVICES, MAX_ENDPOINT_BYTES, MAX_P256DH, MAX_AUTH, MAX_KID],
+  ]), 1)?.[0];
+  const flat = stringList(reply);
+  if (!flat || flat.length % 4 !== 0 || flat.length > 4 * MAX_MEMBER_DEVICES) throw new UnknownReplyError("a member's push devices");
+  const out: SentDevice[] = [];
+  for (let i = 0; i < flat.length; i += 4) {
+    // A device is kept flat, the way lib/web-push.ts hands it back; the reader wants the shape a browser sends, with
+    // the keys nested. Passing the stored shape straight back returns null for every row, and a push that never
+    // leaves looks exactly like a push nobody was owed.
+    const subscription = readSubscription({ endpoint: flat[i], keys: { p256dh: flat[i + 1], auth: flat[i + 2] } });
+    if (subscription && withinDeviceBytes(subscription) && flat[i + 3]) out.push({ ...subscription, kid: flat[i + 3] });
   }
   return out;
 }
@@ -106,7 +155,8 @@ export async function rememberDevice(id: string, who: string, raw: unknown, room
   const keys = vapidKeys();
   if (!keys) return "unavailable";
   const subscription = readSubscription(raw);
-  if (!subscription) return "invalid";
+  // Refused before anything is read or written: one device never weighs more than DEVICE_SENT_BYTES when sent.
+  if (!subscription || !withinDeviceBytes(subscription)) return "invalid";
   const key = pushKey(id, who);
   // Read in their exact shape (CX-123 rule 24): the count a number, the device kept or nil. Anything else throws, and
   // nothing is written: a count that does not read is never under the limit.
@@ -256,7 +306,7 @@ export async function pushMembers(id: string, who: StillIn, alert: MemberAlert):
   let sent = 0;
   await Promise.all(
     who.map(async (one) => {
-      let devices: MemberDevice[] = [];
+      let devices: SentDevice[] = [];
       try {
         devices = await devicesOf(id, one);
       } catch (error) {

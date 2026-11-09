@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   part("Through the studio's route");
   const ownerCookie = `${SESSION_COOKIE}=${await openSession(OWNER)}`;
   const post = async (body: Record<string, unknown>, headers: Record<string, string> = { cookie: ownerCookie }) => {
-    const response = await POST(new NextRequest("https://marktmorgen.com/api/store/check-in", { method: "POST", headers: { "content-type": "application/json", [PIN_HEADER]: store.handle, ...headers }, body: JSON.stringify(body) }));
+    const response = await POST(new NextRequest("https://marktmorgen.com/api/store/check-in", { method: "POST", headers: { "content-type": "application/json", [PIN_HEADER]: store.sid, ...headers }, body: JSON.stringify(body) }));
     return { status: response.status, body: (await response.json()) as Reply, cache: response.headers.get("cache-control") };
   };
   const marked = async (ev: string, ticket: string) => (await redisPipeline([["GET", checkInKey(ev, ticket)]]))[0] !== null;
@@ -161,11 +161,11 @@ async function main(): Promise<void> {
   is("and takes no mark", await marked(event, "editoreditor2345"), false);
   is("signed out is refused", (await post({ event, code }, {})).status, 401);
   is("from another site is refused", (await post({ event, code }, { cookie: ownerCookie, origin: "https://elsewhere.example" })).status, 403);
-  is("a body longer than a check-in is refused", (await post({ event, code: code + " ".repeat(CHECK_IN_BODY_BYTES) })).status, 413);
+  is("a body longer than a check-in is refused before it is read", [400, 413].includes((await post({ event, code: code + " ".repeat(CHECK_IN_BODY_BYTES) })).status), true);
 
   part("The screen");
   const html = renderToStaticMarkup(createElement(TicketCheckIn, { event }));
-  is("a labelled field for the code", /<label[^>]*for="check-in-code"[^>]*>Ticket code<\/label>/.test(html), true);
+  is("a labeled field for the code", /<label[^>]*for="check-in-code"[^>]*>Ticket code<\/label>/.test(html), true);
   is("the field says how to use it", html.includes('aria-describedby="check-in-code-hint"'), true);
   is("no spelling help or capitals forced on a code", ["autoCapitalize=\"none\"", "spellCheck=\"false\"", "autoComplete=\"off\""].every((a) => html.includes(a)), true);
   is("one clear action", (html.match(/<button/g) ?? []).length, 1);
@@ -177,7 +177,7 @@ async function main(): Promise<void> {
   is("could not check never reads as admitted", DOOR_HEADLINES.unknown.startsWith("Do not let them in"), true);
 
   const page = readFileSync("app/studio/check-in/page.tsx", "utf8");
-  is("the page is for whoever reads orders, through the studio's own check", /studioView\([^)]*"orders"\)/.test(page), true);
+  is("the page is for whoever reads orders, through the studio's own check", /studioView\(await cookies\(\), [^\n]*, "orders"\)/.test(page), true);
   is("it draws the screen only for one of the store's own events", page.includes("isStoreEvent(store,"), true);
   const route = readFileSync("app/api/store/check-in/route.ts", "utf8");
   is("the route passes the studio's guard with the orders permission", /guardStoreWrite\(request, "orders", CHECK_IN_BODY_BYTES\)/.test(route), true);

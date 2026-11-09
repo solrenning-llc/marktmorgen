@@ -11,13 +11,20 @@
  *   - a prune after a copy whose keys or bytes fell more than BACKUP_SHRINK_LIMIT_PERCENT below the last good set;
  *     a shrunk copy taken as the new comparison base; a database that lost the last good copy's mark (wiped) while
  *     the bucket holds other copies pruned anyway;
+ *   - (review round of 9 November 2026) step 1 deleting a good pre-shrink set while the prune is held, over many days
+ *     (Claude 2's HIGH 6727145967, Claude 6's MEDIUM 1 5819683734); one unknown read of the mark, or a first day's
+ *     leftover object, holding every later prune for good (Claude 6's MEDIUM 2); a retention the bucket lock outlives
+ *     admitted (Claude 2's MEDIUM, Claude 6's LOW 1); step 1 deleting objects before it knows room can be made
+ *     (Claude 6's LOW 2).
  * The route, the schedule and the alarm are held by tests/bk1-backup-route.test.ts.
  */
 import {
   BACKUP_BUCKET_LOCK_DAYS,
+  BACKUP_MIN_RETENTION_DAYS,
   BACKUP_SHRINK_LIMIT_PERCENT,
   backupLastFailure,
   runBackup,
+  validReview,
   type BackupCostReview,
 } from "@/lib/backup-run";
 import { randomBytes } from "node:crypto";
@@ -268,6 +275,141 @@ async function main(): Promise<void> {
     at(T0 + 800 * DAY);
     const firstEver = await runBackup({ now: clock, review: short, store, key });
     is("control: the very first copy, an empty bucket, no mark: prune done", firstEver.ok && firstEver.prune, "done");
+  }
+
+  // Review round of 9 November 2026. A retention of 9 days (the shortest past the 7-day lock and its day of runs):
+  // the ceiling holds 11 sets, so the bucket fills within days and step 1 has to make room.
+  const nine: BackupCostReview = { ...review, retentionDays: 9 };
+  const ran = (r: Awaited<ReturnType<typeof runBackup>>) => (r.ok ? r.prune : r.reason);
+  /** Twelve good days, then `change` on day 12 and `days` more days; what the bucket and the results were. */
+  const holdProbe = async (change: () => void, days: number) => {
+    reset();
+    wipe();
+    seed(40);
+    lockMs = BACKUP_BUCKET_LOCK_DAYS * DAY;
+    const start = T0 + 1_000 * DAY;
+    for (let d = 0; d < 12; d += 1) {
+      at(start + d * DAY);
+      await runBackup({ now: clock, review: nine, store, key });
+    }
+    const good = [...objects.keys()];
+    at(start + 12 * DAY);
+    change();
+    asked.length = 0;
+    const states: string[] = [];
+    for (let d = 12; d < 12 + days; d += 1) {
+      at(start + d * DAY);
+      states.push(ran(await runBackup({ now: clock, review: nine, store, key })));
+    }
+    return { good, states, start };
+  };
+
+  part("A shrunk database: step 1 never deletes a good set while the prune is held (Claude 2 HIGH, Claude 6 MEDIUM 1)");
+  {
+    const { good, states, start } = await holdProbe(() => {
+      for (let i = 0; i < 30; i += 1) redis.run(["DEL", `nl:store:s${i}`]);
+    }, 30);
+    is("twelve good days leave a full retention of good sets", good.length >= 20, true);
+    is("thirty shrunk days: every run keeps its copy and holds the prune", [states.length, states.every((s) => s === "prune_shrunk")], [30, true]);
+    is("no good pre-shrink object was even asked to go", good.filter((id) => asked.includes(id)), []);
+    is("every good pre-shrink object is still in the bucket", good.filter((id) => !objects.has(id)), []);
+    is("the bucket stays inside its ceiling while it holds them", [...objects.values()].reduce((n, o) => n + o.byteLength, 0) <= nine.maxStoredBytes, true);
+    for (let i = 0; i < 30; i += 1) redis.run(["SET", `nl:store:s${i}`, randomBytes(40).toString("hex")]);
+    at(start + 42 * DAY);
+    const back = await runBackup({ now: clock, review: nine, store, key });
+    is("the database back to its size: the next run prunes again", ran(back), "done");
+  }
+
+  part("A wiped database (its marks gone): step 1 never deletes a good set while the prune is held (Claude 6 MEDIUM 1)");
+  {
+    const { good, states } = await holdProbe(() => {
+      wipe();
+      seed(1);
+    }, 20);
+    is("every blind run keeps its copy and holds the prune", states.every((s) => s === "prune_unverified"), true);
+    is("every good pre-wipe object is still in the bucket, none asked for", [good.filter((id) => !objects.has(id)), good.filter((id) => asked.includes(id))], [[], []]);
+  }
+
+  part("One unknown read of the mark never holds the prune for good (Claude 6 MEDIUM 2, case a)");
+  {
+    reset();
+    wipe();
+    seed(40);
+    const start = T0 + 1_100 * DAY;
+    at(start);
+    await runBackup({ now: clock, review: nine, store, key });
+    const was = redis.run(["GET", "nl:backup:last-ok"]);
+    const plain = redis.pipeline.bind(redis);
+    let fail = 1;
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (commands: (string | number)[][]) => {
+      if (fail > 0 && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === "nl:backup:last-ok") {
+        fail -= 1;
+        throw new Error("a transient database error");
+      }
+      return plain(commands);
+    }) as typeof redis.pipeline;
+    at(start + DAY);
+    const blind = ran(await runBackup({ now: clock, review: nine, store, key }));
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = plain;
+    is("the day the mark could not be read: the copy kept, the prune held", blind, "prune_unverified");
+    is("and the mark that could not be read is left as it was, its base with it", redis.run(["GET", "nl:backup:last-ok"]), was);
+    const after: string[] = [];
+    for (let d = 2; d < 8; d += 1) {
+      at(start + d * DAY);
+      after.push(ran(await runBackup({ now: clock, review: nine, store, key })));
+    }
+    is("every day after it prunes again", after, ["done", "done", "done", "done", "done", "done"]);
+  }
+
+  part("A first day's leftover object (a failed try's part) never holds the prune for good (Claude 6 MEDIUM 2, case b)");
+  {
+    reset();
+    wipe();
+    seed(10);
+    const start = T0 + 1_200 * DAY;
+    at(start);
+    filler(77, clock - HOUR, 2_000);
+    const first: string[] = [];
+    for (let d = 0; d < 4; d += 1) {
+      at(start + d * DAY);
+      first.push(ran(await runBackup({ now: clock, review: nine, store, key })));
+    }
+    is("no other verified set in the bucket: the first copy is the base, and every day prunes", first, ["done", "done", "done", "done"]);
+  }
+
+  part("A retention the bucket lock outlives is refused (Claude 2 MEDIUM, Claude 6 LOW 1)");
+  is("the shortest retention: the lock's 7 days and two", BACKUP_MIN_RETENTION_DAYS, BACKUP_BUCKET_LOCK_DAYS + 2);
+  is("8 days: refused", validReview({ ...review, retentionDays: 8 }), false);
+  is("9 days: admitted", validReview(nine), true);
+  {
+    reset();
+    wipe();
+    seed(5);
+    lockMs = BACKUP_BUCKET_LOCK_DAYS * DAY;
+    const start = T0 + 1_300 * DAY;
+    const states: string[] = [];
+    for (let d = 0; d < 40; d += 1) {
+      at(start + d * DAY);
+      states.push(ran(await runBackup({ now: clock, review: nine, store, key })));
+    }
+    is("9 days under the 7-day lock: forty days, every one done", states.filter((s) => s !== "done"), []);
+  }
+
+  part("Step 1 deletes nothing when the objects it may delete cannot make room (Claude 6 LOW 2)");
+  {
+    reset();
+    wipe();
+    seed(5);
+    const start = T0 + 1_400 * DAY;
+    at(start);
+    await runBackup({ now: clock, review, store, key });
+    const old = [filler(1, clock - 20 * DAY, 2_000), filler(2, clock - 19 * DAY, 2_000)];
+    for (let i = 0; i < 62; i += 1) filler(100 + i, clock + HOUR + i, 2_000);
+    at(start + DAY);
+    lockMs = BACKUP_BUCKET_LOCK_DAYS * DAY;
+    asked.length = 0;
+    const full = await runBackup({ now: clock, review, store, key });
+    is("two old objects free, the rest inside the lock: room_locked, and neither old one asked to go", [full, asked.length, old.every((id) => objects.has(id))], [{ ok: false, reason: "room_locked" }, 0, true]);
   }
 
   done();

@@ -729,26 +729,34 @@ export function nextLook(paidAt: number, now: number): number | null {
   return Math.min(now + every, paidAt + WATCH_SECONDS);
 }
 
-/** How long an order PayPal has not settled is kept for the sweep to ask about, from when it was opened (at most). */
+/**
+ * How long an order PayPal has not settled is kept for the sweep to ask about, from when it was opened (at most).
+ * Whoever merges this with #3411 last: replace it with #3411's ORDER_KEPT_FROM_OPENING_SECONDS (the same rule).
+ */
 const PENDING_KEPT_SECONDS = 30 * 86_400;
+/** Taken off each step of nextPendingLook, so a run of the five-minute job that starts a little late keeps the pace. */
+const PENDING_LOOK_SLACK_SECONDS = 30;
 
 /**
  * When an order still pending at PayPal is next asked about (Claude 2's MEDIUM on the second money review of #3404):
  * every five minutes in its first hour, every half hour in its first day, every three hours in its first week, then
  * every six hours, counted from when it was opened. Its score in pending is this time, and the sweep reads only the
  * orders whose turn has come, so the orders PayPal does not answer for move back behind the others and can never hold
- * the place of a newer one PayPal charged. A time ahead of now (a clock moved back) is read as just opened. Pure.
+ * the place of a newer one PayPal charged. Each step is PENDING_LOOK_SLACK_SECONDS short, so a run that starts a few
+ * seconds late does not skip a turn and double the pace (pre-review LOW 3). A time ahead of now (a clock moved back) is
+ * read as just opened. Pure.
  */
 export function nextPendingLook(openedAt: number, now: number): number {
   const age = Math.max(0, now - openedAt);
   const every = age < 3600 ? 300 : age < 86_400 ? 1800 : age < 7 * 86_400 ? 3 * 3600 : 6 * 3600;
-  return now + every;
+  return now + every - PENDING_LOOK_SLACK_SECONDS;
 }
 
 /**
  * An opened order's record read exactly, for the sweep (CX-123 rule 24): null only when Redis answered that there is
  * none (its life ended); a reply in another envelope, text that is not JSON, or a record without its store, merchant
- * and opening time is "unknown", never "ended", so a pending order is not dropped on a read that failed.
+ * and a positive whole opening time is "unknown", never "ended", so a pending order is not dropped on a read that
+ * failed, nor asked about as if opened in 1970 (#3411's record cap reads the opening time and throws on one that is not).
  */
 async function readOpenedExact(order: string): Promise<Opened | null | "unknown"> {
   const read = repliesFor(await redisPipeline([["GET", orderKey(order)]]), 1);
@@ -757,7 +765,7 @@ async function readOpenedExact(order: string): Promise<Opened | null | "unknown"
   if (typeof read[0] !== "string") return "unknown";
   try {
     const opened = JSON.parse(read[0]) as Opened | null;
-    return opened && typeof opened === "object" && typeof opened.s === "string" && typeof opened.m === "string" && Number.isSafeInteger(opened.at)
+    return opened && typeof opened === "object" && typeof opened.s === "string" && typeof opened.m === "string" && Number.isSafeInteger(opened.at) && opened.at > 0
       ? opened
       : "unknown";
   } catch {
@@ -792,12 +800,16 @@ export async function watchPayPal(
   // Only the orders whose turn has come (their score is when they are next asked: nextPendingLook), oldest turn first.
   const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", String(now), "LIMIT", "0", "25"]]);
   // A kept order is asked again later and later, and its record kept while it is pending, at most PENDING_KEPT_SECONDS
-  // from opening, so a payment PayPal took is not let go unread when the record's own three days end. XX: an order
-  // the return wrote down meanwhile (settle takes it off pending) is not put back. One pipeline of at most two commands.
+  // from opening, so a payment PayPal took is not let go unread when the record's own three days end. Its next look
+  // never falls past five minutes before that end (pre-review MEDIUM 1): a six-hour step would let the record end
+  // unread, and a payment PayPal completed in its last hours would never be handed over; at or past it, every run asks.
+  // XX: an order the return wrote down meanwhile (settle takes it off pending) is not put back. One pipeline of at most
+  // two commands.
   const keep = async (order: string, opened: Opened): Promise<void> => {
     const until = opened.at + PENDING_KEPT_SECONDS;
+    const next = Math.min(nextPendingLook(opened.at, now), Math.max(now + 1, until - 300));
     await redisPipeline([
-      ["ZADD", pendingKey(statsId), "XX", String(nextPendingLook(opened.at, now)), order],
+      ["ZADD", pendingKey(statsId), "XX", String(next), order],
       ...(until > now ? [["EXPIREAT", orderKey(order), String(until)]] : []),
     ]);
   };
@@ -809,8 +821,10 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", pendingKey(statsId), "XX", String(now + 3600), order]]);
       continue;
     }
-    // Thirty days from opening without PayPal settling it (its record ended): no longer asked about.
+    // Thirty days from opening without PayPal settling it (its record ended): no longer asked about, and said so in the
+    // logs, since a payment PayPal completes after this is not handed over by the sweep.
     if (!opened || (await readPaid(order))) {
+      if (!opened) console.error("a pending PayPal order was let go: its record ended before PayPal settled it", order);
       await redisPipeline([["ZREM", pendingKey(statsId), order]]);
       continue;
     }

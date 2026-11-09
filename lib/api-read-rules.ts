@@ -178,10 +178,13 @@ export const BOOK_PAYPAL_REFUNDS = 500;
  * What the book's two questions about one PayPal payment weigh (lib/affiliates.ts, readBook): the name it sends to the
  * refunds kept for good (lib/paypal-sales.ts, backKey: "paypal:" and a capture id of up to 64 characters) and the
  * answer (null, or a time of up to 12 digits), and the order it sends to the set (up to 36 characters) and its score
- * (up to 24), each a bulk string with at most 8 bytes of framing ("$NN\r\n" and "\r\n"): 175, rounded up. Counted for
- * every entry, a ceiling of the payments.
+ * (up to 24), each a bulk string with at most 8 bytes of framing ("$NN\r\n" and "\r\n"): 175. And the same order asked
+ * of the set as refunded in part (lib/paypal-sales.ts, partlyRefundedMember: "part:" and the order, 41) and its score:
+ * 81 more, 256 in all. Counted for every entry, a ceiling of the payments.
  */
-export const BOOK_KEPT_REFUND_BYTES = 192;
+export const BOOK_KEPT_REFUND_BYTES = 256;
+/** Commands the book's questions about `entries` PayPal payments take at the most: one HMGET a slice, and a ZMSCORE a slice of two names an order (in full and in part). */
+export const bookKeptCommands = (entries: number) => Math.ceil(entries / BOOK_KEPT_SLICE) + Math.ceil((2 * entries) / BOOK_KEPT_SLICE);
 /** A PayPal sale's record, read for its refund: the order, the payment, the buyer, what the visit carried. */
 export const PAYPAL_PAID_BYTES = 4_096;
 /** Open bookings whose moves readBook reads at the most, a hundred at a command (lib/call-moves-read.ts). */
@@ -202,9 +205,9 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   return {
     // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below; the moves a hundred at an MGET.
     // With anything credited, the book's two questions about its PayPal payments, in slices of BOOK_KEPT_SLICE (an
-    // HMGET of the refunds kept for good and a ZMSCORE of the set), BOOK_KEPT_REFUND_BYTES an entry; the set's listing
-    // and its records (1 + paypal) are no longer read by the book, still counted as a ceiling.
-    commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products,
+    // HMGET of the refunds kept for good and a ZMSCORE of the set, bookKeptCommands), BOOK_KEPT_REFUND_BYTES an entry;
+    // the set's listing and its records (1 + paypal) are no longer read by the book, still counted as a ceiling.
+    commands: 8 + 7 + (any ? 1 + paypal + bookKeptCommands(s.entries) : 0) + moveReads(moves) + products,
     bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.

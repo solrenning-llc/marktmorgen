@@ -52,10 +52,12 @@ async function main() {
   is("a renewal outage does not silently mean zero renewals", (await readSales(store, NOW))!.cashflowComplete, false);
   part("PayPal refund coverage");
   const noRefunds = await readPayPalRefundsWithCoverage(store.statsId, NOW / 1000 - 86400);
-  is("a known empty reading is complete", noRefunds, { rows: [], partial: false });
+  // Rule 23 (audit R13, MEDIUM 2): the reading also says whether a sale refunded in part is in the range (partly) and
+  // whether it reached every refund in full with its record (uncovered); `partial` is either, unchanged here.
+  is("a known empty reading is complete", noRefunds, { rows: [], partly: false, uncovered: false, partial: false });
   await redis.pipeline([["ZADD", `nl:ppsell:refunded:${store.statsId}`, NOW / 1000, "missing-order"]]);
   const paypal = await readPayPalRefundsWithCoverage(store.statsId, NOW / 1000 - 86400);
-  is("a refund whose payment is missing makes the reading incomplete", paypal, { rows: [], partial: true });
+  is("a refund whose payment is missing makes the reading incomplete", paypal, { rows: [], partly: false, uncovered: true, partial: true });
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

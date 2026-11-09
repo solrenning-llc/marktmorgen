@@ -763,7 +763,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:own:@lib/paypal-sales.ts": short("The paid orders behind one address's product", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:paid:@lib/paypal-sales.ts": short("A PayPal order paid", "order", 400, KB, KIND("paypal")),
   "nl:ppsell:pending:@lib/paypal-sales.ts": short("Orders whose payment PayPal holds, until it completes", "order", 30, MARK, KIND("paypal")),
-  "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),
+  // Two marks an order at the most: refunded in part (partlyRefundedMember), then in full (audit R13, MEDIUM 2).
+  "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded, in part and in full", "order", 400, 2 * MARK, KIND("paypal")),
   // A PayPal order hands over one product (lib/paypal-sales.ts, sellsWithPayPal): never a call, a recurring one or
   // license keys, but it can open a community or a private podcast, so the membership parts it can reach count with
   // it (PAYPAL_NEVER_REACHES leaves out only what a recurring product or license keys keep): the parts of no kind, those

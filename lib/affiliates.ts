@@ -74,7 +74,7 @@
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, paypalPaymentId, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, partlyRefundedMember, paypalPaymentId, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -2994,10 +2994,12 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       };
       const pis = [...paypalSales.keys()];
       const orders = [...paypalOrders.keys()];
+      // Each order is asked twice of the set: refunded in full (the order) and in part (partlyRefundedMember).
+      const asked = orders.flatMap((order) => [order, partlyRefundedMember(order)]);
       if (pis.length) {
         const slices = <T,>(list: T[]) => Array.from({ length: Math.ceil(list.length / BOOK_KEPT_SLICE) }, (_, i) => list.slice(i * BOOK_KEPT_SLICE, (i + 1) * BOOK_KEPT_SLICE));
         const kept = slices(pis).map((names) => ["HMGET", paypalBackKey(statsId), ...names]);
-        const marked = slices(orders).map((names) => ["ZMSCORE", paypalRefundedKey(statsId), ...names]);
+        const marked = slices(asked).map((names) => ["ZMSCORE", paypalRefundedKey(statsId), ...names]);
         const replies = repliesFor(await redisPipeline([...kept, ...marked]), kept.length + marked.length);
         const answers = (from: number, commands: (string | number)[][]) => {
           const out: unknown[] = [];
@@ -3011,10 +3013,19 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         const back = answers(0, kept);
         const seen = answers(kept.length, marked);
         const answer = (v: unknown) => v === null || typeof v === "string";
-        if (!replies || back.length !== pis.length || seen.length !== orders.length || !back.every(answer) || !seen.every(answer)) refundsChecked = false;
+        if (!replies || back.length !== pis.length || seen.length !== asked.length || !back.every(answer) || !seen.every(answer)) refundsChecked = false;
         else {
           for (const [i, pi] of pis.entries()) if (back[i] !== null) refundedInFull(pi);
-          for (const [i, order] of orders.entries()) if (seen[i] !== null) refundedInFull(paypalOrders.get(order) as string);
+          const partly = new Set<string>();
+          for (const [i, order] of orders.entries()) {
+            if (seen[2 * i] !== null) refundedInFull(paypalOrders.get(order) as string);
+            if (seen[2 * i + 1] !== null) partly.add(paypalOrders.get(order) as string);
+          }
+          // A sale on this book PayPal refunded in part (audit R13, MEDIUM 2): how much came back is not read, so what
+          // it earns is unknown, never its whole commission and never a refund of nothing: no payout is made on it
+          // (rule 24). Refunded in full since, its amount is the whole sale's. A sale with no line here (nobody earns on
+          // it) is never asked about, so it leaves the book as it is.
+          for (const pi of partly) if (!paypalSeen.has(pi)) refundsChecked = false;
         }
       }
     } catch (error) {

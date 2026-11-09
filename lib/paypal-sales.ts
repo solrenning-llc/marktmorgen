@@ -12,6 +12,8 @@
  *   nl:ppsell:refunded:<stats>  paid orders PayPal says were refunded in full, scored by when that was seen
  *   nl:ppsell:back:<stats>      the same refunds by payment, kept for good, for the affiliate book's lines
  *
+ *   The same set holds, as "part:<order>", the paid orders PayPal says were refunded in part (partlyRefundedMember).
+ *
  * How it fits together. Marktmorgen is a PayPal partner; a creator connects their
  * PayPal Business account through PayPal's own onboarding (Partner Referrals
  * v2), granting it PAYMENT and REFUND. An order names the creator's account as
@@ -833,6 +835,15 @@ export async function watchPayPal(
         continue;
       }
       status = capture.status;
+      // Refunded in part (audit R13, MEDIUM 2): written down beside the refunds in full, so the affiliate book never
+      // pays the whole commission on it and the numbers never call their refunds whole without it (markPartlyRefunded).
+      // How much was given back is not read here, so its amount is unknown, never zero. Not known written: nothing
+      // else is done, and it is looked at again in an hour. The purchase is kept, as for any partial refund.
+      if (status === "PARTIALLY_REFUNDED" && !(await markPartlyRefunded(statsId, order, now))) {
+        console.error("a PayPal partial refund could not be marked; looked at again in an hour", order);
+        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+        continue;
+      }
     } catch (error) {
       console.error("reading a PayPal capture failed", error);
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
@@ -1087,25 +1098,66 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
 }
 
 /**
+ * A paid order PayPal reports refunded in part (a capture PARTIALLY_REFUNDED), as a member of refundedKey beside
+ * the orders refunded in full (audit R13, MEDIUM 2). Never an order id itself (ORDER_ID has no colon), so the
+ * exact ZSCORE of an order (refundSeen, lib/paypal-handed.ts, the watch's other payments) never takes it for a
+ * refund in full: the purchase is kept and the hand-over goes on. Being in the same key, it is counted wherever
+ * the refunds are counted before they are read (bookSize, bookSizes, paypalKept, paypalCounts: one ZCARD each),
+ * at a paid record's weight, and read by the same range as them (readPayPalRefundsWithCoverage).
+ */
+export const partlyRefundedMember = (order: string) => `part:${order}`;
+
+/**
+ * Writes down that PayPal refunded part of a paid order, once (ZADD NX: the first time it was seen stays its
+ * score, and looking again writes nothing new). True only when both replies read exactly, each 0 or 1 (the member
+ * added or already there; the key's expiry set); anything else, or a call that failed, is not known written.
+ * How much was refunded is not written: nothing in this file reads it from PayPal, so it is unknown, never zero.
+ */
+async function markPartlyRefunded(statsId: string, order: string, now: number): Promise<boolean> {
+  try {
+    const marked = repliesFor(
+      await redisPipeline([
+        ["ZADD", refundedKey(statsId), "NX", String(now), partlyRefundedMember(order)],
+        ["EXPIRE", refundedKey(statsId), SALES_KEPT_SECONDS],
+      ]),
+      2,
+    );
+    return Boolean(marked && marked.every((reply) => reply === 0 || reply === 1));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * PayPal sales refunded in full since `since` (seconds): the payment, how
  * much, in what, and when the refund was seen. At most PAYPAL_REFUNDS_READ,
- * their records read in one MGET; `partial` when that did not cover every
+ * their records read in one MGET; `uncovered` when that did not cover every
  * one (more listed, one listed that is no order's, or one whose record is
- * gone). A member PARTIAL_MARK names (a partial refund's, "part:<order>")
- * is neither a refund in full nor a cut: it is left to its own reader.
- * The affiliate book does not read this: it asks the set about its own
- * orders and reads backKey (lib/affiliates.ts, readBook).
+ * gone). A member PARTIAL_MARK names (a partial refund's, "part:<order>",
+ * partlyRefundedMember) is neither a refund in full nor a cut, and its record
+ * is not read: `partly` says one is in the range and its order was not
+ * refunded in full since (whose amount is then the whole sale's, in `rows`).
+ * `partial` is either: a reader that does not look at which sales were
+ * refunded in part (the store's numbers, the buyer ledger) never says its
+ * refunds are whole while one of an unknown amount is on the list (audit R13,
+ * MEDIUM 2). The affiliate book does not read this: it asks the set about its
+ * own orders and reads backKey (lib/affiliates.ts, readBook).
  */
-export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
-  if (!statsId || !isRedisConfigured()) return { rows: [], partial: false };
+export async function readPayPalRefundsWithCoverage(
+  statsId: string | null,
+  since: number,
+): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partly: boolean; uncovered: boolean; partial: boolean }> {
+  if (!statsId || !isRedisConfigured()) return { rows: [], partly: false, uncovered: false, partial: false };
   // The listing read exactly (rule 24): one reply, a list of text. Anything else is not "no refunds" but a reading
   // that covered nothing, so it is partial (9 November 2026).
   const orders = repliesFor(await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(Math.max(0, since)), "+inf", "WITHSCORES", "LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)]]), 1)?.[0];
   const known = Array.isArray(orders) && orders.every((item) => typeof item === "string");
   const flat = known ? (orders as string[]) : [];
   const listed: { order: string; at: number }[] = [];
+  const partOrders: string[] = [];
   for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) {
-    if (!PARTIAL_MARK.test(flat[i])) listed.push({ order: flat[i], at: Number(flat[i + 1]) || 0 });
+    if (PARTIAL_MARK.test(flat[i])) partOrders.push(flat[i].slice("part:".length));
+    else listed.push({ order: flat[i], at: Number(flat[i + 1]) || 0 });
   }
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
   let missing = !known || listed.some((entry) => !ORDER_ID.test(entry.order));
@@ -1122,7 +1174,11 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
     if (paid && paid.store === statsId) out.push({ order: paid.order, capture: paid.capture, cents: paid.cents, currency: paid.currency, at: entry.at });
     else missing = true;
   });
-  return { rows: out, partial: flat.length > 2 * PAYPAL_REFUNDS_READ || missing };
+  // Refunded in full since: listed as such, read or not, its amount is the whole sale's (or the reading is uncovered).
+  const full = new Set(listed.map((entry) => entry.order));
+  const partly = partOrders.some((order) => !full.has(order));
+  const uncovered = flat.length > 2 * PAYPAL_REFUNDS_READ || missing;
+  return { rows: out, partly, uncovered, partial: uncovered || partly };
 }
 
 export async function readPayPalRefunds(statsId: string | null, since: number): Promise<{ order: string; capture: string; cents: number; currency: string; at: number }[]> {

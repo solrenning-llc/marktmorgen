@@ -1521,8 +1521,10 @@ export default function PrivacyPage() {
           themselves. Meetings already made
           stay on the creator&apos;s calendar or Zoom account. If the creator
           removes our app from their Zoom account, Zoom tells us and we delete
-          every connection that user made, with its tokens, at once. If the
-          creator withdraws our access in their Google account, we stop using
+          every connection that user made, with its tokens, at once. We then
+          keep, for one day, a scrambled form of that Zoom user ID and the time
+          Zoom told us, only so that a connection being finished at that very
+          moment is not kept either. If the creator withdraws our access in their Google account, we stop using
           the connection and tell them, and disconnecting deletes it.
         </p>
         <p id="meta-ads" className="scroll-mt-24">

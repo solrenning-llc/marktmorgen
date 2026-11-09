@@ -199,7 +199,8 @@ async function connectGoogle(store: Store, email: string): Promise<boolean> {
   const state = new URL(url).searchParams.get("state") ?? "";
   const taken = await takeConsent("google", state, { sessionCookie: `cookie-${email}`, email });
   if (!taken || taken.host !== hostId(email) || asked !== GOOGLE_HOST_SCOPES.join(" ")) return false;
-  const result = await finishConsent("google", { statsId: taken.statsId, code: email, verifier: taken.verifier, by: email, owner: { email: store.email, handle: store.handle }, host: taken.host });
+  // startedAt: when the consent flow began, which finishConsent now needs (lib/meet-connect.ts KEEP_UNLESS_GONE, Claude 5 zoom-forget-race).
+  const result = await finishConsent("google", { statsId: taken.statsId, code: email, verifier: taken.verifier, by: email, owner: { email: store.email, handle: store.handle }, host: taken.host, startedAt: taken.at });
   return result.ok;
 }
 

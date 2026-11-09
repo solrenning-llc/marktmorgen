@@ -1,0 +1,192 @@
+/**
+ * The Redis script of lib/meet-connect.ts, read from the file itself, answers the same on the stand-in
+ * (lib/redis-memory.ts) as on Redis (CX-123 rules 24 and 30): KEEP_UNLESS_GONE keeps a store's new meeting
+ * connection, indexed first, only while the renewal lock is the writer's and no deletion of that account was
+ * confirmed since its consent flow began (forgetUser's mark).
+ *
+ * It refuses a call of the wrong shape (key or argument count, a cutoff that is not a time, an empty token,
+ * connection or store) with -1 before touching anything, so a caller's slip is an unknown reply
+ * (UnknownReplyError), never a connection kept. An index of another type is Redis's own error, with no connection
+ * kept outside it.
+ *
+ * With REDIS_ARITY_SERVER naming a Redis 7 server binary, the same cases are run on a private one (a Unix socket in
+ * the temporary directory, no TCP port) and must answer exactly as the stand-in does. The harness is the one of
+ * tests/meta-redis-scripts.test.ts (#3322).
+ */
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createConnection, type Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { once } from "node:events";
+import { MemoryRedis } from "@/lib/redis-memory";
+
+const source = readFileSync("lib/meet-connect.ts", "utf8");
+/** The script as lib/meet-connect.ts defines it; "" when it does not, which its own test below fails on. */
+const K = source.match(/const KEEP_UNLESS_GONE = `([\s\S]*?)`;/)?.[1] ?? "";
+
+test("lib/meet-connect.ts defines the script", () => {
+  assert.match(K, /^-- marktmorgen:meet-keep:v1\n/);
+});
+
+type Arg = string | number;
+type Case = { name: string; setup: Arg[][]; run: Arg[]; reply: number | "error"; after: Arg[][]; state: unknown[] };
+
+const KEYS = ["lock", "conn", "idx", "gone"];
+// The connection, the index's type (a set only once the store was added to it), and the lock (never touched by the script).
+const STATE: Arg[][] = [["GET", "conn"], ["TYPE", "idx"], ["GET", "lock"]];
+const nothing = [null, "none", "T"];
+const kept = ["J", "set", "T"];
+const keep = (name: string, setup: Arg[][], run: Arg[], reply: number | "error", state: unknown[] = nothing): Case => ({
+  name,
+  setup: [["SET", "lock", "T"], ...setup],
+  run: ["EVAL", K, ...run],
+  reply,
+  after: STATE,
+  state,
+});
+const call = (cutoff: Arg = 1001, store: Arg = "s1", token: Arg = "T", connection: Arg = "J"): Arg[] => [4, ...KEYS, token, connection, cutoff, store];
+
+const CASES: Case[] = [
+  keep("keeps and indexes the connection while the lock is ours and no deletion was confirmed", [], call(), 1, kept),
+  keep("keeps nothing once the lock is another's", [["SET", "lock", "X"]], call(), 0, [null, "none", "X"]),
+  keep("keeps nothing once the lock is gone", [["DEL", "lock"]], call(), 0, [null, "none", null]),
+  keep("keeps it when the deletion is older than the flow", [["SET", "gone", "1000"]], call(), 1, kept),
+  keep("keeps nothing when the deletion is at the flow's start", [["SET", "gone", "1001"]], call(), 2),
+  keep("keeps nothing when the deletion is after the flow's start", [["SET", "gone", "2000"]], call(), 2),
+  keep("keeps nothing when the mark does not read as a time", [["SET", "gone", "soon"]], call(), 2),
+  keep("keeps nothing when the mark is empty", [["SET", "gone", ""]], call(), 2),
+  keep("keeps nothing when the mark is longer than sixteen digits", [["SET", "gone", "12345678901234567"]], call(), 2),
+  keep("an index of another type is Redis's error, with no connection kept outside it", [["SET", "idx", "text"]], call(), "error", [null, "string", "T"]),
+  keep("a cutoff of 0 is refused", [], call(0), -1),
+  keep("a negative cutoff is refused", [], call(-5), -1),
+  keep("a cutoff that is not a whole number is refused", [], call("1.5"), -1),
+  keep("a cutoff with a leading zero is refused", [], call("01001"), -1),
+  keep("a cutoff longer than sixteen digits is refused", [], call("12345678901234567"), -1),
+  keep("an empty store is refused", [], call(1001, ""), -1),
+  keep("an empty token is refused", [], call(1001, "s1", ""), -1),
+  keep("an empty connection is refused", [], call(1001, "s1", "T", ""), -1),
+  keep("a key too few is refused", [], [3, ...KEYS.slice(0, 3), "T", "J", 1001, "s1"], -1),
+  keep("a key too many is refused", [], [5, ...KEYS, "more", "T", "J", 1001, "s1"], -1),
+  keep("an argument too many is refused", [], [...call(), "extra"], -1),
+  keep("an argument too few is refused", [], call().slice(0, -1), -1),
+  keep("a key count with a leading zero is Redis's own error", [], ["04", ...KEYS, "T", "J", 1001, "s1"], "error"),
+  keep("a negative key count is Redis's own error", [], [-1, ...KEYS, "T", "J", 1001, "s1"], "error"),
+  keep("more keys than arguments is Redis's own error", [], [9, ...KEYS, "T"], "error"),
+];
+
+function onStandIn(c: Case): { reply: unknown; state: unknown[] } {
+  const store = new MemoryRedis();
+  for (const command of c.setup) store.run(command);
+  let reply: unknown;
+  try {
+    reply = store.run(c.run);
+  } catch {
+    reply = "error";
+  }
+  const state = c.after.map((command) => store.run(command));
+  return { reply, state: state.map((v, i) => (c.after[i][0] === "TTL" && typeof v === "number" && v > 0 ? "ttl" : v)) };
+}
+
+for (const c of CASES) {
+  test(`stand-in: ${c.name}`, () => {
+    const got = onStandIn(c);
+    assert.equal(got.reply, c.reply);
+    assert.deepEqual(got.state, c.state);
+  });
+}
+
+/** One RESP reply off the front of `buffer`, with what is left; null while it is not all there. */
+function parse(buffer: Buffer): { value: unknown; rest: Buffer } | null {
+  const end = buffer.indexOf("\r\n");
+  if (end < 0) return null;
+  const kind = String.fromCharCode(buffer[0]);
+  const line = buffer.subarray(1, end).toString("utf8");
+  const rest = buffer.subarray(end + 2);
+  if (kind === "+") return { value: line, rest };
+  if (kind === "-") return { value: { error: line }, rest };
+  if (kind === ":") return { value: Number(line), rest };
+  if (kind === "$") {
+    const size = Number(line);
+    if (size < 0) return { value: null, rest };
+    if (rest.length < size + 2) return null;
+    return { value: rest.subarray(0, size).toString("utf8"), rest: rest.subarray(size + 2) };
+  }
+  if (kind === "*") {
+    const count = Number(line);
+    if (count < 0) return { value: null, rest };
+    const items: unknown[] = [];
+    let left = rest;
+    for (let i = 0; i < count; i++) {
+      const item = parse(left);
+      if (!item) return null;
+      items.push(item.value);
+      left = item.rest;
+    }
+    return { value: items, rest: left };
+  }
+  throw new Error(`unknown RESP reply ${kind}`);
+}
+
+function client(socket: Socket): (command: Arg[]) => Promise<unknown> {
+  let buffer: Buffer = Buffer.alloc(0);
+  const waiting: ((value: unknown) => void)[] = [];
+  socket.on("data", (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    for (let next = parse(buffer); next && waiting.length; next = parse(buffer)) {
+      buffer = next.rest;
+      waiting.shift()!(next.value);
+    }
+  });
+  return (command) =>
+    new Promise((resolve) => {
+      waiting.push(resolve);
+      socket.write(`*${command.length}\r\n${command.map((value) => `$${Buffer.byteLength(String(value))}\r\n${String(value)}\r\n`).join("")}`);
+    });
+}
+
+test("Redis 7 answers every case exactly as the stand-in does", { skip: !process.env.REDIS_ARITY_SERVER }, async () => {
+  const binary = process.env.REDIS_ARITY_SERVER!;
+  const version = spawnSync(binary, ["--version"], { encoding: "utf8" });
+  assert.equal(version.status, 0);
+  assert.match(version.stdout, /Redis server v=7\./);
+  const dir = mkdtempSync(join(tmpdir(), "meet-redis-"));
+  const path = join(dir, "redis.sock");
+  const child = spawn(binary, ["--port", "0", "--unixsocket", path, "--unixsocketperm", "700", "--dir", dir, "--save", "", "--appendonly", "no"], { stdio: ["ignore", "pipe", "pipe"] });
+  const closed = once(child, "close");
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error("Redis did not report readiness")), 5000);
+      child.once("error", (error) => { clearTimeout(timer); reject(error); });
+      child.once("exit", () => { clearTimeout(timer); reject(Error("Redis exited before readiness")); });
+      child.stdout.on("data", (chunk) => { if (/ready to accept connections/i.test(String(chunk))) { clearTimeout(timer); resolve(); } });
+    });
+    const socket = createConnection({ path });
+    await once(socket, "connect");
+    const send = client(socket);
+    try {
+      for (const c of CASES) {
+        assert.equal(await send(["FLUSHALL"]), "OK");
+        for (const command of c.setup) await send(command);
+        const raw = await send(c.run);
+        const reply = raw && typeof raw === "object" && "error" in raw ? "error" : raw;
+        const state: unknown[] = [];
+        for (const command of c.after) {
+          const v = await send(command);
+          state.push(command[0] === "TTL" && typeof v === "number" && v > 0 ? "ttl" : v);
+        }
+        const standIn = onStandIn(c);
+        assert.deepEqual({ reply, state }, { reply: c.reply, state: c.state }, `Redis: ${c.name} (${JSON.stringify(raw)})`);
+        assert.deepEqual(standIn, { reply, state }, `stand-in and Redis: ${c.name}`);
+      }
+    } finally {
+      socket.end();
+    }
+  } finally {
+    child.kill("SIGTERM");
+    await closed;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -36,7 +36,7 @@ let tokenNumber = 0;
 const issued: string[] = [];
 const revoked: string[] = [];
 
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const json = (status: number, value: unknown) => new Response(JSON.stringify(value), { status });
   if (url.hostname === "zoom.us" && url.pathname === "/oauth/token") {
@@ -45,7 +45,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json(200, { access_token: `access-${tokenNumber}`, refresh_token: `refresh-${tokenNumber}`, expires_in: 3600, scope: "meeting:write:meeting user:read:user" });
   }
   if (url.hostname === "zoom.us" && url.pathname === "/oauth/revoke") {
-    revoked.push(new URLSearchParams(typeof init?.body === "string" ? init.body : "").get("token") ?? "");
+    // Zoom's revoke takes the token in the query (lib/meet-providers.ts revoke).
+    revoked.push(url.searchParams.get("token") ?? "");
     return json(200, { status: "success" });
   }
   if (url.hostname === "api.zoom.us" && url.pathname === "/v2/users/me") return json(200, { id: USER, email: "host@example.com", first_name: "Jenny", last_name: "Park" });

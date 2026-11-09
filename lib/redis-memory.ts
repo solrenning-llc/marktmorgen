@@ -1161,6 +1161,7 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-session-refuse:v1\n")) return this.studioDemo("sessionRefuse", args);
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
+        if (key.startsWith("-- marktmorgen:meet-keep:v1\n")) return this.meetKeep(args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];
         this.live(target);
@@ -2041,6 +2042,34 @@ export class MemoryRedis {
    * what a request is billed, not only what it sends (tests/traffic.test.ts).
    */
   scriptCalls = 0;
+
+  /**
+   * lib/meet-connect.ts KEEP_UNLESS_GONE, step for step: a store's new meeting connection kept, and indexed first,
+   * only while the renewal lock is the writer's and no deletion of its account is at or after the cutoff; -1, as the
+   * script answers, for a call of any other shape. A key count Redis itself refuses throws Redis's own error
+   * (tests/meet-redis-scripts.test.ts holds it to Redis).
+   */
+  private meetKeep(args: string[]): unknown {
+    const raw = args[0] ?? "";
+    if (!/^(0|-?[1-9][0-9]*)$/.test(raw)) throw new Error("ERR value is not an integer or out of range");
+    const count = Number(raw);
+    if (count < 0) throw new Error("ERR Number of keys can't be negative");
+    if (count > args.length - 1) throw new Error("ERR Number of keys can't be greater than number of args");
+    const keys = args.slice(1, 1 + count);
+    const argv = args.slice(1 + count);
+    if (keys.length !== 4 || argv.length !== 4 || argv[0] === "" || argv[1] === "" || !/^[1-9][0-9]{0,15}$/.test(argv[2]) || argv[3] === "") return -1;
+    const [lock, conn, index, goneMark] = keys;
+    const [token, connection, cutoff, statsId] = argv;
+    if (this.run(["GET", lock]) !== token) return 0;
+    const gone = this.run(["GET", goneMark]);
+    if (typeof gone === "string" && (!/^[0-9]{1,16}$/.test(gone) || Number(gone) >= Number(cutoff))) return 2;
+    this.live(index);
+    const held = this.data.get(index);
+    if (held !== undefined && !(held instanceof Set)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+    this.run(["SADD", index, statsId]);
+    this.run(["SET", conn, connection]);
+    return 1;
+  }
 
   /** lib/capped-count.ts: counts that never grow a hash past its most fields, the way version 2 runs them. */
   private cappedCount(args: string[]): unknown {

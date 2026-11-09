@@ -117,7 +117,8 @@ async function main(): Promise<void> {
   is("and removing one that is not there does nothing", await removeTest(statsId, "zoom"), false);
 
   part("A test meeting on the connected account");
-  const connected = await finishConsent("zoom", { statsId, code: "code-1", verifier: "v".repeat(43), by: "owner@example.com", owner: { email: "owner@example.com", handle: "harbor" } });
+  // startedAt: when the consent flow began, which finishConsent now needs (lib/meet-connect.ts KEEP_UNLESS_GONE, Claude 5 zoom-forget-race).
+  const connected = await finishConsent("zoom", { statsId, code: "code-1", verifier: "v".repeat(43), by: "owner@example.com", owner: { email: "owner@example.com", handle: "harbor" }, startedAt: Date.now() });
   is("connected", connected.ok && connected.view.account, "host@example.com");
   is("and it stays in sight, offered or not", (await meetView(statsId, shop)).providers, ["google", "zoom"]);
   seen.length = 0;

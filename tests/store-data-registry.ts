@@ -661,6 +661,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mail:used:@lib/mail.ts": { what: "Monthly emails used in the window", parts: [capped(14 * KEY, "One a window.")] },
   "nl:sender:@lib/mail.ts": company("The owner told of the sender's month", "The company's."),
   "nl:meet:conn:@lib/meet-connect.ts": { what: "Connections to Zoom and Google, the store's and each host's", parts: [capped((MAX_TEAM + 2) * 2 * 4 * KB, "Two providers, the store and each host.", src("lib/team.ts", "MAX_TEAM"))] },
+  "nl:meet:gone:@lib/meet-connect.ts": company("When Zoom told us a user removed the app", "Per Zoom user, a hash of its ID and a time, kept a day (GONE_SECONDS): it stops a connection being finished at that moment."),
   "nl:meet:log:@lib/meet-connect.ts": { what: "The store's last problems", parts: [capped(20 * KB, "The newest LOG_SIZE.", src("lib/meet-connect.ts", "LOG_SIZE"))] },
   "nl:meet:refresh:@lib/meet-connect.ts": short("A token being refreshed", "integration", 1, 128),
   "nl:meet:state:@lib/meet-connect.ts": short("A consent in progress, ten minutes", "integration", 1, 512),

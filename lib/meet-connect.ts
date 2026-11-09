@@ -55,7 +55,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type MeetProvider, MEET_NAMES, isMeetProvider } from "@/lib/call-setup";
 import {
   type Account,
@@ -78,6 +78,20 @@ export const ACCOUNT_NAMES: Record<MeetProvider, string> = { google: "Google Cal
 export { MEET_NAMES };
 
 const STATE_SECONDS = 600;
+/**
+ * The longest a consent flow may run, from beginConsent to the write that keeps its connection: the state is taken
+ * within STATE_SECONDS (takeConsent), and the calls to the provider after it are each bounded. A flow older than
+ * this keeps nothing, so a deletion's mark, kept GONE_SECONDS, always outlasts every flow it has to stop.
+ */
+const FLOW_MS = 2 * STATE_SECONDS * 1000;
+/** How long a deletion's mark is kept (forgetUser): far longer than any flow it has to stop (FLOW_MS). */
+const GONE_SECONDS = 86_400;
+/**
+ * The room left for the clocks of two servers (the one that began the flow and the one Zoom's notice reached): a
+ * flow is taken as begun before a deletion unless it began more than this after it. A reconnection begun within it
+ * is refused, honestly ("removed"), and can simply be made again a few seconds later.
+ */
+const GONE_MARGIN_MS = 10_000;
 const LOG_SIZE = 20;
 const LOG_SECONDS = 30 * 86_400;
 
@@ -110,6 +124,8 @@ const refreshLockKey = (statsId: string, provider: MeetProvider, host = "") => `
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 40);
 const stateKey = (state: string) => `nl:meet:state:${hash(`meet-state:${state}`)}`;
 const userKey = (provider: MeetProvider, id: string) => `nl:meet:user:${provider}:${hash(`meet-user:${provider}:${id}`)}`;
+/** When the provider last told us this account removed the app (forgetUser), a day: a consent flow begun before keeps nothing. */
+const goneKey = (provider: MeetProvider, id: string) => `nl:meet:gone:${provider}:${hash(`meet-gone:${provider}:${id}`)}`;
 const logKey = (statsId: string) => `nl:meet:log:${statsId}`;
 const context = (statsId: string, provider: MeetProvider, part: "access" | "refresh", host = "") =>
   host ? `meet|hosts|${provider}|h:${host}|${part}` : `meet|${statsId}|${provider}|${part}`;
@@ -293,7 +309,7 @@ export async function takeConsent(
   provider: MeetProvider,
   state: string,
   input: { sessionCookie: string; email: string },
-): Promise<{ statsId: string; sid: string; verifier: string; host: string } | null> {
+): Promise<{ statsId: string; sid: string; verifier: string; host: string; at: number } | null> {
   if (!/^[A-Za-z0-9_-]{40,64}$/.test(state) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GETDEL", stateKey(state)]]);
   if (typeof raw !== "string") return null;
@@ -303,7 +319,8 @@ export async function takeConsent(
     if (p.session !== hash(`meet-session:${input.sessionCookie}`)) return null;
     if (p.email !== input.email.toLowerCase()) return null;
     if (Date.now() - p.at > STATE_SECONDS * 1000) return null;
-    return { statsId: p.statsId, sid: p.sid, verifier: p.verifier, host: typeof p.host === "string" && /^[0-9a-f]{24}$/.test(p.host) ? p.host : "" };
+    if (!Number.isSafeInteger(p.at) || p.at <= 0) return null;
+    return { statsId: p.statsId, sid: p.sid, verifier: p.verifier, host: typeof p.host === "string" && /^[0-9a-f]{24}$/.test(p.host) ? p.host : "", at: p.at };
   } catch {
     return null;
   }
@@ -311,14 +328,41 @@ export async function takeConsent(
 
 export type ConnectResult =
   | { ok: true; view: ConnectionView; replaced: boolean }
-  | { ok: false; error: "scope" | "refused" | "account" | "seal" };
+  | { ok: false; error: "scope" | "refused" | "account" | "seal" | "expired" | "removed" };
 
-/** Trades the code for tokens and keeps the connection, sealed. */
+/** Whether a flow begun at `startedAt` (milliseconds) is still young enough to keep its connection (FLOW_MS). */
+const flowFresh = (startedAt: number): boolean => {
+  const age = Date.now() - startedAt;
+  return Number.isSafeInteger(startedAt) && startedAt > GONE_MARGIN_MS && age <= FLOW_MS && age >= -GONE_MARGIN_MS;
+};
+
+/**
+ * Trades the code for tokens and keeps the connection, sealed.
+ *
+ * Zoom's notice that the person removed the app (forgetUser) may land at any moment of this flow. So a store's
+ * connection is kept only in one step with a check of that account's deletion mark (KEEP_UNLESS_GONE): a deletion
+ * confirmed at or after the flow began (`startedAt`, from beginConsent, less GONE_MARGIN_MS for the clocks of two
+ * servers) keeps nothing, gives the access back and says so ("removed"). The flow's start, not the consent on the
+ * provider's page, is the line, because the consent's own moment is not known here: a deletion between the two is
+ * taken as the later word. A flow begun after the deletion (by more than the margin) is the person's new choice and
+ * connects. A flow older than FLOW_MS keeps nothing ("expired"), so the mark, kept GONE_SECONDS, outlasts every
+ * flow it has to stop.
+ */
 export async function finishConsent(
   provider: MeetProvider,
-  input: { statsId: string; code: string; verifier: string; by: string; owner: { email: string; handle: string }; host?: string },
+  input: {
+    statsId: string;
+    code: string;
+    verifier: string;
+    by: string;
+    owner: { email: string; handle: string };
+    host?: string;
+    /** When the consent flow began (beginConsent; takeConsent's `at`), in milliseconds. */
+    startedAt: number;
+  },
 ): Promise<ConnectResult> {
   if (!canSeal()) return { ok: false, error: "seal" };
+  if (!flowFresh(input.startedAt)) return { ok: false, error: "expired" };
   const traded = await exchangeCode(provider, input.code, input.verifier);
   if ("error" in traded) return { ok: false, error: traded.error };
   // Written under the renewal lock, so a renewal of the connection this
@@ -335,9 +379,28 @@ export async function finishConsent(
   }
 }
 
+/**
+ * KEYS[1] the renewal lock, KEYS[2] the store's connection, KEYS[3] the stores the provider account connected (its
+ * index), KEYS[4] that account's deletion mark (forgetUser); ARGV[1] the lock's token, ARGV[2] the new connection,
+ * ARGV[3] the cutoff: the time, in milliseconds, at or after which a deletion of that account stops this flow,
+ * ARGV[4] the store. 1 the store is indexed and the connection kept; 0 the lock is no longer ours and nothing is
+ * written; 2 a deletion at or after the cutoff (or a mark that does not read as a time) and nothing is written; -1 a
+ * call of any other shape, refused before anything is read or written. The index is written before the connection,
+ * so an index Redis refuses (a key of another type) stops the script before any connection is kept outside it.
+ * Mirrored for tests in lib/redis-memory.ts.
+ */
+const KEEP_UNLESS_GONE = `-- marktmorgen:meet-keep:v1
+if #KEYS ~= 4 or #ARGV ~= 4 or ARGV[1] == "" or ARGV[2] == "" or #ARGV[3] > 16 or not string.match(ARGV[3], "^[1-9]%d*$") or ARGV[4] == "" then return -1 end
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+local gone = redis.call("GET", KEYS[4])
+if gone and (#gone > 16 or not string.match(gone, "^%d+$") or tonumber(gone) >= tonumber(ARGV[3])) then return 2 end
+redis.call("SADD", KEYS[3], ARGV[4])
+redis.call("SET", KEYS[2], ARGV[2])
+return 1`;
+
 async function keepConnection(
   provider: MeetProvider,
-  input: { statsId: string; by: string; owner: { email: string; handle: string }; host?: string },
+  input: { statsId: string; by: string; owner: { email: string; handle: string }; host?: string; startedAt: number },
   traded: { tokens: Tokens; account: Account },
   held: Held,
 ): Promise<ConnectResult> {
@@ -356,16 +419,36 @@ async function keepConnection(
     broken: "",
     brokenAt: 0,
   };
-  if (!(await setIfHeld(held, connKey(input.statsId, provider, host), JSON.stringify(connection)))) {
-    throw new LockBusyError("the connection changed while it was saved");
-  }
   if (host) {
+    if (!(await setIfHeld(held, connKey(input.statsId, provider, host), JSON.stringify(connection)))) {
+      throw new LockBusyError("the connection changed while it was saved");
+    }
     // A host's own: nothing else here is keyed by it. A different account
     // connected in its place has its access given back.
     if (before && before.account.id !== traded.account.id) await giveBack(input.statsId, before, host).catch(() => {});
     return { ok: true, view: viewOf(connection), replaced: Boolean(before) };
   }
-  await redisPipeline([["SADD", userKey(provider, traded.account.id), input.statsId]]);
+  // A store's own: kept and indexed in one step, and only while no deletion of that account was confirmed since the
+  // flow began (KEEP_UNLESS_GONE). Before, the connection and its index were two writes and forgetUser read the index
+  // between them, or before both, so a deletion confirmed to Zoom was undone by the write that followed.
+  const access = provider === "zoom" ? traded.tokens.access : traded.tokens.refresh;
+  if (!flowFresh(input.startedAt)) {
+    await revoke(provider, access).catch(() => {});
+    return { ok: false, error: "expired" };
+  }
+  const keys = [held.key, connKey(input.statsId, provider), userKey(provider, traded.account.id), goneKey(provider, traded.account.id)];
+  const replies = repliesFor(
+    await redisPipeline([["EVAL", KEEP_UNLESS_GONE, keys.length, ...keys, held.token, JSON.stringify(connection), input.startedAt - GONE_MARGIN_MS, input.statsId]]),
+    1,
+  );
+  const keptAs = replies ? countOf(replies[0]) : null;
+  if (keptAs === 0) throw new LockBusyError("the connection changed while it was saved");
+  if (keptAs === 2) {
+    // Deleted since the flow began: nothing is kept, and the access this flow was holding goes back.
+    await revoke(provider, access).catch(() => {});
+    return { ok: false, error: "removed" };
+  }
+  if (keptAs !== 1) throw new UnknownReplyError("keeping a meeting connection only while its account was not deleted since");
   // A different account connected in its place: the old one's access is given back.
   if (before && before.account.id !== traded.account.id) {
     await giveBack(input.statsId, before).catch(() => {});
@@ -514,19 +597,36 @@ export async function forgetUser(
   accountId: string,
 ): Promise<{ statsId: string; owner: { email: string; handle: string }; account: string }[]> {
   if (!isRedisConfigured() || !accountId) return [];
-  const [members] = await redisPipeline([["SMEMBERS", userKey(provider, accountId)]]);
-  const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
+  // The mark first, in the same pipeline as the read of the stores: a consent flow that kept its connection before
+  // the mark is in the stores read here and forgotten with them; one that would keep it after is refused
+  // (KEEP_UNLESS_GONE). A mark not confirmed written, or the stores in any shape but a list of text, is unknown.
+  const read = repliesFor(
+    await redisPipeline([
+      ["SET", goneKey(provider, accountId), String(Date.now()), "EX", GONE_SECONDS],
+      ["SMEMBERS", userKey(provider, accountId)],
+    ]),
+    2,
+  );
+  if (!read || read[0] !== "OK") throw new UnknownReplyError("the mark of a meeting account's deletion");
+  const stores = stringList(read[1]);
+  if (!stores) throw new UnknownReplyError("the stores a meeting account connected");
   const forgot: { statsId: string; owner: { email: string; handle: string }; account: string }[] = [];
   for (const statsId of stores.slice(0, 50)) {
+    // Each store leaves the index under its renewal lock, with its connection: a store connected again since (a flow
+    // begun after the mark, which keeps only holding this lock) keeps its place for the next notice to find. Before,
+    // the whole index was deleted at the end, under any connection made meanwhile.
     const c = await withLock(refreshLockKey(statsId, provider), 20, 9_000, async () => {
       const found = await readConnection(statsId, provider);
-      if (!found || found.account.id !== accountId) return null;
-      await redisPipeline([["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)]]);
+      const unlist = ["SREM", userKey(provider, accountId), statsId];
+      if (!found || found.account.id !== accountId) {
+        confirmCounts(await redisPipeline([unlist]), 1, "a meeting account's store leaving its index");
+        return null;
+      }
+      confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)], unlist]), 3, "a meeting connection's deletion");
       return found;
     });
     if (c) forgot.push({ statsId, owner: c.owner, account: viewOf(c).account });
   }
-  await redisPipeline([["DEL", userKey(provider, accountId)]]);
   return forgot;
 }
 

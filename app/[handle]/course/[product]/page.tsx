@@ -212,7 +212,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.accessUnknownTitle}</p>
               <p className="mt-1 text-sm">{w.accessUnknownBody}</p>
               <p className="mt-2 text-sm">
-                <Link href={base} className="font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+                <Link href={base} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
                   {w.accessUnknownAgain}
                 </Link>
               </p>

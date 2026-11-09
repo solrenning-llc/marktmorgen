@@ -207,6 +207,19 @@ async function main(): Promise<void> {
     is(`cron/${name}: no SET NX read as "anything but nil is ours", no plain DEL of the lock`, [source.includes(`"SET", "${lock}", "1", "NX"`), source.includes(`["DEL", "${lock}"]`)], [false, false]);
   }
 
+  // Review 6732896949 (Claude 2, LEVE 1): a lock that runs out before Vercel stops the function lets a second run
+  // start beside the first. Each lock is kept at least the route's maxDuration plus room, so it outlasts the run
+  // whatever the run does (a cutoff stops requests, not the function), as cron/shares already did (300 s, 330 s).
+  part("each job's lock outlasts its route's maxDuration, with room");
+  const LOCK_ROOM_SECONDS = 30;
+  for (const [name, lock] of [...FULL, ...LOCK_ONLY, ["shares", "nl:share:lock"]]) {
+    const source = readFileSync(join(root, "app/api/cron", name, "route.ts"), "utf8");
+    const maxDuration = Number(/export const maxDuration = (\d+);/.exec(source)?.[1] ?? NaN);
+    const ttl = Number(new RegExp(`claimMark\\("${lock}", (\\d+), lock\\)`).exec(source)?.[1] ?? NaN);
+    // Before: stripe-check held its lock 120 s and mail-check 170 s while each may run 180 s.
+    is(`cron/${name}: lock ${ttl} s >= maxDuration ${maxDuration} s + ${LOCK_ROOM_SECONDS} s`, Number.isFinite(maxDuration) && Number.isFinite(ttl) && ttl >= maxDuration + LOCK_ROOM_SECONDS, true);
+  }
+
   part("cron/weekly: numbers that cannot be read let the week's claim go and count as failed (as cron/monthly)");
   const owner = "cron-locks-weekly@example.com";
   await weeklyWorld(owner);

@@ -417,6 +417,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:recover:off:@lib/checkout-recovery.ts": room("An address that pressed stop, kept for good: its room taken before each reminder is sent (RECOVER_TRACE_BYTES)", "lib/checkout-recovery.ts"),
   "nl:recover:once:@lib/checkout-recovery.ts": short("An address told of a product this week", "own", 8, KEY, MAIL("reminder")),
   "nl:recover:sent:@lib/checkout-recovery.ts": short("A checkout's reminder sent, or found paid", "request", 15, MARK, REQ("checkout")),
+  "nl:recover:tries:@lib/checkout-recovery.ts": short("How many times a sender refused a checkout's reminder for certain (REFUSED_TRIES at most), a day", "request", 1, MARK, REQ("checkout")),
   "nl:sweep:cursor@lib/checkout-sweep.ts": company("Where the checkout sweep stopped", "One key, the company's job."),
   "nl:taxobs:v1:@lib/checkout-sweep.ts": room("Inactive diagnostic checkout observations: no production policy. A reviewed synthetic policy reserves its whole bounded document, index and byte count atomically in the existing room before one SET PXAT; at most 300 observations and an absolute expiry within 24 hours. Activation still needs reviewed scope, retention and full-lifetime cost funding.", "lib/checkout-sweep.ts"),
   "nl:wf:abandoned:@lib/checkout-sweep.ts": short("An abandoned checkout noticed", "request", 2, KEY, REQ("checkout")),

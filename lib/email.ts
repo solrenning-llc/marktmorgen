@@ -379,10 +379,20 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
  *
  *   sent       a sender took it;
  *   refused    known not taken: not sent at all (no sender, an address
- *              that is not one, the figure spent) or a sender said no;
+ *              that is not one, the figure spent, a stop before any
+ *              request) or a sender said no;
  *   uncertain  it may have gone: a timeout, a server error or an unknown
  *              claim after the request may have reached a sender. A job
  *              that writes once keeps its own mark on this.
+ *
+ * "refused" speaks for this call only. A guarded Resend send that finds its
+ * attempt already reserved, dispatched or completed by another call (the
+ * same body under the same idempotency key) answers "refused" (a blocked
+ * post, or a stop before its own request) although that other call may have
+ * been accepted. Both callers today (call reminders, checkout recovery) use
+ * an attempt of their own each time (a fresh key, or a new stop link in the
+ * body); a caller that repeats a fixed key with the same body must not read
+ * "refused" as "not sent" (Claude 2's LOW on #3377).
  *
  * sendEmail answers true only for `sent`, exactly as before (added for
  * 283 [HG2], 7 November 2026; its other callers are unchanged).
@@ -455,28 +465,14 @@ async function viaResend(message: OneMessage, originalIdempotencyKey: string | u
 
 /**
  * viaResend, telling a certain refusal from an unknown answer: a guarded
- * post that came back unknown, a server error (5xx) and a throw may follow
- * acceptance, so they are `uncertain`; a 4xx, a blocked post and a refused
- * meter (before the post, or at the guard's last step before it, where the
- * transport makes no request) are `refused`.
+ * post that came back unknown after its POST may have been made, a server
+ * error (5xx) and a throw may follow acceptance, so they are `uncertain`; a
+ * 4xx, a blocked post, a refused meter and a guard that stopped before any
+ * POST (`posted: false`: the usage read, a reservation or dispatch reply,
+ * the meter's last step or the deadline; Claude 2's MEDIUM 2 on #3377) are
+ * `refused`.
  */
-async function resendOutcome(message: OneMessage, originalIdempotencyKey: string | undefined, runtime: ResendTransportRuntime = {}, metering?: MeterAuthorization): Promise<SendOutcome> {
-  // The guard answers "unknown" also when the meter refused at its last step, though it then made no
-  // request (lib/resend-fallback-transport.ts): that refusal is noted here, so it is told apart.
-  let declined = false;
-  const authorization: MeterAuthorization | undefined = metering && {
-    preflight: metering.preflight,
-    beforePost: async () => {
-      try {
-        const ready = await metering.beforePost();
-        if (ready !== true) declined = true;
-        return ready;
-      } catch (error) {
-        declined = true;
-        throw error;
-      }
-    },
-  };
+async function resendOutcome(message: OneMessage, originalIdempotencyKey: string | undefined, runtime: ResendTransportRuntime = {}, authorization?: MeterAuthorization): Promise<SendOutcome> {
   const usageCredential = usageKey() ?? "";
   const key = keyFor(message.from);
   if (!key) return "refused";
@@ -515,7 +511,7 @@ async function resendOutcome(message: OneMessage, originalIdempotencyKey: string
       }, runtime);
       if (result.kind === "accepted_receipt") return "sent";
       if (result.kind === "blocked") return "refused";
-      if (result.kind !== "response") return declined ? "refused" : "uncertain";
+      if (result.kind !== "response") return result.posted === false ? "refused" : "uncertain";
       const response = result.response;
       if (response.ok) {
         await countSent(1);
@@ -535,6 +531,8 @@ async function resendOutcome(message: OneMessage, originalIdempotencyKey: string
         continue;
       }
       console.error("email rejected", response.status);
+      // The guard answers "unknown", never a response, for a 5xx today; read here anyway as
+      // possibly taken, so a later change to the guard cannot make it a refusal by accident.
       return response.status >= 500 ? "uncertain" : "refused";
     } catch (error) {
       console.error("email failed", error);

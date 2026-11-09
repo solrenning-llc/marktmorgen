@@ -39,6 +39,7 @@ const en = {
     email: { title: "That address does not look right", body: "Check it and try again." },
     limited: { title: "Too many requests", body: "Wait a little, then ask again." },
     error: { title: "The email could not be sent", body: "Nothing is lost. Try again in a moment." },
+    unsure: { title: "We could not confirm the email was sent", body: "It may still arrive; check your inbox before asking again." },
     ask: {
       title: "One more step",
       body: "Type the address you paid with below, and a link to open the course is sent there.",
@@ -369,6 +370,7 @@ const es: CoursesWords = {
     email: { title: "Esa dirección no parece correcta", body: "Revísala e inténtalo de nuevo." },
     limited: { title: "Demasiadas solicitudes", body: "Espera un poco y vuelve a pedirlo." },
     error: { title: "No se pudo enviar el email", body: "No se perdió nada. Inténtalo de nuevo en un momento." },
+    unsure: { title: "No pudimos confirmar que el email se envió", body: "Puede que aún llegue; revisa tu bandeja de entrada antes de volver a pedirlo." },
     ask: {
       title: "Un paso más",
       body: "Escribe abajo la dirección con la que pagaste y se enviará allí un enlace para abrir el curso.",
@@ -671,6 +673,7 @@ const fr: CoursesWords = {
     email: { title: "Cette adresse ne semble pas correcte", body: "Vérifiez-la et réessayez." },
     limited: { title: "Trop de demandes", body: "Patientez un peu, puis redemandez." },
     error: { title: "L'e-mail n'a pas pu être envoyé", body: "Rien n'est perdu. Réessayez dans un instant." },
+    unsure: { title: "Nous n'avons pas pu confirmer l'envoi de l'e-mail", body: "Il peut encore arriver. Consultez votre boîte de réception avant de redemander." },
     ask: {
       title: "Encore une étape",
       body: "Saisissez ci-dessous l'adresse avec laquelle vous avez payé, et un lien pour ouvrir la formation y sera envoyé.",
@@ -967,6 +970,7 @@ const de: CoursesWords = {
     email: { title: "Diese Adresse sieht nicht richtig aus", body: "Prüfen Sie sie und versuchen Sie es erneut." },
     limited: { title: "Zu viele Anfragen", body: "Warten Sie kurz und fragen Sie dann erneut." },
     error: { title: "Die E-Mail konnte nicht gesendet werden", body: "Es ist nichts verloren. Versuchen Sie es gleich noch einmal." },
+    unsure: { title: "Wir konnten nicht bestätigen, dass die E-Mail gesendet wurde", body: "Sie kann noch ankommen. Sehen Sie in Ihrem Posteingang nach, bevor Sie erneut fragen." },
     ask: {
       title: "Noch ein Schritt",
       body: "Geben Sie unten die Adresse ein, mit der Sie bezahlt haben, und ein Link zum Öffnen des Kurses wird dorthin gesendet.",
@@ -1268,6 +1272,7 @@ const it: CoursesWords = {
     email: { title: "Quell'indirizzo non sembra corretto", body: "Controllalo e riprova." },
     limited: { title: "Troppe richieste", body: "Aspetta un po', poi richiedilo." },
     error: { title: "Non è stato possibile inviare l'email", body: "Non si è perso nulla. Riprova tra un momento." },
+    unsure: { title: "Non siamo riusciti a confermare l'invio dell'email", body: "Potrebbe ancora arrivare: controlla la tua casella di posta prima di chiederne un'altra." },
     ask: {
       title: "Ancora un passo",
       body: "Scrivi qui sotto l'indirizzo con cui hai pagato, e lì verrà inviato un link per aprire il corso.",
@@ -1567,6 +1572,7 @@ const nl: CoursesWords = {
     email: { title: "Dat adres lijkt niet te kloppen", body: "Controleer het en probeer het opnieuw." },
     limited: { title: "Te veel verzoeken", body: "Wacht even en vraag het dan opnieuw." },
     error: { title: "De e-mail kon niet worden verstuurd", body: "Er is niets verloren. Probeer het zo opnieuw." },
+    unsure: { title: "We konden niet bevestigen dat de e-mail is verstuurd", body: "Hij kan nog aankomen. Kijk in je inbox voordat je het opnieuw vraagt." },
     ask: {
       title: "Nog één stap",
       body: "Vul hieronder het adres in waarmee je hebt betaald, dan wordt daar een link naartoe gestuurd om de cursus te openen.",
@@ -1867,6 +1873,7 @@ const pt: CoursesWords = {
     email: { title: "Esse endereço não parece correto", body: "Verifique-o e tente novamente." },
     limited: { title: "Demasiados pedidos", body: "Aguarde um pouco e volte a pedir." },
     error: { title: "Não foi possível enviar o email", body: "Nada se perdeu. Tente novamente daqui a pouco." },
+    unsure: { title: "Não conseguimos confirmar que o email foi enviado", body: "Ainda pode chegar. Veja a sua caixa de entrada antes de voltar a pedir." },
     ask: {
       title: "Só mais um passo",
       body: "Introduza abaixo o endereço com que pagou, e será enviada para lá uma ligação para abrir o curso.",

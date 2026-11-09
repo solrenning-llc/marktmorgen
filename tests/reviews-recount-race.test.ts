@@ -102,7 +102,7 @@ async function main() {
     is("the mark is still B's", await held(), waiting);
     is("summaryOf takes it as unread, never as numbers", await summaryOf(STATS, PRODUCT).then(() => "numbers", (e) => (e instanceof UnknownReplyError ? "unread" : String(e))), "unread");
     const pass = await recountWaiting(Date.now() + 60_000);
-    is("the daily pass counts it again from B's mark", [pass.recounted, pass.unsure, await shown()], [1, 0, [1, 1]]);
+    is("the daily pass counts it again from B's mark", [pass.recounted, pass.unsure, await shown()], [1, 0, [2, 2]]);
   }
 
   part("The daily pass never writes over a mark written after it read the store's numbers");

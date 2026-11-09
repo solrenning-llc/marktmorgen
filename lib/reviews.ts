@@ -92,9 +92,29 @@ export const REVIEW_STORES_KEY = "nl:rev:stores";
  * numbers' exact shape (exactSummary), so every reader takes it as unread. A mark left by a failure that passes is
  * counted again by the daily pass (recountWaiting), never by a page that reads it: a recount on a public read would
  * cost every visit and race the change that wrote the mark.
+ *
+ * Each change's mark carries a token of its own ("recount:<random>"), and a recount writes its numbers only while the
+ * mark is still the one it counted for (WRITE_NUMBERS_IF, in one step): a recount from before another change (its lock
+ * ran out under it, or its write timed out on the client and ran later on the server) never writes what it counted
+ * over that change's mark (pre-review of claude5/reviews-recount-exact, 9 November 2026).
  */
-const RECOUNT_PENDING = "recount";
-const numbersPending = (statsId: string, productId: string): (string | number)[] => ["HSET", summaryKey(statsId), productId, RECOUNT_PENDING];
+const RECOUNT_MARK = "recount:";
+/** Any mark, whoever wrote it: a product's numbers waiting for their recount, read as unread, never as numbers. */
+const isRecountMark = (value: unknown): value is string => typeof value === "string" && value.startsWith(RECOUNT_MARK);
+const newMark = (): string => `${RECOUNT_MARK}${randomBytes(12).toString("hex")}`;
+const numbersPending = (statsId: string, productId: string, mark: string): (string | number)[] => ["HSET", summaryKey(statsId), productId, mark];
+
+/**
+ * A product's counted numbers written over its mark only while the mark is still `ARGV[2]`, in one step: 1 when
+ * written (the numbers, or the field deleted for "" when the product has no reviews left), 0 when another change
+ * marked them since (or they are no longer marked), and nothing was written. Modelled by lib/redis-memory.ts; run on a
+ * real Redis by scripts/test_review_recount_redis.py. Upstash bills it as the EVAL plus its HGET and, when written,
+ * its HSET or HDEL (tests/plan-cost-registry.ts, lines public-requests and studio).
+ */
+export const WRITE_NUMBERS_IF = `-- marktmorgen:review-numbers-if:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1]) else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
+return 1`;
 
 /**
  * A review's record that answered as text but does not read as that review (damaged, or another review's under its
@@ -239,7 +259,7 @@ export async function summaries(statsId: string | null): Promise<ProductNumbers>
   }
   for (let i = 0; i < flat.length; i += 2) {
     const summary = exactSummary(flat[i + 1]);
-    if (!summary && flat[i + 1] === RECOUNT_PENDING) console.error(`reviews: the numbers of product ${flat[i]} wait to be counted again; no stars are shown for it until they are`);
+    if (!summary && isRecountMark(flat[i + 1])) console.error(`reviews: the numbers of product ${flat[i]} wait to be counted again; no stars are shown for it until they are`);
     else if (!summary) console.error(`reviews: the numbers of product ${flat[i]} did not read; no stars are shown for it until they are counted again`);
     out.set(flat[i], summary ?? UNREAD_NUMBERS);
   }
@@ -256,6 +276,8 @@ export async function summaryOf(statsId: string | null, productId: string): Prom
   const raw = read?.[0];
   if (read && raw === null) return { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
   const summary = read && typeof raw === "string" ? exactSummary(raw) : null;
+  // A recount mark (numbers waiting to be counted again) is unread, as anything else not in the numbers' exact shape.
+  if (!summary && isRecountMark(raw)) console.error(`reviews: the numbers of product ${productId} wait to be counted again; no stars are shown for it until they are`);
   if (!summary) throw new UnknownReplyError("a product's review numbers");
   return summary;
 }
@@ -381,9 +403,12 @@ function recordsOf(reply: unknown, productId: string): { ids: string[]; reviews:
  * pass (recountWaiting) or the product's next change ("unsure"), and the log says so. So is a write of the numbers
  * answered in another shape.
  * Every caller has already marked the numbers as waiting (numbersPending, in the same request as its change), so what
- * stays meanwhile is that mark (no stars, said as unread), never the numbers from before the change.
+ * stays meanwhile is that mark (no stars, said as unread), never the numbers from before the change. `mark` is that
+ * mark, known before the reviews are read (written by the change, or read by the daily pass): the numbers are written
+ * only while it is still there (WRITE_NUMBERS_IF). Another change's mark since is "unsure" too: nothing is written, and
+ * that change's own recount, or the daily pass, counts them.
  */
-async function recount(statsId: string, productId: string): Promise<Summary | "unsure"> {
+async function recount(statsId: string, productId: string, mark: string): Promise<Summary | "unsure"> {
   const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1);
   const reviews = read ? exactReviews(read[0], productId) : null;
   if (!reviews) {
@@ -391,10 +416,15 @@ async function recount(statsId: string, productId: string): Promise<Summary | "u
     return "unsure";
   }
   const summary = summarise(reviews);
-  const change: (string | number)[][] = [
-    reviews.length ? ["HSET", summaryKey(statsId), productId, JSON.stringify(summary)] : ["HDEL", summaryKey(statsId), productId],
-  ];
-  if (!exactWriteReplies(await redisPipeline(change), change)) {
+  const written = repliesFor(
+    await redisPipeline([["EVAL", WRITE_NUMBERS_IF, 1, summaryKey(statsId), productId, mark, reviews.length ? JSON.stringify(summary) : ""]]),
+    1,
+  );
+  if (written?.[0] === 0) {
+    console.error(`reviews: the numbers of product ${productId} were marked again by a newer change before this recount wrote them; that change's recount, or the daily recount, counts them`);
+    return "unsure";
+  }
+  if (written?.[0] !== 1) {
     console.error(`reviews: the numbers of product ${productId} were written with an answer in an unknown shape; counted again by the daily recount or at its next change`);
     return "unsure";
   }
@@ -404,10 +434,11 @@ async function recount(statsId: string, productId: string): Promise<Summary | "u
 /**
  * Writes a review; `also` goes in the same request (the AI summary's deletion), so a failure fails the write too. The
  * product's numbers are marked as waiting for their recount in the same request (numbersPending): a review is never
- * written while its product's numbers from before it are still shown.
+ * written while its product's numbers from before it are still shown. Returns that mark, for the recount that follows.
  */
-async function write(statsId: string, review: Review, also: (string | number)[][] = []): Promise<void> {
+async function write(statsId: string, review: Review, also: (string | number)[][] = []): Promise<string> {
   const member = `${review.productId}|${review.id}`;
+  const mark = newMark();
   await redisPipeline([
     ["HSET", productKey(statsId, review.productId), review.id, JSON.stringify(review)],
     review.hidden
@@ -415,8 +446,9 @@ async function write(statsId: string, review: Review, also: (string | number)[][
       : ["ZADD", visibleKey(statsId, review.productId), review.createdAt, review.id],
     ["ZADD", allKey(statsId), review.createdAt, member],
     ...also,
-    numbersPending(statsId, review.productId),
+    numbersPending(statsId, review.productId, mark),
   ]);
+  return mark;
 }
 
 export type SaveInput = {
@@ -491,7 +523,7 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
     // A review hidden or refunded was never counted by one (lib/review-ai-summary-rules.ts, summaryInputs): it takes none away.
-    await write(statsId, review, before && before.text !== review.text && counted(before) ? summaryGone(statsId, review.productId, before.createdAt) : []);
+    const mark = await write(statsId, review, before && before.text !== review.text && counted(before) ? summaryGone(statsId, review.productId, before.createdAt) : []);
     await redisPipeline([
       ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],
       ["SADD", REVIEW_STORES_KEY, statsId],
@@ -499,7 +531,7 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     // Which reviews a payment paid for, kept for its refund: counted in the
     // store's room at what it really adds (lib/order-data.ts).
     if (review.pi) await orderWrite(room, [["HSET", payKey(statsId), review.pi, await payEntry(statsId, review.pi, `${review.productId}|${id}`)]]);
-    await recount(statsId, input.productId);
+    await recount(statsId, input.productId, mark);
     return { state: before ? "updated" : "created", review };
   });
   return result === "busy" ? { state: "busy" } : result;
@@ -624,6 +656,7 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
     const own = ownRecord(read[0], productId, id, what);
     if (!own) return "missing" as const;
     const gone = own.review;
+    const mark = newMark();
     const deletion: (string | number)[][] = [
       ["HDEL", productKey(statsId, productId), id],
       ["ZREM", visibleKey(statsId, productId), id],
@@ -633,7 +666,7 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
       // refunded was never counted, and takes none away. A damaged one may have been: the summary goes (no date known).
       ...(!gone ? summaryGone(statsId, productId, 0) : counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
       // Its numbers wait for their recount from the same request: never shown counting the review just deleted.
-      numbersPending(statsId, productId),
+      numbersPending(statsId, productId, mark),
     ];
     // Every reply in its exact shape, or the deletion is unknown: no room given back, and the field is read again
     // (below) before it is said as deleted or thrown.
@@ -650,7 +683,7 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
       const again = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
       removed = again !== null && again[0] === null;
     }
-    const recounted = (await recount(statsId, productId)) !== "unsure";
+    const recounted = (await recount(statsId, productId, mark)) !== "unsure";
     if (!removed) throw new UnknownReplyError(what);
     if (!gone) {
       console.error(`reviews: a damaged review record (${productId}|${id}) was deleted for its buyer; its room stays counted${own.photo === undefined ? "; its photo could not be found" : ""}`);
@@ -690,10 +723,10 @@ async function creatorChange(
     // it goes in the same request as the change, so a failure fails the change too.
     // One already hidden or refunded was never counted, so hiding or refunding it takes none away.
     const gone = counted(before) && ((after.hidden && !before.hidden) || (after.refunded && !before.refunded));
-    await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : []);
+    const mark = await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : []);
     // What a shorter answer frees is given back only once it is written.
     if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
-    await recount(statsId, productId);
+    await recount(statsId, productId, mark);
     return after;
   });
 }
@@ -801,7 +834,7 @@ export async function markRefunded(statsId: string, pi: string, onDamaged?: (pro
       onDamaged?.(productId);
       // The AI summary that may have counted it goes in the same request, as a damaged record's own deletion does
       // (no date known): more taken away than counted, never less.
-      const mark = [numbersPending(statsId, productId), ...summaryGone(statsId, productId, 0)];
+      const mark = [numbersPending(statsId, productId, newMark()), ...summaryGone(statsId, productId, 0)];
       let marked = false;
       try {
         marked = exactWriteReplies(await redisPipeline(mark), mark) !== null;
@@ -830,7 +863,7 @@ export async function markOneRefunded(statsId: string, productId: string, id: st
 }
 
 /**
- * The daily recount of numbers left waiting (RECOUNT_PENDING): a change marks its product's numbers in the same
+ * The daily recount of numbers left waiting (a recount mark, isRecountMark): a change marks its product's numbers in the same
  * request and its own recount replaces the mark, but a recount that fails for a moment (a read lost, a timeout) left
  * the mark until the product's next change, which may never come, and the product showed no stars, said as unread, for
  * good. Once a day the hourly recount job (app/api/cron/recount, at REVIEW_RECOUNT_HOUR_UTC) walks the stores with
@@ -909,12 +942,14 @@ async function recountStores(stores: string[], deadline: number, out: WaitingPas
       continue;
     }
     for (let j = 0; j < flat.length; j += 2) {
-      if (flat[j + 1] !== RECOUNT_PENDING) continue;
+      // The mark as read here, before the product's reviews: its numbers are written only while it is still that one.
+      const mark = flat[j + 1];
+      if (!isRecountMark(mark)) continue;
       if (Date.now() >= deadline) return "late";
       if (out.recounted + out.unsure + out.busy >= REVIEW_RECOUNTS_PER_DAY) return "capped";
       const productId = flat[j];
       try {
-        const done = await locked(statsId, productId, () => recount(statsId, productId), 0);
+        const done = await locked(statsId, productId, () => recount(statsId, productId, mark), 0);
         if (done === "busy") out.busy += 1;
         else if (done === "unsure") out.unsure += 1;
         else out.recounted += 1;

@@ -190,7 +190,8 @@ async function main(): Promise<void> {
     // every pass and the refunds sweep (lib/review-proof.ts) stopped at this damaged record for good. A damaged record is
     // now skipped and never said as marked: one review marked (the other), the damaged one's product left unread.
     is("the pass ends, the damaged record never said as marked", result, 1);
-    is("the damaged record's product shows no stars", await raw(["HGET", SUM, ONE]), "recount");
+    // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026, the race): the mark was the fixed text "recount"; each change's mark now carries a token of its own ("recount:<random>"), so a recount from before it never writes over it.
+    is("the damaged record's product shows no stars", /^recount:[0-9a-f]{24}$/.test(String(await raw(["HGET", SUM, ONE]))), true);
     is("the other review of that payment is marked", JSON.parse((await raw(["HGET", records(TWO), two])) as string).refunded, true);
     is("and its stars leave its numbers", JSON.parse((await raw(["HGET", SUM, TWO])) as string).count, 0);
   }

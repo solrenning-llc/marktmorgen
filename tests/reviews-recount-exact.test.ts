@@ -23,6 +23,7 @@ import {
   summaryOf,
   summarise,
   type Review,
+  WRITE_NUMBERS_IF,
 } from "@/lib/reviews";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -129,7 +130,8 @@ async function main(): Promise<void> {
     // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026): the numbers from before the hide were kept
     // and shown, still counting the review just hidden. Now the change marks them as waiting ("recount") in its own
     // request and an unsure recount leaves that mark: no stars, said as unread, never deleted or counted from the read.
-    is(`${label}: the numbers are never deleted or counted from it: they wait, unread`, await raw(["HGET", SUM, PRODUCT]), "recount");
+    // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026, the race): the mark was the fixed text "recount"; each change's mark now carries a token of its own ("recount:<random>"), so a recount from before it never writes over it.
+    is(`${label}: the numbers are never deleted or counted from it: they wait, unread`, /^recount:[0-9a-f]{24}$/.test(String(await raw(["HGET", SUM, PRODUCT]))), true);
     is(`${label}: they were there before the hide`, typeof sum === "string" && sum.startsWith("{"), true);
     is(`${label}: the log says the recount was left`, logged > 0, true);
   }
@@ -137,7 +139,9 @@ async function main(): Promise<void> {
   part("A recount whose write answers in another shape is said in the log");
   for (const [label, reply] of [["no reply", []], ["a text", ["OK"]], ["two", [2]]] as [string, unknown][]) {
     const { ids } = await seed();
-    const write = swap("HSET", SUM, reply);
+    // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026, the race): the numbers were written with a
+    // plain HSET; they are now written by WRITE_NUMBERS_IF only over the change's own mark, so that EVAL's reply is swapped.
+    const write = swap("EVAL", WRITE_NUMBERS_IF, reply);
     const { result, logged } = await outcome(() => setHidden(STATS, PRODUCT, ids[0], true, REASON));
     is(`${label}: the hide itself is written`, typeof result === "object" && result !== null, true);
     is(`${label}: the numbers' write was answered`, write.hit(), true);
@@ -155,7 +159,8 @@ async function main(): Promise<void> {
     swap("HGETALL", RECORDS, []);
     await outcome(() => setHidden(STATS, PRODUCT, ids[1], true, REASON));
     // Rule 23 (pre-review, 9 November 2026): "left stale" showed the numbers from before this hide; now they wait, unread.
-    is("left waiting (unread) after an unknown read, never stale", await raw(["HGET", SUM, PRODUCT]), "recount");
+    // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026, the race): the mark was the fixed text "recount"; each change's mark now carries a token of its own ("recount:<random>"), so a recount from before it never writes over it.
+    is("left waiting (unread) after an unknown read, never stale", /^recount:[0-9a-f]{24}$/.test(String(await raw(["HGET", SUM, PRODUCT]))), true);
     await outcome(() => setHidden(STATS, PRODUCT, ids[0], false));
     is("and right again at the next change", await raw(["HGET", SUM, PRODUCT]), numbers(2, 9, 1, 1, 0, [0, 0, 0, 1, 1]));
     await outcome(() => setHidden(STATS, PRODUCT, ids[1], false));
@@ -252,7 +257,8 @@ async function main(): Promise<void> {
     const damaged = label === "a stored review that does not read";
     is(`the review, ${label}: ${damaged ? "skipped, never said as marked" : "unknown, so the refund pass tries again"}`, (await outcome(() => markRefunded(STATS, "pi_1"))).result, damaged ? 0 : "unknown");
     is(`the review, ${label}: read`, pass.hit(), true);
-    if (damaged) is(`the review, ${label}: its product's numbers wait, unread`, await raw(["HGET", SUM, PRODUCT]), "recount");
+    // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026, the race): the mark was the fixed text "recount"; each change's mark now carries a token of its own ("recount:<random>"), so a recount from before it never writes over it.
+    if (damaged) is(`the review, ${label}: its product's numbers wait, unread`, /^recount:[0-9a-f]{24}$/.test(String(await raw(["HGET", SUM, PRODUCT]))), true);
     swap("HGET", RECORDS, reply);
     is(`one refund, ${label}: unknown`, (await outcome(() => markOneRefunded(STATS, PRODUCT, ids[0]))).result, "unknown");
     swap("HGET", RECORDS, reply);

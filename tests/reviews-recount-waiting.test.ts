@@ -122,7 +122,8 @@ async function main(): Promise<void> {
   is("the pass tried the product's reviews once", lost, 1);
   is("said as unsure, never as recounted", typeof unsure === "object" ? [unsure.recounted, unsure.unsure] : unsure, [0, 1]);
   is("the mark stays: unread, never numbers made up", await shown(), "unread");
-  is("the mark itself is left in place", (await original([["HGET", SUMMARY(STATS), PRODUCT]]))[0], "recount");
+  // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026, the race): the mark was the fixed text "recount"; each change's mark now carries a token of its own ("recount:<random>"), so a recount from before it never writes over it.
+  is("the mark itself is left in place", /^recount:[0-9a-f]{24}$/.test(String((await original([["HGET", SUMMARY(STATS), PRODUCT]]))[0])), true);
 
   part("A damaged record in the product's hash: the mark stays, the record is never rewritten");
   await original([["HSET", RECORDS(STATS, PRODUCT), "rv_damaged01", "{not json"]]);
@@ -164,7 +165,8 @@ async function main(): Promise<void> {
   for (const [i, productId] of products.entries()) {
     const statsId = i % 2 === 0 ? STATS : OTHER_STATS;
     await seed(statsId, productId);
-    await original([["HSET", SUMMARY(statsId), productId, "recount"]]);
+    // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026, the race): the mark was the fixed text "recount"; each change's mark now carries a token of its own ("recount:<random>"), so a recount from before it never writes over it.
+    await original([["HSET", SUMMARY(statsId), productId, `recount:${String(i).padStart(24, "0")}`]]);
   }
   const capped = await pass();
   is("the first pass recounts exactly the cap and says it was capped", typeof capped === "object" ? [capped.recounted, capped.capped] : capped, [CAP, true]);

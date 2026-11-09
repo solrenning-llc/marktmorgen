@@ -202,6 +202,16 @@ export class MemoryRedis {
           }
           return out;
         }
+        // lib/reviews.ts WRITE_NUMBERS_IF: a product's counted numbers written over its recount mark only while the
+        // mark is still the one counted for ("" deletes the field): 1 written, 0 marked again since and nothing written.
+        if (key.startsWith("-- marktmorgen:review-numbers-if:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, numbers, product, mark, value] = args;
+          this.scriptCalls += 1;
+          if (this.run(["HGET", numbers, product]) !== mark) return 0;
+          this.scriptCalls += 1;
+          this.run(value === "" ? ["HDEL", numbers, product] : ["HSET", numbers, product, value]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

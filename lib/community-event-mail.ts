@@ -31,6 +31,14 @@
  * twice; the key a send is made under says which reminder, move or
  * cancellation it is, so the same one is never started twice.
  *
+ * A move's or a cancellation's notice whose list of who is coming does not
+ * read when it is made (rule 30) is written down all the same, `waiting`,
+ * with no readers yet: the change is made and must not go untold. Each run
+ * reads the list again, until it reads, while the notice is still of use
+ * (as the hour-before reminder: not once the event has begun), and then
+ * sends it like any other. A move's notice still waiting when the event is
+ * then called off is dropped: the cancellation's email says all.
+ *
  * These are the community's own notices about something a member signed up
  * for, sent from the store's name through Marktmorgen's address like the reminders
  * before a booked call, on every plan, and not counted against Pro's monthly
@@ -44,6 +52,8 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
 import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
@@ -88,6 +98,12 @@ export type EventMailJob = {
   status: "sending" | "sent" | "failed";
   note: string;
   failures: number;
+  /**
+   * A notice whose list of who is coming did not read when it was made: no
+   * readers written yet, and `total` 0 until they are. False once they are,
+   * and absent on every send made with its list.
+   */
+  waiting?: boolean;
 };
 
 const JOBS = "nl:cm:evmailq";
@@ -101,14 +117,31 @@ const HOUR = 3_600_000;
 /** How many due entries one run takes on. The rest wait five minutes. */
 const QUEUE_BATCH = 200;
 
+const KINDS: readonly string[] = ["24", "1", "moved", "cancelled"] satisfies EventMailKind[];
+const STATUSES: readonly string[] = ["sending", "sent", "failed"] satisfies EventMailJob["status"][];
+const COUNTS = ["start", "was", "wasMinutes", "total", "done", "sent", "failures"] as const;
+
+/**
+ * A send's record, only when every field is there in the shape save() writes; anything else is null. Its id alone,
+ * or a status or count this code never writes, is a partial record, not a send (Codex P on #2954): a reminder is
+ * never dropped as made on it, and a send half done is never taken out of line or written over on it.
+ */
 function parseJob(raw: unknown): EventMailJob | null {
   if (typeof raw !== "string") return null;
+  let value: unknown;
   try {
-    const value = JSON.parse(raw) as EventMailJob;
-    return JOB_ID.test(value.id) ? value : null;
+    value = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const job = value as Record<string, unknown>;
+  if (typeof job.id !== "string" || !JOB_ID.test(job.id)) return null;
+  if (typeof job.community !== "string" || typeof job.handle !== "string" || typeof job.event !== "string" || typeof job.note !== "string") return null;
+  if (typeof job.kind !== "string" || !KINDS.includes(job.kind)) return null;
+  if (typeof job.status !== "string" || !STATUSES.includes(job.status)) return null;
+  if (!COUNTS.every((name) => typeof job[name] === "number" && Number.isFinite(job[name]))) return null;
+  return value as EventMailJob;
 }
 
 async function save(job: EventMailJob): Promise<void> {
@@ -128,13 +161,71 @@ export async function cancelNoticeSending(community: string, event: string): Pro
   });
 }
 
+/** A send: null when it is not there; a reply in another shape throws UnknownReplyError (CX-123 rule 24). */
 export async function readEventJob(id: string): Promise<EventMailJob | null> {
   if (!JOB_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", jobKey(id)]]);
-  return parseJob(raw);
+  const raw = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1)?.[0];
+  if (raw === null) return null;
+  // Text that is not a whole send (cut, or partial: Codex P on #2954) is unknown, never "not there".
+  const job = typeof raw === "string" ? parseJob(raw) : null;
+  if (!job || job.id !== id) throw new UnknownReplyError("an event email's send");
+  return job;
 }
 
-/** Whether a reminder is still worth sending: the day-before one gives way to the hour-before one. */
+/**
+ * A send asked for whose once-only mark is there but whose send is not (yet): the reminder stays due and is asked
+ * for again later, never dropped as made (Codex P on #2954).
+ */
+export class SendNotMadeYetError extends Error {
+  constructor() {
+    super("an event email's once-only mark is there but its send is not, yet");
+    this.name = "SendNotMadeYetError";
+  }
+}
+
+/**
+ * How long a once-only mark with no send under it is taken to belong to a run still writing the send down. Writing
+ * it down is three Redis calls of at most five seconds each (lib/fetch-timeout.ts) after the mark, so a mark this
+ * old with no send belongs to no run still going: one that could not let it go, or whose writing failed.
+ */
+const ORPHAN_MS = 10 * 60_000;
+
+/**
+ * The once-only mark was taken: made, only when the send itself is there (put back in line while it is still being
+ * sent, in case the run that made it could not); a mark with no send under it is not "made". Young, it belongs to a
+ * run still writing the send down, and the send stays due; old (ORPHAN_MS), that very mark is let go (a compare and
+ * delete, so a newer mark is never touched) and claimed again with this run's own value, so two runs cannot both
+ * take it over. Every reply exact; anything else throws.
+ */
+async function madeOrTakeOver(id: string, mark: string): Promise<"made" | "ours"> {
+  const held = repliesFor(await redisPipeline([["GET", madeKey(id)], ["GET", jobKey(id)]]), 2);
+  if (!held || !held.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("an event email's once-only mark and its send");
+  const [was, raw] = held as (string | null)[];
+  if (raw !== null) {
+    // "Made" only when the text read back is this very send, whole (Codex P on #2954): cut text, a partial record,
+    // an id this code never writes or another send's record is unknown, so the reminder stays due and the mark is
+    // not taken over on it.
+    const send = parseJob(raw);
+    if (!send || send.id !== id) throw new UnknownReplyError("an event email's send under its once-only mark");
+    if (send.status === "sending") {
+      const added = repliesFor(await redisPipeline([["SADD", JOBS, id]]), 1)?.[0];
+      if (countOf(added) === null) throw new UnknownReplyError("an event email's send put in line");
+    }
+    return "made";
+  }
+  const at = was === null ? Number.NaN : Number(was);
+  if (was === null || !(at < Date.now() - ORPHAN_MS)) throw new SendNotMadeYetError();
+  await releaseMark(madeKey(id), was);
+  const again = await claimMark(madeKey(id), KEEP_SECONDS, mark);
+  if (again === "ours") return "ours";
+  if (again === "unknown") await releaseMark(madeKey(id), mark);
+  throw new SendNotMadeYetError();
+}
+
+/**
+ * Whether a reminder is still worth sending: the day-before one gives way to the hour-before one. A notice still
+ * waiting for its list is asked as the hour-before one is (advanceEventJob).
+ */
 function stillUseful(kind: EventMailKind, start: number, now: number): boolean {
   if (kind === "24") return now < start - HOUR;
   if (kind === "1") return now < start;
@@ -142,9 +233,32 @@ function stillUseful(kind: EventMailKind, start: number, now: number): boolean {
 }
 
 /**
+ * Writes a waiting notice's readers down, in order, then the send with them, every reply exact (Claude 2's focal on
+ * #3134), as startJob writes a send's. True only when the whole list was written and then the send; false when any
+ * reply is not known or the write failed, so the caller keeps the notice waiting and the next run reads and writes
+ * the list again (DEL first, so a list written in part is never sent from).
+ */
+async function listReaders(job: EventMailJob, readers: string[]): Promise<boolean> {
+  const commands: (string | number)[][] = [["DEL", toKey(job.id)]];
+  for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(job.id), ...readers.slice(i, i + 500)]);
+  commands.push(["EXPIRE", toKey(job.id), KEEP_SECONDS]);
+  try {
+    const listed = repliesFor(await redisPipeline(commands), commands.length);
+    if (!listed || !listed.every((reply) => countOf(reply) !== null)) return false;
+    const saved = repliesFor(await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS]]), 1)?.[0];
+    return saved === "OK";
+  } catch (error) {
+    console.error("writing down who a waiting event email goes to failed", error);
+    return false;
+  }
+}
+
+/**
  * Writes a send down, once: the same reminder, move or cancellation asked
  * for again finds it made and starts nothing. Null when there is nobody to
- * send it to, or it was made already.
+ * send it to, or it was made already. A move's or a cancellation's notice
+ * whose list does not read is written down `waiting` (advanceEventJob reads
+ * it again); a reminder's throws, and stays queued (runEventQueue).
  */
 async function startJob(
   store: Store,
@@ -156,10 +270,34 @@ async function startJob(
   if (!community) return null;
   const seq = kind === "moved" ? `m${event.moves}` : kind === "cancelled" ? "x" : `${event.start}`;
   const id = createHash("sha256").update(`${community}|${event.id}|${kind}|${seq}`).digest("hex").slice(0, 24);
-  const [claimed] = await redisPipeline([["SET", madeKey(id), "1", "NX", "EX", KEEP_SECONDS]]);
-  if (claimed === null) return null;
-  const readers = (await rsvpList(community, event.id)).map((r) => r.key);
-  if (!readers.length) return null;
+  // Who is coming first, read exactly (it throws on a page it cannot read), so no mark is taken for a send that
+  // cannot be written down whole (Claude 5 on #2954). A reminder whose list does not read throws, and stays queued
+  // (runEventQueue). A move's or a cancellation's notice whose list does not read is written down waiting for it
+  // (rule 30): the change it tells of is already made.
+  const notice = kind !== "24" && kind !== "1";
+  let readers: string[] | null;
+  try {
+    readers = (await rsvpList(community, event.id)).map((r) => r.key);
+  } catch (error) {
+    if (!notice) throw error;
+    readers = null;
+  }
+  // Nobody coming: no send, and no mark taken for one.
+  if (readers !== null) {
+    if (!readers.length) return null;
+  }
+  // Made once, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): taken is made only when the send is there
+  // (madeOrTakeOver); unknown makes nothing and lets go of the mark only while it holds our own value.
+  const mark = claimValue();
+  let claimed = await claimMark(madeKey(id), KEEP_SECONDS, mark);
+  if (claimed === "taken") {
+    if ((await madeOrTakeOver(id, mark)) === "made") return null;
+    claimed = "ours";
+  }
+  if (claimed !== "ours") {
+    await releaseMark(madeKey(id), mark);
+    throw new UnknownReplyError("an event email's once-only mark");
+  }
   const job: EventMailJob = {
     id,
     community,
@@ -169,21 +307,67 @@ async function startJob(
     start: event.start,
     was: was?.start ?? 0,
     wasMinutes: was?.minutes ?? 0,
-    total: readers.length,
+    total: readers?.length ?? 0,
     done: 0,
     sent: 0,
     status: "sending",
     note: "",
     failures: 0,
   };
+  if (readers === null) return await startWaiting({ ...job, note: WAITING_NOTE, waiting: true }, mark);
   const commands: (string | number)[][] = [["DEL", toKey(id)]];
   for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(id), ...readers.slice(i, i + 500)]);
   commands.push(["EXPIRE", toKey(id), KEEP_SECONDS]);
-  await redisPipeline(commands);
-  await save(job);
-  await redisPipeline([["SADD", JOBS, id]]);
+  // Everything after the mark is ours, read exactly (Claude 5 on #2954). Before the send is written, a failure lets
+  // the mark go, so the next run makes it; once the send may be written, the mark goes only when the send is read
+  // back as not there (letting it go otherwise could make it twice), and the next run finds the send and puts it in
+  // line, or takes the mark over when no send is there.
+  try {
+    const listed = repliesFor(await redisPipeline(commands), commands.length);
+    if (!listed || !listed.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("an event email's list of people");
+  } catch (error) {
+    await releaseMark(madeKey(id), mark);
+    throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an event email's list of people");
+  }
+  try {
+    const saved = repliesFor(await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS]]), 1)?.[0];
+    if (saved !== "OK") throw new UnknownReplyError("an event email's send");
+    const added = repliesFor(await redisPipeline([["SADD", JOBS, id]]), 1)?.[0];
+    if (countOf(added) === null) throw new UnknownReplyError("an event email's send put in line");
+  } catch (error) {
+    // Not known whether the send was written: read back. Not there, the mark is let go, so the next run makes it;
+    // there, or not known, the mark stays and the next run finds the send and puts it in line (madeOrTakeOver).
+    const back = await redisPipeline([["GET", jobKey(id)]]).then(
+      (replies) => repliesFor(replies, 1),
+      () => null,
+    );
+    if (back && back[0] === null) await releaseMark(madeKey(id), mark);
+    throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an event email's send");
+  }
   return job;
 }
+
+/**
+ * A notice with its list still to be read, written down with no readers, every reply exact. Not known whether it was
+ * written: read back, as startJob does; not there, its once-only mark is let go (only while it holds our value), so
+ * asking again makes it; there, or not known, the mark stays and the next ask finds it (madeOrTakeOver).
+ */
+async function startWaiting(job: EventMailJob, mark: string): Promise<EventMailJob> {
+  try {
+    const written = repliesFor(await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS], ["SADD", JOBS, job.id]]), 2);
+    if (!written || written[0] !== "OK" || countOf(written[1]) === null) throw new UnknownReplyError("an event email's notice waiting for its list");
+  } catch (error) {
+    const back = await redisPipeline([["GET", jobKey(job.id)]]).then(
+      (replies) => repliesFor(replies, 1),
+      () => null,
+    );
+    if (back && back[0] === null) await releaseMark(madeKey(job.id), mark);
+    throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an event email's notice waiting for its list");
+  }
+  return job;
+}
+
+const WAITING_NOTE = "We couldn't read who is coming yet. The email waits and goes out once we can.";
 
 /** The creator moved or cancelled an event: the one email to everyone coming. */
 export async function queueEventNotice(
@@ -287,10 +471,18 @@ export async function advanceEventJob(
   load: (handle: string) => Promise<Store | null>,
   deadline: number,
 ): Promise<EventMailJob | null> {
-  const [got] = await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]);
-  if (got === null) return null;
+  // One run at a time, on an exact claim: held by another run, or not known to be ours, nothing is done this time.
+  const lock = claimValue();
+  if ((await claimMark(lockKey(id), 90, lock)) !== "ours") return null;
   try {
-    let job = await readEventJob(id);
+    // Its record not read (Claude 5 on #2954): nothing is done this time and it stays in line, never taken out of it.
+    let job: EventMailJob | null;
+    try {
+      job = await readEventJob(id);
+    } catch (error) {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    }
     if (!job || job.status !== "sending") {
       await redisPipeline([["SREM", JOBS, id]]);
       return job;
@@ -309,6 +501,27 @@ export async function advanceEventJob(
     // A reminder for a time the event has left, or for an event called off, is no use.
     if (reminder && (event.cancelled || event.start !== job.start || !stillUseful(job.kind, event.start, Date.now()))) {
       return await finish("sent", "No longer due.");
+    }
+    if (job.waiting) {
+      // A move's notice gives way to the cancellation's, which says all.
+      if (job.kind === "moved" && event.cancelled) return await finish("sent", "No longer due: the event was canceled, and that email says so.");
+      // Read again only while it is of use: as the hour-before reminder, not once the event has begun.
+      if (!stillUseful("1", event.start, Date.now())) return await finish("failed", "We couldn't read who was coming before the event's time. Nobody was emailed.");
+      const readers = await rsvpList(job.community, job.event).then((list) => list.map((r) => r.key), () => null);
+      if (readers === null) {
+        job = { ...job, note: WAITING_NOTE };
+        await save(job);
+        return job;
+      }
+      if (!readers.length) return await finish("sent", "");
+      const listed: EventMailJob = { ...job, waiting: false, total: readers.length, note: "" };
+      if (!(await listReaders(listed, readers))) {
+        // Not written down whole: it waits, and the next run writes the whole list again. Nothing was sent from it.
+        job = { ...job, note: WAITING_NOTE };
+        await save(job);
+        return job;
+      }
+      job = listed;
     }
     if (!isSenderConfigured()) return job;
     const words = eventMailWords(store, config, event, job);
@@ -339,9 +552,16 @@ export async function advanceEventJob(
       }
       if (recipients.length) {
         const messages: BatchMessage[] = [];
+        let unkept = false;
         for (const member of recipients) {
           if (reminder) {
-            const token = await tokenFor(store, job.community, member);
+            // A stop link that could not be kept on its member (CX-123 rule 24) is never emailed:
+            // nothing of the batch is sent and the send stays where it was, to be tried again.
+            const token = await tokenFor(store, job.community, member).catch(() => null);
+            if (token === null) {
+              unkept = true;
+              break;
+            }
             const r = render(store, words.subject, words.body, null, {
               page: `${SITE_URL}/unsubscribe?c=${token}`,
               oneClick: `${SITE_URL}/api/mail/unsubscribe?c=${token}`,
@@ -361,6 +581,10 @@ export async function advanceEventJob(
             });
           }
         }
+        if (unkept) {
+          job = { ...job, note: "We couldn't save every recipient's unsubscribe link. The send is still pending." };
+          break;
+        }
         const outcome = await sendBatch(messages, `cmev:${id}:${job.done}:${keys.length}`, { by: "store", store, kind: "email" });
         if (outcome !== "sent") {
           const failures = job.failures + 1;
@@ -376,7 +600,7 @@ export async function advanceEventJob(
     await save(job);
     return job;
   } finally {
-    await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
+    await releaseMark(lockKey(id), lock);
   }
 }
 
@@ -448,6 +672,13 @@ export async function runEventQueue(
       } else counts.dropped += 1;
     } catch (error) {
       console.error("a live event reminder failed", error);
+      // Not known whether it was made: it stays due, and a later run makes it once. Put behind the others due, so a
+      // few that keep failing never take the turn of the rest (Claude 5 on #2954, LIGHT 3); the order is all that
+      // write changes, so its answer is not needed.
+      if (error instanceof UnknownReplyError || error instanceof SendNotMadeYetError) {
+        await redisPipeline([["ZADD", EVENT_QUEUE, now, member]]).catch(() => {});
+        continue;
+      }
     }
     await redisPipeline([["ZREM", EVENT_QUEUE, member]]);
   }

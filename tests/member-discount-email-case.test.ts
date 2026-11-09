@@ -42,6 +42,8 @@ const CUSTOMERS = [
   customer("cus_Upper0000001", "Ana@Example.com", 1),
   customer("cus_Lower0000001", "ana@example.com", 2),
   customer("cus_Cleo00000001", "Cleo@Example.com", 3),
+  customer("cus_Dee000000001", "Dee@Example.com", 4),
+  customer("cus_Bea000000001", "BEA@EXAMPLE.COM", 5),
   ...many("Gil", "Gil@Example.com", 11),
   ...many("gil", "gil@example.com", 11),
 ];
@@ -49,6 +51,8 @@ const SUBS: Record<string, unknown[]> = {
   cus_Upper0000001: [sub("sub_Upper0000001")],
   cus_Lower0000001: [sub("sub_Lower0000001")],
   cus_Cleo00000001: [sub("sub_Cleo00000001")],
+  cus_Dee000000001: [sub("sub_Dee000000001")],
+  cus_Bea000000001: [sub("sub_Bea000000001")],
 };
 /** Rows Stripe would never give for the filter: another person's address, or none at all. */
 let stray: ReturnType<typeof customer> | null = null;
@@ -137,6 +141,27 @@ async function main(): Promise<void> {
   is("no membership of theirs was read past the ceiling", reads.filter((r) => r.path === "/subscriptions").length, 0);
   is("putting a code on is \"stripe\"", await applyMemberDiscount(store, "Gil@Example.com", "sub_Upper0000001", "promo_case000001"), { ok: false, reason: "stripe" });
   is("11 of one spelling alone are within it", (await memberSubs(store, "gil@example.com"))?.length, 0);
+
+  part("The limit, said honestly: a spelling neither read asks for is not found, and the studio never says 'no membership'");
+  reads.length = 0;
+  is("member 'Dee@Example.com' typed in small letters, as the People list shows it: not found (Stripe's filter is exact)", ids(await memberSubs(store, "dee@example.com")), []);
+  is("member 'BEA@EXAMPLE.COM' typed 'Bea@Example.com': not found either", ids(await memberSubs(store, "Bea@Example.com")), []);
+  is("free days: the same limit", ids(await freeDaysSubs(store, "dee@example.com", now)), []);
+  is("only the two spellings were asked, never a sweep of the account", customerReads(), ["dee@example.com", "Bea@Example.com", "bea@example.com", "dee@example.com"]);
+  for (const [what, file] of [
+    ["discount code", "components/member-discount.tsx"],
+    ["free days", "components/member-free-days.tsx"],
+  ] as const) {
+    const screen = readFileSync(file, "utf8");
+    is(`${what}: an empty list never says the address has no running membership`, /has no running membership/.test(screen), false);
+    const status = screen.slice(screen.indexOf('role="status"'));
+    const empty = status.slice(status.indexOf("found.memberships.length === 0 ?"), status.indexOf(") : "));
+    is(
+      `${what}: inside the status region, it says none was found and how to type the address so Stripe finds it`,
+      [screen.includes('role="status"'), empty.includes("No running membership was found under ${found.email}."), empty.includes("Stripe matches capital letters exactly, so type the address the way the member typed it at checkout.")],
+      [true, true, true],
+    );
+  }
 
   part("The studio routes hand the address as typed");
   const discountRoute = readFileSync("app/api/store/member-discount/route.ts", "utf8");

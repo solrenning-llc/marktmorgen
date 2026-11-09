@@ -8,12 +8,15 @@
  *   - an import with more members than the emails left now does not start, and says how many can go now and when
  *     the allowance opens again; nothing is invited and nothing is emailed;
  *   - within the allowance, the import starts and every member is emailed, as before;
- *   - the emails left are read exactly (CX-123 rule 24): any other reply refuses the start, with nothing written;
+ *   - the emails for the whole file are taken when it starts, from the same counter and by the same rules as each
+ *     send (reserveMoved): nothing else can use them first, what the import does not send is given back when it ends,
+ *     is canceled or does not start, and a plan whose month can send nothing (a funded period not reserved) refuses;
+ *   - that count is read exactly (CX-123 rule 24): any other reply refuses the start, with nothing started;
  *   - a reminder refused by a full month is tried once more when the month opens again, while that is still before
  *     the renewal date, and is never sent twice.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { addRows, finishUpload, runImport, sendMoveReminders, startImport, storeImports } from "@/lib/imports";
+import { addRows, cancelImport, finishUpload, reserveMoved, runImport, sendMoveReminders, startImport, storeImports } from "@/lib/imports";
 import { moveCounts } from "@/lib/move-members";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { monthlyAllowance } from "@/lib/mail";
@@ -40,12 +43,15 @@ const setClock = (ms: number) => {
   Date.now = () => ms;
 };
 
-/** Answers every GET of a key starting with `prefix` with `reply` while `fn` runs. */
-async function withGetReply<T>(prefix: string, reply: unknown, fn: () => Promise<T>): Promise<T> {
+/**
+ * Answers every read or count of a key starting with `prefix` (GET, INCRBY) with `reply` while `fn` runs, whichever
+ * of them the start uses to learn the emails left: the command still runs, only its reply is replaced.
+ */
+async function withCountReply<T>(prefix: string, reply: unknown, fn: () => Promise<T>): Promise<T> {
   const pipeline = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = (await pipeline(commands)) as unknown[];
-    return commands.map((c, i) => (String(c[0]).toUpperCase() === "GET" && String(c[1]).startsWith(prefix) ? reply : replies[i]));
+    return commands.map((c, i) => (["GET", "INCRBY"].includes(String(c[0]).toUpperCase()) && String(c[1]).startsWith(prefix) ? reply : replies[i]));
   }) as typeof redis.pipeline;
   try {
     return await fn();
@@ -60,7 +66,7 @@ async function run(id: string) {
   return job;
 }
 
-async function creatorStore(owner: string, handle: string, fields: { tier?: "creator" | "pro"; period: ReturnType<typeof paidPeriod> }) {
+async function creatorStore(owner: string, handle: string, fields: { tier?: "creator" | "pro"; period: ReturnType<typeof paidPeriod> & { funded?: true } }) {
   await claimHandle(owner, handle, "Harbor Kitchen", "");
   await ensureStatsId(owner);
   await setStripeAccount(owner, `acct_1Test${handle.slice(0, 6).padEnd(6, "0")}01`, true);
@@ -86,6 +92,13 @@ async function importMembers(owner: string, rows: string[][]) {
 }
 
 async function main(): Promise<void> {
+  // The clock is fixed to 03:00 UTC of today, and runs on from there (review on #3384, MEDIUM 1): the file's renewal
+  // is a date alone, read at noon UTC, so a reminder's due time below depends on the time of day the test starts.
+  // Before, a start between about 12:00 and 23:00 UTC found the reminders not yet due, and the put-back was never
+  // exercised. Same UTC day as the real clock, so nothing that reads the date another way crosses a day or a month.
+  const fixedStart = Math.floor(realNow() / 86_400_000) * 86_400_000 + 3 * 3_600_000;
+  const realStart = realNow();
+  Date.now = () => fixedStart + (realNow() - realStart);
   process.env.STRIPE_SECRET_KEY = "sk_test_move_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_move_only_a_stand_in";
   redis.clear();
@@ -113,11 +126,11 @@ async function main(): Promise<void> {
   part("The emails left are read exactly (rule 24)");
   const OTHER = "r46e-other@example.com";
   await creatorStore(OTHER, "r46exact", { period: paidPeriod() });
-  for (const [label, reply] of [["a number", 3], ["a list", ["3"]], ["text that is not a count", "3x"], ["nothing at all", undefined]] as const) {
+  for (const [label, reply] of [["a fraction", 2.5], ["true", true], ["a list", ["3"]], ["text that is not a count", "3x"], ["nothing at all", undefined]] as const) {
     let threw = false;
     let started = false;
     try {
-      const r = await withGetReply("nl:imports:moved:", reply, async () => startImport((await storeForEmail(OTHER))!, OTHER, "members", { expected: 2, file: "patrons.csv", stopped: true }));
+      const r = await withCountReply("nl:imports:moved:", reply, async () => startImport((await storeForEmail(OTHER))!, OTHER, "members", { expected: 2, file: "patrons.csv", stopped: true }));
       started = r.ok;
     } catch {
       threw = true;
@@ -139,14 +152,63 @@ async function main(): Promise<void> {
   is("Studio: 5 members with 3 monthly emails left does not start", [studioOver.ok, (studioOver as { reason?: string }).reason, (studioOver as { limit?: number }).limit], [false, "emails_month", 3]);
   let studioThrew = false;
   try {
-    await withGetReply("nl:mail:used:", "many", async () => startImport((await storeForEmail(STUDIO))!, STUDIO, "members", { expected: 2, file: "patrons.csv", stopped: true }));
+    await withCountReply("nl:mail:used:", "many", async () => startImport((await storeForEmail(STUDIO))!, STUDIO, "members", { expected: 2, file: "patrons.csv", stopped: true }));
   } catch {
     studioThrew = true;
   }
   is("Studio: the month's count read in another shape refuses the start", studioThrew, true);
   is("Studio: nothing was started", (await storeImports((await storeForEmail(STUDIO))!)).length, 0);
+  // A count whose reply is unknown may still have been taken, so it is never given back on that answer; set again.
+  await redis.pipeline([["SET", `nl:mail:used:${listId}:${window.id}`, String(allowance - 3)]]);
   const studioFits = await startImport((await storeForEmail(STUDIO))!, STUDIO, "members", { expected: 3, file: "patrons.csv", stopped: true });
   is("Studio control: 3 members with 3 left starts", studioFits.ok, true);
+
+  part("The emails for the whole file are held when it starts (review on #3384, MEDIUM 2)");
+  const HOLD = "r46e-hold@example.com";
+  await creatorStore(HOLD, "r46hold", { period: paidPeriod() });
+  const held = await startImport((await storeForEmail(HOLD))!, HOLD, "members", { expected: 20, file: "patrons.csv", stopped: true });
+  is("Store: 20 members with 20 emails left starts", held.ok, true);
+  is("another email to people brought over cannot take one of those 20 meanwhile", await reserveMoved((await storeForEmail(HOLD))!, 1), 0);
+  if (held.ok) {
+    const s = (await storeForEmail(HOLD))!;
+    await addRows(s, held.job.id, memberRows(20, in10, "held"));
+    await finishUpload(s, held.job.id);
+  }
+  const heldDone = held.ok ? await run(held.job.id) : null;
+  is("so every one of the 20 is emailed their link", { mailed: heldDone?.counts.mailed, unmailed: heldDone?.counts.unmailed, state: heldDone?.state }, { mailed: 20, unmailed: 0, state: "done" });
+
+  const BACK = "r46e-back@example.com";
+  await creatorStore(BACK, "r46back", { period: paidPeriod() });
+  const back = await startImport((await storeForEmail(BACK))!, BACK, "members", { expected: 5, file: "patrons.csv", stopped: true });
+  if (back.ok) {
+    const s = (await storeForEmail(BACK))!;
+    const rows = memberRows(3, in10, "back");
+    await addRows(s, back.job.id, [...rows, ["5", "back1@example.com", "The Inner Circle", rows[0][3], ""], ["6", "back2@example.com", "The Inner Circle", rows[0][3], ""]]);
+    await finishUpload(s, back.job.id);
+  }
+  const backDone = back.ok ? await run(back.job.id) : null;
+  is("a file of 5 rows that emails 3 (two repeated)", [back.ok, backDone?.counts.mailed, backDone?.state], [true, 3, "done"]);
+  is("gives back the 2 it did not use when it ends: 17 of 20 can go", await reserveMoved((await storeForEmail(BACK))!, 20), 17);
+
+  const STOP = "r46e-stop@example.com";
+  await creatorStore(STOP, "r46stop", { period: paidPeriod() });
+  const first = await startImport((await storeForEmail(STOP))!, STOP, "members", { expected: 6, file: "patrons.csv", stopped: true });
+  const busy = await startImport((await storeForEmail(STOP))!, STOP, "members", { expected: 4, file: "more.csv", stopped: true });
+  is("a second import while the first runs is told the store is busy", [first.ok, busy.ok, (busy as { reason?: string }).reason], [true, false, "busy"]);
+  if (first.ok) await cancelImport((await storeForEmail(STOP))!, first.job.id);
+  is("the busy refusal and the canceled import each give back what they held: all 20 can go", await reserveMoved((await storeForEmail(STOP))!, 20), 20);
+
+  part("The start follows the same rules as each send (review on #3384, MEDIUM 3)");
+  const FUNDED = "r46e-funded@example.com";
+  await creatorStore(FUNDED, "r46funded", { tier: "pro", period: { ...paidPeriod(), funded: true } });
+  const sentBefore = emails.length;
+  const funded = await startImport((await storeForEmail(FUNDED))!, FUNDED, "members", { expected: 3, file: "patrons.csv", stopped: true });
+  is(
+    "Studio whose funded period is not reserved can send none of the month's emails: 3 members do not start",
+    [funded.ok, (funded as { reason?: string }).reason, (funded as { limit?: number }).limit],
+    [false, "emails_month", 0],
+  );
+  is("nothing is invited, emailed or listed", [(await moveCounts((await storeForEmail(FUNDED))!)).invited, emails.length - sentBefore, (await storeImports((await storeForEmail(FUNDED))!)).length], [0, 0, 0]);
 
   part("A reminder refused by a full month waits for the month to open again");
   const RE = "r46e-remind@example.com";

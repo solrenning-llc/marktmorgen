@@ -523,7 +523,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                         membership; a code from a link and your store sale on those begun from October 12, 2026. A code typed into Stripe&apos;s own box
                         is not written on the membership, so it is counted at full price here.
                       </p>
-                      {introAgain && introRepeatWords(introAgain) ? (
+                      {introAgain === null || introRepeatWords(introAgain) ? (
                         <p className="mt-3 max-w-2xl text-sm text-ink" data-intro-repeat>
                           {introRepeatWords(introAgain)}
                         </p>

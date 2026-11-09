@@ -202,6 +202,16 @@ export class MemoryRedis {
           }
           return out;
         }
+        // lib/intro-repeat.ts INTRO_REPEAT_COUNT_IF: a sale's mark and its count in one step, counted only when unmarked.
+        if (key.startsWith("-- marktmorgen:intro-repeat-count:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, month, field, markSeconds, keepSeconds] = args;
+          this.scriptCalls += 1;
+          if (this.run(["SET", mark, "1", "NX", "EX", markSeconds]) !== "OK") return 0;
+          this.scriptCalls += 2;
+          this.run(["HINCRBY", month, field, 1]);
+          this.run(["EXPIRE", month, keepSeconds]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

@@ -143,6 +143,8 @@ test("the sweep hands paid checkouts to it, and the memberships page shows the m
   assert.match(page, /data-intro-repeat/);
   const words = api.introRepeatWords as (month: { repeat: number; first: number; unknown: number }) => string;
   assert.equal(typeof words, "function");
-  assert.match(words({ repeat: 2, first: 5, unknown: 0 }), /2 people who had .* before paid its introductory price again/);
-  assert.match(words({ repeat: 1, first: 0, unknown: 1 }), /1 person .*1 more/);
+  // Rule 23 (pre-review of 099b23b129): "2 people who had ... before" and "1 person ... 1 more"; the line now counts
+  // sales by the same email address (not people), in UTC, and says the unknowns apart (tests/intro-repeat-prerev.test.ts).
+  assert.match(words({ repeat: 2, first: 5, unknown: 0 }), /2 sales at the introductory price went to buyers with the same email address/);
+  assert.match(words({ repeat: 1, first: 0, unknown: 1 }), /1 sale .*For 1 sale .*could not be checked/);
 });

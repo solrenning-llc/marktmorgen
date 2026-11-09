@@ -58,7 +58,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/checkout-recovery.ts", how: "suppression", what: "If they had pressed stop on checkout reminders, that one-way mark stays, as their own no" },
   { file: "lib/checkout-recovery.ts", how: "erased", what: "The marks that they heard a checkout reminder about a product this week" },
   { file: "lib/checkout-ask.ts", how: "expires", days: 1, what: "A checkout reminder they asked for in the last hour waits in its queue; it is not sent to a deleted address" },
-  { file: "lib/intro-repeat.ts", how: "none", what: "An introductory price paid again is counted by store and month only (three numbers); the address is read from Stripe at the time and never kept, and a checkout's mark holds its id alone for two days" },
+  { file: "lib/intro-repeat.ts", how: "expires", days: 2, what: "An introductory price paid again is counted by store and month only (three numbers); the address is read from Stripe at the time and never kept, and a checkout's mark holds its id alone, gone by itself in two days" },
   { file: "lib/review-ask.ts", how: "none", what: "Review requests wait for their day by the order's reference, never by address, and are not sent to a deleted address" },
   { file: "lib/welcome-offer-send.ts", how: "erased", what: "When their welcome offer began, that its reminder was set, and the reminder still waiting for its hour, with their address" },
   { file: "lib/winback-send.ts", how: "erased", what: "The marks that they heard a come-back offer about a product" },

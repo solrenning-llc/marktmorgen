@@ -495,11 +495,6 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     if (paid.some((row) => row.metadata?.ab)) {
       await noteTestSales(store.statsId, store.currency, paid).catch((error) => console.error("counting a tested page's sales failed", store.handle, error));
     }
-    // A membership paid at its introductory price by an address that had it before is accepted and counted, by store
-    // and month, once a checkout (owner's decision 15, lib/intro-repeat.ts); it never throws.
-    if (paid.some((row) => row.mode === "subscription" && row.metadata?.intro)) {
-      await noteIntroRepeats(store, paid, deadline);
-    }
     // The creator's ad platforms, sent each sale whose buyer allowed ad
     // measurement, whether or not the buyer came back from Stripe (lib/ad-events.ts).
     if (sendsFromServer(store) && paid.some((row) => row.metadata?.ads)) {
@@ -539,6 +534,13 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         failOrder(paid[i].id as string);
         console.error("a paid order's confirmation was left for the next run", paid[i].id, describe(error));
       }
+    }
+
+    // A membership paid at its introductory price by an address that had it before is accepted and counted, by store
+    // and month, once a checkout (owner's decision 15, lib/intro-repeat.ts): after the confirmations, so it never takes
+    // their time, and never past the pass's deadline; it never throws.
+    if (paid.some((row) => row.mode === "subscription" && row.metadata?.intro)) {
+      await noteIntroRepeats(store, paid, deadline);
     }
 
     // Every buyer of an ordinary order finds this store in their library,

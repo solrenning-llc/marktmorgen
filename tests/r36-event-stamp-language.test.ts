@@ -140,7 +140,7 @@ async function main(): Promise<void> {
   for (const code of others) {
     const post = posts[code];
     is(`${code}: the title and the sentence are in the store's language`, [ENGLISH_EVENT.test(post.title), ENGLISH_EVENT.test(post.text)], [false, false]);
-    is(`${code}: the time and the length are the store's way (the event's zone, the store's language)`, post.text.startsWith(`${eventTimeIn(storeIn(code), event)}, ${lengthIn(storeIn(code), 90)}.`), true);
+    is(`${code}: the time and the length are the store's way (the event's zone, the store's language), ending in one period`, [post.text.startsWith(`${eventTimeIn(storeIn(code), event)}, ${lengthIn(storeIn(code), 90)}`), /^[^\n]*[^.]\.\n/.test(post.text)], [true, true]);
     is(`${code}: the post still carries the title, what the creator wrote and the event page`, [post.title.includes("Sauerteig live"), post.text.includes("Wir backen zusammen"), post.text.endsWith(page)], [true, true, true]);
   }
   is("each language's title and sentence are its own (no two alike)", new Set(LANGUAGE_CODES.map((code) => `${posts[code].title}|${posts[code].text.split("\n\n").at(-1)}`)).size, 7);

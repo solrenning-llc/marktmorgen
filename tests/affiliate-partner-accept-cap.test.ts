@@ -73,8 +73,10 @@ async function main(): Promise<void> {
   const two = await shop("two@example.com", "twoshop");
   const first = await post({ action: "invite", email: "one@example.com", percent: 80, products: [product] });
   const second = await post({ action: "invite", email: "two@example.com", percent: 80, products: [product] });
-  is("the first invitation waits in their studio", [first.status, first.body.waiting], [200, true]);
-  is("the second invitation waits too: nobody has accepted yet", [second.status, second.body.waiting], [200, true]);
+  // Rule 23: the answer no longer says `waiting: true` for an address with a store (Claude 5's authentication audit, M4):
+  // that the invitation waits in their studio is read from their studio's list instead.
+  is("the first invitation waits in their studio", [first.status, first.body.waiting, (await waitingFor("one@example.com")).length], [200, undefined, 1]);
+  is("the second invitation waits too: nobody has accepted yet", [second.status, second.body.waiting, (await waitingFor("two@example.com")).length], [200, undefined, 1]);
   const offerOne = (await waitingFor("one@example.com"))[0];
   const offerTwo = (await waitingFor("two@example.com"))[0];
   const yesOne = await one({ action: "answer", invite: offerOne.id, accept: true });

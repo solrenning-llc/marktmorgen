@@ -314,7 +314,9 @@ export async function POST(request: NextRequest) {
       const theirs = to ? await storeForEmail(to).catch(() => null) : null;
       const alreadyHere = Boolean(theirs && theirs.sid !== store.sid);
       const sent = await invitePartner({ store, email: to, share, titles, origin, alreadyHere });
-      if (sent === "sent" || sent === "waiting") return Response.json({ ok: true, waiting: sent === "waiting" });
+      // The same answer either way (Claude 5's authentication audit, M4, rule 30): whether the address has a store
+      // here is told only to whoever reads its inbox or its studio, never to the creator who typed it.
+      if (sent === "sent" || sent === "waiting") return Response.json({ ok: true });
       return fail(sent === "email" ? "invite_email" : sent);
     }
     if (action === "share") {

@@ -72,10 +72,6 @@ export async function POST(request: NextRequest) {
   const store = await storeForEmail(email);
   if (!store) return back("none");
 
-  // Refused here rather than at the tap, so that a store which could never
-  // land there does not put an invitation in a stranger's inbox first.
-  if (await storeForEmail(wanted)) return back("taken");
-
   if (!isAuthConfigured()) return back("unavailable");
   // Moving the account outlives any session, so it needs a recent login, as
   // adding a passkey does: a session cookie that walked off cannot start it.
@@ -89,8 +85,12 @@ export async function POST(request: NextRequest) {
     if (inbox === "over") return back("limited");
     // Never onto an address with ways in of its own: they would join this account's (checked again at the
     // tap). Asked only after the store, a recent login, the address's hourly count and the account's own
-    // (five addresses an hour), so finding out which addresses have passkeys this way stays slow and limited.
+    // (five addresses an hour), so finding out which addresses have passkeys, or a store, stays slow and limited.
     if (!(await withinLimit("move-ask", normaliseEmail(email), MOVE_ASKS_PER_HOUR, 60 * 60))) return back("limited");
+    // Refused here rather than at the tap, so that a store which could never land there does not put an invitation
+    // in a stranger's inbox first. Asked as late as the passkeys, for the same reason (Claude 5's authentication
+    // audit, M4): before them, any creator could test without limit which addresses have a store here.
+    if (await storeForEmail(wanted)) return back("taken");
     if (await holdsSecondStep(wanted)) return back("has-login");
     await sendMoveLink(email, wanted, linkOrigin(request), session as string);
   } catch (error) {

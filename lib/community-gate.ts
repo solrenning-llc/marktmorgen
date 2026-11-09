@@ -46,8 +46,12 @@ export function previewSpaces<S extends GatedSpace>(spaces: readonly S[], access
   return spaces.filter((space) => seesSpace(space, access, holdings));
 }
 
-/** How a locked space can be opened: by buying a product, not now, or not known (542 [CM1]). */
-export type Unlock = { title: string; href: string } | "none" | "unknown";
+/**
+ * How a locked space can be opened: by buying a product, not now, or not known (542 [CM1]); "unchecked" when the
+ * member's own access to it could not be checked just now, so no product is offered to somebody who may hold one
+ * (CX-123 rule 24).
+ */
+export type Unlock = { title: string; href: string } | "none" | "unknown" | "unchecked";
 
 /** All a page draws of one locked space: never its id, address or anything from inside it. */
 export type LockedSpace = { name: string; about: string; unlock: Unlock };
@@ -67,8 +71,12 @@ export function lockedOf<S extends GatedSpace & { shown?: true }>(config: { spac
 }
 
 /** What the page draws of them, with each one's way in (unlocksOf, lib/community-locked.ts); not read, or not there, is "unknown". */
-export function lockedList(locked: readonly { space: { id: string; name: string; about: string } }[], unlocks: Readonly<Record<string, Unlock>> | null): LockedSpace[] {
-  return locked.map(({ space }) => ({ name: space.name, about: space.about, unlock: unlocks?.[space.id] ?? "unknown" }));
+export function lockedList(
+  locked: readonly { space: { id: string; name: string; about: string } }[],
+  unlocks: Readonly<Record<string, Unlock>> | null,
+  unchecked: ReadonlySet<string> = new Set(),
+): LockedSpace[] {
+  return locked.map(({ space }) => ({ name: space.name, about: space.about, unlock: unchecked.has(space.id) ? "unchecked" : unlocks?.[space.id] ?? "unknown" }));
 }
 
 /**

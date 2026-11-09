@@ -95,6 +95,7 @@ import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
+import { REFUND_CHECK_WAITS, TICKET_CUSTOMERS, TICKET_PAYMENT_PAGES, TICKET_PAYMENT_PAGE_ROWS, TICKET_REFUND_CHECKS, TICKET_SESSION_PAGES, TICKET_SESSION_PAGE_ROWS, TICKET_STRIPE_WAITS } from "@/lib/community-read-rules";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
 import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
@@ -780,8 +781,23 @@ export function searchRead(size: { room: boolean; conversations: number }): numb
     + (size.room ? COMMAND + searchBodyWork(MAX_CHAT_KEPT * READ_ROOM_MESSAGE_BYTES) : 0)
     + size.conversations * (COMMAND + searchBodyWork(SEARCH_MESSAGES * READ_DM_MESSAGE_BYTES));
 }
-/** One check of who holds a product or an event: its cached answer read and written, and up to three calls to Stripe waited on at 2 GB. */
-export const ACCESS_CHECK_READ = 4 * COMMAND + 3 * (EXPORT_PAGE_SECONDS * MEMORY_SECOND + searchBodyWork(64_000));
+/** The most one checkout weighs as a ticket check lists it: with its membership, the membership's latest invoice and the payment's charge expanded. */
+const TICKET_SESSION_ROW_BYTES = 24_000;
+/** The most one payment weighs as a customer's payments are listed, with its charge expanded. */
+const TICKET_PAYMENT_ROW_BYTES = 6_000;
+/** The most one answer to a refund question (a dispute list, an invoice, its payments, a payment) weighs. */
+const TICKET_REFUND_READ_BYTES = 64_000;
+/**
+ * One check of who holds a product or an event (lib/community-access.ts, paidForAny): its cached answer read and
+ * written, and every call to Stripe it may wait on one after another (TICKET_STRIPE_WAITS, lib/community-read-rules.ts)
+ * at 2 GB, with every body it may read: both ways of the address, each TICKET_SESSION_PAGES pages of checkouts; the
+ * customers' pages of payments read side by side; TICKET_REFUND_CHECKS refund questions of REFUND_CHECK_WAITS calls.
+ * It was priced at three calls of 64 KB while it read up to twelve pages (CX-123 rule 24, 9 November 2026).
+ */
+export const ACCESS_CHECK_READ = 4 * COMMAND + TICKET_STRIPE_WAITS * EXPORT_PAGE_SECONDS * MEMORY_SECOND
+  + searchBodyWork(2 * TICKET_SESSION_PAGES * TICKET_SESSION_PAGE_ROWS * TICKET_SESSION_ROW_BYTES)
+  + searchBodyWork(TICKET_CUSTOMERS * TICKET_PAYMENT_PAGES * TICKET_PAYMENT_PAGE_ROWS * TICKET_PAYMENT_ROW_BYTES)
+  + searchBodyWork(TICKET_REFUND_CHECKS * REFUND_CHECK_WAITS * TICKET_REFUND_READ_BYTES);
 /** One step of the walk of a community's archive: its commands, the bytes it reads, and its round trip waited on. */
 export function walkRead(commands: number, bytes: number): number {
   return commands * COMMAND + searchBodyWork(bytes) + 0.05 * MEMORY_SECOND;

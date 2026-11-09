@@ -57,6 +57,8 @@ import { type DataStore, DataRoomError } from "@/lib/store-data";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 // The one Stripe version these lists are read at, so their shape is the one checked here (Revisor 1 on #2464).
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
+import { readStripePage } from "@/lib/stripe-list";
+import { TICKET_CUSTOMERS, TICKET_PAYMENT_PAGES, TICKET_PAYMENT_PAGE_ROWS, TICKET_REFUND_CHECKS, TICKET_SESSION_PAGES, TICKET_SESSION_PAGE_ROWS } from "@/lib/community-read-rules";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
@@ -86,8 +88,6 @@ const IP_LIMIT = 10;
 const ADDRESS_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
-/** The customers whose one-click additions are read for one answer. */
-const CUSTOMERS_READ = 10;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const okKey = (id: string, email: string) => `nl:cm:${id}:ok:${emailKey(email)}`;
@@ -104,9 +104,10 @@ type Row = Record<string, unknown>;
 /** A list from Stripe that is not one, or that has more than was read: whether the address holds anything is not known. */
 export class UnreadPurchasesError extends Error {
   /**
-   * True when asking again gives the same answer: Stripe has more than the one page read of this address's
-   * checkouts or payments, or more customers for it than are asked (CUSTOMERS_READ). A reply that is not a list
-   * at all may be a passing fault, and is not.
+   * True when asking again gives the same answer: Stripe has more than the pages read of this address's
+   * checkouts or payments (TICKET_SESSION_PAGES, TICKET_PAYMENT_PAGES), more customers for it than are asked
+   * (TICKET_CUSTOMERS), or more purchases to ask a refund of than are asked (TICKET_REFUND_CHECKS). A reply that
+   * is not a list at all may be a passing fault, and is not.
    */
   readonly lasting: boolean;
   constructor(what: string, lasting = false) {
@@ -129,19 +130,27 @@ export function askingAgainWontTell(error: unknown): boolean {
   return false;
 }
 
+/** Whether every list read for one answer was read to its end, every row readable (lib/stripe-list.ts). */
+type Reading = { whole: boolean };
+
 /**
- * The rows of a Stripe list, read exactly (CX-123 rule 24): `data` an array
- * and `has_more` a boolean, or the reply is not a list and throws. `complete`
- * is false when Stripe has more than this page: a "no" read from it is not a
- * "no" (Codex G on #2464), so a caller that finds nothing in it throws.
+ * The rows of one Stripe list, page after page from `starting_after`, each page read in its exact shape
+ * (lib/stripe-list.ts, readStripePage; CX-123 rule 24): a page in another shape throws, so it is never read as
+ * "bought nothing". At most `pages` pages; a row that does not read, more pages than that, or a last row with no
+ * id to go on from leaves the reading not whole, so a "no" read from it is not said (Codex G on #2464).
  */
-function listOf(listed: unknown, readable: (row: Row) => boolean): { rows: Row[]; complete: boolean } {
-  const list = listed && typeof listed === "object" ? (listed as { data?: unknown; has_more?: unknown }) : null;
-  if (!list || !Array.isArray(list.data) || typeof list.has_more !== "boolean") throw new UnreadPurchasesError("a reply that is not a list");
-  const rows = list.data.filter((row): row is Row => isRecord(row) && readable(row));
-  // An entry that is not the kind asked for (no id, an unknown state, a list in its place) proves nothing, and is not
-  // a "no" either: the readable ones may still prove a purchase, but the list is not complete (Revisor 1 on #2464).
-  return { rows, complete: !list.has_more && rows.length === list.data.length };
+async function* pagesOf(account: string, path: string, query: URLSearchParams, legible: (row: Row) => boolean, pages: number, reading: Reading): AsyncGenerator<Row[]> {
+  let after = "";
+  for (let page = 0; page < pages; page += 1) {
+    if (after) query.set("starting_after", after);
+    const read = readStripePage(await onAccount("GET", account, `${path}?${query}`, undefined, STRIPE_VERSION), legible);
+    if (read.unreadable > 0) reading.whole = false;
+    yield read.rows;
+    if (!read.hasMore) return;
+    if (!read.lastId) break;
+    after = read.lastId;
+  }
+  reading.whole = false;
 }
 
 const isRecord = (value: unknown): value is Row => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -170,60 +179,89 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   const handles = saleHandles(store);
   const customers = new Set<string>();
   // Whether every list read here was read to its end: a "no" is only a "no" when it was.
-  let complete = true;
+  const reading: Reading = { whole: true };
+  // A refund or a lost dispute is asked of Stripe for at most TICKET_REFUND_CHECKS purchases (the reads stay
+  // bounded); one more that would need asking leaves the answer unread, never "no".
+  let refundChecks = 0;
+  const mayAsk = (asks: boolean) => {
+    if (!asks) return true;
+    if (refundChecks >= TICKET_REFUND_CHECKS) return false;
+    refundChecks += 1;
+    return true;
+  };
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   for (const variant of variants) {
-    const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
+    const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: String(TICKET_SESSION_PAGE_ROWS) });
     query.append("expand[]", "data.subscription");
+    query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
-    const listed = listOf(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_VERSION), isSessionRow);
-    if (!listed.complete) complete = false;
-    for (const session of listed.rows) {
-      // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
-      const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
-      if (!handles.has(meta.store ?? "")) continue;
-      if (!isSettled(session)) continue;
-      if (refunded(session.payment_intent)) continue;
-      if (typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer)) customers.add(session.customer);
-      // A product in a bundle opens the door as if bought on its own.
-      const bought = deliveredIds(meta).filter((id) => ids.has(id));
-      if (!bought.length) continue;
-      // A payment plan's first payment is read only for a purchase that would open the door.
-      if (await purchaseRefunded(account, session)) continue;
-      // A membership opens the door while it is being paid for; a payment
-      // plan is a one-off paid in parts, and counts like one.
-      if (session.mode === "subscription" && meta.kind !== "plan") {
-        const sub = session.subscription as { status?: unknown } | null;
-        // The same rule as every other door a membership opens (lib/membership-access.ts).
-        if (!sub || typeof sub !== "object" || !isLiveSub(sub)) continue;
+    for await (const rows of pagesOf(account, "/checkout/sessions", query, isSessionRow, TICKET_SESSION_PAGES, reading)) {
+      for (const session of rows) {
+        // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
+        const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
+        if (!handles.has(meta.store ?? "")) continue;
+        if (!isSettled(session)) continue;
+        if (refunded(session.payment_intent)) continue;
+        if (typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer)) customers.add(session.customer);
+        // A product in a bundle opens the door as if bought on its own.
+        const bought = deliveredIds(meta).filter((id) => ids.has(id));
+        if (!bought.length) continue;
+        // A payment plan's first payment is read only for a purchase that would open the door.
+        if (!mayAsk((session.mode === "subscription" && meta.kind === "plan") || disputed(session.payment_intent))) {
+          reading.whole = false;
+          continue;
+        }
+        if (await purchaseRefunded(account, session)) continue;
+        // A membership opens the door while it is being paid for; a payment
+        // plan is a one-off paid in parts, and counts like one.
+        if (session.mode === "subscription" && meta.kind !== "plan") {
+          const sub = session.subscription as { status?: unknown } | null;
+          // The same rule as every other door a membership opens (lib/membership-access.ts).
+          if (!sub || typeof sub !== "object" || !isLiveSub(sub)) continue;
+        }
+        return true;
       }
-      return true;
     }
   }
   // What was added in one click after paying is its own payment.
-  // At most ten customers are asked (the reads stay bounded); more than that leaves the answer unread, not "no".
-  if (customers.size > CUSTOMERS_READ) complete = false;
-  for (const customer of [...customers].slice(0, CUSTOMERS_READ)) {
-    const query = new URLSearchParams({ customer, limit: "50" });
-    query.append("expand[]", "data.latest_charge");
-    const listed = listOf(await onAccount("GET", account, `/payment_intents?${query}`, undefined, STRIPE_VERSION), isIntentRow);
-    if (!listed.complete) complete = false;
-    for (const intent of listed.rows) {
-      const meta = (intent.metadata ?? {}) as Record<string, string>;
-      if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) continue;
-      if (intent.status !== "succeeded" || refunded(intent)) continue;
-      if (!deliveredIds(meta).some((id) => ids.has(id))) continue;
-      // Lost to a dispute is given back too (lib/refunds.ts); asked only of a
-      // charge Stripe marks disputed, and a failed read keeps it, as a refund read does.
-      if (await keptUnlessLost(account, intent)) continue;
-      return true;
+  // At most TICKET_CUSTOMERS customers are asked, side by side (the reads stay bounded); more than that leaves the
+  // answer unread, not "no".
+  if (customers.size > TICKET_CUSTOMERS) reading.whole = false;
+  const payments = await Promise.all(
+    [...customers].slice(0, TICKET_CUSTOMERS).map(async (customer) => {
+      const query = new URLSearchParams({ customer, limit: String(TICKET_PAYMENT_PAGE_ROWS) });
+      query.append("expand[]", "data.latest_charge");
+      const rows: Row[] = [];
+      for await (const page of pagesOf(account, "/payment_intents", query, isIntentRow, TICKET_PAYMENT_PAGES, reading)) rows.push(...page);
+      return rows;
+    }),
+  );
+  for (const intent of payments.flat()) {
+    const meta = (intent.metadata ?? {}) as Record<string, string>;
+    if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) continue;
+    if (intent.status !== "succeeded" || refunded(intent)) continue;
+    if (!deliveredIds(meta).some((id) => ids.has(id))) continue;
+    // Lost to a dispute is given back too (lib/refunds.ts); asked only of a
+    // charge Stripe marks disputed, and a failed read keeps it, as a refund read does.
+    if (!mayAsk(disputed(intent))) {
+      reading.whole = false;
+      continue;
     }
+    if (await keptUnlessLost(account, intent)) continue;
+    return true;
   }
   // Nothing found, but not everything was read: unknown, never "holds none of them". A door that does not need to
   // know (not strict) lets nobody in on it and keeps no answer; a strict door says it could not be asked.
-  if (!complete) throw new UnreadPurchasesError("more than one page", true);
+  if (!reading.whole) throw new UnreadPurchasesError("more than is read", true);
   return false;
+}
+
+/** Whether a payment's charge, as Stripe expanded it, is marked disputed: only then is a lost dispute asked about (lib/refunds.ts disputeLost). */
+function disputed(payment: unknown): boolean {
+  // The same charge lib/refunds.ts reads (chargeOf): a Charge itself, or a payment's latest charge as expanded.
+  const charge = !isRecord(payment) ? null : payment.object === "charge" ? payment : isRecord(payment.latest_charge) ? payment.latest_charge : null;
+  return Boolean(charge && charge.disputed === true);
 }
 
 /** Whether a confirmed address on the creator's list got one of these free things. */
@@ -297,18 +335,55 @@ export async function holdsProductsOrThrow(store: Store, ids: string[], email: s
   return ticketFor(store, ids, email, cacheKey, version, true);
 }
 
+/** Whether an address holds a ticket: yes, no, or not known just now (Stripe could not be read whole). */
+export type Ticket = boolean | "unknown";
+
+/**
+ * Whether this address holds a community ticket, said as it is: "unknown" when Stripe could not be asked, or not
+ * read to its end (CX-123 rule 24, 9 November 2026), never a "no" a paying member would be told as "you have
+ * nothing that opens it". For the community's own door (communityViewer) and its "Send me the link".
+ */
+export async function ticketState(store: Store, config: CommunityConfig, email: string): Promise<Ticket> {
+  const id = store.community?.id;
+  if (!id) return false;
+  if (!isRedisConfigured()) return "unknown";
+  try {
+    const answer = await ticketAnswer(store, config.access, email, okKey(id, email), config.v);
+    if ("ok" in answer) return answer.ok;
+    console.error("checking community access failed", answer.unread);
+  } catch (error) {
+    console.error("checking community access failed", error);
+  }
+  return "unknown";
+}
+
 async function ticketFor(store: Store, ids: string[], email: string, cacheKey: string, version: number | string, strict = false): Promise<boolean> {
+  const answer = await ticketAnswer(store, ids, email, cacheKey, version);
+  if ("ok" in answer) return answer.ok;
+  // Stripe could not be asked, or not read whole. Nobody is let in on a guess, and the answer is not kept, so the
+  // next page asks again. A door that would take something away on a no is told it could not be asked.
+  if (strict) throw answer.unread;
+  console.error("checking community access failed", answer.unread);
+  return false;
+}
+
+/**
+ * Stripe's answer for one address and these products, kept under `cacheKey` with `version`: `ok` when it is known,
+ * `unread` (what went wrong) when it is not. Only a known answer is kept; keeping it is a saving only, so a failed
+ * write leaves the answer just read to decide.
+ */
+async function ticketAnswer(store: Store, ids: string[], email: string, cacheKey: string, version: number | string): Promise<{ ok: boolean } | { unread: unknown }> {
   // Which products let in, and whether each is free, is in the store record.
   const products = ids.flatMap((pid) => {
     const item = itemFor(store, pid);
     return item ? [{ id: item.id, free: (item.kind & KIND.free) !== 0 }] : [];
   });
-  if (products.length === 0) return false;
+  if (products.length === 0) return { ok: false };
   const [cached] = await redisPipeline([["GET", cacheKey]]);
   if (typeof cached === "string") {
     try {
       const value = JSON.parse(cached) as { v?: unknown; ok?: unknown };
-      if (value.v === version && typeof value.ok === "boolean") return value.ok;
+      if (value.v === version && typeof value.ok === "boolean") return { ok: value.ok };
     } catch {}
   }
   const free = new Set(products.filter((p) => p.free).map((p) => p.id));
@@ -321,15 +396,12 @@ async function ticketFor(store: Store, ids: string[], email: string, cacheKey: s
       (await broughtOver(store, email, new Set(products.map((p) => p.id)))) ||
       (await paidForAny(store, email, paid));
   } catch (error) {
-    // Stripe could not be asked. Nobody is let in on a guess, and the answer
-    // is not kept, so the next page asks again. A door that would take
-    // something away on a no is told it could not be asked.
-    if (strict) throw error;
-    console.error("checking community access failed", error);
-    return false;
+    return { unread: error };
   }
-  await redisPipeline([["SET", cacheKey, JSON.stringify({ v: version, ok }), "EX", ok ? OPEN_SECONDS : SHUT_SECONDS]]);
-  return ok;
+  await redisPipeline([["SET", cacheKey, JSON.stringify({ v: version, ok }), "EX", ok ? OPEN_SECONDS : SHUT_SECONDS]]).catch((error) => {
+    console.error("keeping a community access answer failed", error);
+  });
+  return { ok };
 }
 
 /**
@@ -350,18 +422,36 @@ export async function maySeeSpace(
   space: { id: string; only: string[] },
   viewer: { owner: boolean; email: string },
 ): Promise<boolean> {
+  // An answer that could not be read is not a yes: the space stays shut, never opened on a guess.
+  return (await spaceAnswer(store, config, space, viewer)) === true;
+}
+
+/**
+ * maySeeSpace's answer as it is: "unknown" when Stripe, or the kept answer, could not be read (CX-123 rule 24,
+ * 9 November 2026), so a page can say it could not check instead of telling a member who may hold the product
+ * that the space is not for them.
+ */
+export async function spaceAnswer(
+  store: Store,
+  config: CommunityConfig,
+  space: { id: string; only: string[] },
+  viewer: { owner: boolean; email: string },
+): Promise<Ticket> {
   if (viewer.owner) return true;
   // The same rule the creator's "View as a member" uses (lib/community-gate.ts).
   const gate = spaceGate(space, config.access);
   if (gate.open) return true;
-  const ids = gate.needs;
   const id = store.community?.id;
   if (!id) return false;
-  // An answer that could not be read is a no: the space stays shut (locked or hidden), never opened on a guess.
-  return holdsAnyOf(store, ids, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v)).catch((error) => {
+  if (!isRedisConfigured()) return "unknown";
+  try {
+    const answer = await ticketAnswer(store, gate.needs, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v));
+    if ("ok" in answer) return answer.ok;
+    console.error("checking a community space's access failed", answer.unread);
+  } catch (error) {
     console.error("checking a community space's access failed", error);
-    return false;
-  });
+  }
+  return "unknown";
 }
 
 /**
@@ -373,12 +463,25 @@ export async function visibleSpaces(
   config: CommunityConfig,
   viewer: { owner: boolean; email: string },
 ): Promise<Space[]> {
-  if (viewer.owner) return config.spaces;
+  return (await spaceChecks(store, config, viewer)).spaces;
+}
+
+/** visibleSpaces, with the ids of the kept spaces whose answer was not known kept apart (never shown, never said to be closed). */
+export async function spaceChecks(
+  store: Store,
+  config: CommunityConfig,
+  viewer: { owner: boolean; email: string },
+): Promise<{ spaces: Space[]; unchecked: Set<string> }> {
+  const unchecked = new Set<string>();
+  if (viewer.owner) return { spaces: config.spaces, unchecked };
   const gated = config.spaces.filter((s) => s.only.length);
-  if (!gated.length) return config.spaces;
-  const allowed = await Promise.all(gated.map((s) => maySeeSpace(store, config, s, viewer)));
-  const mine = new Set(gated.filter((_, i) => allowed[i]).map((s) => s.id));
-  return config.spaces.filter((s) => !s.only.length || mine.has(s.id));
+  if (!gated.length) return { spaces: config.spaces, unchecked };
+  const answers = await Promise.all(gated.map((s) => spaceAnswer(store, config, s, viewer)));
+  const mine = new Set(gated.filter((_, i) => answers[i] === true).map((s) => s.id));
+  gated.forEach((s, i) => {
+    if (answers[i] === "unknown") unchecked.add(s.id);
+  });
+  return { spaces: config.spaces.filter((s) => !s.only.length || mine.has(s.id)), unchecked };
 }
 
 /** Forgets Stripe's answer for one address, so the next request asks again. */
@@ -396,6 +499,8 @@ export type Viewer =
   | { state: "out"; config: CommunityConfig }
   /** A proved address that holds no ticket. */
   | { state: "closed"; config: CommunityConfig; email: string }
+  /** A proved address whose ticket could not be checked just now (Stripe could not be read whole): neither in nor closed. */
+  | { state: "unknown"; config: CommunityConfig; email: string }
   /** Taken out by the creator. */
   | { state: "removed"; config: CommunityConfig; email: string }
   | {
@@ -430,7 +535,10 @@ export async function communityViewer(store: Store, cookies: CookieJar): Promise
   const key = memberKey(learner.email);
   const existing = await readMember(id, key);
   if (existing?.removed) return { state: "removed", config, email: learner.email };
-  if (!(await holdsTicket(store, config, learner.email))) return { state: "closed", config, email: learner.email };
+  const ticket = await ticketState(store, config, learner.email);
+  // Not known is said as such, never as "nothing that opens it" to somebody who may have paid (CX-123 rule 24).
+  if (ticket === "unknown") return { state: "unknown", config, email: learner.email };
+  if (!ticket) return { state: "closed", config, email: learner.email };
   const member = await touchMember(id, learner.email, existing, store);
   // The first time somebody comes in, the creator's welcome, sent privately
   // from the creator, where messages are on (lib/community-dm.ts). Once: the
@@ -535,7 +643,10 @@ export async function requestCommunityLink(input: {
   if (!config) return "error";
   const member = await readMember(id, memberKey(raw));
   if (member?.removed) return "sent";
-  if (!(await holdsTicket(store, config, raw))) return "sent";
+  const ticket = await ticketState(store, config, raw);
+  // Not confirmed either way: "try again", never a quiet "sent" with nothing sent to somebody who paid.
+  if (ticket === "unknown") return "error";
+  if (!ticket) return "sent";
 
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { e: normaliseEmail(raw), k: storeKey(store), h: store.handle };

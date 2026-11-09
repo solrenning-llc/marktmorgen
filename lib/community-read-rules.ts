@@ -26,8 +26,38 @@ export const SEARCH_UNITS = 5;
 export const SEARCH_ROOM_UNITS = 2;
 /** Each of the member's conversations read for a search where messages are on (lib/community-dm.ts, SEARCH_MESSAGES of each). */
 export const SEARCH_UNITS_PER_CONVERSATION = 2;
-/** Each check of who holds a product or an event shown on the lessons' or events' tab, which may ask Stripe (lib/community-access.ts). */
-export const SEARCH_UNITS_PER_CHECK = 1;
+/**
+ * Each check of who holds a product or an event shown on the lessons' or events' tab, which may ask Stripe
+ * (lib/community-access.ts): enough units for the most one check waits on Stripe (TICKET_STRIPE_WAITS), held in
+ * tests/plan-cost-registry.test.ts. It was 1 while a check read one page of checkouts and was priced at three calls,
+ * fewer than it made (CX-123 rule 24, 9 November 2026).
+ */
+export const SEARCH_UNITS_PER_CHECK = 16;
+
+/**
+ * What one answer to "does this address hold a ticket" may read of the creator's Stripe account, at the most
+ * (lib/community-access.ts, paidForAny; CX-123 rule 24, 9 November 2026). Past any of these the answer is not
+ * known, never "no": the door says it could not check, and a strict door is told asking again will not tell.
+ */
+/** Pages of one address's checkouts read, TICKET_SESSION_PAGE_ROWS to a page, for each way the address is written (two at most). */
+export const TICKET_SESSION_PAGES = 2;
+/** Checkouts on one such page: Stripe's most. */
+export const TICKET_SESSION_PAGE_ROWS = 100;
+/** Customers the address paid as whose one-click additions are read, side by side. */
+export const TICKET_CUSTOMERS = 10;
+/** Pages of one such customer's payments read, TICKET_PAYMENT_PAGE_ROWS to a page: one, as before 9 November 2026. */
+export const TICKET_PAYMENT_PAGES = 1;
+/** Payments on one such page. */
+export const TICKET_PAYMENT_PAGE_ROWS = 50;
+/** Purchases whose refund or lost dispute is asked of Stripe for one answer (lib/refunds.ts purchaseRefunded, keptUnlessLost). */
+export const TICKET_REFUND_CHECKS = 2;
+/**
+ * The calls one such question waits on, one after another, at the most: the dispute, a payment plan's invoice, its
+ * payments, its first payments side by side, and their disputes side by side.
+ */
+export const REFUND_CHECK_WAITS = 5;
+/** Every Stripe call one answer waits on, one after another, at the most: the pages of both ways of the address, the customers' pages read side by side, the refund questions. */
+export const TICKET_STRIPE_WAITS = 2 * TICKET_SESSION_PAGES + TICKET_PAYMENT_PAGES + TICKET_REFUND_CHECKS * REFUND_CHECK_WAITS;
 
 export type SearchSize = {
   /** Whether the room is searched. */

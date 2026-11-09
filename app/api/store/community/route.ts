@@ -28,7 +28,7 @@ import {
   within,
   withPin,
 } from "@/lib/community";
-import { communityViewer, maySeeSpace } from "@/lib/community-access";
+import { communityViewer, spaceAnswer } from "@/lib/community-access";
 import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
@@ -154,7 +154,9 @@ export async function POST(request: NextRequest) {
       if (chosen.creatorOnly && !owner) return back(fromPage, "creatoronly");
       // A space kept for the buyers of some products: the same gate the feed
       // asks, asked again here, because a form can be sent from anywhere.
-      if (!(await maySeeSpace(store, config, chosen, { owner, email: viewer.email }))) return back(home, "spacelocked");
+      // Not known is said as not checked, never as a space that is not theirs (CX-123 rule 24).
+      const may = await spaceAnswer(store, config, chosen, { owner, email: viewer.email });
+      if (may !== true) return back(home, may === "unknown" ? "spaceunknown" : "spacelocked");
       // A space that opens for posting at a level (lib/community-points.ts).
       // Reading and commenting stay open to every member.
       if (!owner && chosen.level >= 2) {
@@ -256,9 +258,8 @@ export async function POST(request: NextRequest) {
     const post = await readPost(id, postId);
     if (!post || (post.hid && !owner)) return back(home, "gone");
     const itsSpace = config.spaces.find((s) => s.id === post.sp);
-    if (itsSpace && !(await maySeeSpace(store, config, itsSpace, { owner, email: viewer.email }))) {
-      return back(home, "spacelocked");
-    }
+    const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email }) : true;
+    if (may !== true) return back(home, may === "unknown" ? "spaceunknown" : "spacelocked");
 
     if (action === "comment") {
       const text = cleanText(form.get("text"), MAX_COMMENT_TEXT);

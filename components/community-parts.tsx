@@ -30,7 +30,7 @@ import { NewTab } from "@/components/new-tab";
 const WARN = new Set([
   "noemail", "dmoff", "dmbetween", "dmfull", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
   "name", "questions", "image", "creatoronly", "level", "muted", "full", "fullposts", "fullcomments", "pinfull", "gone", "forbidden",
-  "eventfull", "eventcancelled", "eventover", "eventlocked", "host", "nospace", "spacelocked", "out", "off", "error", "locked",
+  "eventfull", "eventcancelled", "eventover", "eventlocked", "host", "nospace", "spacelocked", "spaceunknown", "out", "off", "error", "locked",
 ]);
 
 /** What happened after a button, in the store's language (lib/buyer-words/community.ts). */
@@ -626,7 +626,7 @@ export function Gate({
 }: {
   store: Store;
   config: CommunityConfig;
-  state: "out" | "closed" | "removed";
+  state: "out" | "closed" | "removed" | "unknown";
   email: string | null;
   products: { id: string; title: string; kind: string }[];
   link: { title: string; body: string } | null;
@@ -655,9 +655,21 @@ export function Gate({
           <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.closedTitle}</p>
           <p className="mt-1 text-sm">{w.closedBody(email ?? "", store.name)}</p>
         </div>
+      ) : state === "unknown" ? (
+        // Stripe could not be read whole just now: neither in nor told they have nothing, nor offered a product
+        // they may hold already; one way on, to check again (CX-123 rule 24).
+        <div className="st-note mt-6" role="status">
+          <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.unknownTitle}</p>
+          <p className="mt-1 text-sm">{w.unknownBody(email ?? "", store.name)}</p>
+          <p className="mt-2 text-sm">
+            <Link href={`/@${store.handle}/community`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+              {w.unknownAgain}
+            </Link>
+          </p>
+        </div>
       ) : null}
 
-      {state !== "removed" && products.length > 0 ? (
+      {state !== "removed" && state !== "unknown" && products.length > 0 ? (
         <div className="mt-6">
           <p className="text-sm font-semibold">{w.openToEveryone}</p>
           <ul className="mt-2 space-y-2">
@@ -673,7 +685,7 @@ export function Gate({
         </div>
       ) : null}
 
-      {state !== "removed" ? (
+      {state !== "removed" && state !== "unknown" ? (
         <LinkRequestForm
           action="/api/store/community/link"
           hidden={{ handle: store.handle }}

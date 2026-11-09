@@ -79,6 +79,7 @@ const en = {
     host: "You host this event, so there is no place for you to take.",
     nospace: "There is no space to post in yet.",
     spacelocked: "That space is for members who have one of the products it is kept for.",
+    spaceunknown: "We could not check your access to that space just now. Nothing was changed. Try again in a minute.",
     out: "Your session here ended. Ask for a new link below.",
     off: "This community is closed right now.",
     error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
@@ -180,6 +181,11 @@ const en = {
   closedTitle: "Nothing that opens it yet",
   closedBody: (email: string, store: string) =>
     `${email} has nothing from ${store} that opens this community, or a membership that did has stopped. If you used another address, ask for a link with it below.`,
+  /** Stripe could not be read whole just now: neither in nor closed (lib/community-access.ts, communityViewer "unknown"). */
+  unknownTitle: "We could not check your access just now",
+  unknownBody: (email: string, store: string) =>
+    `Signed in as ${email}. Your purchase from ${store} could not be confirmed with the payment service at this moment. Nothing was changed. Try again in a minute.`,
+  unknownAgain: "Check my access to this community again",
   openToEveryone: "Open to everyone who has",
   tryAnotherAddress: "Try another address",
   alreadyMember: "Already a member?",
@@ -651,6 +657,7 @@ const es: CommunityWords = {
     host: "Tú presentas este evento, así que no tienes que reservar plaza.",
     nospace: "Todavía no hay ningún espacio donde publicar.",
     spacelocked: "Ese espacio es para los miembros que tienen uno de los productos a los que está reservado.",
+    spaceunknown: "No pudimos comprobar tu acceso a ese espacio ahora mismo. No se cambió nada. Inténtalo de nuevo en un minuto.",
     out: "Tu sesión aquí ha terminado. Pide un enlace nuevo abajo.",
     off: "Esta comunidad está cerrada ahora mismo.",
     error: "Algo falló por nuestra parte. No se cambió nada; vuelve a intentarlo en un momento.",
@@ -744,6 +751,10 @@ const es: CommunityWords = {
   closedTitle: "Todavía no hay nada que la abra",
   closedBody: (email, store) =>
     `${email} no tiene nada de ${store} que abra esta comunidad, o una membresía que la abría se ha detenido. Si usaste otra dirección, pide un enlace con ella abajo.`,
+  unknownTitle: "No pudimos comprobar tu acceso ahora mismo",
+  unknownBody: (email, store) =>
+    `Has entrado como ${email}. No se pudo confirmar tu compra en ${store} con el servicio de pagos en este momento. No se cambió nada. Inténtalo de nuevo en un minuto.`,
+  unknownAgain: "Comprobar de nuevo mi acceso a esta comunidad",
   openToEveryone: "Abierta a todos los que tienen",
   tryAnotherAddress: "Prueba otra dirección",
   alreadyMember: "¿Ya eres miembro?",
@@ -1201,6 +1212,7 @@ const fr: CommunityWords = {
     host: "Vous animez cet événement, il n'y a donc pas de place à réserver pour vous.",
     nospace: "Il n'y a pas encore d'espace où publier.",
     spacelocked: "Cet espace est réservé aux membres qui possèdent l'un des produits pour lesquels il est gardé.",
+    spaceunknown: "Nous n'avons pas pu vérifier votre accès à cet espace pour le moment. Rien n'a été modifié. Réessayez dans une minute.",
     out: "Votre session ici a pris fin. Demandez un nouveau lien ci-dessous.",
     off: "Cette communauté est fermée pour le moment.",
     error: `Un problème est survenu de notre côté. Rien n'a été modifié${S}; réessayez dans un instant.`,
@@ -1294,6 +1306,10 @@ const fr: CommunityWords = {
   closedTitle: "Rien ne l'ouvre encore",
   closedBody: (email, store) =>
     `${email} ne possède rien de ${store} qui ouvre cette communauté, ou un abonnement qui l'ouvrait a pris fin. Si vous avez utilisé une autre adresse, demandez un lien avec elle ci-dessous.`,
+  unknownTitle: "Nous n'avons pas pu vérifier votre accès pour le moment",
+  unknownBody: (email, store) =>
+    `Connecté en tant que ${email}. Votre achat chez ${store} n'a pas pu être confirmé auprès du service de paiement pour l'instant. Rien n'a été modifié. Réessayez dans une minute.`,
+  unknownAgain: "Vérifier à nouveau mon accès à cette communauté",
   openToEveryone: "Ouverte à toutes les personnes qui possèdent",
   tryAnotherAddress: "Essayer une autre adresse",
   alreadyMember: `Déjà membre${S}?`,
@@ -1751,6 +1767,7 @@ const de: CommunityWords = {
     host: "Sie leiten diese Veranstaltung, daher brauchen Sie keinen Platz.",
     nospace: "Es gibt noch keinen Bereich zum Posten.",
     spacelocked: "Dieser Bereich ist für Mitglieder, die eines der Produkte besitzen, für die er vorgesehen ist.",
+    spaceunknown: "Wir konnten Ihren Zugang zu diesem Bereich gerade nicht prüfen. Es wurde nichts geändert. Versuchen Sie es in einer Minute erneut.",
     out: "Ihre Sitzung hier ist beendet. Fordern Sie unten einen neuen Link an.",
     off: "Diese Community ist gerade geschlossen.",
     error: "Bei uns ist etwas schiefgelaufen. Es wurde nichts geändert; versuchen Sie es gleich noch einmal.",
@@ -1844,6 +1861,10 @@ const de: CommunityWords = {
   closedTitle: "Noch nichts, was sie öffnet",
   closedBody: (email, store) =>
     `${email} hat nichts von ${store}, das diese Community öffnet, oder eine Mitgliedschaft, die sie geöffnet hat, ist beendet. Wenn Sie eine andere Adresse verwendet haben, fordern Sie unten einen Link damit an.`,
+  unknownTitle: "Wir konnten Ihren Zugang gerade nicht prüfen",
+  unknownBody: (email, store) =>
+    `Angemeldet als ${email}. Ihr Kauf bei ${store} konnte gerade nicht beim Zahlungsdienst bestätigt werden. Es wurde nichts geändert. Versuchen Sie es in einer Minute erneut.`,
+  unknownAgain: "Meinen Zugang zu dieser Community erneut prüfen",
   openToEveryone: "Offen für alle, die Folgendes besitzen",
   tryAnotherAddress: "Andere Adresse versuchen",
   alreadyMember: "Schon Mitglied?",
@@ -2301,6 +2322,7 @@ const it: CommunityWords = {
     host: "Conduci tu questo evento, quindi non devi prenotare un posto.",
     nospace: "Non c'è ancora uno spazio in cui pubblicare.",
     spacelocked: "Quello spazio è per i membri che hanno uno dei prodotti a cui è riservato.",
+    spaceunknown: "Non siamo riusciti a verificare il tuo accesso a quello spazio in questo momento. Non è cambiato nulla. Riprova tra un minuto.",
     out: "La tua sessione qui è terminata. Chiedi un nuovo link qui sotto.",
     off: "Questa community è chiusa in questo momento.",
     error: "Qualcosa è andato storto da parte nostra. Non è stato modificato nulla; riprova tra un momento.",
@@ -2394,6 +2416,10 @@ const it: CommunityWords = {
   closedTitle: "Ancora niente che la apra",
   closedBody: (email, store) =>
     `${email} non ha nulla di ${store} che apra questa community, oppure un abbonamento che la apriva si è interrotto. Se hai usato un altro indirizzo, chiedi un link con quello qui sotto.`,
+  unknownTitle: "Non siamo riusciti a verificare il tuo accesso in questo momento",
+  unknownBody: (email, store) =>
+    `Accesso effettuato come ${email}. Non è stato possibile confermare il tuo acquisto da ${store} con il servizio di pagamento in questo momento. Non è cambiato nulla. Riprova tra un minuto.`,
+  unknownAgain: "Verifica di nuovo il mio accesso a questa community",
   openToEveryone: "Aperta a chiunque abbia",
   tryAnotherAddress: "Prova un altro indirizzo",
   alreadyMember: "Sei già membro?",
@@ -2851,6 +2877,7 @@ const nl: CommunityWords = {
     host: "Jij presenteert dit evenement, dus je hoeft geen plaats te nemen.",
     nospace: "Er is nog geen ruimte om in te posten.",
     spacelocked: "Die ruimte is voor leden die een van de producten hebben waarvoor ze bedoeld is.",
+    spaceunknown: "We konden je toegang tot die ruimte nu niet controleren. Er is niets veranderd. Probeer het over een minuut opnieuw.",
     out: "Je sessie hier is afgelopen. Vraag hieronder een nieuwe link aan.",
     off: "Deze community is op dit moment gesloten.",
     error: "Er ging aan onze kant iets mis. Er is niets gewijzigd; probeer het zo meteen opnieuw.",
@@ -2944,6 +2971,10 @@ const nl: CommunityWords = {
   closedTitle: "Nog niets dat haar opent",
   closedBody: (email, store) =>
     `${email} heeft niets van ${store} dat deze community opent, of een lidmaatschap dat haar opende is gestopt. Gebruikte je een ander adres, vraag hieronder dan een link aan met dat adres.`,
+  unknownTitle: "We konden je toegang nu niet controleren",
+  unknownBody: (email, store) =>
+    `Ingelogd als ${email}. Je aankoop bij ${store} kon op dit moment niet worden bevestigd bij de betaaldienst. Er is niets veranderd. Probeer het over een minuut opnieuw.`,
+  unknownAgain: "Mijn toegang tot deze community opnieuw controleren",
   openToEveryone: "Open voor iedereen die dit heeft",
   tryAnotherAddress: "Probeer een ander adres",
   alreadyMember: "Al lid?",
@@ -3401,6 +3432,7 @@ const pt: CommunityWords = {
     host: "É o anfitrião deste evento, por isso não precisa de reservar lugar.",
     nospace: "Ainda não há nenhum espaço onde publicar.",
     spacelocked: "Esse espaço é para os membros que têm um dos produtos a que está reservado.",
+    spaceunknown: "Não foi possível verificar o seu acesso a esse espaço agora. Nada foi alterado. Tente novamente dentro de um minuto.",
     out: "A sua sessão aqui terminou. Peça uma nova ligação abaixo.",
     off: "Esta comunidade está fechada neste momento.",
     error: "Algo correu mal do nosso lado. Nada foi alterado; tente novamente daqui a pouco.",
@@ -3494,6 +3526,10 @@ const pt: CommunityWords = {
   closedTitle: "Ainda nada a abre",
   closedBody: (email, store) =>
     `${email} não tem nada de ${store} que abra esta comunidade, ou uma subscrição que a abria terminou. Se usou outro endereço, peça uma ligação com ele abaixo.`,
+  unknownTitle: "Não foi possível verificar o seu acesso agora",
+  unknownBody: (email, store) =>
+    `Sessão iniciada como ${email}. Não foi possível confirmar a sua compra em ${store} junto do serviço de pagamentos neste momento. Nada foi alterado. Tente novamente dentro de um minuto.`,
+  unknownAgain: "Verificar novamente o meu acesso a esta comunidade",
   openToEveryone: "Aberta a todos os que têm",
   tryAnotherAddress: "Experimentar outro endereço",
   alreadyMember: "Já é membro?",

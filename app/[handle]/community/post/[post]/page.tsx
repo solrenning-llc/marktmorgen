@@ -8,7 +8,7 @@ import { CREATOR, type Comment, type Member, commentNumbers, postNumbers, readCo
 import { levelOf, pointsOf } from "@/lib/community-points";
 import { requestCount } from "@/lib/community-dm";
 import { unreadCount } from "@/lib/community-notify";
-import { maySeeSpace } from "@/lib/community-access";
+import { spaceAnswer } from "@/lib/community-access";
 import { communityVisitor } from "@/lib/community-page";
 import { pollViews } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
@@ -181,9 +181,9 @@ export default async function CommunityPostPage({ params, searchParams }: Params
   // A post in a space kept for the buyers of some products is not reachable
   // by its address either.
   const itsSpace = config.spaces.find((s) => s.id === post.sp);
-  if (itsSpace && !(await maySeeSpace(store, config, itsSpace, { owner, email: viewer.email }))) {
-    redirect(`${home}?n=spacelocked`);
-  }
+  // Not known is said as not checked, never as a space that is not theirs (CX-123 rule 24).
+  const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email }) : true;
+  if (may !== true) redirect(`${home}?n=${may === "unknown" ? "spaceunknown" : "spacelocked"}`);
   const query = await searchParams;
   const w = communityWords(store.language);
   const notices = communityNotices(store.language);

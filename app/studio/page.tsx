@@ -645,6 +645,16 @@ const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Your account moved, but other sessions may still be open",
     body: "This address logs you in from now on. We could not close every session that was open before the move. Choose “Log out of all devices” at the bottom of your studio.",
   },
+  // The move stands, but the recovery address could not be carried over, or whether it was is not known
+  // (app/api/auth/move; review of #2883). Both sign-in addresses are emailed too.
+  "moved-no-recovery": {
+    title: "Your account moved, but its recovery address did not",
+    body: "This address logs you in from now on. Every session the old one had open is closed. We could not carry your recovery address over, so your account may have none now. Add one again under Recovery address in your studio.",
+  },
+  "moved-sessions-open-no-recovery": {
+    title: "Your account moved, but two things need you",
+    body: "This address logs you in from now on. We could not close every session that was open before the move: choose “Log out of all devices” at the bottom of your studio. We could not carry your recovery address over, so your account may have none now. Add one again under Recovery address in your studio.",
+  },
   same: {
     title: "That is the address you already use",
     body: "Nothing to move.",

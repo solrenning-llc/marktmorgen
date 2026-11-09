@@ -459,6 +459,17 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/sessions/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/sessions",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/orders/withdraw/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/orders/withdraw",
@@ -1317,6 +1328,7 @@
     "components/checkout-script-editor.tsx",
     "components/checkup-list.tsx",
     "components/clickfunnels-funnel.tsx",
+    "components/client-sessions.tsx",
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
     "components/community-composer.tsx",
@@ -2057,6 +2069,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 141
+    "pageTemplates": 142
   }
 }

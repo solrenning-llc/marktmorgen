@@ -130,7 +130,7 @@ async function main(): Promise<void> {
   is("nothing of another client's booking", [html.includes("Ben&#x27;s private call"), html.includes("Nobody&#x27;s call"), html.includes("Read under two addresses")], [false, false, false]);
   is("headings in order: a section per list, a heading per session", (html.match(/<h[1-6]/g) ?? []).join(" "), "<h2 <h3 <h3 <h2 <h3 <h3");
   is("each list is a list", (html.match(/<ul/g) ?? []).length, 2);
-  is("a session to come offers its calendar file, named by the session it is for", (html.match(/aria-labelledby="up0a up0"/g) ?? []).length, 1);
+  is("a session to come offers its calendar file, named by the session it is for and, the same product booked twice, by its time", [(html.match(/aria-labelledby="up0a up0 up0w"/g) ?? []).length, html.includes('id="up0w"')], [1, true]);
   is("the times are in the client's own zone", html.includes("Lisbon") || /GMT|WET|WEST/.test(html), true);
   is("where to join stays on the purchases page, linked back with the same link", html.includes(`href="/@bela/orders?token=${TOKEN}"`), true);
   for (const s of ["expired", "busy", "unreadable"] as const) {
@@ -149,7 +149,7 @@ async function main(): Promise<void> {
   is("a shared note and task show under their session, with headings", [shared.includes("Bring your draft."), shared.includes("Read chapter 2"), shared.includes("Notes from Bela Studio"), shared.includes("Your tasks")], [true, true, true, true]);
   is("a task whose session is not on the page is never drawn", shared.includes("Not hers"), false);
   is("the session with them is a heading with its notes and tasks under it", (shared.match(/<h[1-6]/g) ?? []).join(" "), "<h2 <h3 <h4 <h4 <h3 <h2 <h3 <h3");
-  is("a task says whether it is done in words, not by colour", shared.includes(sessionsWords("en").taskOpen), true);
+  is("a task says whether it is done in words, not by color", shared.includes(sessionsWords("en").taskOpen), true);
 
   part("In every language");
   for (const code of LANGUAGE_CODES) {

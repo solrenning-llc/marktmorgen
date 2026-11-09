@@ -61,13 +61,20 @@ const passKey = (sid: string) => `nl:pre:${sid}:refunds:pass`;
 const REFUND_PASS_SECONDS = 7 * 86_400;
 /**
  * Refunds Stripe finished (succeeded) whose work could not be done, refund id to payment, in the store's nl:pre: keys (erased
- * with it): tried again first on every run, and let go only once handled, never in silence, so one row that can never
+ * with it): read again from Stripe and tried again first on every run, and let go only once handled or once Stripe says
+ * there is nothing to take back, never in silence, so one row that can never
  * be handled (a record that does not read, a course removal that always fails) does not hold the anchor forever (r24
  * money inventory, item 1). At most REFUND_RETRY_CAP; with the list full, the row holds the anchor at its time instead. Kept as long as the records a refund on it could take
  * back (KEPT_SECONDS, renewed with every row put on it): past that there is nothing left for it to take back.
  */
 const retryKey = (sid: string) => `nl:pre:${sid}:refunds:retry`;
 const REFUND_RETRY_CAP = 100;
+/**
+ * Refunds on the list to try again read again from Stripe (GET /refunds/{id}, its charge expanded) per store per run,
+ * before any is taken back (review of #3302, Claude 2 MEDIUM; the owner's decision 18 of 9 November 2026): from a place
+ * that moves on every five minutes, so each on the list is read in turn. Priced in tests/plan-cost-registry.ts (NOT_A_COST).
+ */
+export const PREORDER_REFUND_REREADS_PER_STORE = 10;
 const REFUND_ID = /^(re|pyr)_[A-Za-z0-9]{3,250}$/;
 const PAYMENT_ID = /^pi_[A-Za-z0-9]{3,252}$/;
 /** The anchor in its exact shape: the whole seconds of the newest refund a pass read to its end. */
@@ -731,24 +738,53 @@ export async function revokeRefundedPreorders(
     return added !== null && added <= rows.length && kept?.[1] === 1;
   };
 
-  // The refunds Stripe finished whose work could not be done, first: each tried again as the full refund that succeeded
-  // it was kept as (only those reach the list, keepForLater), and let go only once handled. A list read in another shape, or a row on it
-  // that is not a refund and a payment, is left as it is and read again next run: never taken as empty or dropped.
+  /**
+   * A refund on the list read again from Stripe before anything is taken back (review of #3302, Claude 2 MEDIUM; the
+   * owner's decision 18 of 9 November 2026): the list keeps which refund it was, never whether it still gives the money
+   * back. Read in its exact shape (refundRowKnown, the same refund and payment): the row itself when it succeeded on a
+   * charge refunded in full; "drop" when Stripe failed or canceled it, or its charge is not refunded in full (nothing
+   * to take back); "keep" when it is not final yet, read in another shape, or Stripe could not be asked (nothing taken
+   * back, read again next run).
+   */
+  const reread = async (id: string, pi: string): Promise<Record<string, unknown> | "drop" | "keep"> => {
+    let row: Record<string, unknown>;
+    try {
+      row = await onAccount("GET", account, `/refunds/${id}?${new URLSearchParams([["expand[]", "charge"]])}`);
+    } catch (error) {
+      console.error("reading refunds for pre-orders: a row to try again could not be read again; kept", error);
+      return "keep";
+    }
+    if (row.object !== "refund" || row.id !== id || row.payment_intent !== pi || !refundRowKnown(row)) return "keep";
+    if (row.status === "failed" || row.status === "canceled") return "drop";
+    const charge = row.charge as { refunded?: unknown } | null;
+    if (row.status !== "succeeded" || !charge) return "keep";
+    return charge.refunded === true ? row : "drop";
+  };
+
+  // The refunds Stripe finished whose work could not be done, first, at most PREORDER_REFUND_REREADS_PER_STORE a run
+  // from a place that moves on every five minutes: each read again from Stripe and handled as the row Stripe sends only
+  // when it succeeded on a charge refunded in full; let go once handled, or once Stripe failed or canceled it or its
+  // charge is not refunded in full, nothing taken back. A list read in another shape, or a row on it that is not a
+  // refund and a payment, is left as it is and read again next run: never taken as empty or dropped.
   const retrying = repliesFor(await redisPipeline([["HGETALL", retryKey(sid)]]), 1);
   const flat = retrying ? stringList(retrying[0]) : null;
   if (!flat || flat.length % 2 !== 0) console.error("reading refunds for pre-orders: the list to try again was read in another shape; read again next run");
   else {
+    const listed: [string, string][] = [];
     for (let i = 0; i < flat.length; i += 2) {
+      if (REFUND_ID.test(flat[i]) && PAYMENT_ID.test(flat[i + 1])) listed.push([flat[i], flat[i + 1]]);
+      else console.error("reading refunds for pre-orders: a row to try again in another shape; kept");
+    }
+    const turn = listed.length ? (Math.floor(Date.now() / 300_000) * PREORDER_REFUND_REREADS_PER_STORE) % listed.length : 0;
+    for (let k = 0; k < Math.min(listed.length, PREORDER_REFUND_REREADS_PER_STORE); k += 1) {
       if (Date.now() >= deadline) return revoked;
-      const [id, pi] = [flat[i], flat[i + 1]];
-      if (!REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) {
-        console.error("reading refunds for pre-orders: a row to try again in another shape; kept");
-        continue;
-      }
-      if (!(await handle({ id, payment_intent: pi, status: "succeeded", charge: { refunded: true } }))) continue;
-      // Handled and marked read: one left on the list by a reply lost here is read again and found handled.
+      const [id, pi] = listed[(turn + k) % listed.length];
+      const verdict = await reread(id, pi);
+      if (verdict === "keep") continue;
+      if (verdict !== "drop" && !(await handle(verdict))) continue;
+      // Handled and marked read, or nothing to take back: one left on the list by a reply lost here is read again.
       const gone = repliesFor(await redisPipeline([["HDEL", retryKey(sid), id]]), 1);
-      if (!oneWrite(gone?.[0])) console.error("reading refunds for pre-orders: letting go of a handled row was left unknown; read again next run");
+      if (!oneWrite(gone?.[0])) console.error("reading refunds for pre-orders: letting go of a row was left unknown; read again next run");
     }
   }
 

@@ -599,12 +599,15 @@ export function storeHasKeys(store: Store): boolean {
  * made that payment (a cs_… reference), or the payment itself for an offer
  * taken in one click (a pi_… reference). Both the product bought and the one
  * ticked at checkout lose their keys, since both were paid by that payment.
- * A partial refund changes nothing. A full refund still pending revokes a
- * key already given, but a sale with none yet only gets PENDING_REFUND_SALE,
- * and that refund stays unread until Stripe says it went through (the mark
- * turns final) or answers it failed or canceled (the mark is cleared, so the
- * paid sale can be given its key); every failed or canceled refund read is
- * looked up once for that, inside the same lookups. A dispute Stripe closed as lost takes
+ * A partial refund changes nothing. A full refund still pending takes
+ * nothing back yet, since it may still fail: a key already given stays valid,
+ * a sale with none yet only gets PENDING_REFUND_SALE (no key while it is
+ * pending), and that refund stays unread until Stripe says it went through
+ * (the key is revoked, the mark turns final) or answers it failed or canceled
+ * (the mark is cleared, so the paid sale can be given its key; a key given
+ * stays as it is); every failed or canceled refund read is looked up once for
+ * that, inside the same lookups (Claude 5's pre-review of
+ * claude5/licence-refunds-combined, HIGH 2). A dispute Stripe closed as lost takes
  * the key back as a full refund does (queue 388 [TB14]): the disputes closed
  * since the last run are read with the first page of refunds, from Stripe's
  * closing events, so a lost dispute revokes within the same five minutes;
@@ -907,10 +910,19 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
                   throw new UnknownReplyError("the swap of a pending refund's mark");
                 }
               } else if (key !== REFUNDED_SALE) {
-                // A key whose record settle has not written yet is not "nothing to revoke": the refund stays unread and
-                // the next run revokes the record written meanwhile (Claude 2's second money review of #2868, MEDIUM).
-                if (!(await setRevoked(store, product, key, true, "refund"))) throw new RecordNotWrittenYet();
-                here += 1;
+                if (pending) {
+                  // A key already given stays valid while the refund is pending: it may still fail, and a key revoked
+                  // then would stay revoked on a sale that was paid. The refund stays unread and is read again until it
+                  // goes through (the key is revoked then) or fails (the key stays as it is; Claude 5's pre-review of
+                  // claude5/licence-refunds-combined, HIGH 2).
+                  heldHere = true;
+                } else {
+                  // A key whose record settle has not written yet is not "nothing to revoke": the refund stays unread
+                  // and the next run revokes the record written meanwhile (Claude 2's second money review of #2868,
+                  // MEDIUM).
+                  if (!(await setRevoked(store, product, key, true, "refund"))) throw new RecordNotWrittenYet();
+                  here += 1;
+                }
               }
             }
             // A buyer still waiting for a key from an empty pool keeps the place while the refund is pending, and is

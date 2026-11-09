@@ -783,32 +783,64 @@ export async function disconnect(store: Store): Promise<SyncView> {
 }
 
 /**
+ * Thrown by forgetSyncPerson when job records in the store's log did not read and do not say whose they are: they
+ * are kept, since they may be another person's, after this person's own jobs were deleted. The erasure is
+ * incomplete and is said so, never "done" (as lib/assignment.ts TaskRecordUnreadError); each record was written to
+ * expire within a week (JOB_SECONDS), and a retry after that finishes.
+ */
+export class SyncJobUnreadError extends Error {
+  constructor(
+    readonly unread: number,
+    readonly deleted: number,
+  ) {
+    super(`${unread} email platform job records of the store did not say whose they are and were kept; ${deleted} of the person's were deleted`);
+    this.name = "SyncJobUnreadError";
+  }
+}
+
+/**
  * Deletes the jobs that sent one person to the creator's email platform, and
  * any still waiting for a try (lib/person-erasure.ts). What the platform
  * already took is in the creator's own account there, to be deleted there.
+ *
+ * A record that does not read never blocks this for good (rule 30, as
+ * lib/reviews.ts ownRecord): one whose address still reads (DamagedJob) is
+ * theirs or another person's by that address, and theirs is deleted; one whose
+ * address does not read is never deleted, since it may be another person's:
+ * this person's own jobs are deleted all the same, and SyncJobUnreadError says
+ * the erasure is incomplete. The log names records by their id, never an address.
  */
 export async function forgetSyncPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
   const { logged, ids } = await loggedJobIds(statsId);
   if (!ids.length) return 0;
-  const jobs = await loggedJobs(ids);
+  const jobs = await loggedJobs(statsId, ids);
+  const unread = ids.filter((_, i) => isDamaged(jobs[i]) && (jobs[i] as DamagedJob).email === null);
+  const damaged = ids.filter((_, i) => isDamaged(jobs[i]) && (jobs[i] as DamagedJob).email !== null);
   const theirs = ids.filter((_, i) => {
     const job = jobs[i];
-    return job !== null && normaliseEmail(job.email) === address;
+    return job !== null && job.email !== null && normaliseEmail(job.email) === address;
   });
-  if (!theirs.length) return 0;
-  // Each delete answers a count (CX-123 rule 24): DEL and ZREM at most the jobs named, LREM at most the log's length.
-  // Another shape throws, so the erasure is said as not finished and a retry finds what is left.
-  const commands = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]];
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
-  const within = (reply: unknown, most: number) => {
-    const n = countOf(reply);
-    return n !== null && n <= most;
-  };
-  if (!replies || !within(replies[0], theirs.length) || !within(replies[replies.length - 1], theirs.length) || !replies.slice(1, -1).every((reply) => within(reply, logged))) {
-    throw new UnknownReplyError("deleting a person's email-platform jobs");
+  if (unread.length) {
+    console.error(`email sync: job records ${unread.join(", ")} did not read and do not say whose they are; kept, and a person's erasure is said incomplete`);
   }
+  if (theirs.length) {
+    // Each delete answers a count (CX-123 rule 24): DEL and ZREM at most the jobs named, LREM at most the log's length.
+    // Another shape throws, so the erasure is said as not finished and a retry finds what is left.
+    const commands = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]];
+    const replies = repliesFor(await redisPipeline(commands), commands.length);
+    const within = (reply: unknown, most: number) => {
+      const n = countOf(reply);
+      return n !== null && n <= most;
+    };
+    if (!replies || !within(replies[0], theirs.length) || !within(replies[replies.length - 1], theirs.length) || !replies.slice(1, -1).every((reply) => within(reply, logged))) {
+      throw new UnknownReplyError("deleting a person's email-platform jobs");
+    }
+    const mended = theirs.filter((id) => damaged.includes(id));
+    if (mended.length) console.error(`email sync: job records ${mended.join(", ")} did not read; deleted for their person's erasure`);
+  }
+  if (unread.length) throw new SyncJobUnreadError(unread.length, theirs.length);
   return theirs.length;
 }
 
@@ -825,19 +857,61 @@ async function loggedJobIds(statsId: string): Promise<{ logged: number; ids: str
 }
 
 /**
- * The records of logged jobs, one for each id, read exactly: an expired record
- * (null) is known absence; any other shape, or a record that cannot be read as a
- * job with its address (empty for a person not sent), throws UnknownReplyError,
- * never "not theirs".
+ * A job record that is there but does not read as a job: `email` is the address
+ * it still says (from its JSON, or from the start of a record cut short), or
+ * null when whose it is cannot be read.
  */
-async function loggedJobs(ids: string[]): Promise<(Job | null)[]> {
+type DamagedJob = { damaged: true; email: string | null };
+
+function isDamaged(job: Job | DamagedJob | null): job is DamagedJob {
+  return job !== null && "damaged" in job;
+}
+
+/**
+ * The address a damaged job record still says, read exactly or not at all: the
+ * string `email` of a JSON object, or, in a record cut short, the complete
+ * string that follows the start queuePerson writes every record with (its id,
+ * its store, then its address). Null otherwise.
+ */
+function damagedAddress(raw: string, id: string, statsId: string): string | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    value = undefined;
+  }
+  if (value !== undefined) {
+    const email = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>).email : undefined;
+    return typeof email === "string" ? email : null;
+  }
+  const start = `{"id":${JSON.stringify(id)},"statsId":${JSON.stringify(statsId)},"email":`;
+  if (!raw.startsWith(start)) return null;
+  const field = /^("(?:[^"\\]|\\.)*")[,}]/.exec(raw.slice(start.length));
+  if (!field) return null;
+  try {
+    const email = JSON.parse(field[1]) as unknown;
+    return typeof email === "string" ? email : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The records of logged jobs, one for each id, read exactly: an expired record
+ * (null) is known absence; a batch or a record that is not text throws
+ * UnknownReplyError, never "not theirs". A record that is text but does not
+ * read as a job with its address (empty for a person not sent) is a DamagedJob,
+ * with the address it still says, if any.
+ */
+async function loggedJobs(statsId: string, ids: string[]): Promise<(Job | DamagedJob | null)[]> {
   const read = repliesFor(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length);
   if (!read) throw new UnknownReplyError("reading a store's email-platform jobs");
-  return read.map((raw) => {
+  return read.map((raw, i) => {
     if (raw === null) return null;
+    if (typeof raw !== "string") throw new UnknownReplyError("an email-platform job record");
     const job = parseJob(raw);
-    if (!job || typeof job.email !== "string") throw new UnknownReplyError("an email-platform job record");
-    return job;
+    if (job && typeof job.email === "string") return job;
+    return { damaged: true, email: damagedAddress(raw, ids[i], statsId) };
   });
 }
 
@@ -852,8 +926,15 @@ export async function syncJobsOf(statsId: string | null, email: string): Promise
   // Read as the erasure reads them (rule 30): another shape throws, so the copy fails whole rather than miss a part.
   const { ids } = await loggedJobIds(statsId);
   if (!ids.length) return [];
-  return (await loggedJobs(ids)).flatMap((job) => {
-    if (job === null || normaliseEmail(job.email) !== address) return [];
+  return (await loggedJobs(statsId, ids)).flatMap((job) => {
+    if (job === null) return [];
+    if (isDamaged(job)) {
+      // Another person's record, known by the address it still says, is not part of this copy, and never blocks it. One
+      // that may be theirs cannot be handed over whole, so the copy fails whole rather than miss a part.
+      if (job.email !== null && normaliseEmail(job.email) !== address) return [];
+      throw new UnknownReplyError("an email-platform job record");
+    }
+    if (normaliseEmail(job.email) !== address) return [];
     const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
     return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
   });

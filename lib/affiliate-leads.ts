@@ -31,7 +31,7 @@ import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { DataRoomError, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
@@ -271,10 +271,21 @@ export async function leadOf(store: Pick<Store, "statsId">, email: string): Prom
   const replies = repliesFor(await redisPipeline([["HGET", leadsKey(store.statsId), leadId(store.statsId, email)]]), 1);
   if (!replies) throw new UnknownReplyError("a person's affiliate lead");
   const [raw] = replies;
-  if (raw === null) return null;
+  // A lead whose contents were deleted with its person (forgetLeadPerson) keeps nothing of theirs: there is nothing to copy.
+  if (raw === null || raw === emptiedLead(leadId(store.statsId, email))) return null;
   const lead = parseLeadExact(raw);
   if (!lead) throw new UnknownReplyError("a person's affiliate lead");
   return lead;
+}
+
+/**
+ * What is left of a person's lead that did not read once their deletion took its contents (forgetLeadPerson): its id
+ * alone, the one-way fingerprint, so the same person joining again is not counted as a new lead. It holds no affiliate,
+ * so it never reads as a lead (parseLead): the affiliate's book leaves it out, as it left the damaged record out, and
+ * a decision still fails closed on it (readLeads), since what the affiliate was owed for it is not known.
+ */
+function emptiedLead(id: string): string {
+  return JSON.stringify({ id, email: "", emptied: true });
 }
 
 /** Where open bookings' calls end now, read from their moves, in seconds. */
@@ -358,12 +369,28 @@ export async function forgetLeadPerson(store: Store, email: string): Promise<num
     const replies = repliesFor(await redisPipeline([["HGET", leadsKey(statsId), id]]), 1);
     if (!replies) throw new UnknownReplyError("a person's affiliate lead");
     const [raw] = replies;
-    // Only an exact nil is "no lead". A kept lead that does not read, or whose address is of another type, may still
-    // hold the address, so it is never said to be forgotten: the deletion reports this part as not done and tries
-    // again (rule 24).
+    // Only an exact nil is "no lead". A reply that is not text is not known to be the record (rule 24): nothing is
+    // written on it, and the deletion reports this part as not done and tries again.
     if (raw === null) return 0;
-    const kept = typeof raw === "string" && parseLead(raw) ? (JSON.parse(raw) as Record<string, unknown>) : null;
-    if (!kept || typeof kept.email !== "string") throw new UnknownReplyError("a person's affiliate lead");
+    if (typeof raw !== "string") throw new UnknownReplyError("a person's affiliate lead");
+    if (raw === emptiedLead(id)) {
+      await forgetBookSnapshot(statsId);
+      return 0;
+    }
+    const kept = parseLead(raw) ? (JSON.parse(raw) as Record<string, unknown>) : null;
+    // A lead under this person's own field (their fingerprint) that does not read may still hold their address, and
+    // throwing would keep it there on every retry (rule 30, as lib/reviews.ts ownRecord). It is theirs by its field,
+    // so its contents go: only the address, when the rest reads; all but its id, when it does not. The log names
+    // the id, never the address. Its room stays counted: what it took is not known, so more than is used, never less.
+    if (!kept || typeof kept.email !== "string") {
+      const json = kept ? JSON.stringify({ ...kept, email: "" }) : emptiedLead(id);
+      if (countOf(repliesFor(await redisPipeline([["HSET", leadsKey(statsId), id, json]]), 1)?.[0]) === null) {
+        throw new UnknownReplyError("a person's affiliate lead, deleting its contents");
+      }
+      await forgetBookSnapshot(statsId);
+      console.error(`affiliate leads: lead ${id} did not read; ${kept ? "its address" : "all but its id"} was deleted for its person's erasure`);
+      return 1;
+    }
     // The program's kept book shows the address masked (lib/affiliate-book-snapshot.ts): deleted whole, worked out again at the next load.
     // After the address comes off the lead, so a refresh that read the lead before is thrown away by the raised version and one that
     // reads it after never sees the address; and again when the address is already off, so a deletion tried again after this step

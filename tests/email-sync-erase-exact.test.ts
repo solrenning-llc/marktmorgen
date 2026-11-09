@@ -139,16 +139,34 @@ async function main(): Promise<void> {
     ["a long batch", (real) => [...real, null]],
     ["a sparse batch", (real) => sparse(real.length, [[1, real[1]]])],
     ["a record that is a number", (real) => [42, ...real.slice(1)]],
-    ["a record that is not JSON", (real) => ["{not json", ...real.slice(1)]],
-    ["a record that is JSON but not a job", (real) => ["5", ...real.slice(1)]],
-    ["a record without its address", (real) => [JSON.stringify({ id: theirs, state: "queued" }), ...real.slice(1)]],
-    ["another person's record without its address", (real) => [real[0], JSON.stringify({ id: other, state: "queued" }), ...real.slice(2)]],
     ["a batch that is not a list", () => "OK"],
   ];
   for (const [what, reply] of records) {
     seed();
     is(`erase: ${what} throws UnknownReplyError, with nothing written`, await run(() => forgetSyncPerson(statsId, person), { at: "jobs", reply }), { got: "unknown", writes: 0 });
     is(`erase: ${what} leaves every job in place`, state(), untouched);
+    seed();
+    is(`copy: ${what} throws UnknownReplyError, never a part missing`, (await run(() => syncJobsOf(statsId, person), { at: "jobs", reply })).got, "unknown");
+  }
+
+  // Rule 23, changed with claude5/erasure-damaged-records (tests/erasure-damaged-records.test.ts): these four were
+  // "throws UnknownReplyError, with nothing written" and "leaves every job in place". A record that is text but does
+  // not read, with no address to say whose it is, is never deleted (it may be another person's), and no longer
+  // blocks the erasure for good: the person's own jobs that read are deleted, and the erasure is said incomplete
+  // (SyncJobUnreadError), never done. The copy still throws, never a copy that may miss a part.
+  const theirsKept = untouched;
+  const theirsGone = { theirs: false, other: true, log: [other, expired], queue: [`${statsId}|${other}`] };
+  const damaged: [string, (real: unknown[]) => unknown, unknown, typeof untouched][] = [
+    ["a record that is not JSON", (real) => ["{not json", ...real.slice(1)], { got: "incomplete", writes: 0 }, theirsKept],
+    ["a record that is JSON but not a job", (real) => ["5", ...real.slice(1)], { got: "incomplete", writes: 0 }, theirsKept],
+    ["a record without its address", (real) => [JSON.stringify({ id: theirs, state: "queued" }), ...real.slice(1)], { got: "incomplete", writes: 0 }, theirsKept],
+    ["another person's record without its address", (real) => [real[0], JSON.stringify({ id: other, state: "queued" }), ...real.slice(2)], { got: "incomplete", writes: 1 }, theirsGone],
+  ];
+  for (const [what, reply, want, after] of damaged) {
+    seed();
+    const got = await run(() => forgetSyncPerson(statsId, person), { at: "jobs", reply });
+    is(`erase: ${what} is said incomplete, never done`, { got: typeof got.got === "string" && got.got.includes("SyncJobUnreadError") ? "incomplete" : got.got, writes: got.writes }, want);
+    is(`erase: ${what} is never deleted; only what is certainly theirs goes`, state(), after);
     seed();
     is(`copy: ${what} throws UnknownReplyError, never a part missing`, (await run(() => syncJobsOf(statsId, person), { at: "jobs", reply })).got, "unknown");
   }

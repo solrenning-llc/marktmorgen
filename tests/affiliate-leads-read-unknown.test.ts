@@ -244,8 +244,11 @@ async function main(): Promise<void> {
   await put([]);
   is("no lead for the person: nothing to forget", await forgetLeadPerson(store, email), 0);
   await put([[theirs, `{"id":"${theirs}","aff":"${ANA}","email":"${email}","kind":`]]);
-  is("their lead unreadable, the address maybe in it: the deletion throws and is tried again", await thrown(() => forgetLeadPerson(store, email)), "UnknownReplyError");
-  is("and the record is left as it was", (await real([["HGET", key, theirs]]))[0], `{"id":"${theirs}","aff":"${ANA}","email":"${email}","kind":`);
+  // Rule 23, changed with claude5/erasure-damaged-records (tests/erasure-damaged-records.test.ts): these two were "the
+  // deletion throws and is tried again" (UnknownReplyError) and "the record is left as it was", which kept the
+  // address in it on every retry. The lead is theirs by its field (leadId), so its contents go and its id stays.
+  is("their lead unreadable, the address maybe in it: its contents are deleted and the deletion counts it", await thrown(() => forgetLeadPerson(store, email)), "no error: 1");
+  is("and only its id is left, without the address", (await real([["HGET", key, theirs]]))[0], JSON.stringify({ id: theirs, email: "", emptied: true }));
   await put([[theirs, JSON.stringify({ ...lead(4), id: theirs, email })]]);
   is("a healthy lead: the address comes off", [await forgetLeadPerson(store, email), (JSON.parse(String((await real([["HGET", key, theirs]]))[0])) as LeadRecord).email], [1, ""]);
   const keptNow = async () => JSON.parse(String((await real([["HGET", key, theirs]]))[0])) as Record<string, unknown>;
@@ -257,7 +260,9 @@ async function main(): Promise<void> {
   );
   is("so the program's leads still do not read after the deletion", await thrown(() => readLeads(store)), "UnknownReplyError");
   await put([[theirs, JSON.stringify({ ...lead(6), id: theirs, email: [email] })]]);
-  is("an address of another type: the deletion throws and is tried again", await thrown(() => forgetLeadPerson(store, email)), "UnknownReplyError");
+  // Rule 23, changed with claude5/erasure-damaged-records: was "the deletion throws and is tried again" (UnknownReplyError),
+  // which kept the address on every retry. The rest of the lead reads, so only the address comes off, as for a healthy one.
+  is("an address of another type: the address comes off, the rest as kept", [await thrown(() => forgetLeadPerson(store, email)), (await keptNow()).email, (await keptNow()).aff], ["no error: 1", "", ANA]);
 
   const buyer = "buyer.contact@example.com";
   const contact = leadId(statsId, buyer);

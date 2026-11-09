@@ -187,7 +187,10 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     // account for a complete, bounded list tied to this exact charge.
     const listed = await onAccount("GET", fee.account,
       `/disputes?${new URLSearchParams({ charge: fee.charge, limit: "100" })}`, undefined, READ_VERSION);
-    const statuses = new Set(["lost", "won", "needs_response", "under_review", "warning_needs_response", "warning_under_review", "warning_closed"]);
+    // `prevented` (given back to the buyer before a chargeback) takes the money back as `lost` does
+    // (Claude 5's money review of #3318). `charge_refunded` left the API in 2023-08-16, before
+    // READ_VERSION, and stays unknown: it fails closed, as any status not listed here.
+    const statuses = new Set(["lost", "prevented", "won", "needs_response", "under_review", "warning_needs_response", "warning_under_review", "warning_closed"]);
     const rows = listed?.data;
     if (listed?.object !== "list" || listed.has_more !== false || !Array.isArray(rows) || rows.length < 1 || rows.length > 100) {
       throw new Error("Dispute evidence is incomplete");
@@ -205,7 +208,7 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
       }
       if (!statuses.has(status)) throw new UnknownDisputeStatus(fee.id);
       seen.add(id);
-      if (status === "lost") lostDispute = true;
+      if (status === "lost" || status === "prevented") lostDispute = true;
     }
   }
 

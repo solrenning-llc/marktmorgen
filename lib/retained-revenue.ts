@@ -7,7 +7,7 @@
  *   paid at checkout (purchases and one-click extras)
  * + renewals (memberships renewed, later plan payments)
  * − refunds given in the window
- * − disputed money the bank holds or the buyer won (DISPUTE_TAKES)
+ * − disputed money the bank holds or gave back to the buyer (DISPUTE_TAKES)
  * = kept.
  *
  * Currencies are never added together and nothing is converted: euros added
@@ -34,11 +34,17 @@
 
 /**
  * The states of a Stripe dispute in which the money is not the creator's:
- * held by the bank while it is answered or reviewed, or taken back for good.
- * An inquiry (warning_*) takes nothing, and a dispute won gives it back.
+ * held by the bank while it is answered or reviewed, or taken back for good,
+ * lost or `prevented` (given back to the buyer before a chargeback, as
+ * lib/plan-refund-rules.ts RETURNED and lib/plan-dispute-rules.ts read it;
+ * Claude 5's money review of #3318). An inquiry (warning_*) takes nothing,
+ * and a dispute won gives it back. The legacy `charge_refunded` (removed in
+ * API 2023-08-16) is left out: its money went back through a refund, which
+ * the refund reading already takes off, so counting it here would take it
+ * twice. Statuses: stripe-node v22.6.0 Dispute.Status and its CHANGELOG.
  * The affiliate book (lib/affiliates.ts) reads the same set.
  */
-export const DISPUTE_TAKES: ReadonlySet<string> = new Set(["needs_response", "under_review", "lost"]);
+export const DISPUTE_TAKES: ReadonlySet<string> = new Set(["needs_response", "under_review", "lost", "prevented"]);
 
 /** A channel name for a renewal, refund or dispute that no sale read explains. */
 export const UNPLACED = "unrecorded";
@@ -47,7 +53,7 @@ export const ATTRIBUTION_NOTE =
   "A channel says where the buyer came from before buying. It does not show that the channel caused the sale, and it is not a measure of lift.";
 
 export const DISPUTE_NOTE =
-  "Disputed is the amount of each dispute the bank is holding or the buyer won, before Stripe's dispute fee. A dispute you win gives it back and it leaves this column.";
+  "Disputed is the amount of each dispute the bank is holding or gave back to the buyer, before Stripe's dispute fee. A dispute you win gives it back and it leaves this column.";
 
 export type Window = "d7" | "d30" | "d90";
 export const WINDOWS: readonly Window[] = ["d7", "d30", "d90"];

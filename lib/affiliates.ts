@@ -1064,7 +1064,10 @@ export async function invitePartner(input: {
       share,
       titles: named,
     });
-    if (!left.ok) return left.reason === "full" ? "full" : "error";
+    // Their studio already holds as many offers as it may: answered as a sent offer, since "full" here would tell the
+    // creator who typed the address that it has a store (pre-review D, Claude 5's authentication audit M4). Nothing is
+    // left and nothing is sent, as when the address has no store and never answers.
+    if (!left.ok) return left.reason === "full" ? "waiting" : "error";
     await sendEmail({ meter: { by: "store", store: store, kind: "email" },
       from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
       to: email,

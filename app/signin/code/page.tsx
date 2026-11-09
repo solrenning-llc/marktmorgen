@@ -17,7 +17,7 @@ const NOTICES: Record<string, string> = {
   wrong: "That code is not right. Type the six digits your app shows now, or one of your recovery codes.",
   limited: "That is a lot of codes in an hour. Wait a while, then try again, or log in with a passkey.",
   stopped:
-    "Too many wrong codes were typed, so your app's codes are off for now. Use one of your recovery codes, log in with a passkey, or get a link at your recovery address below. After that, your app's codes work again.",
+    "Too many wrong codes were typed, so your app's codes are off for now. Log in with one of your recovery codes or a passkey, and your app's codes work again. Or get a link at your recovery address below: that link turns two-step login off, and you can turn it on again in your studio.",
   unreadable:
     "Your app's codes cannot be checked right now, after a security change on our side. Use one of your recovery codes, or log in with a passkey, then turn two-step login off and on again.",
   "rescue-limited": "A link has gone to your recovery address three times this hour. Use the newest one, or try again later.",

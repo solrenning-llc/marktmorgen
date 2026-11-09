@@ -25,6 +25,7 @@
  * Progress is kept per course and per student: which lessons they marked done
  * and when they last came back. That is all, and the creator sees it.
  */
+import { afterAnswer } from "@/lib/after-answer";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
@@ -821,7 +822,12 @@ export type LinkRequest = "sent" | "email" | "limited" | "error";
 
 /**
  * Emails a way into the course, when the address bought it. "sent" either
- * way: only whoever reads the inbox learns whether it had.
+ * way, in the same time, whatever the read or the send then finds: only
+ * whoever reads the inbox learns whether it had (owner's decision through
+ * Claude 1, 9 November 2026, 15h42, option A; Claude 5's authentication
+ * audit, L1). The page says to try again if nothing arrives. What does not
+ * depend on the address (a mistyped one, no Redis, the limits, mail known to
+ * be down) is answered before, as it is.
  */
 export async function requestCourseLink(input: {
   store: Store;
@@ -840,9 +846,8 @@ export async function requestCourseLink(input: {
   // False is unknown; the original rights and final sender checks still apply.
   if (serviceMailKnownUnavailable()) return "error";
 
-  const paid = await paidCourses(store, raw);
-  if (!paid.has(product.id)) return "sent";
-  return (await sendCourseLink(store, product, raw, origin)) ? "sent" : "error";
+  await afterAnswer(() => sendIfBought(store, product, raw, origin), "sending a course link");
+  return "sent";
 }
 
 /** Sends the link itself. Also used when a buyer pays in another browser. */
@@ -860,6 +865,33 @@ export async function sendCourseLink(store: Store, product: Listing, email: stri
     subject: w.courseSubject(product.title).slice(0, 200),
     text: [w.courseLead(product.title), "", link, "", w.courseDevice, "", w.courseHour, "", w.sentBy(store.name)].join("\n"),
   });
+}
+
+/** Tries of sendIfBought: the first, and one more on the server when it could not read or send. */
+const COURSE_LINK_TRIES = 2;
+/** The wait before that second try, so a provider's or Redis's moment of trouble can pass. */
+const COURSE_LINK_RETRY_MS = 1000;
+
+/**
+ * After the answer (requestCourseLink): whether the address bought the course,
+ * and the link when it did, tried once more when the purchases could not be
+ * read or the email was not sent. Logged without the address, which only the
+ * inbox may learn about. Within the store's one public request
+ * (app/api/store/course/link, takeBuyerRead) and the address's ADDRESS_LIMIT
+ * an hour: at most COURSE_LINK_TRIES reads and sends, each send the store's
+ * own transactional email.
+ */
+async function sendIfBought(store: Store, product: Listing, email: string, origin: string): Promise<void> {
+  for (let attempt = 1; attempt <= COURSE_LINK_TRIES; attempt += 1) {
+    if (attempt > 1) await new Promise((resolve) => setTimeout(resolve, COURSE_LINK_RETRY_MS));
+    try {
+      if (!(await paidCourses(store, email)).has(product.id)) return;
+      if (await sendCourseLink(store, product, email, origin)) return;
+      console.error(`a course link was not sent (try ${attempt} of ${COURSE_LINK_TRIES})`);
+    } catch (error) {
+      console.error(`reading or sending a course link failed (try ${attempt} of ${COURSE_LINK_TRIES})`, error instanceof Error ? error.name : "unknown");
+    }
+  }
 }
 
 /** Spends one open of an emailed link, and says who and what it was for. */

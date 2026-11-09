@@ -296,7 +296,7 @@ export function refusedJson(reason: Refusal, message = ""): Response {
 export async function creatorFrom(
   request: NextRequest,
   need: Need,
-  options: { checkOrigin?: boolean } = {},
+  options: { checkOrigin?: boolean; action?: string } = {},
 ): Promise<Creator | Response> {
   const origin = originFrom(request);
 
@@ -304,7 +304,8 @@ export async function creatorFrom(
     return new Response("forbidden", { status: 403 });
   }
 
-  const result = await studioAccess(request, need);
+  // `action` names what a locked session may not do under `need` (lib/two-step.ts LOCKED_ACTIONS).
+  const result = await studioAccess(request, need, options.action);
   if (!result.ok) {
     if (result.reason === "signed_out") return away(origin, "/signin?status=expired");
     if (result.reason === "no_store") return away(origin, "/studio?stripe=nostore");

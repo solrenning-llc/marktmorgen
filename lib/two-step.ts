@@ -93,7 +93,8 @@ const CODES_PER_HOUR = 10;
  * app's codes are off for it (Claude 5's authentication audit, M2; NIST SP
  * 800-63B §5.2.2 asks for at most 100). Kept on the account's record as `f`,
  * counted before each comparison; a right code, a recovery code or a login
- * with a passkey (cancelReset) starts it again. The ways back stay open with
+ * with a passkey (cancelReset, "login") starts it again; Cancel in the studio
+ * does not, since any session may press it. The ways back stay open with
  * no test of any kind (AX274 3.3.9): recovery codes, passkeys, the link to the
  * recovery address and the request to turn it off. Both addresses are told
  * once, on the try that reaches it.
@@ -362,7 +363,11 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     reviews: "photo" (a buyer's photo taken off a review);
  *   - member (what every person on the team may do for themselves):
  *     "phone-add" (a new phone for sale notifications, app/api/store/phone),
- *     which is told every sale and outlives the session that added it.
+ *     which is told every sale and outlives the session that added it;
+ *     "host-connect" (a host's own Google Calendar for team bookings,
+ *     lib/meet-routes.ts, at the start and at the callback), which reads
+ *     when they are busy, writes the calls they host and outlives the
+ *     session too (pre-review C, rule 30).
  *
  * A route whose action is not its body's `action` names it to
  * guardStoreWrite (lib/store-request.ts); one that learns only from what is
@@ -380,7 +385,9 @@ export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
   reviews: ["photo"],
   // A new phone for sale notifications (app/api/store/phone, Claude 5's authentication audit, M3): it is told every sale,
   // booking, report and affiliate, and it is the person's, not the session's, so logging out does not take it off.
-  member: ["phone-add"],
+  // A host's own Google Calendar (lib/meet-routes.ts startHostConnect and finishHostConnect, pre-review C): the same
+  // door, the person's and not the session's, asked outside app/api/store.
+  member: ["phone-add", "host-connect"],
 };
 
 /** Whether a locked session may not do `need` (with `action`, when the route names one). */
@@ -634,10 +641,12 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
 export async function cancelReset(email: string, why: "login" | "studio"): Promise<boolean | "kept-locked"> {
   const called = await withTwoStep(email, async (held) => {
     const record = await read(email);
-    if (!record || (record.reset === 0 && record.f === 0)) return false;
-    // A login with a code or a passkey, or the owner in a session opened with one, also lets the app's codes in again
-    // after too many wrong ones (APP_CODE_FAILS_IN_A_ROW).
-    if (!(await writeHeld(held, email, { ...record, reset: 0, f: 0 }))) return false;
+    // A login with a recovery code or a passkey also lets the app's codes in again after too many wrong ones
+    // (APP_CODE_FAILS_IN_A_ROW). Cancel in the studio does not: any session may press it, one let in without the
+    // second step included, so it leaves the count as it is (pre-review A).
+    const f = why === "login" ? 0 : record?.f ?? 0;
+    if (!record || (record.reset === 0 && record.f === f)) return false;
+    if (!(await writeHeld(held, email, { ...record, reset: 0, f }))) return false;
     return record.reset !== 0;
   });
   if (!called) return false;
@@ -925,7 +934,7 @@ async function toldStopped(email: string): Promise<void> {
   await tell(
     email,
     "Your app's codes are off for your Marktmorgen account",
-    `Someone typed a wrong code from your authenticator app ${APP_CODE_FAILS_IN_A_ROW} times in a row for your Marktmorgen account, so the app's codes are off for now. Nobody got in with them. To get back in, use one of your recovery codes, a passkey, or the link we send to your recovery address from the code page. After that, the app's codes work again.`,
+    `Someone typed a wrong code from your authenticator app ${APP_CODE_FAILS_IN_A_ROW} times in a row for your Marktmorgen account, so the app's codes are off for now. Nobody got in with them. To get back in, log in with one of your recovery codes or a passkey: that turns the app's codes back on. You can also get a link at your recovery address from the code page: that link turns two-step login off, and you can turn it on again in your studio.`,
     backup,
   );
 }

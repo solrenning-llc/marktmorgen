@@ -34,7 +34,7 @@ const en = {
   linkNotices: {
     sent: {
       title: "Check your inbox",
-      body: "If that address bought this course, a link to open it is on its way. It works for one hour.",
+      body: "If this address bought the course, a link is on its way; if it does not arrive in a few minutes, try again. It works for one hour.",
     },
     email: { title: "That address does not look right", body: "Check it and try again." },
     limited: { title: "Too many requests", body: "Wait a little, then ask again." },
@@ -364,7 +364,7 @@ const es: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Revisa tu bandeja de entrada",
-      body: "Si esa dirección compró este curso, va en camino un enlace para abrirlo. Funciona durante una hora.",
+      body: "Si esa dirección compró este curso, va en camino un enlace para abrirlo; si no llega en unos minutos, vuelve a intentarlo. Funciona durante una hora.",
     },
     email: { title: "Esa dirección no parece correcta", body: "Revísala e inténtalo de nuevo." },
     limited: { title: "Demasiadas solicitudes", body: "Espera un poco y vuelve a pedirlo." },
@@ -666,7 +666,7 @@ const fr: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Consultez votre boîte de réception",
-      body: "Si cette adresse a acheté cette formation, un lien pour l'ouvrir est en route. Il fonctionne pendant une heure.",
+      body: "Si cette adresse a acheté cette formation, un lien pour l'ouvrir est en route. S'il n'arrive pas d'ici quelques minutes, réessayez. Il fonctionne pendant une heure.",
     },
     email: { title: "Cette adresse ne semble pas correcte", body: "Vérifiez-la et réessayez." },
     limited: { title: "Trop de demandes", body: "Patientez un peu, puis redemandez." },
@@ -962,7 +962,7 @@ const de: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Sehen Sie in Ihrem Posteingang nach",
-      body: "Wenn mit dieser Adresse dieser Kurs gekauft wurde, ist ein Link zum Öffnen unterwegs. Er funktioniert eine Stunde lang.",
+      body: "Wenn mit dieser Adresse dieser Kurs gekauft wurde, ist ein Link zum Öffnen unterwegs. Kommt er nicht in ein paar Minuten an, versuchen Sie es noch einmal. Er funktioniert eine Stunde lang.",
     },
     email: { title: "Diese Adresse sieht nicht richtig aus", body: "Prüfen Sie sie und versuchen Sie es erneut." },
     limited: { title: "Zu viele Anfragen", body: "Warten Sie kurz und fragen Sie dann erneut." },
@@ -1263,7 +1263,7 @@ const it: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Controlla la tua casella di posta",
-      body: "Se con quell'indirizzo è stato acquistato questo corso, un link per aprirlo è in arrivo. Funziona per un'ora.",
+      body: "Se con quell'indirizzo è stato acquistato questo corso, un link per aprirlo è in arrivo; se non arriva entro qualche minuto, riprova. Funziona per un'ora.",
     },
     email: { title: "Quell'indirizzo non sembra corretto", body: "Controllalo e riprova." },
     limited: { title: "Troppe richieste", body: "Aspetta un po', poi richiedilo." },
@@ -1562,7 +1562,7 @@ const nl: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Kijk in je inbox",
-      body: "Als met dat adres deze cursus is gekocht, is er een link onderweg om hem te openen. Die werkt een uur lang.",
+      body: "Als met dat adres deze cursus is gekocht, is er een link onderweg om hem te openen. Komt hij niet binnen een paar minuten aan, probeer het dan opnieuw. Die werkt een uur lang.",
     },
     email: { title: "Dat adres lijkt niet te kloppen", body: "Controleer het en probeer het opnieuw." },
     limited: { title: "Te veel verzoeken", body: "Wacht even en vraag het dan opnieuw." },
@@ -1862,7 +1862,7 @@ const pt: CoursesWords = {
   linkNotices: {
     sent: {
       title: "Consulte a sua caixa de entrada",
-      body: "Se esse endereço comprou este curso, uma ligação para o abrir está a caminho. Funciona durante uma hora.",
+      body: "Se esse endereço comprou este curso, uma ligação para o abrir está a caminho; se não chegar dentro de alguns minutos, tente novamente. Funciona durante uma hora.",
     },
     email: { title: "Esse endereço não parece correto", body: "Verifique-o e tente novamente." },
     limited: { title: "Demasiados pedidos", body: "Aguarde um pouco e volte a pedir." },

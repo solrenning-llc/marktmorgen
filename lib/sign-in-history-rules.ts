@@ -283,7 +283,7 @@ export const LOCKED_NOTE = [
   "It cannot delete anything for good, like people, products, lessons, files, forms or posts.",
   "It cannot put a new file or picture over an old one.",
   "It cannot cancel, delete or move an event, or send a purchase email again.",
-  "It cannot turn on sale notifications on a new phone.",
+  "It cannot turn on sale notifications on a new phone or connect your own Google Calendar for team calls.",
   'It cannot use "Sign out everywhere", add or remove a passkey or change two-step login.',
   "It cannot change your recovery address or your sign-in address.",
   "Everything else in your studio is open to it.",

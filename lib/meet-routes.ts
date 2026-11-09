@@ -25,6 +25,7 @@ import { integrationPauseWord } from "@/lib/integration-pause";
 import { away, creatorFrom, resolveAccess, studioPath } from "@/lib/studio-route";
 import { logTeam } from "@/lib/team";
 import { PERMISSION_WORDS } from "@/lib/team-roles";
+import { lockedFor } from "@/lib/two-step";
 
 /** Consents one store may start in ten minutes. */
 const STARTS_PER_TEN_MINUTES = 10;
@@ -77,7 +78,9 @@ export async function startConnect(request: NextRequest, provider: MeetProvider)
  */
 export async function startHostConnect(request: NextRequest): Promise<Response> {
   if (!hostSyncOn()) return notFound();
-  const creator = await creatorFrom(request, "member");
+  // Not from a session let in without its second step: the connection is the person's and outlives it
+  // (lib/two-step.ts LOCKED_ACTIONS, "host-connect"; pre-review C).
+  const creator = await creatorFrom(request, "member", { action: "host-connect" });
   if (creator instanceof Response) return creator;
   const { store, ref, email, origin } = creator;
   const back = (query: string) => away(origin, studioPath(store, query, "calendar"));
@@ -105,6 +108,8 @@ async function finishHostConnect(
   email: string,
   taken: { statsId: string; sid: string; verifier: string; host: string },
 ): Promise<Response> {
+  // A consent begun before the session was locked is not finished by it either ("host-connect").
+  if (await lockedFor(request, "member", "host-connect")) return away(origin, "/studio?two-step=locked");
   const allowed = await resolveAccess(email, { pinned: taken.sid, session: request.cookies.get(SESSION_COOKIE)?.value ?? "" }, "member");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
   const { store } = allowed.access;

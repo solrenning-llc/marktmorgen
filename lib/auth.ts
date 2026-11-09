@@ -751,8 +751,9 @@ export async function takeSignInCode(request: unknown, typed: unknown): Promise<
   if (forAddress > EMAIL_CODE_TRIES_PER_ADDRESS_HOUR || forDay > EMAIL_CODE_TRIES_PER_ADDRESS_DAY) return "address-blocked";
   const verifier = codeHash(request, code);
   if (!verifier) return "expired";
-  // The address's tries in a row, counted before the comparison as the others are (M1): a try that will be compared is
-  // one more, until a login starts the count again (noteSignIn). Past the ceiling, nothing is compared.
+  // The address's wrong codes in a row (M1): each try is counted before the comparison, as the others are, so tries at
+  // the same moment cannot pass the ceiling together; a right code takes the count away below, so only wrong ones stay
+  // in it (pre-review E), and so does a login (noteSignIn). Past the ceiling, nothing is compared.
   const fails = await codeFailsKey(tries as string);
   const streak = repliesFor(await redisPipeline([["INCR", fails], ["EXPIRE", fails, CODE_FAILS_SECONDS]]), 2);
   const inRow = countOf(streak?.[0]);
@@ -765,12 +766,14 @@ export async function takeSignInCode(request: unknown, typed: unknown): Promise<
     if (inRow === EMAIL_CODE_FAILS_IN_A_ROW) await tellCodesOff(link as string);
     return { wrong: Math.max(0, EMAIL_CODE_TRIES - forRequest) };
   }
+  // Right: the row of wrong codes ends here, whether or not a login follows (an account with two-step login is only
+  // held at its code page). Its DEL goes with the record's below, in the same command.
   const owner = await spendLinkKey(link as string);
   // Still the newest after the link was spent (Codex CX1 on #2736): a newer request that finished before the spend has
   // moved the mark, and this code then opens nothing. Read after the spend, so no request can come between the check and
   // the spend; a request that comes after the spend found this code the newest when it was used.
   const after = repliesFor(await redisPipeline([["GET", last as string]]), 1);
-  await redisPipeline([["DEL", record, pointer as string]]).catch((error: unknown) => console.error("letting a spent code go failed", error));
+  await redisPipeline([["DEL", record, pointer as string, fails]]).catch((error: unknown) => console.error("letting a spent code go failed", error));
   if (owner === undefined || !after || (after[0] !== null && typeof after[0] !== "string")) return "unknown";
   if (after[0] !== record) return "expired";
   return owner ? { owner } : "expired";
@@ -779,7 +782,9 @@ export async function takeSignInCode(request: unknown, typed: unknown): Promise<
 /**
  * Tells the address its login codes stopped (M1), from the link's record of
  * the request that reached the ceiling, which holds the address. Best effort:
- * the codes stop whether or not this reaches the inbox.
+ * the codes stop whether or not this reaches the inbox. Anybody may ask a
+ * code for any address, so the words say "this address", never "your
+ * account": it is told whether or not it has one (pre-review F).
  */
 async function tellCodesOff(link: string): Promise<void> {
   try {
@@ -790,15 +795,15 @@ async function tellCodesOff(link: string): Promise<void> {
       from: NIMBUS_FROM,
       to: address,
       replyTo: "support@marktmorgen.com",
-      subject: "Login codes are off for your Marktmorgen account",
+      subject: "Login codes are off for this email address on Marktmorgen",
       text: [
-        `Someone typed a wrong login code for your Marktmorgen account (${address}) ${EMAIL_CODE_FAILS_IN_A_ROW} times in a row. Nobody got in.`,
+        `Someone typed a wrong login code for this email address (${address}) on Marktmorgen ${EMAIL_CODE_FAILS_IN_A_ROW} times in a row. Nobody got in.`,
         "",
-        "To keep your account safe, the six-digit codes in login emails no longer work for this address. The link in a login email still works, and so does a passkey.",
+        "To keep it safe, the six-digit codes in login emails no longer work for this address. The link in a login email still works, and so does a passkey.",
         "",
         "When you log in with the link or a passkey, the codes work again.",
         "",
-        "If this was not you, there is nothing else to do. Somebody may be trying to get into your account, so keep your email safe.",
+        "If this was not you, or you have no Marktmorgen account, there is nothing else to do. Somebody may be trying to use this address, so keep your email safe.",
       ].join("\n"),
     });
   } catch (error) {

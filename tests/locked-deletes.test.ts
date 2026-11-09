@@ -511,7 +511,10 @@ async function main(): Promise<void> {
   const filing = deleting.filter((r) => /\bdel\(|dropStamped\(|dropStream\(/.test(readFileSync(join(base, r, "route.ts"), "utf8")));
   is("every route that deletes a file has a request above that reads the file still there", filing.filter((r) => !keptBy.has(r)), []);
   const named = new Set(Object.values(HELD).flat().filter((w) => w.startsWith("act:")).map((w) => w.split(":").slice(1).join(":")));
-  const unused = Object.entries(LOCKED_ACTIONS).flatMap(([need, list]) => list.filter((a) => !named.has(`${need}:${a}`) && !["replace", "move", "email", "delete", "delete-comment", "unsay", "clear", "fields-remove"].includes(a)).map((a) => `${need}:${a}`));
+  // "host-connect" is asked outside app/api/store (lib/meet-routes.ts, held by tests/host-connect-locked-session.test.ts;
+  // pre-review C of claude5/auth-failure-caps): the list below gains it, rule 23, and the route must still name it.
+  const unused = Object.entries(LOCKED_ACTIONS).flatMap(([need, list]) => list.filter((a) => !named.has(`${need}:${a}`) && !["replace", "move", "email", "delete", "delete-comment", "unsay", "clear", "fields-remove", "host-connect"].includes(a)).map((a) => `${need}:${a}`));
+  is("and the host's own calendar connection names its action where it is asked", (readFileSync(join(root, "lib/meet-routes.ts"), "utf8").match(/"host-connect"/g) ?? []).length >= 2, true);
   is("and no action is named for one route only by its path", Object.values(LOCKED_ACTIONS).flat().filter((a) => a.includes(":")), []);
   is("and every action LOCKED_ACTIONS names is one a route here uses (the in-route ones are asked through lockedFor)", unused, []);
 

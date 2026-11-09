@@ -199,7 +199,6 @@ import {
   readSubscription,
   renewalInvoicePage,
   trialOffered,
-  trialOfferedTo,
 } from "@/lib/billing";
 import { STORAGE_BRAKE_BYTES, storageBrakeFor, storageUsed, storageWords } from "@/lib/storage-quota";
 import { trafficForAdmission } from "@/lib/traffic";
@@ -959,8 +958,6 @@ export default async function StudioPage({
     // Stripe's own page that pays an unpaid renewal, read fresh on each load (232 [CA1] unit 4).
     renewalPage: current && unpaidSince > 0 && store?.subscriptionId && isBillingConfigured() ? early(renewalInvoicePage(store.subscriptionId)) : null,
     firstSale: PLANS_ON_SALE && store && paid && !billedYearly ? early(firstSaleAt(store)) : null,
-    // Once per person (R26): whether the trial is still offered, read at Stripe only while it could be (lib/billing.ts).
-    trialTo: PLANS_ON_SALE && store && trialOffered(store) ? early(trialOfferedTo(store, null)) : null,
     domainNow: domainsOn && store?.domain && !store.domain.liveAt && paid && hasPro(tier) ? early(domainStatus(store.domain.name, store).catch(() => null)) : null,
     sold: current && current.stripeAccountId && may("orders") ? early(listSales(current)) : null,
     usage: early(
@@ -1022,7 +1019,7 @@ export default async function StudioPage({
   const trialing = live?.state === "active" && live.trialing;
   // The trial is once per store. A store starting again is told, on every
   // button, that it pays from today — the same rule the checkout opens with.
-  const withTrial = store ? (planReads.trialTo ? await planReads.trialTo : trialOffered(store)) : true;
+  const withTrial = store ? trialOffered(store) : true;
   // One of an account's other stores that has never had a plan: it is not
   // "starting again", it starts for the first time, without the trial that
   // belongs to the account's first store (lib/billing.ts, trialOffered).

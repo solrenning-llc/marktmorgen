@@ -33,7 +33,7 @@ is("the compose words, the draft, when, the check and the confirms, as the studi
 is("sending for the owner or an Admin, writing drafts for an Editor too", [can("owner", "send"), can("admin", "send"), can("editor", "send"), can("editor", "draft")], [true, true, false, true]);
 const billingForms = [...page.matchAll(/action=\{`\/api\/billing\/(checkout|switch)/g)].map((m) => m.index ?? 0);
 is("no button starts or changes a plan while none is on sale, as the checkout and the switch refuse", [page.includes("!PLANS_ON_SALE || !isBillingConfigured() ? ("), page.includes("Paid plans are not on sale yet, so this store cannot move to Pro for now."), billingForms.length >= 2 && billingForms.every((at) => page.indexOf("!PLANS_ON_SALE || !isBillingConfigured() ? (") < at), page.includes("moveUp={ PLANS_ON_SALE && isBillingConfigured() &&"), read("app/api/billing/checkout/route.ts").includes('if (!PLANS_ON_SALE) return away(origin, studio("billing=not-open"));'), read("app/api/billing/switch/route.ts").includes("PLANS_ON_SALE")], [true, true, true, true, true, true]);
-is("the trial's emails only said while a trial can start", page.includes("{PLANS_ON_SALE && withTrial ? ( <p className=\"mt-3 text-sm text-ink-soft\"> {`During the free trial") && page.includes("const withTrial = PLANS_ON_SALE && trialOffered(store) ? await trialOfferedTo(store, null) : trialOffered(store);"), true);
+is("the trial's emails only said while a trial can start", page.includes("{PLANS_ON_SALE && trialOffered(store) ? ( <p className=\"mt-3 text-sm text-ink-soft\"> {`During the free trial"), true);
 
 part("The answers, in both states");
 const now = emailBeginnerQuestions(false, TRIAL_DAYS);

@@ -175,12 +175,15 @@ async function main(): Promise<void> {
   is("a customer the checkout opens for that Stripe no longer has: no trial, from the address", await checkout(fresh(brandNew), "cus_GoneFromStripe1"), { trial: null, missing: null, sessions: 2, opened: true });
   is("(control) after the unknowns, a new person still gets the trial", (await checkout(fresh(brandNew))).trial, String(TRIAL_DAYS));
 
-  part("The studio's buttons read the same answer the checkout opens with");
+  part("Only the checkout reads Stripe for this, a bounded number of times (Claude 2, #3337 MEDIUM)");
+  reads.length = 0;
+  for (let i = 1; i <= 4; i += 1) customers.set(`cus_FiveOfThem0000${i}`, "five@example.com");
+  await checkout(fresh("five@example.com"), "cus_TrialOnce0001");
+  is("one customer search and at most five subscription lists per checkout", [reads.filter((r) => r === "search").length, reads.filter((r) => r.startsWith("subscriptions:")).length], [1, 5]);
   const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
   const studio = flat("app/studio/page.tsx");
   const email = flat("app/studio/email/page.tsx");
-  is("the studio asks the person's history while plans are on sale", [studio.includes("trialTo: PLANS_ON_SALE && store && trialOffered(store) ? early(trialOfferedTo(store, null)) : null,"), studio.includes("const withTrial = store ? (planReads.trialTo ? await planReads.trialTo : trialOffered(store)) : true;")], [true, true]);
-  is("the email page too, for both of its trial sentences", [email.includes("const withTrial = PLANS_ON_SALE && trialOffered(store) ? await trialOfferedTo(store, null) : trialOffered(store);"), email.includes("{withTrial ? `Start the ${TRIAL_DAYS}-day trial on Pro"), email.includes("{trialOffered(store)"), email.includes("&& trialOffered(store) ? (")], [true, true, false, false]);
+  is("the studio's pages keep the store rule and never ask Stripe for the person's history", [studio.includes("trialOfferedTo"), email.includes("trialOfferedTo"), studio.includes("const withTrial = store ? trialOffered(store) : true;"), email.includes("{PLANS_ON_SALE && trialOffered(store) ? (")], [false, false, true, true]);
   done();
 }
 main().catch((error) => { console.error = globalThis.console.log; console.log(error); process.exitCode = 1; });

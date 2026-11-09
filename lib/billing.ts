@@ -291,9 +291,8 @@ function writeInline(body: URLSearchParams, tier: Tier, cycle: Cycle): void {
  * Once per store: a store that has ever started a subscription with us —
  * trial or not, cancelled or not — pays from the first day when it starts
  * again. Otherwise cancelling inside the trial and starting over would be a
- * free store for as long as anyone cared to keep doing it. The studio reads
- * the same answer, so the button never promises a trial the checkout does not
- * open with.
+ * free store for as long as anyone cared to keep doing it. The studio's
+ * buttons read this answer.
  *
  * And once per account: the trial is for an account's first store, the one
  * that decides whether we are worth paying for. Every other store an account
@@ -301,8 +300,12 @@ function writeInline(body: URLSearchParams, tier: Tier, cycle: Cycle): void {
  * not five trials in a row.
  *
  * This reads the store record only. A closed store's record is gone, so the
- * checkout and the studio ask trialOfferedTo below, which also reads the
- * person's history at Stripe.
+ * checkout asks trialOfferedTo below, which also reads the person's history at
+ * Stripe. The studio does not: a page load makes no Stripe request (its Search
+ * API limit is shared with the checkout's own search), so for a person whose
+ * earlier store closed the studio can still say "trial" while the checkout
+ * opens without one; Stripe's Checkout page shows the amount due today before
+ * any charge.
  */
 export function trialOffered(store: Pick<Store, "stripeCustomerId" | "subscriptionId" | "extra">): boolean {
   return !store.extra && !store.stripeCustomerId && !store.subscriptionId;
@@ -318,7 +321,9 @@ export const TRIAL_HISTORY_CUSTOMERS = 5;
  * money-back guarantee is (lib/plan-refund.ts): a store that closes takes its
  * record with it (closeStoreRecord), not its customer at Stripe, so a person
  * whose first store closed and who makes another is not offered a second trial.
- * The checkout and the studio read this same answer.
+ * Only the checkout reads this answer (bounded: one search and at most
+ * TRIAL_HISTORY_CUSTOMERS subscription lists per checkout); the studio's
+ * pages keep trialOffered and make no Stripe request on a load.
  *
  * Read: every customer of ours with the store's sign-in address (Stripe's
  * customer search by `email`, the query lib/plan-refund.ts uses; it can lag a

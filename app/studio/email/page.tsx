@@ -35,7 +35,7 @@ import { readFields, readPipelines } from "@/lib/crm";
 import { labeledStages } from "@/lib/crm-rules";
 import { listDraftsStrict } from "@/lib/mail-drafts";
 import { can } from "@/lib/team-roles";
-import { isBillingConfigured, trialOffered, trialOfferedTo } from "@/lib/billing";
+import { isBillingConfigured, trialOffered } from "@/lib/billing";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import { listSegments } from "@/lib/segments";
 import { activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
@@ -108,8 +108,6 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     readMailVisits(store, broadcasts.filter((b) => b.status === "sent" && b.tagged).map((b) => b.id)),
   ]);
   const trial = allowance > 0 && inTrial(store);
-  // Once per person (R26): the same answer the checkout opens with, read at Stripe only while a trial could start.
-  const withTrial = PLANS_ON_SALE && trialOffered(store) ? await trialOfferedTo(store, null) : trialOffered(store);
   // Which sent emails are published on the store, and which for members (lib/letters.ts): one read.
   // A failed read is not "not published": the studio says it does not know (null).
   const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetters(store) : new Map<string, { members: boolean }>();
@@ -197,7 +195,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <form action={`/api/billing/checkout?store=${store.sid}`} method="post" className="mt-5 flex flex-col items-start gap-3">
                 <input type="hidden" name="tier" value="pro" />
                 <button type="submit" name="cycle" value="month" className="btn btn-primary btn-wrap">
-                  {withTrial
+                  {trialOffered(store)
                     ? `Start the ${TRIAL_DAYS}-day trial on Pro — ${priceWords("pro", "month")} after that`
                     : `Start Pro — ${priceWords("pro", "month")}, from today`}
                 </button>
@@ -206,7 +204,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
                 </button>
               </form>
             )}
-            {PLANS_ON_SALE && withTrial ? (
+            {PLANS_ON_SALE && trialOffered(store) ? (
               <p className="mt-3 text-sm text-ink-soft">
                 {`During the free trial a store sends up to ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with the first payment.`}
               </p>

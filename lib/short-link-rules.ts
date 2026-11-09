@@ -5,6 +5,8 @@
  */
 import { POST_PLACES } from "@/lib/share-links";
 import { SITE_URL } from "@/lib/site-url";
+import { readCartIds } from "@/lib/cart-rules";
+import { readLinkCode } from "@/lib/code-link";
 
 /** The letters a code is made of: none of 0, o, 1, l or i, which are misread from a slide or a flyer. */
 export const CODE_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -15,7 +17,13 @@ export const MAX_NAME = 30;
 /** How long the CDN keeps a link's answer. */
 export const CACHE_SECONDS = 300;
 
-export type LinkTarget = { kind: "store" } | { kind: "product"; id: string };
+/**
+ * Where a link goes: the store, one product's page, or the store with a
+ * ready cart (624 [SZ8](23)): two to MAX_CART products and, if chosen, one of
+ * the creator's discount codes (lib/code-link.ts), applied at checkout only if
+ * it is live.
+ */
+export type LinkTarget = { kind: "store" } | { kind: "product"; id: string } | { kind: "cart"; ids: string[]; code?: string };
 
 export type ShortLink = {
   code: string;
@@ -54,6 +62,14 @@ export function readTarget(raw: unknown, isProduct: (id: string) => boolean): Li
   const v = raw as Record<string, unknown>;
   if (v.kind === "store") return { kind: "store" };
   if (v.kind === "product" && typeof v.id === "string" && v.id.length <= 64 && isProduct(v.id)) return { kind: "product", id: v.id };
+  if (v.kind === "cart" && Array.isArray(v.ids)) {
+    const ids = readCartIds(v.ids);
+    if (ids.length < 2 || ids.length !== v.ids.length || !ids.every(isProduct)) return null;
+    const typed = typeof v.code === "string" ? v.code.trim().toUpperCase() : "";
+    const code = readLinkCode(typed);
+    if (typed && !code) return null;
+    return code ? { kind: "cart", ids, code } : { kind: "cart", ids };
+  }
   return null;
 }
 
@@ -65,5 +81,10 @@ export function readTarget(raw: unknown, isProduct: (id: string) => boolean): Li
 export function landingUrl(base: string, link: Pick<ShortLink, "name" | "place" | "target">): string {
   const page = link.target.kind === "product" ? `${base}/p/${encodeURIComponent(link.target.id)}` : base;
   const params = new URLSearchParams({ utm_source: link.place, utm_medium: "post", utm_campaign: link.name });
+  // A ready cart: the store page puts these in the cart (restore) and the code is remembered for the checkout.
+  if (link.target.kind === "cart") {
+    params.set("restore", link.target.ids.join(","));
+    if (link.target.code) params.set("code", link.target.code);
+  }
   return `${page}?${params.toString()}`;
 }

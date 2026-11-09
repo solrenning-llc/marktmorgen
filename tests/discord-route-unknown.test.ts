@@ -1,7 +1,7 @@
 /**
  * Sweep app1, finding 8: "Disconnect the server" in the studio
  * (app/api/store/discord/route.ts). The creator hears "Disconnected" only once
- * Discord confirmed the bot left (an exact answer: 2xx, or 404 when it was no
+ * Discord confirmed the bot left (an exact answer: 2xx, or 404 with code 10004 when it was no
  * longer there); before that nothing kept for the server is forgotten, so a
  * failed leave answers an honest error ("server", 502) and the creator can
  * press again. And the connected server read in another shape is not "no
@@ -29,7 +29,7 @@ const SERVER = "100000000000000001";
 const ROLE = "200000000000000001";
 const LEAVE = `DELETE /users/@me/guilds/${SERVER}`;
 const asked: string[] = [];
-let leave: "left" | "ok200" | "gone" | "down" | "throws" | "forbidden" = "left";
+let leave: "left" | "ok200" | "gone" | "down" | "throws" | "forbidden" | "bare404" | "other404" = "left";
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const what = `${init?.method ?? "GET"} ${url.pathname.replace(/^\/api\/v10/, "")}`;
@@ -38,6 +38,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (leave === "throws") throw new TypeError("synthetic network failure");
     if (leave === "down") return new Response(JSON.stringify({ message: "synthetic outage" }), { status: 503 });
     if (leave === "forbidden") return new Response(JSON.stringify({ message: "Missing Access", code: 50001 }), { status: 403 });
+    // A 404 that is not Discord's "Unknown Guild" (10004), such as a proxy's HTML page or another code, does not
+    // say the bot is out (independent review of #2994, comment 6698105767).
+    if (leave === "bare404") return new Response("<html><body>404 Not Found</body></html>", { status: 404, headers: { "content-type": "text/html" } });
+    if (leave === "other404") return new Response(JSON.stringify({ message: "404: Not Found", code: 0 }), { status: 404 });
     if (leave === "gone") return new Response(JSON.stringify({ message: "Unknown Guild", code: 10004 }), { status: 404 });
     if (leave === "ok200") return new Response(null, { status: 200 });
     return new Response(null, { status: 204 });
@@ -91,7 +95,7 @@ async function main(): Promise<void> {
     is(`${label}: the server and its product roles are forgotten`, await kept(), [null, []]);
   }
 
-  for (const [label, as] of [["Discord answers 503", "down"], ["the request to Discord fails", "throws"], ["Discord answers 403", "forbidden"]] as const) {
+  for (const [label, as] of [["Discord answers 503", "down"], ["the request to Discord fails", "throws"], ["Discord answers 403", "forbidden"], ["an HTML 404 with no Discord code", "bare404"], ["a 404 with a code other than 10004", "other404"]] as const) {
     part(`The leave is not confirmed: ${label}`);
     await connect();
     asked.length = 0;

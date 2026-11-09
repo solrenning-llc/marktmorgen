@@ -44,6 +44,7 @@ const MESSAGES: Record<string, string> = {
   pages_changed: "Your store's pages changed while this was checked. Check the funnel again.",
   setup_incomplete: "The import stopped partway. Check the funnel again: anything already made is used again, not made twice.",
   unavailable: "Imports are not switched on yet.",
+  try_again: "Nothing was made. Try again in a moment.",
   server_error: "Something went wrong on our side. Try again in a moment.",
   // 232 [CA1] unit 4b2: in place of the studio's words about uploads.
   renewal_unpaid: FUNNEL_PAUSED.renewal_unpaid,

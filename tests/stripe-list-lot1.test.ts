@@ -118,7 +118,10 @@ async function planRefunds(): Promise<void> {
       if (path === "/invoices") return list(q.get("subscription") === sub ? [invoice] : []);
       if (path === "/charges") return list(q.get("customer") === customer ? [chargeRow] : []);
       if (path === `/charges/${charge}`) return Response.json(chargeRow);
-      if (path === "/charges/search" || path === "/customers/search") return list([]);
+      // #2742 (codex/c-tx2-plan-refund-list-evidence) reads a search page only in Stripe's own search envelope
+      // (object "search_result"), as Stripe answers it; a plain list there is now "unknown" and would make no refund
+      // before the refunds list this part checks is even read.
+      if (path === "/charges/search" || path === "/customers/search") return Response.json({ object: "search_result", data: [], has_more: false, next_page: null });
       if (path === "/disputes") return list([]);
       if (path === "/refunds") return Response.json(refundsPage);
       return null;
@@ -129,14 +132,15 @@ async function planRefunds(): Promise<void> {
     made.length = 0;
     const store = await shopWith(page);
     const result = await refundPlanPayment(store, NOW);
-    is(`refunds answered ${label}: nothing made`, [result.ok, made.length], [false, 0]);
+    // The refunds list is what stops it ("failed"), not an earlier reading turned "unknown" (as after #2742).
+    is(`refunds answered ${label}: nothing made`, [result.ok, (result as { reason?: string }).reason, made.length], [false, "failed", 0]);
   }
   // Codex CX1 on #2759: a row is a refund only with a refund's own id; any other id is not readable, so no refund.
   for (const [label, id] of [["a subscription's id", "sub_CX1Wrong0001"], ["underscores only", "___"]]) {
     made.length = 0;
     const store = await shopWith({ object: "list", data: [{ id, object: "refund", status: "failed", amount: 6_900 }], has_more: false });
     const result = await refundPlanPayment(store, NOW);
-    is(`a refund row with ${label} for id: not readable, nothing made`, [result.ok, made.length], [false, 0]);
+    is(`a refund row with ${label} for id: not readable, nothing made`, [result.ok, (result as { reason?: string }).reason, made.length], [false, "failed", 0]);
   }
   made.length = 0;
   const fine = await shopWith({ object: "list", data: [], has_more: false });

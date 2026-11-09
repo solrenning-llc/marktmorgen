@@ -76,15 +76,15 @@ export class PlatformError extends Error {
   /** "key": the key was refused. "target": the audience is gone. "contact": this person cannot be added. */
   readonly kind: "key" | "target" | "contact" | "limit" | "server" | "network";
 
-  constructor(kind: PlatformError["kind"], status: number, message: string) {
+  constructor(kind: PlatformError["kind"], status: number, message: string, private readonly mayRetry = true) {
     super(message);
     this.kind = kind;
     this.status = status;
   }
 
-  /** Worth another try: everything except a person the platform will not take. */
+  /** A contact refusal or confirmed picker limitation cannot be fixed by an automatic retry. */
   get retry(): boolean {
-    return this.kind !== "contact";
+    return this.kind !== "contact" && this.mayRetry;
   }
 }
 
@@ -219,7 +219,7 @@ const TARGET_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** The audiences, forms, publications or groups the key can reach, for the creator to pick one. */
 export async function listTargets(provider: EmailProvider, key: string, deadline = Date.now() + 10_000): Promise<Target[]> {
   const path = {
-    mailchimp: `/lists?count=${MAX_TARGETS}&fields=lists.id,lists.name`,
+    mailchimp: `/lists?count=${MAX_TARGETS}&fields=lists.id,lists.name,total_items`,
     kit: `/forms?status=active&per_page=${MAX_TARGETS}`,
     beehiiv: `/publications?limit=${MAX_TARGETS}`,
     mailerlite: `/groups?limit=${MAX_TARGETS}&sort=name`,
@@ -227,16 +227,48 @@ export async function listTargets(provider: EmailProvider, key: string, deadline
   const answer = await call(provider, key, "GET", path, undefined, deadline);
   if (!ok(answer)) throw failure(provider, answer, "key");
   const rows = answer.json[provider === "mailchimp" ? "lists" : provider === "kit" ? "forms" : "data"];
-  if (!Array.isArray(rows)) return [];
-  return rows
-    .map((row) => {
-      const value = (row ?? {}) as Record<string, unknown>;
-      const id = typeof value.id === "number" ? String(value.id) : typeof value.id === "string" ? value.id : "";
-      const name = typeof value.name === "string" ? value.name.replace(/\s+/g, " ").trim().slice(0, 100) : "";
-      return { id, name: name || id };
-    })
-    .filter((target) => TARGET_ID.test(target.id))
-    .slice(0, MAX_TARGETS);
+  const unconfirmed = () => new PlatformError("server", answer.status, `${PROVIDER_NAMES[provider]} returned an incomplete or unreadable destination list. Nothing was changed.`);
+  // An unreadable page is not an empty list. Reconnecting uses this evidence
+  // to retain the chosen destination, so never return a partial page either.
+  if (!Array.isArray(rows)) throw unconfirmed();
+  // The callers use absence to clear a saved destination or mark it missing.
+  // A first page cannot prove absence. Stay inside the existing single request
+  // and picker bound: refuse more pages or missing/contradictory metadata.
+  // Sources: Kit forms/pagination; Mailchimp lists; beehiiv publications;
+  // MailerLite groups (official API documentation, checked 2026-11-07).
+  const data = answer.json;
+  const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const pagination = record(data.pagination);
+  const links = record(data.links);
+  const meta = record(data.meta);
+  const complete = provider === "mailchimp"
+    ? Number.isSafeInteger(data.total_items) && data.total_items === rows.length
+    : provider === "kit"
+      ? pagination.has_previous_page === false && pagination.has_next_page === false
+      : provider === "beehiiv"
+        ? data.page === 1 && (data.total_pages === 1 || (rows.length === 0 && data.total_pages === 0)) && Number.isSafeInteger(data.total_results) && data.total_results === rows.length
+        : links.prev === null && links.next === null && meta.current_page === 1 && meta.last_page === 1 && Number.isSafeInteger(meta.total) && meta.total === rows.length;
+  // A full first page with consistent, explicit continuation describes an
+  // account our picker cannot list completely; it is not a provider failure.
+  const larger = rows.length === MAX_TARGETS && (provider === "mailchimp"
+    ? Number.isSafeInteger(data.total_items) && (data.total_items as number) > MAX_TARGETS
+    : provider === "kit"
+      ? pagination.has_previous_page === false && pagination.has_next_page === true
+      : provider === "beehiiv"
+        ? data.page === 1 && Number.isSafeInteger(data.total_pages) && (data.total_pages as number) > 1 && Number.isSafeInteger(data.total_results) && (data.total_results as number) > MAX_TARGETS
+        : links.prev === null && typeof links.next === "string" && links.next.length > 0 && meta.current_page === 1 && Number.isSafeInteger(meta.last_page) && (meta.last_page as number) > 1 && Number.isSafeInteger(meta.total) && (meta.total as number) > MAX_TARGETS);
+  if ((!complete && !larger) || rows.length > MAX_TARGETS) throw unconfirmed();
+  const targets: Target[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) throw unconfirmed();
+    const value = row as Record<string, unknown>;
+    const id = typeof value.id === "number" && Number.isSafeInteger(value.id) ? String(value.id) : typeof value.id === "string" ? value.id : "";
+    if (!TARGET_ID.test(id)) throw unconfirmed();
+    const name = typeof value.name === "string" ? value.name.replace(/\s+/g, " ").trim().slice(0, 100) : "";
+    targets.push({ id, name: name || id });
+  }
+  if (larger) throw new PlatformError("server", answer.status, `Your ${PROVIDER_NAMES[provider]} account has more destinations than we can list on one page. Nothing was connected or changed. Use an account with fewer destinations.`, false);
+  return targets;
 }
 
 export type Contact = {

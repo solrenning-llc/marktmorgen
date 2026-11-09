@@ -98,9 +98,21 @@ export async function claimHandle(id: string, who: string, name: string, had: st
   return had;
 }
 
-/** Gives a handle back, for a member who is removed. */
-export async function releaseHandle(id: string, handle: string): Promise<void> {
-  if (handle) await redisPipeline([["HDEL", handlesKey(id), handle]]);
+/**
+ * Gives a handle back, for a member who is removed: true when it was given back, false when nobody held it.
+ * Read exactly (rules 24 and 30): an answer lost or not 0 or 1 is logged and throws UnknownReplyError, so a
+ * release is never reported as done when it is not known to be.
+ */
+export async function releaseHandle(id: string, handle: string): Promise<boolean> {
+  if (!handle) return false;
+  try {
+    const gone = countOf(repliesFor(await redisPipeline([["HDEL", handlesKey(id), handle]]), 1)?.[0]);
+    if (gone === null || gone > 1) throw new UnknownReplyError("a community handle release");
+    return gone === 1;
+  } catch (error) {
+    console.error(`community handle ${handle} could not be released`, error);
+    throw error;
+  }
 }
 
 /** The handles written in a piece of text, lower case, in order, deduplicated. */

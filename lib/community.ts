@@ -774,9 +774,14 @@ export async function directory(id: string, before: number | null, page: number)
   return { members, next: more ? scores[page - 1] : null };
 }
 
+/**
+ * How many members chose to be listed. Read exactly (rules 24 and 30): a reply lost, cut short or not a whole
+ * count throws UnknownReplyError, never "0 listed"; the members page then shows no number.
+ */
 export async function directorySize(id: string): Promise<number> {
-  const [n] = await redisPipeline([["ZCARD", dirKey(id)]]);
-  return Number(n) || 0;
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", dirKey(id)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the size of a community's directory");
+  return n;
 }
 
 /**

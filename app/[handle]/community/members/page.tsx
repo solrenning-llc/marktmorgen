@@ -54,7 +54,11 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
       console.error("the community directory could not be read", error);
       return null;
     }),
-    directorySize(id),
+    // The count too (rules 24 and 30): unread, no number is shown, and the page says the list could not be loaded.
+    directorySize(id).catch((error: unknown) => {
+      console.error("the community directory size could not be read", error);
+      return null;
+    }),
   ]);
   const page = read ?? { members: [], next: null };
   const listed = viewer.member?.dir && viewer.member.n;
@@ -79,9 +83,11 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
       <CommunityBar store={store} config={viewer.config} tab="members" signedIn />
       <main id="content" className="mx-auto max-w-3xl px-4 pb-16 pt-6">
         <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] sm:text-3xl">{w.tabMembers}</h1>
-        <p className="st-muted mt-2">
-          {w.listedTotal(total)}
-        </p>
+        {total !== null ? (
+          <p className="st-muted mt-2">
+            {w.listedTotal(total)}
+          </p>
+        ) : null}
         {!viewer.owner ? (
           <p className="st-muted mt-1 text-sm">
             {listed ? w.youListed : w.youNotListed}{" "}
@@ -91,7 +97,7 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
           </p>
         ) : null}
 
-        {read === null ? <NamesUnread language={store.language} what="membersList" className="mt-6" /> : null}
+        {read === null || total === null ? <NamesUnread language={store.language} what="membersList" className="mt-6" /> : null}
         <ul className="mt-6 grid gap-3 sm:grid-cols-2">
           {!before ? (
             <li className="st-card flex items-center gap-3 p-4">

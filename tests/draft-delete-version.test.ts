@@ -13,6 +13,8 @@ async function main() {
   const draft = newer.draft, id = draft.id;
   const key = "nl:mail:drafts:" + store.listId;
   const original = redis.pipeline;
+  /** The draft's delete: since #3343's follow-up, one script that names the drafts hash and checks the lease. */
+  const deletes = (c: (string | number)[]) => (c[0] === "HDEL" && c[1] === key) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:draft-del-held:") && c.includes(key));
   const seed = async () => original.call(redis, [["HSET", key, id, JSON.stringify(draft)]]);
   const read = async () => (await original.call(redis, [["HGET", key, id]]))[0];
   part("An old screen cannot delete newer work");
@@ -37,7 +39,7 @@ async function main() {
   let deletions = 0;
   for (const reply of [[], [undefined], ["broken"], ["null"], [JSON.stringify({ ...draft, id: "2222222222222222" })], [JSON.stringify({ ...draft, savedAt: "invalid" })], new Error("read lost")]) {
     redis.pipeline = async commands => {
-      deletions += commands.filter(c => c[0] === "HDEL").length;
+      deletions += commands.filter(deletes).length;
       if (commands.some(c => c[0] === "HGET" && c[1] === key)) {
         if (reply instanceof Error) throw reply;
         return reply;
@@ -69,7 +71,7 @@ async function main() {
   part("A lost deletion response does not recreate the draft");
   await seed();
   redis.pipeline = async commands => {
-    if (commands.some(c => c[0] === "HDEL" && c[1] === key)) {
+    if (commands.some(deletes)) {
       await original.call(redis, commands);
       throw new Error("applied delete response lost");
     }

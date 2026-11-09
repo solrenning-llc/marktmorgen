@@ -333,6 +333,17 @@ export class MemoryRedis {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
         }
+        // lib/mail-drafts.ts DRAFT_SET_HELD and DRAFT_DEL_HELD: a draft set or deleted only while its lease holds the writer's value.
+        if (key.startsWith("-- marktmorgen:draft-set-held:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, drafts, lease, value, field, json] = args;
+          if (this.run(["GET", lease]) !== value) return -1;
+          return this.run(["HSET", drafts, field, json]);
+        }
+        if (key.startsWith("-- marktmorgen:draft-del-held:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, drafts, lease, value, field] = args;
+          if (this.run(["GET", lease]) !== value) return -1;
+          return this.run(["HDEL", drafts, field]);
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;

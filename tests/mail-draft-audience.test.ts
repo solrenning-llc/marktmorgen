@@ -52,7 +52,7 @@ async function main() {
   const original = redis.pipeline;
   let writes = 0;
   redis.pipeline = async commands => {
-    writes += commands.filter(c => c[0] === "HSET").length;
+    writes += commands.filter(c => c[0] === "HSET" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:draft-set-held:"))).length;
     if (commands.some(c => c[0] === "HGET")) return [];
     return original.call(redis, commands);
   };

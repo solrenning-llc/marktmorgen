@@ -2148,8 +2148,8 @@ export default function PrivacyPage() {
               marktmorgen.com/privacy/delete
             </Link>
             , or from the link at the foot of any store&apos;s page, type your
-            address. If a store knows it, we email it a link that works for an
-            hour; the page it opens says what will be deleted and what is kept,
+            address. If a store knows it, we try to email it a link that works
+            for an hour; the page it opens says what will be deleted and what is kept,
             and pressing its button deletes it, from that store or from every
             store you bought from (since October 11, 2026) or signed up with
             yourself (since October 17, 2026). The page says the same whether or
@@ -2157,7 +2157,14 @@ export default function PrivacyPage() {
             from one address. A creator, or an admin of their store, can do the
             same from the studio, and the store&apos;s owner is told when you do
             it, with your address, so they can delete you from their own tools
-            too.
+            too. The email may not go out, for example when a store has used up
+            the emails it may send for requests like this, and a store may not
+            be able to delete right away; the page then says why. If no email
+            comes, or you would rather not wait, write to{" "}
+            <a href="mailto:support@marktmorgen.com" className="text-black underline underline-offset-2 hover:no-underline">
+              support@marktmorgen.com
+            </a>{" "}
+            from that address and ask us to delete your data.
           </p>
           <p>
             What is deleted: your place on the store&apos;s list and every link

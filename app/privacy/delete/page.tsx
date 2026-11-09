@@ -119,7 +119,7 @@ export default async function DeletePage({ searchParams }: Params) {
             <p className="eyebrow">Your data</p>
             <h1 className="t-h1 balance mt-4 max-w-3xl">Delete what a store keeps about you</h1>
             <p className="mt-4 max-w-2xl text-lg text-ink-soft">
-              From one store, or from every store on Marktmorgen you bought from or joined. No account and nobody to ask: we email you a link, and you press the button.
+              From one store, or from every store on Marktmorgen you bought from or joined. No account and nobody to ask: we try to email you a link, and you press the button on the page it opens.
             </p>
           </div>
         </section>

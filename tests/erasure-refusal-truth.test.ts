@@ -195,7 +195,7 @@ async function main(): Promise<void> {
     const policy = plain("app/privacy/page.tsx");
     const opening = /If a store knows it, we email it a link that works for an hour/.test(policy);
     is("the Privacy Policy never promises the link is always emailed", opening, false);
-    is("the Privacy Policy says where to write when it does not come", /we try to email it a link.{0,600}support@marktmorgen\.com/.test(policy), true);
+    is("the Privacy Policy says where to write when it does not come", /we try to email it a link.{0,1500}support@marktmorgen\.com/.test(policy), true);
     is("the deletion page's opening never promises the link is always emailed", /nobody to ask: we email you a link/.test(plain("app/privacy/delete/page.tsx")), false);
   } finally {
     if (keyBefore === undefined) delete process.env.NIMBUS_DATA_KEY;

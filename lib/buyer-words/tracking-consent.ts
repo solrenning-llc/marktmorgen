@@ -63,7 +63,7 @@ const es: TrackingConsentWords = {
   affiliateLabel: "Enlace de afiliado",
   affiliateTitle: (store) => `Un afiliado de ${store} te ha enviado aquí`,
   affiliateBody: (days) =>
-    `Con tu permiso, esta tienda guarda una cookie con el código de ese afiliado y la hora a la que llegaste, para que se le atribuya la venta si compras en un plazo de ${days} ${days === 1 ? "día" : "días"}. No guarda nada más sobre ti, y el precio es el mismo en cualquier caso.`,
+    `Con tu permiso, esta tienda guarda una cookie con el código de ese afiliado y la hora a la que llegaste, para que se le atribuya la venta si compras en un plazo de ${days} ${days === 1 ? "día" : "días"}. La cookie no contiene nada más sobre ti, y el precio es el mismo en cualquier caso.`,
   adsLabel: "Medición de anuncios",
   adsTitle: (store) => `${store} mide sus anuncios`,
   adsBody: (names, store) =>
@@ -117,7 +117,7 @@ const it: TrackingConsentWords = {
   affiliateLabel: "Link di affiliazione",
   affiliateTitle: (store) => `Ti ha mandato qui un affiliato di ${store}`,
   affiliateBody: (days) =>
-    `Con il tuo permesso, questo negozio conserva un cookie con il codice di quell'affiliato e l'ora del tuo arrivo, così l'acquisto gli viene attribuito se compri entro ${days} ${days === 1 ? "giorno" : "giorni"}. Non contiene nient'altro su di te, e il prezzo è lo stesso in ogni caso.`,
+    `Con il tuo permesso, questo negozio conserva un cookie con il codice di quell'affiliato e l'ora del tuo arrivo, così l'acquisto gli viene attribuito se compri entro ${days} ${days === 1 ? "giorno" : "giorni"}. Il cookie non contiene nient'altro su di te, e il prezzo è lo stesso in ogni caso.`,
   adsLabel: "Misurazione degli annunci",
   adsTitle: (store) => `${store} misura i propri annunci`,
   adsBody: (names, store) =>
@@ -153,11 +153,11 @@ const pt: TrackingConsentWords = {
   affiliateLabel: "Ligação de afiliado",
   affiliateTitle: (store) => `Chegou aqui através de um afiliado de ${store}`,
   affiliateBody: (days) =>
-    `Com a sua autorização, esta loja guarda um cookie com o código desse afiliado e a hora da sua chegada, para que a compra lhe seja atribuída se comprar no prazo de ${days} ${days === 1 ? "dia" : "dias"}. Não guarda mais nada sobre si, e o preço é o mesmo em qualquer caso.`,
+    `Com a sua autorização, esta loja guarda um cookie com o código desse afiliado e a hora da sua chegada, para que a compra seja atribuída a esse afiliado se comprar no prazo de ${days} ${days === 1 ? "dia" : "dias"}. O cookie não contém mais nada sobre si, e o preço é o mesmo em qualquer caso.`,
   adsLabel: "Medição de anúncios",
-  adsTitle: (store) => `${store} mede os resultados dos anúncios`,
+  adsTitle: (store) => `${store} mede os resultados dos próprios anúncios`,
   adsBody: (names, store) =>
-    `Com a sua autorização, esta página carrega a medição de anúncios de ${names}, que instala cookies, e ${store} informa-os dos seus registos e compras, para saber que anúncios trazem pessoas até aqui. Se recusar, nada é carregado, nada é enviado e a página funciona exatamente da mesma forma.`,
+    `Com a sua autorização, esta página carrega a medição de anúncios de ${names}, que instala cookies, e ${store} informa-os dos seus registos e compras, para saber quais dos próprios anúncios trazem pessoas até aqui. Se recusar, nada é carregado, nada é enviado e a página funciona exatamente da mesma forma.`,
   and: "e",
   more: "Saber mais",
   allow: "Permitir",

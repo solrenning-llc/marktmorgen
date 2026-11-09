@@ -201,10 +201,21 @@ async function main(): Promise<void> {
   is("the failed refund is read and the mark cleared", [await run(), await seenOf(pooledSale.id), await placeOf(pack, pooledSale.reference)], [0, 1, null]);
   is("the buyer now gets the pool's key", ((await give(pack, pooledSale.reference)) as { state?: string; key?: string } | null)?.key, "GLAZE-AAAA-BBBB-CCCC");
 
-  part("9. Unchanged: a sale that already had a key loses it to a pending full refund, read at once");
+  part("9. A sale that already had a key keeps it while a full refund is pending, and loses it once it goes through");
   const keyed = (await give(app, "cs_test_licpend000008")) as { key?: string };
   const keyedSale = sale("08", app, "pending");
-  is("revoked and read", [await run(), await seenOf(keyedSale.id), await checkKey(store, app, keyed.key ?? "")], [1, 1, "revoked"]);
+  // Regra 23: this asserted [1, 1, "revoked"] (revoked and read at once). Claude 5's pre-review of
+  // claude5/licence-refunds-combined, HIGH 2: a pending refund that then failed left the paid sale's key revoked for
+  // good, so a pending one now takes nothing back and stays unread.
+  is("pending: nothing revoked, the refund unread, the key valid", [await run(), await seenOf(keyedSale.id), await checkKey(store, app, keyed.key ?? "")], [0, 0, "valid"]);
+  is("still pending next run: the same", [await run(), await seenOf(keyedSale.id), await checkKey(store, app, keyed.key ?? "")], [0, 0, "valid"]);
+  keyedSale.set("failed");
+  is("failed: read, the paid sale's key still valid", [await run(), await seenOf(keyedSale.id), await checkKey(store, app, keyed.key ?? "")], [0, 1, "valid"]);
+  const settled = (await give(app, "cs_test_licpend000010")) as { key?: string };
+  const settledSale = sale("10", app, "pending");
+  is("another pending: the key valid", [await run(), await checkKey(store, app, settled.key ?? "")], [0, "valid"]);
+  settledSale.set("succeeded");
+  is("succeeded: revoked and read", [await run(), await seenOf(settledSale.id), await checkKey(store, app, settled.key ?? "")], [1, 1, "revoked"]);
 
   part("10. Unchanged: a failed refund of a sale with a valid key and no mark is read and changes nothing");
   const kept = (await give(app, "cs_test_licpend000009")) as { key?: string };

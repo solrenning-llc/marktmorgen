@@ -1,0 +1,198 @@
+/**
+ * The writing help's box for a page drafted step by step, run as the
+ * creator uses it (758 [STN5] unit 1; components/ai-steps-assist.tsx). The
+ * component's real code runs under tests/client-hooks.ts, with `fetch`
+ * replaced by a stand-in whose lines arrive one at a time, in the order a
+ * check gives them. Nothing real is sent. What is checked:
+ *   - a draft that comes back after the creator pressed Stop (writing had
+ *     already started) never replaces the page on its own: the box says it
+ *     finished and counts toward the month, and asks "Use this draft" or
+ *     "Keep my page";
+ *   - without a Stop, the draft is used as before;
+ *   - Stop stays where it is once writing starts, unavailable and saying
+ *     why, so focus on it is never dropped mid-run;
+ *   - a draft that comes back with a step not run says that step was not
+ *     charged and how many writing jobs were given back;
+ *   - a PDF with nothing to write from says so, not "try again".
+ */
+import { AiStepsAssist, AiStepsProgress } from "@/components/ai-steps-assist";
+import { AiOn } from "@/components/ai-assist";
+import { pageSteps } from "@/lib/ai-steps";
+import { READ_PDF_JOBS } from "@/lib/ai-rules";
+import { find, mount, texts } from "./client-hooks";
+import { done, is, part } from "./check";
+
+type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
+
+// The few browser objects the box reads; the in-memory hook runner draws nothing.
+const page = { activeElement: null as unknown };
+(globalThis as Record<string, unknown>).document = page;
+(globalThis as Record<string, unknown>).window = globalThis;
+
+/** The answer to the draft's own request: lines the check sends one at a time. */
+let push: (line: unknown) => void = () => {};
+let close: () => void = () => {};
+const stops: unknown[] = [];
+globalThis.fetch = (async (_url: string, init: RequestInit) => {
+  const body = JSON.parse(String(init.body)) as { kind?: string };
+  if (body.kind === "stop") {
+    stops.push(body);
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+  }
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      push = (line) => controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+      close = () => controller.close();
+    },
+  });
+  return new Response(stream, { status: 200, headers: { "content-type": "application/x-ndjson; charset=utf-8" } });
+}) as typeof fetch;
+
+const DONE = "Drafted. Read each block, change anything, then press Save.";
+const said = (tree: unknown) => find(tree, (n) => n.props?.role === "status" && n.type === "p").map((n) => texts(n.props?.children).join(""));
+const alerts = (tree: unknown) => find(tree, (n) => n.props?.role === "alert").map((n) => texts(n.props?.children).join(""));
+const button = (tree: unknown, label: string) => find(tree, (n) => n.type === "button" && texts(n.props?.children).join("") === label)[0] as Node | undefined;
+const click = (node: Node | undefined) => (node?.props?.onClick as (() => unknown) | undefined)?.();
+const progress = (tree: unknown) => find(tree, (n) => n.type === AiStepsProgress)[0]?.props as Parameters<typeof AiStepsProgress>[0] | undefined;
+
+async function box() {
+  const used: unknown[] = [];
+  const mounted = await mount(
+    AiStepsAssist<{ headline: string }>,
+    {
+      title: "Write the whole page with AI",
+      hint: "A full draft.",
+      placeholder: "Who it is for.",
+      payload: () => ({ kind: "page", product: "p1", readFile: true }),
+      steps: pageSteps(true),
+      onResult: (value: { headline: string }) => used.push(value),
+      done: DONE,
+      allowEmpty: true,
+    },
+    new Map([[AiOn, { on: true, left: 30 }]]),
+  );
+  const write = async () => {
+    click(button(mounted.tree(), "Write a draft"));
+    await mounted.settle();
+    push({ pad: " ".repeat(1024) });
+  };
+  const send = async (...lines: unknown[]) => {
+    for (const line of lines) push(line);
+    await mounted.settle();
+  };
+  const end = async (...lines: unknown[]) => {
+    for (const line of lines) push(line);
+    close();
+    await mounted.settle();
+    await mounted.settle();
+  };
+  return { mounted, used, write, send, end };
+}
+
+const DRAFT = { headline: "Forty weeknight dinners" };
+
+async function main(): Promise<void> {
+  part("Without a Stop, the draft is used as before");
+  {
+    const b = await box();
+    await b.write();
+    await b.send({ step: "read", state: "started" }, { step: "read", state: "done" }, { step: "write", state: "started" });
+    await b.end({ step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 19 });
+    is("the draft goes into the page", b.used, [DRAFT]);
+    is("it says it is drafted", said(b.mounted.tree()).includes(DONE), true);
+    is("no question is asked", [button(b.mounted.tree(), "Use this draft"), button(b.mounted.tree(), "Keep my page")], [undefined, undefined]);
+    b.mounted.unmount();
+  }
+
+  part("A Stop that comes after writing started: the page is never replaced on its own");
+  {
+    const b = await box();
+    await b.write();
+    await b.send({ step: "read", state: "started" }, { step: "read", state: "done" });
+    is("Stop is offered while the writing step has not started", progress(b.mounted.tree())?.canStop, true);
+    progress(b.mounted.tree())?.onStop();
+    await b.mounted.settle();
+    is("the stop is sent", stops.length, 1);
+    await b.send({ step: "write", state: "started" });
+    is(
+      "once writing starts after the Stop, the box says the stop came too late",
+      (progress(b.mounted.tree())?.announce ?? "").startsWith("Writing had already started when you pressed Stop"),
+      true,
+    );
+    await b.end({ step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 19 });
+    is("the draft does not replace the page by itself", b.used, []);
+    const words = said(b.mounted.tree()).join(" ");
+    is("it says writing had started, finished and counts toward the month", /Writing had already started when you pressed Stop, so it finished and counts toward this month/.test(words), true);
+    is("it says the page is unchanged", /Your page is unchanged/.test(words), true);
+    is("it asks before replacing the blocks", [Boolean(button(b.mounted.tree(), "Use this draft")), Boolean(button(b.mounted.tree(), "Keep my page"))], [true, true]);
+    click(button(b.mounted.tree(), "Keep my page"));
+    await b.mounted.settle();
+    is("keeping the page uses nothing", b.used, []);
+    is("and says so", said(b.mounted.tree()).some((t) => /Your page is as it was/.test(t)), true);
+    is("the question is gone", button(b.mounted.tree(), "Use this draft"), undefined);
+    b.mounted.unmount();
+  }
+
+  part("The same, when the creator chooses the draft");
+  {
+    const b = await box();
+    await b.write();
+    await b.send({ step: "read", state: "started" }, { step: "read", state: "done" });
+    progress(b.mounted.tree())?.onStop();
+    await b.mounted.settle();
+    // The writing step's lines and the result arrive together, as a buffering proxy would hand them over.
+    await b.end({ step: "write", state: "started" }, { step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 19 });
+    is("nothing is used before the answer", b.used, []);
+    click(button(b.mounted.tree(), "Use this draft"));
+    await b.mounted.settle();
+    is("the draft goes into the page once", b.used, [DRAFT]);
+    is("it says it is drafted", said(b.mounted.tree()).includes(DONE), true);
+    b.mounted.unmount();
+  }
+
+  part("Stop stays in place once writing starts");
+  {
+    const b = await box();
+    await b.write();
+    await b.send({ step: "read", state: "started" }, { step: "read", state: "done" }, { step: "write", state: "started" });
+    const now = progress(b.mounted.tree());
+    is("the button is still drawn, so focus on it is never dropped", now?.stopShown, true);
+    is("but it can no longer stop anything", now?.canStop, false);
+    await b.end({ step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 19 });
+    b.mounted.unmount();
+  }
+
+  part("A draft with a step that did not run says it was not charged");
+  {
+    const b = await box();
+    await b.write();
+    // The reading's money was refused: it never reached the model, and the creator's words carried the page.
+    await b.send({ step: "read", state: "started" }, { step: "write", state: "started" });
+    await b.end({ step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 29, returned: READ_PDF_JOBS });
+    is("the draft goes into the page", b.used, [DRAFT]);
+    is("the reading is shown as not run, not charged", progress(b.mounted.tree())?.states, { read: "skipped", write: "done" });
+    is("it says how many writing jobs were given back", said(b.mounted.tree()).some((t) => t.includes(`${READ_PDF_JOBS} writing jobs given back, 29 left this month`)), true);
+    b.mounted.unmount();
+  }
+
+  part("A PDF with nothing to write from says so");
+  {
+    const b = await box();
+    await b.write();
+    await b.send({ step: "read", state: "started" }, { step: "read", state: "done" });
+    await b.end({ done: true, ok: false, error: "empty", returned: 1, left: 20 });
+    const words = alerts(b.mounted.tree()).join(" ");
+    is("it says nothing was found to write from", /found nothing to write from in your PDF's first pages/.test(words), true);
+    is("it asks for a few words, not a retry of the same", [/Add a few words/.test(words), /Try again in a moment/.test(words)], [true, false]);
+    is("and what came back", words.includes("1 writing job given back, 20 left this month"), true);
+    b.mounted.unmount();
+  }
+
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

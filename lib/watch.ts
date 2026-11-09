@@ -123,8 +123,11 @@ export async function watchedForAdmission(folder: string, month = calendarWindow
 /** The stores whose video was watched at all in a month. */
 export async function watchedFolders(month = calendarWindow().id): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["SMEMBERS", foldersKey(month)]]);
-  return Array.isArray(raw) ? raw.filter((f): f is string => typeof f === "string" && FOLDER_PATTERN.test(f)).sort() : [];
+  // Read exactly (CX-123 rule 24): a reply that is not one list of strings is unknown and throws, so the daily run
+  // says it could not read the watched stores rather than settling as if no store had watched any video.
+  const raw = stringList(repliesFor(await redisPipeline([["SMEMBERS", foldersKey(month)]]), 1)?.[0]);
+  if (!raw) throw new UnknownReplyError("the stores whose video was watched");
+  return raw.filter((f) => FOLDER_PATTERN.test(f)).sort();
 }
 
 /**

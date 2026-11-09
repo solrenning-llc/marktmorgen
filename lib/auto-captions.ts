@@ -20,6 +20,7 @@
  * once ask for the same one and money is never returned twice.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { askStream, noteCaptionLanguages, streamCaptions, streamConfig, streamRecord } from "@/lib/stream";
 import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
 import { captionLabel } from "@/lib/captions";
@@ -326,8 +327,11 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
 export async function sweepAutoCaptions(deadline: number, now = Date.now()): Promise<{ looked: number; done: number }> {
   const counts = { looked: 0, done: 0 };
   if (!isRedisConfigured() || !streamConfig()) return counts;
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 30]]);
-  for (const id of Array.isArray(due) ? due : []) {
+  // Read exactly (CX-123 rule 24): a reply that is not one list of strings is unknown and throws, so the job says
+  // it failed rather than reporting no captions due, which would leave a refund owed unlooked-at in silence.
+  const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 30]]), 1)?.[0]);
+  if (!due) throw new UnknownReplyError("the videos whose captions are due a look");
+  for (const id of due) {
     if (Date.now() > deadline || typeof id !== "string") break;
     counts.looked += 1;
     if ((await syncAutoCaptions(id, now)) === "done") counts.done += 1;

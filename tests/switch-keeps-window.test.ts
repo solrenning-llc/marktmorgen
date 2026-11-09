@@ -377,6 +377,32 @@ async function main(): Promise<void> {
     // Never from an older snapshot written late: a period that begins before the record's own is no switch.
     const record = { subscriptionActive: true, subscriptionId: SUB, trialEnds: 0, planEndedAt: "", cycle: "month" as const, period: per(Date.UTC(2027, 1, 10, 12), 1) };
     is("8d: an older period written over a newer one writes no anchor", anchorAfter(record, { ...record, period: per(Date.UTC(2027, 0, 10, 12), 1) }, Date.UTC(2027, 1, 11, 12)), null);
+
+    part("9. Unknown, and every day of the month: nothing used opens again");
+    // A stop whose day cannot be read is taken as late as it can be: the anchor is kept, never dropped to a fresh window.
+    const decemberAnchor = { subscriptionId: SUB, start: START, end: Date.UTC(2027, 0, 1, 12) };
+    const restarted = { ...record, period: per(Date.UTC(2027, 2, 10, 12), 1) };
+    is("9a: a stop with no readable day keeps the anchor", ["", "soon"].map((planEndedAt) =>
+      anchorAfter({ ...record, subscriptionActive: false, period: null, planEndedAt, allowanceAnchor: decemberAnchor }, restarted, Date.UTC(2027, 2, 20, 12))), [decemberAnchor, decemberAnchor]);
+    is("9a: a plan still stopped keeps it as it is", anchorAfter({ ...record, subscriptionActive: false, period: null, planEndedAt: new Date(Date.UTC(2027, 1, 12)).toISOString(), allowanceAnchor: decemberAnchor },
+      { ...restarted, subscriptionActive: false, period: null }, Date.UTC(2027, 2, 20, 12)), decemberAnchor);
+    // A switch either way, begun on any day (the 29th to the 31st cut in short months), made at any point of the window,
+    // written at once, in the grace or days late: the window counted when it is written keeps its name.
+    let checked = 0;
+    const renamed: string[] = [];
+    for (const from of ["month", "year"] as const) for (const startDay of [1, 15, 28, 29, 30, 31]) for (const afterHours of [1, 100, 300, 600]) for (const lateHours of [0, 13, 30, 47, 49, 75]) {
+      const begun = Date.UTC(2027, 0, startDay, 9);
+      const was = { subscriptionActive: true, subscriptionId: SUB, trialEnds: 0, planEndedAt: "", cycle: from, period: per(begun, from === "year" ? 12 : 1) };
+      const to = from === "year" ? "month" as const : "year" as const;
+      const switchedAt = begun + afterHours * 3_600_000, writtenAt = switchedAt + lateHours * 3_600_000;
+      const moved = { ...was, cycle: to, period: per(switchedAt, to === "year" ? 12 : 1) };
+      const open = windowAt(was, writtenAt);
+      if (!open?.billing) continue;
+      checked += 1;
+      const id = allowanceWindow({ ...moved, allowanceAnchor: anchorAfter(was, moved, writtenAt) }, writtenAt)?.id ?? null;
+      if (id !== open.id) renamed.push(`${from} ${startDay} +${afterHours}h +${lateHours}h: ${open.id} -> ${id}`);
+    }
+    is("9b: 288 switches checked, none renames the window counted when it is written", [checked, renamed], [288, []]);
   } finally {
     Date.now = realNow;
   }

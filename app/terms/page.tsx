@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 4, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 9, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -426,8 +426,11 @@ export default function TermsPage() {
           the calendar month: it begins on the day your plan renews and ends
           when the next payment&apos;s month begins, so each payment buys one
           month of every figure. A yearly plan&apos;s figures are monthly too,
-          each month beginning on the day of the month your year began. A free
-          trial&apos;s figures are counted for the trial as a whole, and a
+          each month beginning on the day of the month your year began. If you
+          switch between monthly and yearly, your billing month keeps the day
+          it had before the switch. If your plan stops over an unpaid renewal
+          and you then pay a later one, it can go back to the day your plan
+          renews. A free trial&apos;s figures are counted for the trial as a whole, and a
           store with no plan, before one starts or after one ends, counts them
           by calendar month (UTC). Until we have read your plan&apos;s billing
           month from our payment processor (when you next open your studio, or

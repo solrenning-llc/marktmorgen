@@ -388,7 +388,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "When do my plan's monthly figures start again?",
         a: [
-          "With your billing month, not on the 1st. A paid plan's figures (visits, orders, emails, AI, uploads, imports and the rest) are counted from the day your plan renews until the next payment's month begins, so each payment buys one whole month of every figure. On a yearly plan they are monthly too, each month starting on the day of the month your year began. Your studio shows the dates.",
+          "With your billing month, not on the 1st. A paid plan's figures (visits, orders, emails, AI, uploads, imports and the rest) are counted from the day your plan renews until the next payment's month begins, so each payment buys one whole month of every figure. On a yearly plan they are monthly too, each month starting on the day of the month your year began. If you switch between monthly and yearly, your billing month keeps the day it had before the switch. If your plan stops over an unpaid renewal and you then pay a later one, it can go back to the day your plan renews. Your studio shows the dates.",
           "A free trial counts its figures for the trial as a whole. A store with no plan, before one starts or after it ends, counts them by calendar month (UTC).",
         ],
       },

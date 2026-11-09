@@ -286,28 +286,65 @@ function periodWindowAt(store: WindowFields, atMs: number): AllowanceWindow | nu
 /**
  * The allowance anchor a store's record must carry once `next` is written over `previous` at `now`
  * (lib/store.ts, setSubscription, in the same write as the period). One already kept for the same subscription stays
- * as it is, readable or not, through a plan seen stopped and running again. Otherwise, when the period of the same
- * subscription moves so that it begins inside the paid window open now (an interval switch: Stripe begins the new
- * period at the moment of the change), the open window becomes the anchor, whether or not the new period already
- * counts (a period a little in the future does too). The open window is
- * what the snapshot says, or, when it has missed a renewal, the window that renewal opened (windowAt). A renewal,
- * a trial's end, a change that keeps the period, a plan not running and another subscription write none.
+ * as it is, readable or not, through a plan seen stopped (keptThroughStop decides when it runs again). Otherwise, when
+ * the period of the same subscription moves so that it begins inside the paid window open now (an interval switch:
+ * Stripe begins the new period at the moment of the change), the open window becomes the anchor, whether or not the
+ * new period already counts (a period a little in the future does too). The open window is what the snapshot says,
+ * or, when it has missed a renewal, the window that renewal opened (windowAt). A switch written only after that window
+ * turned (a 3DS confirmation, the next day's job, a write that failed and is made again) begins after the record's
+ * own period and before the open window: the old record's window that holds its first day becomes the anchor, so the
+ * window open now, perhaps already used, keeps its name. A renewal, a trial's end, a change that keeps the period, a
+ * plan not running, an older period written late and another subscription write none.
  */
 export function anchorAfter(previous: WindowFields, next: WindowFields, now = Date.now()): AllowanceAnchor | null {
   if (!next.subscriptionId || previous.subscriptionId !== next.subscriptionId) return null;
   const kept = previous.allowanceAnchor;
-  if (kept !== undefined && kept !== null && (!isAllowanceAnchor(kept) || kept.subscriptionId === next.subscriptionId)) return kept;
+  if (kept !== undefined && kept !== null && (!isAllowanceAnchor(kept) || kept.subscriptionId === next.subscriptionId)) {
+    return isAllowanceAnchor(kept) && !keptThroughStop(previous, next, kept, now) ? null : kept;
+  }
   if (!Number.isFinite(now)) return null;
   if (standingOf(next, now / 1000) !== "paid" || !isPeriod(next.period)) return null;
-  const open = windowAt({ ...previous, allowanceAnchor: null }, now);
+  const old = { ...previous, allowanceAnchor: null };
+  const open = windowAt(old, now);
   if (!open || !open.billing) return null;
   // Only a period that begins inside the open window, after it began, moved without a renewal: one that begins at its
-  // end or later is the next payment's, one that begins at its start is the same month, and one that begins before it
-  // is no switch (an older snapshot written late).
+  // end or later is the next payment's, and one that begins at its start is the same month.
   const begins = next.period.start * 1000;
-  if (!(open.start < begins && begins < open.end)) return null;
-  const anchor = { subscriptionId: next.subscriptionId, start: open.start, end: open.end };
+  if (open.start < begins && begins < open.end) return anchorFrom(next.subscriptionId, open);
+  // One that begins before the open window is a switch written late only when it also begins after the record's own
+  // period began: one that begins before that is an older snapshot written late, no switch.
+  if (!(begins < open.start) || !isPeriod(previous.period) || !(previous.period.start * 1000 < begins)) return null;
+  const held = windowAt(old, begins);
+  if (!held || !held.billing || !(held.start < begins && begins < held.end)) return null;
+  const anchor = anchorFrom(next.subscriptionId, held);
+  // Its months must bring back the open window exactly, or the window counted now would change its name; when they
+  // do not, the open window itself is the anchor.
+  const at = anchor && anchoredWindow(anchor, now);
+  return at && at.start === open.start && at.end === open.end ? anchor : anchorFrom(next.subscriptionId, open);
+}
+
+/** An anchor of one window, or null when the window is not one an anchor can be (isAllowanceAnchor). */
+function anchorFrom(subscriptionId: string, window: AllowanceWindow): AllowanceAnchor | null {
+  const anchor = { subscriptionId, start: window.start, end: window.end };
   return isAllowanceAnchor(anchor) ? anchor : null;
+}
+
+/**
+ * Whether an anchor kept through a plan seen stopped still counts once it runs again. Only when the window of the
+ * anchor that holds the new period's first day began before the plan was seen stopped: that window may already have
+ * been counted in, and going on in it opens nothing again. Otherwise a period was skipped (a renewal never paid, and
+ * a later one paid): the anchor's months after the stop were never paid for, and counting the new period in them would
+ * give one payment two windows, so the period's own months come back. A stop whose day cannot be read is taken as late
+ * as it can be (now): the anchor is kept, so nothing already used opens again. A plan that was not stopped, or that
+ * does not run yet, keeps it as it is.
+ */
+function keptThroughStop(previous: WindowFields, next: WindowFields, kept: AllowanceAnchor, now: number): boolean {
+  if (standingOf(previous, now / 1000) !== "ended") return true;
+  if (!Number.isFinite(now) || standingOf(next, now / 1000) !== "paid" || !isPeriod(next.period)) return true;
+  const read = Date.parse(previous.planEndedAt);
+  const stopped = Number.isFinite(read) ? Math.min(read, now) : now;
+  const holds = anchoredWindow(kept, next.period.start * 1000);
+  return !holds || holds.start <= stopped;
 }
 
 /** The window's name, or null: what a counter's key carries. */

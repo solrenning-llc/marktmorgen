@@ -2764,7 +2764,7 @@ export default async function StudioPage({
                 <p className="mt-4 rounded-[12px] bg-paper px-4 py-3 text-sm text-ink-soft ring-1 ring-line">
                   {usageWindow
                     ? usageWindow.billing
-                      ? `Your billing month: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here is counted in it and starts again on ${windowDay(usageWindow.end)}, with your plan\u2019s next month.`
+                      ? `Your billing month: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here is counted in it and starts again on ${windowDay(usageWindow.end)}, when your next billing month begins.`
                       : standing === "trial"
                         ? `Your free trial: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here is counted for the whole trial.`
                         : `This calendar month: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here starts again on the 1st.`

@@ -26,6 +26,7 @@ import { type Store, storeForId } from "@/lib/store";
 import { type Listing, readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { withStockHold } from "@/lib/stock";
+import { CHECKOUT_OPEN_SECONDS } from "@/lib/stripe-account";
 import { fromLine, render } from "@/lib/mail";
 import { tokensFor } from "@/lib/contacts";
 import { type Claim, readClaimFull } from "@/lib/free";
@@ -177,10 +178,26 @@ export async function welcomesOffered(store: Store): Promise<number> {
 
 export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "refused" | "consent" };
 
+/** Whether a holding checkout made at `nowSeconds` would still be open after `until`. */
+function closesAfter(nowSeconds: number, until: number): boolean {
+  return nowSeconds + CHECKOUT_OPEN_SECONDS > until;
+}
+
 /**
  * The checkout the offer's button opens: the offered product, the address
  * the free copy went to, the discount applied by Stripe, only while the
  * person's own time lasts.
+ *
+ * And it closes by then (coupon audit, 9 November 2026). Without a closing
+ * time Stripe keeps a checkout open a day, so a button pressed a minute
+ * before the end would take the discounted payment a day later. The store's
+ * coupon is one for everybody offered it, so it cannot carry one person's
+ * end (`redeem_by`); the checkout does instead: it is opened as a holding
+ * one, which closes CHECKOUT_OPEN_SECONDS after it is made
+ * (lib/stripe-account.ts, checkoutClosesAt), the shortest Stripe takes.
+ * With less time left than that, no discounted checkout opens, and one that
+ * may close after the end, because making it took that long, is never
+ * handed over.
  */
 export async function openWelcome(
   store: Store,
@@ -197,11 +214,16 @@ export async function openWelcome(
   if (offer.ended) return { ok: false, reason: "expired" };
   const product = await readProduct(store, offer.product.id);
   if (!product || !canOfferWelcome(store, offer.product)) return { ok: false, reason: "unavailable" };
+  // Too little time left for the shortest checkout Stripe makes: the offer has ended for this button.
+  if (closesAfter(nowSeconds, offer.until)) return { ok: false, reason: "expired" };
   try {
-    const held = await withStockHold(store, product, (holding) =>
-      createCheckout(store, product, origin, undefined, { coupon: store.welcomeOffer.coupon, email: claim.e, welcome: true, held: holding, digitalConsent: consent }),
+    // Always a holding checkout (held: true), whether or not a limited unit is held, so it closes in time.
+    const held = await withStockHold(store, product, () =>
+      createCheckout(store, product, origin, undefined, { coupon: store.welcomeOffer.coupon, email: claim.e, welcome: true, held: true, digitalConsent: consent }),
     );
     if (!held.ok) return { ok: false, reason: "unavailable" };
+    // Counted from now, at least as late as the moment its closing time was set: past the end, never handed over.
+    if (closesAfter(Math.max(nowSeconds, Math.floor(Date.now() / 1000)), offer.until)) return { ok: false, reason: "expired" };
     return { ok: true, url: held.value.url };
   } catch (error) {
     // A coupon the creator deleted in their own dashboard, most likely.

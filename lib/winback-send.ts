@@ -25,7 +25,7 @@ import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { onAccount, platformKey } from "@/lib/stripe-account";
+import { CHECKOUT_OPEN_SECONDS, onAccount, platformKey } from "@/lib/stripe-account";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
@@ -325,7 +325,15 @@ export async function readWinBack(store: Store, product: string, token: string):
 
 export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" };
 
-/** The checkout a come-back link opens: this product, this address, the offer applied, no second trial. */
+/**
+ * The checkout a come-back link opens: this product, this address, the offer applied, no second trial.
+ *
+ * It closes by the day the email named (coupon audit, 9 November 2026): without a closing time Stripe keeps a
+ * checkout open a day past the link's end. It is opened as a holding one, closing CHECKOUT_OPEN_SECONDS after it is
+ * made (lib/stripe-account.ts, checkoutClosesAt), the shortest Stripe takes; with less time left on the link no
+ * discounted checkout opens, and one that may close after the end, because making it took that long, is never handed
+ * over. The store's coupon is one for every link, so it cannot carry one link's end (`redeem_by`).
+ */
 export async function openWinBack(
   store: Store,
   productId: string,
@@ -345,12 +353,17 @@ export async function openWinBack(
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, grant.option)) return { ok: false, reason: "unavailable" };
   const option = product.options.length ? grant.option : undefined;
+  // Too little time left on the link for the shortest checkout Stripe makes: the offer has ended for it.
+  if (Math.floor(Date.now() / 1000) + CHECKOUT_OPEN_SECONDS > grant.until) return { ok: false, reason: "expired" };
   try {
-    // A limited product holds a unit while the checkout is open, as any other checkout does.
-    const held = await withStockHold(store, product, (holding) =>
-      createCheckout(store, product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: holding, digitalConsent: consent }),
+    // A limited product holds a unit while the checkout is open, as any other checkout does; and every one is a
+    // holding checkout (held: true), so it closes in time.
+    const held = await withStockHold(store, product, () =>
+      createCheckout(store, product, origin, option, { coupon: grant.coupon, email: grant.email, noTrial: true, held: true, digitalConsent: consent }),
     );
     if (!held.ok) return { ok: false, reason: "unavailable" };
+    // Counted from now, at least as late as the moment its closing time was set: past the end, never handed over.
+    if (Math.floor(Date.now() / 1000) + CHECKOUT_OPEN_SECONDS > grant.until) return { ok: false, reason: "expired" };
     return { ok: true, url: held.value.url };
   } catch (error) {
     // A coupon the creator deleted in their own dashboard, most likely: said

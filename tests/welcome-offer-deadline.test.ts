@@ -122,7 +122,9 @@ async function main(): Promise<void> {
     is(`${left / 60} minute(s) left: the page's "this offer has ended", no discounted checkout`, [seen.opened, seen.tries], ["expired", 0]);
   }
 
-  part("Welcome offer: Stripe slow enough that the checkout would close after the end");
+  // When its closing time was set is not known here: once a checkout made now could close after the end, the
+  // one just made could too.
+  part("Welcome offer: making the checkout took long enough that it may close after the end");
   slowBy = 5 * 60;
   seen = await welcome(until - 32 * 60);
   slowBy = 0;
@@ -174,7 +176,7 @@ async function main(): Promise<void> {
   slowBy = 5 * 60;
   seen = await comeBack(back);
   slowBy = 0;
-  is("Stripe slow past the end: Stripe was asked once, and the link is never handed over", [seen.tries, seen.opened], [1, "expired"]);
+  is("making it took long enough that it may close after the end: Stripe was asked once, and the link is never handed over", [seen.tries, seen.opened], [1, "expired"]);
 
   done();
 }

@@ -9,7 +9,6 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addToDoNotContact } from "@/lib/research-do-not-contact";
 import { sendResearchMessage } from "@/lib/research-outreach";
 import { find, mount } from "./client-hooks";
-import { NOT_RESEARCH_SENDERS } from "./email-senders";
 import { store as redis } from "./redis-stub";
 
 // "We will not contact you again" needs a way to keep it: research messages
@@ -43,55 +42,83 @@ test("a research message is sent only to a contact the list says is clear", asyn
   assert.deepEqual(sent.map((m) => [m.to, m.meter]), [["clear@example.com", { by: "company" }]]);
 });
 
-/** Every file that imports a function that sends email, read from its imports, not from its words. */
-function senderFiles(): string[] {
-  const files: string[] = [];
+/** Every source file the site runs or ships, with its text. */
+function sources(): Map<string, string> {
+  const out = new Map<string, string>();
   const walk = (dir: string) => {
     for (const name of readdirSync(join(root, dir))) {
       const path = `${dir}/${name}`;
       if (statSync(join(root, path)).isDirectory()) walk(path);
-      else if (/\.(ts|tsx|mjs|js)$/.test(name)) files.push(path);
+      else if (/\.(ts|tsx|mjs|js)$/.test(name)) out.set(path, readFileSync(join(root, path), "utf8"));
     }
   };
   for (const dir of ["app", "lib", "components", "scripts"]) walk(dir);
-  const SENDING: Record<string, string[]> = {
-    "@/lib/email": ["sendEmail", "sendBatch", "sendListBatch", "queuedShipmentMailSender"],
-    "@/lib/mail": ["sendTo"],
-    "@/lib/ses": ["sesSend", "sesBatch"],
-  };
-  const out = new Set<string>();
-  for (const file of files) {
-    const text = readFileSync(join(root, file), "utf8");
-    for (const m of text.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["']([^"']+)["']/g)) {
-      const from = m[2];
-      const names = m[1].split(",").map((s) => s.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]).filter(Boolean);
-      if (Object.hasOwn(SENDING, from) ? names.some((n) => SENDING[from].includes(n)) : /(^|\/)(email|mail|ses)$/.test(from) && from.startsWith(".")) out.add(file);
-    }
-    if (/import\s*\*\s*as\s+\w+\s+from\s+["']@\/lib\/(email|mail|ses)["']|import\(\s*["']@\/lib\/(email|mail|ses)["']\s*\)|require\(\s*["']@\/lib\/(email|mail|ses)["']\s*\)/.test(text)) out.add(file);
-  }
-  return [...out].sort();
+  return out;
 }
 
-test("no path but sendResearchMessage can send a research message: every other sender is a known one that is not research", () => {
-  const senders = senderFiles();
-  assert.ok(senders.includes("lib/research-outreach.ts"));
-  const unknown = senders.filter((f) => f !== "lib/research-outreach.ts" && !NOT_RESEARCH_SENDERS.includes(f));
-  assert.deepEqual(unknown, [], "a new file that sends email: research goes through sendResearchMessage (lib/research-outreach.ts); anything else is added to tests/email-senders.ts");
-  const gone = NOT_RESEARCH_SENDERS.filter((f) => !senders.includes(f));
-  assert.deepEqual(gone, [], "remove from tests/email-senders.ts what no longer sends");
-  // Nothing reaches a mail provider but the two transports, lib/email.ts (Resend) and lib/ses.ts (Amazon).
-  const direct: string[] = [];
-  for (const dir of ["app", "lib", "components", "scripts"]) {
-    const walk = (d: string) => {
-      for (const name of readdirSync(join(root, d))) {
-        const path = `${d}/${name}`;
-        if (statSync(join(root, path)).isDirectory()) walk(path);
-        else if (/\.(ts|tsx|mjs|js)$/.test(name) && path !== "lib/email.ts" && path !== "lib/ses.ts" && /api\.resend\.com|SendEmailCommand|sesv2|\/v2\/email\/outbound-emails/.test(readFileSync(join(root, path), "utf8"))) direct.push(path);
-      }
-    };
-    walk(dir);
+/** The modules a file imports from, read from its import statements (named, namespace, dynamic, require). */
+function importsOf(text: string): { from: string; names: string[] | "*" }[] {
+  const out: { from: string; names: string[] | "*" }[] = [];
+  for (const m of text.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["']([^"']+)["']/g)) {
+    out.push({ from: m[2], names: m[1].split(",").map((part) => part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]).filter(Boolean) });
   }
+  for (const m of text.matchAll(/import\s*\*\s*as\s+\w+\s+from\s+["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)|require\(\s*["']([^"']+)["']\s*\)|export\s*\*\s*from\s+["']([^"']+)["']/g)) {
+    out.push({ from: m[1] ?? m[2] ?? m[3] ?? m[4], names: "*" });
+  }
+  for (const m of text.matchAll(/export\s*\{([^}]*)\}\s*from\s+["']([^"']+)["']/g)) {
+    out.push({ from: m[2], names: m[1].split(",").map((part) => part.trim().split(/\s+as\s+/)[0]).filter(Boolean) });
+  }
+  return out;
+}
+
+/** Functions that send email, by the module that holds them. */
+const SENDING: Record<string, string[]> = {
+  email: ["sendEmail", "sendBatch", "sendListBatch", "queuedShipmentMailSender"],
+  mail: ["sendTo"],
+  ses: ["sesSend", "sesBatch"],
+};
+const moduleOf = (from: string) => /(?:^@\/lib\/|^\.{1,2}\/(?:.*\/)?)([\w-]+)$/.exec(from)?.[1] ?? "";
+const sends = (text: string) =>
+  importsOf(text).some(({ from, names }) => Object.hasOwn(SENDING, moduleOf(from)) && (names === "*" || names.some((n) => SENDING[moduleOf(from)].includes(n))));
+const RESEARCH_MODULES = new Set(["research-do-not-contact", "research-contact"]);
+const touchesResearch = (text: string) => importsOf(text).some(({ from }) => RESEARCH_MODULES.has(moduleOf(from)));
+
+/** Who may import the list's modules: the list itself, the one way to send research, and the do-not-contact page, form and routes. */
+const LIST_IMPORTERS = [
+  "lib/research-do-not-contact.ts",
+  "lib/research-outreach.ts",
+  "app/api/privacy/do-not-contact/route.ts",
+  "app/api/operator/do-not-contact/route.ts",
+  "app/api/operator/do-not-contact/check/route.ts",
+  "app/privacy/do-not-contact/page.tsx",
+  "components/do-not-contact-form.tsx",
+];
+
+test("no path but sendResearchMessage can send a research message, read from the code's imports and calls", () => {
+  const code = sources();
+  // 1. Only the list, the sending wrapper and the do-not-contact page, form and routes import the list's modules.
+  const importers = [...code].filter(([file, text]) => file !== "lib/research-contact.ts" && touchesResearch(text)).map(([file]) => file);
+  assert.deepEqual(importers.filter((file) => !LIST_IMPORTERS.includes(file)), [], "a research message goes out through sendResearchMessage (lib/research-outreach.ts), never with the list read elsewhere");
+  // 2. Only sendResearchMessage asks the list to decide a sending; the operator's look-up asks it to show the answer, and sends nothing.
+  const askers = [...code].filter(([file, text]) => file !== "lib/research-do-not-contact.ts" && /\b(mayContactForResearch|doNotContactState)\(/.test(text)).map(([file]) => file).sort();
+  assert.deepEqual(askers, ["app/api/operator/do-not-contact/check/route.ts", "lib/research-outreach.ts"]);
+  assert.equal(sends(code.get("app/api/operator/do-not-contact/check/route.ts")!), false, "the look-up sends nothing");
+  // 3. No file but the wrapper imports both a function that sends and anything of the list's modules.
+  const both = [...code].filter(([, text]) => sends(text) && touchesResearch(text)).map(([file]) => file);
+  assert.deepEqual(both, ["lib/research-outreach.ts"]);
+  // Nothing reaches a mail provider but the two transports, lib/email.ts (Resend) and lib/ses.ts (Amazon).
+  const direct = [...code].filter(([file, text]) => file !== "lib/email.ts" && file !== "lib/ses.ts" && /api\.resend\.com|SendEmailCommand|sesv2|\/v2\/email\/outbound-emails/.test(text)).map(([file]) => file);
   assert.deepEqual(direct, []);
+});
+
+test("the guard reads what it must: a sender that imports the list fails it, one that does not passes", () => {
+  assert.equal(sends('import { sendEmail } from "@/lib/email";'), true);
+  assert.equal(sends('import { sesBatch as batch } from "./ses";'), true);
+  assert.equal(sends('import * as mail from "@/lib/mail";'), true);
+  assert.equal(sends('import { isSenderConfigured } from "@/lib/email";'), false);
+  assert.equal(touchesResearch('import { normalizeResearchContact } from "@/lib/research-contact";'), true);
+  assert.equal(touchesResearch('const m = await import("@/lib/research-do-not-contact");'), true);
+  assert.equal(touchesResearch('import { sendResearchMessage } from "@/lib/research-outreach";'), false, "using the wrapper is the way");
 });
 
 const req = (fields: Record<string, string>, headers: Record<string, string>) =>

@@ -4,9 +4,10 @@
  * lib/research-do-not-contact.ts) and sends only to a contact the list says,
  * in its exact shape, is clear of it; listed, unknown or not a contact it
  * reads sends nothing. Counted against the company's own email (meter
- * "company"). tests/research-do-not-contact-sending.test.ts holds every other
- * file that sends email as one that does not send research, so a research
- * message has no other way out. Nothing calls it today: no research message is
+ * "company"). tests/research-do-not-contact-sending.test.ts holds, from the
+ * code's imports and calls, that no other file both sends email and reads
+ * the list, that only the list's own page, form and routes import it, and
+ * that only this function asks it to decide a sending. Nothing calls it today: no research message is
  * sent by the site.
  */
 import { sendEmail } from "@/lib/email";

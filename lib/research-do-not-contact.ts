@@ -25,7 +25,8 @@
  * Research messages go out only through sendResearchMessage
  * (lib/research-outreach.ts), which asks doNotContactState first and sends
  * nothing unless the contact is clear; tests/research-do-not-contact-sending.test.ts
- * holds every other file that sends email as one that does not send research.
+ * holds, from the code's imports and calls, that no other file both sends
+ * email and reads this list, and who may import it.
  * The operator looks a contact up before writing by hand on the same page
  * (app/api/operator/do-not-contact/check).
  *

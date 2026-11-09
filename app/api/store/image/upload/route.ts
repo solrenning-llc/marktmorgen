@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { hasProduct } from "@/lib/catalog";
+import { StoreSpaceRefused, admitStorePicture } from "@/lib/image-space";
 import { head, issueSignedToken } from "@/lib/blob";
 import { BlobNotFoundError } from "@vercel/blob";
 import { handleUploadPresigned, type HandleUploadPresignedBody } from "@vercel/blob/client";
@@ -8,17 +9,8 @@ import { isHeader } from "@/lib/store-link";
 import { imageFolder } from "@/lib/store";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES, ownsImagePath } from "@/lib/product-image";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
-import { costPauseCode, standingOf, storageRefusal } from "@/lib/plan-standing";
+import { costPauseCode } from "@/lib/plan-standing";
 import { notePictureDoor } from "@/lib/picture-door";
-import { ImageSpaceRefused, admitImage } from "@/lib/image-space";
-import { storageBrakeFor } from "@/lib/storage-quota";
-
-/** A door refused for the store's space: the plan's storage sentence, or files_unavailable when the room cannot be read. */
-class PictureRoomRefused extends Error {
-  constructor(public readonly code: "storage_full" | "storage_trial" | "storage_setup" | "files_unavailable") {
-    super(code);
-  }
-}
 
 /** How long the creator has to start the upload after asking for the door. */
 const UPLOAD_WINDOW_MS = 5 * 60 * 1000;
@@ -91,13 +83,6 @@ export async function POST(request: NextRequest) {
         const there = await head(pathname).then(() => true, (error: unknown) => (error instanceof BlobNotFoundError ? false : null));
         if (there === true) throw new Error("invalid");
         if (there === null) throw new Error("could not check whether a picture name is free");
-        // The picture takes room in the store's space before the door opens (owner's decision 8, lib/image-space.ts):
-        // at the most it may weigh, settled to its real size when it is put on a product. Full, or a room that
-        // cannot be read, refuses the door; nothing is signed.
-        const standing = standingOf(store);
-        await admitImage(ref, MAX_IMAGE_BYTES, storageBrakeFor(standing, store.tier), pathname).catch((error: unknown) => {
-          throw error instanceof ImageSpaceRefused ? new PictureRoomRefused(error.reason === "full" ? storageRefusal(standing) : "files_unavailable") : error;
-        });
         const noted = await notePictureDoor(pathname).catch((error: unknown) => {
           console.error("could not note a picture upload", error);
           return false;
@@ -109,6 +94,10 @@ export async function POST(request: NextRequest) {
           maximumSizeInBytes: MAX_IMAGE_BYTES,
           validUntil: Date.now() + UPLOAD_WINDOW_MS,
         };
+        // The picture takes room in the store's space before anything is signed (owner's decision 8, lib/image-space.ts),
+        // at the most it may weigh, settled to its real size when it is put on a product. Full, or a room that cannot be
+        // read, refuses the door.
+        await admitStorePicture(store, ref, MAX_IMAGE_BYTES, pathname);
         return {
           token: await issueSignedToken({ pathname, operations: ["put"], ...rules }),
           urlOptions: { ...rules, addRandomSuffix: false, allowOverwrite: false },
@@ -119,9 +108,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // The store's space (lib/image-space.ts), in a block of its own: full is the plan's storage sentence, a room that
     // cannot be read is a try-again-later.
-    if (error instanceof PictureRoomRefused) {
+    if (error instanceof StoreSpaceRefused) {
       return Response.json({ ok: false, error: error.code }, { status: error.code === "files_unavailable" ? 503 : 409 });
     }
+
     const reason = error instanceof Error ? error.message : "server_error";
     const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "renewal_unpaid", "plan_disputed"].includes(reason);
     if (!known) console.error("signing a picture upload failed", error);

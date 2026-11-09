@@ -43,7 +43,9 @@
  */
 import { list } from "@/lib/blob";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { storageUsed, type StorageUse } from "@/lib/storage-quota";
+import { storageBrakeFor, storageUsed, type StorageUse } from "@/lib/storage-quota";
+import { standingOf, storageRefusal } from "@/lib/plan-standing";
+import type { Store } from "@/lib/store";
 import { imageFolder, storeFolder } from "@/lib/store";
 import { UPLOAD_SECONDS } from "@/lib/vault-rules";
 
@@ -355,6 +357,30 @@ export async function admitImage(ref: string, bytes: number, limit: number, door
     }
   }
   throw refusal(first.code);
+}
+
+/** A picture refused for the store's space: the plan's storage sentence, or files_unavailable when the room cannot be read. */
+export class StoreSpaceRefused extends Error {
+  constructor(public readonly code: "storage_full" | "storage_trial" | "storage_setup" | "files_unavailable") {
+    super(code);
+    this.name = "StoreSpaceRefused";
+  }
+}
+
+/**
+ * admitImage against the store's own space (its plan's storage, by where it
+ * stands with its plan), refusing with the words a studio upload is told:
+ * the plan's storage sentence when full, files_unavailable when the room
+ * cannot be read or too many pictures wait.
+ */
+export async function admitStorePicture(store: Store, ref: string, bytes: number, door?: string): Promise<void> {
+  const standing = standingOf(store);
+  try {
+    await admitImage(ref, bytes, storageBrakeFor(standing, store.tier), door);
+  } catch (error) {
+    if (error instanceof ImageSpaceRefused) throw new StoreSpaceRefused(error.reason === "full" ? storageRefusal(standing) : "files_unavailable");
+    throw error;
+  }
 }
 
 /**

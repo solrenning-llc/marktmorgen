@@ -929,21 +929,6 @@ export const COST_LINES: CostLine[] = [
     basis: "The plan's storage, all used, at the dearest store a file may be in.",
   },
   {
-    id: "images-space",
-    feature: "The store's pictures counted in its space (owner's decision 8, 9 November 2026): the counter taken before each picture, settled and given back, and its reconciliation once a day",
-    monthlyUsd: (tier) => imagesSpaceMonthlyUsd(tier),
-    sources: [
-      { file: "lib/image-space.ts", names: ["IMAGE_SPACE_COMMANDS", "IMAGE_SPACE_READ_BYTES", "IMAGE_LIST_PAGES", "RECONCILE_EVERY_MS", "RECONCILE_MS", "IMAGE_OPEN_MAX", "admitImage", "adjustImages", "reconcileImages", "spaceUsed", "noteFilesAuthorized"] },
-      { file: "lib/file-store.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
-      { file: "lib/vault.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
-      { file: "app/api/store/image/upload/route.ts", names: ["await admitImage(ref, MAX_IMAGE_BYTES, storageBrakeFor(standing, store.tier), pathname)"] },
-      { file: "app/api/store/image/route.ts", names: ["await adjustImages(ref, settled.filter((each) => fresh.has(each.path)), given)"] },
-      { file: "lib/review-photo.ts", names: ["await admitImage(ref, checked.bytes.length, limit)"] },
-      { file: "lib/mail-pictures.ts", names: ["await admitImage(ref, checked.bytes.length, limit)"] },
-    ],
-    basis: "Every studio request a door's picture or an attach (IMAGE_SPACE_COMMANDS.door, the dearer of the two, with IMAGE_SPACE_READ_BYTES read), every public request a review with a photo (take), every service request an email's picture (take), every upload start its read and note (heldRead + files); and one reconciliation every day of the window (DAY_WINDOWS), each listing IMAGE_LIST_PAGES pages of pictures and the files' 20 Blob pages, each an Advanced Operation tried IMAGE_BLOB_TRIES times at IMAGE_BLOB_ADVANCED_OP, the vault's 20 pages at R2 Class A, its commands (claim, write, a second admission and a read) and the function held IMAGE_RECONCILE_SECONDS at 2 GB. The pictures' bytes are inside the plan's storage (line storage), which no longer leaves them out.",
-  },
-  {
     id: "free-delivery",
     feature: "Downloads (sold and free)",
     monthlyUsd: () => (FREE_PAUSE_ABOVE_BYTES / GB) * FILE_DELIVERY_PER_GB,
@@ -1052,6 +1037,21 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => micro(uploadWorstCostMicroUsd(tier)),
     sources: [{ file: "lib/upload-budget-policy.ts", names: ["uploadWorstCostMicroUsd", "PAID_UPLOAD_OPENS"] }],
     basis: "Every upload operation the automatic upload allowance can start.",
+  },
+  {
+    id: "images-space",
+    feature: "The store's pictures counted in its space (owner's decision 8, 9 November 2026): the counter taken before each picture, settled and given back, and its reconciliation once a day",
+    monthlyUsd: (tier) => imagesSpaceMonthlyUsd(tier),
+    sources: [
+      { file: "lib/image-space.ts", names: ["IMAGE_SPACE_COMMANDS", "IMAGE_SPACE_READ_BYTES", "IMAGE_LIST_PAGES", "RECONCILE_EVERY_MS", "RECONCILE_MS", "IMAGE_OPEN_MAX", "admitImage", "adjustImages", "reconcileImages", "spaceUsed", "noteFilesAuthorized"] },
+      { file: "lib/file-store.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
+      { file: "lib/vault.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
+      { file: "app/api/store/image/upload/route.ts", names: ["await admitStorePicture(store, ref, MAX_IMAGE_BYTES, pathname)"] },
+      { file: "app/api/store/image/route.ts", names: ["await adjustImages(ref, settled.filter((each) => fresh.has(each.path)), given)"] },
+      { file: "lib/review-photo.ts", names: ["await admitImage(ref, checked.bytes.length, limit)"] },
+      { file: "lib/mail-pictures.ts", names: ["await admitImage(ref, checked.bytes.length, limit)"] },
+    ],
+    basis: "Every studio request a door's picture or an attach (IMAGE_SPACE_COMMANDS.door, the dearer of the two, with IMAGE_SPACE_READ_BYTES read), every public request a review with a photo (take), every service request an email's picture (take), every upload start its read and note (heldRead + files); and one reconciliation every day of the window (DAY_WINDOWS), each listing IMAGE_LIST_PAGES pages of pictures and the files' 20 Blob pages, each an Advanced Operation tried IMAGE_BLOB_TRIES times at IMAGE_BLOB_ADVANCED_OP, the vault's 20 pages at R2 Class A, its commands (claim, write, a second admission and a read) and the function held IMAGE_RECONCILE_SECONDS at 2 GB. The pictures' bytes are inside the plan's storage (line storage), which no longer leaves them out.",
   },
   {
     id: "workflows",

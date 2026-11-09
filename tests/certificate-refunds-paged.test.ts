@@ -144,7 +144,9 @@ async function main(): Promise<void> {
   const anchorKey = `nl:certrefunds:since:${sid}`;
   const seenKey = `nl:certrefunds:seen:${sid}`;
   const exported = pass as unknown as Record<string, unknown>;
-  const run = () => pass.withdrawRefundedCertificates(store, Date.now() + 60_000);
+  // On the Scale plan, whose month of checks (CERTIFICATE_REFUND_CHECKS_PER_MONTH) holds the 320 refunds below: the
+  // pages are what is checked here; the ceiling is checked in tests/certificate-refund-pass-cost.test.ts.
+  const run = () => pass.withdrawRefundedCertificates({ ...store, tier: "scale" }, Date.now() + 60_000);
   const anchorAt = async (): Promise<number> => Number(String((await redis.pipeline([["GET", anchorKey]]))[0] ?? "").split("|")[0]);
 
   const student = async (email: string): Promise<{ session: Session; id: string }> => {

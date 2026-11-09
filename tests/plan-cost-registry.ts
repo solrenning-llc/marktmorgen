@@ -54,7 +54,8 @@ import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
-import { CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE, CERTIFICATE_SCAN_SECONDS } from "@/lib/certificate-refunds";
+import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE } from "@/lib/certificate-refunds";
+import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
@@ -798,34 +799,49 @@ export const TEAM_COMMANDS_PER_VIEW = 2;
 export const DAY_WINDOWS = 32;
 
 /**
- * The certificates' refund pass (lib/certificate-refunds.ts; second review of #3409, Claude 5, ALTO 1), for one store,
- * every five minutes of the checkout sweep (vercel.json, /api/cron/mail): DAY_WINDOWS days of 288 runs.
+ * The certificates' refund pass (lib/certificate-refunds.ts; second review of #3409, Claude 5, ALTO 1; focal review,
+ * ALTO 2), for one store: at most one pass every CERTIFICATE_PASS_EVERY_SECONDS (the store's turn, SET NX EX), so at
+ * most this many in DAY_WINDOWS days, the one at the window's edge included.
  */
-export const CERTIFICATE_PASS_RUNS = DAY_WINDOWS * 288;
+export const CERTIFICATE_PASS_RUNS = Math.ceil((DAY_WINDOWS * 86_400) / CERTIFICATE_PASS_EVERY_SECONDS) + 1;
+/** Runs of the five-minute checkout sweep (vercel.json, /api/cron/mail) in DAY_WINDOWS days, each reading the batch's turns. */
+export const CERTIFICATE_TURN_READS = DAY_WINDOWS * 288;
 /**
- * Commands of one run for a store one of whose courses issued a certificate, no row looked up, at the most: the mark's
- * GET, the place's GET, the lost disputes' place (GET, and its SET or DEL), one ZRANGEBYSCORE of the rows handled for
- * the lost disputes, one a page of refunds and one to keep the disputes' place, and the place's SET and
- * ZREMRANGEBYSCORE (tests/certificate-refund-pass-cost.test.ts measures a run under it).
+ * A store's share of the bytes of the sweep's one MGET a batch of its turns, at the most: its key (about 52 bytes) and
+ * its value, with the reply's framing. The MGET itself is one command a batch of up to 200 stores whatever their
+ * number, a company fixed cost of the sweep as its SCAN is.
  */
-export const CERTIFICATE_PASS_RUN_COMMANDS = 1 + 1 + 2 + 1 + CERTIFICATE_REFUND_PAGES_PER_STORE + 1 + 2;
-/** The ZRANGEBYSCORE replies of a run, each at most the set of rows handled (tests/store-data-registry.ts, 64 KB). */
-export const CERTIFICATE_PASS_RUN_BYTES = (2 + CERTIFICATE_REFUND_PAGES_PER_STORE) * 64 * 1_024;
+export const CERTIFICATE_TURN_BYTES = 128;
+/**
+ * Commands of one pass, no row looked up, at the most: the store's turn (SET NX EX), the place's GET, the lost
+ * disputes' place (GET, and its SET or DEL), one ZMSCORE of the rows handled for the lost disputes, one a page of
+ * refunds and one to keep the disputes' place, the place's SET and ZREMRANGEBYSCORE, and the INCRBY and EXPIRE of
+ * the month's checks a pass sends once when they are spent (focal review, L2)
+ * (tests/certificate-refund-pass-cost.test.ts measures a pass under it).
+ */
+export const CERTIFICATE_PASS_RUN_COMMANDS = 1 + 1 + 2 + 1 + CERTIFICATE_REFUND_PAGES_PER_STORE + 1 + 2 + 2;
+/**
+ * The ZMSCORE requests and replies of a pass, at the most: two entries a row (its id and its wait), each at most 64
+ * bytes asked and answered, for the lost disputes read (100 a page, LOST_DISPUTE_PAGES pages) twice and the refunds'
+ * pages once.
+ */
+export const CERTIFICATE_PASS_RUN_BYTES = 2 * (2 * 100 * LOST_DISPUTE_PAGES + 100 * CERTIFICATE_REFUND_PAGES_PER_STORE) * 64;
 /**
  * Commands of one of the month's checks, at the most (a row marked handled, or a course its checkout gave): the INCRBY and
  * EXPIRE that take it, the listing's GET and SCARD, the buyer's courses (DEL of the kept answer, courseLedger's
  * pipeline of three and its SET, and a community's earned courses), the withdrawal (the slot's HGET and GET, the
  * record's GET, SET XX, HGET and HDEL, the slot read again, the student's list's SMEMBERS and MGET and a mark on an
- * earlier one) and the row's ZADD and EXPIRE (tests/certificate-refund-pass-cost.test.ts measures one under it).
+ * earlier one) and the row's ZADD and EXPIRE, or, for a row left unknown, the ZADD and EXPIRE of its wait in their
+ * place (tests/certificate-refund-pass-cost.test.ts measures one under it).
  */
 export const CERTIFICATE_PASS_CHECK_COMMANDS = 32;
 
-/** The most the pass costs one store in a month, in dollars: its runs, its looks at the courses, and its checks. */
-export function certificatePassMonthUsd(): number {
+/** The most the pass costs one store on a plan in a month, in dollars: the turns read, its passes, and its checks. */
+export function certificatePassMonthUsd(tier: Tier): number {
+  const turns = CERTIFICATE_TURN_READS * CERTIFICATE_TURN_BYTES * DB_BYTE;
   const runs = CERTIFICATE_PASS_RUNS * (CERTIFICATE_PASS_RUN_COMMANDS * COMMAND + CERTIFICATE_PASS_RUN_BYTES * DB_BYTE);
-  const looks = Math.ceil((DAY_WINDOWS * 86_400) / CERTIFICATE_SCAN_SECONDS) * ((2 + 2 * MAX_PRODUCTS) * COMMAND + MAX_PRODUCTS * MAX_PRODUCT_BYTES * DB_BYTE);
-  const checks = CERTIFICATE_REFUND_CHECKS_PER_MONTH * (CERTIFICATE_PASS_CHECK_COMMANDS * COMMAND + (MAX_PRODUCT_BYTES + 16_384) * DB_BYTE);
-  return runs + looks + checks;
+  const checks = CERTIFICATE_REFUND_CHECKS_PER_MONTH[tier] * (CERTIFICATE_PASS_CHECK_COMMANDS * COMMAND + (MAX_PRODUCT_BYTES + 16_384) * DB_BYTE);
+  return turns + runs + checks;
 }
 
 /** CX-61: two bounded provider reads, independent of released-name history.
@@ -907,17 +923,17 @@ export const COST_LINES: CostLine[] = [
   {
     id: "certificate-refund-pass",
     feature: "Certificates withdrawn when their course's payment is given back: the checkout sweep's pass (audit R41, DONO-18; second review of #3409, Claude 5, ALTO 1)",
-    monthlyUsd: ALL_TIERS_SAME(certificatePassMonthUsd()),
+    monthlyUsd: (tier) => certificatePassMonthUsd(tier),
     sources: [
-      { file: "lib/certificate-refunds.ts", names: ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE", "CERTIFICATE_REFUND_CHECKS_PER_MONTH", "CERTIFICATE_SCAN_SECONDS", "takeChecks", "handledAmong", "issuedAny"] },
-      { file: "lib/certificate.ts", names: ["certificatesIssuedKey", "CERTIFICATES_ISSUED", "withdrawForRefund"] },
-      { file: "lib/checkout-sweep.ts", names: ["mayHaveCertificates(store)", "withdrawRefundedCertificates(store, deadline)"] },
-      { file: "lib/catalog-rules.ts", names: ["MAX_PRODUCTS"] },
+      { file: "lib/certificate-refunds.ts", names: ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE", "CERTIFICATE_REFUND_CHECKS_PER_MONTH", "CERTIFICATE_PASS_EVERY_SECONDS", "CERTIFICATE_REFUND_RETRY_SECONDS", "takeChecks", "seenAmong", "certificatePassesDue", "takeCertificatePass"] },
+      { file: "lib/certificate.ts", names: ["withdrawForRefund"] },
+      { file: "lib/checkout-sweep.ts", names: ["certificatePassesDue(stores.slice(skip))", "takeCertificatePass(store)", "withdrawRefundedCertificates(store, deadline)"] },
+      { file: "lib/refunds.ts", names: ["LOST_DISPUTE_PAGES"] },
       { file: "lib/catalog.ts", names: ["MAX_PRODUCT_BYTES"] },
       { file: "app/api/cron/mail/route.ts", names: ["sweepCheckouts"] },
       { file: "vercel.json", names: ["/api/cron/mail", "*/5 * * * *"] },
     ],
-    basis: "One store, a calendar month of DAY_WINDOWS days, every plan the same (the pass runs for any store paid through Stripe with a course, whatever its plan). A store none of whose courses issued a certificate costs the mark's GET a run, inside CERTIFICATE_PASS_RUN_COMMANDS. A store that issued one: CERTIFICATE_PASS_RUNS runs at CERTIFICATE_PASS_RUN_COMMANDS and CERTIFICATE_PASS_RUN_BYTES each (CERTIFICATE_REFUND_PAGES_PER_STORE GET /refunds and LOST_DISPUTE_PAGES GET /events, Stripe bills no API call). A look at the courses, once for a store never looked at and again each CERTIFICATE_SCAN_SECONDS while none is found: the GET, every course listing (MAX_PRODUCTS, each MAX_PRODUCT_BYTES at the most), one SCARD a course and the mark's SET. Every row looked up (at most CERTIFICATE_REFUND_LOOKUPS_PER_STORE a run: 2 GET /refunds?charge and 1 GET /checkout/sessions, and the buyer's checkouts as courseStandingFor reads them) asks Stripe only until a course its checkout gave is read: each such course takes one of CERTIFICATE_REFUND_CHECKS_PER_MONTH before anything is read for it, and each row one before it is marked handled, each at CERTIFICATE_PASS_CHECK_COMMANDS and a listing and 16 KB of records; past them the pass waits for the next month at that row. The run's time is inside CERTIFICATE_REFUND_PASS_MS of the sweep's run, whose schedule bounds it (a company fixed cost). The mark's SET at an issue is one of the commands of the buyer action that asks for a certificate (buyer-actions). Each reply read in its exact shape.",
+    basis: "One store on a plan, a calendar month of DAY_WINDOWS days (the pass runs for any store paid through Stripe with a course, whatever its plan). Every run of the five-minute sweep reads the turns of its batch of stores in one MGET (a company fixed cost of the sweep, one command a batch whatever the number of stores), of which a store's share is CERTIFICATE_TURN_BYTES; a store whose pass is not due costs no command of its own. At most CERTIFICATE_PASS_RUNS passes, one each CERTIFICATE_PASS_EVERY_SECONDS (the store's turn, SET NX EX), at CERTIFICATE_PASS_RUN_COMMANDS and CERTIFICATE_PASS_RUN_BYTES each (CERTIFICATE_REFUND_PAGES_PER_STORE GET /refunds and LOST_DISPUTE_PAGES GET /events, Stripe bills no API call). No look at the store's courses: only the courses a refunded checkout gave are read. Every row looked up (at most CERTIFICATE_REFUND_LOOKUPS_PER_STORE a pass: 2 GET /refunds?charge and 1 GET /checkout/sessions, and the buyer's checkouts as courseStandingFor reads them) asks Stripe only until a course its checkout gave is read: each such course takes one of the plan's CERTIFICATE_REFUND_CHECKS_PER_MONTH before anything is read for it, and each row one before it is marked handled, each at CERTIFICATE_PASS_CHECK_COMMANDS and a listing and 16 KB of records; past them the pass waits for the next month at that row. A row that took its checks and was left unknown waits CERTIFICATE_REFUND_RETRY_SECONDS before it takes any again. The pass's time is inside CERTIFICATE_REFUND_PASS_MS of the sweep's run, whose schedule bounds it (a company fixed cost). Each reply read in its exact shape.",
   },
   {
     id: "platform-subscription-search",
@@ -1687,7 +1703,7 @@ export const NOT_A_COST: Record<string, string> = {
   DEMO_REFUSALS_PER_ADDRESS_PER_DAY: "Refused demo requests one address or network may count in a day, each counted for the whole site only inside it, so one address cannot spend the day's DEMO_REFUSALS_PER_DAY: a pace that only refuses, inside the day's counted refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_REFUSALS_PER_SESSION: "Refused actions one live demo session may count in its own record, whoever shares its address, past which its next actions are answered after one read and write nothing: priced with each day's openings in the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_REFUSAL_WORST_COMMANDS: "The commands one refused demo request sends at the most, priced with the refusals of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
-  LOST_DISPUTE_PAGES: "Pages of Stripe's closing events (GET /events, up to 100 each) read per store per run by each of the six five-minute jobs that take things back after a lost dispute (lib/refunds.ts, lostDisputesSince; lib/licence-keys.ts, lib/call-meetings.ts, lib/review-proof.ts, the checkout sweep's gifts and pre-orders, lib/gifts.ts and lib/preorders.ts, asked only of a store that ever sold one, and the checkout sweep's certificates' refund pass, lib/certificate-refunds.ts, asked only of a store whose mark says a course of it issued a certificate, and priced per plan in its own line, certificate-refund-pass), so at most 6 x LOST_DISPUTE_PAGES calls a store every five minutes, inside each run's deadline and with no other call per dispute: a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call. Each lost dispute read becomes one row, handled once (its event id kept as read), with the store commands a refund row of the same job takes (SISMEMBER, SADD and EXPIRE of the read set, or for gifts and pre-orders the SISMEMBER and SADD of the read set, the GET of the payment's gift or pre-order and the read of that gift or pre-order and of what it gave (GET or HGET), each reply read in its exact shape so a row left unknown is read again next run, at most once a row a run, and the closing write: the key revoked, the meeting ended, the review marked, the gift or pre-order taken back as for a full refund; for a call refunded in full, the calendar feed's changed mark too: SET, INCRBY and EXPIRE, lib/call-records.ts, markBookingsChanged, at most REFUND_LOOKUPS a store a run), at most 100 x LOST_DISPUTE_PAGES rows a job a run, inside the same schedule and deadline as the refund rows. When there are more than a run may read, the job keeps its place in one key (GET at the start, then, once every row read is handled, one SMISMEMBER of the read set, or for the certificates' pass one ZRANGEBYSCORE of its set of rows handled, and SET or DEL: 3 commands a run, lib/refunds.ts, lostCursorKey and confirmLostRead; a run that could not handle every row writes nothing) and the next run reads on from there.",
+  LOST_DISPUTE_PAGES: "Pages of Stripe's closing events (GET /events, up to 100 each) read per store per run by each of the six five-minute jobs that take things back after a lost dispute (lib/refunds.ts, lostDisputesSince; lib/licence-keys.ts, lib/call-meetings.ts, lib/review-proof.ts, the checkout sweep's gifts and pre-orders, lib/gifts.ts and lib/preorders.ts, asked only of a store that ever sold one, and the checkout sweep's certificates' refund pass, lib/certificate-refunds.ts, asked of a store with a course at most once every CERTIFICATE_PASS_EVERY_SECONDS, and priced per plan in its own line, certificate-refund-pass), so at most 6 x LOST_DISPUTE_PAGES calls a store every five minutes, inside each run's deadline and with no other call per dispute: a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call. Each lost dispute read becomes one row, handled once (its event id kept as read), with the store commands a refund row of the same job takes (SISMEMBER, SADD and EXPIRE of the read set, or for gifts and pre-orders the SISMEMBER and SADD of the read set, the GET of the payment's gift or pre-order and the read of that gift or pre-order and of what it gave (GET or HGET), each reply read in its exact shape so a row left unknown is read again next run, at most once a row a run, and the closing write: the key revoked, the meeting ended, the review marked, the gift or pre-order taken back as for a full refund; for a call refunded in full, the calendar feed's changed mark too: SET, INCRBY and EXPIRE, lib/call-records.ts, markBookingsChanged, at most REFUND_LOOKUPS a store a run), at most 100 x LOST_DISPUTE_PAGES rows a job a run, inside the same schedule and deadline as the refund rows. When there are more than a run may read, the job keeps its place in one key (GET at the start, then, once every row read is handled, one SMISMEMBER of the read set, or for the certificates' pass one ZMSCORE of its set of rows handled, and SET or DEL: 3 commands a run, lib/refunds.ts, lostCursorKey and confirmLostRead; a run that could not handle every row writes nothing) and the next run reads on from there.",
   GIVEN_UP_LINES_PER_DAY: "A cap on the lines passed-over Stripe events leave for each endpoint of a store a day, at most MAX_ENDPOINTS endpoints a store a day, past which one summary line an endpoint counts the rest (lib/webhooks.ts, markGivenUp): no endpoint is called and no delivery taken; what the lines keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:evt:), and the job that writes them is the five-minute schedule's (a company fixed cost).",
   SKIPPED_LINES_PER_DAY: "A cap on the lines a store's log gets in a UTC day for messages not kept (too large to keep, or made with the month's webhook deliveries used), each reason on its own, past which one summary line an endpoint counts the rest (lib/webhooks.ts, skippedLines): no endpoint is called and no delivery taken; what the lines and the day's counts keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:wait:).",
   DISPUTE_LOOKUPS_PER_STORE: "The same job's separate budget of calls per store per run to tell whose a disputed payment is (lib/webhooks.ts, paymentMeta): inside the same schedule, the same ten as before, each call of a membership's lookup counted.",

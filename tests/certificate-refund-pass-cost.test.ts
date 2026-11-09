@@ -4,22 +4,21 @@
  *
  * ALTO 1: every run of the five-minute sweep read every course listing and one count a course of every store paid
  * through Stripe with a course, before knowing whether any certificate was issued: a run's work grew with the courses
- * (MAX_PRODUCTS), and it was booked as a company fixed cost. Now a store's mark, written when a certificate is issued
- * (and by a one-time look at the courses' counts for those issued before the mark was kept, repeated while none is
- * found), says whether the pass has anything to do; a store with no certificate costs one read a run, whatever its
- * courses. What the pass costs a store that issued one is priced per plan in COST_LINES.
+ * (MAX_PRODUCTS), and it was booked as a company fixed cost. Now a pass reads no course but those a refunded checkout
+ * gave, so its commands do not grow with the courses; it runs on the store's turn, at most once every
+ * CERTIFICATE_PASS_EVERY_SECONDS (focal review, ALTO 2: tests/certificate-refund-pass-pace.test.ts), and what it
+ * costs a store is priced per plan in COST_LINES.
  *
  * MÉDIO 1: a certificate the creator had already withdrawn by hand (or an earlier one, replaced since) kept the
  * student's name on its page after a full refund. Now the refund marks every certificate of the course the student
  * was issued as withdrawn for a refund, keeping when it was withdrawn.
  *
  * What is checked:
- *   - a run on a store with 2 courses and on one with 120, none of which issued a certificate, sends the same
- *     commands, at most one, and asks Stripe nothing; its worst month is a few cents;
- *   - issuing a certificate sets the store's mark at once, and the pass then reads the refunds;
- *   - a mark that reads in another shape runs the pass (never skips it);
- *   - a certificate issued before the mark was kept is found by the look at the courses, repeated once the "none
- *     found" mark expires, sooner than the pass's first look back, and its full refund withdraws it;
+ *   - a pass on a store with 2 courses and on one with 120 sends the same commands, within
+ *     CERTIFICATE_PASS_RUN_COMMANDS;
+ *   - the sweep's turns: one MGET for the batch; a turn absent is due, one taken is not; a reply in another shape runs
+ *     no pass that run; a turn is taken once, with SET NX EX, and held CERTIFICATE_PASS_EVERY_SECONDS;
+ *   - a refund withdraws its certificate, and one issued with no store id on its room is met by its refund all the same;
  *   - a certificate withdrawn by hand, then fully refunded, shows no name; an earlier one replaced since shows no
  *     name either; a hand-withdrawn one with no refund keeps it (control); running again changes nothing;
  *   - past the month's checks the pass waits at the row and takes it up the next month, never skipping it;
@@ -36,7 +35,7 @@ import { emailKey, storeKey } from "@/lib/learn";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
-import { CERTIFICATE_PASS_CHECK_COMMANDS, CERTIFICATE_PASS_RUNS, CERTIFICATE_PASS_RUN_COMMANDS, COMMAND, COST_LINES, NOT_A_COST } from "./plan-cost-registry";
+import { CERTIFICATE_PASS_CHECK_COMMANDS, CERTIFICATE_PASS_RUN_COMMANDS, COST_LINES, NOT_A_COST } from "./plan-cost-registry";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_certificate_refund_pass_cost";
 
@@ -81,7 +80,7 @@ const replaced = new Map<string, unknown>();
 redis.pipeline = async (batch: (string | number)[][]) => {
   commands += batch.length;
   const replies = await healthy(batch);
-  return replies.map((reply, i) => (batch[i][0] === "GET" && replaced.has(String(batch[i][1])) ? replaced.get(String(batch[i][1])) : reply));
+  return replies.map((reply, i) => (batch[i][0] === "GET" && replaced.has(String(batch[i][1])) ? replaced.get(String(batch[i][1])) : batch[i][0] === "MGET" && replaced.has("MGET") ? replaced.get("MGET") : reply));
 };
 
 const hours = (n: number) => Math.floor(Date.now() / 1000) - n * 3_600;
@@ -150,27 +149,39 @@ async function main(): Promise<void> {
     return issued.certificate.id;
   };
   const record = async (id: string) => (await readCertificate(id)) as Certificate | null;
-  const markOf = async (store: Store) => (await healthy([["GET", `nl:certrefunds:has:${store.statsId}`]]))[0];
+  const turnOf = async (store: Store) => (await healthy([["GET", `nl:certrefunds:next:${store.statsId}`]]))[0];
 
-  part("ALTO 1: a store none of whose courses issued a certificate costs the same small read a run, whatever its courses");
+  part("ALTO 1: a pass's commands do not grow with the store's courses");
   await run(two.store);
   await run(many.store);
   const small = await run(two.store);
   const large = await run(many.store);
-  is("a run's commands do not grow with the courses (2 courses, 120 courses)", large.commands, small.commands);
-  is("at most one command a run, and nothing asked of Stripe", [small.commands <= 1, small.stripe + large.stripe], [true, 0]);
-  is("such a store's worst month of runs costs under two cents", small.commands * CERTIFICATE_PASS_RUNS * COMMAND < 0.02, true);
+  is("a pass's commands do not grow with the courses (2 courses, 120 courses)", large.commands, small.commands);
+  is("within CERTIFICATE_PASS_RUN_COMMANDS", small.commands <= CERTIFICATE_PASS_RUN_COMMANDS, true);
 
-  part("A mark that reads in another shape runs the pass, never skips it");
-  replaced.set(`nl:certrefunds:has:${many.store.statsId}`, 7);
-  const odd = await run(many.store);
+  part("ALTO 2: the sweep's turns, one MGET for the batch, one SET NX EX a pass");
+  const dueOf = (pass as unknown as { certificatePassesDue: (stores: Store[]) => Promise<Set<string>> }).certificatePassesDue;
+  const take = (pass as unknown as { takeCertificatePass: (store: Store) => Promise<boolean> }).takeCertificatePass;
+  let before = commands;
+  const due = await dueOf([two.store, many.store]);
+  is("both stores' turns are read with one command", commands - before, 1);
+  is("a turn never taken is due", [due.has(two.store.statsId!), due.has(many.store.statsId!)], [true, true]);
+  is("a store's turn is taken once", [await take(many.store), await take(many.store)], [true, false]);
+  is("and held as not due", [await turnOf(many.store), (await dueOf([two.store, many.store])).has(many.store.statsId!)], ["1", false]);
+  const ttl = Number((await healthy([["TTL", `nl:certrefunds:next:${many.store.statsId}`]]))[0]);
+  is("for CERTIFICATE_PASS_EVERY_SECONDS", ttl > 0 && ttl <= (exported.CERTIFICATE_PASS_EVERY_SECONDS as number), true);
+  replaced.set("MGET", [null, 7]);
+  is("a turn read in another shape runs no pass of that store this run", [...(await dueOf([two.store, many.store]))], [two.store.statsId]);
+  replaced.set("MGET", "OK");
+  is("a reply that is not a list runs none this run", (await dueOf([two.store, many.store])).size, 0);
   replaced.clear();
-  is("the pass read the refunds", odd.stripe > 0, true);
+  before = commands;
+  is("a batch with no store paid through Stripe with a course reads nothing", [(await dueOf([])).size, commands - before], [0, 0]);
+  await healthy([["DEL", `nl:certrefunds:next:${many.store.statsId}`]]);
 
-  part("Issuing a certificate sets the store's mark at once, and the pass reads the refunds from then on");
+  part("A full refund withdraws the certificate, at a priced cost");
   const ana = buy("twocourses", "ana@example.com", two.products[0]);
   const anaId = await issue(two.store, two.products[0], two.courseIds[0], "ana@example.com", "Ana Example");
-  is("the mark is set by the issue", await markOf(two.store), "1");
   refundInFull(ana);
   const after = await run(two.store);
   is("the pass reads the refunds and withdraws Ana's certificate", [after.stripe > 0, ((await record(anaId))?.withdrawnAt ?? 0) > 0], [true, true]);
@@ -182,19 +193,12 @@ async function main(): Promise<void> {
   is("each course checked and each row marked handled takes one of the month's checks", (await healthy([["GET", `nl:certrefunds:n:${two.store.statsId}:${month}`]]))[0], "2");
   console.log(`  (measured: a run ${idle.commands} commands, a lookup ${after.commands - idle.commands})`);
 
-  part("A certificate issued before the mark was kept is found by the look at the courses");
-  const scan = exported.CERTIFICATE_SCAN_SECONDS;
-  is("the look is repeated sooner than the pass's first look back, less its wait", typeof scan === "number" && scan + (exported.CERTIFICATE_REFUND_SETTLE_SECONDS as number) < (exported.CERTIFICATE_REFUND_LOOKBACK_SECONDS as number), true);
+  part("A certificate issued with no store id on its room (before the store had one) is met by its refund all the same");
   const ben = buy("manycourses", "ben@example.com", many.products[117]);
-  // Issued as before the mark was kept: its room names no store id, so the mark is not set.
   const benId = await issue(many.store, many.products[117], many.courseIds[117], "ben@example.com", "Ben Example", { ...ROOM, statsId: null });
   refundInFull(ben);
-  is("the store's mark still says none found", await markOf(many.store), "0");
-  redis.advance(((typeof scan === "number" ? scan : 6 * 86_400) + 60) * 1_000);
   await run(many.store);
-  await run(many.store);
-  is("once the mark of none expires, the look finds the certificate and sets the mark", await markOf(many.store), "1");
-  is("and the full refund withdraws it", ((await record(benId))?.withdrawnAt ?? 0) > 0, true);
+  is("its full refund withdraws it", ((await record(benId))?.withdrawnAt ?? 0) > 0, true);
 
   part("MÉDIO 1: a full refund takes the name off a certificate already withdrawn by hand, and off an earlier one");
   const [course, product] = [two.courseIds[1], two.products[1]];
@@ -223,8 +227,9 @@ async function main(): Promise<void> {
   is("running again changes nothing", JSON.stringify(await Promise.all([cleoId, danOld, danNew, eveId].map(record))), again);
 
   part("Past the month's checks the pass waits at the row, and goes on from it the next month");
-  const ceiling = exported.CERTIFICATE_REFUND_CHECKS_PER_MONTH;
-  is("the month's checks are a named, exported ceiling", typeof ceiling === "number" && ceiling > 0, true);
+  const ceilings = exported.CERTIFICATE_REFUND_CHECKS_PER_MONTH as Record<string, number>;
+  const ceiling = ceilings[two.store.tier];
+  is("the month's checks are a named, exported ceiling for each plan", ["creator", "pro", "scale"].every((tier) => Number.isSafeInteger(ceilings[tier]) && ceilings[tier] > 0), true);
   const counter = `nl:certrefunds:n:${two.store.statsId}:${new Date().toISOString().slice(0, 7)}`;
   await healthy([["SET", counter, String(ceiling), "EX", 3_600]]);
   const fay = buy("twocourses", "fay@example.com", two.products[0]);
@@ -240,8 +245,9 @@ async function main(): Promise<void> {
   const line = COST_LINES.find((one) => one.id === "certificate-refund-pass");
   is("a plan's line prices the pass", Boolean(line), true);
   is("the line names the pass's ceilings", Boolean(line?.sources.some((s) => s.file === "lib/certificate-refunds.ts" && ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE"].every((name) => s.names.includes(name)))), true);
-  is("the line has a figure above zero for a paid plan", (line?.monthlyUsd("creator") ?? 0) > 0, true);
-  console.log(`  (the line: $${(line?.monthlyUsd("creator") ?? 0).toFixed(4)} a store a month)`);
+  is("the line has a figure above zero for every paid plan", (["creator", "pro", "scale"] as const).every((tier) => (line?.monthlyUsd(tier) ?? 0) > 0), true);
+  is("a plan with more checks costs more", (line?.monthlyUsd("creator") ?? 0) < (line?.monthlyUsd("pro") ?? 0) && (line?.monthlyUsd("pro") ?? 0) < (line?.monthlyUsd("scale") ?? 0), true);
+  console.log(`  (the line: $${(line?.monthlyUsd("creator") ?? 0).toFixed(4)} a Store store a month)`);
   const registry = NOT_A_COST as Record<string, string | undefined>;
   is("the pages and lookups are no longer a company fixed cost", ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE"].some((name) => name in registry), false);
 

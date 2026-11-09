@@ -1207,9 +1207,10 @@ export default function PrivacyPage() {
           (section 6), its certificates go with it.
           A student who wants theirs withdrawn asks the creator. A certificate
           whose course was refunded in full or lost in a dispute is withdrawn
-          on its own, usually within half an hour (longer when a store has
-          many refunds at once), once the course no longer opens for the
-          student, and its page then no longer shows the name, the course or
+          on its own once the course no longer opens for the student, usually
+          within three hours (longer when the payment service cannot be read,
+          and until the next month when a store has many refunds in one
+          month), and its page then no longer shows the name, the course or
           the date. The same goes for one the creator already withdrew and
           for the student&apos;s earlier certificates of that course. A
           refund still pending, failed or canceled withdraws

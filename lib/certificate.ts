@@ -22,8 +22,6 @@
  *   nl:cert:<id>                  -> the certificate, as JSON, kept for good
  *   nl:course:<course>:certs      -> hash of student key -> standing certificate id
  *   nl:course:<course>:certs:all  -> set of every certificate id issued, withdrawn ones too
- *   nl:certrefunds:has:<stats>    -> "1" once a course of the store issued a certificate, kept for good, so the
- *                                    certificates' refund pass reads the store's refunds (lib/certificate-refunds.ts)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
@@ -228,13 +226,6 @@ export const certKey = (id: string) => `nl:cert:${id}`;
 const CERTS_SLOT = (courseId: string) => `cc:${courseId}`;
 const indexKey = (courseId: string) => `nl:course:${courseId}:certs`;
 export const allKey = (courseId: string) => `nl:course:${courseId}:certs:all`;
-/**
- * A store's mark that one of its courses issued a certificate (review of #3409, Claude 5, ALTO 1): set before a
- * certificate is written, so the certificates' refund pass (lib/certificate-refunds.ts) reads the refunds of a store
- * that has one and of no other. CERTIFICATES_ISSUED is its value; the pass writes another while it finds none.
- */
-export const certificatesIssuedKey = (statsId: string) => `nl:certrefunds:has:${statsId}`;
-export const CERTIFICATES_ISSUED = "1";
 /** Every certificate one student was ever issued for a course, withdrawn ones too (added 17 October 2026), so deleting them finds each. */
 const byKey = (courseId: string, who: string) => `nl:course:${courseId}:certs:by:${who}`;
 /** How many certificates of a course deleting a person looks through for ones issued before byKey was kept. */
@@ -330,13 +321,6 @@ export async function issueCertificate(input: {
   // a certificate not yet written, and a second press arriving then read it
   // as lost, took the slot and issued a second certificate beside the first.
   // Its room first: the record, kept for good, and its places in the course's lists.
-  // The store's mark first (review of #3409, Claude 5, ALTO 1), by the store id of the room, which is the store
-  // (app/api/store/course/certificate/route.ts): unknown whether it was written, nothing is issued (CX-123 rule 24).
-  // A room with no store id (one made before the store had its id) leaves the mark to the pass's look at the courses.
-  if (input.room.statsId) {
-    const [marked] = exactReplies(await redisPipeline([["SET", certificatesIssuedKey(input.room.statsId), CERTIFICATES_ISSUED]]), 1, "a certificate's issue");
-    if (marked !== "OK") throw new UnknownReply("a certificate's issue");
-  }
   const bytes = dataBytes([JSON.stringify(certificate)], 3);
   await needData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
   await redisPipeline([["SET", certKey(id), JSON.stringify(certificate)]]);

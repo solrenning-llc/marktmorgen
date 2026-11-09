@@ -25,6 +25,7 @@
  */
 import { readFileSync } from "node:fs";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
+import { CERTIFICATE_REFUND_RETRY_SECONDS } from "@/lib/certificate-refunds";
 import * as certificates from "@/lib/certificate";
 import { type Certificate, issueCertificate, readCertificate } from "@/lib/certificate";
 import type { Course } from "@/lib/course";
@@ -35,6 +36,15 @@ import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_certificate_refund_withdraw";
+
+// The clock the pass and the in-memory Redis read: moved on when a row left unknown must wait its turn to be tried again.
+const realNow = Date.now;
+let offsetMs = 0;
+Date.now = () => realNow() + offsetMs;
+/** A row that took its checks and was left unknown is tried again CERTIFICATE_REFUND_RETRY_SECONDS later (focal review of #3409, MÉDIO 2). */
+const later = () => {
+  offsetMs += (CERTIFICATE_REFUND_RETRY_SECONDS + 60) * 1000;
+};
 
 const OWNER = "teacher@example.com";
 const HANDLE = "inkschool";
@@ -158,7 +168,11 @@ function closeDispute(session: Session, status: "lost" | "won"): void {
   });
 }
 
+/** The store's turn for the certificates' refund pass (lib/certificate-refunds.ts), once its stats id is known. */
+let turn = "";
+/** A run of the sweep on the store's turn, as one CERTIFICATE_PASS_EVERY_SECONDS after the last. */
 async function sweep(): Promise<void> {
+  if (turn) await redis.pipeline([["DEL", turn]]);
   await sweepCheckouts(Date.now() + 20_000);
 }
 
@@ -184,6 +198,7 @@ async function main(): Promise<void> {
   if (!made.ok) throw new Error("no product");
   await setProductCourse(OWNER, made.product.id, { id: COURSE_ID, lessons: 3 });
   const store = (await storeForEmail(OWNER))!;
+  turn = `nl:certrefunds:next:${store.statsId}`;
   const product = made.product.id;
   const course = { id: COURSE_ID, certificate: true, startsAt: null, modules: [] } as unknown as Course;
 
@@ -270,7 +285,7 @@ async function main(): Promise<void> {
   await sweep();
   is("bought twice, one refunded: the course still opens, the certificate stands", await withdrawn(ivy.id), false);
 
-  part("Unknown is never shut: nothing is withdrawn on an answer that cannot be read, and the next run does it");
+  part("Unknown is never shut: nothing is withdrawn on an answer that cannot be read, and a later run does it");
   for (const [label, answer] of GARBLED) {
     const s = await student(`list${n}@example.com`);
     refund(s.session, 4900, "succeeded");
@@ -278,6 +293,8 @@ async function main(): Promise<void> {
     await sweep();
     is(`the student's checkouts, ${label}: stands`, await withdrawn(s.id), false);
     delete garble.byEmail;
+    // The row took its checks before the student's checkouts were read: it waits its turn to be tried again.
+    later();
     await sweep();
     is(`the student's checkouts read whole again (${label}): withdrawn`, await withdrawn(s.id), true);
   }
@@ -316,6 +333,7 @@ async function main(): Promise<void> {
       redis.pipeline = original;
     }
     is(`the student's slot read as ${label}: stands`, await withdrawn(s.id), false);
+    later();
     await sweep();
     is(`the slot read exactly again (${label}): withdrawn`, await withdrawn(s.id), true);
   }

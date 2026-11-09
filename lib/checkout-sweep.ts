@@ -70,7 +70,7 @@ import { settleStoreList, storesWithRequests } from "@/lib/payment-request-store
 import { createHash } from "node:crypto";
 import { TAKE_DATA, dataKey, monthOf, type DataStore } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
-import { mayHaveCertificates, withdrawRefundedCertificates } from "@/lib/certificate-refunds";
+import { certificatePassesDue, mayHaveCertificates, takeCertificatePass, withdrawRefundedCertificates } from "@/lib/certificate-refunds";
 
 const CURSOR_KEY = "nl:sweep:cursor";
 
@@ -648,6 +648,8 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
 
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
+    // Whose certificates' refund pass is due, read once for the batch (lib/certificate-refunds.ts; focal review of #3409, ALTO 2).
+    const certificatesDue = await certificatePassesDue(stores.slice(skip));
     let done = 0;
     for (const store of stores) {
       if (done < skip) {
@@ -668,10 +670,10 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
         }
       }
       // A certificate whose course's payment was given back is withdrawn (lib/certificate-refunds.ts; DONO-18), for a
-      // store with a course whatever else it sells. One failing never holds up the stores after it.
-      if (mayHaveCertificates(store) && Date.now() < deadline) {
+      // store with a course whatever else it sells, on its turn. One failing never holds up the stores after it.
+      if (mayHaveCertificates(store) && certificatesDue.has(store.statsId!) && Date.now() < deadline) {
         try {
-          counts.revoked += await withdrawRefundedCertificates(store, deadline);
+          if (await takeCertificatePass(store)) counts.revoked += await withdrawRefundedCertificates(store, deadline);
         } catch (error) {
           console.error("reading a store's refunds for certificates failed", store.handle, error instanceof Error ? error.name : typeof error);
         }

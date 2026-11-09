@@ -103,7 +103,7 @@ export class MemoryRedis {
     // Redis checks command arity before looking up or changing any key.
     const minimum = name === "HSET" || name === "ZADD" ? 4
       : name === "DEL" || name === "MGET" ? 2
-      : ["HDEL", "SADD", "SREM", "ZREM", "LPUSH", "RPUSH", "HMGET"].includes(name) ? 3 : 0;
+      : ["HDEL", "SADD", "SREM", "ZREM", "LPUSH", "RPUSH", "HMGET", "ZMSCORE"].includes(name) ? 3 : 0;
     if (command.length < minimum || (name === "HSET" && command.length % 2 !== 0)) {
       throw new Error(`ERR wrong number of arguments for '${name.toLowerCase()}' command`);
     }
@@ -1555,6 +1555,14 @@ export class MemoryRedis {
       case "ZSCORE": {
         const found = this.zset(key).find((e) => e.member === args[0]);
         return found ? String(found.score) : null;
+      }
+      case "ZMSCORE": {
+        // Each member's score as ZSCORE answers it, nil for one not there (lib/certificate-refunds.ts, seenAmong).
+        const z = this.zset(key);
+        return args.map((member) => {
+          const found = z.find((e) => e.member === member);
+          return found ? String(found.score) : null;
+        });
       }
       case "ZREMRANGEBYRANK": {
         const z = this.zset(key);

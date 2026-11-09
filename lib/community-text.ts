@@ -128,6 +128,13 @@ export const CHALLENGE_WRITES_PER_HOUR = 30;
  */
 export const MAX_CHALLENGE_DAY_POINTS = 10;
 export const MAX_CHALLENGE_DONE_POINTS = 100;
+/**
+ * The community points a lesson finished in one of the store's courses may
+ * give (lib/lesson-points.ts): one number for every course, at most ten likes'
+ * worth, so a course cannot swamp the board the likes make. 0 unless the
+ * creator sets it.
+ */
+export const MAX_LESSON_POINTS = 10;
 
 /** Ids of spaces, posts and comments: short, random, and nothing else. */
 export const ITEM_ID = /^[0-9a-f]{12}$/;

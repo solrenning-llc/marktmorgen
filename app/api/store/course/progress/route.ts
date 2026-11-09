@@ -12,6 +12,7 @@ import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
+import { pointsForLessonDone } from "@/lib/lesson-points";
 
 /** "Mark as done", and on to the next lesson. A plain form, no script needed. */
 export async function POST(request: NextRequest) {
@@ -70,6 +71,9 @@ export async function POST(request: NextRequest) {
     }
     // The last lesson done starts what finishing the course starts (lib/course-finish.ts).
     if (done) await noteIfFinished(store, product.id, product.course.id, access.learner.email);
+    // The community points a finished lesson gives, once (lib/lesson-points.ts). The lesson stays done
+    // whatever happens to them: a reply that cannot be read gives none and is only logged.
+    if (done) await pointsForLessonDone(store, product.course.id, lessonId, access.learner.email).catch((error: unknown) => console.error("lesson points could not be confirmed", error));
   }
   const target = done && ITEM_ID_PATTERN.test(next) ? next : lessonId;
   return new Response(null, { status: 303, headers: { Location: `${base}/${target}`, "Cache-Control": "no-store" } });

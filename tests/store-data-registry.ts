@@ -454,7 +454,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:unsub:@lib/community-mail.ts": { what: "A member's stop link, made once and kept", parts: [item(KEY, "One a member.", "membership")] },
   "nl:cm:@lib/community-mentions.ts": { what: "Members' handles", room: ["lib/community.ts"] },
   "nl:cm:@lib/community-notify.ts": { what: "What happened to each member, and when they last looked", room: ["lib/community-notify.ts"], parts: [item(MARK, "A member's last look.", "membership")] },
-  "nl:cm:@lib/community-points.ts": { what: "Points: all-time, by day, by period; rewards; what each member reached", parts: [item(512, "A member's points, their board places and what reached them.", "membership"), per("buyer", 32, 128, "A day's points."), capped(4 * KB, "The rewards a community sets.")] },
+  "nl:cm:@lib/community-points.ts": { what: "Points: all-time, by day, by period; rewards; what each member reached; the points a finished lesson gives and the lessons that gave each member theirs (each written once through lib/order-data.ts, in the store's room)", parts: [item(512, "A member's points, their board places and what reached them.", "membership"), per("buyer", 32, 128, "A day's points."), capped(4 * KB, "The rewards a community sets.")] },
   "nl:cm:@lib/community-polls.ts": { what: "Votes and their tallies", room: ["lib/community-polls.ts"] },
   "nl:cm:@lib/community-trace.ts": { what: "What each member wrote and did, by reference, for the copy of their data (619 [SZ3])", room: ["lib/community.ts", "lib/community-polls.ts"] },
   "nl:cm:@lib/community-push.ts": { what: "Members' devices for notifications", room: ["lib/community-push.ts"] },

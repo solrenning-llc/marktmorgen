@@ -23,6 +23,7 @@ import {
   MAX_QUESTION,
   MAX_QUESTIONS,
   MAX_WELCOME,
+  MAX_LESSON_POINTS,
 } from "@/lib/community-text";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_SLOW } from "@/lib/community-chat-rules";
@@ -72,6 +73,7 @@ const MESSAGES: Record<string, string> = {
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   invalid: "That could not be read. Nothing was changed.",
   rewards: "Pick one of your courses for each level, or no course.",
+  lesson_points: `Points for a lesson are a whole number from 0 to ${MAX_LESSON_POINTS}.`,
   questions: `Ask up to ${MAX_QUESTIONS} questions.`,
   level: "Pick who may start posts here.",
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, first.",
@@ -119,6 +121,7 @@ export function CommunityStudio({
   events = null,
   rewards = [],
   courses = [],
+  lessonPoints = 0,
 }: {
   handle: string;
   address: string;
@@ -143,6 +146,8 @@ export function CommunityStudio({
   rewards?: Reward[];
   /** The store's courses: what a level can hand over. */
   courses?: { id: string; title: string }[];
+  /** The points each lesson a member finishes gives (lib/lesson-points.ts); null when it could not be read. */
+  lessonPoints?: number | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -211,7 +216,7 @@ export function CommunityStudio({
             <Messages config={config} busy={busy} run={run} problem={problem} />
             <Room config={config} busy={busy} run={run} problem={problem} />
             <Spaces config={config} products={products} busy={busy} run={run} problem={problem} />
-            <Levels config={config} rewards={rewards} courses={courses} busy={busy} run={run} problem={problem} />
+            <Levels config={config} rewards={rewards} courses={courses} lessonPoints={lessonPoints} busy={busy} run={run} problem={problem} />
           </>
         ) : (
           events
@@ -818,6 +823,7 @@ function Levels({
   config,
   rewards,
   courses,
+  lessonPoints,
   busy,
   run,
   problem,
@@ -825,11 +831,15 @@ function Levels({
   config: CommunityConfig;
   rewards: Reward[];
   courses: { id: string; title: string }[];
+  lessonPoints: number | null;
   busy: string | null;
   run: Runner;
   problem: Problem;
 }) {
   const [chosen, setChosen] = useState<Record<number, string>>(Object.fromEntries(rewards.map((r) => [r.level, r.product])));
+  const [perLesson, setPerLesson] = useState(lessonPoints === null ? "" : String(lessonPoints));
+  const lessonValid = /^\d{1,3}$/.test(perLesson.trim()) && Number(perLesson.trim()) <= MAX_LESSON_POINTS;
+  const lessonChanged = lessonPoints === null || Number(perLesson.trim()) !== lessonPoints;
   const list = Object.entries(chosen)
     .filter(([, product]) => product)
     .map(([level, product]) => ({ level: Number(level), product }));
@@ -839,7 +849,7 @@ function Levels({
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-levels-title">
       <h2 id="cm-levels-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Levels and rewards</h2>
       <p className="mt-2 text-ink-soft">
-        {`Every like a member's post or comment gets from somebody else is one point, and the points a challenge gives for checking in count too (you set them on each challenge). Points make ${MAX_LEVEL} levels. Members see the leaderboard for 7 days, 30 days and all time, and exactly what each level opens. A level can hand over one of your courses, free: it opens for a member the day they reach it, and stays theirs.`}
+        {`Every like a member's post or comment gets from somebody else is one point, and the points a challenge gives for checking in count too (you set them on each challenge), as do the points for each lesson a member finishes in your courses (set below). Points make ${MAX_LEVEL} levels. Members see the leaderboard for 7 days, 30 days and all time, and exactly what each level opens. A level can hand over one of your courses, free: it opens for a member the day they reach it, and stays theirs.`}
       </p>
       {courses.length === 0 ? (
         <p className="mt-3 text-sm text-ink-soft">You have no course yet. Make one, and a level here can hand it over.</p>
@@ -891,6 +901,40 @@ function Levels({
         ) : null}
       </form>
       {problem("levels")}
+      <form
+        className="mt-6 border-t border-line pt-5"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (lessonValid && lessonChanged) run("lesson-points", { action: "lesson-points", points: Number(perLesson.trim()) }, "Points for lessons saved.");
+        }}
+      >
+        <label htmlFor="cm-lesson-points" className="block font-semibold text-ink">Points for each lesson a member finishes</label>
+        <p id="cm-lesson-points-hint" className="mt-1 text-sm text-ink-soft">
+          {`From 0 to ${MAX_LESSON_POINTS}, for every course. A member gets them once per lesson, the first time they finish it, and only while they are in the community. 0 gives none.`}
+        </p>
+        {lessonPoints === null ? (
+          <p className="mt-2 text-sm text-ink-soft" role="status">The points for lessons could not be read just now. Reload the page before you change them.</p>
+        ) : null}
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <input
+            id="cm-lesson-points"
+            className="field w-28"
+            inputMode="numeric"
+            value={perLesson}
+            aria-describedby={`cm-lesson-points-hint${perLesson !== "" && !lessonValid ? " cm-lesson-points-error" : ""}`}
+            aria-invalid={perLesson !== "" && !lessonValid ? true : undefined}
+            onChange={(e) => setPerLesson(e.target.value)}
+          />
+          <button type="submit" className="btn btn-primary btn-sm" aria-busy={busy === "lesson-points"} disabled={busy !== null || !lessonValid || !lessonChanged || lessonPoints === null}>
+            Save points for lessons
+          </button>
+        </div>
+        {perLesson !== "" && !lessonValid ? (
+          <p id="cm-lesson-points-error" className="mt-2 text-sm text-ink" role="alert">{`Enter a whole number from 0 to ${MAX_LESSON_POINTS}.`}</p>
+        ) : null}
+      </form>
+      {problem("lesson-points")}
     </section>
   );
 }

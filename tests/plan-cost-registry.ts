@@ -1349,6 +1349,13 @@ export const COST_LINES: CostLine[] = [
       // lib/order-data.ts): a few commands, far under the hundred the heaviest action is priced at.
       { file: "lib/community-challenges.ts", names: ["everyEarlierDay", "awardPoints(id, member, points, room, now)"] },
       { file: "lib/community-points.ts", names: ["awardPoints", "MAX_AWARD_POINTS"] },
+      // A lesson finished (24 [E7] part 2), by the button or a quiz passed, spends after its buyer action: one GET of
+      // the points a lesson gives and, when they are set, one HGET of the member and two charged writes (the lesson's
+      // HSETNX, then awardPoints' three commands, each through lib/order-data.ts): under a dozen commands, far under
+      // the hundred the heaviest action is priced at. None when the community is off or the creator set 0.
+      { file: "lib/lesson-points.ts", names: ["pointsForLessonDone", "readLessonPoints", "readMember", "awardLesson"] },
+      { file: "lib/community-points.ts", names: ["awardLesson", "readLessonPoints", "MAX_LESSON_POINTS"] },
+      { file: "app/api/store/course/quiz/route.ts", names: ["pointsForLessonDone"] },
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR", "CHALLENGE_WRITES_PER_HOUR"] },
     ],

@@ -404,6 +404,7 @@ const en = {
   moreMembers: "More members",
   pointsRule: (store: string) =>
     `Every like your posts and comments get from somebody else is one point. Taking a like back takes the point back, your own likes earn you nothing, and ${store} collects no points.`,
+  lessonPointsRule: (n: number) => (n > 0 ? `Each lesson you finish in a course gives you ${n} ${plural(n, "point", "points")}.` : ""),
   youAtLevel: (n: number) => `You are at Level ${n}`,
   pointsInAll: (n: number) => `${n} ${plural(n, "point", "points")} in all.`,
   moreToLevel: (more: number, level: number) => `${more} more ${plural(more, "point reaches", "points reach")} Level ${level}.`,
@@ -961,6 +962,7 @@ const es: CommunityWords = {
   moreMembers: "Más miembros",
   pointsRule: (store) =>
     `Cada «me gusta» que reciben tus publicaciones y comentarios de otra persona es un punto. Retirar un «me gusta» retira el punto, tus propios «me gusta» no te dan nada y ${store} no suma puntos.`,
+  lessonPointsRule: (n) => (n > 0 ? `Cada lección que terminas en un curso te da ${n} ${plural(n, "punto", "puntos")}.` : ""),
   youAtLevel: (n) => `Estás en el nivel ${n}`,
   pointsInAll: (n) => `${n} ${plural(n, "punto", "puntos")} en total.`,
   moreToLevel: (more, level) => `${plural(more, `Falta ${more} punto`, `Faltan ${more} puntos`)} para el nivel ${level}.`,
@@ -1511,6 +1513,7 @@ const fr: CommunityWords = {
   moreMembers: "Plus de membres",
   pointsRule: (store) =>
     `Chaque «${S}j'aime${S}» que vos publications et commentaires reçoivent de quelqu'un d'autre vaut un point. Retirer un «${S}j'aime${S}» retire le point, vos propres «${S}j'aime${S}» ne vous rapportent rien, et ${store} ne collecte aucun point.`,
+  lessonPointsRule: (n) => (n > 0 ? `Chaque leçon que vous terminez dans un cours vous rapporte ${n}${S}${frPlural(n, "point", "points")}.` : ""),
   youAtLevel: (n) => `Vous êtes au niveau ${n}`,
   pointsInAll: (n) => `${n}${S}${frPlural(n, "point", "points")} au total.`,
   moreToLevel: (more, level) => `Encore ${more}${S}${frPlural(more, "point", "points")} pour atteindre le niveau ${level}.`,
@@ -2061,6 +2064,7 @@ const de: CommunityWords = {
   moreMembers: "Weitere Mitglieder",
   pointsRule: (store) =>
     `Jedes Like, das Ihre Beiträge und Kommentare von jemand anderem bekommen, ist ein Punkt. Wird ein Like zurückgenommen, geht der Punkt zurück, eigene Likes bringen nichts, und ${store} sammelt keine Punkte.`,
+  lessonPointsRule: (n) => (n > 0 ? `Jede Lektion, die Sie in einem Kurs abschließen, bringt Ihnen ${n} ${plural(n, "Punkt", "Punkte")}.` : ""),
   youAtLevel: (n) => `Sie sind auf Level ${n}`,
   pointsInAll: (n) => `${n} ${plural(n, "Punkt", "Punkte")} insgesamt.`,
   moreToLevel: (more, level) => `Noch ${more} ${plural(more, "Punkt", "Punkte")} bis Level ${level}.`,
@@ -2611,6 +2615,7 @@ const it: CommunityWords = {
   moreMembers: "Altri membri",
   pointsRule: (store) =>
     `Ogni «mi piace» che i tuoi post e commenti ricevono da qualcun altro vale un punto. Ritirare un «mi piace» ritira il punto, i tuoi «mi piace» non ti fanno guadagnare nulla e ${store} non raccoglie punti.`,
+  lessonPointsRule: (n) => (n > 0 ? `Ogni lezione che completi in un corso ti dà ${n} ${plural(n, "punto", "punti")}.` : ""),
   youAtLevel: (n) => `Sei al livello ${n}`,
   pointsInAll: (n) => `${n} ${plural(n, "punto", "punti")} in tutto.`,
   moreToLevel: (more, level) => `${plural(more, `Manca ${more} punto`, `Mancano ${more} punti`)} al livello ${level}.`,
@@ -3161,6 +3166,7 @@ const nl: CommunityWords = {
   moreMembers: "Meer leden",
   pointsRule: (store) =>
     `Elke like die je berichten en reacties van iemand anders krijgen, is één punt. Een like terugnemen neemt het punt terug, je eigen likes leveren niets op, en ${store} verzamelt geen punten.`,
+  lessonPointsRule: (n) => (n > 0 ? `Elke les die je in een cursus afrondt, levert je ${n} ${plural(n, "punt", "punten")} op.` : ""),
   youAtLevel: (n) => `Je zit op level ${n}`,
   pointsInAll: (n) => `${n} ${plural(n, "punt", "punten")} in totaal.`,
   moreToLevel: (more, level) => `Nog ${more} ${plural(more, "punt", "punten")} tot level ${level}.`,
@@ -3711,6 +3717,7 @@ const pt: CommunityWords = {
   moreMembers: "Mais membros",
   pointsRule: (store) =>
     `Cada «gosto» que as suas publicações e comentários recebem de outra pessoa vale um ponto. Retirar um «gosto» retira o ponto, os seus próprios «gosto» não lhe valem nada e ${store} não junta pontos.`,
+  lessonPointsRule: (n) => (n > 0 ? `Cada aula que conclui num curso vale-lhe ${n} ${plural(n, "ponto", "pontos")}.` : ""),
   youAtLevel: (n) => `Está no nível ${n}`,
   pointsInAll: (n) => `${n} ${plural(n, "ponto", "pontos")} no total.`,
   moreToLevel: (more, level) => `${plural(more, `Falta ${more} ponto`, `Faltam ${more} pontos`)} para o nível ${level}.`,

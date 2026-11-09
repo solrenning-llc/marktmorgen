@@ -6,7 +6,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { readMembers } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
-import { LEVELS, type Period, board, levelOf, pointsOf, readRewards, toNextLevel } from "@/lib/community-points";
+import { LEVELS, type Period, board, levelOf, pointsOf, readLessonPoints, readRewards, toNextLevel } from "@/lib/community-points";
 import { readListings } from "@/lib/catalog";
 import { CommunityBar, Face, LevelBadge } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
@@ -49,10 +49,12 @@ export default async function CommunityLeaderboardPage({ params, searchParams }:
     { id: "all", label: w.periodAll },
   ];
 
-  const [standing, rewards, mineAll] = await Promise.all([
+  const [standing, rewards, mineAll, perLesson] = await Promise.all([
     board(id, period, owner ? null : key),
     readRewards(id),
     owner ? Promise.resolve(new Map<string, number>()) : pointsOf(id, [key]),
+    // The points a finished lesson gives (lib/lesson-points.ts). Unreadable: the sentence is left out, never "0".
+    readLessonPoints(id).catch(() => 0),
   ]);
   const [members, allTime, courses] = await Promise.all([
     readMembers(id, standing.top.map((s) => s.key)),
@@ -82,6 +84,7 @@ export default async function CommunityLeaderboardPage({ params, searchParams }:
         <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] sm:text-3xl">{w.tabLeaderboard}</h1>
         <p className="st-muted mt-2">
           {w.pointsRule(store.name)}
+          {perLesson > 0 ? ` ${w.lessonPointsRule(perLesson)}` : ""}
         </p>
 
         {!owner ? (

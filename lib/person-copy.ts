@@ -56,7 +56,7 @@ import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
 import { syncJobsOf } from "@/lib/email-sync";
 import { memberTraces, readMember as readCommunityMember } from "@/lib/community";
-import { pointsRecordOf } from "@/lib/community-points";
+import { lessonsGivenOf, pointsRecordOf } from "@/lib/community-points";
 import { allNoticesOf } from "@/lib/community-notify";
 import { deviceCount } from "@/lib/community-push";
 import { conversationsOf } from "@/lib/community-dm";
@@ -338,8 +338,9 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     if (!id) return [];
     const who = s.learner;
     const member = await readCommunityMember(id, who);
-    const [points, notices, devices, conversations, room, events, traces, challenges] = await Promise.all([
+    const [points, lessonsGiven, notices, devices, conversations, room, events, traces, challenges] = await Promise.all([
       pointsRecordOf(id, who),
+      lessonsGivenOf(id, who),
       allNoticesOf(id, who),
       deviceCount(id, who),
       conversationsOf(id, who),
@@ -355,6 +356,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       // The link in their announcement emails is a key, left out: they have it in those emails.
       profile: member ? { email: member.e, name: member.n, handle: member.h, inDirectory: member.dir, announcementEmails: member.mail, joined: iso(member.at), lastSeen: iso(member.seen), muted: member.muted } : null,
       points,
+      // The lessons that gave them points, each "<course id>:<lesson id>" (24 [E7] part 2).
+      lessonsThatGavePoints: lessonsGiven,
       // What happened, on which post, and when; not who did it, which is theirs.
       notifications: notices.map((n) => ({ kind: n.kind, post: n.post, ...(n.comment ? { comment: n.comment } : {}), at: iso(n.at) })),
       devicesNotified: devices,

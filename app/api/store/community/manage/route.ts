@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { hasProduct, readKind } from "@/lib/catalog";
-import { MAX_LEVEL, parseRewards, saveRewards } from "@/lib/community-points";
+import { MAX_LEVEL, parseRewards, saveLessonPoints, saveRewards } from "@/lib/community-points";
+import { MAX_LESSON_POINTS } from "@/lib/community-text";
 import { StoreFullError, setCommunity, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -203,6 +204,17 @@ export async function POST(request: NextRequest) {
       if (rewards.some((r) => !courses.has(r.product))) return fail("rewards");
       await saveRewards(id, rewards);
       return Response.json({ ok: true, rewards });
+    }
+
+    // The community points each lesson finished in one of the store's courses
+    // gives (lib/lesson-points.ts): one whole number from 0 to MAX_LESSON_POINTS,
+    // refused otherwise, never cut, so what the studio shows is what was saved.
+    if (action === "lesson-points") {
+      const raw = body.points;
+      const points = typeof raw === "number" ? raw : typeof raw === "string" && /^\d{1,3}$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
+      if (!Number.isSafeInteger(points) || points < 0 || points > MAX_LESSON_POINTS) return fail("lesson_points");
+      await saveLessonPoints(id, points);
+      return Response.json({ ok: true, points });
     }
 
     // Welcoming a new member: the questions asked before a first post, and the

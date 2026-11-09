@@ -18,9 +18,9 @@
  */
 import { claimHandle, ensureListId, ensureStatsId, setCommunity, setSubscription, storeForEmail } from "@/lib/store";
 import { MAX_LESSON_POINTS } from "@/lib/community-text";
-import { awardLesson, pointsOf, pointsRecordOf, readLessonPoints, saveLessonPoints } from "@/lib/community-points";
+import { awardLesson, lessonsGivenOf, pointsOf, pointsRecordOf, readLessonPoints, saveLessonPoints } from "@/lib/community-points";
 import { pointsForLessonDone } from "@/lib/lesson-points";
-import { memberKey, moderateMember, readMember, touchMember } from "@/lib/community";
+import { memberKey, readMember, touchMember } from "@/lib/community";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { communityWords } from "@/lib/buyer-words/community";
@@ -70,7 +70,9 @@ async function main(): Promise<void> {
   await touchMember(id, eve, null, store);
   is("not in the community: nothing", await pointsForLessonDone(store, COURSE, L1, "stranger@example.com"), "not_member");
   is("and no points", redis.run(["ZSCORE", `nl:cm:${id}:pts`, memberKey("stranger@example.com")]), null);
-  await moderateMember(id, memberKey(eve), { removed: true });
+  // The creator took Eve out: her record says so (lib/community.ts moderateMember writes it by a compare-and-set).
+  const eveRecord = JSON.parse(redis.run(["HGET", `nl:cm:${id}:m`, memberKey(eve)]) as string) as Record<string, unknown>;
+  redis.run(["HSET", `nl:cm:${id}:m`, memberKey(eve), JSON.stringify({ ...eveRecord, removed: true })]);
   is("Eve is taken out", (await readMember(id, memberKey(eve)))?.removed, true);
   is("taken out by the creator: nothing", await pointsForLessonDone(store, COURSE, L1, eve), "not_member");
   is("Eve has none", (await pointsOf(id, [memberKey(eve)])).get(memberKey(eve)), 0);
@@ -97,7 +99,7 @@ async function main(): Promise<void> {
   const off = (await storeForEmail(OWNER))!;
   is("community off: off", await pointsForLessonDone(off, COURSE, "lesson000003", ada), "off");
   await setCommunity(OWNER, true);
-  is("a store with no community at all: off", await pointsForLessonDone({ ...store, community: undefined }, COURSE, L1, ada), "off");
+  is("a store with no community at all: off", await pointsForLessonDone({ ...store, community: null }, COURSE, L1, ada), "off");
 
   part("A reply that cannot be read gives none (rule 24)");
   const real = redis.pipeline.bind(redis);
@@ -120,11 +122,12 @@ async function main(): Promise<void> {
   is("a lesson that is not one: refused", await failed(() => awardLesson(id, cid, COURSE, "Lesson 1", 4, store)), "Error: Not a course lesson");
 
   part("The copy of a person's data, and their erasure (rules 27 and 28)");
-  const copy = await pointsRecordOf(id, memberKey(ada));
-  is("her copy lists the lessons that gave her points", copy.lessons.slice().sort(), [`${COURSE}:${L1}`, `${COURSE}:${L2}`]);
-  is("and her total", copy.total, 8);
+  is("her copy lists the lessons that gave her points", (await lessonsGivenOf(id, memberKey(ada))).slice().sort(), [`${COURSE}:${L1}`, `${COURSE}:${L2}`]);
+  is("and her total", (await pointsRecordOf(id, memberKey(ada))).total, 8);
+  const copySource = readFileSync("lib/person-copy.ts", "utf8");
+  is("the copy of her data carries them", copySource.includes("lessonsThatGavePoints: lessonsGiven"), true);
   redis.run(["HSET", `nl:cm:${id}:lw:${memberKey(bob)}`, "not a lesson", "1"]);
-  is("a record that does not read: unknown, never left out", await failed(() => pointsRecordOf(id, memberKey(bob))), "Error: Incomplete community points record");
+  is("a record that does not read: unknown, never left out", await failed(() => lessonsGivenOf(id, memberKey(bob))), "Error: Incomplete community points record");
   redis.run(["HDEL", `nl:cm:${id}:lw:${memberKey(bob)}`, "not a lesson"]);
   await forgetCommunityPerson(id, memberKey(ada), ada, [], store);
   is("which lessons gave her points went with her", redis.run(["EXISTS", `nl:cm:${id}:lw:${memberKey(ada)}`]), 0);

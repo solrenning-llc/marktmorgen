@@ -12,6 +12,7 @@ import { MAX_QUESTIONS, heldBack, passedForGate, readAnswers, readQuizFor, submi
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
+import { pointsForLessonDone } from "@/lib/lesson-points";
 
 /**
  * "Check my answers": marks one try at a lesson's quiz and goes back to the
@@ -72,6 +73,8 @@ export async function POST(request: NextRequest) {
   if (result.ok && result.grade.passed) {
     await markLesson(course.id, access.learner.email, lessonId, true, store, true);
     await noteIfFinished(store, product.id, course.id, access.learner.email);
+    // The community points a finished lesson gives, once (lib/lesson-points.ts); never in the way of the result.
+    await pointsForLessonDone(store, course.id, lessonId, access.learner.email).catch((error: unknown) => console.error("lesson points could not be confirmed", error));
   }
   return away(`${base}/${lessonId}?quiz=marked#quiz`);
 }

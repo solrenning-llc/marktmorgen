@@ -27,9 +27,13 @@
  *   nl:cm:<id>:pts:d:<day>    points made on one UTC day (kept 32 days)
  *   nl:cm:<id>:rw             what each level opens: { level, product }[]
  *   nl:cm:<id>:unl:<member>   when each reward reached this member (hash)
+ *   nl:cm:<id>:lpts           the points each finished lesson gives (0 when absent)
+ *   nl:cm:<id>:lw:<member>    the lessons that gave this member points (hash,
+ *                             "<course>:<lesson>" → "1"), so each gives them once
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { MAX_LESSON_POINTS } from "@/lib/community-text";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { LEVELS, MAX_LEVEL, MAX_REWARDS, type Reward, levelOf, parseRewards, toNextLevel } from "@/lib/community-levels";
 
@@ -49,6 +53,10 @@ const rewardsKey = (id: string) => `nl:cm:${id}:rw`;
 const unlockedKey = (id: string, member: string) => `nl:cm:${id}:unl:${member}`;
 const boardKey = (id: string, period: string) => `nl:cm:${id}:pts:b:${period}`;
 const membersKey = (id: string) => `nl:cm:${id}:m`;
+const lessonPointsKey = (id: string) => `nl:cm:${id}:lpts`;
+const lessonsGivenKey = (id: string, member: string) => `nl:cm:${id}:lw:${member}`;
+/** A course's id and one of its lessons' (lib/course.ts COURSE_ID_PATTERN and ITEM_ID_PATTERN). */
+const LESSON_FIELD = /^[0-9a-f]{32}:[a-z0-9]{12}$/;
 
 const dayOf = (ms: number) => Math.floor(ms / 86_400_000);
 
@@ -125,6 +133,65 @@ export async function awardPoints(id: string, who: string, n: number, owner: Dat
   if (!Array.isArray(replies) || replies.length !== 3 || !score(replies[0]) || !score(replies[1]) || (replies[2] !== 0 && replies[2] !== 1)) {
     throw new UnknownReplyError("community points given");
   }
+}
+
+// ------------------------------------------------------------------ lessons
+
+/**
+ * The points each lesson finished in one of the store's courses gives
+ * (24 [E7], part 2): 0 when the creator set none. A number kept out of shape,
+ * or above MAX_LESSON_POINTS, is unknown (rule 24), never 0.
+ */
+export async function readLessonPoints(id: string): Promise<number> {
+  if (!COMMUNITY.test(id) || !isRedisConfigured()) return 0;
+  const replies = repliesFor(await redisPipeline([["GET", lessonPointsKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community's points for a lesson");
+  const raw = replies[0];
+  if (raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|[1-9][0-9]?)$/.test(raw) || Number(raw) > MAX_LESSON_POINTS) {
+    throw new UnknownReplyError("a community's points for a lesson");
+  }
+  return Number(raw);
+}
+
+/** Sets the points each finished lesson gives; 0 deletes the setting. */
+export async function saveLessonPoints(id: string, n: number): Promise<void> {
+  if (!Number.isSafeInteger(n) || n < 0 || n > MAX_LESSON_POINTS) throw new Error(`Points for a lesson must be a whole number from 0 to ${MAX_LESSON_POINTS}`);
+  if (!COMMUNITY.test(id)) throw new Error("Not a community");
+  const replies = repliesFor(await redisPipeline([n === 0 ? ["DEL", lessonPointsKey(id)] : ["SET", lessonPointsKey(id), String(n)]]), 1);
+  const reply = replies?.[0];
+  if (n === 0 ? reply !== 0 && reply !== 1 : reply !== "OK") throw new UnknownReplyError("a community's points for a lesson, saved");
+}
+
+/**
+ * Gives a member a lesson's points, once for good: the lesson is written
+ * down first, only when it was not there, and only that write gives the
+ * points, so two presses at once, a lesson done again, or undone and done
+ * again, give them once (rule 25). Charged to the store's room (lib/order-data.ts).
+ * A reply that cannot be read throws, never reads as given (rule 24); one
+ * written down whose points could not be confirmed is not given again, so a
+ * member may get fewer, never more.
+ */
+export async function awardLesson(
+  id: string,
+  who: string,
+  courseId: string,
+  lessonId: string,
+  n: number,
+  owner: DataOwner,
+  now = Date.now(),
+): Promise<"given" | "already"> {
+  if (!Number.isSafeInteger(n) || n < 1 || n > MAX_LESSON_POINTS) throw new Error(`Points for a lesson must be a whole number from 1 to ${MAX_LESSON_POINTS}`);
+  const field = `${courseId}:${lessonId}`;
+  if (!LESSON_FIELD.test(field)) throw new Error("Not a course lesson");
+  if (!COMMUNITY.test(id) || !MEMBER.test(who)) throw new Error("Not a community member");
+  if (!isRedisConfigured()) return "already";
+  const replies = await orderWrite(owner, [["HSETNX", lessonsGivenKey(id, who), field, "1"]]);
+  const set = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
+  if (set !== 0 && set !== 1) throw new UnknownReplyError("whether a lesson gave its points");
+  if (set === 0) return "already";
+  await awardPoints(id, who, n, owner, now);
+  return "given";
 }
 
 /** Each member's all-time points; 0 for anybody with none. */
@@ -269,7 +336,8 @@ export async function earnedCourses(
 /**
  * Deletes one member's points (lib/community-erasure.ts): their all-time
  * total, what they made on each day still kept, the rewards that reached
- * them, and the boards worked out from them, which are worked out again.
+ * them, the record of which lessons gave them points, and the boards worked
+ * out from them, which are worked out again.
  */
 export async function forgetPointsPerson(id: string, who: string, now = Date.now()): Promise<number> {
   if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return 0;
@@ -278,7 +346,7 @@ export async function forgetPointsPerson(id: string, who: string, now = Date.now
   const replies = await redisPipeline([
     ["ZREM", allKey(id), who],
     ...days.map((key) => ["ZREM", key, who]),
-    ["DEL", unlockedKey(id, who), boardKey(id, "7"), boardKey(id, "30"), boardKey(id, "all")],
+    ["DEL", unlockedKey(id, who), lessonsGivenKey(id, who), boardKey(id, "7"), boardKey(id, "30"), boardKey(id, "all")],
   ]);
   return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
 }
@@ -318,7 +386,8 @@ function storedRewards(value: unknown): Record<string, string> {
 /**
  * One member's points, for the copy of their data (619 [SZ3],
  * lib/person-copy.ts): the all-time total, each kept day's, and the rewards
- * unlocked. The same records the erasure deletes. Only reads.
+ * unlocked. The same records the erasure deletes. Only reads. The lessons
+ * that gave points are read by lessonsGivenOf.
  */
 export async function pointsRecordOf(id: string, who: string, now = Date.now()): Promise<{ total: number; days: { day: number; points: number }[]; rewards: Record<string, string> }> {
   if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return { total: 0, days: [], rewards: {} };
@@ -334,4 +403,24 @@ export async function pointsRecordOf(id: string, who: string, now = Date.now()):
     days: dayList.flatMap((day, i) => (days[i] === null ? [] : [{ day, points: Math.max(0, days[i]) }])),
     rewards,
   };
+}
+
+/**
+ * The lessons that gave one member points (24 [E7] part 2), for the copy of
+ * their data: each "<course id>:<lesson id>". The same record the erasure
+ * deletes. Only reads; a reply in any other shape throws, never leaves one out.
+ */
+export async function lessonsGivenOf(id: string, who: string): Promise<string[]> {
+  if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return [];
+  const replies = repliesFor(await redisPipeline([["HKEYS", lessonsGivenKey(id, who)]]), 1);
+  if (!replies) throw new Error("Incomplete community points record");
+  return storedLessons(replies[0]);
+}
+
+/** The lessons that gave a member points, each "<course>:<lesson>"; any other shape throws, never leaves one out. */
+function storedLessons(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((field) => typeof field !== "string" || !LESSON_FIELD.test(field))) {
+    throw new Error("Incomplete community points record");
+  }
+  return value as string[];
 }

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { type Reward, pointsOf, readRewards } from "@/lib/community-points";
+import { type Reward, pointsOf, readLessonPoints, readRewards } from "@/lib/community-points";
 import { idsOfKind, readCards } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -81,6 +81,8 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   let members: StudioMember[] = [];
   let totals = { members: 0, listed: 0, posts: 0, reach: 0 };
   let rewards: Reward[] = [];
+  // The points a finished lesson gives (lib/lesson-points.ts); null when it could not be read (rule 24), said so.
+  let lessonPoints: number | null = 0;
   let coming: StudioEvent[] = [];
   let over: StudioEvent[] = [];
   let challenges: StudioChallenge[] | null = [];
@@ -181,6 +183,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     all.sort((a, b) => b.seen - a.seen);
     const points = await pointsOf(id, all.slice(0, MEMBERS_SHOWN).map((m) => m.k));
     rewards = await readRewards(id);
+    lessonPoints = await readLessonPoints(id).catch(() => null);
     members = all.slice(0, MEMBERS_SHOWN).map((m) => ({
       key: m.k,
       email: m.e,
@@ -278,6 +281,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
           canSettings={can(view.role, "settings")}
           isOwner={view.role === "owner"}
           rewards={rewards}
+          lessonPoints={lessonPoints}
           courses={[...course].flatMap((id) => {
             const card = cards.get(id);
             return card ? [{ id, title: card.title }] : [];

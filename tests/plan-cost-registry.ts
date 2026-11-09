@@ -1664,6 +1664,8 @@ export const NOT_A_COST: Record<string, string> = {
   VERCEL_CPU_MICRO_USD_PER_HOUR: "A rate, not a cap.",
   ASKS_PER_TEN_MINUTES: "A burst limit under ANSWERS_MONTHLY (line ai).",
   STORE_ASKS_PER_MINUTE: "A burst limit under ANSWERS_MONTHLY (line ai).",
+  CALENDAR_ADDS_PER_TEN_MINUTES: "A burst limit per store on calendar adds, each one of the store's studio requests (line studio) that reads one remote calendar (R27): it only refuses, before the read.",
+  CALENDAR_ADDS_PER_CONNECTION_TEN_MINUTES: "The same per connection, whatever store it is signed in to (R27): it only refuses, before the read.",
   TRIAL_MONTHLY_EMAILS: "The free trial's emails: in nonPayingWorst (line free-share).",
   DAILY_CAPS: "The choices of a host's own daily booking cap: how many calls a host takes, not a cost.",
   KIT_PER_DAY: "A daily burst limit under the writing jobs an affiliate kit takes (line ai).",
@@ -1743,6 +1745,8 @@ export const SCOPES: Record<string, ScopeClass> = {
   "paypal-connect": SERVICE, "paypal-pay": SERVICE, "paypal-sell-connect": SERVICE, "aff-kit": SERVICE, "aff-payto": SERVICE, "outreach-find": SERVICE,
   "person-find": SERVICE, "vault-open": SERVICE, "vault-sign": SERVICE, "stream-door": SERVICE, "stream-captions": SERVICE, "mail-picture": SERVICE,
   "host-calendar": SERVICE, "outreach-find-day": BURST("integrations"),
+  // Calendar adds (R27): each reads one remote calendar inside one of the store's studio requests.
+  "calendar-add": BURST("studio"), "calendar-add-ip": BURST("studio"),
 };
 
 /** The store figures, each priced by a line (lib/store-allowance-rules.ts, takeAllowance). */

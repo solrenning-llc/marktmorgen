@@ -86,6 +86,7 @@ function centralAliases(file,root,here){
   for(const name of ['meet-test','account-notice'])aliases['@/lib/'+name]=join(here,'meeting-disabled-world.ts');
  }
  if(file==='host-calendar-removal.test.ts')aliases['@/lib/host-calendar']=join(here,'host-calendar-removal-world.ts');
+ if(file==='calendar-add-limit.test.ts')aliases['@/lib/calendar-sync']=join(here,'calendar-add-limit-world.ts');
  if(file==='outreach-counter-admission.test.ts')for(const name of ['redis','store-request','outreach','metered-limits'])aliases['@/lib/'+name]=join(here,'outreach-counter-admission-world.ts');
  if(file==='ai-report-counter-admission.test.ts')for(const name of ['redis','store-request','review-ai-summary','stats-report','numbers-ask','person-agenda-read','ai'])aliases['@/lib/'+name]=join(here,'ai-report-counter-admission-world.ts');
  if(file==='cron-checks-exact.test.ts')for(const name of ['email','verify-mail','verify-stripe'])aliases['@/lib/'+name]=join(here,'cron-checks-exact-world.ts');

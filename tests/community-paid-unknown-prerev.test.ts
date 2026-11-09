@@ -23,13 +23,11 @@ import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared
 import CommunityPage from "@/app/[handle]/community/page";
 import * as access from "@/lib/community-access";
 import * as readRules from "@/lib/community-read-rules";
-import * as registry from "./plan-cost-registry";
 import { COMMUNITY_WORDS } from "@/lib/buyer-words/community";
 import * as lockedWordsModule from "@/lib/buyer-words/community-locked";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { type CommunityConfig, freshConfig, newItemId, saveConfig } from "@/lib/community";
 import { mintPass, passCookieName } from "@/lib/learn";
-import { laterPageCost } from "./traffic-cost";
 import { store as redis } from "./redis-stub";
 import { cookieValues } from "./meeting-withdrawal-page-world";
 import { paidPeriod } from "./billing-period-fixture";
@@ -47,18 +45,14 @@ const read = (file: string) => readFileSync(file, "utf8");
 const sessions: Record<string, Record<string, unknown>[]> = {};
 let stripeDown = false;
 /** A row Stripe sends that is not a checkout as it lists them, put first on every page when set. */
-let garbledRow = false;
+const garbledRow = false;
 let stripeReads = 0;
-let resendCalls = 0;
 /** Characters added to the first checkout of every page, to make a page heavier than it may be read. */
 let padding = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (url.hostname.includes("resend")) {
-    resendCalls += 1;
-    return answer({ id: "email_test_1" });
-  }
+  if (url.hostname.includes("resend")) return answer({ id: "email_test_1" });
   stripeReads += 1;
   if (stripeDown) return answer({ error: { message: "synthetic outage" } }, 500);
   const path = url.pathname.replace(/^\/v1/, "");
@@ -140,24 +134,13 @@ async function main(): Promise<void> {
     const token = await mintPass(await fresh(), email, "all");
     return access.communityViewer(store, jar);
   };
-  const draw = async (email: string) => {
-    cookieValues.clear();
-    cookieValues.set(passCookieName(await fresh()), await mintPass(store, email, "all"));
-    try {
-      const page = await CommunityPage({ params: Promise.resolve({ handle: "@paidunknown" }), searchParams: Promise.resolve({}) });
-      return renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {}, replace() {}, prefetch() {} } as never }, page));
-    } catch (error) {
-      return `PAGE_FAILED ${String(error)}`;
-    }
-  };
-
   const drawWith = async (email: string, sp: Record<string, string>) => {
     cookieValues.clear();
     cookieValues.set(passCookieName(await fresh()), await mintPass(store, email, "all"));
     const page = await CommunityPage({ params: Promise.resolve({ handle: "@paidunknown" }), searchParams: Promise.resolve(sp) });
     return renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {}, replace() {}, prefetch() {} } as never }, page));
   };
-  const en = COMMUNITY_WORDS.en as Record<string, any>;
+  const en = COMMUNITY_WORDS.en as unknown as { sessionEnded: { title: string }; unknownLastingBody?: (email: string, store: string) => string };
 
   part("P1 [ALTO] one search of 20 events/lessons outspends a Store member's whole day, and 1/33 of the store's month");
   const whole = requestLimitFor(await fresh());
@@ -246,7 +229,7 @@ async function main(): Promise<void> {
   is(
     "every language says an event and a search match not checked",
     languages.filter((l) => {
-      const w = COMMUNITY_WORDS[l] as Record<string, any>;
+      const w = COMMUNITY_WORDS[l] as unknown as Record<string, unknown> & { notices?: Record<string, unknown> };
       return !(typeof w.notices?.eventunknown === "string" && typeof w.eventUnchecked === "string" && typeof w.uncheckedMore === "function" && typeof w.unknownLastingBody === "function");
     }),
     [],
@@ -263,7 +246,7 @@ async function main(): Promise<void> {
   const piaHtml = await drawWith("pia@example.com", {});
   stripeDown = false;
   is("the gate's unknown title is a heading", /<h2[^>]*>[^<]*could not check your access just now/.test(piaHtml), true);
-  is("its words name no payment service (Redis may be what failed)", Object.keys(COMMUNITY_WORDS).filter((l) => /payment service|servicio de pagos|service de paiement|Zahlungsdienst|servizio di pagamento|betaaldienst|serviço de pagamento/i.test(String((COMMUNITY_WORDS as any)[l].unknownBody("a@b.c", "S")))), []);
+  is("its words name no payment service (Redis may be what failed)", Object.keys(COMMUNITY_WORDS).filter((l) => /payment service|servicio de pagos|service de paiement|Zahlungsdienst|servizio di pagamento|betaaldienst|serviço de pagamento/i.test(String((COMMUNITY_WORDS[l as keyof typeof COMMUNITY_WORDS] as unknown as { unknownBody: (e: string, s: string) => string }).unknownBody("a@b.c", "S")))), []);
 
   done();
 }

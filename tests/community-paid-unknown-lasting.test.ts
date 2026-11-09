@@ -80,6 +80,14 @@ const paid = (n: number, product: string, extra: Record<string, unknown> = {}, m
   payment_intent: { id: `pi_cpl${n}`, object: "payment_intent", latest_charge: charge },
   ...extra,
 });
+/** The lines these checks read, as loose as an earlier commit may have them. */
+type Words = {
+  notices?: Record<string, string | undefined>;
+  eventUnchecked?: string;
+  eventUncheckedLasting?: string;
+  uncheckedMore?: (n: number) => string;
+  uncheckedMoreLasting?: (n: number) => string;
+};
 const customerOf = (who: string, n: number) => `cus_${who}${String(n).padStart(6, "0")}`;
 /** The addition one click after a checkout, on the checkout's customer (lib/upsell.ts). */
 const addition = (n: number, product: string, parent: string) => ({
@@ -138,7 +146,7 @@ async function main(): Promise<void> {
   };
   const html = (text: string) => text.replace(/&/g, "&amp;").replace(/'/g, "&#x27;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const lw = lockedWords("en") as unknown as Record<string, string>;
-  const en = COMMUNITY_WORDS.en as Record<string, any>;
+  const en = COMMUNITY_WORDS.en as unknown as Record<string, unknown>;
   const rules = readRules as Record<string, unknown>;
   const cap = typeof rules.TICKET_CUSTOMERS === "number" ? (rules.TICKET_CUSTOMERS as number) : 0;
 
@@ -212,7 +220,7 @@ async function main(): Promise<void> {
   is("every door that says 'not known' tells a lasting one apart", sources.filter(([file, pattern]) => !pattern.test(read(file))).map(([file]) => file), []);
   const languages = Object.keys(COMMUNITY_WORDS) as (keyof typeof COMMUNITY_WORDS)[];
   const lasting = (l: string) => {
-    const w = COMMUNITY_WORDS[l as keyof typeof COMMUNITY_WORDS] as Record<string, any>;
+    const w = COMMUNITY_WORDS[l as keyof typeof COMMUNITY_WORDS] as unknown as Words;
     const lk = lockedWords(l) as unknown as Record<string, string>;
     return [w.notices?.spaceunknownlasting, w.notices?.eventunknownlasting, w.eventUncheckedLasting, typeof w.uncheckedMoreLasting === "function" ? w.uncheckedMoreLasting(2) : undefined, lk.uncheckedLasting];
   };
@@ -220,7 +228,7 @@ async function main(): Promise<void> {
   is(
     "none of them is the line for a passing fault",
     languages.filter((l) => {
-      const w = COMMUNITY_WORDS[l] as Record<string, any>;
+      const w = COMMUNITY_WORDS[l] as unknown as Words;
       const lk = lockedWords(l) as unknown as Record<string, string>;
       const passing = [w.notices?.spaceunknown, w.notices?.eventunknown, w.eventUnchecked, w.uncheckedMore?.(2), lk.unchecked];
       return lasting(l).some((t, i) => t === passing[i]);

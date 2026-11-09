@@ -583,9 +583,12 @@ async function main(): Promise<void> {
   restore();
   const storesRoute = readFileSync("app/api/store/stores/route.ts", "utf8");
   const closingCron = readFileSync("app/api/cron/closing/route.ts", "utf8");
+  // Changed assertion (rule 23, Claude 5 on claude5/closing-siblings-on-3327, over #3327): the closing job now runs each part on its own
+  // (tests/closing-cron-isolated.test.ts), so the line is tried again as its own part, "forgets", no longer awaited
+  // bare; it is still tried on every run, with the same deadline.
   is(
     "a delete whose first try failed puts it in line; the daily closing job tries the line again",
-    [storesRoute.includes("await queueStoreForget(result.store.statsId ?? null, result.store.sid)"), storesRoute.includes("forgetStoreWebhooks(result.store.statsId), revokeAllKeys(result.store.sid)"), closingCron.includes("await retryStoreForgets(start + 32_000)")],
+    [storesRoute.includes("await queueStoreForget(result.store.statsId ?? null, result.store.sid)"), storesRoute.includes("forgetStoreWebhooks(result.store.statsId), revokeAllKeys(result.store.sid)"), closingCron.includes('await part("forgets", () => retryStoreForgets(start + 32_000), null)')],
     [true, false, true],
   );
 

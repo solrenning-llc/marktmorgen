@@ -208,12 +208,37 @@ async function readDiary(callsId: string): Promise<string[]> {
   return flat;
 }
 
-async function heldAndBooked(store: Store, now: number): Promise<(TeamBusy & { field: string })[]> {
+/**
+ * A diary entry as readBusy uses it: its field, and for a hold that ran out
+ * before its call, when it ran out (`ranOut`, in milliseconds). Such a hold
+ * keeps its time until Stripe shows its checkout can never be paid
+ * (unpaidHolds).
+ */
+type DiaryBusy = TeamBusy & { field: string; ranOut?: number };
+
+/**
+ * How many checkouts behind holds that ran out one reading of the taken
+ * times may ask Stripe about on their own (GET /checkout/sessions/<id>),
+ * only for a hold the pages read cannot vouch for (audit of Stripe readings,
+ * A6). Past it, or when Stripe cannot be asked, the hold keeps its time and
+ * a later reading asks again.
+ */
+export const STALE_HOLD_CHECKS_PER_READING = 3;
+
+/**
+ * How much earlier than HOLD_SECONDS before its hold ran out a checkout may
+ * have been opened: the hold's end is set once Stripe answered, so a slow
+ * opening and clocks apart are taken in, and a checkout is never taken for
+ * one opened later than it was.
+ */
+const HOLD_OPENED_SLACK_MS = 10 * 60_000;
+
+async function heldAndBooked(store: Store, now: number): Promise<DiaryBusy[]> {
   const callsId = store.callsId as string;
   // Every entry is read before anything is decided or deleted: one that cannot be read throws (entryOf), and the
   // whole diary is then unknown, so no time is offered or sold and nothing is let go on it.
   const entries = readEntries(await readDiary(callsId));
-  const busy: (TeamBusy & { field: string })[] = [];
+  const busy: DiaryBusy[] = [];
   const stale: string[] = [];
   const past: string[] = [];
   let freed = 0;
@@ -223,14 +248,26 @@ async function heldAndBooked(store: Store, now: number): Promise<(TeamBusy & { f
       freed += fieldReleaseBytes(field, value);
       continue;
     }
-    if (entry.until !== 0 && entry.until < now) {
+    // A hold that ran out for a call already over can never be offered again: tidied as it is noticed.
+    if (entry.until !== 0 && entry.until < now && entry.e <= now) {
       stale.push(field);
       continue;
     }
     const team = teamOf(entry);
-    busy.push({ start: entry.start, end: entry.e, product: entry.p, session: entry.session, field, ...(team ? { hosts: team.hosts, claim: team.claim } : {}) });
+    busy.push({
+      start: entry.start,
+      end: entry.e,
+      product: entry.p,
+      session: entry.session,
+      field,
+      ...(team ? { hosts: team.hosts, claim: team.claim } : {}),
+      // A hold that ran out before its call: its checkout may have been paid, and its booking not written yet. It keeps
+      // its time until Stripe shows the checkout can never be paid (readBusy, unpaidHolds), never on its clock alone:
+      // once let go, nothing but a reading of every completed checkout would find that booking again (audit A6).
+      ...(entry.until !== 0 && entry.until < now ? { ranOut: entry.until } : {}),
+    });
   }
-  // Holds that ran out are tidied as they are noticed, and calls long over let go.
+  // Holds that ran out for calls already over are tidied as they are noticed, and calls long over let go.
   if (stale.length) await redisPipeline([["HDEL", busyKey(callsId), ...stale]]).catch(() => {});
   if (past.length) {
     const [gone] = await redisPipeline([["HDEL", busyKey(callsId), ...past]]).catch(() => [0]);
@@ -404,9 +441,23 @@ function sessionRowKnown(row: Record<string, unknown>): boolean {
  * there is more without a row to read on from throws StripeListUnreadable,
  * never read as "no booking", so a paid time is never offered again.
  */
-async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refunded: Set<string>; partial: boolean }> {
+async function readCallSessions(store: Store): Promise<{
+  paid: CallRow[];
+  refunded: Set<string>;
+  partial: boolean;
+  /** Every completed checkout read, of any product. */
+  seen: Set<string>;
+  /**
+   * From when, in milliseconds, every completed checkout of the account was
+   * read: the lookback when the reading was whole, a second after the oldest
+   * row read when it stopped with more, never (Infinity) when that row's time
+   * cannot be read or there is no account to read.
+   */
+  coveredFrom: number;
+}> {
   const refunded = new Set<string>();
-  if (!store.stripeAccountId) return { paid: [], refunded, partial: false };
+  const seen = new Set<string>();
+  if (!store.stripeAccountId) return { paid: [], refunded, partial: false, seen, coveredFrom: Number.POSITIVE_INFINITY };
   const handles = saleHandles(store);
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 86400;
   const found: CallRow[] = [];
@@ -414,6 +465,8 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
   let after = "";
   // Whether the last page read still said there were more: older bookings were then left out.
   let partial = false;
+  // When the oldest row read was made, in seconds; null when it cannot be read.
+  let oldest: number | null = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const list = readStripePage(
       await onAccount(
@@ -426,7 +479,10 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
     if (list.unreadable > 0) throw new StripeListUnreadable(`${list.unreadable} checkout row(s) could not be read`);
     if (list.hasMore && !list.lastId) throw new StripeListUnreadable("more checkouts, with no row to read on from");
     const rows = list.rows as SessionRow[];
+    const last = rows.length ? rows[rows.length - 1].created : undefined;
+    oldest = typeof last === "number" && Number.isSafeInteger(last) && last > 0 ? last : null;
     for (const row of rows) {
+      if (typeof row.id === "string") seen.add(row.id);
       const call = await callOrLost(store, row, handles, reads);
       if (call === "refunded") {
         if (typeof row.id === "string") refunded.add(row.id);
@@ -436,7 +492,9 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
     if (page === MAX_PAGES - 1) partial = true;
     after = list.lastId as string;
   }
-  return { paid: await withMoves(found), refunded, partial };
+  // Stripe lists the newest first, so a checkout made a whole second after the oldest row read was on a page read.
+  const coveredFrom = !partial ? since * 1000 : oldest === null ? Number.POSITIVE_INFINITY : (oldest + 1) * 1000;
+  return { paid: await withMoves(found), refunded, partial, seen, coveredFrom };
 }
 
 /**
@@ -466,7 +524,9 @@ async function readBusy(
   store: Store,
   now: number,
 ): Promise<{ busy: TeamBusy[]; paid: PaidCall[]; blocked: Busy[]; sessions: Busy[] }> {
-  const local = store.callsId && isRedisConfigured() ? await heldAndBooked(store, now) : [];
+  // The diary: every hold and booking this store wrote (null when there is no diary to read).
+  const diary = store.callsId && isRedisConfigured() ? await heldAndBooked(store, now) : null;
+  let local: DiaryBusy[] = diary ?? [];
   let paid: PaidCall[] = [];
   // Read alongside Stripe, and never a reason to fail: a calendar that does
   // not answer blocks nothing.
@@ -479,21 +539,32 @@ async function readBusy(
   // Awaited below; marked here so a failure while Stripe is being read is not left unheard.
   sessions.catch(() => {});
   let refunded = new Set<string>();
+  let seen = new Set<string>();
+  let coveredFrom = Number.POSITIVE_INFINITY;
   try {
     let partial: boolean;
-    ({ paid, refunded, partial } = await readCallSessions(store));
+    ({ paid, refunded, partial, seen, coveredFrom } = await readCallSessions(store));
     // A reading that stopped at its last page while Stripe said there were more left older completed checkouts
-    // unread: a paid booking among them, whose diary entry is missing, would be offered and sold again. Not every
-    // paid booking is known then, so no time is offered or sold on this reading (Claude 2 on #3233).
-    if (partial) throw new StripeListUnreadable(`more completed checkouts than ${MAX_PAGES} pages; paid bookings not all read`);
+    // unread (Claude 2 on #3233). The diary holds every booking: its hold is written before its checkout's address is
+    // handed out, and leaves only once Stripe shows that checkout can never be paid (unpaidHolds below), or for a full
+    // refund, a call long over, or a move that writes it anew. So the pages read are enough once the diary was read:
+    // a store selling more than five hundred things in the lookback still sells calls (audit of Stripe readings, A6).
+    // Without a diary, only a whole reading knows every paid booking, and no time is offered or sold on a part.
+    if (partial && !diary) throw new StripeListUnreadable(`more completed checkouts than ${MAX_PAGES} pages; paid bookings not all read`);
   } catch (error) {
     // Without Stripe's answer a paid time could be offered twice. Refusing to
     // show any time is the safe failure; the caller treats the throw as that.
     console.error("reading paid calls failed", error);
     throw error;
   }
-  // Stripe's copy wins over ours: it is the ledger, and it is read with any
-  // move applied. Each checkout session is one seat, however often it is seen.
+  // A hold that ran out, whose checkout Stripe shows can never be paid, gives its time back; any other keeps it.
+  const unpaid = await unpaidHolds(store, local, seen, refunded, coveredFrom);
+  if (unpaid.size && store.callsId) {
+    await redisPipeline([["HDEL", busyKey(store.callsId), ...unpaid]]).catch(() => {});
+    local = local.filter((b) => !unpaid.has(b.field));
+  }
+  // Stripe's copy of a booking it lists wins over ours, read with any move
+  // applied. Each checkout session is one seat, however often it is seen.
   const fromStripe = new Set(paid.map((c) => c.session).filter(Boolean));
   // A booking refunded in full gives its time back.
   const gone = local.filter((b) => b.session && refunded.has(b.session));
@@ -507,6 +578,53 @@ async function readBusy(
     ...paid.map((c) => ({ start: c.start, end: c.end, product: c.product, session: c.session, ...(c.claim ? { hosts: c.hosts, claim: c.claim } : {}) })),
   ];
   return { busy, paid, blocked: (await calendar).busy, sessions: await sessions };
+}
+
+/**
+ * The holds that ran out whose checkouts Stripe shows can never be paid, by
+ * diary field. Only those: a hold that ran out keeps its time otherwise, so a
+ * booking paid in its last minute and not yet written down is never offered
+ * again (CX-123 rule 24).
+ *
+ *   - A checkout among the completed ones read (`seen`) keeps its hold, paid
+ *     or not settled; one refunded in full is let go by readBusy already.
+ *   - A checkout absent from them, opened after the reading's `coveredFrom`,
+ *     was never completed: it can no longer be (it closed before its hold ran
+ *     out), and its hold is let go without asking Stripe again.
+ *   - Any other is asked about on its own, at most
+ *     STALE_HOLD_CHECKS_PER_READING a reading, picked at random so the ones
+ *     Stripe keeps answering for never crowd the rest out: only "expired", or
+ *     a payment refunded in full, lets its hold go. An answer that fails or
+ *     reads otherwise keeps it, for a later reading.
+ */
+async function unpaidHolds(store: Store, local: DiaryBusy[], seen: Set<string>, refunded: Set<string>, coveredFrom: number): Promise<Set<string>> {
+  const out = new Set<string>();
+  const doubtful: DiaryBusy[] = [];
+  for (const b of local) {
+    if (b.ranOut === undefined || !b.session || seen.has(b.session) || refunded.has(b.session)) continue;
+    if (b.ranOut - HOLD_SECONDS * 1000 - HOLD_OPENED_SLACK_MS >= coveredFrom) out.add(b.field);
+    else doubtful.push(b);
+  }
+  const account = store.stripeAccountId;
+  if (!account || !doubtful.length) return out;
+  for (let i = doubtful.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [doubtful[i], doubtful[j]] = [doubtful[j], doubtful[i]];
+  }
+  const handles = saleHandles(store);
+  await Promise.all(
+    doubtful.slice(0, STALE_HOLD_CHECKS_PER_READING).map(async (b) => {
+      const session = b.session as string;
+      try {
+        const row = (await onAccount("GET", account, `/checkout/sessions/${encodeURIComponent(session)}?expand[]=payment_intent.latest_charge`)) as SessionRow;
+        if (!row || typeof row !== "object" || row.id !== session) return;
+        if (row.status === "expired" || (row.status === "complete" && callFromRow(row, handles) === "refunded")) out.add(b.field);
+      } catch (error) {
+        console.error("reading a ran-out hold's checkout failed; its time is kept", session, error);
+      }
+    }),
+  );
+  return out;
 }
 
 /** Every seat taken or held in this store, right now. */

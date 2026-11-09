@@ -303,10 +303,22 @@ async function main(): Promise<void> {
   before = opened;
   is("control: …and not sold again", [await sell(p, B), opened - before], ["taken", 0]);
 
+  // Regra 23 (audit of Stripe readings, A6): these two once read "no time is offered" and "error", whatever the diary
+  // held, so a store with more than five hundred sales in the lookback sold no call at all. The diary now holds every
+  // booking (a hold leaves it only once Stripe shows its checkout can never be paid; tests/calls-busy-read.test.ts),
+  // so the booking past the pages is in it, as confirmBooking wrote it, and only its own time is refused. Without a
+  // diary to read, a reading cut short still refuses everything (the third check).
   listed.set(P, pagesThenBooking(5));
-  is("five full pages and more said: no time is offered", await offered(p), null);
+  await run([["HSET", diaryOf(p), booking.id, JSON.stringify({ s: B, e: B + HOUR, until: 0, session: booking.id, p: p.call.id })]]);
+  const cut = await offered(p);
+  is("five full pages and more said: the free times are offered, the booked one is not", [cut?.includes(B), (cut?.length ?? 0) > 0], [false, true]);
   before = opened;
-  is("five full pages and more said: the time is not sold, no checkout is opened", [await sell(p, B), opened - before], ["error", 0]);
+  is("five full pages and more said: the booked time is not sold, no checkout is opened", [await sell(p, B), opened - before], ["taken", 0]);
+  const noDiary = { ...p, store: { ...p.store, callsId: "" } as Store };
+  is("five full pages and more said, with no diary to read: no time is offered", await offered(noDiary), null);
+  listed.set(P, pagesThenBooking(4));
+  const wholeNoDiary = await offered(noDiary);
+  is("control: a whole reading with no diary to read offers times, never the booked one", [wholeNoDiary?.includes(B), (wholeNoDiary?.length ?? 0) > 0], [false, true]);
   listed.delete(P);
   await clear(p);
 

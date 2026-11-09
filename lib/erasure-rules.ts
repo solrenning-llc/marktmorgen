@@ -62,6 +62,12 @@ export type ErasureSize = {
   roomMessages: number;
   events: number;
   certificates: number;
+  /**
+   * The steps the deletion of their lesson comments walks over the courses' records (lib/lesson-comments.ts,
+   * commentScanSize), and those steps times the lessons each names, since every step names its course's lessons.
+   */
+  commentPages: number;
+  commentPageLessons: number;
 };
 
 /**
@@ -84,6 +90,11 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   roomMessages: [0, 1_200],
   events: [1, 150],
   certificates: [0, 500],
+  // Each step walked FORGET_PASSES (3) times at the most, each walk four billed commands and under 3,000 bytes
+  // before its lessons, 80 bytes a lesson (lib/lesson-comments.ts, forgetPageWork; held in
+  // tests/lesson-comments-copy-erasure-bounds.test.ts). The commands a step runs for each comment it deletes are not counted.
+  commentPages: [12, 9_000],
+  commentPageLessons: [0, 240],
 };
 /** The studio units that cover an erasure's own call, its CPU and memory, and waiting on Discord to take roles back. */
 export const ERASE_BASE_UNITS = 15;

@@ -60,7 +60,10 @@ async function comments(): Promise<void> {
   const made = await addComment({ room: ROOM, courseId: COURSE, lessonId: L1, by: ana, text: "How warm should the kitchen be?", name: "Ana Lopes", parent: null });
   if (!made.ok) throw new Error(`no comment: ${made.reason}`);
   const before = await used();
-  for (const bad of [[], [undefined], [0], [[]], [["Ana Lopes"]], [[null, []]], [["Ana Lopes", null]], [["Ana Lopes", [1]]], [["Ana Lopes", [], 1]], [["", []], 0]]) {
+  // Rule 23 (pre-review of 9 November 2026, finding 2): a step of the erasure answers {cursor, how many went, their
+  // room, threads waiting}, no longer {the name, every comment's words}; these are the shapes of that answer it
+  // refuses (the name is read and deleted after, in its own commands).
+  for (const bad of [[], [undefined], [0], [[]], [["x"]], [["0"]], [["0", 1, 640]], [[0, 1, 640, 0]], [["", 1, 640, 0]], [["0 ", 1, 640, 0]], [["0", -1, 0, 0]], [["0", 1, 0, 0]], [["0", 0, 16, 0]], [["0", 1, 640, null]], [["0", 1, 640, 0, 1]], [["0", 1, 640, 0], 0]]) {
     is(`refused on ${JSON.stringify(bad)}`, await refused("lesson-comments-forget", bad, () => forgetLessonCommentsPerson(COURSE, [L1], ana, ROOM)), true);
     is(`no room given back on ${JSON.stringify(bad)}`, await used(), before);
   }

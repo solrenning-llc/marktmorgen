@@ -71,7 +71,7 @@ import { forgetFinishPerson } from "@/lib/course-finish";
 import { forgetQuizPerson } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
 import { forgetCertificatesPerson } from "@/lib/certificate";
-import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
+import { commentScanSize, forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
@@ -243,13 +243,14 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
 /** How big this erasure is: the store's catalogue and courses, and the few things counted to know it. */
 export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   const id = scope.communityId;
-  const [deals, conversations, dmConversations, roomMessages, events, certificates] = await Promise.all([
+  const [deals, conversations, dmConversations, roomMessages, events, certificates, comments] = await Promise.all([
     dealCount(scope.statsId),
     conversationCount(scope.statsId),
     id ? dmCount(id, scope.learner) : 0,
     id ? roomSize(id) : 0,
     id ? eventCount(id) : 0,
     certificateCount(scope.courses.map((c) => c.courseId)),
+    commentScanSize(scope.courses),
   ]);
   return {
     products: scope.productIds.length,
@@ -261,6 +262,8 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     roomMessages,
     events,
     certificates,
+    commentPages: comments.pages,
+    commentPageLessons: comments.lessonPages,
   };
 }
 

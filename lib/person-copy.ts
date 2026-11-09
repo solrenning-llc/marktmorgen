@@ -19,10 +19,13 @@
  *             law asks for (tests/person-copy.test.ts).
  *
  * Only reading: every reader here is one that changes nothing the person or
- * the store would see (no "read" mark, no token made, no cache written). The
- * one count it makes is what a read the store's records do not bound costs
- * (a student's lesson comments), taken from the store's studio figure before
- * it is read, as the erasure's own (payCopyRead).
+ * the store would see (no "read" mark, no token made, no cache written).
+ * Nothing it reads is taken from the creator's studio figure: a right of
+ * access is never held by a store's month of requests. Its one read whose
+ * size a record does not bound (a student's lesson comments) is bounded by
+ * what the store's data room can hold (lib/lesson-comments.ts,
+ * copyReadWork), and the copy has no budget of its own yet: no door may give
+ * it before one (tests/plan-cost-registry.ts, NOT_A_COST.PERSON_COPY_BUDGET).
  * What other people wrote is left out where it is theirs and not about the
  * person: a teammate's address on a note or a deal, who a conversation is
  * given to. What the store wrote to or about the person (a note, a reply,
@@ -41,7 +44,7 @@ import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
 import { certificatesOf } from "@/lib/certificate";
-import { studentComments } from "@/lib/lesson-comments";
+import { chosenName, studentComments } from "@/lib/lesson-comments";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
@@ -80,8 +83,6 @@ import { heldPaymentsOf } from "@/lib/closing-holds";
 import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
-import { workUnits } from "@/lib/erasure-rules";
-import { takeAllowance } from "@/lib/store-allowance";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 
@@ -104,7 +105,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
-  "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
+  "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons, and the name you chose for them" },
   "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
@@ -178,17 +179,6 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
     checkoutsRead.set(s, read);
   }
   return read;
-}
-
-/**
- * Takes a read whose size the record it reads does not bound (a student's lesson comments) from the store's studio
- * figure before it is sent, as the erasure takes its own (lib/person-erasure.ts, erasureUnits): one studio unit is
- * twenty commands or fifty kilobytes (lib/erasure-rules.ts, workUnits). A figure used or not counted throws, so the
- * copy fails and says so, never handed over without what it could not pay to read.
- */
-async function payCopyRead(s: ErasureScope, work: { commands: number; bytes: number }): Promise<void> {
-  const taken = await takeAllowance(s.store, "studio", workUnits(work));
-  if (!taken.ok) throw new Error(`the copy could not be counted from the store's studio requests: ${taken.message}`);
 }
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
@@ -287,11 +277,14 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/lesson-comments.ts": async (s) => {
     const out: unknown[] = [];
     for (const c of s.courses) {
+      // The name they chose for their comments, which the erasure deletes too (lib/person-data.ts), even with none.
+      const name = await chosenName(c.courseId, s.learner);
+      if (name) out.push({ course: c.productId, chosenName: name });
       // Every one they wrote in the course, where the erasure finds them (R19 MEDIUM 3: a lesson's newest 2,000 left
-      // older ones out), each read paid from the studio figure before it is sent. Only their own: the replies under
+      // older ones out), read in bounded steps, never from the studio figure. Only their own: the replies under
       // them are other people's words. By the course's lessons in order, then any lesson it no longer lists, newest first.
       const place = new Map(c.lessonIds.map((lessonId, i) => [lessonId, i]));
-      const comments = await studentComments(c.courseId, s.learner, (work) => payCopyRead(s, work));
+      const comments = await studentComments(c.courseId, s.learner);
       comments.sort((a, b) => (place.get(a.lesson) ?? place.size) - (place.get(b.lesson) ?? place.size) || (a.lesson < b.lesson ? -1 : a.lesson > b.lesson ? 1 : 0) || b.at - a.at || (a.id < b.id ? 1 : -1));
       for (const comment of comments) out.push({ course: c.productId, lesson: comment.lesson, name: comment.name, text: comment.text, at: iso(comment.at) });
     }

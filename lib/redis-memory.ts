@@ -55,6 +55,35 @@ export class MemoryRedis {
     }
   }
 
+  /** Where each cursor a script's HSCAN step gave stopped: the key and its last field (scanStep). */
+  private scanMarks = new Map<string, string>();
+  private scanCursor = 0;
+
+  /**
+   * One HSCAN step inside a script, in real pages (HSCAN as a command answers everything at once): `count` fields
+   * in the order of their names, after the one the cursor stopped at, and "0" at the end. Like Redis's, a field kept
+   * through the whole walk is given once; one written meanwhile may or may not be. Never makes the key.
+   */
+  private scanStep(key: string, cursor: string, count: number): [string, string[]] {
+    const held = this.data.get(key);
+    if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+    let after: string | null = null;
+    if (cursor !== "0") {
+      const mark = this.scanMarks.get(cursor);
+      if (mark === undefined || !mark.startsWith(`${key}\n`)) throw new Error("ERR invalid cursor");
+      after = mark.slice(key.length + 1);
+    }
+    const fields = held instanceof Map ? [...held.keys()].filter((f) => after === null || f > after).sort() : [];
+    const most = Math.max(1, Math.floor(count) || 10);
+    const step = fields.slice(0, most);
+    const flat = step.flatMap((f) => [f, (held as Map<string, string>).get(f) as string]);
+    if (fields.length <= most) return ["0", flat];
+    this.scanCursor += 1;
+    const next = String(this.scanCursor);
+    this.scanMarks.set(next, `${key}\n${step[step.length - 1]}`);
+    return [next, flat];
+  }
+
   /** For a test to look at what a flow left behind. */
   keys(): string[] {
     return [...this.data.keys()].sort();
@@ -853,59 +882,79 @@ export class MemoryRedis {
           if (root.r !== null) this.run(["HINCRBY", replies, root.r, -1]);
           return [gone.length, freed];
         }
-        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v2\n")) {
+        // lib/lesson-comments.ts FORGET_LESSON_COMMENTS: one step of a student's comments out of the course's record.
+        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v3\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const argv = args.slice(1 + count);
-          const [comments, all, replies, names, ...lessonKeys] = keys;
-          const who = argv[0];
-          const lessons = new Map(lessonKeys.map((k, i) => [argv[1 + i], k]));
+          const [comments, all, replies, ...lessonKeys] = keys;
+          const [who, cursor, scanCount, mode, entryRaw, stepRaw] = argv;
+          const entry = Number(entryRaw);
+          const step = Number(stepRaw);
+          if ((mode !== "free" && mode !== "all") || !Number.isFinite(entry) || !Number.isFinite(step) || step < 1) return ["x"];
+          const lessons = new Map(lessonKeys.map((k, i) => [argv[6 + i], k]));
           for (const k of keys) this.live(k);
-          const held = this.data.get(comments);
-          const rows = new Map<string, { b?: string; r?: string | null; l?: string }>();
-          if (held instanceof Map) for (const [id, raw] of held) {
-            try { rows.set(id, JSON.parse(raw)); } catch { /* not a comment */ }
-          }
-          const tops = new Set([...rows].filter(([, c]) => c.b === who && !c.r).map(([id]) => id));
-          const raws = new Map(held instanceof Map ? [...held] : []);
-          const gone: string[] = [];
-          for (const [id, c] of rows) {
-            const parent = c.r ?? null;
-            if (c.b !== who && !(parent && tops.has(parent))) continue;
-            if (held instanceof Map) held.delete(id);
-            this.zset(all).splice(0, this.zset(all).length, ...this.zset(all).filter((e) => e.member !== id));
-            this.hash(replies).delete(id);
-            const lessonKey = c.l ? lessons.get(c.l) : undefined;
-            if (lessonKey) this.zset(lessonKey).splice(0, this.zset(lessonKey).length, ...this.zset(lessonKey).filter((e) => e.member !== id));
-            if (parent && !tops.has(parent) && rows.has(parent)) {
-              const counts = this.hash(replies);
-              counts.set(parent, String((Number(counts.get(parent)) || 0) - 1));
-            }
-            gone.push(raws.get(id) ?? "");
-          }
-          const name = this.hash(names).get(who) ?? "";
-          this.hash(names).delete(who);
-          return [name, gone];
-        }
-        // lib/lesson-comments.ts LESSON_COMMENTS_OF: one student's comments in the course's whole record, only read.
-        if (key.startsWith("-- marktmorgen:lesson-comments-of:v1\n") && args[0] === "1" && args.length === 4) {
-          const [, comments, who, mostRaw] = args;
-          const most = Number(mostRaw);
-          if (mostRaw.trim() === "" || !Number.isFinite(most) || most < 0) return [2];
-          this.live(comments);
-          const held = this.data.get(comments);
-          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
-          const mine: string[] = [];
-          let bytes = 0;
-          for (const raw of held instanceof Map ? held.values() : []) {
+          const [next, flat] = this.scanStep(comments, cursor, Number(scanCount));
+          type Row = { id: string; raw: string; c: Record<string, unknown>; parent: string | null };
+          const answers: Row[] = [];
+          const threads: Row[] = [];
+          for (let i = 0; i < flat.length; i += 2) {
             let c: unknown;
-            try { c = JSON.parse(raw); } catch { return [2]; }
-            if (!c || typeof c !== "object" || typeof (c as { b?: unknown }).b !== "string") return [2];
-            if ((c as { b: string }).b !== who) continue;
-            mine.push(raw);
-            bytes += new TextEncoder().encode(raw).length;
+            try { c = JSON.parse(flat[i + 1]); } catch { continue; }
+            if (!c || typeof c !== "object") continue;
+            const row = c as Record<string, unknown>;
+            const parent = row.r === undefined || row.r === null ? null : String(row.r);
+            if (parent !== null) answers.push({ id: flat[i], raw: flat[i + 1], c: row, parent });
+            else if (row.b === who) threads.push({ id: flat[i], raw: flat[i + 1], c: row, parent });
           }
-          return bytes > most ? [1, bytes] : [0, ...mine];
+          const above = answers.length ? (this.run(["HMGET", comments, ...answers.map((a) => a.parent as string)]) as (string | null)[]) : [];
+          const under = new Set<string>();
+          answers.forEach((a, k) => {
+            const raw = above[k];
+            if (typeof raw !== "string") return;
+            try {
+              const p = JSON.parse(raw) as { b?: unknown } | null;
+              if (p && typeof p === "object" && p.b === who) under.add(a.parent as string);
+            } catch { /* not a comment */ }
+          });
+          let gone = 0;
+          let freed = 0;
+          let held = 0;
+          const take = (row: Row) => {
+            if (this.run(["HDEL", comments, row.id]) !== 1) return;
+            this.run(["ZREM", all, row.id]);
+            this.run(["HDEL", replies, row.id]);
+            const lessonKey = typeof row.c.l === "string" ? lessons.get(row.c.l) : undefined;
+            if (lessonKey) this.run(["ZREM", lessonKey, row.id]);
+            if (row.parent !== null && this.run(["HEXISTS", comments, row.parent]) === 1) this.run(["HINCRBY", replies, row.parent, -1]);
+            let bytes = new TextEncoder().encode(row.raw).length;
+            if (row.c.h === true) bytes -= ',"h":true'.length;
+            freed += Math.floor((bytes + entry * 4 + step - 1) / step) * step;
+            gone += 1;
+          };
+          for (const a of answers) if (a.c.b === who || under.has(a.parent as string)) take(a);
+          if (threads.length) {
+            const left = this.run(["HMGET", replies, ...threads.map((t) => t.id)]) as (string | null)[];
+            threads.forEach((t, k) => {
+              if (mode === "all" || (Number(left[k]) || 0) <= 0) take(t);
+              else held += 1;
+            });
+          }
+          return [next, gone, freed, held];
+        }
+        // lib/lesson-comments.ts LESSON_COMMENTS_OF: one step of one student's comments in the course's record, only read.
+        if (key.startsWith("-- marktmorgen:lesson-comments-of:v2\n") && args[0] === "1" && args.length === 5) {
+          const [, comments, who, cursor, scanCount] = args;
+          this.live(comments);
+          const [next, flat] = this.scanStep(comments, cursor, Number(scanCount));
+          const out: string[] = [next];
+          for (let i = 0; i < flat.length; i += 2) {
+            let c: unknown;
+            try { c = JSON.parse(flat[i + 1]); } catch { return ["x"]; }
+            if (!c || typeof c !== "object" || typeof (c as { b?: unknown }).b !== "string") return ["x"];
+            if ((c as { b: string }).b === who) out.push(flat[i + 1]);
+          }
+          return out;
         }
         if (key.startsWith("-- marktmorgen:lesson-comments-hide:v1\n") && args[0] === "1" && args.length === 4) {
           if (this.run(["HEXISTS", args[1], args[2]]) !== 1) return 0;

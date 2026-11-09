@@ -11,14 +11,15 @@
  * Held here: the copy finds every comment the student wrote in the course,
  * where the erasure finds them, whatever their age or lesson; a record it
  * cannot read, or a read too large for what it paid, fails the copy, never
- * leaves a part out in silence; and what the read costs is taken from the
- * store's studio figure before the read is sent, as the erasure's is, so a
- * store whose figure is used gets a refusal, not an unpaid read.
+ * leaves a part out in silence; and (since the pre-review of 9 November
+ * 2026, tests/lesson-comments-copy-erasure-bounds.test.ts) the read takes
+ * nothing from the store's studio figure, a right of access never held by a
+ * store's month of requests, and walks the record in bounded steps.
  */
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { COPIERS } from "@/lib/person-copy";
 import { emailKey } from "@/lib/learn";
-import { LESSON_COMMENTS_OF, forgetLessonCommentsPerson } from "@/lib/lesson-comments";
+import { COMMENT_SCAN_COUNT, LESSON_COMMENTS_OF, forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { MAX_LESSON_THREADS, MAX_REPLIES, serializeComment, type LessonComment } from "@/lib/lesson-comments-rules";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
@@ -109,36 +110,33 @@ async function main(): Promise<void> {
   is("her four, each with its lesson and when", ((await copy(scope)) as { lesson: string; at: string }[]).map((r) => [r.lesson, r.at]).sort(),
     [anaFirst, anaAnswer, anaNew, anaGone].map((c) => [c.lesson, new Date(c.at * 1000).toISOString()]).sort());
 
-  part("What the read costs is taken from the studio figure before the read is sent");
+  // Rule 23 (pre-review of 9 November 2026, finding 1, GRAVE): the copy no longer takes its read from the studio
+  // figure, which held a right of access hostage to a store's month of requests; it was "the figure is taken, before
+  // the read". Now nothing is taken, and the read is in steps of COMMENT_SCAN_COUNT fields (finding 3).
+  part("The read takes nothing from the studio figure, and walks the record in steps");
   log.length = 0;
   const before = await allowanceUsed(store, "studio");
   await copy(scope);
-  const taken = (await allowanceUsed(store, "studio")) - before;
-  const charge = log.findIndex((l) => l.startsWith("INCRBY nl:allow:studio:"));
-  const read = log.findIndex((l) => l.startsWith("EVAL -- marktmorgen:lesson-comments-of:"));
-  is("the figure is taken", taken > 0, true);
-  is("before the read, which is sent", [charge >= 0, read >= 0, charge < read], [true, true, true]);
-  is("the read is one command that answers only hers, never the whole lesson", log.filter((l) => /^(HMGET|HGETALL|ZRANGE|ZREVRANGE|HSCAN) /.test(l)).length, 0);
+  is("nothing is taken from the figure", (await allowanceUsed(store, "studio")) - before, 0);
+  const steps = log.filter((l) => l.startsWith("EVAL -- marktmorgen:lesson-comments-of:")).length;
+  is("one step for each COMMENT_SCAN_COUNT fields of the record, at the least", steps >= Math.ceil((newer.length + 5) / COMMENT_SCAN_COUNT), true);
+  is("each step answers only hers, never the whole lesson", log.filter((l) => /^(HMGET|HGETALL|ZRANGE|ZREVRANGE|HSCAN) /.test(l)).length, 0);
 
-  part("Many long comments of hers: more than the first read is paid for, still whole, the larger read paid before it is sent");
+  // Rule 23 (same pre-review, finding 1): "two reads, each paid before it is sent, what was taken covers the bytes"
+  // held the studio figure's charge; the copy is now whole however long hers are, at no charge to the figure.
+  part("Many long comments of hers: still whole, nothing taken from the figure");
   const many: LessonComment[] = [];
   for (let n = 0; n < 40; n += 1) many.push(comment({ id: id("anl", n), by: ana, at: base + 30_000 + n, text: `${n} ${"x".repeat(1_990)}` }));
   await keep(many);
-  log.length = 0;
   const beforeMany = await allowanceUsed(store, "studio");
   const all = await copy(scope);
-  const takenMany = (await allowanceUsed(store, "studio")) - beforeMany;
-  is("all of them, with the four before", all.length, 44);
-  const reads = log.flatMap((l, i) => (l.startsWith("EVAL -- marktmorgen:lesson-comments-of:") ? [i] : []));
-  const charges = log.flatMap((l, i) => (l.startsWith("INCRBY nl:allow:studio:") ? [i] : []));
-  is("two reads: the first at its small size, then one at the size its answer said", reads.length, 2);
-  is("each read sent has its charge before it", reads.length > 0 && reads.every((r, k) => charges[k] !== undefined && charges[k] < r && (k === 0 || charges[k] > reads[k - 1])), true);
-  // One studio unit is twenty commands or fifty kilobytes (lib/erasure-rules.ts): her 80 KB and more cannot be under two.
-  is("what was taken covers the bytes read", takenMany >= Math.ceil(many.reduce((s, c) => s + serializeComment(c).length, 0) / 50_000) + 1, true);
+  is("all of them, with the four before", all.filter((r) => typeof (r as { text?: unknown }).text === "string").length, 44);
+  is("nothing taken from the figure", (await allowanceUsed(store, "studio")) - beforeMany, 0);
 
+  // Rule 23 (same pre-review, finding 3): the script read the whole record with HGETALL; it walks it with HSCAN.
   part("The read changes nothing");
   const calls = [...LESSON_COMMENTS_OF.matchAll(/redis\.call\("([A-Z]+)"/g)].map((m) => m[1]);
-  is("its script only reads the course's record", calls, ["HGETALL"]);
+  is("its script only reads the course's record, a step at a time", calls, ["HSCAN"]);
 
   part("A comment record that does not read fails the copy, never leaves it out in silence");
   redis.run(["HSET", `nl:lc:${COURSE}:c`, id("bad", 1), "{not json"]);
@@ -146,12 +144,13 @@ async function main(): Promise<void> {
   redis.run(["HDEL", `nl:lc:${COURSE}:c`, id("bad", 1)]);
   is("and reads again once it is gone", (await copy(scope)).length, 44);
 
-  part("A store whose studio figure is used: refused, and nothing is read");
+  // Rule 23 (same pre-review, finding 1, GRAVE): it was "refused, and nothing is read", which left a store whose
+  // figure was used unable to give the copy, saying "This opens again on December 1" (VR rule 2). Now it is given.
+  part("A store whose studio figure is used: the copy is still given, whole");
   const used = allowanceFor(store, "studio") - (await allowanceUsed(store, "studio"));
   if (used > 0) await takeAllowance(store, "studio", used);
-  log.length = 0;
-  is("the copy fails and says so", (await failed(() => copy(scope))) !== "", true);
-  is("the read was never sent", log.some((l) => l.startsWith("EVAL -- marktmorgen:lesson-comments-of:")), false);
+  is("the copy is made", (await failed(() => copy(scope))), "");
+  is("whole", (await copy(scope)).filter((r) => typeof (r as { text?: unknown }).text === "string").length, 44);
 
   part("The erasure still finds every one of them");
   is("Ana's 44 go, with Ben's answers under her thread (none)", await forgetLessonCommentsPerson(COURSE, [L1, L2], ana), 44);

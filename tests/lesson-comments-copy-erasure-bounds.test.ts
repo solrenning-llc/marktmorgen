@@ -16,14 +16,17 @@
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { COPIERS } from "@/lib/person-copy";
 import { emailKey } from "@/lib/learn";
-import { FORGET_LESSON_COMMENTS, LESSON_COMMENTS_OF, copyReadWork, forgetLessonCommentsPerson, lessonComments } from "@/lib/lesson-comments";
+import { FORGET_LESSON_COMMENTS, FORGET_PASSES, LESSON_COMMENTS_OF, copyReadWork, forgetLessonCommentsPerson, forgetPageWork, lessonComments } from "@/lib/lesson-comments";
 import { serializeComment, type LessonComment } from "@/lib/lesson-comments-rules";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
-import { erasureWork, type ErasureScope } from "@/lib/erasure-rules";
+import { ERASE_PER, erasureWork, type ErasureScope } from "@/lib/erasure-rules";
 import { erasureSize } from "@/lib/person-erasure";
 import { dataUsed, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { NOT_A_COST } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -166,7 +169,32 @@ async function main(): Promise<void> {
   is("only Ben's 500 are kept, nothing orphaned, no count for her thread, no name", [kept, newest, count, name], [500, 500, null, null]);
   is("Ben's comment she answered counts no answer", (await redis.pipeline([["HGET", `nl:lc:${COURSE}:r`, bens[3].id]]))[0], "0");
   is("the lessons list only Ben's", (await lessonComments(COURSE, L1)).length + (await lessonComments(COURSE, L2)).length, 500);
-  is("the room keeps exactly Ben's", (await dataUsed(room))?.used, benRoom);
+  // Rule 23: the RED commit expected Ben's comments alone; the room also counts its own field for the slot, 64 bytes
+  // while it holds anything (lib/store-data.ts, TAKE_DATA), which stays with Ben's comments.
+  is("the room keeps exactly Ben's, with the slot's own field", (await dataUsed(room))?.used, benRoom + 64);
+
+  part("7. What the erasure counts for a step covers what a step moves, every pass");
+  for (const lessons of [[], [L1], [L1, L2], Array.from({ length: 300 }, (_, k) => id("lesson", k))]) {
+    const step = forgetPageWork(COURSE, lessons, ana);
+    const counted = erasureWork({ commentPages: 1, commentPageLessons: lessons.length });
+    const base = erasureWork({});
+    is(`a step over ${lessons.length} lessons: ${FORGET_PASSES} × ${step.commands} commands and ${step.bytes} bytes counted`,
+      [counted.commands - base.commands >= FORGET_PASSES * step.commands, counted.bytes - base.bytes >= FORGET_PASSES * step.bytes], [true, true]);
+  }
+  is("a step's lessons are counted by the step", ERASE_PER.commentPageLessons[1] > 0, true);
+
+  part("8. The copy has no budget of its own yet: the pending is written, and no door gives it");
+  is("the cost registry names what it needs", typeof NOT_A_COST.PERSON_COPY_BUDGET === "string" && NOT_A_COST.PERSON_COPY_BUDGET.startsWith("PENDING"), true);
+  const callers: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (/\.(ts|tsx)$/.test(name) && path !== join("lib", "person-copy.ts") && /\bcopyPerson\(/.test(readFileSync(path, "utf8"))) callers.push(path);
+    }
+  };
+  for (const dir of ["app", "lib", "components"]) walk(dir);
+  is("nothing outside lib/person-copy.ts calls copyPerson", callers, []);
   done();
 }
 

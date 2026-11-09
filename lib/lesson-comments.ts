@@ -12,7 +12,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
-import { DATA_STEP_BYTES, ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
+import { DATA_ROOM_BYTES, DATA_STEP_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES, dataBytes, utf8Length } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 import { newItemId } from "@/lib/course";
 import { cleanLine, cleanText } from "@/lib/community-text";
@@ -238,6 +238,14 @@ export async function commenterName(courseId: string, key: string): Promise<stri
   if (!isRedisConfigured()) return "";
   const [raw] = await redisPipeline([["HGET", namesKey(courseId), key]]);
   return typeof raw === "string" ? raw : "";
+}
+
+/** The name a student chose, read exactly for the copy of their data (lib/person-copy.ts): "" only when none is kept. */
+export async function chosenName(courseId: string, key: string): Promise<string> {
+  if (!isRedisConfigured()) return "";
+  const raw = oneReply(await redisPipeline([["HGET", namesKey(courseId), key]]));
+  if (raw !== null && typeof raw !== "string") throw unreadableComments();
+  return raw ?? "";
 }
 
 /** Every comment kept under one lesson, newest first. */
@@ -580,163 +588,296 @@ export async function dropLessonComments(courseId: string, lessonIds: string[], 
 }
 
 /**
- * Takes one student's comments out of a course, on the Redis side, with the
- * answers under their own comments, as deleting a comment does, and the name
- * they chose. KEYS: the comments, the newest, the answer counts, the names,
- * then each lesson's comments; ARGV: the student's key, then each lesson's
- * id in the same order. Answers how many comments went.
+ * How many fields one step of a walk over a course's record of comments asks
+ * HSCAN for. COUNT is a hint: Redis visits at most ten times as many buckets
+ * in one step and answers about this many fields, so what one call decodes,
+ * how long it runs and what it answers have a ceiling whatever the course's
+ * size, where HGETALL decoded the whole record in one call.
  */
-export const FORGET_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-forget:v2
+export const COMMENT_SCAN_COUNT = 200;
+
+/**
+ * The largest data room any store has, paying or not (lib/store-data-rules.ts):
+ * the most a store's comments can take, since every comment is charged to the
+ * room before it is written, and a store on a smaller plan keeps what it has,
+ * never more.
+ */
+const LARGEST_DATA_ROOM = Math.max(...Object.values(DATA_ROOM_BYTES), ...Object.values(NON_PAYING_DATA_ROOM_BYTES));
+
+/** The most comments one course's record can hold: each is charged at least four entries of the room (commentBytes). */
+export const MOST_COURSE_COMMENTS = Math.floor(LARGEST_DATA_ROOM / (4 * ENTRY_BYTES));
+
+/**
+ * The steps a walk over a record of `fields` fields may take: half a COUNT a
+ * step at the least, as the store's other walks allow (lib/free.ts), and two
+ * more for what is written while it walks. A walk not at its end by then is
+ * unknown and throws, never handed over as whole.
+ */
+export function scanPagesFor(fields: number): number {
+  return Math.ceil(Math.max(0, fields) / (COMMENT_SCAN_COUNT / 2)) + 2;
+}
+
+/** The steps a walk over the largest course may take, whatever Redis answers. */
+export const COMMENT_SCAN_PAGES = scanPagesFor(MOST_COURSE_COMMENTS);
+
+/**
+ * One step of taking one student's comments out of a course, on the Redis
+ * side, with the answers under their own comments, as deleting a comment
+ * does. KEYS: the comments, the newest, the answer counts, then each lesson's
+ * comments; ARGV: the student's key, the cursor, COMMENT_SCAN_COUNT, "free"
+ * (their own threads go once no answer is left under them) or "all", the
+ * room's ENTRY_BYTES and DATA_STEP_BYTES, then each lesson's id in the order
+ * of KEYS. Answers are taken before threads, each counted off its thread,
+ * so a thread whose answers sit in a later step waits for the next pass and
+ * none is left without its thread. Answers {the next cursor, how many went,
+ * the room they were charged (commentBytes, visible), how many of their
+ * threads wait}: counts, never the words (they were all sent back until 9
+ * November 2026, past what the erasure counts). The name they chose goes in
+ * forgetLessonCommentsPerson.
+ */
+export const FORGET_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-forget:v3
 local who = ARGV[1]
+local mode = ARGV[4]
+local entry = tonumber(ARGV[5])
+local step = tonumber(ARGV[6])
+if (mode ~= "free" and mode ~= "all") or not entry or not step or step < 1 then return {"x"} end
 local lessons = {}
-for i = 5, #KEYS do lessons[ARGV[i - 3]] = KEYS[i] end
-local flat = redis.call("HGETALL", KEYS[1])
-local all = {}
-local flat_raw = {}
-local tops = {}
+for i = 4, #KEYS do lessons[ARGV[i + 3]] = KEYS[i] end
+local page = redis.call("HSCAN", KEYS[1], ARGV[2], "COUNT", tonumber(ARGV[3]))
+local flat = page[2]
+local answers = {}
+local parents = {}
+local threads = {}
 for i = 1, #flat, 2 do
   local ok, c = pcall(cjson.decode, flat[i + 1])
   if ok and type(c) == "table" then
-    all[flat[i]] = c
-    flat_raw[flat[i]] = flat[i + 1]
-    if c.b == who and (c.r == nil or c.r == cjson.null) then tops[flat[i]] = true end
+    local parent = c.r
+    if parent == cjson.null then parent = nil end
+    if parent ~= nil then
+      table.insert(answers, {flat[i], flat[i + 1], c, parent})
+      table.insert(parents, parent)
+    elseif c.b == who then
+      table.insert(threads, {flat[i], flat[i + 1], c})
+    end
   end
 end
-local gone = {}
-for id, c in pairs(all) do
-  local parent = c.r
-  if parent == cjson.null then parent = nil end
-  if c.b == who or (parent ~= nil and tops[parent]) then
-    redis.call("HDEL", KEYS[1], id)
-    redis.call("ZREM", KEYS[2], id)
-    redis.call("HDEL", KEYS[3], id)
-    if lessons[c.l] then redis.call("ZREM", lessons[c.l], id) end
-    if parent ~= nil and not tops[parent] and all[parent] then redis.call("HINCRBY", KEYS[3], parent, -1) end
-    table.insert(gone, flat_raw[id])
+local function fields(key, names)
+  local out = {}
+  for first = 1, #names, 1000 do
+    local chunk = {}
+    for k = first, math.min(first + 999, #names) do table.insert(chunk, names[k]) end
+    local got = redis.call("HMGET", key, unpack(chunk))
+    for k = 1, #chunk do out[first + k - 1] = got[k] end
+  end
+  return out
+end
+local under = {}
+local above = fields(KEYS[1], parents)
+for k = 1, #parents do
+  if above[k] then
+    local ok, p = pcall(cjson.decode, above[k])
+    if ok and type(p) == "table" and p.b == who then under[parents[k]] = true end
   end
 end
-local name = redis.call("HGET", KEYS[4], who)
-redis.call("HDEL", KEYS[4], who)
-return {name or "", gone}`;
+local gone = 0
+local freed = 0
+local held = 0
+local function take(id, raw, c, parent)
+  if redis.call("HDEL", KEYS[1], id) ~= 1 then return end
+  redis.call("ZREM", KEYS[2], id)
+  redis.call("HDEL", KEYS[3], id)
+  if type(c.l) == "string" and lessons[c.l] then redis.call("ZREM", lessons[c.l], id) end
+  if parent ~= nil and redis.call("HEXISTS", KEYS[1], parent) == 1 then redis.call("HINCRBY", KEYS[3], parent, -1) end
+  local bytes = string.len(raw)
+  if c.h == true then bytes = bytes - string.len(',"h":true') end
+  freed = freed + math.floor((bytes + entry * 4 + step - 1) / step) * step
+  gone = gone + 1
+end
+for _, row in ipairs(answers) do
+  if row[3].b == who or under[row[4]] then take(row[1], row[2], row[3], row[4]) end
+end
+if #threads > 0 then
+  local ids = {}
+  for k = 1, #threads do ids[k] = threads[k][1] end
+  local left = fields(KEYS[3], ids)
+  for k, row in ipairs(threads) do
+    if mode == "all" or (tonumber(left[k]) or 0) <= 0 then take(row[1], row[2], row[3], nil) else held = held + 1 end
+  end
+end
+return {page[1], gone, freed, held}`;
 
 /**
- * Finds every comment one student wrote in a course where the erasure finds
- * them (FORGET_LESSON_COMMENTS): the course's whole record of comments,
- * whatever their lesson or age, not a lesson's newest LESSON_KEPT, which the
- * answers under its threads can outgrow. Only reads, and answers only theirs.
- * KEYS: the comments; ARGV: the student's key, the most stored bytes of theirs
- * it may answer. Answers {0, each of theirs} when they fit, {1, their stored
- * bytes} when they do not (none of them sent), and {2} when a record does not
- * read as a comment, since whose it is cannot be known.
+ * The passes an erasure walks a course's record at the most: a thread of
+ * theirs read before the answers under it waits for the next pass; the last
+ * pass takes every one of theirs left, whatever its count of answers says.
  */
-export const LESSON_COMMENTS_OF = `-- marktmorgen:lesson-comments-of:v1
-local who = ARGV[1]
-local most = tonumber(ARGV[2])
-if not most or most < 0 then return {2} end
-local flat = redis.call("HGETALL", KEYS[1])
-local mine = {}
-local bytes = 0
-for i = 1, #flat, 2 do
-  local ok, c = pcall(cjson.decode, flat[i + 1])
-  if not ok or type(c) ~= "table" or type(c.b) ~= "string" then return {2} end
-  if c.b == who then
-    table.insert(mine, flat[i + 1])
-    bytes = bytes + string.len(flat[i + 1])
-  end
-end
-if bytes > most then return {1, bytes} end
-local out = {0}
-for _, raw in ipairs(mine) do table.insert(out, raw) end
-return out`;
+export const FORGET_PASSES = 3;
 
-/** The stored bytes of a student's comments the first read of a copy may answer: a few long ones, at one studio unit's bytes. */
-export const COPY_FIRST_BYTES = 16_000;
-
-/**
- * The most one read of LESSON_COMMENTS_OF moves, for `most` stored bytes:
- * one command; the script, the key and the student's key sent; and the
- * answer, each comment's JSON written again as a string (every quote and
- * backslash doubled, so at most twice its bytes) with its quotes and comma
- * (a comment is far longer than those three bytes, so three times `most`
- * holds them all).
- */
-export function copyReadWork(courseId: string, who: string, most: number): { commands: number; bytes: number } {
-  return { commands: 1, bytes: LESSON_COMMENTS_OF.length + commentsKey(courseId).length + who.length + 64 + 3 * most };
+function forgetCommand(courseId: string, lessonIds: string[], who: string, cursor: string, mode: "free" | "all"): (string | number)[] {
+  return ["EVAL", FORGET_LESSON_COMMENTS, 3 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), who, cursor, COMMENT_SCAN_COUNT, mode, ENTRY_BYTES, DATA_STEP_BYTES, ...lessonIds];
 }
 
 /**
- * Every comment one student (`who`, lib/learn.ts emailKey) wrote in a course,
- * for the copy of what a store keeps about them (lib/person-copy.ts): read
- * whole, or not at all. `pay` is given what a read may move before it is
- * sent and throws when it cannot be paid, so nothing is read unpaid. A first
- * read is paid at COPY_FIRST_BYTES; when theirs are more, the answer says how
- * many bytes, and one more read is paid at that size. A record that does not
- * read, an answer of another shape, or theirs grown past what was paid
- * between the two throws: the copy fails and says so, never leaves them out.
+ * What one step of FORGET_LESSON_COMMENTS moves, for a course of these
+ * lessons: four billed commands (the EVAL and, inside it, the HSCAN and two
+ * HMGET of a step's fields; Upstash bills a script's inside too, docs/backup.md)
+ * and the bytes of the command, at a cursor of twenty digits, and its answer
+ * of four numbers. lib/erasure-rules.ts counts it in ERASE_PER (commentPages,
+ * commentPageLessons), held over this in tests/lesson-comments-copy-erasure-bounds.test.ts.
+ * The commands it runs for each comment it deletes are not in it.
  */
-export async function studentComments(
-  courseId: string,
-  who: string,
-  pay: (work: { commands: number; bytes: number }) => Promise<void>,
-): Promise<LessonComment[]> {
-  if (!isRedisConfigured()) return [];
-  let most = COPY_FIRST_BYTES;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    await pay(copyReadWork(courseId, who, most));
-    const reply = oneReply(await redisPipeline([["EVAL", LESSON_COMMENTS_OF, 1, commentsKey(courseId), who, most]]));
-    if (!Array.isArray(reply) || reply.length < 1) throw unreadableComments();
-    const code = dataSlot(reply, 0);
-    if (code === 1 && attempt === 0 && reply.length === 2) {
-      const bytes = dataSlot(reply, 1);
-      if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes <= most) throw unreadableComments();
-      most = bytes;
-      continue;
-    }
-    if (code !== 0) throw unreadableComments();
-    const comments: LessonComment[] = [];
-    const seen = new Set<string>();
-    let bytes = 0;
-    for (let index = 1; index < reply.length; index += 1) {
-      const raw = dataSlot(reply, index);
-      const comment = parseComment(raw);
-      if (typeof raw !== "string" || !comment || comment.by !== who || seen.has(comment.id)) throw unreadableComments();
-      seen.add(comment.id);
-      bytes += new TextEncoder().encode(raw).length;
-      comments.push(comment);
-    }
-    if (bytes > most) throw unreadableComments();
-    return comments;
-  }
-  throw unreadableComments();
+export function forgetPageWork(courseId: string, lessonIds: string[], who: string): { commands: number; bytes: number } {
+  return { commands: 4, bytes: JSON.stringify(forgetCommand(courseId, lessonIds, who, "9".repeat(20), "free")).length + 64 };
+}
+
+/** How many fields a course's record of comments holds, each read exactly. */
+async function commentFields(courseIds: string[], what: string): Promise<number[]> {
+  if (!courseIds.length) return [];
+  const replies = exactReplies(await redisPipeline(courseIds.map((c) => ["HLEN", commentsKey(c)])), courseIds.length, what);
+  return replies.map((raw) => replyCount(raw, what));
+}
+
+/**
+ * The steps deleting a person walks over these courses' comments, counted
+ * before it runs (lib/person-erasure.ts, erasureSize): `pages`, each course's
+ * scanPagesFor its record, and `lessonPages`, each of those steps times the
+ * lessons it names. Each is walked FORGET_PASSES times at the most.
+ */
+export async function commentScanSize(courses: { courseId: string; lessonIds: string[] }[]): Promise<{ pages: number; lessonPages: number }> {
+  if (!courses.length || !isRedisConfigured()) return { pages: 0, lessonPages: 0 };
+  const counts = await commentFields(courses.map((c) => c.courseId), "the lesson comments counted for a person's erasure");
+  let pages = 0;
+  let lessonPages = 0;
+  courses.forEach((course, k) => {
+    const steps = scanPagesFor(counts[k]);
+    pages += steps;
+    lessonPages += steps * course.lessonIds.length;
+  });
+  return { pages, lessonPages };
 }
 
 /**
  * Deletes one student's comments in a course (and the answers under their
  * own comments) and the name they chose (lib/person-erasure.ts). `who` is
- * lib/learn.ts emailKey. What they took goes back to `room` as the other
- * deletions here give it back: each comment at commentBytes, and the name
- * kept once (a name typed again was charged again; that part is not known,
- * so it stays counted, never less than kept). A reply that is not exactly
- * what was asked for throws UnknownReply (lib/redis-exact.ts).
+ * lib/learn.ts emailKey. The course's record is walked in steps of
+ * COMMENT_SCAN_COUNT, at most scanPagesFor its size a pass and FORGET_PASSES
+ * passes. What they took goes back to `room` as the other deletions here give
+ * it back: each comment at commentBytes, and the name kept once (a name typed
+ * again was charged again; that part is not known, so it stays counted, never
+ * less than kept), also when a later step fails. A reply that is not exactly
+ * what was asked for throws UnknownReply (lib/redis-exact.ts), and what that
+ * step did is not given back.
  */
 export async function forgetLessonCommentsPerson(courseId: string, lessonIds: string[], who: string, room?: DataStore): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const what = "the deletion of a student's lesson comments";
-  const [reply] = exactReplies(
-    await redisPipeline([
-      ["EVAL", FORGET_LESSON_COMMENTS, 4 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), namesKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), who, ...lessonIds],
-    ]),
-    1,
-    what,
-  );
-  // Exactly {the name ("" for none), the comments taken}: any other shape
-  // leaves the deletion unknown (UnknownReply), and nothing is given back.
-  const [name, raws] = exactReplies(reply, 2, what);
-  const gone = plainList(raws);
-  if (typeof name !== "string" || !gone || !gone.every((raw) => typeof raw === "string")) throw new UnknownReply(what);
-  if (room) {
-    const freed = takenBytes(gone) + (typeof name === "string" && name ? dataBytes([who, name], 1) : 0);
-    if (freed > 0) await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);
+  const [fields] = await commentFields([courseId], what);
+  const pages = scanPagesFor(fields);
+  let gone = 0;
+  let freed = 0;
+  try {
+    for (let pass = 0; pass < FORGET_PASSES; pass += 1) {
+      const mode = pass === FORGET_PASSES - 1 ? "all" : "free";
+      let cursor = "0";
+      let held = 0;
+      for (let page = 0; ; page += 1) {
+        if (page >= pages) throw new UnknownReply(what);
+        const [reply] = exactReplies(await redisPipeline([forgetCommand(courseId, lessonIds, who, cursor, mode)]), 1, what);
+        // Exactly {the next cursor, how many went, their room, how many of their threads wait}: any other shape
+        // leaves the step unknown (UnknownReply), and nothing of it is given back.
+        const [next, taken, bytes, waiting] = exactReplies(reply, 4, what);
+        if (typeof next !== "string" || !/^[0-9]+$/.test(next)) throw new UnknownReply(what);
+        const count = replyCount(taken, what);
+        const charged = replyCount(bytes, what);
+        held += replyCount(waiting, what);
+        if (charged < count * 4 * ENTRY_BYTES || (count === 0) !== (charged === 0)) throw new UnknownReply(what);
+        gone += count;
+        freed += charged;
+        cursor = next;
+        if (cursor === "0") break;
+      }
+      if (held === 0) break;
+    }
+    const [name, dropped] = exactReplies(await redisPipeline([["HGET", namesKey(courseId), who], ["HDEL", namesKey(courseId), who]]), 2, what);
+    if ((name !== null && typeof name !== "string") || replyCount(dropped, what) > 1) throw new UnknownReply(what);
+    if (typeof name === "string" && name && dropped === 1) freed += dataBytes([who, name], 1);
+  } finally {
+    if (room && freed > 0) await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);
   }
-  return gone.length;
+  return gone;
+}
+
+/**
+ * One step of finding every comment one student wrote in a course where the
+ * erasure finds them (FORGET_LESSON_COMMENTS): the course's whole record of
+ * comments, whatever their lesson or age, not a lesson's newest LESSON_KEPT,
+ * which the answers under its threads can outgrow. Only reads, and answers
+ * only theirs. KEYS: the comments; ARGV: the student's key, the cursor,
+ * COMMENT_SCAN_COUNT. Answers {the next cursor, each of theirs in this step},
+ * or {"x"} when a record does not read as a comment, since whose it is cannot
+ * be known.
+ */
+export const LESSON_COMMENTS_OF = `-- marktmorgen:lesson-comments-of:v2
+local page = redis.call("HSCAN", KEYS[1], ARGV[2], "COUNT", tonumber(ARGV[3]))
+local flat = page[2]
+local out = {page[1]}
+for i = 1, #flat, 2 do
+  local ok, c = pcall(cjson.decode, flat[i + 1])
+  if not ok or type(c) ~= "table" or type(c.b) ~= "string" then return {"x"} end
+  if c.b == ARGV[1] then table.insert(out, flat[i + 1]) end
+end
+return out`;
+
+function copyCommand(courseId: string, who: string, cursor: string): (string | number)[] {
+  return ["EVAL", LESSON_COMMENTS_OF, 1, commentsKey(courseId), who, cursor, COMMENT_SCAN_COUNT];
+}
+
+/**
+ * The most the copy's read of one student's comments in a course moves, from
+ * what is known before it runs and never from an answer: COMMENT_SCAN_PAGES
+ * steps of two billed commands (the EVAL and the HSCAN inside it,
+ * docs/backup.md), each the bytes of its command at a cursor of twenty digits
+ * and its framing; and theirs, which the store's room bounds, each comment's
+ * JSON written again as a string (every quote and backslash doubled, so at
+ * most twice its bytes) with its quotes and comma: three times the largest
+ * room holds them all. Not paid from anything yet (tests/plan-cost-registry.ts,
+ * NOT_A_COST.PERSON_COPY_BUDGET).
+ */
+export function copyReadWork(courseId: string, who: string): { commands: number; bytes: number } {
+  const step = JSON.stringify(copyCommand(courseId, who, "9".repeat(20))).length + 64;
+  return { commands: 2 * COMMENT_SCAN_PAGES, bytes: COMMENT_SCAN_PAGES * step + 3 * LARGEST_DATA_ROOM };
+}
+
+/**
+ * Every comment one student (`who`, lib/learn.ts emailKey) wrote in a course,
+ * for the copy of what a store keeps about them (lib/person-copy.ts): read
+ * whole, or not at all, in steps of COMMENT_SCAN_COUNT. Bounded by what is
+ * known before, never by an answer: at most COMMENT_SCAN_PAGES steps, and at
+ * most the largest data room of theirs (copyReadWork). A record that does not
+ * read, an answer of another shape, a walk not at its end by then or theirs
+ * past that room throws: the copy fails and says so, never leaves them out.
+ * A comment HSCAN hands back twice is kept once.
+ */
+export async function studentComments(courseId: string, who: string): Promise<LessonComment[]> {
+  if (!isRedisConfigured()) return [];
+  const comments = new Map<string, LessonComment>();
+  let bytes = 0;
+  let cursor = "0";
+  for (let page = 0; ; page += 1) {
+    if (page >= COMMENT_SCAN_PAGES) throw unreadableComments();
+    const reply = oneReply(await redisPipeline([copyCommand(courseId, who, cursor)]));
+    if (!Array.isArray(reply) || reply.length < 1) throw unreadableComments();
+    const next = dataSlot(reply, 0);
+    if (typeof next !== "string" || !/^[0-9]+$/.test(next)) throw unreadableComments();
+    for (let index = 1; index < reply.length; index += 1) {
+      const raw = dataSlot(reply, index);
+      const comment = parseComment(raw);
+      if (typeof raw !== "string" || !comment || comment.by !== who) throw unreadableComments();
+      bytes += utf8Length(raw);
+      if (bytes > LARGEST_DATA_ROOM) throw unreadableComments();
+      comments.set(comment.id, comment);
+    }
+    cursor = next;
+    if (cursor === "0") return [...comments.values()];
+  }
 }

@@ -15,7 +15,9 @@
  *   before any token, product or page is read;
  * - the way to take an address off a wait list stays open past the public
  *   share, on the share kept for what people already have (who: "buyer"),
- *   still counted, and rests only when the whole window is used;
+ *   still counted; with the whole window used it never rests: it shows the
+ *   button and what happened after it with nothing read past the store
+ *   (pre-review of 9 November 2026, MÉDIO: leaving a list is a right);
  * - a store's own page asks up to MAX_FORMS forms, one read each, more than
  *   a later page's commands: it takes siteFormUnits of the window for them
  *   once its blocks say how many, before it reads one, and rests when the
@@ -218,10 +220,26 @@ async function main(): Promise<void> {
   const restingForms = await watched(() => formsPage(2));
   is("the page asking forms rests, no form read", [restingForms.out.includes(restingTitle), formReads(restingForms.commands)], [true, 0]);
 
-  part("With the whole window used, the way off the list rests too");
+  // Pre-review of 9 November 2026 (MÉDIO): the wait list's emails link to this page to leave (lib/waitlist.ts), and the
+  // way to leave a list must keep working (CAN-SPAM, GDPR art. 21): with the whole window used, the page still shows the
+  // button and what happened after it, reading nothing past the store (no token, no product), so it costs no read.
+  part("With the whole window used, the way off the list still works, reading nothing behind it");
   await takePublicRequest(store, "buyer", Date.now(), whole, { shared: true });
-  for (const i of [4, 5]) {
-    const { out, commands } = await watched(() => draw(i, i === 4 ? 0 : 800 + i));
+  is("the store's own pages rest", await isResting(store, Date.now(), "buyer"), true);
+  {
+    const { out, commands } = await watched(() => draw(4, 0));
+    is("the real link off the list: its button, no resting notice, nothing read", [out.includes(g.removeButton), out.includes(`value="${leave}"`), out.includes(restingTitle), readsIn(commands)], [true, true, false, []]);
+  }
+  {
+    const { out, commands } = await watched(() => draw(5, 805));
+    is("taken off: said so, no resting notice, nothing read", [out.includes(g.removedTitle), out.includes(restingTitle), readsIn(commands)], [true, false, []]);
+  }
+  {
+    const { out, commands } = await watched(() => drawn(wait({ leave: "not-a-token" })));
+    is("an address that is not a link's shape: no button, nothing read", [out.includes(g.removeButton), readsIn(commands)], [false, []]);
+  }
+  for (const i of [0, 2, 3]) {
+    const { out, commands } = await watched(() => draw(i, 900 + i));
     is(`${pages[i][0]}: rests, nothing behind it read`, [out.includes(restingTitle), readsIn(commands)], [true, []]);
   }
   done();

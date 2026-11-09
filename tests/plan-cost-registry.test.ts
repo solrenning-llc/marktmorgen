@@ -268,7 +268,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // An affiliate's own page and the store's map take requests sized by what they read (lib/public-read-rules.ts, 4 November 2026):
   // at every size, from an empty program or store to the largest, the requests cost more than the reads.
-  const sizes = [0, 1, 15, 16, 17, 31, 32, 33, 149, 150, 151, 500, 1_000, 5_000, 50_000, 1_000_000];
+  // And the sizes between, where a field's share of a request is rounded up least (the book's PayPal questions in part
+  // and in full, BOOK_KEPT_REFUND_BYTES, audit R13, MEDIUM 2): 868, 1,092, 1,208 and 1,541 fields.
+  const sizes = [0, 1, 15, 16, 17, 31, 32, 33, 149, 150, 151, 500, 868, 1_000, 1_092, 1_208, 1_541, 5_000, 50_000, 1_000_000];
   for (const fields of sizes) for (const rows of [0, 1, 16, 17, 200, 700, 5_000]) for (const listings of [0, 1, 32, 33, 1_000, 2_000]) for (const stripePages of [0, 1, 3, 13, 23, 40]) {
     const size = { fields, rows, listings, stripePages };
     assert.ok(affiliatePageUnits(size) * laterPageCost() >= affiliatePageRead(size), `affiliate book ${JSON.stringify(size)}: ${affiliatePageUnits(size)} x ${laterPageCost()} < ${affiliatePageRead(size)}`);

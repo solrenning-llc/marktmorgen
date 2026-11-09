@@ -199,7 +199,8 @@ export const ERASERS: Eraser[] = [
       const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files, (reviews) => dropReviewQuotes(s.store, reviews));
       // Then the quotes are kept again from the reviews as they now stand, under the store's lock, even when this run
       // found none: a review an earlier run deleted is not found again, a refresh that read one before its delete has
-      // written by now, and other buyers' quotes taken off above come back. When that fails, this part fails too.
+      // written by now, and other buyers' quotes taken off above come back. When they cannot be kept, they are all
+      // taken off; this part fails only when that is not confirmed either.
       await keepStoreQuotes(s.store);
       return done.records;
     },

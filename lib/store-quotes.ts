@@ -35,8 +35,9 @@ export async function refreshStoreQuotes(store: Store): Promise<void> {
 
 /**
  * refreshStoreQuotes for a caller that must know it worked (a person's erasure, lib/person-erasure.ts): the quotes as
- * the reviews now stand, whatever an earlier run of that caller found. Throws when the record is not read or not
- * written, after taking every quote off, so the caller does not answer done.
+ * the reviews now stand, whatever an earlier run of that caller found. When they cannot be kept, every quote is taken
+ * off instead: once that is confirmed nobody is quoted at all, so it resolves and the next change keeps them again.
+ * Throws only when taking them off is not confirmed either, so the caller does not answer done.
  */
 export async function keepStoreQuotes(store: Store): Promise<void> {
   const statsId = store.statsId;
@@ -59,8 +60,14 @@ export async function keepStoreQuotes(store: Store): Promise<void> {
   } catch (error) {
     // Not read is not "as before": since the last keep a review may have been hidden, refunded or deleted, or its
     // words changed, so nothing is quoted rather than words that may be off its page now; the next change keeps them.
-    await setQuotes(storeRef(store), []).catch((cleared: unknown) => console.error("taking a store's quotes off failed", cleared));
-    throw error;
+    // Once nothing is quoted, no one's words are left to take off: a review that never reads again (a stale entry)
+    // must not keep every erasure of the store from being done.
+    const cleared = await setQuotes(storeRef(store), []).catch((failed: unknown) => {
+      console.error("taking a store's quotes off failed", failed);
+      return null;
+    });
+    if (cleared?.quotes.length !== 0) throw error;
+    console.error("keeping a store's newest reviews failed; its quotes are off until the next change", error);
   }
 }
 

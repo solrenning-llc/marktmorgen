@@ -184,7 +184,7 @@ async function main(): Promise<void> {
     const email = "oncecl@example.com";
     await claimHandle(email, "oncecl", "Oncecl Shop", "");
     await setSubscription(email, { customerId: "cus_oncecl0001", subscriptionId: "sub_onceclplan01", active: true, tier: "creator", cycle: "month", trialEnds: 0 });
-    await setStripeAccount(email, "acct_1Once000000000001", true);
+    await setStripeAccount(email, "acct_once01", true);
     await setSubscription(email, { active: false });
     const store = (await storeForEmail(email))!;
     const folder = await storeFolder(storeRef(store));

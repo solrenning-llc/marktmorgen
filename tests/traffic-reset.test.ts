@@ -64,6 +64,33 @@ async function main(): Promise<void> {
   redis.run(["SET", "nl:operator:traffic-reset:lock", "1", "EX", 30]);
   is("a reset already running: busy, nothing written", [await resetVisits({ store: shop, to: 0, now: NOW }), redis.run(["GET", visits])], [{ ok: false, reason: "busy" }, "10"]);
 
+  part("No change without its record, and none from a reset whose lock was lost (Codex M on #3380)");
+  redis.clear();
+  redis.run(["SET", visits, "100", "EX", 1000]);
+  // The record cannot be written (a key of another type): the visits must stay as they were.
+  redis.run(["SET", "nl:operator:traffic-log", "not a list"]);
+  const unrecorded = await resetVisits({ store: shop, to: 10, now: NOW }).catch(() => ({ ok: false, reason: "thrown" }));
+  is("a record that cannot be written: not done, and the visits not lowered", [unrecorded.ok, redis.run(["GET", visits])], [false, "100"]);
+  redis.run(["DEL", "nl:operator:traffic-log"]);
+  // A reset that waited past its lock: another reset took the lock and lowered the visits meanwhile.
+  const plain = redis.pipeline.bind(redis);
+  let overtaken = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const writes = commands.some((command) => command[0] === "EVAL" || command[0] === "DECRBY");
+    if (writes && !overtaken) {
+      overtaken = true;
+      redis.run(["DEL", "nl:operator:traffic-reset:lock"]);
+      redis.run(["SET", "nl:operator:traffic-reset:lock", "someone-else", "EX", 30]);
+      redis.run(["SET", visits, "20", "EX", 1000]);
+    }
+    return plain(commands);
+  }) as typeof redis.pipeline;
+  const stale = await resetVisits({ store: shop, to: 10, now: NOW }).catch(() => ({ ok: false, reason: "thrown" }));
+  redis.pipeline = plain;
+  is("a reset that lost its lock changes nothing: the visits stay as the later one left them", [stale.ok, redis.run(["GET", visits])], [false, "20"]);
+  is("and it never lets go of the lock it no longer holds", redis.run(["GET", "nl:operator:traffic-reset:lock"]), "someone-else");
+  redis.run(["DEL", "nl:operator:traffic-reset:lock"]);
+
   part("Only the operator, answered as if the door did not exist for anybody else");
   const route = readFileSync("app/api/operator/traffic-reset/route.ts", "utf8");
   is("refused from another site and for anybody but the operator, as a 404", /fromAnotherSite\(request\)\) return notFound/.test(route) && /if \(!isOperator\(email\)\) return notFound/.test(route), true);

@@ -15,7 +15,6 @@ import {
   type NetQuantity,
   type SafetyGap,
   type SafetyInfo,
-  GPSR_AREA,
   MAX_ELECTRONIC,
   MAX_IDENTIFIER,
   MAX_NAME,
@@ -25,6 +24,8 @@ import {
   MAX_WARNINGS,
   checkProp65,
   electronicAddress,
+  gpsrClosedCountries,
+  gpsrCloses,
   readNetQuantity,
   readSafetyInfo,
   safetyGaps,
@@ -131,10 +132,9 @@ export const GAP_WORDS: Record<SafetyGap, string> = {
 };
 
 /**
- * "" when nothing is missing; otherwise one sentence listing what is. It says
- * what is needed, not what happens: no country is closed in this unit, so the
- * cart still ships the product there (docs/sz2-physical-legal-fields.md,
- * "Next units").
+ * "" when nothing is missing; otherwise one sentence listing what is. What
+ * that means for buyers is said by safetySummary, from where the product
+ * ships.
  */
 export function gapSummary(gaps: readonly SafetyGap[]): string {
   if (gaps.length === 0) return "";
@@ -144,13 +144,32 @@ export function gapSummary(gaps: readonly SafetyGap[]): string {
 }
 
 /**
- * The studio's one-sentence status of the EU/EEA product safety fields, from
- * where the product ships: a product that ships to no EU/EEA country is not
- * told about EU/EEA gaps.
+ * Whether the checkout leaves countries out of this product's shipping now
+ * because its safety fields are not filled: the same rule as
+ * lib/physical-legal-ship.ts (shippingNow), read from the same record.
+ */
+export function safetyClosed(shipsTo: readonly string[], info: SafetyInfo | null, hasPicture: boolean): boolean {
+  return gpsrClosedCountries(shipsTo, info, hasPicture).length > 0;
+}
+
+/** What the closing means for buyers, said to the creator (VR 2): some countries, or every one the product ships to. */
+export const CLOSED_WORDS = {
+  some: "Until these details are complete, buyers in the EU and EEA can't buy this product.",
+  all: "Until these details are complete, no one can buy this product, because it only ships to the EU and EEA.",
+} as const;
+
+/**
+ * The studio's status of the EU/EEA product safety fields, from where the
+ * product ships: a product that ships to no EU/EEA country is not told about
+ * EU/EEA gaps; one the checkout closes there (safetyClosed) is told what is
+ * needed and that buyers there can't buy it until then.
  */
 export function safetySummary(shipsTo: readonly string[], info: SafetyInfo | null, hasPicture: boolean): string {
-  if (!shipsTo.some((code) => GPSR_AREA.includes(code))) return "This product does not ship to the EU/EEA.";
-  return gapSummary(safetyGaps(info, hasPicture)) || "The EU/EEA product safety fields are filled.";
+  if (!shipsTo.some(gpsrCloses)) return "This product does not ship to the EU/EEA.";
+  const needed = gapSummary(safetyGaps(info, hasPicture));
+  if (!needed) return "The EU/EEA product safety fields are filled.";
+  const closed = gpsrClosedCountries(shipsTo, info, hasPicture);
+  return `${needed} ${closed.length === shipsTo.length ? CLOSED_WORDS.all : CLOSED_WORDS.some}`;
 }
 
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;

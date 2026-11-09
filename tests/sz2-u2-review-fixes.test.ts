@@ -3,10 +3,11 @@
  * (proofs by Claude 1: tests/c1proof-sz2-u2-eu-words.test.ts and
  * tests/c1proof-sz2-u2-copy.test.ts, made permanent here).
  *
- *   - No country is closed in this unit (the cart still ships an incomplete
- *     product to the EU/EEA), so the studio says what is needed before selling
- *     there, never that the product "is not shipped" there; and a product that
- *     does not ship to the EU/EEA is not told about EU/EEA gaps.
+ *   - The studio says what is needed before selling to the EU/EEA, never that
+ *     the product "is not shipped" there; since #3029 closes those countries in
+ *     the checkout while a gap remains, it also says buyers there can't buy it
+ *     (tests/sz2-u3-display.test.ts); and a product that does not ship to the
+ *     EU/EEA is not told about EU/EEA gaps.
  *   - Copying a shipped product to another store keeps its shipping and its
  *     legal information (only the main price's net quantity: options are not
  *     copied), so the creator's filled fields are not lost without a word.
@@ -24,12 +25,14 @@ const safetySummary = (record as unknown as Record<string, unknown>).safetySumma
 const summaryOf = (shipsTo: readonly string[], info: unknown, hasPicture: boolean): string =>
   typeof safetySummary === "function" ? safetySummary(shipsTo, info, hasPicture) : record.gapSummary(safetyGaps(null, hasPicture));
 
-part("The studio words match what checkout does (no country is closed yet)");
+part("The studio words match what checkout does (the EU/EEA closed since #3029)");
 const world = parseProduct({ id: "p1", title: "Book", priceCents: 3500, shipping: { cents: 600, region: "world", note: "" } })!;
 const cart = cartShipping([cartItemOf(world)]);
-is("the cart still ships an incomplete product to DE in this unit", cart.kind === "ships" && cart.countries.includes("DE"), true);
+// Changed assertions, noted (#3029 closes the EU/EEA in the checkout while the safety fields are not filled): the cart
+// no longer ships the incomplete product to DE, so the studio now says buyers there can't buy it (VR 2).
+is("the cart leaves DE out of an incomplete product (since #3029)", cart.kind === "ships" && !cart.countries.includes("DE") && cart.countries.includes("US"), true);
 const said = summaryOf(world.shipping!.countries, world.legal?.safety ?? null, false);
-is("so the studio does not say it is not shipped there", /not shipped/i.test(said), false);
+is("so the studio says buyers in the EU and EEA can't buy it", said.endsWith(" Until these details are complete, buyers in the EU and EEA can't buy this product."), true);
 is("it says what is needed before selling there", said.startsWith("Needed before selling to buyers in the EU/EEA: "), true);
 is("the words of the gaps list", record.gapSummary(["manufacturer-name", "picture", "warnings"]), "Needed before selling to buyers in the EU/EEA: the manufacturer's name, a picture of the product and the warnings, or a check that it has none.");
 is("nothing missing is no gaps sentence", record.gapSummary([]), "");

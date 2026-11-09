@@ -250,7 +250,10 @@ rest of the studio. This unit has no interface: 0 → 0 steps and decisions.
    draws it before the buy button, words in `lib/buyer-words/product-safety.ts`
    (7 languages). The unit price is shown for each price sold, from the price
    charged now (store sale or fair price), above the block. The studio's
-   summary (unit 2) already says "Not shipped to the EU/EEA until …".
+   summary (`safetySummary`, unit 2) lists what is needed and, from the same
+   rule (`safetyClosed`), says in a warning notice: "Until these details are
+   complete, buyers in the EU and EEA can't buy this product." (or, for a
+   product shipped only there, that no one can buy it).
 3. Confirmation email: the GPSR fields and the Prop 65 text.
 4. Price history written when a price or a sale changes; the EU/EEA prior
    price on the store sale (`lib/store-sale.ts`) and the percentage from it.

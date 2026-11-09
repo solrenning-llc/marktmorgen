@@ -6,7 +6,7 @@ import { toast } from "@/components/toast";
 import type { Product } from "@/lib/store";
 import { SHIP_COUNTRIES } from "@/lib/shipping";
 import { GPSR_AREA, MAX_ELECTRONIC, MAX_IDENTIFIER, MAX_NAME, MAX_POSTAL, MAX_PROP65, MAX_TYPE, MAX_WARNINGS, QUANTITY_UNITS, type QuantityUnit, readSafetyInfo } from "@/lib/physical-legal";
-import { type LegalFieldProblem, type PhysicalLegal, LEGAL_LABELS, checkLegalWrite, confirmsLegal, legalProblemMessage, safetySummary } from "@/lib/physical-legal-record";
+import { type LegalFieldProblem, type PhysicalLegal, LEGAL_LABELS, checkLegalWrite, confirmsLegal, legalProblemMessage, safetyClosed, safetySummary } from "@/lib/physical-legal-record";
 
 const NOT_CONFIRMED = "Saving was not confirmed. Reload the page to check what was saved before trying again.";
 
@@ -88,6 +88,8 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
   const id = `legal-${product.id}`;
   const countries = countryList();
   const savedSummary = safetySummary(product.shipping.countries, saved?.safety ?? null, hasPicture);
+  // While the checkout leaves the EU/EEA out (lib/physical-legal-ship.ts), the summary is a warning notice, not plain text.
+  const savedClosed = safetyClosed(product.shipping.countries, saved?.safety ?? null, hasPicture);
   const repNeeded = maker.country !== "" && !GPSR_AREA.includes(maker.country);
   const showRep = repNeeded || rep.name !== "" || rep.postal !== "" || rep.electronic !== "" || rep.country !== "";
   const link = "min-h-11 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
@@ -163,7 +165,7 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
   if (!open) {
     return (
       <div className="mt-3 text-sm text-ink-soft">
-        <p>
+        <p className={savedClosed ? "notice notice-warn" : undefined}>
           <span className="font-semibold text-ink">Legal information for shipping: </span>
           {savedSummary}
           {" "}
@@ -223,6 +225,7 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
 
   // Read leniently for the live summary: a value that would be refused counts as not filled.
   const liveSummary = safetySummary(product.shipping.countries, readSafetyInfo(draft().safety), hasPicture);
+  const liveClosed = safetyClosed(product.shipping.countries, readSafetyInfo(draft().safety), hasPicture);
 
   return (
     <form
@@ -240,7 +243,7 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
         <p className="mt-1 text-xs text-ink-soft">
           Fill in what your manufacturer or supplier gave you. You can save part of it now and the rest later. These are information fields: they do not tell you whether a law applies to your product.
         </p>
-        <p id={`${id}-gaps`} className="mt-2 text-sm font-semibold text-ink" aria-live="polite">
+        <p id={`${id}-gaps`} className={liveClosed ? "notice notice-warn mt-2 text-sm font-semibold" : "mt-2 text-sm font-semibold text-ink"} aria-live="polite">
           {liveSummary}
         </p>
         {problems.length ? (

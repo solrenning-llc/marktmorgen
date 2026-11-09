@@ -259,7 +259,8 @@ async function main(): Promise<void> {
     ["not filled, EU/EEA only", studioEuOnly],
   ] as const) {
     const closes = shippingNow(product)!.countries.length < activeShipping(product)!.countries.length;
-    is(`${name}: the studio says buyers can't buy exactly when the checkout closes a country`, /can't buy/.test(said(product)), closes);
+    // Changed assertion, noted (after the RED commit): either closing sentence counts, "no one can buy" included.
+    is(`${name}: the studio says buyers can't buy exactly when the checkout closes a country`, [SOME_CANT, NO_ONE].some((words) => said(product).endsWith(` ${words}`)), closes);
   }
   is("the form shows the closing in the studio's notice style, from the same rule", /safetyClosed\(product\.shipping\.countries, /.test(editor) && /notice notice-warn/.test(editor), true);
 

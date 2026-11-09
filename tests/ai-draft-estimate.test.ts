@@ -122,4 +122,20 @@ is("'double your' and 'triple the' still claim a number", safely(() => unsourced
 is("'0.125' is not the 125 the creator gave (nit)", safely(() => unsourcedNumbers(["0.125 inch thick"], "125 pages")), ["0.125"]);
 is("'1.250' in a European draft is still 1250", safely(() => unsourcedNumbers(["1.250 Rezepte"], "1250 recipes", "de")), []);
 
+part("The skips stay narrow: a claim that shares their shape is still listed (Claude 6 focal return on #3437, review 5831982049, LOW)");
+is("'30d' is 30 days, still a figure", safely(() => unsourcedNumbers(["30d free trial"], "")), ["30"]);
+is("'Ships in 3d' is still a figure", safely(() => unsourcedNumbers(["Ships in 3d"], "")), ["3"]);
+is("'3D' and '2D' are still shapes", safely(() => unsourcedNumbers(["3D printing and 2D sketches"], "")), []);
+is("'Double sales' claims a number", safely(() => unsourcedNumbers(["Double sales in 30 days"], "30 days")), ["Double"]);
+is("'Double revenue' claims a number", safely(() => unsourcedNumbers(["Double revenue, guaranteed"], "")), ["Double"]);
+is("'Triple conversions' claims a number", safely(() => unsourcedNumbers(["Triple conversions with one page"], "")), ["Triple"]);
+is("a double espresso and a double bed are not twice", safely(() => unsourcedNumbers(["A double espresso, a double bed and a triple scoop"], "")), []);
+is("'5m followers' is five million, not the 5 recipes given", safely(() => unsourcedNumbers(["5m followers trust us"], "5 recipes")), ["5m"]);
+is("'10m views' is ten million, not the 10 tips given", safely(() => unsourcedNumbers(["10m views"], "10 tips")), ["10m"]);
+is("'a 10m call' is still the 10 minutes given", safely(() => unsourcedNumbers(["A 10m call, then 10m of questions"], "a 10 minute call")), []);
+is("'our 10th year in business' claims a figure", safely(() => unsourcedNumbers(["Celebrating our 10th year in business"], "")), ["10"]);
+is("'our 1000th customer' claims a figure", safely(() => unsourcedNumbers(["Be our 1000th customer"], "")), ["1000"]);
+is("'the 10th year' the creator gave is not invented", safely(() => unsourcedNumbers(["Our 10th year"], "ten years in business")), []);
+is("a lesson's order is still not a figure", safely(() => unsourcedNumbers(["In the 2nd lesson and the 10th week"], "")), []);
+
 done();

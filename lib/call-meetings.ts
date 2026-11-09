@@ -49,7 +49,7 @@ import { readListing } from "@/lib/catalog";
 import { markBookingsChanged, readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
 import { MEET_STORES, callRefunded, dropScope, dueScopes, retryRecord } from "@/lib/meet-links";
-import { type PaidCall, isCallProduct, paidCalls, teamBookingsAhead, tellNewLink } from "@/lib/calls";
+import { type PaidCall, isCallProduct, paidCalls, tellNewLink } from "@/lib/calls";
 import { eventStillWants, readEventScope } from "@/lib/event-meetings";
 import type { Store } from "@/lib/store";
 import { isClaimId, isHostId, releaseClaim } from "@/lib/host-claims";
@@ -57,6 +57,7 @@ import { isClaimId, isHostId, releaseClaim } from "@/lib/host-claims";
 import { leaveFormerHost, replaceFormerHost, teamHostIds } from "@/lib/meet-links";
 import { callScope, readRecords } from "@/lib/meet-records";
 import { hostId } from "@/lib/host-claims";
+import { teamBookingsAhead } from "@/lib/calls";
 
 const BATCH = 40;
 const REFUND_STORES = 20;

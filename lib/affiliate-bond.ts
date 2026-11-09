@@ -141,8 +141,13 @@ export async function forgetBuyer(store: Store, email: string): Promise<boolean>
  */
 export async function forgetBondPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["HDEL", bondKey(statsId), buyerHash(statsId, email)]]);
+  const [gone] = await redisPipeline([forgetBondCommand(statsId, email)]);
   return Number(gone) || 0;
+}
+
+/** The command that forgets one buyer's bond (HDEL: 0 or 1), for a caller that reads its reply itself (lib/paypal-delivery.ts). */
+export function forgetBondCommand(statsId: string, email: string): (string | number)[] {
+  return ["HDEL", bondKey(statsId), buyerHash(statsId, email)];
 }
 
 /**

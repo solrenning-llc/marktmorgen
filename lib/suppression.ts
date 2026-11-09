@@ -4,7 +4,8 @@
  * again (CAN-SPAM's opt-out, the GDPR's objection to direct marketing) and
  * no import, API call or list from another platform puts them back.
  *
- *   nl:erased:<listId>   hash  fingerprint -> when they were deleted (seconds)
+ *   nl:erased:<listId>   hash  fingerprint -> when they were deleted (seconds), and, when the person asked for it
+ *                              themselves, "own:" + fingerprint -> when (seconds; ownErasureCommand)
  *
  * Kept under the store's list id (lib/contacts.ts), which every path that
  * emails a store's people already reads; deleting somebody gives a store
@@ -14,7 +15,11 @@
  * characters. It cannot be read back into an address; it can only answer
  * "is this address the one that was deleted?" when the address is typed
  * again. It holds nothing else: not their name, not what they bought, not
- * who deleted them.
+ * who on the team deleted them. Beside it, a person who asked for their own
+ * deletion has the same fingerprint noted as theirs ("own:"), because a
+ * team's deletion keeps their purchases and theirs does not
+ * (lib/person-erasure.ts): an order paid before it and still owed is then
+ * not handed over to them (lib/paypal-delivery.ts).
  *
  * Only the person can lift it, by giving their own yes again: asking for
  * something free and confirming by the emailed link, or ticking the box to
@@ -40,9 +45,22 @@ export function suppressCommand(listId: string, email: string, nowSeconds = Math
   return ["HSET", suppressedKey(listId), suppressionPrint(listId, email), nowSeconds];
 }
 
-/** Lifts it: the person's own yes, given again. */
+/** The field beside a deleted person's fingerprint that says they asked for the deletion themselves. */
+export function ownErasureField(listId: string, email: string): string {
+  return `own:${suppressionPrint(listId, email)}`;
+}
+
+/**
+ * Notes that this address's deletion from this store was asked for by the person themselves (lib/person-erasure.ts,
+ * written with the fingerprint, before anything is deleted). HSET: answers 1, or 0 for one noted before.
+ */
+export function ownErasureCommand(listId: string, email: string, nowSeconds = Math.floor(Date.now() / 1000)): Command {
+  return ["HSET", suppressedKey(listId), ownErasureField(listId, email), nowSeconds];
+}
+
+/** Lifts it, and the note that it was their own: the person's own yes, given again. */
 export function liftCommand(listId: string, email: string): Command {
-  return ["HDEL", suppressedKey(listId), suppressionPrint(listId, email)];
+  return ["HDEL", suppressedKey(listId), suppressionPrint(listId, email), ownErasureField(listId, email)];
 }
 
 /**

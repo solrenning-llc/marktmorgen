@@ -10,6 +10,9 @@ import { createHmac } from "node:crypto";
 import { ordersLinkWithToken } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
+import { importedKey } from "@/lib/imported-purchases";
+import { forgetBoughtCommands } from "@/lib/buyer-library";
+import { forgetBondCommand } from "@/lib/affiliate-bond";
 import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
@@ -20,7 +23,7 @@ import { emitEvent } from "@/lib/webhooks";
 import { deriveKey } from "@/lib/secret-box";
 import { createHash } from "node:crypto";
 import { noteForErasure } from "@/lib/erasure-index";
-import { suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { ownErasureField, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { countOrder } from "@/lib/orders";
 
 /**
@@ -182,12 +185,15 @@ async function deletionListId(store: Store): Promise<string> {
 
 /**
  * Whether the person was deleted from the store at or after the payment: the same print and the same rule as
- * KEEP_RECEIPT (erasePerson writes the print before it deletes anything, and it is kept). False when there is none,
- * or when they were deleted before they paid again. One HGET, read exactly (CX-123 rule 24): nothing, or a time in
- * seconds; any other reply throws UnknownReplyError, so nothing of them is written and the order stays owed.
+ * KEEP_RECEIPT (erasePerson writes the print before it deletes anything, and it is kept). With `own`, only a deletion
+ * the person asked for themselves (lib/suppression.ts ownErasureField, written beside the print): a team's deletion
+ * keeps their purchases, so an order still owed is handed over (second review of #3449, finding 1). False when there
+ * is none, or when they were deleted before they paid again. One HGET, read exactly (CX-123 rule 24): nothing, or a
+ * time in seconds; any other reply throws UnknownReplyError, so nothing of them is written and the order stays owed.
  */
-async function erasedSincePaid(listId: string, paid: Paid): Promise<boolean> {
-  const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, paid.email)]]), 1);
+async function erasedSincePaid(listId: string, paid: Paid, own = false): Promise<boolean> {
+  const field = own ? ownErasureField(listId, paid.email) : suppressionPrint(listId, paid.email);
+  const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), field]]), 1);
   const mark = replies?.[0];
   if (!replies || (mark !== null && (typeof mark !== "string" || !/^[0-9]{1,12}$/.test(mark)))) {
     throw new UnknownReplyError("a person's deletion mark, before a PayPal hand-over");
@@ -247,6 +253,53 @@ async function sameReceipt(store: Store, paid: Paid, made: PayPalReceipt, listId
   return keptReceipt(kept, made);
 }
 
+/** The job a purchase's record names (lib/imported-purchases.ts grantImported), or null when it does not read so. */
+function grantJob(raw: string): string | null {
+  try {
+    const value: unknown = JSON.parse(raw);
+    const job = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>).job : null;
+    return typeof job === "string" ? job : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Takes back what a hand-over of this order wrote of a person deleted at their own request at or after the payment
+ * (second review of #3449, finding 3): a deletion that completed during a try, after its check, deleted what was
+ * there before the try's writes, not those writes. Only when their purchase of the product is this order's (its job
+ * `paypal:<order>`), so a purchase they made after their deletion, and what goes with it, is kept: the courses of the
+ * order taken off their ledger (dropEnrollment), the store out of the stores they bought from when this was their
+ * only purchase here, the bond to the order's affiliate, and the purchase itself last, so a try stopped part way finds
+ * it and takes back the rest. Every reply read exactly (CX-123 rule 24): otherwise UnknownReplyError, and the order
+ * stays owed, tried again at the next sweep, which takes back what is left. The link's grant is not: it expires in a
+ * day (ORDERS_LINK_SECONDS), as one the deletion found does.
+ */
+async function takeBack(store: Store, paid: Paid, product: Listing, bundled: Map<string, Listing>): Promise<void> {
+  const statsId = store.statsId as string;
+  const key = importedKey(statsId, paid.email);
+  const read = repliesFor(await redisPipeline([["HGET", key, product.id], ["HLEN", key]]), 2);
+  const [raw, count] = read ?? [];
+  if (!read || (raw !== null && typeof raw !== "string") || typeof count !== "number" || !Number.isSafeInteger(count) || count < (raw === null ? 0 : 1)) {
+    throw new UnknownReplyError("a deleted person's purchase, to take back what a PayPal hand-over wrote");
+  }
+  if (raw === null) return;
+  const job = grantJob(raw);
+  if (job === null) throw new UnknownReplyError("a deleted person's purchase, to take back what a PayPal hand-over wrote");
+  if (job !== `paypal:${paid.order}`) return;
+  for (const id of [product.id, ...(product.bundle ?? [])]) {
+    if ((id === product.id ? product : bundled.get(id))?.course) await dropEnrollment(store, paid.email, id);
+  }
+  const rest = [...(count === 1 ? forgetBoughtCommands(store.sid, paid.email) : []), ...(paid.via ? [forgetBondCommand(statsId, paid.email)] : [])];
+  const zeroOrOne = (replies: unknown[] | null) => replies !== null && replies.every((reply) => reply === 0 || reply === 1);
+  if (rest.length && !zeroOrOne(repliesFor(await redisPipeline(rest), rest.length))) {
+    throw new UnknownReplyError("taking back what a PayPal hand-over wrote of a deleted person");
+  }
+  if (!zeroOrOne(repliesFor(await redisPipeline([["HDEL", key, product.id]]), 1))) {
+    throw new UnknownReplyError("taking back what a PayPal hand-over wrote of a deleted person");
+  }
+}
+
 /** Takes a handed-over order out of the list. Not known whether it left: it stays, and the next try finds it handed over. */
 async function handedOver(statsId: string, order: string): Promise<void> {
   await redisPipeline([["ZREM", handOverKey(statsId), order]]).catch((error) => console.error("taking a handed-over PayPal order out of the list failed", order, error));
@@ -284,16 +337,19 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     if (store.statsId) await handedOver(store.statsId, paid.order);
     return "gone";
   }
-  // The person deleted from the store at or after the payment (erasedSincePaid): nothing of them is handed over or
-  // written again (the purchase, the library, the course, the link's grant, the receipt, the affiliate's and partners'
-  // notes, the webhooks), nothing is sent, and the order leaves the list; it is still one of the month's orders
-  // (countOrder, once an order). Checked before the hand-over's first write for them, not in one step with it: those
-  // writes are other modules' (grantImported, recordEnrollment, ordersLinkWithToken), so a deletion that completes
-  // between this read and them can find them written once more; the receipt is checked again where it is kept
-  // (KEEP_RECEIPT), and the next try finds the print and writes nothing.
+  // The person deleted from the store at their own request at or after the payment (erasedSincePaid, own): nothing of
+  // them is handed over or written again (the purchase, the library, the course, the link's grant, the receipt, the
+  // affiliate's bond, the webhooks), nothing is sent, and the order leaves the list; it is still one of the month's
+  // orders (countOrder, once an order), and the affiliate and partners are credited for the sale paid, with nothing
+  // that names the buyer (creditPayPalSale without rememberBuyer; finding 2). What an earlier try wrote after the
+  // deletion is taken back first (takeBack). A deletion by the store's team keeps their purchases, so the order is
+  // handed over as any other (finding 1); its receipt is refused where it is kept (KEEP_RECEIPT). Checked again after
+  // the hand-over's writes (below), since a deletion can complete between this read and them.
   const listId = store.statsId && isRedisConfigured() ? await deletionListId(store) : null;
-  if (store.statsId && listId && (await erasedSincePaid(listId, paid))) {
-    console.error("a PayPal purchase's person was deleted from the store after paying; nothing of them is handed over or written again", store.handle, paid.order);
+  if (store.statsId && listId && (await erasedSincePaid(listId, paid, true))) {
+    console.error("a PayPal purchase's person was deleted from the store at their request after paying; nothing of them is handed over or written again", store.handle, paid.order);
+    await takeBack(store, paid, product, bundled);
+    await creditPayPalSale(store, paid, product.title, false).catch((error) => console.error("crediting a PayPal sale failed", error));
     await countOrder(store, `paypal:${paid.order}`, paid.cents);
     await handedOver(store.statsId, paid.order);
     return "handed";
@@ -327,6 +383,15 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     },
   });
   await creditPayPalSale(store, paid, product.title).catch((error) => console.error("crediting a PayPal sale failed", error));
+  // The person's own deletion completed during this try, after its check (finding 3): what the try wrote of them is
+  // taken back, the webhooks are not told, and the order leaves the list. Read once more, after every write that names
+  // them (the bond last), so a deletion that writes its mark after this read deletes those writes itself. One HGET a try.
+  if (store.statsId && listId && (await erasedSincePaid(listId, paid, true))) {
+    console.error("a PayPal purchase's person was deleted from the store at their request during its hand-over; what it wrote of them is taken back", store.handle, paid.order);
+    await takeBack(store, paid, product, bundled);
+    await handedOver(store.statsId, paid.order);
+    return "handed";
+  }
   await emitEvent(store, "sale.completed", `paypal:${paid.order}`, {
     paypal_order: paid.order,
     paypal_capture: paid.capture,
@@ -423,6 +488,9 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
     },
     refunded: async (paid) => {
       const product = await readListing(store, paid.product).catch(() => null);
+      // A person deleted from the store at their own request at or after the payment is not named (second review of
+      // #3449); a mark that does not read exactly is taken as such a deletion. A store with no list deleted nobody.
+      const erased = store.listId && isRedisConfigured() ? await erasedSincePaid(store.listId, paid, true).catch(() => true) : false;
       await emitEvent(store, "refund.issued", `paypal:${paid.capture}`, {
         paypal_capture: paid.capture,
         paid_with: "paypal",
@@ -432,7 +500,7 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
         amount_cents: paid.cents,
         fully_refunded: true,
         currency: paid.currency,
-        buyer: { email: paid.email, name: null },
+        buyer: { email: erased ? null : paid.email, name: null },
         refunded_at: new Date().toISOString(),
       });
     },

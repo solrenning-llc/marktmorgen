@@ -710,23 +710,31 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  *   first try, each time through the one sender kept for its key (sendEmailPinned): at most one request a sender
  *   attempt, and none again once an answer was not known;
  * - commandsPerReceiptTry: every Redis command one such try sends, from the paid record's GET to the list's ZADD, the
- *   person's deletion mark read before the hand-over (one HGET, erasedSincePaid; a person deleted at or after the
- *   payment ends the try there, and on the try that finds the receipt gone after a request one more HGET instead of
- *   the keep's EVAL; part L), the hand-over's rerun (its writes already there), the first-try mark, the link's
- *   grant, the receipt kept as first made (two GETs each try; on the try that keeps it, one EVAL, KEEP_RECEIPT, whose six calls are the person's
- *   deletion mark read, its three erasure notes, SET NX and GET) and the kept sender included, at the most measured
- *   with either sender refusing (tests/paypal-handover-cost.test.ts for Resend, tests/paypal-receipt-once.test.ts for
- *   Amazon): 34 sent, with the receipt kept, Amazon refusing for the account (the owner told), the key moved to Resend
- *   and Resend asking to slow down (429) on each of viaResend's three attempts, all in one try (a refusal Amazon gave
- *   goes on to Resend in the same try; part E2). 53 counts each of KEEP_RECEIPT's six calls besides its EVAL (40),
- *   and a store from before lists given its list in that try, before the deletion mark's read, once in its life
- *   (ensureListId: 7 sent, measured in part K, the three lock and write scripts' two calls each counted too, 13).
+ *   note of the person's own deletion read before the hand-over (one HGET, erasedSincePaid with `own`; a person deleted
+ *   at their own request at or after the payment ends the try there, after the take-back's read below, the affiliate's
+ *   and partners' credit and the order's count; parts L and M), the hand-over's rerun (its writes already there), the
+ *   first-try mark, the link's grant, the receipt kept as first made (two GETs each try; on the try that keeps it, one
+ *   EVAL, KEEP_RECEIPT, whose six calls are the person's deletion mark read, its three erasure notes, SET NX and GET),
+ *   the affiliate's credit, the same note read once more after every write that names the person (one HGET; it runs on
+ *   the return route's first hand-over too, which is the order's own work, line orders, inside ORDER_COMPUTE) and the
+ *   kept sender included, at the most measured with either sender refusing (tests/paypal-handover-cost.test.ts for
+ *   Resend, tests/paypal-receipt-once.test.ts for Amazon): 35 sent, with the receipt kept, Amazon refusing for the
+ *   account (the owner told), the key moved to Resend and Resend asking to slow down (429) on each of viaResend's three
+ *   attempts, all in one try (a refusal Amazon gave goes on to Resend in the same try; part E2). 54 counts each of
+ *   KEEP_RECEIPT's six calls besides its EVAL (41), and a store from before lists given its list in that try, before
+ *   the deletion mark's read, once in its life (ensureListId: 7 sent, measured in part K, the three lock and write
+ *   scripts' two calls each counted too, 13). A try whose second read finds the person's own deletion completed during
+ *   it takes back what it wrote of them (takeBack; part M), at most takeBackCommands more for a product that is not a
+ *   course: the purchase's HGET and HLEN, the store's SREM from each of the 14 keys of the stores they bought from
+ *   (lib/buyer-library.ts forgetBoughtCommands), the affiliate bond's HDEL and the purchase's HDEL; a course of the
+ *   order adds two (dropEnrollment), as its hand-over's recordEnrollment does (line orders). 72 is the longest try with
+ *   a take-back on top. Once a take-back succeeds the order leaves the list.
  *   The kept receipt is at most RECEIPT_MAIL_BYTES (lib/paypal-delivery.ts), written once and read back by each try; its key is priced as the
  *   order's in tests/store-data-registry.ts (nl:ppsell:mail:). The guarded Resend ledger's own EVALs are lib/resend-fallback-budget's.
  *   PAYPAL_RECEIPT_RETRY_COMMANDS is their product: the most one order's receipt retries send.
  * Why the retry is the five-minute job's, not a plan's: NOT_A_COST.HAND_OVER_BATCH.
  */
-export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 53 } as const;
+export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 72, takeBackCommands: 18 } as const;
 export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTriesPerOrder * PAYPAL_HAND_OVER_RETRY.commandsPerReceiptTry;
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**

@@ -119,7 +119,8 @@ export async function runJourney(is: Check, sent: Sent[], counted: { commands: n
   const left = [...after].filter(([key, value]) => marks(statsId, tess).some((m) => key.includes(m) || value.includes(m)));
   is("no key or value names them, by address or by any key made from it", left.map(([key]) => key), []);
   const suppressionOnly = [...after].filter(([key]) => /^nl:erased:/.test(key));
-  is("only a fingerprint is kept, under the store's list", suppressionOnly.map(([key, value]) => [key, (JSON.parse(value) as string[]).length]), [[`nl:erased:${listId}`, 1]]);
+  // The fingerprint, and the same fingerprint noted as their own request (lib/suppression.ts ownErasureField).
+  is("only a fingerprint is kept, under the store's list, noted as their own request", suppressionOnly.map(([key, value]) => [key, (JSON.parse(value) as string[]).length]), [[`nl:erased:${listId}`, 2]]);
   is("which cannot be read back to the address", suppressionOnly.some(([, value]) => value.includes(tess) || value.includes("@")), false);
   is("the other person is untouched", parseContact((await redisPipeline([["HGET", leadsKey(listId), other]]))[0])?.agreed, true);
 

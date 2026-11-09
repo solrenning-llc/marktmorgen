@@ -2364,9 +2364,10 @@ export async function notePartners(
  * the share it had when the buyer paid, and to every partner who shares in
  * the product. Once per order, whichever of the return page and the sweep
  * hands it over first. A refund in full on PayPal takes it back in the book
- * (readBook, through readPayPalRefundsWithCoverage).
+ * (readBook, through readPayPalRefundsWithCoverage). `remember` false: the
+ * buyer is not tied to the affiliate (rememberBuyer), the rest is credited.
  */
-export async function creditPayPalSale(store: Store, paid: Paid, title: string): Promise<void> {
+export async function creditPayPalSale(store: Store, paid: Paid, title: string, remember = true): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
   const sale = {
     ref: `paypal:${paid.order}`,
@@ -2380,7 +2381,8 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string):
   };
   if (paid.via && affiliatesOn(store) && paid.via.rate > 0) {
     await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
-    await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
+    // Not for a person deleted at their own request (lib/paypal-delivery.ts): the bond names them, the referral does not.
+    if (remember) await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
   await notePartners(store, { ...sale, buyer: paid.email });
 }

@@ -45,7 +45,7 @@ export const PERSON_DATA: PersonData[] = [
   // ---------------------------------------------------------------- the list and email
   { file: "lib/contacts.ts", how: "erased", what: "Their row on your list: address, name, labels, what they asked for or bought, and whether they agreed to hear from you" },
   { file: "lib/contacts.ts", how: "erased", what: "The link in your emails that unsubscribes them" },
-  { file: "lib/suppression.ts", how: "suppression", what: "A one-way fingerprint of the address, so your store never emails it again and no import puts it back. It cannot be turned back into the address. Only the person can lift it, by joining your list again themselves." },
+  { file: "lib/suppression.ts", how: "suppression", what: "A one-way fingerprint of the address, so your store never emails it again and no import puts it back. It cannot be turned back into the address. When they asked for the deletion themselves, it also notes that it was their request. Only the person can lift it, by joining your list again themselves." },
   { file: "lib/joined-stores.ts", how: "erased", via: "lib/buyer-library.ts", what: "The note that they joined your list, used to find them when they ask to be deleted everywhere" },
   { file: "lib/mail-clicks.ts", how: "erased", what: "Which links in your sequences' emails they used" },
   { file: "lib/mail-health.ts", how: "erased", what: "The mark that their address was counted in this week's delivery checks" },

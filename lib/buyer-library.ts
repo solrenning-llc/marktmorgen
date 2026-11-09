@@ -69,6 +69,15 @@ export async function storesKnownFor(email: string): Promise<string[]> {
   return [...new Set(ids(all))].slice(0, MAX_LIBRARY_STORES);
 }
 
+/**
+ * The commands that forget that this address bought from the store with this id, in every quarter it can be in, and
+ * not that it joined it: what a PayPal hand-over takes back of what it wrote for a person deleted at their own request
+ * during it (lib/paypal-delivery.ts). Each answers 0 or 1. None for an id that is not a store's.
+ */
+export function forgetBoughtCommands(sid: string, email: string): (string | number)[][] {
+  return STORE_ID.test(sid) ? libraryKeys(email).map((key) => ["SREM", key, sid]) : [];
+}
+
 /** Forgets that this address bought from or joined the store with this id (lib/person-erasure.ts): in every quarter it can be in. */
 export async function forgetLibraryPerson(sid: string, email: string): Promise<number> {
   if (!STORE_ID.test(sid) || !isRedisConfigured()) return 0;

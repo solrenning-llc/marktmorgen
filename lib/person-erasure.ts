@@ -46,7 +46,8 @@ import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
-import { suppressCommand } from "@/lib/suppression";
+import { ownErasureCommand, suppressCommand } from "@/lib/suppression";
+import { repliesFor } from "@/lib/redis-reply";
 import { takeAllowance } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
@@ -293,9 +294,18 @@ export async function erasePerson(
 
   // First, and on its own: whatever happens next, they are never written to again.
   await redisPipeline([suppressCommand(scope.listId as string, email)]);
+  // A person's own deletion is noted as theirs too, before anything is deleted (lib/suppression.ts ownErasureCommand):
+  // it takes their purchases and a team's does not, so a PayPal order still owed to them is then not handed over
+  // (lib/paypal-delivery.ts). Its reply read exactly (CX-123 rule 24): not confirmed, the deletion still runs and
+  // answers "incomplete", so the person's link presses it again (lib/erasure-request.ts).
+  let ownNoted = by.kind !== "person";
+  if (!ownNoted) {
+    const noted = await redisPipeline([ownErasureCommand(scope.listId as string, email)]).then((replies) => repliesFor(replies, 1), () => null);
+    ownNoted = noted?.[0] === 0 || noted?.[0] === 1;
+  }
 
   const parts: ErasedPart[] = [];
-  const failed: string[] = [];
+  const failed: string[] = ownNoted ? [] : ["lib/suppression.ts"];
   const files: string[] = [];
   const notes = new Set<ErasureNote>();
   for (const eraser of ERASERS) {

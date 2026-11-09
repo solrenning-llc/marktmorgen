@@ -111,6 +111,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/assistant-memory": row("settings", draft, "The creator's own notes for their assistant: the agent may propose one, which the creator confirms; it never keeps one by itself."),
   "POST store/assistant-settings": row("settings", draft),
   "POST store/attribution": row("numbers", draft),
+  "POST store/automation-draft": row("email", draft, "A workflow drafted from the creator's goal (20 [E3]): it comes back to the creator, nothing is saved by it."),
   "GET store/audience": row("buyers", never(PEOPLE_FILE)),
   "POST store/blog": row("pages", draft),
   "GET store/bundle": row("products", read),

@@ -2,8 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AiAssist, AiOn } from "@/components/ai-assist";
+import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
+import { MAX_AI_NOTES } from "@/lib/ai-rules";
+import { readAiAnswer } from "@/lib/ai-response";
 import { type AutomationDraftValue, explainDraft, isAutomationDraftValue, readDraftSaveResult, toFlowRaw } from "@/lib/automation-draft";
+
+/** What is said when a draft is not made, by the reason the server gives. */
+const DRAFT_MESSAGES: Record<string, string> = {
+  notes: "Write your goal first: what should happen, and to whom.",
+  used: "This month's writing help is used up. It starts again with your next billing month.",
+  slow: "A few at a time: wait a minute, then try again.",
+  failed: "The draft did not come back usable just now. Nothing was saved. Started attempts count toward the monthly allowance. Try again in a moment, or say the goal another way.",
+  long: "Your goal is too long to draft from. Say it in fewer words.",
+  off: "The writing help is not available right now.",
+  forbidden: "Your role on this store cannot save workflows.",
+};
+const UNCONFIRMED = "Whether a draft was made could not be confirmed. Check your writing allowance before trying again.";
 
 /**
  * A workflow drafted with AI from a goal the creator writes (20 [E3],
@@ -13,12 +27,56 @@ import { type AutomationDraftValue, explainDraft, isAutomationDraftValue, readDr
  * that was a slip). Nothing is sent or switched on from here.
  */
 export function AutomationDraftBox({ ai }: { ai: { on: boolean; left: number; known?: false } }) {
+  const [goal, setGoal] = useState("");
+  const [left, setLeft] = useState(ai.left);
+  const [known, setKnown] = useState(ai.known !== false);
+  const [drafting, setDrafting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [saves, setSaves] = useState(0);
   const [value, setValue] = useState<AutomationDraftValue | null>(null);
   const [discarded, setDiscarded] = useState<AutomationDraftValue | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   if (!ai.on) return null;
+
+  async function draft() {
+    if (drafting) return;
+    if (!goal.trim()) {
+      setError(DRAFT_MESSAGES.notes);
+      return;
+    }
+    setDrafting(true);
+    setError(null);
+    setMessage("");
+    try {
+      const response = await fetch("/api/store/automation-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: goal }),
+      });
+      const data = readAiAnswer(response.ok, await response.json().catch(() => null));
+      if (data.ok) {
+        setLeft(data.left);
+        setKnown(true);
+        if (!isAutomationDraftValue(data.value)) {
+          setError(UNCONFIRMED);
+          return;
+        }
+        setValue(data.value);
+        setDiscarded(null);
+        setMessage("Your draft is below. Read each step, then save it paused or discard it.");
+        return;
+      }
+      // An answer the studio cannot place may have counted a job: the allowance is unknown until the page is read again.
+      if (!Object.hasOwn(DRAFT_MESSAGES, data.error)) setKnown(false);
+      setError(Object.hasOwn(DRAFT_MESSAGES, data.error) ? DRAFT_MESSAGES[data.error] : UNCONFIRMED);
+    } catch {
+      setKnown(false);
+      setError(UNCONFIRMED);
+    } finally {
+      setDrafting(false);
+    }
+  }
 
   async function save() {
     if (!value || busy) return;
@@ -52,22 +110,33 @@ export function AutomationDraftBox({ ai }: { ai: { on: boolean; left: number; kn
       <p className="mt-2 max-w-2xl text-sm text-ink-soft">
         Say what you want to happen, in your own words. AI drafts a workflow from the steps the Email Studio already has and the products in your store. You read every step first. It is saved paused, and nothing is sent until you switch it on.
       </p>
-      <div className="mt-4">
-        <AiOn value={ai}>
-          <AiAssist<AutomationDraftValue>
-            title="Draft a workflow with AI"
-            hint="Say what should happen and to whom. For example: welcome new subscribers, then offer the course a few days later. Only your store's products and links are used."
-            placeholder="For example: remind people who leave the checkout for my course, and stop once they buy."
-            payload={() => ({ kind: "automation" })}
-            validateResult={isAutomationDraftValue}
-            onResult={(drafted) => {
-              setValue(drafted);
-              setDiscarded(null);
-              setMessage("");
-            }}
-            done="Your draft is below. Read each step, then save it paused or discard it."
-          />
-        </AiOn>
+      <div className="mt-4 space-y-3">
+        <label htmlFor="automation-goal" className="block text-sm font-semibold text-ink">Your goal</label>
+        <p id="automation-goal-help" className="text-sm text-ink-soft">
+          Say what should happen and to whom. For example: remind people who leave the checkout for my course, and stop once they buy. Only your store&apos;s products and links are used.
+        </p>
+        <textarea
+          id="automation-goal"
+          className="field"
+          rows={3}
+          maxLength={MAX_AI_NOTES}
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          aria-describedby="automation-goal-help automation-goal-left"
+        />
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" className="btn btn-secondary inline-flex min-h-11 items-center" onClick={() => void draft()} disabled={drafting || busy || !known || left <= 0} aria-busy={drafting}>
+            {drafting ? "Drafting…" : "Draft a workflow"}
+          </button>
+          <span id="automation-goal-left" className="text-xs text-ink-soft">
+            {known ? `${left} left this month. Started attempts count, even if they fail.` : AI_ALLOWANCE_UNKNOWN}
+          </span>
+        </div>
+        {error ? (
+          <p className="notice notice-error text-sm" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
       {value ? (
         <DraftReview

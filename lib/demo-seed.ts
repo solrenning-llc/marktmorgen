@@ -34,7 +34,8 @@
  * A run ends before its lock does: the work runs inside a cutoff (lib/fetch-timeout.ts, withCutoff) that leaves
  * the rest of the lock for writing the mark and letting the lock go, and /demo may run no longer than the lock
  * (its maxDuration). A run that is cut stops between two steps, says "run:cutoff" in its mark, and is never
- * written down as finished; the next run after the wait below picks up what is still missing.
+ * written down as finished; its mark keeps what it did finish (the store, its photo, the pictures), never a step
+ * left in the middle, and the next run after the wait below does only what is still missing.
  */
 import { createHash } from "node:crypto";
 import { readNote } from "@/lib/thanks-note";
@@ -969,12 +970,25 @@ async function ensureCall(store: Store, mark: Mark, deps: SeedDeps, pending: str
   return ensureAbout(store, product, pending, DEMO_CALL.about);
 }
 
-/** Brings the demo store in line with this file, one step at a time. */
-async function build(before: Mark | null, deps: SeedDeps): Promise<Mark> {
-  const pending: string[] = [];
-  const mark: Mark = { v: seedFingerprint(), pending, at: Math.floor(Date.now() / 1000), store: false, photo: before?.photo ?? "", image: before?.image ?? "", images: { ...(before?.images ?? {}) } };
+/** A run's own mark, before it has done anything: the pictures already in place are carried over from the mark before. */
+function startMark(before: Mark | null): Mark {
+  return { v: seedFingerprint(), pending: [], at: Math.floor(Date.now() / 1000), store: false, photo: before?.photo ?? "", image: before?.image ?? "", images: { ...(before?.images ?? {}) } };
+}
+
+/** Names `step` among what is still missing, once. */
+function named(mark: Mark, step: string): void {
+  if (!mark.pending.includes(step)) mark.pending.push(step);
+}
+
+/**
+ * Brings the demo store in line with this file, one step at a time, writing into `mark` as it goes: a step is
+ * written down only once it is in place, so a run that stops in the middle of one (cut, or failed) leaves that step
+ * as it was in the mark before, and keeps the steps it did finish.
+ */
+async function build(mark: Mark, deps: SeedDeps): Promise<void> {
+  const pending = mark.pending;
   let store = await ensureStore(pending);
-  if (!store) return mark;
+  if (!store) return;
   mark.store = true;
   inTime();
 
@@ -986,7 +1000,7 @@ async function build(before: Mark | null, deps: SeedDeps): Promise<Mark> {
   const made = await ensureProduct(store, pending);
   if (!made) {
     if (!pending.some((p) => p.startsWith("product"))) pending.push(refused("product", "missing"));
-    return mark;
+    return;
   }
   inTime();
   store = await ensureFiles(made.store, made.product, deps, pending);
@@ -1028,7 +1042,6 @@ async function build(before: Mark | null, deps: SeedDeps): Promise<Mark> {
   if (!fresh || !product || !canSellProduct(fresh, product)) {
     if (!pending.length) pending.push(refused("selling", "off"));
   }
-  return mark;
 }
 
 /**
@@ -1060,28 +1073,35 @@ export async function ensureDemoStore(deps: SeedDeps = REAL): Promise<SeedResult
     console.error("the demo store's lock answered in an unknown shape; nothing is built this time");
     return { ok: mark?.store ?? false, pending: [refused("lock", "unknown")], ran: false };
   }
+  // What this run has done, written down as it goes. A run that is cut, or fails, writes this, not the mark before
+  // it: the store and the pictures it put in place are kept, and the next run does only what is still missing.
+  const next = startMark(mark);
   try {
-    // The work ends before the lock does, and before a caller's own cutoff, with room to write the mark and let go.
-    const end = Math.min(started + BUILD_MS, Date.now() + timeLeft() - WRITE_ROOM_MS);
-    const next = await withCutoff(end, async () => {
-      try {
-        const built = await build(mark, bounded(deps));
+    try {
+      // The work ends before the lock does, and before a caller's own cutoff, with room to write the mark and let go.
+      const end = Math.min(started + BUILD_MS, Date.now() + timeLeft() - WRITE_ROOM_MS);
+      await withCutoff(end, async () => {
+        try {
+          await build(next, bounded(deps));
+        } catch (error) {
+          // Stopped between two steps at the cutoff, or by a request given up there: what is done stays done.
+          if (!(error instanceof CutOff) && timeLeft() >= NO_TIME_MS) throw error;
+        }
         // A request given up at the cutoff may have been read by a step as "nothing there": never finished.
-        if (timeLeft() < NO_TIME_MS && !built.pending.includes(refused("run", CUTOFF))) built.pending.push(refused("run", CUTOFF));
-        return built;
-      } catch (error) {
-        if (timeLeft() < NO_TIME_MS) throw new CutOff();
-        throw error;
-      }
-    });
-    await redisPipeline([["SET", MARK, JSON.stringify(next)]]);
+        if (timeLeft() < NO_TIME_MS) named(next, refused("run", CUTOFF));
+      });
+    } catch (error) {
+      console.error("making the demo store failed", error);
+      // Named, so the next few visits do not each try again; what the run did before it failed is kept.
+      named(next, refused("run", why(error)));
+    }
+    try {
+      await redisPipeline([["SET", MARK, JSON.stringify(next)]]);
+    } catch (error) {
+      console.error("writing down the demo store's mark failed", error);
+      named(next, refused("run", why(error)));
+    }
     return { ok: next.store, pending: next.pending, ran: true };
-  } catch (error) {
-    console.error("making the demo store failed", error);
-    // Written down, so the next few visits do not each try again.
-    const failed: Mark = { v: seedFingerprint(), pending: [refused("run", why(error))], at: now, store: mark?.store ?? false, photo: mark?.photo ?? "", image: mark?.image ?? "", images: mark?.images ?? {} };
-    await redisPipeline([["SET", MARK, JSON.stringify(failed)]]).catch(() => {});
-    return { ok: failed.store, pending: failed.pending, ran: true };
   } finally {
     await releaseMark(LOCK, lock);
   }

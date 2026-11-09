@@ -14,7 +14,7 @@ globalThis.fetch = (async () => {
   throw new Error("No outside request in this test");
 }) as typeof fetch;
 
-const ID = "communityx1";
+const ID = "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c1";
 const WHO = "whoabc";
 const TOKEN = "ab".repeat(20);
 const MEMBERS = `nl:cm:${ID}:m`;

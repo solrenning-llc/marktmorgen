@@ -23,8 +23,8 @@ let beforeCas: null | (() => Promise<void>) = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: Command[]) => {
   if(failed==="read"&&commands.length===1&&commands[0][0]==="HGET"&&String(commands[0][1]).endsWith(":m"))return [];
-  if(failed==="cas"&&commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).startsWith('local cur = redis.call("HGET"'))return [];
-  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith('local cur = redis.call("HGET"')) {
+  if(failed==="cas"&&commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).includes('local cur = redis.call("HGET", KEYS[1], ARGV[1])'))return [];
+  if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes('local cur = redis.call("HGET", KEYS[1], ARGV[1])')) {
     if (beforeCas) {
       const act = beforeCas;
       beforeCas = null;

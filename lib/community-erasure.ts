@@ -25,7 +25,7 @@ import { TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 import { SET_TAKE_COUNT } from "@/lib/redis-take";
 import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
 import { giveData } from "@/lib/store-data";
-import { forgetMemberRecord, readConfig, readMemberRecord } from "@/lib/community";
+import { DamagedConfigError, forgetMemberRecord, readConfigExact, readMemberRecord } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
 import { forgetCommunityUnsub } from "@/lib/community-mail";
 import { forgetPointsPerson } from "@/lib/community-points";
@@ -45,7 +45,17 @@ import { unindexMember } from "@/lib/community-index";
  * at live events give back what they took there.
  */
 export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[], room?: DataStore): Promise<number> {
-  const config = await readConfig(id).catch(() => null);
+  // Not swallowed (CX-123 rule 24): read as none, every space's record of
+  // the person below would be skipped while the erasure said it was done.
+  // Except a setup stored damaged (review of #3091 by Claude 2), which asking
+  // again never mends: while it cannot be read the community is off for
+  // everyone (communityViewer), so no space's answer about them is read or
+  // written, and those written before expire on their own within five
+  // minutes (lib/community-access.ts, OPEN_SECONDS). Everything else goes now.
+  const config = await readConfigExact(id).catch((error: unknown) => {
+    if (error instanceof DamagedConfigError) return null;
+    throw error;
+  });
   // The record is read first and taken last: what it names elsewhere (their handle, their unsubscribe token, whose
   // record holds their address) goes while it can still be found by it, so a step that fails leaves the record for
   // the next try (Claude 5 on #2576).

@@ -77,7 +77,7 @@ async function contacts(): Promise<void> {
 }
 
 async function community(): Promise<void> {
-  const ID = "cmorigin";
+  const ID = "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c2";
   const bia = await touchMember(ID, "bia@example.com", null, ROOM);
   await setProfile(ID, bia!, { name: "Bia", dir: true, mail: false }, ROOM);
 

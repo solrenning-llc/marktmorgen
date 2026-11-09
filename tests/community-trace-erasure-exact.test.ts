@@ -31,7 +31,7 @@ async function main(): Promise<void> {
     part(label);
     redis.clear();
     answering(shape);
-    const answer = await forgetCommunityPerson("communityx1", "whoabc", "member@example.com", []).then((n) => `done ${n}`, (error: Error) => error.name);
+    const answer = await forgetCommunityPerson("c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c1", "whoabc", "member@example.com", []).then((n) => `done ${n}`, (error: Error) => error.name);
     redis.pipeline = pipe;
     is(`${label}: the deletion is unknown, never "nothing was there"`, answer, "UnknownReply");
   }
@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   part("A confirmed count");
   redis.clear();
   answering([0]);
-  const none = await forgetCommunityPerson("communityx1", "whoabc", "member@example.com", []).then((n) => `done ${n}`, (error: Error) => error.name);
+  const none = await forgetCommunityPerson("c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c1", "whoabc", "member@example.com", []).then((n) => `done ${n}`, (error: Error) => error.name);
   redis.pipeline = pipe;
   is("a confirmed zero is nothing there", none, "done 0");
   done();

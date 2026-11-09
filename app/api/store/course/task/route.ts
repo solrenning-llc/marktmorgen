@@ -8,7 +8,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { handIn, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { handIn, noteTaskUpload, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
   type HandedFile,
@@ -31,6 +31,16 @@ import { speech } from "@/lib/buyer-words";
 const HAND_INS_PER_HOUR = 20;
 
 const no = (error: string, status = 400) => Response.json({ ok: false, error }, { status, headers: { "Cache-Control": "no-store" } });
+
+/**
+ * Puts a name a hand-in took off the sweep's list back on it, when the hand-in does not keep the file (the pre-review
+ * of 9 November 2026): the browser's PUT may still land within the door's five minutes (app/api/store/course/task/upload),
+ * or the file could not be deleted, and either would otherwise be kept for ever, outside the sweep and the room. Best
+ * effort, logged; never for work whose write was sent.
+ */
+async function backOnTheList(path: string): Promise<void> {
+  await noteTaskUpload(path).catch((error: unknown) => console.error("putting an assignment upload back on its list failed", error));
+}
 
 /**
  * A student hands in their work on a lesson's assignment, or hands it in
@@ -80,14 +90,19 @@ export async function POST(request: NextRequest) {
         if (!ownsTaskPath(asked.path, folder) || !(await takeTaskUpload(asked.path))) return no("invalid");
         const path = asked.path;
         const found = await headFile(path).catch(() => null);
-        if (!found) return no("missing");
+        if (!found) {
+          await backOnTheList(path);
+          return no("missing");
+        }
         const extension = taskExtension(found.contentType);
         if (!extension || !path.endsWith(`.${extension}`)) {
           await deleteFile(path).catch(() => {});
+          await backOnTheList(path);
           return no("type");
         }
         if (found.size > MAX_TASK_FILE_BYTES) {
           await deleteFile(path).catch(() => {});
+          await backOnTheList(path);
           return no("too_big");
         }
         // An unknown reply from the room's counter throws (CX-123 rule 24): the file sent is deleted first, never left
@@ -95,10 +110,12 @@ export async function POST(request: NextRequest) {
         const roomTaken = await takeRoom(room, found.size, taskRoomFor(store), path).catch(async (error: unknown) => {
           await deleteFile(path).catch(() => {});
           await undoTakeRoom(room, found.size, path).catch((undoError: unknown) => console.error("giving back a task file's room failed", undoError));
+          await backOnTheList(path);
           throw error;
         });
         if (!roomTaken) {
           await deleteFile(path).catch(() => {});
+          await backOnTheList(path);
           return no("full");
         }
         taken = found.size;
@@ -120,6 +137,7 @@ export async function POST(request: NextRequest) {
           (deleteError: unknown) => (console.error("deleting a task file that was not handed in failed", deleteError), false),
         );
         if (gone) await releaseBytes(room, taken).catch(() => {});
+        await backOnTheList(file.path);
       } else if (taken) {
         console.error("a hand-in failed after its write: its file and the room it took are kept", error);
       }

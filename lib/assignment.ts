@@ -565,6 +565,13 @@ export async function takeTaskUpload(path: string): Promise<boolean> {
  * them), so a lost reply costs at most TAKE_BATCH files kept, not the run's
  * whole list.
  */
+/** The course, lesson and student a path in a store's assignment folders names (lib/assignment-rules.ts, taskFolder). */
+function handedInWorkOf(path: string): { courseId: string; lessonId: string; who: string } | null {
+  const parts = path.split("/");
+  if (parts.length !== 7 || parts[0] !== "stores" || parts[2] !== "tasks") return null;
+  return { courseId: parts[3], lessonId: parts[4], who: parts[5] };
+}
+
 /** How many doors a pipeline of ZREMs takes off the list at most (see sweepTaskUploads). */
 const TAKE_BATCH = 25;
 
@@ -599,6 +606,21 @@ export async function sweepTaskUploads(remove: (paths: string[]) => Promise<void
   const deleted: string[] = [];
   const failed: string[] = [];
   for (const p of won) {
+    // A file that is a student's handed-in work is never deleted, whatever the list says (the pre-review of 9 November
+    // 2026): read from the work itself, by the course, lesson and student its path names. Work that cannot be read
+    // keeps the file and puts it back for the next run; a path that names no work is a door's file as before.
+    const work = handedInWorkOf(p);
+    if (work) {
+      const held = await submissionOf(work.courseId, work.lessonId, work.who).then(
+        (found) => found?.file?.path === p,
+        (error: unknown) => (console.error("reading the work an unused assignment upload may belong to failed; kept for the next run", error), null),
+      );
+      if (held === true) continue;
+      if (held === null) {
+        failed.push(p);
+        continue;
+      }
+    }
     try {
       await remove([p]);
       deleted.push(p);

@@ -114,7 +114,7 @@ import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import type { ReadWork } from "@/lib/api-read-rules";
+import { COURSE_BYTES, DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
@@ -356,10 +356,41 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
  * (app/api/store/community/image).
  */
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
+/**
+ * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes), at US$ 0.400 per million on
+ * demand, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing, read by
+ * Claude on 2 November 2026, docs/codex-queue.md item PP2), which also says every interaction counts: never a free quota.
+ */
+export const BLOB_SIMPLE_OPERATION = 0.4 / 1e6;
+/**
+ * One "Advanced Operation" of Vercel Blob (a put, a copy, a list; a delete is taken as one too), as a review
+ * ceiling: twice the US$ 5.00 per million on demand of Vercel's published price, the same doubling as
+ * BLOB_TRANSFER_PER_BYTE. Not read from an official page in this session (vercel.com could not be reached on
+ * 9 November 2026): not certified, never zero; a dated official read replaces it.
+ */
+export const BLOB_ADVANCED_OPERATION = 10 / 1e6;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
 export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_BYTE + BLOB_TRANSFER_PER_BYTE);
+/**
+ * The daily sweep's commands for one assignment door never used (lib/assignment.ts, sweepTaskUploads): its share of
+ * the list read, its ZREM, the student's work read to keep a handed-in file, and the ZADD when it is listed again.
+ */
+export const TASK_SWEEP_COMMANDS = 6;
+/**
+ * The most one assignment upload door costs (app/api/store/course/task/upload, 9 November 2026): held as a call waited
+ * on for ten seconds at 2 GB, forty commands (the student, the store, the course, its listing, the gate, the task,
+ * the pace, the room, the buyer action, the listing and the one taken back), the store's record, the course's and
+ * its listing's, the task and the lessons done read at their largest, one head of the file store to refuse a name it
+ * already has, the browser's upload through the door and the sweep's delete of it when it is never handed in (two
+ * Advanced Operations), and the sweep's commands for it. One buyer action is taken before the head;
+ * tests/task-upload-path.test.ts holds this at or under UNIT_COST.buyer, so the line buyer-actions already pays for it.
+ * (The two Blob prices are declared as in #3414, same name and value: whichever lands second keeps one copy.)
+ */
+export const TASK_DOOR_COST =
+  request("wait", 40 + TAKE_COMMANDS, MAX_STORE_BYTES + COURSE_BYTES + LISTING_BYTES + TASK_BYTES + DONE_SET_BYTES)
+  + BLOB_SIMPLE_OPERATION + 2 * BLOB_ADVANCED_OPERATION + TASK_SWEEP_COMMANDS * COMMAND;
 /**
  * One certificate of completion drawn as a PDF file (app/[handle]/certificate/[id]/pdf/route.ts): the store and the
  * certificate (or the sample's course and listing) read, its two counts (REQUEST_COMMANDS each), the fonts embedded and the page drawn at a

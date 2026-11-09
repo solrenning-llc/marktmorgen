@@ -85,6 +85,10 @@ export async function POST(request: NextRequest) {
       if (there === null) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       return Response.json({ ok: false, error: "invalid" }, { status: 400 });
     }
+    // Listed again now that the name is known to be free: the daily sweep may have taken an old listing of it off the
+    // list while the file store was asked (it reads the list, then takes each name), and the file this door lets in
+    // must be on it (the pre-review of 9 November 2026).
+    await listTaskDoor(pathname);
 
     const answer = await handleUploadPresigned({
       body,

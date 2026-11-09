@@ -607,7 +607,11 @@ export function storeHasKeys(store: Store): boolean {
  * (the mark is cleared, so the paid sale can be given its key; a key given
  * stays as it is); every failed or canceled refund read is looked up once for
  * that, inside the same lookups (Claude 5's pre-review of
- * claude5/licence-refunds-combined, HIGH 2). A dispute Stripe closed as lost takes
+ * claude5/licence-refunds-combined, HIGH 2). A succeeded refund that is only
+ * part of the charge counts as pending while another refund of that charge is
+ * on its way (one GET /refunds?charge= inside the same lookups, asked only when
+ * the charge reads refunded in full and this refund alone does not cover it;
+ * Claude 2's focal money review of #2868, HIGH). A dispute Stripe closed as lost takes
  * the key back as a full refund does (queue 388 [TB14]): the disputes closed
  * since the last run are read with the first page of refunds, from Stripe's
  * closing events, so a lost dispute revokes within the same five minutes;
@@ -696,6 +700,59 @@ function onlyRow(answer: unknown, legible?: (row: Record<string, unknown>) => bo
   if (listed.rows.length) return listed.rows[0];
   if (listed.unreadable > 0 || listed.hasMore) throw new StripeListUnreadable("a row that could not be read");
   return null;
+}
+
+/** The most refunds of one charge read in one GET /refunds?charge= (one page; more than that is unknown). */
+const CHARGE_REFUNDS_PAGE = 100;
+const CHARGE_PATTERN = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+/** Statuses a refund still on its way has: it may yet fail, and Stripe already counts it in amount_refunded. */
+const REFUND_ON_ITS_WAY = new Set(["pending", "requires_action"]);
+const REFUND_STATUS_KNOWN = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const centsKnown = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/**
+ * Whether a succeeded refund whose charge reads refunded in full gave the whole charge back by itself: its own amount
+ * covers the charge's. Only then is no other refund of the charge needed to say the money went back for good.
+ */
+function wholeOnItsOwn(refund: Record<string, unknown>): boolean {
+  const charge = refund.charge;
+  if (!plainObject(charge)) return false;
+  const amount = ownField(charge, "amount");
+  return centsKnown(refund.amount) && centsKnown(amount) && amount > 0 && refund.amount >= amount;
+}
+
+/**
+ * A full refund made of several refunds of one charge, read from all of that charge's refunds (one GET /refunds?charge=,
+ * Stripe's own list): "held" while any is still on its way (pending or needing action: it may still fail, and Stripe
+ * counts it in the charge's amount_refunded already), "through" when the ones that succeeded add up to the whole charge.
+ * Anything else (no charge id, a row or a list in another shape, more than one page, or succeeded refunds that do not
+ * add up although the charge reads refunded in full) throws StripeListUnreadable: never "nothing pending" (Claude 2's
+ * focal money review of #2868 at 9fa5c95602, HIGH; CX-123 rule 24).
+ */
+async function chargeRefundsSettled(account: string, refund: Record<string, unknown>): Promise<"held" | "through"> {
+  const charge = refund.charge;
+  const id = plainObject(charge) ? ownField(charge, "id") : undefined;
+  const amount = plainObject(charge) ? ownField(charge, "amount") : undefined;
+  if (typeof id !== "string" || !CHARGE_PATTERN.test(id) || !centsKnown(amount) || amount <= 0) {
+    throw new StripeListUnreadable("a refund's charge without its id or amount");
+  }
+  const legible = (row: Record<string, unknown>) => {
+    const status = ownField(row, "status");
+    const named = ownField(row, "charge");
+    const chargeId = typeof named === "string" ? named : plainObject(named) ? ownField(named, "id") : undefined;
+    return typeof status === "string" && REFUND_STATUS_KNOWN.has(status) && centsKnown(ownField(row, "amount")) && chargeId === id;
+  };
+  const listed = readStripePage(
+    await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`),
+    legible,
+  );
+  if (listed.unreadable > 0 || listed.hasMore) throw new StripeListUnreadable("a charge's refunds");
+  // The refund being read is one of them, as it now stands: if Stripe's list does not have it, the list proves nothing.
+  if (!listed.rows.some((row) => row.id === refund.id)) throw new StripeListUnreadable("a charge's refunds without the one read");
+  if (listed.rows.some((row) => REFUND_ON_ITS_WAY.has(ownField(row, "status") as string))) return "held";
+  const through = listed.rows.reduce((sum, row) => sum + (ownField(row, "status") === "succeeded" ? (ownField(row, "amount") as number) : 0), 0);
+  if (through >= amount) return "through";
+  throw new StripeListUnreadable("a charge read refunded in full whose succeeded refunds do not add up");
 }
 
 /**
@@ -789,7 +846,8 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       const undone = !givesBack && refund.object !== "dispute" && (refund.status === "failed" || refund.status === "canceled");
       if (!givesBack && !undone) continue;
       // A full refund not yet through: the keyless sale is marked pending, and the refund stays unread until it settles.
-      const pending = givesBack && refund.object !== "dispute" && refund.status === "pending";
+      // A succeeded part of a full refund whose rest is still pending counts as pending too (below).
+      let pending = givesBack && refund.object !== "dispute" && refund.status === "pending";
       const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
       if (Number(seen) === 1) {
         newest = Math.max(newest, created);
@@ -860,6 +918,25 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       } else {
         unsure = true;
         continue;
+      }
+
+      // A succeeded refund that is only part of a charge read as refunded in full (Stripe counts a refund still pending
+      // in amount_refunded) takes nothing back while another refund of that charge is on its way: it may still fail,
+      // and a key revoked then stays revoked on a sale mostly paid. All of the charge's refunds are read (one lookup);
+      // while one is on its way the sale is held exactly like a pending refund, and anything unknown keeps the refund
+      // unread (Claude 2's focal money review of #2868 at 9fa5c95602, HIGH). A single refund of the whole charge, and
+      // a lost dispute, need no read.
+      if (sales.length > 0 && givesBack && !pending && refund.object !== "dispute" && !wholeOnItsOwn(refund)) {
+        if (lookups <= 0) continue;
+        lookups -= 1;
+        try {
+          if ((await chargeRefundsSettled(account, refund)) === "held") pending = true;
+        } catch (error) {
+          if (!(error instanceof StripeListUnreadable)) throw error;
+          console.error("reading the refunds of a refunded charge failed", store.handle, error);
+          unsure = true;
+          continue;
+        }
       }
 
       // The refund is marked read only once every key it takes back is revoked for sure: a reply in an unknown shape

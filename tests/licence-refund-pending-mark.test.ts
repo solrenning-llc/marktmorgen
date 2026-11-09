@@ -75,7 +75,9 @@ type Status = "pending" | "succeeded" | "failed" | "canceled";
 /** A refund row of GET /refunds as Stripe gives it: a full refund going through sets the charge refunded, a failed or canceled one sets it back. */
 const refundRow = (id: string, pi: string, status: Status) => {
   const back = status === "pending" || status === "succeeded";
-  return { id, object: "refund", created: NOW - 30, status, payment_intent: pi, charge: { object: "charge", amount: 2900, amount_refunded: back ? 2900 : 0, refunded: back } };
+  // Regra 23: the row now carries its own amount, as every refund Stripe sends does. A refund of the whole charge is
+  // whole on its own; a row without it is unknown and now needs the charge's refunds read (review of #2868, HIGH).
+  return { id, object: "refund", amount: 2900, created: NOW - 30, status, payment_intent: pi, charge: { object: "charge", amount: 2900, amount_refunded: back ? 2900 : 0, refunded: back } };
 };
 let store: Store;
 const run = async (): Promise<number | "threw"> => {

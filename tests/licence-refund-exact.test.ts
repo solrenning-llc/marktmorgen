@@ -71,7 +71,9 @@ const real = (async (commands: Command[]) => {
   return out;
 }) as typeof redis.pipeline;
 redis.pipeline = real;
-const refund = (id: string, pi: string) => ({ id, object: "refund", created: NOW - 30, status: "succeeded", payment_intent: pi, charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } });
+// Regra 23: the row now carries its own amount, as every refund Stripe sends does: a refund of the whole charge is whole
+// on its own. Without it the job reads the charge's refunds first (Claude 2's focal money review of #2868, HIGH).
+const refund = (id: string, pi: string) => ({ id, object: "refund", amount: 2900, created: NOW - 30, status: "succeeded", payment_intent: pi, charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } });
 const run = async (): Promise<number | "threw"> => {
   try {
     return await revokeRefunded(store, Date.now() + 10_000);

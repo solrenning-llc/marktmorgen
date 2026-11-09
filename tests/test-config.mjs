@@ -57,7 +57,7 @@ function centralAliases(file,root,here){
  if(file==='yearly-ask-read-evidence.test.ts')for(const name of ['redis','order-data','stripe-account','email','store','membership-manage','mail','contacts','purchase-email','catalog','store-checkout','auth','member-health','yearly-switch'])aliases['@/lib/'+name]=join(here,'yearly-ask-read-world.ts');
  if(['community-mail-read-evidence.test.ts','nx-community-mail.test.ts'].includes(file))for(const name of ['redis','community','community-access','community-events','email','mail','order-data','calls','phone-alerts'])aliases['@/lib/'+name]=join(here,'community-mail-read-world.ts');
  if(file==='r30-scan-followup.test.ts')aliases['@/lib/contact-rules']=join(here,'r30-scan-followup-contact-rules.ts');
- if(file==='community-report-queue-view.test.ts'||file==='r30-studio-rsvp-unread.test.ts'){
+ if(file==='community-report-queue-view.test.ts'||file==='r30-studio-rsvp-unread.test.ts'||file==='community-members-exact.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
  }

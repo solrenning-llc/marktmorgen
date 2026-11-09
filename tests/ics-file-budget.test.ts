@@ -57,7 +57,7 @@ function vevent(lines: string[]): string {
   return `BEGIN:VEVENT\r\n${lines.join("\r\n")}\r\nEND:VEVENT\r\n`;
 }
 /** What a reading says about the times, for comparing two readers. */
-const shape = (p: ics.ParsedCalendar) => ({ busy: p.busy, events: p.events, unsupported: p.unsupported, truncated: p.truncated, zone: p.zone });
+const shape = (p: Pick<ics.ParsedCalendar, "busy" | "events" | "unsupported" | "truncated" | "zone">) => ({ busy: p.busy, events: p.events, unsupported: p.unsupported, truncated: p.truncated, zone: p.zone });
 
 function tryParse(text: string, options: ReturnType<typeof window>): { parsed: Parsed | null; error: unknown } {
   try {

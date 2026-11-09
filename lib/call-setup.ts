@@ -498,18 +498,34 @@ export function parseSetup(raw: unknown): CallSetup | null {
   return typeof read === "string" ? null : read;
 }
 
+/**
+ * One formatter per zone, made once: building an Intl.DateTimeFormat costs far
+ * more than using one, and a calendar file's parse asks for the same zone on
+ * every step (R27). Only zones Intl accepts get here (it throws first); the
+ * map is emptied past ZONE_FORMATS_MAX, so names spelled in odd letter cases
+ * cannot grow it without bound.
+ */
+const ZONE_FORMATS_MAX = 512;
+const zoneFormats = new Map<string, Intl.DateTimeFormat>();
+
 /** The parts of a date as a clock in `tz` shows them at instant `ms`. */
 export function partsIn(ms: number, tz: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    weekday: "short",
-  }).formatToParts(new Date(ms));
+  let format = zoneFormats.get(tz);
+  if (!format) {
+    format = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      weekday: "short",
+    });
+    if (zoneFormats.size >= ZONE_FORMATS_MAX) zoneFormats.clear();
+    zoneFormats.set(tz, format);
+  }
+  const parts = format.formatToParts(new Date(ms));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday"));
   return {

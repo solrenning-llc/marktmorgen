@@ -525,11 +525,13 @@ export async function revokeChecked(store: Store, role: Role, id: string): Promi
  * are put back for the next press. An email that may have gone (a timeout,
  * a server error, a throw after the request) leaves them told: it has no key
  * of its own, so the next press would write twice (rule 30, as 283 [HG2]);
- * that person is counted as neither emailed nor waiting. Returns who was
- * written to and how many keys still wait for theirs.
+ * that person is counted as neither emailed nor waiting, but as uncertain,
+ * so the owner's page never calls the confirmed ones everyone (VR item 2).
+ * Returns who was written to, how many keys still wait for theirs and how
+ * many people's emails could not be confirmed.
  */
-export async function tellPaused(store: Store, origin: string): Promise<{ emailed: string[]; waiting: number }> {
-  if (!store.sid) return { emailed: [], waiting: 0 };
+export async function tellPaused(store: Store, origin: string): Promise<{ emailed: string[]; waiting: number; uncertain: number }> {
+  if (!store.sid) return { emailed: [], waiting: 0, uncertain: 0 };
   const [keys, members] = await Promise.all([keyRecords(store.sid), membersByPrint(store)]);
   const byPerson = new Map<string, KeyRecord[]>();
   const nobody: string[] = [];
@@ -543,6 +545,7 @@ export async function tellPaused(store: Store, origin: string): Promise<{ emaile
   if (nobody.length) await swapHolds(store.sid, nobody, "told", ["paused"]);
   const emailed: string[] = [];
   let waiting = 0;
+  let uncertain = 0;
   for (const [email, theirs] of byPerson) {
     const claimed = new Set(await swapHolds(store.sid, theirs.map((k) => k.id), "told", ["paused"]));
     const names = theirs.filter((k) => claimed.has(k.id)).map((k) => k.name);
@@ -570,11 +573,13 @@ export async function tellPaused(store: Store, origin: string): Promise<{ emaile
       ].join("\n"),
     }).catch(() => "uncertain" as const);
     if (outcome === "sent") emailed.push(email);
-    else if (outcome === "uncertain") console.error("an email about paused API keys may have gone; the keys stay told, not emailed again", store.handle);
-    else {
+    else if (outcome === "uncertain") {
+      uncertain += 1;
+      console.error("an email about paused API keys may have gone; the keys stay told, not emailed again", store.handle);
+    } else {
       // Put back for the next press, only where still told by this one.
       waiting += (await swapHolds(store.sid, [...claimed], "paused", ["told"])).length;
     }
   }
-  return { emailed, waiting };
+  return { emailed, waiting, uncertain };
 }

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
+import { holdListDownload } from "@/lib/list-download";
 import { listAsCsv } from "@/lib/free";
 
 /**
@@ -21,13 +22,20 @@ export async function GET(request: NextRequest) {
 
   const onlyAgreed = request.nextUrl.searchParams.get("who") === "agreed";
 
+  // The whole list is read and sent, so its size is counted first and its units taken from the studio figure
+  // before any of it is read (lib/list-download.ts, R31); refused, with nothing read, when either cannot be done.
+  const held = await holdListDownload(store);
+  if (!held.ok) return new Response(held.message, { status: held.status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+
   try {
     const csv = await listAsCsv(store, onlyAgreed);
     const day = new Date().toISOString().slice(0, 10);
     const name = `${store.handle}-${onlyAgreed ? "agreed" : "everyone"}-${day}.csv`;
     // The byte-order mark makes Excel read the file as UTF-8, so a name with
     // an accent arrives with its accent. Every email tool ignores it.
-    return new Response(`\uFEFF${csv}`, {
+    const body = `\uFEFF${csv}`;
+    await held.settle(new TextEncoder().encode(body).length);
+    return new Response(body, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${name}"`,

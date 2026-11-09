@@ -26,6 +26,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ORIGIN_PER_BYTE, UNIT_COST, request } from "./plan-cost-registry";
+import { MAX_LEADS } from "@/lib/contact-rules";
+import { LIST_CONTACTS_PER_COMMAND, LIST_READ_BYTES_PER_CONTACT, LIST_SENT_BYTES_PER_CONTACT, listDownloadHeld, listDownloadUnits } from "@/lib/list-download";
 
 const N = 3_000;
 
@@ -99,6 +101,17 @@ async function main(): Promise<void> {
     is("refused as too many", spent.status, 429);
     is("the list is never walked", spent.walked, false);
     is("nothing more taken", spent.taken, 0);
+  }
+
+  part("The units pay for the reads and the file at every size, up to MAX_LEADS, by the registry's prices");
+  for (const contacts of [0, 1, N, MAX_LEADS]) {
+    const sent = contacts * LIST_SENT_BYTES_PER_CONTACT;
+    const commands = Math.ceil(contacts / LIST_CONTACTS_PER_COMMAND) + 20;
+    const units = listDownloadUnits(contacts, sent);
+    const cost = costOf(commands, contacts * LIST_READ_BYTES_PER_CONTACT + sent, sent);
+    console.log(`${contacts} contacts: ${units} units ($${(units * UNIT_COST.studio).toFixed(5)}) for $${cost.toFixed(5)}; held first ${listDownloadHeld(contacts)}`);
+    is(`${contacts} contacts: the units pay for it`, units * UNIT_COST.studio >= cost, true);
+    is(`${contacts} contacts: what is held first is never less`, listDownloadHeld(contacts) >= units, true);
   }
 
   part("Control: an empty list still downloads, for a unit or two");

@@ -66,8 +66,10 @@ export async function POST(request: NextRequest) {
     if (action === "invite") {
       const result = await inviteMember(store, text(body.email, 300), body.role, linkOrigin(request));
       if (!result.ok) return fail(result.reason);
-      await logTeam(store.sid, { who: email, role, what: `Invited ${result.invite.email} as ${ROLE_NAMES[result.invite.role]}` });
-      return Response.json({ ok: true, invite: result.invite });
+      // Its email's send not known: the invitation is kept and the studio says so (lib/team.ts inviteMember).
+      const unsure = result.uncertain === true;
+      await logTeam(store.sid, { who: email, role, what: `Invited ${result.invite.email} as ${ROLE_NAMES[result.invite.role]}${unsure ? " (its email could not be confirmed as sent)" : ""}` });
+      return Response.json(unsure ? { ok: true, invite: result.invite, uncertain: true } : { ok: true, invite: result.invite });
     }
 
     if (action === "revoke") {

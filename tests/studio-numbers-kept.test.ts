@@ -62,7 +62,9 @@ async function main(): Promise<void> {
   part("The studio says it");
   const panel = read("components/stats-panel.tsx");
   const studio = read("app/studio/page.tsx");
-  is("the panel's reading line: the time on the creator's clock, Update now or when they come back", [panel.includes("Updated at <LocalClock ms={reading.at} />."), panel.includes("{reading.canRefresh ? ("), panel.includes("Update now"), panel.includes("<UtcAndLocal ms={reading.backAt} />")], [true, true, true, true]);
+  // Rule 23: anchor moved, not loosened. Since studio-shelf-honest-2 a day's count that could not be read is said first
+  // (rule 24, never "Today's readings are used"), so Update now or when they come back follow it; both are still checked.
+  is("the panel's reading line: the time on the creator's clock, Update now or when they come back", [panel.includes("Updated at <LocalClock ms={reading.at} />."), panel.includes("{reading.leftUnknown ? (") && panel.includes(") : reading.canRefresh ? ("), panel.includes("Update now"), panel.includes("<UtcAndLocal ms={reading.backAt} />")], [true, true, true, true]);
   is("Update now reads again from the day's own budget, and is offered by what is left (heavy for a store that reads sales)", [studio.includes('const freshNumbers = params.numbers === "fresh";'), studio.includes("canRefresh: readsSales(current) ? left.heavy : left.any,"), studio.includes('refreshHref: studioPath(current, "numbers=fresh"),')], [true, true, true]);
   is("a store whose sales are used and none kept is said so, not as an error", studio.includes("used: error instanceof ReadingsUsed"), true);
 

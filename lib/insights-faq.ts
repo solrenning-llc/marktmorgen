@@ -23,7 +23,7 @@ export function insightsBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
   return [
     {
       q: "Where do I see my numbers?",
-      a: `In your studio, on the “${w.card}” card; “${w.jump}” at the top jumps to it. Choose ${w.ranges.slice(0, -1).map((r) => `“${r}”`).join(", ")} or “${w.ranges[w.ranges.length - 1]}” at its top. The owner, an ${ROLE_NAMES.admin} or an ${ROLE_NAMES.editor} sees them; ${ROLE_NAMES.support} does not. While visits cannot be read, the card and that link are not shown.`,
+      a: `In your studio, on the “${w.card}” card; “${w.jump}” at the top jumps to it. Choose ${w.ranges.slice(0, -1).map((r) => `“${r}”`).join(", ")} or “${w.ranges[w.ranges.length - 1]}” at its top. The owner, an ${ROLE_NAMES.admin} or an ${ROLE_NAMES.editor} sees them; ${ROLE_NAMES.support} does not. While visits cannot be read, the card is not shown, and a note in its place says why.`,
     },
     {
       q: "Why are my numbers empty?",

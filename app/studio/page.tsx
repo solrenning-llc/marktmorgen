@@ -1202,6 +1202,8 @@ export default async function StudioPage({
         // A reading that failed after calling Stripe was counted (inbox C4-53): said, with what is left of the day.
         failed: salesRead?.failed === true || visitsKept?.failed === true,
         left: readsSales(current) ? left.heavyLeft : left.anyLeft,
+        // What is left of the day could not be read (lib/store-readings.ts readingsLeft): said so, never as used (rule 24).
+        leftUnknown: left.unknown === true,
       }
     : null;
   // Read after the day's reading, from what it read, so it cannot be waited for before it: when the products it names
@@ -1748,34 +1750,35 @@ export default async function StudioPage({
                   );
                 })()}
               </div>
-            ) : numbersUnread ? (
-              <div id="numbers" className="scroll-mt-32">
+            ) : numbersUnread || visitsOut ? (
+              // The numbers not shown, and why, under the numbers card's own title (components/stats-panel.tsx), so the
+              // section the "Numbers" link jumps to is named as it is when the numbers are there (AAA 2.4.10).
+              <section id="numbers" className="scroll-mt-32" aria-labelledby="numbers-out-title">
+                <h2 id="numbers-out-title" className="mt-8 text-lg font-semibold tracking-[-0.02em] text-ink">
+                  Your numbers
+                </h2>
                 {troubleNotice}
-                <div className="notice notice-warn mt-8" role="status">
-                  <p className="font-bold text-ink">We could not read your numbers just now</p>
-                  <p className="mt-1 text-sm text-ink-soft">Your visits and sales are shown with your products&rsquo; names, and those could not be read. Nothing was changed. Reload this page in a moment to check again.</p>
-                </div>
-              </div>
-            ) : visitsOut === "used" ? (
-              <div id="numbers" className="scroll-mt-32">
-                {troubleNotice}
-                <div className="notice notice-warn mt-8" role="status">
-                  <p className="font-bold text-ink">Today&rsquo;s readings of your numbers are used</p>
-                  <p className="mt-1 text-sm text-ink-soft">
-                    {`Your store can read its numbers ${STORE_READINGS_PER_DAY} times a day, and today\u2019s are used. Your numbers can be read again at `}
-                    <UtcAndLocal ms={readingsBackAt()} />
-                    {". Nothing was changed."}
-                  </p>
-                </div>
-              </div>
-            ) : visitsOut === "unread" ? (
-              <div id="numbers" className="scroll-mt-32">
-                {troubleNotice}
-                <div className="notice notice-warn mt-8" role="status">
-                  <p className="font-bold text-ink">We could not read your numbers just now</p>
-                  <p className="mt-1 text-sm text-ink-soft">Your visits could not be read. Nothing was changed. Reload this page in a moment to check again.</p>
-                </div>
-              </div>
+                {numbersUnread ? (
+                  <div className="notice notice-warn mt-8" role="status">
+                    <p className="font-bold text-ink">We could not read your numbers just now</p>
+                    <p className="mt-1 text-sm text-ink-soft">Your visits and sales are shown with your products&rsquo; names, and those could not be read. Nothing was changed. Reload this page in a moment to check again.</p>
+                  </div>
+                ) : visitsOut === "used" ? (
+                  <div className="notice notice-warn mt-8" role="status">
+                    <p className="font-bold text-ink">Today&rsquo;s readings of your numbers are used</p>
+                    <p className="mt-1 text-sm text-ink-soft">
+                      {`Your store can read its numbers ${STORE_READINGS_PER_DAY} times a day, and today\u2019s are used. Your numbers can be read again at `}
+                      <UtcAndLocal ms={readingsBackAt()} />
+                      {". Nothing was changed."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="notice notice-warn mt-8" role="status">
+                    <p className="font-bold text-ink">We could not read your numbers just now</p>
+                    <p className="mt-1 text-sm text-ink-soft">Your visits could not be read. Nothing was changed. Reload this page in a moment to check again.</p>
+                  </div>
+                )}
+              </section>
             ) : null}
 
             {may("page") ? (

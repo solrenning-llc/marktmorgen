@@ -425,6 +425,8 @@ export type NumbersReading = {
   failed?: boolean;
   /** Readings of this kind left today. */
   left?: number;
+  /** What is left of the day could not be read just now: neither offered nor said used (rule 24). */
+  leftUnknown?: boolean;
 };
 
 /**
@@ -441,10 +443,16 @@ export function ReadingLine({ reading }: { reading: NumbersReading }) {
         </span>
       ) : null}
       {reading.failed ? (
-        <span>{`The last reading failed and was counted; ${reading.left ?? 0} ${(reading.left ?? 0) === 1 ? "reading" : "readings"} left today.`}</span>
+        <span>
+          {reading.leftUnknown
+            ? "The last reading failed and was counted."
+            : `The last reading failed and was counted; ${reading.left ?? 0} ${(reading.left ?? 0) === 1 ? "reading" : "readings"} left today.`}
+        </span>
       ) : null}
       {reading.salesUsed ? <span>Your sales could not be read again today.</span> : null}
-      {reading.canRefresh ? (
+      {reading.leftUnknown ? (
+        <span>We could not check what is left of today&apos;s readings just now. Reload this page in a moment to check again.</span>
+      ) : reading.canRefresh ? (
         <a href={reading.refreshHref} className="link inline-flex min-h-11 items-center font-semibold">
           Update now
         </a>

@@ -91,21 +91,40 @@ export class ReadingFailed extends Error {
 }
 
 /**
+ * Thrown when the day's count of the store's readings could not be made (the
+ * count did not reach Redis, or its reply was not whole: CX-123 rule 24) and
+ * there is no copy to show: nothing was read and nothing is known to be used,
+ * so it is said as a reading that could not be made, never as the day's
+ * readings used (ReadingsUsed).
+ */
+export class ReadingUncounted extends Error {
+  constructor() {
+    super("the day's count of the store's readings could not be made");
+    this.name = "ReadingUncounted";
+  }
+}
+
+/**
  * Whether the day still has a reading, and a heavy one, left: two GET, for a
  * page that offers to read again. Unknown is none, so nothing is offered that
- * would be refused.
+ * would be refused, and `unknown` says so, so that a page never says the day's
+ * readings are used when it could not tell (rule 24).
  */
-export type ReadingsLeft = { any: boolean; heavy: boolean; anyLeft: number; heavyLeft: number };
+export type ReadingsLeft = { any: boolean; heavy: boolean; anyLeft: number; heavyLeft: number; unknown?: true };
 
 export async function readingsLeft(store: Pick<Store, "statsId">, now = Date.now()): Promise<ReadingsLeft> {
-  const none: ReadingsLeft = { any: false, heavy: false, anyLeft: 0, heavyLeft: 0 };
+  const none: ReadingsLeft = { any: false, heavy: false, anyLeft: 0, heavyLeft: 0, unknown: true };
   if (!store.statsId || !isRedisConfigured()) return none;
   const key = dayKey(store.statsId, utcDay(now));
   try {
-    const [raw, rawHeavy] = await redisPipeline([["GET", key], ["GET", `${key}:heavy`]]);
+    const replies = repliesFor(await redisPipeline([["GET", key], ["GET", `${key}:heavy`]]), 2);
+    if (!replies) return none;
+    const [raw, rawHeavy] = replies;
+    // Only a count as text, or none yet: any other reply is unknown (rule 24), never a count of zero.
+    if ((raw !== null && typeof raw !== "string") || (rawHeavy !== null && typeof rawHeavy !== "string")) return none;
     const n = raw === null ? 0 : Number(raw);
     const h = rawHeavy === null ? 0 : Number(rawHeavy);
-    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(h)) return none;
+    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(h) || n < 0 || h < 0) return none;
     const anyLeft = Math.max(0, STORE_READINGS_PER_DAY - n);
     const heavyLeft = Math.max(0, Math.min(anyLeft, HEAVY_READINGS_PER_DAY - h));
     return { any: anyLeft > 0, heavy: heavyLeft > 0, anyLeft, heavyLeft };
@@ -142,24 +161,38 @@ async function giveStoreReading(store: Pick<Store, "statsId">, now: number, heav
  * A count that cannot be made is a refusal.
  */
 export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date.now(), heavy = false): Promise<boolean> {
-  if (!store.statsId || !isRedisConfigured()) return false;
+  return (await countStoreReading(store, now, heavy)) === "taken";
+}
+
+/**
+ * The day's count of a reading, as takeStoreReading takes it, telling a
+ * refusal apart: "taken"; "used", the day's figure (or the heavy one) reached;
+ * "uncounted", the count did not reach Redis or its reply was not an integer
+ * of at least one (rule 24), so whether the day has a reading left is unknown.
+ * Either refusal takes nothing.
+ */
+async function countStoreReading(store: Pick<Store, "statsId">, now: number, heavy: boolean): Promise<"taken" | "used" | "uncounted"> {
+  if (!store.statsId || !isRedisConfigured()) return "uncounted";
   const key = dayKey(store.statsId, utcDay(now));
   const heavyKey = `${key}:heavy`;
   try {
-    const [, raw, , , rawHeavy] = await redisPipeline([
+    const sent = [
       ["SET", key, "0", "NX", "EX", 2 * 86_400],
       ["INCRBY", key, 1],
       ["EXPIRE", key, 2 * 86_400, "NX"],
       ...(heavy ? [["SET", heavyKey, "0", "NX", "EX", 2 * 86_400], ["INCRBY", heavyKey, 1]] : []),
-    ]);
-    const n = Number(raw);
-    const h = heavy ? Number(rawHeavy) : 0;
-    if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(h) || (heavy && h < 1)) return false;
-    if (n <= STORE_READINGS_PER_DAY && h <= HEAVY_READINGS_PER_DAY) return true;
+    ];
+    const replies = repliesFor(await redisPipeline(sent), sent.length);
+    if (!replies) return "uncounted";
+    const [, raw, , , rawHeavy] = replies;
+    const n = countOf(raw);
+    const h = heavy ? countOf(rawHeavy) : 0;
+    if (n === null || n < 1 || h === null || (heavy && h < 1)) return "uncounted";
+    if (n <= STORE_READINGS_PER_DAY && h <= HEAVY_READINGS_PER_DAY) return "taken";
     await redisPipeline([["DECRBY", key, 1], ...(heavy ? [["DECRBY", heavyKey, 1]] : [])]).catch(() => {});
-    return false;
+    return "used";
   } catch {
-    return false;
+    return "uncounted";
   }
 }
 
@@ -198,7 +231,8 @@ export type ReadingGuard<T> = {
  * A reading of `kind`, kept: the one kept when it is fresh (unless `fresh`
  * asks to read again); otherwise, when the day's budget allows, `read` again
  * and kept; otherwise the last one kept, `stale`. With none kept: null when
- * the store has no counts at all, ReadingsUsed when none may be read today.
+ * the store has no counts at all, ReadingsUsed when none may be read today,
+ * ReadingUncounted when the day's count could not be made.
  * A reading that fails after calling a supplier is counted (what it spent
  * was spent; inbox C4-53): the last one kept is shown, stale and `failed`, or
  * ReadingFailed is thrown when there is none. One that stopped before calling
@@ -219,9 +253,11 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     kept = null;
   }
   if (kept && !fresh && now - kept.at < READING_FRESH_SECONDS * 1000) return kept;
-  if (!(await takeStoreReading(store, now, kind === "sales"))) {
+  const counted = await countStoreReading(store, now, kind === "sales");
+  if (counted !== "taken") {
     if (kept) return { ...kept, stale: true };
-    throw new ReadingsUsed();
+    // Used only when the count said so: a count that could not be made is a reading not made (rule 24).
+    throw counted === "used" ? new ReadingsUsed() : new ReadingUncounted();
   }
   let value: T;
   try {
@@ -297,7 +333,8 @@ export async function keptSales(store: Store, now = Date.now(), fresh = false): 
     if (!guard.listId && sales?.buyers?.top.length) guard.listId = await listForNaming(store, now);
     return withoutErasedBuyers({ listId: guard.listId ?? null }, sales);
   }, now, fresh, guard);
-  if (!kept) throw new ReadingsUsed();
+  // No count to take at all (no statsId, or no Redis): nothing is known to be used, so never said as used (rule 24).
+  if (!kept) throw new ReadingUncounted();
   return kept;
 }
 

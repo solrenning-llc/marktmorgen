@@ -13,7 +13,12 @@
 import type { Need } from "@/lib/studio-route";
 
 export const STUDIO_PAGE_UNITS = 4;
-/** RED stub: 766 [STN13] unit 1. */
-export const STUDIO_SEARCH_UNITS = 0;
+/**
+ * A search of the studio's one search box (766 [STN13]; app/api/store/studio-search) is this many of the store's
+ * studio requests, taken before it reads: the request itself and one exact read of every product's name, up to
+ * MAX_PRODUCTS of them, with its two counters (held in tests/stn13-studio-search.test.ts and
+ * tests/plan-cost-registry.ts, line studio).
+ */
+export const STUDIO_SEARCH_UNITS = 2;
 export const ESSENTIAL_NEEDS: readonly Need[] = ["billing", "delete", "export", "member"];
 export const ESSENTIAL_PER_DAY = 10;

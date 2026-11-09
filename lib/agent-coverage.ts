@@ -253,6 +253,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/stores": row("access", never(ACCESS)),
   "POST store/stream": row("files", draft),
   "POST store/stream/captions": row("courses", draft, "Captions typed or uploaded by the creator; the paid automatic captions (action \"auto\") are never: money."),
+  "POST store/studio-search": row("products", read, "The studio's search box: products, the store's own pages and the studio's tools found by name, each only for a role that may open it."),
   "POST store/tax": row("settings", draft),
   "POST store/team": row("access", never(ACCESS)),
   "POST store/thanks-note": row("products", draft),

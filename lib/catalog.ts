@@ -1088,6 +1088,45 @@ export async function readCardsFor(store: Store, ids: Iterable<string>): Promise
   return found;
 }
 
+/**
+ * Every product's card, in the creator's order, for the studio's search (766
+ * [STN13], lib/studio-search.ts): what the store record holds (inline, or in
+ * the head) with no read, the rest in one HMGET of the card hash, read
+ * exactly. Never filled in from the products' own records, so a search's
+ * reads stay one command whatever the store: a product whose card is absent
+ * or in an older shape is counted in `missing` and left out (the studio's
+ * Sales pages fill them, readCards). Anything but one string or nil for each
+ * product throws UnknownReplyError (rule 24), never "no products".
+ */
+export async function readCardsExact(store: Store): Promise<{ cards: Card[]; missing: number }> {
+  const catalog = store.catalog;
+  const cardOf = (p: Listing): Card => ({ id: p.id, title: p.title, priceCents: p.priceCents, page: p.page });
+  if (catalog.inline) return { cards: catalog.inline.map(cardOf), missing: 0 };
+  const ids = productIds(store);
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const rest = ids.filter((id) => !head.has(id));
+  const found = new Map<string, Card>();
+  for (const id of ids) {
+    const listing = head.get(id);
+    if (listing) found.set(id, cardOf(listing));
+  }
+  let missing = 0;
+  if (rest.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new redisReply.UnknownReplyError("the products' cards");
+    const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...rest]]), 1);
+    const slots = replies ? redisReply.repliesFor(replies[0], rest.length) : null;
+    if (!slots) throw new redisReply.UnknownReplyError("the products' cards");
+    rest.forEach((id, i) => {
+      const raw = slots[i];
+      if (raw !== null && typeof raw !== "string") throw new redisReply.UnknownReplyError("a product's card");
+      const card = raw === null ? null : parseCard(id, raw);
+      if (card) found.set(id, card);
+      else missing += 1;
+    });
+  }
+  return { cards: ids.flatMap((id) => (found.has(id) ? [found.get(id)!] : [])), missing };
+}
+
 /** When the studio's list is one page of a longer one, as the studio page read it. */
 export type ProductPaging = {
   page: number;

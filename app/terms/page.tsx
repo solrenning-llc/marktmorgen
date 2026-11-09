@@ -19,7 +19,7 @@ import { CLOSING_DAYS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, KEEP_NOTHING_FROM
 import { RELEASE_QUARANTINE_DAYS } from "@/lib/store";
 import { CALL_ORDER_UNITS, ORDERS_INCLUDED, TRIAL_ORDERS } from "@/lib/order-rules";
 import { API_SALES_UNITS, API_WRITE_UNITS, allowanceListWords } from "@/lib/store-allowance-rules";
-import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { STUDIO_PAGE_UNITS, STUDIO_SEARCH_UNITS } from "@/lib/studio-allowance-rules";
 import { FREE_POOL_BASE_STORES, PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { BUYER_RESERVE_BPS, EXTRA_REQUESTS, REQUESTS_PER_VISIT, ROOM_IDLE_PARTS, ROOM_LIVE_PARTS, SETUP_VISITS, TRIAL_VISITS, VISITS_INCLUDED, countWords, partsWords } from "@/lib/traffic-rules";
 import { ROOM_GRANT_MINUTES } from "@/lib/chat-pace";
@@ -441,7 +441,8 @@ export default function TermsPage() {
           {allowanceListWords("pro")}; and on {PLAN_TITLES.scale},{" "}
           {allowanceListWords("scale")}. A studio request is any page of your
           studio you open (each counts as {STUDIO_PAGE_UNITS}), any save, and
-          the studio&apos;s own refreshing; an API request is one made with
+          the studio&apos;s own refreshing, and a search in the studio counts as
+          {STUDIO_SEARCH_UNITS}; an API request is one made with
           one of your store&apos;s keys (a contact added or a product given
           counts as {API_WRITE_UNITS}, and a page of sales read counts as{" "}
           {API_SALES_UNITS}); store emails are the emails your

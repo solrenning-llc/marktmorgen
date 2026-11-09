@@ -21,14 +21,14 @@
  * (tests/plan-cost-registry.ts, closure).
  */
 import { readAllListings } from "@/lib/catalog";
-import { BODIES_PER_READ, type Course, readAllBodies, readCoursesExact } from "@/lib/course";
+import { BODIES_PER_READ, type Course, MAX_LESSONS, readAllBodies, readCoursesExact } from "@/lib/course";
 import { ListNotWholeError, listAsCsv, listSize } from "@/lib/free";
 import { dataUsed } from "@/lib/store-data";
 import { readForms, readResponses } from "@/lib/form-store";
 import { readAbouts } from "@/lib/product-about";
 import { readPages } from "@/lib/sales-page-store";
 import { EXPORT_PAGES, type SalesGap, salesCsv, readsSales } from "@/lib/stats";
-import { allPosts, readPosts } from "@/lib/store-blog";
+import { MAX_POSTS, allPosts, readPosts } from "@/lib/store-blog";
 import { type Store } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
@@ -78,18 +78,36 @@ export async function exportShape(store: Store): Promise<ExportShape> {
   // cannot be priced as an empty room before the remaining reads begin.
   if (!used) throw new Error("The data-room size could not be read");
   const listings = await readAllListings(store);
-  const ids = listings.flatMap((l) => (l.course ? [l.course.id] : []));
-  // Read exactly (rule 24): an outline that cannot be read throws, so the export is never priced at fewer lessons
-  // than the store has (the route answers that it could not be measured, before anything is taken).
-  const courses = ids.length ? await readCoursesExact(ids, COURSES_READ) : new Map<string, Course>();
-  let lessons = 0;
-  for (const course of courses.values()) for (const unit of course.modules) lessons += unit.lessons.length;
-  const posts = (await allPosts(store.statsId)).length;
+  const ids = [...new Set(listings.flatMap((l) => (l.course ? [l.course.id] : [])))];
+  // Read exactly (rule 24): an outline that cannot be read is never priced at fewer lessons than the store has. It is
+  // priced at the most a course holds (MAX_LESSONS each), never refused: a refusal locked a store whose outline stays
+  // unreadable out of its whole file for good (Claude 6's review of #3397). The file then leaves the courses out and
+  // says so (coursesNote), reading no lesson of them, so what it reads stays under this count.
+  let courseCount = ids.length;
+  let lessons = ids.length * MAX_LESSONS;
+  const courses = ids.length ? await readCoursesExact(ids, COURSES_READ).catch(unmeasured("course outlines")) : new Map<string, Course>();
+  if (courses) {
+    courseCount = courses.size;
+    lessons = 0;
+    for (const course of courses.values()) for (const unit of course.modules) lessons += unit.lessons.length;
+  }
+  // The posts' list the same way (rule 30): one that cannot be read is priced at the most a store keeps (MAX_POSTS),
+  // and the file says the posts could not be read, reading none of them.
+  const postList = await allPosts(store.statsId).catch(unmeasured("blog list"));
+  const posts = postList ? postList.length : MAX_POSTS;
   const forms = (await readForms(store.statsId)).length;
   const contacts = (await listSize(store)).total;
   return {
     bytes: used.used,
-    commands: Math.ceil(EXPORT_COMMANDS.fixed + 3 * Math.ceil(listings.length / 100) + Math.ceil(courses.size / 100) + Math.ceil(lessons / BODIES_PER_READ) + Math.ceil(posts / 100) + EXPORT_COMMANDS.form * forms + contacts / 1000),
+    commands: Math.ceil(EXPORT_COMMANDS.fixed + 3 * Math.ceil(listings.length / 100) + Math.ceil(courseCount / 100) + Math.ceil(lessons / BODIES_PER_READ) + Math.ceil(posts / 100) + EXPORT_COMMANDS.form * forms + contacts / 1000),
+  };
+}
+
+/** A part the measuring could not read: logged, and null so it is priced at its ceiling instead of refusing the file. */
+function unmeasured(part: string): (error: unknown) => null {
+  return (error) => {
+    console.error(`measuring a store export could not read the ${part}; priced at the most it holds`, error);
+    return null;
   };
 }
 

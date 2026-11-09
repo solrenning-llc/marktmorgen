@@ -23,20 +23,24 @@ export async function GET(request: NextRequest) {
 
   try {
     // Contacts kept but unreadable (rule 24): the readable ones are handed over, and the file's name says it is not the
-    // whole list ("-partial", as the sales file says it), never a file given as the list without a word.
+    // whole list and how many were left out ("-partial", as the sales file says it, then "-3-contacts-not-read"),
+    // never a file given as the list without a word. The count is in the name, not in the file, so every email tool
+    // still imports the file as it is.
     const read = await listAsCsv(store, onlyAgreed).then(
-      (csv) => ({ csv, partial: false }),
+      (csv) => ({ csv, unreadable: 0 }),
       (error: unknown) => {
-        if (error instanceof ListNotWholeError) return { csv: error.csv, partial: true };
+        if (error instanceof ListNotWholeError) return { csv: error.csv, unreadable: Math.max(1, error.unreadable) };
         throw error;
       },
     );
     const csv = read.csv;
     const day = new Date().toISOString().slice(0, 10);
-    const name = `${store.handle}-${onlyAgreed ? "agreed" : "everyone"}-${day}${read.partial ? "-partial" : ""}.csv`;
+    const left = read.unreadable ? `-partial-${read.unreadable}-${read.unreadable === 1 ? "contact" : "contacts"}-not-read` : "";
+    const name = `${store.handle}-${onlyAgreed ? "agreed" : "everyone"}-${day}${left}.csv`;
     // The byte-order mark makes Excel read the file as UTF-8, so a name with
     // an accent arrives with its accent. Every email tool ignores it.
-    return new Response(`\uFEFF${csv}`, {
+    const body = `\uFEFF${csv}`;
+    return new Response(body, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${name}"`,

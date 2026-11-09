@@ -13,6 +13,10 @@
  *     Class B for each read-back and one manifest read a run, a million of each class of
  *     rounding, every Upstash command and byte the caps allow (at most 200
  *     SCAN pages a run), the route's whole duration, the 10% provider allowance;
+ *   - one of the four lines docs/backup-costs-2026-11-08.md (section 3, items 2, 3, 4 and 8; on #3271) priced
+ *     outside the code until 9 November 2026 missing or at zero: Vercel at its dearest region (gru1), one more
+ *     billing block of each Upstash and Vercel unit, the batch of oversized keys read before the byte cap refuses
+ *     it, and every byte the function moves at Vercel's dearest transfer rate;
  *   - a free quota credited;
  *   - a figure for a review the run would refuse, or one read through a getter,
  *     inherited, or that throws when read;
@@ -21,6 +25,7 @@
  */
 import { BACKUP_COST_UNKNOWNS, BACKUP_RUNS_PER_MONTH, backupWorstMonth } from "@/lib/backup-cost";
 import * as backupCost from "@/lib/backup-cost";
+import * as backupRun from "@/lib/backup-run";
 import { readFileSync } from "node:fs";
 import type { BackupCostReview } from "@/lib/backup-run";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, FIXED_COST_SOURCE_OBSERVATIONS, LLC_FIXED_COST_IDS, allocateEntireLlcFixedCosts } from "@/lib/llc-fixed-costs";
@@ -65,15 +70,43 @@ is("Upstash bytes: at most 200 full SCAN pages, every copied byte, each name sen
 is("Upstash storage: the backup's six marks", line("upstash-storage"), 2);
 // 64 × (2 × 300/3,600 × 10,600 + 300/3,600 × 128,000 + 0.6) = 64 × 12,433.93 = 795,771.73 → 795,772.
 is("Vercel: the whole 300 s at 2 GB, CPU all along", line("vercel"), 795_772);
-// 17,271 + 4,502,777 + 362,466 + 2,587,008 + 245,224 + 2 + 795,772 = 8,510,520; × 10% = 851,052.
-is("the provider allowance on all of it", line("provider-allowance"), 851_052);
-// 8,510,520 + 851,052 = 9,361,572: $9.36 a month, $112.34 a year.
-is("the month: $9.36", month?.knownMicroUsd, 9_361_572);
-// The quote at the route's own maxDuration (Claude 5's LOW 1 on #3293, 6732268011): the Vercel line at 800 s, not 300.
+// The four lines docs/backup-costs-2026-11-08.md (#3271, section 3) kept outside the code until 9 November 2026, each
+// from the rates that document cites with their dates (Vercel functions pricing, last_updated 2026-06-16, and its
+// regional and transfer pages; Upstash billing; all read 2026-11-08).
+// Vercel at gru1, the dearest region ($0.221 a CPU-hour, $0.0183 a GB-hour), less the iad1 rates the line above uses:
+// 64 × (2 × 300/3,600 × (18,300 - 10,600) + 300/3,600 × (221,000 - 128,000)) = 64 × 9,033.33 = 578,133.33 → 578,134.
+is("Vercel at its dearest region (gru1), above the repository's iad1 rates", line("vercel-region"), 578_134);
+// One more block of each unit, as R2's rounding: 100,000 Upstash commands (200,000), 1 GB of Upstash bandwidth
+// (30,000), 1 GB-month of Upstash storage (250,000), 1 CPU-hour (221,000) and 1 GB-hour (18,300) at gru1 = 719,300.
+is("one more billing block of each Upstash and Vercel unit", line("billing-blocks"), 719_300);
+// The batch read before the byte cap refuses it: the run's 100 keys (lib/backup-run.ts, BACKUP_DUMP_BATCH), each at
+// Upstash's record cap of 100 MB read as 100 MiB, the dearer reading: 104,857,600 bytes, as base64 ⌈/3⌉ × 4 =
+// 139,810,136; 64 × 100 × 139,810,136 = 894,784,870,400 bytes = 894.7848704 GB × 30,000 = 26,843,546.11 → 26,843,547.
+is("the batch of oversized keys read before the cap refuses it, each at Upstash's record cap", line("upstash-overshoot"), 26_843_547);
+// Every byte the function moves, at Vercel's dearest transfer rate ($0.43 a GB): a run's Upstash bytes 127,720,448 +
+// the oversized batch 13,981,013,600 + the set written and read back 2 × 4,325,536 + up to 105 objects read to find
+// the verified copies, each at most manifestBound(10,000 parts) = 1,665,536 bytes (174,881,280) = 14,292,266,400;
+// × 64 = 914,705,049,600 bytes = 914.7050496 GB × 430,000 = 393,323,171.33 → 393,323,172.
+is("every byte the function moves, at Vercel's dearest transfer rate", line("vercel-transfer"), 393_323_172);
+for (const id of ["vercel-region", "billing-blocks", "upstash-overshoot", "vercel-transfer"]) {
+  is(`${id}: in the worst month and above zero, never left out`, (month?.lines ?? []).some((l) => l.id === id && l.microUsd > 0), true);
+}
+// 8,510,520 + 578,134 + 719,300 + 26,843,547 + 393,323,172 = 429,974,673; × 10% = 42,997,467.3 → 42,997,468.
+is("the provider allowance on all of it", line("provider-allowance"), 42_997_468);
+// 429,974,673 + 42,997,468 = 472,972,141: $472.97 a month.
+is("the month: $472.97", month?.knownMicroUsd, 472_972_141);
+// The overshoot follows the run's own batch: a smaller batch in lib/backup-run.ts lowers it, and only then.
+const dumpBatch = (backupRun as Record<string, unknown>).BACKUP_DUMP_BATCH as number;
+is("the overshoot is priced at the batch the run sends", [dumpBatch, line("upstash-overshoot") === Math.ceil((64 * dumpBatch * 139_810_136 * 30_000) / 1_000_000_000), readFileSync("lib/backup-run.ts", "utf8").includes("batch: BACKUP_DUMP_BATCH")], [100, true, true]);
+// The quote at the route's own maxDuration (Claude 5's LOW 1 on #3293, 6732268011): the Vercel lines at 800 s, not 300.
+// Vercel: 64 × (2 × 800/3,600 × 10,600 + 800/3,600 × 128,000 + 0.6) = 2,121,994; gru1: 64 × 24,088.89 = 1,541,688.9 →
+// 1,541,689. 17,271 + 4,502,777 + 362,466 + 2,587,008 + 245,224 + 2 + 2,121,994 + 1,541,689 + 719,300 + 26,843,547 +
+// 393,323,172 = 432,264,450; + 43,226,445 = 475,490,895 (until 9 November 2026, without the four lines, 10,820,417).
 const routeSeconds = (backupCost as Record<string, unknown>).BACKUP_ROUTE_SECONDS as number;
 const atRoute = backupWorstMonth(builtAsIs, routeSeconds);
-is("at the route's maxDuration (800 s): $10.82 a month", [routeSeconds, atRoute?.knownMicroUsd], [800, 10_820_417]);
-is("docs/backup.md quotes the month at the route's 800 s, not at 300 s", [readFileSync("docs/backup.md", "utf8").includes("10,820,417"), readFileSync("docs/backup.md", "utf8").includes("worst month at a 300 s route")], [true, false]);
+is("at the route's maxDuration (800 s): $475.49 a month", [routeSeconds, atRoute?.knownMicroUsd], [800, 475_490_895]);
+is("at 800 s, the four lines are in too", ["vercel-region", "billing-blocks", "upstash-overshoot", "vercel-transfer"].every((id) => (atRoute?.lines ?? []).some((l) => l.id === id && l.microUsd > 0)), true);
+is("docs/backup.md quotes the month at the route's 800 s with the four lines, not the old figure", [readFileSync("docs/backup.md", "utf8").includes("475,490,895"), readFileSync("docs/backup.md", "utf8").includes("worst month at a 300 s route")], [true, false]);
 is("no free quota anywhere: storage, operations and bytes all above zero", [line("r2-storage"), line("r2-class-a"), line("r2-class-b"), line("upstash-transfer")].every((n) => n > 0), true);
 // With fewer commands than the page cap, the walk can read only what its commands allow: 30 - 10 = 20 pages.
 const fewCommands = backupWorstMonth({ ...builtAsIs, maxRows: 2, maxCommands: 30 }, 300)?.lines.find((l) => l.id === "upstash-transfer")?.basis ?? "";

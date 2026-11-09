@@ -161,7 +161,11 @@ async function main(): Promise<void> {
   for (const email of ["ana@example.com", "ben@example.com", "cy@example.com", "dee@example.com"]) await touchStudent(course.id, email, now, ROOM);
   await markLesson(course.id, "ana@example.com", one, true, ROOM);
   await setBlocked(store, course.id, "dee@example.com", true);
-  const blocked = async () => (await studentsOf(course)).students.filter((s) => s.blocked).map((s) => s.email).sort();
+  const blocked = async () => {
+    const read = await studentsOf(course);
+    if (!read) throw new Error("the course's students could not be read");
+    return read.students.filter((s) => s.blocked).map((s) => s.email).sort();
+  };
   is("dee was taken off the course, one at a time, as before", await blocked(), ["dee@example.com"]);
   is(
     "each person's access, read exactly from the same records the course reads",

@@ -687,17 +687,18 @@ export const BUYER_LEDGER_BYTES = 2 * ALL_TIME_PAGES * 100 * 320;
  * decision 2 of C1-20261109-1029-C5-52), held by tests/paypal-removed-owed.test.ts:
  * - ownCommandsAtMost: one try's own Redis commands at the most: the buyer's grant read exactly (HGET, SISMEMBER, the
  *   refund mark's ZSCORE, and the taken-back mark's ZSCORE where that is read), the mark's pipeline (ZADD NX, EXPIRE,
- *   ZREMRANGEBYSCORE, the email's GET), the email's claim (SET NX, GET when its answer is odd), then either the "sent"
- *   SET or, when the sender did not take it, the claim let go (an EVAL billed with its GET and DEL) and the list's ZADD XX
- *   that makes it due later. The count of the order (lib/orders.ts countOrder) and the email are the order's own, as a
- *   hand-over's are: the email goes in place of the receipt, which is not sent (meter "order"), at most once accepted;
- * - triesAtMost: the email is tried at most TELL_TRIES_AT_MOST times (the first, then one every TELL_RETRY_SECONDS until
- *   TELL_WINDOW_SECONDS after the payment), each a try of at most ownCommandsAtMost; past the window the order leaves
- *   the list. The first try is the order's own work, and costs less than the hand-over it replaces (the test measures
- *   both); the later ones are the five-minute job's, inside NOT_A_COST.HAND_OVER_BATCH's batch.
- * The refund itself is not made by the code (no call to PayPal's refund of a capture yet), so it costs nothing here.
+ *   ZREMRANGEBYSCORE, the email's GET), the email's claim (SET NX, GET when its answer is odd) and its state's SET XX
+ *   ("sent" or "unsure"). The count of the order (lib/orders.ts countOrder) and the email are the order's own, as a
+ *   hand-over's are: the email goes in place of the receipt, which is not sent (meter "order");
+ * - emailTriesAtMost: the email is handed to the sender once, ever: its claim is never let go, and a false from
+ *   sendEmail (refused, or taken with its answer lost) is "unsure", never tried again (Claude 1's pre-review ALTO 1);
+ * - laterTriesAtMost: while another run holds the claim (CLAIM_IN_FLIGHT_SECONDS, an hour), the order stays on the list
+ *   and each five-minute sweep tries it again, without the email or the claim's commands: at most an hour's runs.
+ * The first try is the order's own work, and costs less than the hand-over it replaces (the test measures both); the
+ * later ones are the five-minute job's, inside NOT_A_COST.HAND_OVER_BATCH's batch. The refund itself is not made by the
+ * code (no call to PayPal's refund of a capture yet), so it costs nothing here.
  */
-export const PAYPAL_REFUND_OWED = { ownCommandsAtMost: 14, triesAtMost: 13, emailsAcceptedPerOrder: 1 } as const;
+export const PAYPAL_REFUND_OWED = { ownCommandsAtMost: 11, emailTriesAtMost: 1, laterTriesAtMost: 12 } as const;
 /**
  * A store's PayPal sales and refunds read for its buyers at the most
  * (lib/paypal-sales.ts, readPayPalSales and readPayPalRefundsWithCoverage;

@@ -762,7 +762,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:o:@lib/paypal-sales.ts": { what: "A PayPal order opened", parts: [per("order", 30, KB, "Its record, thirty days at most.", KIND("paypal")), per("request", 3, 768, "One opened and never paid, three days.", REQ("paypal checkout"))] },
   "nl:ppsell:own:@lib/paypal-sales.ts": short("The paid orders behind one address's product", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:owed:@lib/paypal-owed.ts": short("Paid orders whose refund is owed: their product was removed before they were handed over", "order", 400, MARK, KIND("paypal")),
-  "nl:ppsell:owed:told:@lib/paypal-owed.ts": short("The creator's email asking to refund one of them: claimed for an hour, then kept as sent", "order", 400, MARK, KIND("paypal")),
+  "nl:ppsell:owed:told:@lib/paypal-owed.ts": short("The creator's email asking to refund one of them: claimed, then kept as sent or unsure", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:paid:@lib/paypal-sales.ts": short("A PayPal order paid", "order", 400, KB, KIND("paypal")),
   "nl:ppsell:pending:@lib/paypal-sales.ts": short("Orders whose payment PayPal holds, until it completes", "order", 30, MARK, KIND("paypal")),
   "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),

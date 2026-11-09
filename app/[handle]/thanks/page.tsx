@@ -1448,18 +1448,20 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
   // that cannot be read is unknown: never a link to the purchase or a purchase event for the creator's pixels.
   const handed = ours ? await paypalHandedOver(ours).catch(() => "unknown" as const) : false;
   if (handed === "unknown") unread = true;
+  // Paid, this order's own hand-over never run, and the product gone: marked refund owed, and its creator emailed once to
+  // refund it (lib/paypal-owed.ts); the page says they were asked only when the sender took the email, and that it could
+  // not be confirmed when that is unsure. "owned" (the buyer holds the product through another grant) can be owed too
+  // (Claude 1's pre-review MEDIUM 2). A mark that cannot be read is unknown.
+  const notOwn = ours !== null && (handed === false || handed === "owned");
+  const owed = notOwn ? await refundOwed(ours.store, ours.order).catch(() => "unknown" as const) : false;
+  if (owed === "unknown") unread = true;
+  const unavailable = notOwn && (owed === "told" || owed === "unsure" || owed === "owed");
+  const handing = ours !== null && handed === false && owed === false;
   // "owned": a repeat purchase (or one after a gift) whose buyer already holds the product through another grant. The
   // purchase, its link and the event are shown (paid, and the access is real), but the receipt is promised only when
-  // this order's own hand-over is proven (Claude 5's LOW on #2911).
-  const delivered = ours !== null && (handed === true || handed === "owned");
+  // this order's own hand-over is proven (Claude 5's LOW on #2911); never for one whose refund is owed, or unread.
+  const delivered = ours !== null && (handed === true || (handed === "owned" && owed === false));
   const ownReceipt = ours !== null && handed === true;
-  // Paid, nothing handed over, and the product gone: marked refund owed, and its creator emailed to refund it when the
-  // email went (lib/paypal-owed.ts); the page says they were asked only then. A mark that cannot be read is unknown.
-  const notHanded = ours !== null && handed === false;
-  const owed = notHanded ? await refundOwed(ours.store, ours.order).catch(() => "unknown" as const) : false;
-  if (owed === "unknown") unread = true;
-  const unavailable = notHanded && (owed === "told" || owed === "owed");
-  const handing = notHanded && owed === false;
   // Refunded in full by PayPal and taken back by the refund watch: said so, with no link, no purchase event and no
   // hand-over or receipt promised (the Claude 4 team's second money review of #2911).
   const refunded = ours !== null && handed === "refunded";
@@ -1492,7 +1494,7 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
             <>
               <p className="st-price text-sm">{t.paidWithPayPal}</p>
               <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.ppUnavailable}</h1>
-              <p className="st-muted mt-4">{owed === "told" ? t.ppUnavailableAsked(store.name) : t.ppUnavailableOwed(store.name)}</p>
+              <p className="st-muted mt-4">{owed === "told" ? t.ppUnavailableAsked(store.name) : owed === "unsure" ? t.ppUnavailableUnsure(store.name) : t.ppUnavailableOwed(store.name)}</p>
               <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
             </>
           ) : ours && handing ? (

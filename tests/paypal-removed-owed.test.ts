@@ -14,8 +14,10 @@
  *   PayPal completes it, and only then is it marked.
  * - A read that is unknown (the buyer's grant): nothing is marked, the order stays on the list, and the sweep tries
  *   again (CX-123 rule 24).
- * - An email the sender would not take: the order is marked, the page does not say the creator was asked, and the
- *   email is tried again later (not every run), inside a window; past it the order leaves the list marked.
+ * - An email the sender did not confirm (refused, or taken with its answer lost: sendEmail does not tell them apart):
+ *   the order is marked, the email is never sent again, and the page says the creator could not be confirmed told.
+ * - A repeat purchase whose buyer already holds the product through another grant: owed too (pre-review MEDIUM 2,
+ *   tests/paypal-owed-prerev.test.ts).
  * - Handed over before the product was removed: never marked, nobody emailed.
  *
  * Synthetic only: a stand-in for PayPal's and Resend's APIs, the Redis stub, the real return route, the real sweep and
@@ -28,7 +30,7 @@ import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, removeProduct, setPayPalSeller, setProductLink, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { handOverKey, openOrder, readPaid } from "@/lib/paypal-sales";
 import { handOverPayPal, sweepPayPal } from "@/lib/paypal-delivery";
-import { TELL_RETRY_SECONDS, TELL_TRIES_AT_MOST, TELL_WINDOW_SECONDS, owePayPalRefund } from "@/lib/paypal-owed";
+import { CLAIM_IN_FLIGHT_SECONDS, owePayPalRefund } from "@/lib/paypal-owed";
 import { readListing } from "@/lib/catalog";
 import { importedKey } from "@/lib/imported-purchases";
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -232,10 +234,12 @@ async function main(): Promise<void> {
     is("and it leaves the list", await onList(store, order), false);
   }
 
-  // Changed after the RED commit (rule 23): this part first expected "nothing marked" while the email was not taken. The
-  // mark now goes first, so the order is owed whatever the email does, and the page says the creator was asked only
-  // once the email went; a refusal (422, which the sender confirms it did not take) is tried again later, not every run.
-  part("The email to the creator is not taken: marked, the page does not say they were asked, tried again later");
+  // Changed twice (rule 23). The RED commit expected "nothing marked" while the email was not taken; the first fix
+  // marked it and tried the email again every 6 hours. Claude 1's pre-review ALTO 1: sendEmail answers false also when
+  // the sender took it and the answer was lost, so a retry after SES's one-day once-marker sends it twice. Now a false is
+  // "unsure": the email is never sent again, the order leaves the list marked, and the page says the creator could not
+  // be confirmed told.
+  part("The email to the creator is not confirmed: marked, never sent again, the page says it could not confirm");
   {
     const { order } = await opened("Firing chart", "refused@example.com", true);
     resendFails = true;
@@ -243,37 +247,37 @@ async function main(): Promise<void> {
     resendFails = false;
     const store = await owner();
     is("the order is marked refund owed", await owed(store, order), true);
-    is("nobody is emailed yet", told(order), 0);
-    is("it stays on the hand-over list", await onList(store, order), true);
-    const [score] = await redis.pipeline([["ZSCORE", handOverKey(store.statsId!), order]]);
-    const due = Number(score) + 600 - Math.floor(Date.now() / 1000);
-    is("due again in about TELL_RETRY_SECONDS, not at the next run", due > TELL_RETRY_SECONDS - 120 && due <= TELL_RETRY_SECONDS, true);
-    await sweep();
-    is("the next run does not try it again", told(order), 0);
+    is("nobody is emailed", told(order), 0);
+    is("it leaves the hand-over list", await onList(store, order), false);
     const html = await page(order);
     is("the page says the product is no longer available", html.includes(UNAVAILABLE), true);
-    is("it does not say the creator was asked", html.includes("asked Kiln Works to refund"), false);
-    is("it says the payment is owed back, and how to ask for it", html.includes("This payment is owed back to you: ask Kiln Works for a refund"), true);
-    await dueNow(store, order);
-    await sweep();
-    is("once due, the sweep emails the creator once", told(order), 1);
-    is("and it leaves the list", await onList(store, order), false);
-    is("the page now says the creator was asked", (await page(order)).includes("asked Kiln Works to refund"), true);
+    is("it does not say the creator was asked", html.includes("We asked Kiln Works to refund"), false);
+    is("it says the email could not be confirmed", html.includes("we could not confirm that the email reached them"), true);
+    const paid = (await readPaid(order))!;
+    is("asked again, even days later, the email is never sent again", [await owePayPalRefund(store, paid, paid.at + 2 * 86_400), told(order)], ["owed", 0]);
   }
 
-  part("The email never taken inside the window: marked, no longer tried");
+  part("Another run holds the email's claim: left on the list, tried again, the email not sent twice");
   {
-    const { order } = await opened("Glaze tests", "never@example.com", true);
-    resendFails = true;
-    await returnFor(await owner(), order);
+    const { order } = await opened("Glaze tests", "inflight@example.com", true);
     const store = await owner();
+    await redis.pipeline([["SET", `nl:ppsell:owed:told:${order}`, `${Date.now()}.000000001`]]);
+    await returnFor(store, order);
+    is("marked, nobody emailed by this run, still on the list", [await owed(store, order), told(order), await onList(store, order)], [true, 0, true]);
     const paid = (await readPaid(order))!;
-    is("tried once, not taken", [await owed(store, order), told(order), await onList(store, order)], [true, 0, true]);
-    is("past the window it leaves the list, marked", await owePayPalRefund(store, paid, paid.at + TELL_WINDOW_SECONDS), "owed");
-    resendFails = false;
-    is("nobody was emailed", told(order), 0);
-    is("the page does not say the creator was asked", (await page(order)).includes("asked Kiln Works to refund"), false);
-    is("the tries are bounded", TELL_TRIES_AT_MOST, 13);
+    is("past its in-flight hour the claim is unsure: it leaves the list, not sent", [await owePayPalRefund(store, paid, Math.floor(Date.now() / 1000) + CLAIM_IN_FLIGHT_SECONDS + 1), told(order)], ["owed", 0]);
+  }
+
+  part("A repeat purchase of a removed product (the buyer holds it through another grant): owed, the page says so");
+  {
+    const { order, product } = await opened("Kiln manual", "repeat@example.com", true);
+    const store = await owner();
+    await redis.pipeline([["HSET", importedKey(store.statsId!, "repeat@example.com"), product, JSON.stringify({ at: Math.floor(Date.now() / 1000) - 86_400, job: "gift:earlier", items: null })]]);
+    await returnFor(store, order);
+    is("marked, the creator emailed once, off the list", [await owed(store, order), told(order), await onList(store, order)], [true, 1, false]);
+    const html = await page(order);
+    is("the page says the product is no longer available and the creator was asked", [html.includes(UNAVAILABLE), html.includes("asked Kiln Works to refund")], [true, true]);
+    is("no thanks for a purchase and no link to it", [html.includes("Thank you"), html.includes("/@kilnworks/orders")], [false, false]);
   }
 
   part("Cost: one try's own commands, and the first try against the hand-over it replaces");
@@ -320,7 +324,7 @@ async function main(): Promise<void> {
     // Less the list's own ZREM (listCommandsPerSale, PAYPAL_HAND_OVER_RETRY), which is not one of this try's own.
     is("a try's own commands stay within PAYPAL_REFUND_OWED.ownCommandsAtMost", [owedTry.mine - 1 <= PAYPAL_REFUND_OWED.ownCommandsAtMost, refusedTry.mine <= PAYPAL_REFUND_OWED.ownCommandsAtMost], [true, true]);
     is("the first try costs less than the hand-over it replaces", owedTry.all < handOver.all, true);
-    is("the tries are those the registry states", PAYPAL_REFUND_OWED.triesAtMost, TELL_TRIES_AT_MOST);
+    is("the email is tried once, the in-flight retries an hour of five-minute runs", [PAYPAL_REFUND_OWED.emailTriesAtMost, PAYPAL_REFUND_OWED.laterTriesAtMost], [1, CLAIM_IN_FLIGHT_SECONDS / 300]);
   }
 
   part("Handed over, then the product removed: nothing owed");

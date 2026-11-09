@@ -741,7 +741,8 @@ export async function watchPayPal(
   store: Store,
   deadline: number,
   on: {
-    handOver: (paid: Paid) => Promise<void>;
+    /** Hands a newly settled payment over; false when nothing was handed over (counted only when it was). */
+    handOver: (paid: Paid) => Promise<void | boolean>;
     dropStart: (email: string, productId: string) => Promise<void>;
     refunded?: (paid: Paid) => Promise<void>;
     /** Puts a course back for a payment that keeps the purchase (an HSETNX: nothing for one still there, no email). */
@@ -782,10 +783,8 @@ export async function watchPayPal(
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) continue;
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && email && typeof capture.id === "string") {
       const { paid, fresh } = await settle(order, opened, capture.id, email);
-      if (fresh) {
-        await on.handOver(paid);
-        result.cleared += 1;
-      }
+      // Counted as cleared only when handed over: false is not (Claude 1's pre-review LEVE 6).
+      if (fresh && (await on.handOver(paid)) !== false) result.cleared += 1;
       continue;
     }
     // Declined, failed, or not what was asked: nothing is handed over.

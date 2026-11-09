@@ -54,10 +54,10 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
     throw error;
   }
   if (!product) {
-    // Paid (settle writes only a capture PayPal answered COMPLETED) for a product the store no longer has: unless it was
-    // handed over before the product went, it is marked refund owed and the creator emailed once to refund it
-    // (lib/paypal-owed.ts; the owner's decision 2 of C1-20261109-1029-C5-52). A read that is unknown throws, and an
-    // email the sender did not take answers "later": either way the order stays on the list for the sweep.
+    // Paid (settle writes only a capture PayPal answered COMPLETED) for a product the store no longer has: unless this
+    // order was handed over before the product went, it is marked refund owed and the creator emailed once, never twice,
+    // to refund it (lib/paypal-owed.ts; the owner's decision 2 of C1-20261109-1029-C5-52). A read that is unknown
+    // throws, and an email another run is sending answers "later": either way the order stays on the list for the sweep.
     console.error("a PayPal purchase named a product the store no longer has", store.handle, paid.order);
     if ((await owePayPalRefund(store, paid)) === "later") return false;
     if (store.statsId) await handedOver(store.statsId, paid.order);
@@ -147,9 +147,11 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
   const done = await watchPayPal(store, deadline, {
     // On the hand-over list since settle wrote it down: one that throws (a read unknown, or a removed product's email
     // to the creator not sent) is tried again by handOverAgain, and the rest of the store's sweep goes on.
-    handOver: async (paid) => {
-      await handOverPayPal(store, paid).catch((error) => console.error("handing over a PayPal purchase failed; tried again at the next sweep", store.handle, paid.order, error));
-    },
+    handOver: (paid) =>
+      handOverPayPal(store, paid).catch((error) => {
+        console.error("handing over a PayPal purchase failed; tried again at the next sweep", store.handle, paid.order, error);
+        return false;
+      }),
     dropStart: (email, productId) => dropEnrollment(store, email, productId),
     // A course put back for a payment that keeps the purchase (Codex G's M1 on #2791): HSETNX, so nothing for one
     // still there, and no email; only for a product that is a course, as handing over does.

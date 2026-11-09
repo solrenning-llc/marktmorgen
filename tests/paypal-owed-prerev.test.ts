@@ -63,13 +63,15 @@ async function main(): Promise<void> {
     lose = true;
     const first = await owePayPalRefund(store, p, at);
     lose = false;
-    is("first try: SES took it (answer lost), the branch answers later", [first, amazon.filter((m) => m.to === OWNER).length], ["later", 1]);
+    // Changed after the RED commit (rule 23): the proof expected "later" here, the branch's answer then (retried in 6
+    // hours). The fix takes a false from sendEmail as unsure and never sends it again: the order is owed at once.
+    is("first try: SES took it (answer lost), the order is owed and its email unsure", [first, amazon.filter((m) => m.to === OWNER).length, await refundOwed(store.statsId!, p.order)], ["owed", 1, "unsure"]);
     // The once-only marker of lib/email.ts lives 86_400 s; the window is 3 days. Its expiry, stood in for by DEL:
     const once = `nl:ses:once:${createHash("sha256").update(`nimbus-paypal-owed:${p.order}`).digest("hex").slice(0, 40)}`;
     is("the SES once-only marker exists after the uncertain send", redis.run(["GET", once]), "1");
     redis.run(["DEL", once]);
     const again = await owePayPalRefund(store, p, at + 25 * 3600);
-    is("a retry 25 h later (inside the 72 h window) sends it again: the creator gets it twice", [again, amazon.filter((m) => m.to === OWNER).length], ["owed", 1]);
+    is("asked again 25 h later, once the marker ran out: the email is not sent again", [again, amazon.filter((m) => m.to === OWNER).length], ["owed", 1]);
   }
 
   part("P2: a repeat purchase of a removed product, this order never handed over");

@@ -97,7 +97,7 @@ The same packs at one, four, ten and forty times their amount, each prepaid on i
 | Pack | 1×: price, per unit, price over cost | 4×: price, per unit, price over cost | 10×: price, per unit, price over cost | 40×: price, per unit, price over cost |
 | --- | --- | --- | --- | --- |
 | 5,000 visits | $44, $8.80 per 1,000 visits, 32.35× | $124, $6.20 per 1,000 visits, 22.88× | $284, $5.68 per 1,000 visits, 20.96× | $1,083, $5.42 per 1,000 visits, 19.98× |
-| 250 orders, with their access and store emails | $35, $0.14 per order, 39.33× | $87, $0.09 per order, 24.65× | $191, $0.08 per order, 21.66× | $711, $0.07 per order, 20.16× |
+| 250 orders, with their access and store emails | $35, $0.14 per order, 39.33× | $87, $0.09 per order, 24.58× | $191, $0.08 per order, 21.61× | $713, $0.07 per order, 20.16× |
 | 2,500 list emails | $62, $24.80 per 1,000 emails, 27.56× | $195, $19.50 per 1,000 emails, 21.67× | $460, $18.40 per 1,000 emails, 20.44× | $1,786, $17.86 per 1,000 emails, 19.84× |
 | 20 AI writing jobs and 100 answers | $50, $2.50 per writing job with 5 answers, 31.25× | $143, $1.79 per writing job with 5 answers, 22.45× | $331, $1.66 per writing job with 5 answers, 20.78× | $1,269, $1.59 per writing job with 5 answers, 19.92× |
 | 25 GB of storage | $43, $1.72 per GB, 33.33× | $118, $1.18 per GB, 22.96× | $270, $1.08 per GB, 21.01× | $1,028, $1.03 per GB, 20.01× |

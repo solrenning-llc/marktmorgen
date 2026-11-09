@@ -18,6 +18,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, scanPage } from "@/lib/redis-reply";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
@@ -321,4 +322,58 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
   ]);
   return held.length;
+}
+
+/** The invitations one studio request reads and deletes when their membership is removed: a page of the store's invitations. */
+export const INVITES_PER_UNIT = 100;
+
+/** Thrown when a page of a store's invitations could not be paid for in studio requests: nothing of it was read. */
+export class InvitesUnpaidError extends Error {
+  constructor() {
+    super("the studio requests to delete a removed membership's invitations could not be taken");
+    this.name = "InvitesUnpaidError";
+  }
+}
+
+/**
+ * Deletes every invitation to one membership, its link and its reminder, as the membership is removed (sibling of
+ * audit A1, 9 November 2026): kept under the product's id, they would otherwise outlive it, and a person's erasure,
+ * which reads only the products the store holds, would never reach them. The store's invitations are read a page at
+ * a time (HSCAN), each page paid for first in one studio request (`pay`, false when the studio will not:
+ * InvitesUnpaidError, nothing more read). Every reply is read exactly (rule 24): an unknown one throws
+ * UnknownReplyError, and what is left is found again by the next try. A store with no invitations reads one count.
+ */
+export async function dropProductInvites(store: Pick<Store, "sid" | "statsId">, productId: string, pay: (units: number) => Promise<boolean>): Promise<number> {
+  if (!store.statsId || !store.sid || !isRedisConfigured()) return 0;
+  const key = invitesKey(store.statsId);
+  const size = countOf(repliesFor(await redisPipeline([["HLEN", key]]), 1)?.[0]);
+  if (size === null) throw new UnknownReplyError("a store's invitations");
+  if (size === 0) return 0;
+  const suffix = `:${productId}`;
+  let dropped = 0;
+  let cursor = "0";
+  do {
+    if (!(await pay(1))) throw new InvitesUnpaidError();
+    const page = scanPage(await redisPipeline([["HSCAN", key, cursor, "MATCH", `*${suffix}`, "COUNT", INVITES_PER_UNIT]]));
+    if (!page || page.items.length % 2 !== 0) throw new UnknownReplyError("a page of a store's invitations");
+    const held: { field: string; token: string | null }[] = [];
+    for (let i = 0; i < page.items.length; i += 2) {
+      const field = page.items[i];
+      if (!field.endsWith(suffix)) continue;
+      held.push({ field, token: parseInvite(page.items[i + 1])?.t ?? null });
+    }
+    if (held.length) {
+      const links = held.flatMap((h) => (h.token && TOKEN_PATTERN.test(h.token) ? [linkKey(h.token)] : []));
+      const commands: (string | number)[][] = [
+        ["HDEL", key, ...held.map((h) => h.field)],
+        ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
+        ...(links.length ? [["DEL", ...links]] : []),
+      ];
+      const replies = repliesFor(await redisPipeline(commands), commands.length);
+      if (!replies || !replies.every((r) => countOf(r) !== null)) throw new UnknownReplyError("the deletion of a removed membership's invitations");
+      dropped += held.length;
+    }
+    cursor = page.next;
+  } while (cursor !== "0");
+  return dropped;
 }

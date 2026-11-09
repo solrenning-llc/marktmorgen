@@ -1224,6 +1224,8 @@ export const COST_LINES: CostLine[] = [
       // the page and one for each LISTENERS_PER_UNIT listeners on it, refused without reading past the studio's figure (audit A1, 9 November 2026).
       { file: "app/api/store/product/route.ts", names: ["countStudio(guarded.store, null, units)", "dropListeners(guarded.store, id"] },
       { file: "lib/podcast-access.ts", names: ["LISTENERS_PER_UNIT = 100;", "options.pay(1)", "options.pay(Math.ceil(addresses.length / LISTENERS_PER_UNIT))"] },
+      // And a removed membership's invitations from an import: a page of the store's invitations per studio request, paid first.
+      { file: "lib/move-members.ts", names: ["INVITES_PER_UNIT = 100;", "if (!(await pay(1))) throw new InvitesUnpaidError();"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
     ],

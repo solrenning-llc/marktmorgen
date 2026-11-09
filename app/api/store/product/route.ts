@@ -46,6 +46,7 @@ import { dropPodcastRecord, readPodcast } from "@/lib/podcast";
 import type { Podcast } from "@/lib/podcast-rules";
 import { GoneFullError, ListenersUnpaidError, dropListeners } from "@/lib/podcast-access";
 import { countStudio } from "@/lib/studio-route";
+import { InvitesUnpaidError, dropProductInvites } from "@/lib/move-members";
 import { studioRefusal } from "@/lib/person-tasks";
 import { withLock } from "@/lib/redis-lock";
 import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
@@ -333,6 +334,21 @@ export async function POST(request: NextRequest) {
           }
           if (error instanceof GoneFullError) return Response.json({ ok: false, error: "podcast_feeds" }, { status: 409 });
           console.error("could not delete the feeds of a product's podcast before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
+      // And the invitations an import gave members to keep it here (lib/move-members.ts), with their links and
+      // reminders: kept under its id, a person's erasure would never reach them once it is gone. Paid for and
+      // refused the same way; not finished, nothing is removed.
+      if (before) {
+        try {
+          await dropProductInvites(guarded.store, id, pay);
+        } catch (error) {
+          if (error instanceof InvitesUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          console.error("could not delete the invitations to a membership before removing it", error);
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         }
       }

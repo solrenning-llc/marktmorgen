@@ -190,6 +190,14 @@ const infoKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, p
 const waitingKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, product)}:waiting`;
 const warnedKey = (store: Store, product: Pick<Listing, "id">) => `${base(store, product)}:warned`;
 
+/**
+ * What the refund job writes in a sale's place among the keys given (`:sale`) when the sale was refunded in full or
+ * lost in a dispute before it had a key: never a key (a key has no space in it, lib/licence-key-rules.ts), and written
+ * with HSETNX, so it and settle's HSETNX of a key cannot both win. A sale holding it is never given a key, and it is
+ * kept for good with the product's keys (Claude 2's second money review of #2868, HIGH).
+ */
+export const REFUNDED_SALE = "refunded before a key";
+
 /** Keys go to Redis in batches this size, well under any request limit. */
 const BATCH = 1_000;
 
@@ -263,11 +271,20 @@ function usable(store: Store, product: Listing): boolean {
  * product still hands out keys: a key given stays the buyer's.
  */
 export async function keyOfSale(store: Store, product: Listing, reference: string): Promise<SaleKey | null> {
+  const known = await readSale(store, product, reference);
+  return known?.state === "refunded" ? null : known;
+}
+
+/** A sale's key as keyOfSale reads it, or that it was refunded before it had one (and whether a buyer's place still waits). */
+type SaleRead = SaleKey | { state: "refunded"; waiting: boolean } | null;
+
+async function readSale(store: Store, product: Listing, reference: string): Promise<SaleRead> {
   if (!store.statsId || !isRedisConfigured() || !reference) return null;
   const [key, waiting] = await redisPipeline([
     ["HGET", saleKey(store, product), reference],
     ["HEXISTS", waitingKey(store, product), reference],
   ]);
+  if (key === REFUNDED_SALE) return { state: "refunded", waiting: Number(waiting) === 1 };
   if (typeof key === "string" && key) {
     const [raw] = await redisPipeline([["HGET", infoKey(store, product), key]]);
     // No record yet (the moment between the sale's key and its record in settle) is not revoked; a reply of another
@@ -289,8 +306,10 @@ export async function keyOfSale(store: Store, product: Listing, reference: strin
  */
 export async function keyForSale(store: Store, product: Listing, reference: string, email: string): Promise<SaleKey | null> {
   if (!usable(store, product) || !reference) return null;
-  const known = await keyOfSale(store, product, reference);
+  const known = await readSale(store, product, reference);
   if (known?.state === "issued") return known;
+  // Refunded before it had a key: none is given, and a place it kept on an empty pool is let go.
+  if (known?.state === "refunded") return refundedSale(store, product, reference, known.waiting);
   const setup = activeKeys(product) as KeySetup;
 
   if (setup.source === "generated") {
@@ -312,7 +331,7 @@ export async function keyForSale(store: Store, product: Listing, reference: stri
     return { state: "waiting" };
   }
   const result = await settle(store, product, reference, email, popped, true);
-  if (result.state === "issued" && result.key === popped) await warnIfLow(store, product);
+  if (result?.state === "issued" && result.key === popped) await warnIfLow(store, product);
   return result;
 }
 
@@ -320,12 +339,14 @@ export async function keyForSale(store: Store, product: Listing, reference: stri
  * Ties a key to a sale, unless the sale got one a moment ago from somewhere
  * else — then that one stands, and this key goes back where it came from.
  */
-async function settle(store: Store, product: Listing, reference: string, email: string, key: string, fromPool: boolean): Promise<SaleKey> {
+async function settle(store: Store, product: Listing, reference: string, email: string, key: string, fromPool: boolean): Promise<SaleKey | null> {
   // A key given to a sale is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
   const [won] = await orderWrite(store, [["HSETNX", saleKey(store, product), reference, key]]);
   if (Number(won) !== 1) {
     await redisPipeline(fromPool ? [["LPUSH", poolKey(store, product), key]] : [["SREM", allKey(store, product), key]]);
-    const again = await keyOfSale(store, product, reference);
+    // Lost to a key given a moment ago from somewhere else, or to the refund job's mark: then no key at all.
+    const again = await readSale(store, product, reference);
+    if (again?.state === "refunded") return refundedSale(store, product, reference, again.waiting);
     return again ?? { state: "waiting" };
   }
   const info: Info = { r: reference, e: email, at: Math.floor(Date.now() / 1000) };
@@ -336,17 +357,23 @@ async function settle(store: Store, product: Listing, reference: string, email: 
   return { state: "issued", key, revoked: false };
 }
 
+/** A sale refunded before it had a key: no key, and its place on an empty pool, if one was kept in the same moment, let go. */
+async function refundedSale(store: Store, product: Listing, reference: string, waiting: boolean): Promise<null> {
+  if (waiting) await redisPipeline([["HDEL", waitingKey(store, product), reference]]);
+  return null;
+}
+
 
 
 export async function keyCounts(store: Store, product: Listing): Promise<KeyCounts> {
   if (!store.statsId || !isRedisConfigured()) return { left: 0, issued: 0, revoked: 0, waiting: 0 };
-  const [left, issued, waiting] = await redisPipeline([
+  const [left, waiting] = await redisPipeline([
     ["LLEN", poolKey(store, product)],
-    ["HLEN", saleKey(store, product)],
     ["HLEN", waitingKey(store, product)],
   ]);
+  // Keys given are counted from their records: the sales' hash also holds the sales refunded before a key (REFUNDED_SALE).
   const list = await issuedKeys(store, product, "", 0);
-  return { left: Number(left) || 0, issued: Number(issued) || 0, revoked: list.revoked, waiting: Number(waiting) || 0 };
+  return { left: Number(left) || 0, issued: list.total, revoked: list.revoked, waiting: Number(waiting) || 0 };
 }
 
 /**
@@ -514,6 +541,14 @@ const REFUND_LOOKBACK_SECONDS = 30 * 86_400;
 const REFUND_PAGES = 3;
 const REFUND_LOOKUPS = 20;
 const INTENT_PATTERN = /^pi_[A-Za-z0-9]{6,200}$/;
+
+/** A sale's key whose record settle has not written yet: unknown for the refund job, which leaves the refund unread. */
+class RecordNotWrittenYet extends UnknownReplyError {
+  constructor() {
+    super("a refunded sale's license key record");
+    this.message = "a refunded sale's license key has no record yet (settle is between its two writes)";
+  }
+}
 
 /** Whether any product of this store hands out keys, so its refunds are worth reading. */
 export function storeHasKeys(store: Store): boolean {
@@ -789,11 +824,29 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
             // stays unread for the next run (review of #2868, CX-123 rule 24).
             if (!product && hasProduct(store, productId)) throw new UnknownReplyError("a refunded product's listing");
             if (!product) continue;
-            const key = repliesFor(await redisPipeline([["HGET", saleKey(store, product), sale.reference]]), 1)?.[0];
-            // No writer stores an empty key (settle writes one of at least MIN_KEY_LENGTH): "" is unknown, never "no key"
-            // (Claude 4's second review of #2868, CX-123 rule 24).
-            if (key !== null && (typeof key !== "string" || !key)) throw new UnknownReplyError("HGET of a sale's license key");
-            if (key && (await setRevoked(store, product, key, true, "refund"))) here += 1;
+            // A sale of a product set to hand out keys takes the refunded mark in the key's place when it has none yet,
+            // with HSETNX, so it is never given one: settle's HSETNX of a key and this one cannot both win (Claude 2's
+            // second money review of #2868, HIGH). A product never set up for keys gets no mark and keeps no data for it.
+            let taken = true;
+            if (product.keys) {
+              const marked = countOf(repliesFor(await orderWrite(store, [["HSETNX", saleKey(store, product), sale.reference, REFUNDED_SALE]]), 1)?.[0]);
+              if (marked !== 0 && marked !== 1) throw new UnknownReplyError("HSETNX of a refunded sale's mark");
+              taken = marked === 0;
+            }
+            if (taken) {
+              const key = repliesFor(await redisPipeline([["HGET", saleKey(store, product), sale.reference]]), 1)?.[0];
+              // The sale's place holds its key, or the mark of a refund read before. No writer stores an empty key, and a
+              // place just seen taken is not empty, so "" (or none, after the mark lost) is unknown, never "no key" (Claude
+              // 4's second review of #2868, CX-123 rule 24). A product never set up for keys answers none: no key.
+              if (key === null && !product.keys) continue;
+              if (typeof key !== "string" || !key) throw new UnknownReplyError("HGET of a sale's license key");
+              if (key !== REFUNDED_SALE) {
+                // A key whose record settle has not written yet is not "nothing to revoke": the refund stays unread and
+                // the next run revokes the record written meanwhile (Claude 2's second money review of #2868, MEDIUM).
+                if (!(await setRevoked(store, product, key, true, "refund"))) throw new RecordNotWrittenYet();
+                here += 1;
+              }
+            }
             // A buyer still waiting for a key from an empty pool is not given one.
             const dropped = countOf(repliesFor(await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]), 1)?.[0]);
             if (dropped === null) throw new UnknownReplyError("HDEL of a buyer waiting for a license key");
@@ -958,7 +1011,9 @@ async function serveWaiting(store: Store, product: Listing, origin: string): Pro
       email = String((JSON.parse(String(flat[i + 1])) as { e?: unknown }).e ?? "");
     } catch {}
     const given = await keyForSale(store, product, reference, email);
-    if (given?.state !== "issued") break;
+    // A sale refunded while it waited is given nothing, and lets its place go: the next buyer is still served.
+    if (!given) continue;
+    if (given.state !== "issued") break;
     served += 1;
     if (!email) continue;
     const g = givingWords(store.language);

@@ -7,17 +7,23 @@
  * openOrder in lib/paypal-sales.ts) must be that same price, from the same
  * trusted country (the x-vercel-ip-country header the Stripe checkout reads),
  * never from anything in the form. The order keeps which discount it was, so
- * the store's numbers say "fair price", as for a Stripe checkout.
+ * the store's numbers say "fair price", as for a Stripe checkout, with the
+ * percentage only: the privacy policy (#fair-prices) says the country is not
+ * stored, and the creator's studio and help say the lower price is paid on
+ * PayPal as on Stripe's page.
  *
  * Synthetic store, Redis stub and a stand-in for PayPal's API only.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, setFair, setPayPalSeller, setProductLink, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { offNow, SaleNote } from "@/components/store-product";
-import { payPalPrice } from "@/lib/paypal-sales";
+import { payPalPrice, type Paid } from "@/lib/paypal-sales";
+import { payPalSale } from "@/lib/stats";
+import { discountKindOf, discountOff } from "@/lib/discount-impact";
 import { salePrice } from "@/lib/store-sale";
 import { redisPipeline } from "@/lib/redis";
 import { POST as payPayPal } from "@/app/api/store/paypal/checkout/route";
@@ -46,7 +52,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   return Response.json({}, { status: 404 });
 }) as typeof fetch;
 
-type Kept = { c: number; off?: number; sale?: number; meta?: Record<string, string> };
+type Kept = { c: number; off?: number; sale?: number; meta?: Record<string, string>; raw?: string };
 
 /** Posts the PayPal button's form; `country` is what the edge says, `formCountry` a field the page never sends. */
 async function buy(store: Store, product: string, country: string | null, formCountry = ""): Promise<{ value: string | null; kept: Kept | null }> {
@@ -64,8 +70,10 @@ async function buy(store: Store, product: string, country: string | null, formCo
   if (sent.length === before) return { value: null, kept: null };
   const order = sent[sent.length - 1];
   const [raw] = await redisPipeline([["GET", `nl:ppsell:o:${order.id}`]]);
-  return { value: order.value, kept: typeof raw === "string" ? (JSON.parse(raw) as Kept) : null };
+  return { value: order.value, kept: typeof raw === "string" ? { ...(JSON.parse(raw) as Kept), raw } : null };
 }
+
+const now0 = () => Math.floor(Date.now() / 1000);
 
 async function main(): Promise<void> {
   redis.clear();
@@ -92,11 +100,26 @@ async function main(): Promise<void> {
   part("The order PayPal is sent");
   const india = await buy(store, product.id, "IN");
   is("a buyer whose connection is in India is charged the fair price", india.value, "20.00");
-  is("the order keeps it as a fair price, not a store sale", [india.kept?.c, india.kept?.off, india.kept?.sale ?? null, india.kept?.meta?.fair], [2000, 2000, null, "IN:50"]);
+  is("the order keeps it as a fair price, not a store sale, with the percentage only", [india.kept?.c, india.kept?.off, india.kept?.sale ?? null, india.kept?.meta?.fair], [2000, 2000, null, "50"]);
+  is("the country is not stored with the order (privacy policy, #fair-prices)", /"IN"|IN:|India/.test(india.kept?.raw ?? ""), false);
+  const paid: Paid = { store: store.statsId!, order: "FAIRORDER999999", capture: "CAPTUREFAIR01", email: "buyer-fair@example.com", product: product.id, cents: india.kept?.c ?? 0, currency: "usd", at: now0(), handle: store.handle, meta: india.kept?.meta, off: india.kept?.off };
+  const row = payPalSale(paid).row;
+  is("the store's numbers still read it as a fair price, and what it took off", [discountKindOf(row), discountOff(row)], ["fair", 2000]);
   const elsewhere = await buy(store, product.id, "US");
   is("a buyer elsewhere: the full price, nothing noted", [elsewhere.value, elsewhere.kept?.off ?? null, elsewhere.kept?.meta?.fair ?? null], ["40.00", null, null]);
   const forged = await buy(store, product.id, null, "IN");
   is("the country is never read from the form: no edge country, full price", [forged.value, forged.kept?.meta?.fair ?? null], ["40.00", null]);
+
+  part("What the store tells buyers and creators");
+  const privacy = readFileSync("app/privacy/page.tsx", "utf8");
+  const fairPrivacy = (privacy.split('<p id="fair-prices">')[1] ?? "").split("</p>")[0].replace(/\s+/g, " ");
+  is("the privacy policy still says the country is not stored", /It is not stored\./.test(fairPrivacy), true);
+  is("the privacy policy says a PayPal order keeps only the percentage, not the country", /PayPal/.test(fairPrivacy) && /only the percentage/.test(fairPrivacy), true);
+  const editor = readFileSync("components/fair-price-editor.tsx", "utf8").replace(/\s+/g, " ");
+  is("the studio says the lower price is paid with PayPal too", /pay it on Stripe&apos;s page with no code to type/.test(editor) === false && /PayPal/.test(editor), true);
+  const help = readFileSync("lib/help-content.ts", "utf8");
+  const fairHelp = help.split("Can buyers in poorer countries pay less?")[1]?.split("q: ")[0] ?? "";
+  is("the help says the lower price is paid with PayPal too", /pays that on Stripe's page with no code to type/.test(fairHelp) === false && /PayPal/.test(fairHelp), true);
 
   part("A running store sale and a fair price: the larger one, never both");
   const now = Math.floor(Date.now() / 1000);

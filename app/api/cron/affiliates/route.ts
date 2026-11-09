@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSenderConfigured } from "@/lib/email";
 import { sendPaydayEmails } from "@/lib/affiliate-payday";
 import { settleAllPayPal } from "@/lib/paypal-payouts";
@@ -35,8 +36,12 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isSenderConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:aff:payday:lock", "1", "NX", "EX", 300]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an unknown
+  // answer runs nothing this time, and the lock is let go at the end only while it still holds this run's own value.
+  const lock = claimValue();
+  const got = await claimMark("nl:aff:payday:lock", 300, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
     const started = Date.now();
     const settled = await settleAllPayPal(started + RUN_MS / 3);
@@ -48,7 +53,7 @@ export async function GET(request: NextRequest) {
     console.error("sending affiliate payday emails failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   } finally {
-    await redisPipeline([["DEL", "nl:aff:payday:lock"]]).catch(() => {});
+    await releaseMark("nl:aff:payday:lock", lock);
   }
 }
 

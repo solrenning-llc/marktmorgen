@@ -534,7 +534,7 @@ async function main(): Promise<void> {
     is("10g: a stop seen after the grace of an unpaid renewal leaves the anchor behind", backG.allowanceAnchor ?? null, null);
     is("10g: the payment made later opens one window, its own, for its whole month",
       [Date.UTC(2027, 4, 28, 12), Date.UTC(2027, 5, 2, 12), Date.UTC(2027, 5, 27, 12)].map((at) => windowId(backG, at)), ["2027-05-28", "2027-05-28", "2027-05-28"]);
-    // A stopG written inside the grace, and one with no overdue period to read, keep the anchor as before.
+    // A stop written inside the grace, and one with no overdue period to read, keep the anchor as before.
     const inGraceG = { ...lastPaidG, subscriptionActive: false, period: null, planEndedAt: new Date(Date.UTC(2027, 3, 29, 11)).toISOString() };
     is("10g: a stop written inside the grace keeps the anchor", anchorAfter(lastPaidG, inGraceG, Date.UTC(2027, 3, 29, 11))?.subscriptionId, SUB);
 

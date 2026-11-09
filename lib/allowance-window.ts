@@ -305,6 +305,9 @@ export function anchorAfter(previous: WindowFields, next: WindowFields, now = Da
   if (!next.subscriptionId || previous.subscriptionId !== next.subscriptionId) return null;
   const kept = previous.allowanceAnchor;
   if (kept !== undefined && kept !== null && (!isAllowanceAnchor(kept) || kept.subscriptionId === next.subscriptionId)) {
+    // A stop written after the record's period and its grace, with the overdue period never written: no window could be
+    // open since the grace ended, so the anchor is left behind and a later payment opens one window, its own.
+    if (isAllowanceAnchor(kept) && !next.subscriptionActive && isPeriod(previous.period) && now > (previous.period.end + RENEW_GRACE_SECONDS) * 1000) return null;
     return isAllowanceAnchor(kept) && (skippedRenewal(previous, next) || !keptThroughStop(previous, next, kept, now)) ? null : kept;
   }
   if (!Number.isFinite(now)) return null;

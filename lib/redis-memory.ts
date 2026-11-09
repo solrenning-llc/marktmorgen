@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
+
+/** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
+const NOTES_TOTAL_FIELD = "ln#";
 /**
  * A Redis that lives in memory, for testing the parts of this codebase whose
  * behaviour only shows up across several commands.
@@ -126,6 +129,22 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
+        if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, listKey, id, kept] = args;
+          this.live(listKey);
+          if (!this.data.has(listKey)) return null;
+          for (const raw of this.list(listKey).slice(0, Number(kept))) {
+            if (!raw.includes(`"id":"${id}"`)) continue;
+            try {
+              const value = JSON.parse(raw) as unknown;
+              if (!value || typeof value !== "object" || Array.isArray(value) || (value as { id?: unknown }).id === id) return raw;
+            } catch {
+              return raw;
+            }
+          }
+          return null;
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;
@@ -986,50 +1005,91 @@ export class MemoryRedis {
           });
           return out;
         }
-        // lib/lesson-notes.ts SAVE_NOTE and FORGET_NOTES: a student's note, its count, its data-room slot and the notes' count in the room in one step.
-        if (key.startsWith("-- marktmorgen:lesson-note-save:v2\n") && args[0] === "2" && args.length === 13) {
-          const [, room, notes, limit, month, field, slot, size, wasHeld, was, json, most, share] = args;
-          const held = this.run(["HGET", notes, field]);
-          if (wasHeld === "1" ? held !== was : held !== null) return [2, 0];
-          const count = this.noteCount(this.run(["HGET", room, "ln#"]));
-          const weighed = this.noteCount(this.run(["HGET", room, slot]));
-          const weight = (n: number) => (n > 0 ? n + 64 : 0);
-          if (json === "") {
-            if (held !== null) this.run(["HDEL", notes, field]);
-            const gone = this.storeData([room, limit, "1", month, "s", slot, "0"]);
-            if (Array.isArray(gone) && gone[0] === 1 && count !== null && weighed !== null) this.setNoteCount(room, Math.max(0, count - weight(weighed)));
-            return gone;
+        // lib/lesson-notes.ts NOTE_SAVE, NOTE_FORGET and NOTE_CLEAR: a student's notes, their tally and the notes' slot in
+        // one step. Redis's TIME is this stand-in's clock.
+        if (key.startsWith("-- marktmorgen:lesson-note-save:v1\n")) {
+          if (args[0] !== "3" || args.length !== 17) return [-1, 0];
+          const [, room, notes, prints, limit, month, field, seen, json, rawOld, rawNew, rawMost, rawMine, rawShare, rawTally, print, rawSince] = args;
+          const [oldB, newB, most, mine, share, tally, since] = [rawOld, rawNew, rawMost, rawMine, rawShare, rawTally, rawSince].map(Number);
+          if (![oldB, newB, most, mine, share, tally, since].every(Number.isFinite) || since < 0 || field === "#" || field === "") return [-1, 0];
+          if (print !== "") {
+            const erased = this.run(["HGET", prints, print]);
+            const start = Math.floor(this.now() / 1000) - since;
+            if (typeof erased === "string" && !(Number(erased) < start - 1)) return [2, 0];
           }
-          if (held === null && Number(this.run(["HLEN", notes])) >= Number(most)) return [3, 0];
-          const cap = Number(share);
-          const bytes = Number(size);
-          if (count === null || weighed === null || share === "" || !Number.isFinite(cap) || cap < 0 || size === "" || !Number.isFinite(bytes) || bytes < 0) return [-1, 0];
-          const grows = weight(Math.floor(bytes)) - weight(weighed);
-          if (grows > 0 && count + grows > cap) return [4, 0];
-          const taken = this.storeData([room, limit, "0", month, "s", slot, size]);
+          const held = this.run(["HGET", notes, field]);
+          if ((typeof held === "string" ? held : "") !== seen) return [2, 0];
+          if (typeof held !== "string" && json === "") return [1, 0];
+          const sum = this.run(["HGET", notes, "#"]);
+          let had = 0;
+          if (typeof sum === "string") {
+            had = Number(sum);
+            if (!Number.isInteger(had) || had < 0) return [-1, 0];
+          } else if (typeof held === "string") return [-1, 0];
+          if (typeof held !== "string") {
+            const count = Number(this.run(["HLEN", notes])) - (typeof sum === "string" ? 1 : 0);
+            if (count >= most) return [3, 0];
+          }
+          const now = had - oldB + newB;
+          if (now < 0) return [-1, 0];
+          let delta = newB - oldB;
+          if (had === 0 && now > 0) delta += tally;
+          else if (had > 0 && now === 0) delta -= tally;
+          if (delta > 0) {
+            if (now > mine) return [4, 0];
+            // The notes' count in the room, read exactly: absent is none yet, anything but a whole number is unknown.
+            const all = this.noteCount(this.run(["HGET", room, NOTES_TOTAL_FIELD]));
+            if (all === null) return [-1, 0];
+            if (all + delta > share) return [5, 0];
+          }
+          const taken = this.storeData([room, limit, "0", month, "a", NOTES_TOTAL_FIELD, String(delta)]);
           if (!Array.isArray(taken) || taken[0] !== 1) return taken;
-          this.run(["HSET", notes, field, json]);
-          this.setNoteCount(room, Math.max(0, count + grows));
+          if (json === "") this.run(["HDEL", notes, field]);
+          else this.run(["HSET", notes, field, json]);
+          if (now > 0) this.run(["HSET", notes, "#", String(now)]);
+          else this.run(["HDEL", notes, "#"]);
           return taken;
         }
-        if (key.startsWith("-- marktmorgen:lesson-note-forget:v2\n") && args[0] === "2" && args.length === 6) {
-          const [, room, notes, limit, month, prefix] = args;
-          const fields = this.run(["HKEYS", notes]) as string[];
-          if (fields.length === 0) return [0, 1, 0];
+        if (key.startsWith("-- marktmorgen:lesson-note-forget:v2\n")) {
+          if (args[0] !== "2" || args.length !== 6) return [-1, 0];
+          const [, room, notes, limit, month, rawTally] = args;
+          const tally = Number(rawTally);
+          if (!Number.isFinite(tally)) return [-1, 0];
+          const sum = this.run(["HGET", notes, "#"]);
+          const n = Number(this.run(["HLEN", notes])) - (typeof sum === "string" ? 1 : 0);
           this.run(["DEL", notes]);
-          const named = fields.filter((f) => /^[0-9a-f]{32}:[a-z0-9]{12}$/.test(f));
+          if (typeof sum !== "string") return [n, 1];
+          const had = Number(sum);
+          if (!Number.isInteger(had) || had < 0) return [n, -1];
+          if (had === 0) return [n, 1];
+          const taken = this.storeData([room, limit, "1", month, "a", NOTES_TOTAL_FIELD, String(-(had + tally))]);
+          return [n, Array.isArray(taken) ? taken[0] : -1];
+        }
+        if (key.startsWith("-- marktmorgen:lesson-note-clear:v1\n")) {
+          if (args[0] !== "2" || args.length !== 9) return [-1, 0];
+          const [, room, notes, limit, month, prefix, rawTally, rawEntry, rawStep] = args;
+          const [tally, entry, step] = [rawTally, rawEntry, rawStep].map(Number);
+          if (![tally, entry, step].every(Number.isFinite) || step <= 0 || prefix === "") return [-1, 0];
+          const gone: string[] = [];
           let freed = 0;
-          let known = true;
-          for (const f of named) {
-            const weighed = this.noteCount(this.run(["HGET", room, prefix + f]));
-            if (weighed === null) known = false;
-            else if (weighed > 0) freed += weighed + 64;
+          for (const [field, value] of this.hash(notes)) {
+            if (field === "#" || !field.startsWith(prefix)) continue;
+            gone.push(field);
+            freed += Math.ceil((entry + Buffer.byteLength(field) + Buffer.byteLength(value)) / step) * step;
           }
-          const count = this.noteCount(this.run(["HGET", room, "ln#"]));
-          const changes = named.flatMap((f) => ["s", prefix + f, "0"]);
-          const taken = changes.length > 0 ? this.storeData([room, limit, "1", month, ...changes]) : [1, 0];
-          if (Array.isArray(taken) && taken[0] === 1 && count !== null && known) this.setNoteCount(room, Math.max(0, count - freed));
-          return Array.isArray(taken) ? [fields.length, taken[0], taken[1]] : taken;
+          if (gone.length === 0) return [0, 1];
+          this.run(["HDEL", notes, ...gone]);
+          const sum = this.run(["HGET", notes, "#"]);
+          const had = typeof sum === "string" ? Number(sum) : NaN;
+          if (!Number.isInteger(had) || had < 0 || freed > had) return [gone.length, -1];
+          const left = had - freed;
+          let back = freed;
+          if (left === 0) {
+            back += tally;
+            this.run(["HDEL", notes, "#"]);
+          } else this.run(["HSET", notes, "#", String(left)]);
+          const taken = this.storeData([room, limit, "1", month, "a", NOTES_TOTAL_FIELD, String(-back)]);
+          return [gone.length, Array.isArray(taken) ? taken[0] : -1];
         }
         // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
         if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {
@@ -1838,15 +1898,11 @@ export class MemoryRedis {
     return [charged, ...replies];
   }
 
-  /** lib/lesson-notes.ts NOTE_COUNT: a room count read exactly; absent is 0, anything but a whole number is unknown (null). */
+  /** lib/lesson-notes.ts NOTE_SAVE: the notes' count in a room read exactly; absent is 0, anything but a whole number is unknown (null). */
   private noteCount(value: unknown): number | null {
     if (value === null || value === undefined) return 0;
     if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
     return Number(value);
-  }
-
-  private setNoteCount(room: string, n: number): void {
-    this.run(n > 0 ? ["HSET", room, "ln#", String(n)] : ["HDEL", room, "ln#"]);
   }
 
   private storeData(args: string[]): unknown {

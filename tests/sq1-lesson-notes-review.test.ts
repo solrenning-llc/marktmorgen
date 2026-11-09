@@ -108,19 +108,23 @@ async function lastPlace(): Promise<void> {
     () => saveNote({ statsId: STATS, learner: who, courseId: COURSE_B, lessonId: "lastplace001", text: "First new note.", was: "", room: ROOM }),
     () => saveNote({ statsId: STATS, learner: who, courseId: COURSE_B, lessonId: "lastplace002", text: "Second new note.", was: "", room: ROOM }),
   ]);
-  const [count] = await real([["HLEN", `nl:lnote:${STATS}:${who}`]]);
-  is(`the student keeps at most ${rules.MAX_NOTES_PER_STUDENT} notes`, Number(count) <= rules.MAX_NOTES_PER_STUDENT, true);
+  // Rule 23 (merge of #3031's two fix branches): the student's hash also keeps the tally of what their notes weigh ("#").
+  const [fields] = await real([["HKEYS", `nl:lnote:${STATS}:${who}`]]);
+  const count = (fields as string[]).filter((field) => field !== "#").length;
+  is(`the student keeps at most ${rules.MAX_NOTES_PER_STUDENT} notes`, count <= rules.MAX_NOTES_PER_STUDENT, true);
   is("one takes the last place, the other is refused as too many", [a, b].map((r) => (r.ok ? "ok" : r.reason)).sort(), ["ok", "too_many"]);
 }
 
 async function downloadCost(): Promise<void> {
   part("J3: a course's download admits its reads before them");
   const who = emailKey("j3-cost@example.com");
-  // The worst a student may keep: 200 notes on one course and 100 on another, each 4,000 characters that are
-  // stored at six bytes each (a lone surrogate, which JSON writes as \\uXXXX).
+  // The worst a student may keep: notes on one course and another, each 4,000 characters that are stored at six
+  // bytes each (a lone surrogate, which JSON writes as \\uXXXX). Rule 23 (merge of #3031's two fix branches): what
+  // one student's notes weigh is capped (MAX_NOTES_BYTES_PER_STUDENT), so they write until the cap refuses one.
   const worst = "\uD800".repeat(rules.MAX_NOTE_CHARS);
   for (let n = 0; n < rules.MAX_NOTES_PER_STUDENT; n++) {
-    const saved = await saveNote({ statsId: STATS, learner: who, courseId: n < 200 ? COURSE_A : COURSE_B, lessonId: lessonId(n), text: worst, was: "", room: ROOM });
+    const saved = await saveNote({ statsId: STATS, learner: who, courseId: n % 2 === 0 ? COURSE_A : COURSE_B, lessonId: lessonId(n), text: worst, was: "", room: ROOM });
+    if (!saved.ok && saved.reason === "mine") break;
     if (!saved.ok) throw new Error(`setup note ${n}: ${saved.reason}`);
   }
   const page = laterPageCost();
@@ -161,7 +165,7 @@ async function downloadCost(): Promise<void> {
     const outBytes = Buffer.byteLength(text);
     // The route's own reads (store, listing, course, session, ledger) are inside its first request, as before; the notes on top.
     const cost = readShapeCost({ seconds: SHAPES.heavy.seconds * (1 + dbBytes / 1e6), cpu: SHAPES.heavy.cpu * (1 + dbBytes / 1e6), commands: 12 + commands, dbBytes: 65_536 + dbBytes, outBytes, stripePages: 0 });
-    const label = course === COURSE_A ? "200 notes" : course === COURSE_B ? "100 notes" : "no notes";
+    const label = course === COURSE_A ? "first course" : course === COURSE_B ? "second course" : "no notes";
     console.log(`  ${label}: ${commands} commands, ${dbBytes} database bytes, ${outBytes} bytes sent; ${units} requests admitted ($${(units * page).toFixed(6)}) for $${cost.toFixed(6)}`);
     is(`${label}: the requests admitted cost at least what the download reads and sends`, units * page >= cost, true);
     is(`${label}: they are admitted before the notes are read`, admittedBeforeReads, true);
@@ -171,16 +175,18 @@ async function downloadCost(): Promise<void> {
 function everySize(): void {
   part("J3: at every size a course's notes may reach, the requests admitted cost more than the worst download");
   const units = lib.noteReadUnits as (n: number) => number;
-  const valueBytes = lib.MAX_NOTE_VALUE_BYTES as number;
   const page = laterPageCost();
-  // One course can hold every note a student keeps (its lessons, and lessons since taken out of it).
+  // Rule 23 (merge of #3031's two fix branches): the notes are read in one snapshot asked for in base64, whatever the
+  // course, and what one student's notes weigh is capped; so what is read is at most NOTE_DOWNLOAD_READ_BYTES
+  // (lib/lesson-notes-rules.ts) for any count, and what is sent is at most the notes' own bytes, with titles for each.
+  const readBytes = Number((rules as Record<string, unknown>).NOTE_DOWNLOAD_READ_BYTES);
+  const mostBytes = Number((rules as Record<string, unknown>).MAX_NOTES_BYTES_PER_STUDENT);
   let failing = -1;
   for (let n = 0; n <= rules.MAX_NOTES_PER_STUDENT; n++) {
-    // The list of all the student's notes (a 45-byte field each), then the course's values, fifty to a command.
-    const dbBytes = 65_536 + rules.MAX_NOTES_PER_STUDENT * 64 + n * (valueBytes + 64);
+    const dbBytes = 65_536 + readBytes;
     // Each note sent with its lesson's and module's titles (120 characters, four bytes each) and its separator.
-    const outBytes = 4_096 + n * (4 * rules.MAX_NOTE_CHARS + 2 * 4 * 120 + 32);
-    const cost = readShapeCost({ seconds: SHAPES.heavy.seconds * (1 + dbBytes / 1e6), cpu: SHAPES.heavy.cpu * (1 + dbBytes / 1e6), commands: 12 + 1 + Math.ceil(n / 50), dbBytes, outBytes, stripePages: 0 });
+    const outBytes = 4_096 + Math.min(n * 4 * rules.MAX_NOTE_CHARS, mostBytes) + n * (2 * 4 * 120 + 32);
+    const cost = readShapeCost({ seconds: SHAPES.heavy.seconds * (1 + dbBytes / 1e6), cpu: SHAPES.heavy.cpu * (1 + dbBytes / 1e6), commands: 12 + 3, dbBytes, outBytes, stripePages: 0 });
     if ((1 + units(n)) * page < cost && failing < 0) failing = n;
   }
   is("no size of a course's notes costs more than the requests its download takes", failing, -1);
@@ -211,8 +217,10 @@ async function erasureDuringSave(): Promise<void> {
   const after = await readNote(STATS, who, COURSE_A, lessonId(7));
   is("after the erasure answered, nothing of the person's notes is left", after.state, "none");
   is("the person's notes, listed after the erasure, are none", (await notesOf(STATS, who)).length, 0);
-  const [slot] = await real([["HGET", "nl:data:room-test-store", `ln:${who}:${COURSE_A}:${lessonId(7)}`]]);
-  is("and the note's slot in the room is empty", slot, null);
+  // Rule 23 (merge of #3031's two fix branches): every student's notes share one slot of the room, and the student's
+  // own tally goes with their notes.
+  const [tally] = await real([["HGET", `nl:lnote:${STATS}:${who}`, "#"]]);
+  is("and nothing of the note is counted for them any more", tally, null);
 }
 
 function closedCourse(): void {
@@ -445,10 +453,14 @@ async function afterAccess(): Promise<void> {
     }
   }
   const page = read("app/[handle]/course/[product]/page.tsx");
+  // Rule 23 (merge of #3031's two fix branches): the page draws components/lesson-notes-kept.tsx, which links the
+  // route's download in the store's words and offers to delete the course's notes (tests/sq1-lesson-notes-third.test.ts).
+  const kept = read("components/lesson-notes-kept.tsx");
   is("the course page asks it with the store's public request, and links the route's download in the store's words", [
     /notesDownloadAfterAccess\(store\.statsId \?\? "", access, course\.id, \(\) => takeBuyerRead\(store\)\)/.test(page),
-    /\/api\/store\/course\/note\?h=\$\{encodeURIComponent\(store\.handle\)\}&p=\$\{encodeURIComponent\(product\.id\)\}/.test(page),
-    /lessonNotesWords\(store\.language\)/.test(page) && /\.download\}/.test(page),
+    /\{notesAfter \? \(\s*<LessonNotesKept handle=\{store\.handle\} product=\{product\.id\} language=\{store\.language\} \/>/.test(page) &&
+      /\/api\/store\/course\/note\?h=\$\{encodeURIComponent\(handle\)\}&p=\$\{encodeURIComponent\(product\)\}/.test(kept),
+    /lessonNotesWords\(language\)/.test(kept) && /\{w\.download\}/.test(kept),
   ], [true, true, true]);
 }
 

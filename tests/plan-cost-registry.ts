@@ -1340,7 +1340,15 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
-      { file: "app/api/store/course/note/route.ts", names: ["takeBuyerAction(store)", "takeBuyerRead(store)", "NOTE_SAVES_PER_HOUR"] },
+      // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read
+      // (Codex J's review of #3031, M3; tests/sq1-lesson-notes-review.test.ts, tests/sq1-lesson-notes-second.test.ts), read
+      // in base64 so no escaping can grow it (third review, M3; tests/sq1-lesson-notes-third.test.ts). A save, an emptied note and a course's notes
+      // cleared are each one buyer action, under the same hourly limit. The course's page counts a student's notes
+      // there, once the course is no longer open to them, with one buyer read (Claude 4's focal return, C4-2).
+      { file: "app/api/store/course/note/route.ts", names: ["takeBuyerAction(store)", "takeBuyerRead(store)", "takeBuyerRead(store, units)", "NOTE_SAVES_PER_HOUR", "clearCourseNotes"] },
+      { file: "lib/lesson-notes-rules.ts", names: ["MAX_NOTES_BYTES_PER_STUDENT", "NOTE_DOWNLOAD_BYTES_PER_UNIT", "NOTE_DOWNLOAD_READ_BYTES", "NOTE_DOWNLOAD_UNITS"] },
+      { file: "lib/lesson-notes.ts", names: ["redisPipelineBase64([[\"HGETALL\", key]])", "NOTE_DOWNLOAD_UNITS - 1", "admit(noteReadUnits())"] },
+      { file: "app/[handle]/course/[product]/page.tsx", names: ["notesDownloadAfterAccess(store.statsId ?? \"\", access, course.id, () => takeBuyerRead(store))"] },
       // Removing a like spends at most five commands after its buyer action is taken: EVAL, two ZSCOREs and two writes.
       { file: "lib/community-points.ts", names: ["REMOVE_POINT", "award"] },
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
@@ -1699,6 +1707,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "mail-clicked": guard("A click beacon from a store page opened from an email link, which the page itself counts: a few commands and no work, per connection."),
   "stream-hook": guard("The video service's own notices: a company cost."), "zoom-notice": guard("Zoom's own notices: a company cost."),
   "plan-refund": guard("The plan refund route (app/api/billing/refund, 305 [SY1]): at most PER_DAY (10) a store a day, each a bounded Stripe reading (MAX_CALLS) and one write; the money is the reviewed refund exposure (docs/funded-exposure-review.md), a company cost."),
+  "plan-withdraw": guard("The plan withdrawal route (app/api/billing/withdraw, 588 [KB9] unit 3): at most PER_DAY (10) a store a day, each a bounded Stripe reading (MAX_CALLS) and, once per withdrawal, the plan refund flow; the money is the reviewed refund exposure under the money-back guarantee (docs/funded-exposure-review.md), a company cost."),
   "plan-refund-review": guard("The plan refund's review page (app/studio/refund, 305 [SY1]): drawn at most SHOWN_PER_DAY (20) a store a day, each a bounded Stripe reading (MAX_CALLS) and one short key: a company cost."),
   "metaads-deauth": guard("Meta's own notices: a company cost."), "outreach-stop": guard("A recipient's stop link: a company cost."),
   // Public requests: counted in the store's window as well (lib/metered-limits.ts, withinStore).
@@ -1747,6 +1756,8 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/email.ts": ["company", "order", "monthly", "store"],
   // The acknowledgement of a buyer's withdrawal (EU art. 11a, 588 [KB9]): the store's transactional email, tried at most WITHDRAWAL_ACK_SENDS (3) times per order.
   "lib/withdrawal.ts": ["store"],
+  // The receipt of a creator's withdrawal from their plan (EU art. 11a, 588 [KB9] unit 3), tried at most PLAN_WITHDRAW_ACK_SENDS (3) times, and a note to support tried at most PLAN_WITHDRAW_SUPPORT_TRIES (3) times, each counted before it is made: the company's.
+  "lib/plan-withdrawal.ts": COMPANY,
   "app/api/cron/mail-check/route.ts": COMPANY, "app/api/cron/monthly/route.ts": COMPANY, "app/api/cron/stripe-check/route.ts": COMPANY,
   "app/api/cron/usage/route.ts": COMPANY, "app/api/cron/weekly/route.ts": COMPANY, "lib/account-notice.ts": COMPANY, "lib/auth.ts": COMPANY,
   "lib/billing-reminders.ts": COMPANY, "lib/passkeys.ts": COMPANY, "lib/plan-closing.ts": COMPANY, "lib/closing-buyers.ts": COMPANY, "lib/closing-plan-guard.ts": COMPANY, "lib/plan-refund-flow.ts": COMPANY, "lib/plan-pause.ts": COMPANY,

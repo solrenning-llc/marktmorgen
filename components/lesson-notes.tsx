@@ -22,6 +22,12 @@ export type NoteShown = { state: "kept"; text: string } | { state: "none" } | { 
  * can be put back with one button. The count is said to a screen reader
  * only once the student has typed.
  *
+ * What is typed while a save is on its way stays in the box, and leaving
+ * the page stays guarded until it is saved too; deleting a whole note offers
+ * to undo it; the count is said to a screen reader only once the student has
+ * typed (Claude 2's review of #3031, M2, L6, L7). Undo leaves focus in the
+ * box (third review of #3031, L2).
+ *
  * Said in the store's `language` (lib/buyer-words/lesson-notes.ts).
  */
 export function LessonNotes({
@@ -40,18 +46,24 @@ export function LessonNotes({
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState("");
   const [heard, setHeard] = useState("");
-  // The note just deleted, while it can still be put back.
-  const [undo, setUndo] = useState<string | null>(null);
+  // The words of a note just deleted, while the box is still empty: what Undo puts back.
+  const [lost, setLost] = useState<string | null>(null);
   const pause = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The box as it is now, for a save that answers after the student typed more.
+  const latest = useRef(start);
+  // Whether the student has typed: nothing is said to a screen reader before that.
   const typed = useRef(false);
+  // The box, for focus to land on when Undo, the control that had it, goes away (third review of #3031, L2).
+  const area = useRef<HTMLTextAreaElement | null>(null);
   const length = noteLength(text);
   const over = length > MAX_NOTE_CHARS;
   const count = w.count(length, MAX_NOTE_CHARS);
-  // Guarded while a save is on its way too: nothing is saved until the server says so.
+  // Guarded while anything in the box is not saved, also while a save is on its way.
   useLeaveGuard(initial.state !== "unknown" && text !== kept);
 
   // The count is said to a screen reader once typing pauses, not on every key, and never before the student types.
   useEffect(() => {
+    if (!typed.current) return;
     if (pause.current) clearTimeout(pause.current);
     if (!typed.current) return;
     pause.current = setTimeout(() => setHeard(over ? w.tooLong(MAX_NOTE_CHARS) : count), 1_000);
@@ -71,14 +83,8 @@ export function LessonNotes({
     );
   }
 
-  /** Sends `next`, starting from what the server kept; the box keeps whatever is typed meanwhile. */
-  async function send(next: string) {
-    if (busy) return;
-    if (noteLength(next) > MAX_NOTE_CHARS) {
-      setSaid(w.tooLong(MAX_NOTE_CHARS));
-      return;
-    }
-    const was = kept;
+  /** Sends `next` over `was`; the box keeps whatever was typed meanwhile, and only what was sent is said saved. */
+  async function send(next: string, was: string): Promise<void> {
     setBusy(true);
     setSaid(w.saving);
     try {
@@ -91,15 +97,19 @@ export function LessonNotes({
       if (data.ok === true && typeof data.text === "string") {
         const saved = data.text;
         setKept(saved);
-        // Only what was sent is replaced by what the server kept; words typed since stay.
-        setText((now) => (now === next ? saved : now));
-        setUndo(saved === "" && was !== "" ? was : null);
-        setSaid(saved ? w.saved : w.cleared);
+        setLost(saved === "" && was !== "" ? was : null);
+        if (latest.current === next) {
+          // Nothing typed since: the box shows the note as kept (the server trims what trails it).
+          latest.current = saved;
+          setText(saved);
+          setSaid(saved ? w.saved : w.cleared);
+        } else setSaid(w.savedEarlier);
         return;
       }
       const errors: Record<string, string> = {
         too_long: w.tooLong(MAX_NOTE_CHARS),
         too_many: w.tooMany(MAX_NOTES_PER_STUDENT),
+        mine: w.mine,
         changed: w.changed,
         full: w.full,
         // The students' notes of the store have reached their share of its room (lib/lesson-notes.ts).
@@ -117,16 +127,24 @@ export function LessonNotes({
     }
   }
 
-  function save(event: React.FormEvent) {
+  async function save(event: React.FormEvent) {
     event.preventDefault();
-    return send(text);
+    if (busy) return;
+    if (over) {
+      setSaid(w.tooLong(MAX_NOTE_CHARS));
+      return;
+    }
+    await send(text, kept);
   }
 
-  function putBack() {
-    if (undo === null) return;
-    const back = undo;
-    setText(back);
-    return send(back);
+  /** Puts a note just deleted back, as a new note. */
+  async function undo() {
+    if (busy || lost === null) return;
+    latest.current = lost;
+    setText(lost);
+    // Undo disappears once the box holds words again: focus goes to the words it put back, not to the page.
+    area.current?.focus();
+    await send(lost, "");
   }
 
   return (
@@ -136,12 +154,13 @@ export function LessonNotes({
       <form onSubmit={save} className="mt-3">
         <label htmlFor="lesson-notes-text" className="st-label block">{w.label}</label>
         <textarea
+          ref={area}
           id="lesson-notes-text"
           name="text"
           value={text}
           onChange={(event) => {
             typed.current = true;
-            setUndo(null);
+            latest.current = event.target.value;
             setText(event.target.value);
           }}
           rows={6}
@@ -155,9 +174,9 @@ export function LessonNotes({
         </p>
         <p className="sr-only" aria-live="polite">{heard}</p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button type="submit" className="btn st-btn min-h-[44px] items-center" disabled={busy} aria-disabled={busy}>{w.save}</button>
-          {undo !== null ? (
-            <button type="button" className="btn st-btn-ghost min-h-[44px] items-center" onClick={putBack} disabled={busy} aria-disabled={busy}>{w.undo}</button>
+          <button type="submit" className="btn st-btn inline-flex min-h-[44px] items-center" disabled={busy} aria-disabled={busy}>{w.save}</button>
+          {lost !== null && text === "" ? (
+            <button type="button" className="btn st-btn-ghost inline-flex min-h-[44px] items-center" onClick={undo} disabled={busy} aria-disabled={busy}>{w.undo}</button>
           ) : null}
           <p role="status" className="text-sm">{said}</p>
         </div>

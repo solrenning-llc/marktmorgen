@@ -66,7 +66,9 @@ async function answered<T>(match: (commands: (string | number)[][]) => boolean, 
     redis.pipeline = real;
   }
 }
-const notesCommand = (commands: (string | number)[][]) => commands.some((c) => typeof c[1] === "string" && c[1].startsWith("nl:lnote:"));
+// Any command that names a notes key, as its key or as one of a script's keys (the save and the erasure are scripts
+// since Claude 2's review of #3031, M3): rule 23, the same commands answered badly, now found where they name it.
+const notesCommand = (commands: (string | number)[][]) => commands.some((c) => c.some((arg) => typeof arg === "string" && arg.startsWith("nl:lnote:")));
 
 const save = (who: string, lesson: string, text: string, was = "") => saveNote({ statsId: STATS, learner: who, courseId: COURSE, lessonId: lesson, text, was, room: ROOM });
 
@@ -83,15 +85,18 @@ async function owner(): Promise<void> {
 
   const route = read("app/api/store/course/note/route.ts");
   is("the route finds the student from the session, through courseAccess", /courseAccess\(store, product, await cookies\(\)\)/.test(route), true);
-  is("the student's key is made from the session's address, never from the request", /emailKey\(access\.learner\.email\)/.test(route) && !/body\.(who|email|learner)/.test(route), true);
+  // Rule 23 (merge of #3031's two fix branches): the route asks noteReaderOf, which makes the key from the session's address.
+  is("the student's key is made from the session's address, never from the request", /noteReaderOf\(access, course\.id\)/.test(route) && /return emailKey\(learner\.email\)/.test(read("lib/lesson-notes.ts")) && !/body\.(who|email|learner)/.test(route), true);
   is("the creator keeps no notes and reads none", /access\.learner\.owner/.test(route), true);
   is("a request from another site is refused", /fromAnotherSite\(request\)/.test(route), true);
   is("a save is one of the store's buyer actions", /takeBuyerAction\(store\)/.test(route), true);
-  is("a download is one of the store's buyer reads", /takeBuyerRead\(store\)/.test(route), true);
+  // Rule 23: the download takes NOTE_DOWNLOAD_UNITS reads in all, what its most costs to read (Codex J's review, M3): one
+  // for the request, then the rest (noteReadUnits) asked by courseNotesOf before any note is read.
+  is("a download is one of the store's buyer reads, as many as it may read", /takeBuyerRead\(store\)/.test(route) && /courseNotesOf\(store\.statsId, who, course\.id, \(units\) => takeBuyerRead\(store, units\)\)/.test(route), true);
   is("one student's saves are held to an hourly limit", /withinLimit\("lesson-note", who, NOTE_SAVES_PER_HOUR, 3_600\)/.test(route), true);
   is("the answers are never cached", route.includes('NO_STORE = { "Cache-Control": "no-store" }') && (route.match(/NO_STORE/g) ?? []).length >= 4, true);
   const page = read("app/[handle]/course/[product]/[lesson]/page.tsx");
-  // Since the reviews of #3031 (Claude 2, finding 5): and only on a lesson the route takes saves for, not one held back by a quiz.
+  // Rule 23: and not on a lesson held behind a quiz, whose saves the route refuses (Claude 2's review, L5).
   is("the lesson page reads a note only for a student, never the creator or a visitor", /student && open && !blocker\s*\?\s*await readNote\(/.test(page), true);
   is("studio pages never read notes", read("app/studio/course/[product]/page.tsx").includes("lesson-notes"), false);
 }

@@ -19,11 +19,18 @@
  *   R5  deleting the person gives the notes' room back to the notes' count;
  *   R6  the studio line, and the student's sentence in the store's seven
  *       languages, announced in the box's live region.
+ *
+ * Rule 23 (merge of #3031's two fix branches): every student's notes are
+ * counted in one slot of the room (lib/lesson-notes.ts NOTES_SLOT, the room's
+ * NOTES_TOTAL_FIELD), each student's share of it kept as a tally in their own
+ * notes ("#") with its own TALLY_BYTES; and one student's notes weigh at most
+ * MAX_NOTES_BYTES_PER_STUDENT, so the students who fill the share are many,
+ * each going on to the next once their own cap refuses them ("mine").
  */
 import { readFileSync } from "node:fs";
 import { emailKey } from "@/lib/learn";
 import * as notesLib from "@/lib/lesson-notes";
-import { forgetLessonNotesPerson, readNote, saveNote } from "@/lib/lesson-notes";
+import { TALLY_BYTES, forgetLessonNotesPerson, readNote, saveNote } from "@/lib/lesson-notes";
 import * as dataLib from "@/lib/store-data";
 import { takeData, type DataStore } from "@/lib/store-data";
 import * as rulesLib from "@/lib/store-data-rules";
@@ -50,14 +57,20 @@ const lessonId = (n: number) => `l${String(n).padStart(11, "0")}`;
 const BIG = "🙂".repeat(4_000);
 const tenth = () => Math.floor(dataRoomFor(SHOP) / 10);
 
-/** What the notes take in the room, summed from their own slots (a slot's bytes and its 64-byte field). */
+/** What the notes take in the room, summed from each student's own tally (what their notes weigh, and the tally's own TALLY_BYTES). */
 async function noteSlots(): Promise<number> {
-  const [flat] = await real([["HGETALL", ROOM_KEY]]);
-  const list = Array.isArray(flat) ? (flat as string[]) : [];
+  const [scan] = await real([["SCAN", "0", "MATCH", `nl:lnote:${STATS}:*`]]);
+  const keys = Array.isArray(scan) && Array.isArray(scan[1]) ? (scan[1] as string[]) : [];
   let sum = 0;
-  for (let i = 0; i < list.length; i += 2) if (list[i].startsWith("ln:")) sum += Number(list[i + 1]) + 64;
+  for (const key of keys) {
+    const [tally] = await real([["HGET", key, "#"]]);
+    if (typeof tally === "string") sum += Number(tally) + TALLY_BYTES;
+  }
   return sum;
 }
+
+/** The student R1's fill was refused for as the share was full, under their own cap: R2 goes on with them. */
+let capped = "";
 
 /** The notes' count dataUsed reads for the studio, or the reply as it is when it has no such count. */
 async function notesCount(): Promise<unknown> {
@@ -77,21 +90,25 @@ async function clear(): Promise<void> {
 async function fillsATenth(): Promise<void> {
   part("R1: several students' notes stop at a tenth of a Store plan's room");
   await clear();
-  const students = ["r1-a@example.com", "r1-b@example.com", "r1-c@example.com"].map(emailKey);
+  const students = Array.from({ length: 12 }, (_, i) => emailKey(`r1-${i}@example.com`));
   let refused: { who: number; n: number; reason: string } | null = null;
   for (let s = 0; s < students.length && !refused; s++) {
     for (let n = 0; n < 60; n++) {
       const saved = await saveNote({ statsId: STATS, learner: students[s], courseId: COURSE, lessonId: lessonId(n), text: BIG, was: "", room: SHOP });
+      // One student's own cap: the next one goes on.
+      if (!saved.ok && saved.reason === "mine") break;
       if (!saved.ok) {
         refused = { who: s, n, reason: saved.reason };
         break;
       }
     }
   }
+  capped = refused ? students[refused.who] : "";
   const slots = await noteSlots();
   is("the notes, all students together, take at most a tenth of the plan's room", slots <= tenth(), true);
   is("the save past the tenth is refused as notes_full (not the store's room being full)", refused?.reason ?? "none refused", "notes_full");
   is("the notes kept before it all stay", (await readNote(STATS, students[0], COURSE, lessonId(0))).state, "kept");
+  is("setup: the student refused for the share kept big notes before it (R2 goes on with them)", [refused !== null && refused.n >= 2, (await readNote(STATS, capped, COURSE, lessonId(1))).state], [true, "kept"]);
   is("the notes' own count matches their slots", await notesCount(), slots);
   const creator = await takeData(SHOP, [{ slot: "p:creator-product", bytes: 2_400, set: true }]);
   is("the creator's own product still fits in the room", creator.ok, true);
@@ -100,7 +117,8 @@ async function fillsATenth(): Promise<void> {
 
 async function atTheCap(): Promise<void> {
   part("R2: at the cap a note may shrink or be emptied, never grow");
-  const who = emailKey("r1-a@example.com");
+  // Rule 23: the student R1's share refused, under their own cap, so their refusal is the share's.
+  const who = capped;
   // Fill what a big note left, with short notes of another student, to the brim.
   const filler = emailKey("r2-filler@example.com");
   let last: Awaited<ReturnType<typeof saveNote>> = { ok: true, text: "" };
@@ -149,16 +167,22 @@ async function together<T>(acts: (() => Promise<T>)[]): Promise<T[]> {
 async function race(): Promise<void> {
   part("R3: two students racing for the last room under the cap");
   await clear();
-  const filler = emailKey("r3-filler@example.com");
-  // Fill to just under the tenth, leaving room for one big note and not two.
+  // Fill to just under the tenth, leaving room for one big note and not two; a filler whose own cap refuses them
+  // ("mine") hands over to the next.
+  let filler = 0;
   let n = 0;
   for (;;) {
     const slots = await noteSlots();
     if (tenth() - slots < 2 * 16_400 && tenth() - slots >= 16_400) break;
     const text = tenth() - slots >= 3 * 16_400 ? BIG : "x".repeat(200);
-    const saved = await saveNote({ statsId: STATS, learner: filler, courseId: COURSE, lessonId: lessonId(n), text, was: "", room: SHOP });
+    const saved = await saveNote({ statsId: STATS, learner: emailKey(`r3-filler-${filler}@example.com`), courseId: COURSE, lessonId: lessonId(n), text, was: "", room: SHOP });
     n += 1;
-    if (!saved.ok || n > 290) break;
+    if (!saved.ok && saved.reason === "mine") {
+      filler += 1;
+      n = 0;
+      continue;
+    }
+    if (!saved.ok || n > 290 || filler > 40) break;
   }
   const a = emailKey("r3-a@example.com");
   const b = emailKey("r3-b@example.com");

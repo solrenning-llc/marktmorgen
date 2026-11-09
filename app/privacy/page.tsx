@@ -696,16 +696,20 @@ export default function PrivacyPage() {
           We keep what they wrote and when, for that student alone: the
           creator, the creator&apos;s team and the other students never see
           them. A note holds at most 4,000 characters, and a student keeps at
-          most 300 notes in one store. All the students&apos; notes in one
-          store together take at most a tenth of the store&apos;s data room:
-          past that, a new or longer note is refused and the notes already
-          saved stay. The student can download a course&apos;s
-          notes as a text file whenever they are signed in with the address
-          they took it with: from each lesson while the course is open to
-          them, and from the course&apos;s own page also after the course is no longer open to them
-          (after a refund, for example, or when a membership ends). A note is
-          deleted when the student empties it, when they ask to be deleted
-          from the store, and when the store is closed.
+          most 300 notes in one store, together at most 256 KB. All the
+          students&apos; notes in one store together take at most a tenth of
+          the store&apos;s data room, so at least nine tenths of it always stay
+          the creator&apos;s: past that, a new or longer note is refused and
+          the notes already saved stay. The creator can neither see nor delete
+          them. While signed in with the address they took the course with,
+          the student can download its notes as a text file: from each lesson
+          while the course is open to them, and from the course&apos;s own page
+          also after the course is no longer open to them (after a refund, for
+          example, or when a membership ends). The notes stay kept until the
+          student empties them on the lesson or,
+          after their access to the course ends, deletes them on the
+          course&apos;s page, asks to be deleted from the store, or the store
+          is closed.
         </p>
         <p>
           <strong className="text-black">A one-click offer after paying.</strong>{" "}

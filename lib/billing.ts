@@ -94,6 +94,19 @@ export class BillingError extends Error {
   }
 }
 
+/**
+ * A plan switch sent to Stripe whose outcome is not known: the answer was lost,
+ * unreadable or a server error, or what came back could not be confirmed after
+ * Stripe took it. Stripe may have moved the subscription and charged for it, so
+ * this is never told to the creator as "nothing changed".
+ */
+export class SwitchUnconfirmedError extends Error {
+  constructor(cause: unknown) {
+    super(`The plan switch was sent to Stripe and its outcome is not confirmed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = "SwitchUnconfirmedError";
+  }
+}
+
 export async function onPlatform(
   method: "GET" | "POST" | "DELETE",
   path: string,
@@ -1247,11 +1260,18 @@ export async function switchPlan(
   assertSourcePhase();
   assertFunding(funding,choice.tier,choice.cycle,'switch',undefined,subscriptionId);
   if(funding)await onPlatform('POST',path,new URLSearchParams({'metadata[funding_pending_grant]':funding.id,'metadata[funding_pending_review]':funding.reviewId}));
+  // From here the change itself is on its way to Stripe. A refusal Stripe
+  // states (a 4xx with its reason) changed nothing; any other failure, such as
+  // a lost or unreadable answer or a server error, may have switched and billed.
+  const sendChange = () => onPlatform("POST", path, body).catch((error: unknown) => {
+    if (error instanceof BillingError && error.status >= 400 && error.status < 500) throw error;
+    throw new SwitchUnconfirmedError(error);
+  });
   let updated: Record<string, unknown>;
   try {
     assertSourcePhase();
   assertFunding(funding,choice.tier,choice.cycle,'switch',undefined,subscriptionId);
-    updated = await onPlatform("POST", path, body);
+    updated = await sendChange();
   } catch (error) {
     // A price archived at Stripe since we last read it. The creator asked to
     // change plan once; they should not have to ask twice because of our own
@@ -1264,28 +1284,33 @@ export async function switchPlan(
     body.set("items[0][price]", await ensurePrice(choice.tier, choice.cycle));
     assertSourcePhase();
   assertFunding(funding,choice.tier,choice.cycle,'switch',undefined,subscriptionId);
-    updated = await onPlatform("POST", path, body);
+    updated = await sendChange();
   }
 
-  const updatedMeta=updated.metadata as Record<string,unknown>|null|undefined;
-  if(funding&&(updated.id!==subscriptionId||updatedMeta?.funding_pending_grant!==funding.id||updatedMeta?.funding_pending_review!==funding.reviewId))throw new Error('Switch funding observation does not match the submitted contract');
-  if (updated.pending_update) {
-    const invoice = updated.latest_invoice as { hosted_invoice_url?: unknown } | null;
-    const url = typeof invoice?.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
-    if (INVOICE_PAGE.test(url) || (LOCAL_PAGE.test(url) && STRIPE_API.startsWith("http://127.0.0.1"))) {
-      return { kind: "confirm", url };
+  // Stripe has taken the change: whatever fails from here, it may have switched and billed.
+  try {
+    const updatedMeta=updated.metadata as Record<string,unknown>|null|undefined;
+    if(funding&&(updated.id!==subscriptionId||updatedMeta?.funding_pending_grant!==funding.id||updatedMeta?.funding_pending_review!==funding.reviewId))throw new Error('Switch funding observation does not match the submitted contract');
+    if (updated.pending_update) {
+      const invoice = updated.latest_invoice as { hosted_invoice_url?: unknown } | null;
+      const url = typeof invoice?.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
+      if (INVOICE_PAGE.test(url) || (LOCAL_PAGE.test(url) && STRIPE_API.startsWith("http://127.0.0.1"))) {
+        return { kind: "confirm", url };
+      }
+      return { kind: "refused", reason: "pending" };
     }
-    return { kind: "refused", reason: "pending" };
+    const observedState=stateOf(updated);
+    if(funding&&(observedState.state!=='active'||observedState.tier!==choice.tier||observedState.cycle!==choice.cycle))throw new Error('Switch observation does not match the requested plan');
+    if(funding&&!(await activateObservedSwitch(funding.statsId,funding.id,funding.reviewId,subscriptionId,updated)))throw new Error('Switch funding activation was not acknowledged');
+    // The price says which plan this is; the note is for whoever reads the
+    // subscription in the Stripe dashboard. Missing it changes nothing charged.
+    await onPlatform("POST", path, new URLSearchParams({ "metadata[tier]": choice.tier,...(funding?{"metadata[funding_grant]":funding.id,"metadata[funding_review]":funding.reviewId,"metadata[funding_action]":"switch","metadata[funding_pending_grant]":"","metadata[funding_pending_review]":""}:{}) })).catch((error) =>
+      console.error("noting the plan on the subscription failed", error),
+    );
+    return { kind: "switched", state: funding&&observedState.state==="active"?{...observedState,period:fundedPeriod(observedState.period)}:observedState };
+  } catch (error) {
+    throw new SwitchUnconfirmedError(error);
   }
-  const observedState=stateOf(updated);
-  if(funding&&(observedState.state!=='active'||observedState.tier!==choice.tier||observedState.cycle!==choice.cycle))throw new Error('Switch observation does not match the requested plan');
-  if(funding&&!(await activateObservedSwitch(funding.statsId,funding.id,funding.reviewId,subscriptionId,updated)))throw new Error('Switch funding activation was not acknowledged');
-  // The price says which plan this is; the note is for whoever reads the
-  // subscription in the Stripe dashboard. Missing it changes nothing charged.
-  await onPlatform("POST", path, new URLSearchParams({ "metadata[tier]": choice.tier,...(funding?{"metadata[funding_grant]":funding.id,"metadata[funding_review]":funding.reviewId,"metadata[funding_action]":"switch","metadata[funding_pending_grant]":"","metadata[funding_pending_review]":""}:{}) })).catch((error) =>
-    console.error("noting the plan on the subscription failed", error),
-  );
-  return { kind: "switched", state: funding&&observedState.state==="active"?{...observedState,period:fundedPeriod(observedState.period)}:observedState };
 }
 
 /**

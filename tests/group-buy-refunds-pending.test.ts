@@ -231,6 +231,28 @@ async function main(): Promise<void> {
   unreadableCharges.clear();
   is("unreadable: once the charge's refunds read and add up, both places are taken back", await run(), 2);
 
+  part("a refund in parts whose read mark does not read is held, never kept to be taken back later");
+  const flaky = await make(12);
+  const flakyAt = base + 5500;
+  const half = row("re_GrpFlakyA000001", flakyAt, "succeeded", flaky.pi, true, 9800, 4900);
+  refunds = [row("re_GrpFlakyB000001", flakyAt + 10, "pending", flaky.pi, true, 9800, 4900), half];
+  const realPipeline = redis.pipeline.bind(redis);
+  // The read mark answers in another shape for this run only: the succeeded half is left unknown before it was read through.
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await realPipeline(commands);
+    return commands.map((c, i) => (c[0] === "SISMEMBER" ? "garbled" : replies[i]));
+  }) as typeof redis.pipeline;
+  try {
+    is("flaky: nothing taken back", await run(), 0);
+  } finally {
+    redis.pipeline = realPipeline;
+  }
+  is("flaky: nothing kept on the retry list as taken back", (await redis.pipeline([["HLEN", `nl:grp:${sid}:refunds:retry`]]))[0], 0);
+  // The other half failed: the half that succeeded is not the whole charge, and nothing goes.
+  refunds = [row("re_GrpFlakyB000001", flakyAt + 10, "failed", flaky.pi, false, 4900, 4900), row("re_GrpFlakyA000001", flakyAt, "succeeded", flaky.pi, false, 4900, 4900)];
+  is("flaky: the other half failed: nothing taken back", await run(), 0);
+  is("flaky: both places still hold it", await flaky.held(), 2);
+
   part("a pass of two pages: a refund not final yet on the second page holds the anchor too");
   const paged = await make(4);
   const at = base + 6000;

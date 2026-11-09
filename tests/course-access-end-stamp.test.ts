@@ -26,6 +26,7 @@ import {
   ensureStatsId,
   setPastBuyers,
   setProductCourse,
+  setProductExtras,
   setStripeAccount,
   setSubscription,
   storeForEmail,
@@ -305,6 +306,38 @@ async function main(): Promise<void> {
   is("bought again with no end: the row's end goes, the row stays; no row is made for a learner who never came", [typeof rows[0] === "string" && !("x" in JSON.parse(rows[0] as string)), rows[1]], [true, null]);
   const start = readFileSync("app/api/store/course/start/route.ts", "utf8");
   is("the start route keeps it on the student row", /purchaseStamp\(store, order\.email, product\.id\)/.test(start) && /noteStudentStamp\(/.test(start), true);
+
+  part("M-P (C6 focal): a course paid through its payment plan has no end, as a membership has none");
+  const plan = await shop("stampplan");
+  if (!(await setProductExtras(plan.owner, plan.product.id, { plan: { payments: 3, interval: "month", amountCents: 2000 } })).ok) throw new Error("plan fixture");
+  const planEnd = Math.floor(Date.now() / 1000) + 30 * DAY;
+  await saveCourse(withEnd(plan.courseId, planEnd), plan.store);
+  opened.length = 0;
+  const planForm = withConsent(new URLSearchParams({ handle: plan.store.handle, product: plan.product.id, pay: "plan", access_end: String(planEnd) }));
+  await checkoutRoute(new NextRequest("https://marktmorgen.test/api/store/checkout", { method: "POST", headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" }, body: planForm.toString() }));
+  is("a payment-plan checkout opens as a plan, with no end stamped", [opened.length, opened[0]?.get("metadata[kind]") ?? null, opened[0]?.get("metadata[access_end]") ?? null], [1, "plan", null]);
+  listed = [{ ...session(a.store, { product: a.product.id, kind: "plan", access_end: String(END) }, SET_AT + DAY), mode: "subscription", subscription: { status: "active" } }];
+  is("a stamped plan purchase read after the end (sessions made before this change): open", (await gate(a.store, a.product, course, "mp-plan@example.test", LATER)).state, "open");
+  const studioPage = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
+  const editor = readFileSync("components/course-editor.tsx", "utf8");
+  const terms = readFileSync("app/terms/page.tsx", "utf8");
+  is("the studio and the Terms say a payment-plan buyer keeps the course with no end",
+    [/planOffered=\{activePlan\(product\) !== null\}/.test(studioPage), /pay in a payment plan keep the course with no end/.test(editor), /pay in a payment plan[\s\S]{0,40}keep the course[\s\S]{0,10}with no end/.test(terms)],
+    [true, true, true]);
+
+  part("L-1 (C2 focal): the start button reads the learner's courses only for a student row that exists");
+  const noteLazy = (learn as Record<string, unknown>).noteStudentStamp as (courseId: string, email: string, stamp: () => Promise<number | null | "unknown">, room: Store) => Promise<void>;
+  let asked = 0;
+  const lazy = async () => {
+    asked += 1;
+    return SET_AT + 40 * DAY;
+  };
+  await noteLazy(d.courseId, "l1-norow@example.test", lazy, d.store);
+  const askedWithoutRow = asked;
+  await touchStudent(d.courseId, "l1-row@example.test", SET_AT + DAY, d.store, null);
+  await noteLazy(d.courseId, "l1-row@example.test", lazy, d.store);
+  const l1row = await redis.pipeline([["HGET", `nl:course:${d.courseId}:students`, emailKey("l1-row@example.test")]]);
+  is("no row: nothing asked; a row: asked once, and its end kept", [askedWithoutRow, asked, typeof l1row[0] === "string" ? (JSON.parse(l1row[0] as string) as { x?: number }).x : null], [0, 1, SET_AT + 40 * DAY]);
 
   globalThis.fetch = realFetch;
   done();

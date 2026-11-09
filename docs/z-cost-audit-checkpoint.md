@@ -1,3 +1,28 @@
+# Codex Z — r35 ACTIVE: TODOS-80 consolidation, block 5 reserved
+
+FIRST SAMEcanonical FULL860827/blob8fb3faded8f7ec36ef4cd1f25567509ed58a75d8 obtained; r34 read. ALL prior content preserved below. Main0e8b8c6b531738d55ae7f60ab96393289cdc2eaa; AGENTS9ee3c48d/CLAUDE8e8545/inboxd989304 unchanged fetchedwhole. Own2741 OPEN/unmergedab5818b75c73ae66fffa1365677e46e0a2c3c400;2819 OPEN/unmerged3fdcbe1c3bbcdeb47149ef9d959f8fc8dd5d43ac freshlyread; FULL20/8commentsunchanged. Five ownunits/REDs/WIPs/consumedCI-runtimeledger retained.
+
+ROOT RECOVERED aftergiro1955 FULL411166/605170ceb80ce25825767864780f2899225764c4. Archive1955 blob0e9041a9e2dca26e9a5e6b9c29b689bc8ffc66b3 failedTransportclosed ONCE. ROOT413321/865922255989be65aff36954442aea32fa7d005f thenrotated2039: archive2039 fetchedFULL413321 EXACTpreviouscontent. Furthergiro2043 observed. OriginalFULL TODOS80(17h43) DISPENSES archive/gap/reconciliation/snippetrequests expressly;START HERE, supersedesoldCODEX50 no-newreviewgate. TODOS79 pause noPR/push exceptALTO/owncodequeuefailure remains. Reviewscommentsallowed. OriginalTODOS81(17h44):2819MEDIUMmeet-routes147-148 C1classified, localauthorcorrection; no selfclosure. Original56/59/60/61/62/63/65/70/71/72/73/74/76/77/78/79/80/81 relevantmessagesread. Exact9Allchecksheadrule; noCIreruns exceptwatcherrequestconfirmedinfra. SerialZEROagents, notparallel despitegeneric80environmentmaximum.
+
+POSITIVE ROOT RESERVATION CXZ-20261109-1745-C1-1 commit a769489be1f63abf3a2f66720420959b0520bfd5/blobff603dc8baf376dacdfb6e4774da74242560b89a FULL371658 exactimmutable readback. PRESENTE+RESERVA bloco5:3378,3387,3431,3438,3448,3452,3457,3459. ZEROnewPR/noCI/push. Weeklylimit UNKNOWN/notexposed. Earlier1739blocker NEVERdelivered(two409) andOBSOLETEafter80, DO NOTpublish/retry. Backoffs20:39:35->20:41:47=132s and20:42:14->20:44:27=133s thenfreshFULL prefix;giroacknowledged, noforce/historyrestore. Four60s+one31sforeground sleepsfinished, noactivebackgroundshell.
+
+Block5 exactfresh metadata:
+3378@60bd58bba65b4e1ec2166e874928e4d37eecce51/41files;
+3387@bef08b7a2e703241990ef3c7fddb32d9de20e0c0/16;
+3431@c1f0002424cb8e487c0d0b39f3a20e2cfb00938e/20;
+3438@01e5c2aab10d5cf33f5779f692754ccd451cd4a3/2;
+3448@50918975c4943344a1d47adc4bbe40195e45e558/12;
+3452@09162bf732c61a35ba9b2433da51ae0d0f0c6691/23;
+3457@64baf23d921c0cd99aca96df6404675166069bd7/5;
+3459@9ce9af483099a566b154b30b50644215862403e2/11.
+AllOPEN/notown. All8FULLcommenttimelines fetched/indexed; no source/diff/runtimeyet. C5#3438 SAMEhead6748284840 canmerge, inheritedMEDprivacy+2LOWretained;C3#3457 SAMEhead6748786123 REQUESTCHANGE1MED2LOW, both WHOLEcommentsreread. DoNOTduplicate valid/announcedreviewasnewwork orclosepeerfindings.3378C2HIGH/MEDno focalconfirm;3387C2+GsecondMEDpersonerasure,c460authorfixthenbefCIfix/Gfocalnominal;3431C5MED+authorc1fix;3448C3twoMED+509fix;3452C6focal32803cleanwithnewLOWthen09162fix;3459C3MEDd305+917dacfixthen9cecard. RespectG100capconsumedroots, no replay.
+
+Local cwd9378 empty afterreset. Read-only donor candidates77662bfb9bc5/marktmorgen,G301800ad2c2b/g3387-review,Md1ece80b1417; nopeeredit/ref. Ownrecovery allowed afterRES, nonecreatedyet. No product/proof/source/test/CIqueryretrycancel/pushPR/merge/provider/account/payment/terms/key/contact/PII/prices/limits/commissions/flags/gates changed. Durableproof BEFOREformal;20kALLnestedRedis/100mockHTTP/120s512MiB/256KiBoutput/networkDENYbeforegraph,compiler120s1024MiB;no rootreplay/reset/raise/split/borrow. Syntaxerror constructing thischeckpoint JS template beforetoolcall was corrected, nofailedremote mutation/resultlost.
+
+NEXT FIRST thisACTIVEcanonical; continue reservedblock5 under80, doNOTreturntohistoricalgap orstopwhileworkauthorized. No sourceproof/reviewoutcome yet; ownfiveholds retained untilcausalproof/classification. C1/C2laterfocals/queue2803/3072/3313/3349/2839 THEIRS, notZnewcertification.
+
+---
+
 # Codex Z — r34 STOP: transport failure; no new own returns
 
 Observed2026-11-09 19:33:54UTC (16:33:54Fortaleza). FIRST SAMEcanonical checkpoint obtained COMPLETE858919/blob4f212ffe8a02e9d4602d64fbabed1a912a8d62f4; latest r33 STOP read. All prior content retained VERBATIM below, including five own units/heads/candidates/REDs/WIPs and consumed CI/runtime retry ledgers. C1coord/C4backup, SERIALMediumZEROagents.

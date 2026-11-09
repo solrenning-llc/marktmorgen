@@ -16,6 +16,7 @@ const REFUSALS: Record<string, string> = {
   few: `A summary needs at least ${MIN_SUMMARY_REVIEWS} reviews with words.`,
   used: "This month's AI jobs are used up. A summary can be made next month.",
   busy: "Another summary is being made. Try again in a minute.",
+  unread: "Your reviews could not be read just now, so no summary was made and no AI job was used. Try again in a moment.",
   off: "AI summaries are not available for this store just now.",
   slow: "Too many AI requests a moment ago. Try again in a minute.",
   // The try is counted before the model answers (lib/ai.ts keeps it counted on purpose), so this never says otherwise.

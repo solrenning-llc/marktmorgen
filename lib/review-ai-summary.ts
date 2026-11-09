@@ -45,7 +45,7 @@ export type ReviewSummary = { at: number; read: number; themes: SummaryTheme[] }
  * change; or none: never taken away) is never read.
  */
 const SUMMARY_VERSION = 3;
-export type ReviewSummaryResult = { ok: true; summary: ReviewSummary; fresh: boolean; left: number | null } | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed" | "empty" | "week"; reviews?: number; /** "week": when the next one may be made, in seconds. */ next?: number };
+export type ReviewSummaryResult = { ok: true; summary: ReviewSummary; fresh: boolean; left: number | null } | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed" | "empty" | "week" | "unread"; reviews?: number; /** "week": when the next one may be made, in seconds. */ next?: number };
 
 const KEEP_SECONDS = 8 * 86_400;
 /** The lock outlasts the model's longest answer (lib/ai.ts) with the reads around it; the keeping checks it is still this call's. */
@@ -199,7 +199,14 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
   const statsId = store.statsId;
   const nowSeconds = Math.floor(now / 1000);
   const { kept, lastAt } = await week(statsId, productId);
-  const reviews = await visibleReviews(statsId, productId, 0, MAX_SUMMARY_REVIEWS);
+  // Reviews that could not be read (rule 24) are their own answer, before any model call: nothing asked, no AI job.
+  let reviews: Awaited<ReturnType<typeof visibleReviews>>;
+  try {
+    reviews = await visibleReviews(statsId, productId, 0, MAX_SUMMARY_REVIEWS);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return { ok: false, reason: "unread" };
+    throw error;
+  }
   const inputs = summaryInputs(reviews, productId);
   // The newest review read: a review created at or before it may be counted, so its change takes the summary away
   // (lib/reviews.ts); one created after it never is. Older reviews than the ones sent count as read too (never less).

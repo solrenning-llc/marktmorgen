@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
   try {
     const done = await makeReviewSummary(store, product);
-    if (!done.ok) return Response.json({ ok: false, error: done.reason, reviews: done.reviews ?? null, next: done.next ?? null }, { status: done.reason === "failed" || done.reason === "empty" ? 502 : done.reason === "busy" ? 409 : done.reason === "week" || done.reason === "used" ? 429 : 400 });
+    if (!done.ok) return Response.json({ ok: false, error: done.reason, reviews: done.reviews ?? null, next: done.next ?? null }, { status: done.reason === "failed" || done.reason === "empty" ? 502 : done.reason === "busy" ? 409 : done.reason === "unread" ? 503 : done.reason === "week" || done.reason === "used" ? 429 : 400 });
     return Response.json({ ok: true, summary: done.summary, fresh: done.fresh, left: done.left });
   } catch (error) {
     console.error("summing up a product's reviews failed", error);

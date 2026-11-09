@@ -365,9 +365,13 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   await forward(message("loud@example.com", [], [], "orders@marktmorgen.com"), NOON);
   is("held after its read: orders@, not support@", [/written to orders@marktmorgen\.com/.test(notices()[0]?.text ?? ""), /written to support@/.test(notices()[0]?.text ?? "")], [true, false]);
   fresh();
-  for (let i = 0; i < ANNOUNCED; i++) await forward(message(`a${i}@q${i}.example`), NOON);
-  await forward(message("late@q.example", [], [], "hello@marktmorgen.com"), NOON, ["hello@marktmorgen.com"]);
-  is("held at the announcement: hello@", [/written to hello@marktmorgen\.com/.test(notices()[0]?.text ?? ""), /written to support@/.test(notices()[0]?.text ?? "")], [true, false]);
+  // The day's announcements already counted (no held message before it, so the day's notice is this one's).
+  const today = new Date(NOON).toISOString().slice(0, 10);
+  redis.run(["SET", `nl:rl:support-announced:${createHash("sha256").update(`nimbus-support-announced:${today}`).digest("hex").slice(0, 32)}`, String(ANNOUNCED), "EX", "172800"]);
+  const before = notices().length;
+  const lateResult = await forward(message("late@q.example", [], [], "hello@marktmorgen.com"), NOON, ["hello@marktmorgen.com"]);
+  const lateNotice = notices().at(-1)?.text ?? "";
+  is("held at the announcement: hello@", [lateResult, notices().length - before, /written to hello@marktmorgen\.com/.test(lateNotice), /written to support@/.test(lateNotice)], ["held", 1, true, false]);
 
   globalThis.fetch = originalFetch;
   fixture.restore();

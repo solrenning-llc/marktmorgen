@@ -869,8 +869,9 @@ export function heldCompanyMonthlyExposure(caseCap: number | null, observed: num
  * (docs/pack-cost-decomposition-2026-10-18.md), not read again on
  * 9 November 2026 (aws.amazon.com blocked in that session). Not in the
  * figure, so the complete one stays unknown, never zero: announcements past
- * SUPPORT_ANNOUNCED_DAILY (a call and about six commands each, bounded only by
- * the webhook's per-connection limit and Resend's receiving quota), transfer
+ * SUPPORT_ANNOUNCED_DAILY (a call and the route's 3 commands each, no counter
+ * after the first on an instance, bounded only by the webhook's per-connection
+ * limit and Resend's receiving quota), transfer
  * out of the function to SES, and Resend's count of received mail.
  */
 export const SUPPORT_FORWARD_COMMANDS = 3 + 2 + 18 + 100 * 4 + 64;
@@ -882,7 +883,10 @@ export function supportForwardMonthlyUsd(): { perForwardUsd: number; perReadUsd:
   const forwards = UTC_DAYS * (SUPPORT_DAILY + SUPPORT_HELD_NOTICES_DAILY);
   const reads = UTC_DAYS * SUPPORT_ANNOUNCED_DAILY;
   const fileGb = (UTC_DAYS * SUPPORT_FILE_BYTES_DAILY * 4) / 3 / GB;
-  return { perForwardUsd, perReadUsd, modeledUsd: forwards * perForwardUsd + reads * perReadUsd + fileGb * SES_ATTACHMENT_PER_GB, completeUsd: null };
+  // Each announcement read also reads the sender's store record to tell a paid plan (one GET), at the record's
+  // largest size, whatever the answer (2nd pre-review of 9 November 2026).
+  const storeReadsUsd = reads * MAX_STORE_BYTES * DB_BYTE;
+  return { perForwardUsd, perReadUsd, modeledUsd: forwards * perForwardUsd + reads * perReadUsd + storeReadsUsd + fileGb * SES_ATTACHMENT_PER_GB, completeUsd: null };
 }
 
 /** Historical operating model only: encoded-size assumptions and fetched-ahead factor.
@@ -1651,6 +1655,7 @@ export const NOT_A_COST: Record<string, string> = {
   SUPPORT_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
   SUPPORT_FILE_BYTES_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
   SUPPORT_HELD_NOTICES_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
+  SUPPORT_CREATOR_SENDER_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
   SUPPORT_PUBLIC_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
   SUPPORT_ANNOUNCED_DAILY: "Mail to our own support sent on through SES (lib/inbound-mail.ts, ALTO 1 of the email audit, 9 November 2026): a company fixed cost under MR item 2, never a plan's, counted before each forward and priced at its ceilings by supportForwardMonthlyUsd above, whose month is in docs/funded-exposure-review.md; its complete figure stays unknown, never zero.",
   HELD_RECHECKS_PER_DAY: "Company recovery work plus separate post_cancellation retention exposure, never a paid plan allowance: HELD_EXPOSURE in this registry and docs/funded-exposure-review.md count50 global daily rechecks, two actual bounded reads each, retained full stores/keys and aggregate counters. Actual case cap/rates remain unknown until reviewed; no zero subsidy.",
@@ -1756,7 +1761,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "erase-address": METERED_EMAIL, "erase-ip": METERED_EMAIL,
   "podcast-link-address": METERED_EMAIL, "contact-ip": METERED_EMAIL, "contact-store": METERED_EMAIL, "remind-ask": METERED_EMAIL,
   "remind-store": METERED_EMAIL, "assist-remind-store": METERED_EMAIL, "resend-sale": METERED_EMAIL, "resend-store": METERED_EMAIL, "creator-inbound": METERED_EMAIL,
-  "support-sender-hour": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-sender-day": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-forward": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-public": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-announced": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."),
+  "support-sender-hour": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-sender-day": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-forward": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-public": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-creator-day": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."), "support-announced": guard("Mail to our own support sent on through SES, counted before it is fetched or sent (lib/inbound-mail.ts): a company fixed cost, priced at its ceilings by supportForwardMonthlyUsd, never a plan's."),
   "inbox-reply": METERED_EMAIL, "inbox-tell": METERED_EMAIL,
   // The Store assistant (an add-on, ADD_ON_LINES): its asks are burst limits under its month's pool, the rest public requests.
   assist: guard("A burst limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),

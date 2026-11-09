@@ -398,19 +398,28 @@ function cell(value: string): string {
 }
 
 /**
+ * The people whose fields' values listAsCsv reads in one go: a read a field
+ * for each of them, gathered across the walk's pages, so the reads never
+ * depend on how many contacts a page of HSCAN holds (COUNT is only a hint;
+ * third cost review of #3354).
+ */
+export const LIST_VALUES_PER_READ = 1_000;
+
+/**
  * What listAsCsv reads beside the list's own pages: the store's fields'
- * values for the people on it, a read a field for each thousand contacts,
- * each person's key sent with each field (lib/crm.ts, valuesOf). Priced into
- * a whole export before it is read (lib/store-export.ts, exportShape). The
- * fields and the list's length are read exactly (CX-123 rule 24): an unknown
- * answer throws, never a shape without them (second cost review of #3354).
+ * values for the people on it, a read a field for each LIST_VALUES_PER_READ
+ * of them, each person's key sent with each field once (lib/crm.ts,
+ * valuesOf). Priced into a whole export before it is read
+ * (lib/store-export.ts, exportShape). The fields and the list's length are
+ * read exactly (CX-123 rule 24): an unknown answer throws, never a shape
+ * without them (second cost review of #3354).
  */
 export async function listValuesShape(store: Store): Promise<{ bytes: number; commands: number }> {
   const fields = (await readFieldsWhole(store.statsId)).length;
   if (!fields || !store.listId || !isRedisConfigured()) return { bytes: 0, commands: 0 };
   const contacts = countOf(repliesFor(await redisPipeline([["HLEN", leadsKey(store.listId)]]), 1)?.[0]);
   if (contacts === null) throw new UnknownReplyError("a list's HLEN");
-  return { bytes: contacts * fields * PERSON_ARG_BYTES, commands: Math.ceil(contacts / 1000) * fields };
+  return { bytes: contacts * fields * PERSON_ARG_BYTES, commands: Math.ceil(contacts / LIST_VALUES_PER_READ) * fields };
 }
 
 /**
@@ -427,9 +436,12 @@ export async function listValuesShape(store: Store): Promise<{ bytes: number; co
  * (app/api/store/leads/route.ts), and the store's whole export says that part
  * could not be read (lib/store-export.ts).
  *
- * The store's fields' values are read page by page for the people the file
- * holds only (lib/crm.ts, valuesOf), never the whole of a field's values,
- * which outlive a person's leaving the list (second cost review of #3354);
+ * The store's fields' values are read for the people the file holds only
+ * (lib/crm.ts, valuesOf), never the whole of a field's values, which outlive
+ * a person's leaving the list (second cost review of #3354): gathered across
+ * the walk's pages, LIST_VALUES_PER_READ people at a read, and each address
+ * read once however often HSCAN hands it back, as listValuesShape prices
+ * them (third cost review of #3354);
  * the fields themselves are read exactly too, so a file never goes without a
  * column it should have. Every read goes through `through`: a download's
  * metered read holds its units before it is made (lib/list-download.ts).
@@ -445,9 +457,20 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean, through: List
   if (!store.listId || !isRedisConfigured()) return `${rows.join("\r\n")}\r\n`;
 
   const key = leadsKey(store.listId);
+  const statsId = store.statsId;
   // By address: HSCAN may hand the same field back twice during a walk, and the file holds each address once, as
-  // last read (null when that reading is not one the file holds).
+  // last read: its contact's cells, or null when that reading is not one the file holds.
   const byEmail = new Map<string, string | null>();
+  // An address's fields' values, as cells, once read: a later reading of it keeps them, never reads them again.
+  const valued = new Map<string, string>();
+  // The addresses whose values are still to be read, in the order they came.
+  const waiting = new Set<string>();
+  const readValues = async (count: number) => {
+    const batch = [...waiting].slice(0, count);
+    for (const email of batch) waiting.delete(email);
+    const values = statsId && fields.length ? await valuesOf(statsId, fields, batch.map((email) => personKey(statsId, email)), through) : {};
+    batch.forEach((email, k) => valued.set(email, fields.map((f) => cell(values[f.id]?.[k] ?? "")).join(",")));
+  };
   let cursor = "0";
   // Bounded, so a cursor that never comes back to zero cannot hold the
   // function forever; a list not read to its end by then is unknown.
@@ -459,23 +482,18 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean, through: List
     if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("a list's HSCAN");
     cursor = read.next;
     const flat = read.items;
-    // The people this page puts in the file, their values read after it for them alone: each held under a mark of its
-    // own, so a later reading of the same address on the page (left out, or not one the file holds) still wins.
-    const waiting: { email: string; mark: string; cells: string[] }[] = [];
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const email = flat[i];
       const lead = parseContact(flat[i + 1]);
       if (!lead) continue;
       if (onlyAgreed && !mailable(lead)) {
         byEmail.set(email, null);
+        waiting.delete(email);
         continue;
       }
-      const mark = `\u0000${waiting.length}`;
-      byEmail.set(email, mark);
-      waiting.push({
+      byEmail.set(
         email,
-        mark,
-        cells: [
+        [
           email,
           lead.agreed ? "yes" : "no",
           lead.agreedAt,
@@ -487,17 +505,16 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean, through: List
           lead.tags.join("; "),
           lead.source,
           lead.importedAt,
-        ],
-      });
+        ]
+          .map(cell)
+          .join(","),
+      );
+      if (!valued.has(email)) waiting.add(email);
     }
-    const statsId = store.statsId;
-    const values = statsId && fields.length ? await valuesOf(statsId, fields, waiting.map((w) => personKey(statsId, w.email)), through) : {};
-    waiting.forEach((w, k) => {
-      if (byEmail.get(w.email) !== w.mark) return;
-      byEmail.set(w.email, [...w.cells, ...fields.map((f) => values[f.id]?.[k] ?? "")].map(cell).join(","));
-    });
+    while (waiting.size >= LIST_VALUES_PER_READ) await readValues(LIST_VALUES_PER_READ);
     if (cursor === "0") break;
   }
-  for (const row of byEmail.values()) if (row !== null) rows.push(row);
+  if (waiting.size) await readValues(waiting.size);
+  for (const [email, row] of byEmail) if (row !== null) rows.push(fields.length ? `${row},${valued.get(email)}` : row);
   return `${rows.join("\r\n")}\r\n`;
 }

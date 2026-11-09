@@ -1461,7 +1461,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "lib/crm.ts", names: ["PERSON_ARG_BYTES = 35;", "valuesOf"] },
       { file: "lib/free.ts", names: ["Math.ceil(MAX_LEADS / 500) + 10"] },
       { file: "lib/store-export.ts", names: ["listValuesShape(store)"] },
-      { file: "lib/free.ts", names: ["contacts * fields * PERSON_ARG_BYTES", "Math.ceil(contacts / 1000) * fields"] },
+      { file: "lib/free.ts", names: ["contacts * fields * PERSON_ARG_BYTES", "Math.ceil(contacts / LIST_VALUES_PER_READ) * fields", "LIST_VALUES_PER_READ = 1_000;", "readValues(LIST_VALUES_PER_READ)", "if (!valued.has(email)) waiting.add(email);"] },
       { file: "lib/joined-stores.ts", names: ["QUARTERS_KEPT", "PERSON_RECORD_MONTHS"] },
       { file: "lib/plan-closing-rules.ts", names: ["DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
       { file: "tests/store-data-registry.ts", names: ["closingBytes", "followedBytes", "TRIAL_UNITS"] },
@@ -1489,7 +1489,7 @@ export function exportCommands(bytes: number): number {
   const lessons = MAX_PRODUCTS * MAX_LESSONS;
   // The contacts' pages: a thousand at a command, as many as the room can hold and never more than lib/free.ts, listAsCsv, reads (MAX_LEADS).
   const contacts = Math.min(Math.ceil(bytes / 100 / 1000), MAX_LEADS / 500 + 10);
-  // Each page's people's values, one HMGET a field (lib/crm.ts, valuesOf; second cost review of #3354).
+  // The people's values, one HMGET a field for each thousand of them, never more than the walk's pages (lib/free.ts, LIST_VALUES_PER_READ; lib/crm.ts, valuesOf; second and third cost reviews of #3354).
   return Math.ceil(EXPORT_COMMANDS.fixed + 3 * Math.ceil(MAX_PRODUCTS / 100) + Math.ceil(MAX_PRODUCTS / 100) + Math.ceil(lessons / BODIES_PER_READ) + Math.ceil(MAX_POSTS / 100) + EXPORT_COMMANDS.form * MAX_FORMS + contacts * (1 + MAX_CRM_FIELDS));
 }
 

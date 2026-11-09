@@ -1277,6 +1277,7 @@
     "components/affiliate-link-box.tsx",
     "components/affiliate-promotion-results.tsx",
     "components/affiliate-studio.tsx",
+    "components/affiliate-unconfirmed.tsx",
     "components/agent-proposals.tsx",
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",

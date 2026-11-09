@@ -3302,10 +3302,11 @@ async function writeReferral(store: Store, referral: Referral, buyer: string): P
   // first, counted in the store's room at what it really adds (lib/order-data.ts).
   // A sale whose buyer is not confirmed goes on the list the five-minute job reads again (settleUnconfirmed), in the same
   // write and before the sale: a reference with no sale, or already decided, is dropped from it by the job unread.
-  await orderWrite(store, [
+  const written = await orderWrite(store, [
     ...(tier.buyerUnknown ? [["ZADD", unconfirmedKey(store.statsId), Math.floor(Date.now() / 1000), referral.ref]] : []),
     ["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify({ ...referral, ...tier })],
   ]);
+  if (tier.buyerUnknown && written[written.length - 1] === 1) await countUnconfirmed({ waited: 1 });
 }
 
 /**
@@ -4267,6 +4268,67 @@ function tierOfInvoice(byId: Map<string, Affiliate>, aff: string, buyer: string,
   return tierOwn(recruit, byId.get(recruit.by.id), buyer) ? { tierOff: 1 } : {};
 }
 
+const UNCONFIRMED_COUNTS = ["waited", "decided", "approved", "failed", "reads"] as const;
+type UnconfirmedCount = (typeof UNCONFIRMED_COUNTS)[number];
+const unconfirmedMonthKey = (month: string) => `nl:aff:unc:month:${month}`;
+const UNCONFIRMED_MONTH_SECONDS = 400 * 86_400;
+
+/**
+ * The month's counts of the sales whose second tier waited for their buyer, for the owner's monthly report: numbers
+ * only, no store and no person (the key is the month; a count is a whole number). Best effort and never throws: a
+ * count that is lost is a count short, not a sale changed. waited: written waiting; decided: by the five-minute job;
+ * approved: by the creator in person; failed: a read that did not answer; reads: requests made to find an address.
+ */
+async function countUnconfirmed(counts: Partial<Record<UnconfirmedCount, number>>, nowMs = Date.now()): Promise<void> {
+  const key = unconfirmedMonthKey(new Date(nowMs).toISOString().slice(0, 7));
+  const commands: (string | number)[][] = UNCONFIRMED_COUNTS.filter((name) => (counts[name] ?? 0) > 0).map((name) => ["HINCRBY", key, name, counts[name] as number]);
+  if (!commands.length) return;
+  await redisPipeline([...commands, ["EXPIRE", key, UNCONFIRMED_MONTH_SECONDS]]).catch((error) => console.error("counting the sales whose buyer was not confirmed failed", error instanceof Error ? error.message : ""));
+}
+
+/** The counts of one month ("2026-11"), each a whole number (0 when never counted), or null when not read. */
+export async function unconfirmedMonth(month: string): Promise<Record<UnconfirmedCount, number> | null> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isRedisConfigured()) return null;
+  try {
+    const read = repliesFor(await redisPipeline([["HGETALL", unconfirmedMonthKey(month)]]), 1);
+    if (!read) return null;
+    const held = new Map(pairs(read[0]));
+    const out = {} as Record<UnconfirmedCount, number>;
+    for (const name of UNCONFIRMED_COUNTS) {
+      const raw = held.get(name);
+      const n = raw === undefined ? 0 : Number(raw);
+      if (!Number.isSafeInteger(n) || n < 0) return null;
+      out[name] = n;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The creator approves in person the second tier of one sale whose buyer was not confirmed (the studio's "tier-confirm"):
+ * the sale stops waiting, with no tierOff, so its tier joins the next payment batch. `ref` is the line's reference
+ * ("tier2:<sale>") or the sale's own. "not-waiting" when it already was decided, "gone" when no such sale, "unknown"
+ * when it is not a reference or the store does not answer. One read, then one write and a removal from the list.
+ */
+export async function approveUnconfirmed(store: Store, ref: string): Promise<"approved" | "not-waiting" | "gone" | "unknown"> {
+  const sale = ref.startsWith("tier2:") ? ref.slice(6) : ref;
+  if (!store.statsId || !isRedisConfigured() || !/^[A-Za-z0-9_:.-]{3,250}$/.test(sale)) return "unknown";
+  const read = repliesFor(await redisPipeline([["HGET", salesKey(store.statsId), sale]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) return "unknown";
+  if (read[0] === null) return "gone";
+  const kept = parseReferral(read[0]);
+  if (!kept) return "unknown";
+  if (!kept.buyerUnknown) return "not-waiting";
+  const whole = JSON.parse(read[0]) as Record<string, unknown>;
+  delete whole.buyerUnknown;
+  await orderWrite(store, [["HSET", salesKey(store.statsId), sale, JSON.stringify(whole)]]);
+  await redisPipeline([["ZREM", unconfirmedKey(store.statsId), sale]]).catch(() => undefined);
+  await countUnconfirmed({ approved: 1 });
+  return "approved";
+}
+
 /** Orders of a store the five-minute job reads again for their buyer's address in one run (settleUnconfirmed). */
 export const UNCONFIRMED_BATCH = 5;
 /** Seconds before an order that gave no address is read again; an order Stripe or Redis did not answer for is read again after an hour. */
@@ -4309,6 +4371,16 @@ async function buyerOf(store: Store, ref: string, deadline: number | undefined):
  */
 export async function settleUnconfirmed(store: Store, now = Math.floor(Date.now() / 1000), deadline?: number): Promise<{ decided: number; waiting: number; failed: number }> {
   const out = { decided: 0, waiting: 0, failed: 0 };
+  const tally = { reads: 0 };
+  try {
+    return await settleUnconfirmedRun(store, now, deadline, out, tally);
+  } finally {
+    // What the run asked and what it decided, for the month's report, even when it ended on an error.
+    await countUnconfirmed({ decided: out.decided, failed: out.failed, reads: tally.reads }, now * 1000);
+  }
+}
+
+async function settleUnconfirmedRun(store: Store, now: number, deadline: number | undefined, out: { decided: number; waiting: number; failed: number }, tally: { reads: number }): Promise<{ decided: number; waiting: number; failed: number }> {
   if (!store.statsId || !isRedisConfigured()) return out;
   const statsId = store.statsId;
   const list = repliesFor(await redisPipeline([["ZRANGEBYSCORE", unconfirmedKey(statsId), "-inf", now, "LIMIT", 0, UNCONFIRMED_BATCH]]), 1);
@@ -4331,6 +4403,8 @@ export async function settleUnconfirmed(store: Store, now = Math.floor(Date.now(
       continue;
     }
     try {
+      // Counted before it is asked, so a request that fails is counted too.
+      tally.reads += 1;
       const buyer = await buyerOf(store, ref, deadline);
       if (!buyer) {
         await redisPipeline([later(ref, UNCONFIRMED_READ_AGAIN)]);

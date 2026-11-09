@@ -53,3 +53,16 @@ test("CX-67 holds the full retained store and global retries as company exposure
   assert.equal(heldCompanyMonthlyExposure(1, 1).completeUsd, null);
   assert.equal(COST_LINES.some(row => row.id === "held-stores"), false);
 });
+
+test("second pre-review L-3: the daily plans job's expanded pages and brake are company exposure, their bytes unknown, never zero", async () => {
+  const { BILLING_SYNC_RUN: run } = await import("./plan-cost-registry");
+  const { readFileSync } = await import("node:fs");
+  const sync = readFileSync("lib/billing-sync.ts", "utf8");
+  assert.match(sync, /const MAX_PAGES = 50;/);
+  assert.match(sync, /export const MISSING_AT_MOST = 3;/);
+  assert.equal(run.listPagesMost, 50);
+  assert.equal(run.brakeCommandsMost, 7);
+  assert.equal(run.pageBytesMost, null, "an unmeasured page is not zero bytes");
+  assert.equal(run.completeMonthlyCostUsd, null);
+  assert.equal(run.stripeEndpointTariffUsd, null);
+});

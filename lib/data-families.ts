@@ -210,8 +210,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:backup:last-fail": C, "nl:backup:last-ok": C, "nl:backup:lock": C, "nl:backup:ran:": C, // the company's daily backup run (lib/backup-run.ts), no store's
   "nl:bench:ranges": C, "nl:bench:s:": Cr(21),
   "nl:billing:sync:after": C, "nl:billing:sync:cursor": C,
-  // Plans ended this week as missing at Stripe (lib/billing-sync.ts, reserveMissingEnds): a store's reference, gone within the week.
-  "nl:billing:sync:missing": Cr(7),
+  // Plans ended this week as missing at Stripe (lib/billing-sync.ts, reserveMissingEnds): an index of stores' references, each taken
+  // out when its store is deleted or closed (lib/store.ts), as ENDED_INDEX is; the rest gone within the week.
+  "nl:billing:sync:missing": I,
   "nl:blog:body:": E, "nl:blog:meta:": E, "nl:blog:pub:": E,
   "nl:busy:": Cr(1),
   // ---------------------------------------------------------------- c

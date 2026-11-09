@@ -66,6 +66,7 @@ import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recor
 import { createHash } from "node:crypto";
 import { customerReachable, observeStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
 import { reserveMissingEnds } from "@/lib/billing-sync";
+import { noTryEnded } from "@/lib/no-try-rules";
 import { readAllListings } from "@/lib/catalog";
 import { editCourse, filesInCourse, readCourse, saveCourse } from "@/lib/course";
 import { bytesWords } from "@/lib/delivery";
@@ -879,8 +880,10 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
       }
       ownMissing = own.state === "unknown";
       // A renewal unpaid comes back unpaid: never a store paid up again (pre-review A1).
-      if (own.state === "active") {
-        await setSubscription(key, { active: true, tier: own.tier, cycle: own.cycle, trialEnds: own.trialing ? own.until : 0, shared: own.shared, period: own.period, renewalUnpaid: own.renewalUnpaid });
+      // One unpaid with no try scheduled, past its clock or already ended here, does
+      // not come back at all (lib/no-try-rules.ts; second pre-review G-1).
+      if (own.state === "active" && !noTryEnded(store, store.subscriptionId, own.noTryFrom, Math.floor(now / 1000))) {
+        await setSubscription(key, { active: true, tier: own.tier, cycle: own.cycle, trialEnds: own.trialing ? own.until : 0, shared: own.shared, period: own.period, renewalUnpaid: own.renewalUnpaid, ...(own.noTryFrom !== undefined ? { noTryFrom: own.noTryFrom } : {}) });
         await redisPipeline([["DEL", stateKey(key)]]);
         return { key, state: "running", note: "Stripe says the plan runs" };
       }
@@ -898,6 +901,8 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // when search is unavailable; an empty list cannot prove unknown absence.
     live ??= await observation.customerLive();
     if (!live && !searchKnown) return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
+    // Running at Stripe with its renewal unpaid and no try scheduled past its clock: not a plan that runs.
+    if (live && noTryEnded(store, live.subscriptionId, live.noTryFrom, Math.floor(now / 1000))) live = null;
   } catch (error) {
     console.error("asking Stripe about an ended plan failed", error);
     return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
@@ -905,7 +910,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   if (live) {
     // Our note was wrong, or the plan was started again a moment ago: put right.
     // As Stripe has it: a renewal unpaid stays unpaid, costs paused (pre-review A1).
-    await setSubscription(key, { customerId: live.customerId, subscriptionId: live.subscriptionId, active: true, tier: live.tier, cycle: live.cycle, trialEnds: live.trialEnds, shared: live.shared, period: live.period, renewalUnpaid: live.renewalUnpaid === true });
+    await setSubscription(key, { customerId: live.customerId, subscriptionId: live.subscriptionId, active: true, tier: live.tier, cycle: live.cycle, trialEnds: live.trialEnds, shared: live.shared, period: live.period, renewalUnpaid: live.renewalUnpaid === true, ...(live.noTryFrom !== undefined ? { noTryFrom: live.noTryFrom } : {}) });
     await redisPipeline([["DEL", stateKey(key)]]);
     return { key, state: "running", note: "Stripe says the plan runs" };
   }

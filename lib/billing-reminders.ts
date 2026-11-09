@@ -10,7 +10,8 @@
  * charge, and says the date, the amount and the one click that stops it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { isAddOn, keepCardThatPays, listSubscriptions, noTryEndsAt, pastDueInGrace, periodEnd, planOf, retryLeft } from "@/lib/billing";
+import { isAddOn, keepCardThatPays, listSubscriptions, noTryFrom, pastDueInGrace, periodEnd, planOf, retryLeft, stateOf } from "@/lib/billing";
+import { noTryEndsAt } from "@/lib/no-try-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { recordUnpaidRenewal } from "@/lib/billing-sync";
@@ -175,8 +176,14 @@ export type FailedPlan = {
 
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
 
-/** The failed payment a past-due subscription is waiting on, if it can be paid from an email. */
-export function failedPlan(subscription: Record<string, unknown>): FailedPlan | null {
+/**
+ * The failed payment a past-due subscription is waiting on, if it can be paid
+ * from an email. `unpaidSince`: when the store that keeps it first recorded
+ * the renewal unpaid (0 when not known), the clock its end is counted on
+ * (lib/no-try-rules.ts; second pre-review M-1); `ended`: that store has
+ * already written its plan ended.
+ */
+export function failedPlan(subscription: Record<string, unknown>, unpaidSince = 0, ended = false): FailedPlan | null {
   const id = typeof subscription.id === "string" ? subscription.id : "";
   // An add-on whose payment failed simply stops answering: the plan's words ("your checkout stops") are not about it.
   if (!id || subscription.status !== "past_due" || isAddOn(subscription)) return null;
@@ -198,11 +205,15 @@ export function failedPlan(subscription: Record<string, unknown>): FailedPlan | 
   // its checkout has already stopped, and the email must say so.
   const afterTrial = !pastDueInGrace(subscription);
   const nextTry = typeof invoice.next_payment_attempt === "number" && invoice.next_payment_attempt > 0 ? invoice.next_payment_attempt : 0;
-  // A null next try is Stripe having stopped only for an invoice charged
-  // automatically, and only past Stripe's longest retry window (pre-review M-a).
-  const left = retryLeft(subscription);
-  const noTry = nextTry ? "" : left === "manual" ? "manual" : left === "no" ? "ended" : "waiting";
-  const endsAt = noTry === "waiting" ? noTryEndsAt(subscription) : 0;
+  // A null next try ends the plan only NO_TRY_WAIT_DAYS after the renewal was
+  // first unpaid, on the same clock the store ends it by (pre-review M-a;
+  // second pre-review G-1, M-1); one paid by link is never said to be tried.
+  const from = noTryFrom(subscription);
+  const endsOn = from === undefined ? 0 : noTryEndsAt(unpaidSince, from);
+  const read = stateOf(subscription);
+  const over = !afterTrial && (ended || (read.state === "inactive" && read.reason === "past_due_no_retry") || (endsOn > 0 && Math.floor(Date.now() / 1000) >= endsOn));
+  const noTry = nextTry ? "" : over ? "ended" : retryLeft(subscription) === "manual" ? "manual" : "waiting";
+  const endsAt = noTry === "waiting" ? endsOn : 0;
   return { subscription: id, invoice: invoiceId, email, amountCents, payUrl, nextTry, noTry, endsAt, afterTrial, tier: planOf(subscription).tier };
 }
 
@@ -259,6 +270,19 @@ export function failedPlanEmail(failed: FailedPlan, endedSeconds = Math.floor(Da
 }
 
 /**
+ * The clock a failed renewal's end is counted on, for the store that keeps
+ * this subscription: when it first recorded the renewal unpaid (0 when it has
+ * not), and whether it already wrote the plan ended.
+ */
+export async function unpaidClock(subscription: Record<string, unknown>): Promise<{ unpaidSince: number; ended: boolean }> {
+  const handle = (subscription.metadata as Record<string, unknown> | null | undefined)?.store;
+  if (typeof handle !== "string" || !handle) return { unpaidSince: 0, ended: false };
+  const store = await storeForHandle(handle);
+  if (!store || store.subscriptionId !== subscription.id) return { unpaidSince: 0, ended: false };
+  return { unpaidSince: store.subscriptionActive ? store.renewalUnpaidSince ?? 0 : 0, ended: !store.subscriptionActive && Boolean(store.planEndedAt) };
+}
+
+/**
  * When the store that keeps this subscription wrote its plan's end down, in
  * seconds, or now when it has not (the daily job writes it once it reads the
  * plan ended): the day its closing is counted from.
@@ -291,6 +315,9 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
         // A renewal's email says what has stopped, so it is written down
         // first (lib/billing-sync.ts); a failure waits for the next run.
         if (!due.afterTrial) await recordUnpaidRenewal(subscription);
+        // The end it names is counted on the store's own clock, now written down.
+        const clock = await unpaidClock(subscription);
+        if (!due.nextTry && !due.afterTrial) Object.assign(due, failedPlan(subscription, clock.unpaidSince, clock.ended) ?? {});
         // First, so the card that pays is the one the next renewal uses.
         await keepCardThatPays(due.subscription);
         const { subject, text } = failedPlanEmail(due, due.noTry === "ended" ? await planEndedSeconds(subscription) : undefined);

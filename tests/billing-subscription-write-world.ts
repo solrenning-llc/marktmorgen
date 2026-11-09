@@ -24,7 +24,7 @@ export async function setCancelAtPeriodEnd(subscription:string,cancel:boolean){
  return {state:world.cancelState};
 }
 /** Mirrors lib/billing.ts: a cancel is the same Stripe change; nothing here is past due, so no renewal is voided. */
-export async function cancelAndStopUnpaidRenewal(subscription:string){return {state:await setCancelAtPeriodEnd(subscription,true),renewal:"none" as const};}
+export async function cancelAndStopUnpaidRenewal(subscription:string){return {state:await setCancelAtPeriodEnd(subscription,true),renewal:"none" as const,olderMayBeOpen:false};}
 /** Mirrors lib/billing.ts: the change was sent to Stripe and its outcome is not known. */
 export class SwitchUnconfirmedError extends Error{constructor(cause:unknown){super("TEST ONLY switch sent, outcome unknown",{cause});this.name="SwitchUnconfirmedError";}}
 export async function readSubscription(subscription:string){world.provider.push(["read",subscription]);return {state:world.readState};}

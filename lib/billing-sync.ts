@@ -42,7 +42,8 @@ import {
   startedFromObservedSubscription,
   stateOf,
 } from "@/lib/billing";
-import { ENDED_INDEX } from "@/lib/plan-standing";
+import { ENDED_INDEX, MISSING_ENDS_KEY } from "@/lib/plan-standing";
+import { noTryEnded } from "@/lib/no-try-rules";
 import { allowanceWindow, samePeriod } from "@/lib/allowance-window";
 import { type Store, setSubscription, storeForHandle, storeRef, storesAfter } from "@/lib/store";
 import { refusePlanIfClosing } from "@/lib/closing-plan-guard";
@@ -65,8 +66,7 @@ const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]+$/;
  */
 export const MISSING_AT_MOST = 3;
 export const MISSING_WINDOW_DAYS = 7;
-/** The stores whose plans were ended as missing, scored by when: at most MISSING_AT_MOST members, each kept MISSING_WINDOW_DAYS. */
-export const MISSING_ENDS_KEY = "nl:billing:sync:missing";
+export { MISSING_ENDS_KEY };
 const MISSING_WINDOW_MS = MISSING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 /**
@@ -75,6 +75,9 @@ const MISSING_WINDOW_MS = MISSING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
  * room; false, keeping nothing, when they do not or Redis could not be asked
  * (unknown is never room). At most MISSING_AT_MOST + 3 commands in two
  * pipelines, the second only to give room back (tests/plan-cost-registry.ts).
+ * All or nothing, by design (second pre-review L-1): more plans missing than
+ * the room left is itself the sign of a key or account changed, and ending
+ * the ones that fit would be the very trickle this brake is there to stop.
  */
 export async function reserveMissingEnds(refs: string[], nowMs = Date.now()): Promise<boolean> {
   const wanted = [...new Set(refs)];
@@ -145,8 +148,11 @@ export type SyncCounts = {
  */
 export async function recordState(store: Store, state: SubscriptionState): Promise<boolean> {
   if (state.state === "unknown") return false;
-  const active = state.state === "active";
-  const plan = active ? { tier: state.tier, cycle: state.cycle, trialEnds: state.trialing ? state.until : 0, shared: state.shared, period: state.period, renewalUnpaid: state.renewalUnpaid === true } : null;
+  // A renewal unpaid with no try scheduled ends the plan on the store's own
+  // clock (lib/no-try-rules.ts; second pre-review G-1); setSubscription
+  // applies the same rule to every writer.
+  const active = state.state === "active" && !noTryEnded(store, store.subscriptionId, state.noTryFrom);
+  const plan = active && state.state === "active" ? { tier: state.tier, cycle: state.cycle, trialEnds: state.trialing ? state.until : 0, shared: state.shared, period: state.period, renewalUnpaid: state.renewalUnpaid === true, ...(state.noTryFrom !== undefined ? { noTryFrom: state.noTryFrom } : {}) } : null;
   if (
     active === store.subscriptionActive &&
     (!plan || (plan.tier === store.tier && plan.cycle === store.cycle && plan.trialEnds === store.trialEnds && plan.shared === store.shared && samePeriod(plan.period, store.period ?? null) &&

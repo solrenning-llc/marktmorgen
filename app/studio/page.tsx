@@ -167,6 +167,7 @@ import { visibleCount } from "@/lib/catalog";
 import { storeChecks } from "@/lib/store-coach";
 import { accessCheck } from "@/lib/store-access-check";
 import { isPaidUp } from "@/lib/billing";
+import { noTryEnded } from "@/lib/no-try-rules";
 import { allowanceWindow, calendarWindow, samePeriod } from "@/lib/allowance-window";
 import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, KIND_WORDS, allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed } from "@/lib/store-allowance";
@@ -468,6 +469,10 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
   "canceling-paused": {
     title: "Canceled",
     body: "Your plan will not renew. Collection of its payments is paused at Stripe, so nothing is charged, and until the date below your store's page stays up but its checkout stays closed; then your plan ends. You can change your mind on this page until then.",
+  },
+  "canceling-unpaid-older": {
+    title: "Canceled, but an earlier payment may still be tried",
+    body: "Your plan will not renew. Its latest renewal payment that did not go through is canceled at Stripe, so your card is not tried for it again. An earlier renewal payment that did not go through may still be open at Stripe, and your card may still be charged for it. Until the date below your store's page stays up, but its checkout stays closed, as it has been since the first payment failed; then your plan ends.",
   },
   "canceling-unpaid-open": {
     title: "Canceled, but one payment may still be tried",
@@ -919,13 +924,16 @@ export default async function StudioPage({
   // "unknown" means Stripe could not be asked, which is not the same as not
   // paying. The snapshot stands rather than closing a paying creator's till
   // over a network blip.
+  // A renewal unpaid with no try scheduled past the store's own clock has
+  // ended, as the daily job reads it (lib/no-try-rules.ts; second pre-review G-1).
+  const running = live?.state === "active" && !(store && noTryEnded(store, store.subscriptionId, live.noTryFrom));
   const paid =
     live && live.state !== "unknown"
-      ? live.state === "active"
+      ? running
       : Boolean(store?.subscriptionActive);
   const plan =
-    live?.state === "active"
-      ? { tier: live.tier, cycle: live.cycle, trialEnds: live.trialing ? live.until : 0, shared: live.shared, period: live.period, renewalUnpaid: live.renewalUnpaid === true }
+    live?.state === "active" && running
+      ? { tier: live.tier, cycle: live.cycle, trialEnds: live.trialing ? live.until : 0, shared: live.shared, period: live.period, renewalUnpaid: live.renewalUnpaid === true, ...(live.noTryFrom !== undefined ? { noTryFrom: live.noTryFrom } : {}) }
       : null;
   let written: Awaited<ReturnType<typeof setSubscription>> = null;
   if (

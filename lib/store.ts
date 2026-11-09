@@ -78,7 +78,8 @@ import { type InboxSetting, NO_INBOX, parseInboxSetting } from "@/lib/inbox-rule
 import { type PastSale, type StoreSale, NO_SALE, parsePastSales, parseSale, withPastSale } from "@/lib/store-sale";
 import { parseTiers } from "@/lib/tier-rules";
 import { type BillingPeriod, isPeriod } from "@/lib/allowance-window";
-import { ENDED_INDEX } from "@/lib/plan-standing";
+import { ENDED_INDEX, MISSING_ENDS_KEY } from "@/lib/plan-standing";
+import { noTryEnded } from "@/lib/no-try-rules";
 import { SHARING_INDEX } from "@/lib/platform-share";
 import { PAYING_INDEX } from "@/lib/free-pool-rules";
 import { type Cycle, type Tier, parseCycle, parseTier } from "@/lib/plan";
@@ -1867,6 +1868,7 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
       ["DEL", storeIdKey(store.sid)],
       ["SREM", await accountKey(store.email), store.sid],
       ["ZREM", ENDED_INDEX, storeRef(store)],
+      ["ZREM", MISSING_ENDS_KEY, storeRef(store)],
       ["SREM", SHARING_INDEX, storeRef(store)],
     ]);
     return { ok: true, store };
@@ -1891,6 +1893,7 @@ export async function closeStoreRecord(store: Store, extraKeys: string[] = []): 
     ["DEL", owner, beforeMoveKeyOf(owner), ...extraKeys],
     ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ["SREM", await accountKey(store.email), store.sid]] : []),
     ["ZREM", ENDED_INDEX, storeRef(store)],
+    ["ZREM", MISSING_ENDS_KEY, storeRef(store)],
     ["SREM", SHARING_INDEX, storeRef(store)],
   ]);
 }
@@ -2017,6 +2020,14 @@ export async function setSubscription(
      * Not given: kept for the same subscription, cleared for another one.
      */
     renewalUnpaid?: boolean;
+    /**
+     * Stripe has no try scheduled on the unpaid renewal: the latest invoice's
+     * own clock (0 when none). The plan is then written ended once 63 days
+     * have passed since the store first recorded the renewal unpaid, and an
+     * ended one is not written running again while Stripe still says so
+     * (lib/no-try-rules.ts noTryEnded; second pre-review G-1).
+     */
+    noTryFrom?: number;
   },
   expected?: Pick<Store, "sid" | "statsId" | "stripeCustomerId" | "subscriptionId" | "subscriptionActive" | "tier" | "cycle">,
 ): Promise<Store | null> {
@@ -2044,11 +2055,14 @@ export async function setSubscription(
       return null;
     }
 
+    // A renewal unpaid with no try scheduled for long enough has ended,
+    // whoever writes what Stripe said (second pre-review G-1).
+    const active = fields.active && !noTryEnded(store, subscriptionId, fields.noTryFrom);
     // A proved period never becomes an inferred renewal through a writer
     // that omitted its marker. New identities/plans/periods need fresh proof.
     if(fields.period!==undefined&&fields.period!==null&&!isPeriod(fields.period))return null;
-    let period=!fields.active?null:fields.period===undefined?store.period??null:fields.period;
-    if(fields.active&&store.period?.funded===true){
+    let period=!active?null:fields.period===undefined?store.period??null:fields.period;
+    if(active&&store.period?.funded===true){
       const changed=subscriptionId!==store.subscriptionId||(fields.tier??store.tier)!==store.tier||(fields.cycle??store.cycle)!==store.cycle;
       if(changed&&fields.period?.funded!==true)return null;
       if(period?.funded!==true){
@@ -2060,19 +2074,19 @@ export async function setSubscription(
     // The day a plan is first seen to be over is written down once, and
     // wiped when a plan runs again. A store that never started one has none.
     const had = store.subscriptionActive || store.subscriptionId !== null || subscriptionId !== null;
-    const planEndedAt = fields.active ? "" : store.planEndedAt || (had ? new Date(Date.now()).toISOString() : "");
+    const planEndedAt = active ? "" : store.planEndedAt || (had ? new Date(Date.now()).toISOString() : "");
     // The day a renewal was first seen unpaid is written down once and kept
     // while it stays unpaid; paying it, a plan not running, or another
     // subscription clears it.
     const unpaidBefore = store.subscriptionId === subscriptionId ? store.renewalUnpaidSince ?? 0 : 0;
-    const unpaid = fields.active && (fields.renewalUnpaid ?? unpaidBefore > 0);
+    const unpaid = active && (fields.renewalUnpaid ?? unpaidBefore > 0);
     const renewalUnpaidSince = unpaid ? unpaidBefore || Math.floor(Date.now() / 1000) : 0;
 
     const saved = await save({
       ...store,
       stripeCustomerId: customerId,
       subscriptionId,
-      subscriptionActive: fields.active,
+      subscriptionActive: active,
       subscriptionCheckedAt: new Date().toISOString(),
       tier: fields.tier ?? store.tier,
       cycle: fields.cycle ?? store.cycle,

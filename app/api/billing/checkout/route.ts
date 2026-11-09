@@ -2,6 +2,7 @@ import {reserveContractFunding} from '@/lib/contract-funding';
 import type { NextRequest } from "next/server";
 import { away, creatorFrom } from "@/lib/studio-route";
 import { createBillingCheckout, endLapsed, findStoreSubscriptions, isBillingConfigured } from "@/lib/billing";
+import { noTryEnded } from "@/lib/no-try-rules";
 import { PRO_ON_SALE, parseCycle, parseTier } from "@/lib/plan";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { accountStores, setSubscription } from "@/lib/store";
@@ -75,7 +76,12 @@ export async function POST(request: NextRequest) {
   let lapsed: string[] = [];
   try {
     const found = await findStoreSubscriptions(store);
-    if (found.live) {
+    // A plan Stripe still reads as running, its renewal unpaid with no try
+    // scheduled past the store's own clock, has ended (lib/no-try-rules.ts;
+    // second pre-review G-1): it is ended at Stripe with the lapsed ones below,
+    // so a new plan can start, rather than leaving the creator stuck on "already".
+    const ended = found.live && noTryEnded(store, found.live.subscriptionId, found.live.noTryFrom) ? found.live.subscriptionId : null;
+    if (found.live && !ended) {
       // Not written down, the store stays locked while Stripe charges it: an
       // error to retry, never "already".
       if (!(await setSubscription(ref, found.live))) {
@@ -85,7 +91,7 @@ export async function POST(request: NextRequest) {
       return away(origin, studio("billing=already"));
     }
     customerId = customerId ?? found.customerId;
-    lapsed = found.lapsed;
+    lapsed = ended ? [...found.lapsed, ended] : found.lapsed;
   } catch (error) {
     console.error("looking for this store's subscriptions failed", error);
     return away(origin, studio("billing=error"));

@@ -99,6 +99,14 @@ export function videoLimitFor(store: PlanFields & { tier?: Tier }, nowSeconds = 
  * setSubscription) and read by the daily job (lib/plan-closing.ts).
  */
 export const ENDED_INDEX = "nl:plan:ended";
+/**
+ * The stores whose plans were ended this week because Stripe says it does not
+ * have them (lib/billing-sync.ts, reserveMissingEnds), scored by when: at
+ * most MISSING_AT_MOST members, each kept MISSING_WINDOW_DAYS. An index, as
+ * ENDED_INDEX: a deleted or closed store's reference is taken out with it
+ * (lib/store.ts deleteStore, closeStoreRecord; second pre-review M-2).
+ */
+export const MISSING_ENDS_KEY = "nl:billing:sync:missing";
 
 /** The word an upload is refused with when it would not fit, by standing (lib/studio-messages.ts has the sentences). */
 export function storageRefusal(standing: Standing): "storage_full" | "storage_trial" | "storage_setup" {

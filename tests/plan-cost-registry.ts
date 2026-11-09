@@ -818,6 +818,28 @@ export const PLATFORM_SUBSCRIPTION_SEARCH = {
   stripeGetFeeUsd: null,
   deploymentRegionVerified: false,
 } as const;
+/**
+ * The daily plans job (app/api/cron/plans, lib/billing-sync.ts
+ * syncSubscriptions): company exposure, not a paid unit's line (second
+ * pre-review L-3). Each run reads at most MAX_PAGES (50) pages of Stripe's
+ * list of every subscription, each up to 100 rows with the customer and,
+ * since the plan-lifecycle audit (M1, A1), the latest invoice expanded: an
+ * invoice carries its lines, so a page can run to hundreds of KB, never
+ * measured here, so its bytes stay unknown (null), never zero. The brake on
+ * plans missing (reserveMissingEnds) adds at most two Redis pipelines a run,
+ * the first of MISSING_AT_MOST + 3 commands and the second, only to give room
+ * back, of one. Stripe's tariff for these reads stays unknown, as elsewhere.
+ */
+export const BILLING_SYNC_RUN = {
+  runsPerMonth: 31,
+  listPagesMost: 50,
+  rowsPerPage: 100,
+  pageBytesMost: null,
+  brakePipelinesMost: 2,
+  brakeCommandsMost: 3 + 3 + 1,
+  stripeEndpointTariffUsd: null,
+  completeMonthlyCostUsd: null,
+} as const;
 export const PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD = PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet;
 export const UTC_DAYS = 31;
 

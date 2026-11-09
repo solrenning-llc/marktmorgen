@@ -98,4 +98,12 @@ const scope = spawnSync("python3", ["-c", [
 ].join("\n")], { encoding: "utf8" });
 is("merge_group: full coverage, and no reuse of an earlier run", scope.stdout.trim(), "True False");
 
+part("a push to main reuses the merge queue's green on the same commit, never for CodeQL (C1-0305-C4-28)");
+const reuse = spawnSync("python3", ["-c", [
+  "import sys; sys.path.insert(0, 'scripts')",
+  "from ci_full_tree_proof import WORKFLOWS",
+  "print('codeql' in WORKFLOWS, sorted(WORKFLOWS) == sorted(w for w in " + JSON.stringify(WORKFLOWS) + " if w != 'codeql'))",
+].join("\n")], { encoding: "utf8" });
+is("CodeQL is in no reuse path: its push run on main always runs; the other eight can reuse", reuse.stdout.trim(), "False True");
+
 done();

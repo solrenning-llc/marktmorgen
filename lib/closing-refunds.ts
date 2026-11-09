@@ -48,6 +48,8 @@ const INTENT_ID = /^pi_[A-Za-z0-9]{6,64}$/;
 const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
 const lockKey = (folder: string) => `nl:closing:refund:${folder}`;
 const LOCK_SECONDS = 120;
+type Row = Record<string, unknown>;
+const objectOf = (value: unknown): Row | null => (value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : null);
 
 export type UnusedRow = { sub: string; paid: PaidPeriod; unused: number };
 /**
@@ -142,6 +144,7 @@ export type Settled = {
 };
 
 /**
+/**
  * Rule 30 (Claude 6's money review of #3097): a Stripe reply decides only when it is the object asked for. Null-safe,
  * so a 200 whose JSON body is null, a string or a number is not the object asked for either.
  */
@@ -151,9 +154,20 @@ const isOwnReply = (reply: unknown, id: string): boolean =>
 const idOf = (value: unknown): unknown => (value !== null && typeof value === "object" ? (value as { id?: unknown }).id : value);
 
 /**
- * The payment intent an invoice was paid by, whichever way this account's API version names it. A reply that is not
- * this invoice, or a listed payment that names another invoice, throws: it would name another member's payment, so the
- * member is counted failed and tried again, never refunded on that payment nor settled "none".
+ * The invoice-payment statuses that prove a row was not paid: Stripe documents an invoice payment's status as one of
+ * "open", "paid" or "canceled" (https://docs.stripe.com/api/invoice-payment/object). Anything else is unknown, including
+ * "failed", which that list does not hold (Codex G's focal return on #3120, review 5816998291).
+ */
+const KNOWN_UNPAID: ReadonlySet<unknown> = new Set(["open", "canceled"]);
+
+/**
+ * The payment intent an invoice was paid by, whichever way this account's API version names it; "" only when this
+ * invoice's own whole list of payments holds none paid. A reply for another invoice, a list that is not one, a row of
+ * another invoice, a list that is not whole, or a paid row whose payment does not read as a payment intent (missing,
+ * null, off-pattern, or of another type: Codex G on #3120, Claude 6 on #3097) is unknown and throws, so the member is
+ * counted failed and tried again, never refunded on another payment and never settled as owed nothing. So is a row whose
+ * status is not one this code knows (missing, null, not a string, or a value Stripe does not document: Codex G's residual
+ * finding on #3120): only "paid" decides paid, and only KNOWN_UNPAID decides not paid.
  */
 async function intentOf(account: string, invoice: string, count: () => void): Promise<string> {
   count();
@@ -162,28 +176,52 @@ async function intentOf(account: string, invoice: string, count: () => void): Pr
   const direct = idOf(read.payment_intent);
   if (typeof direct === "string" && INTENT_ID.test(direct)) return direct;
   count();
-  const listed: unknown = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
-  if (listed === null || typeof listed !== "object" || !Array.isArray((listed as { data?: unknown }).data)) throw new Error("this invoice's payments could not be read");
-  for (const row of (listed as { data: unknown[] }).data) {
-    if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("a payment listed for this invoice could not be read");
-    if (Object.hasOwn(row, "invoice") && idOf((row as { invoice?: unknown }).invoice) !== invoice) throw new Error("Stripe listed another invoice's payment");
-    if ((row as { status?: unknown }).status !== "paid") continue;
-    const id = idOf(((row as { payment?: unknown }).payment as { payment_intent?: unknown } | null)?.payment_intent);
+  const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
+  const rows = objectOf(listed)?.data;
+  if (!Array.isArray(rows)) throw new Error("an invoice's payments did not come as a list");
+  // A paid row is a payment made, whatever it reads as: one that does not name a readable intent proves no absence.
+  // A readable paid intent of this invoice is still found whatever the row order.
+  // A status this code does not know proves nothing either, so it never lets the list settle none.
+  let unread = false;
+  let unknownStatus = false;
+  for (const item of rows) {
+    const row = objectOf(item);
+    if (!row || idOf(row.invoice) !== invoice) throw new Error("a payment listed is not this invoice's");
+    if (row.status !== "paid") {
+      if (!KNOWN_UNPAID.has(row.status)) unknownStatus = true;
+      continue;
+    }
+    const id = idOf(objectOf(row.payment)?.payment_intent);
     if (typeof id === "string" && INTENT_ID.test(id)) return id;
-    // A paid payment whose intent does not read is not "paid by nothing" (Claude 6 and Codex G on #3097/#3120).
-    throw new Error("a paid payment of this invoice names no payment intent that reads");
+    unread = true;
   }
+  if (unread) throw new Error("an invoice's paid payment did not read as a payment intent");
+  if (unknownStatus) throw new Error("an invoice's payment has a status that does not read as paid or not paid");
   // "None" only from a whole list: one that says, exactly, that there is no more.
-  if ((listed as { has_more?: unknown }).has_more !== false) throw new Error("this invoice's payments were not read whole");
+  if (objectOf(listed)?.has_more !== false) throw new Error("an invoice's payments could not be read whole");
   return "";
 }
 
-/** The account's available balance, by currency, in the smallest unit. */
+/** Stripe's currency codes: three lowercase letters (https://docs.stripe.com/currencies). */
+const CURRENCY = /^[a-z]{3}$/;
+
+/**
+ * The account's available balance, by currency, in the smallest unit, read exactly (CX-123 rule 24; audit R24 round 6,
+ * finding 1; https://docs.stripe.com/api/balance/balance_object): only Stripe's balance object, whose `available` is a
+ * list of rows, each one currency with a whole amount. Another shape, a row that does not read, or a currency listed
+ * twice throws, so the run counts its members failed and tries again; it is never an empty balance, which on the
+ * closing day would record every member as a final "short" and tell them the creator's balance did not cover it.
+ */
 async function available(account: string): Promise<Map<string, number>> {
-  const balance = await onAccount("GET", account, "/balance");
+  const balance = objectOf(await onAccount("GET", account, "/balance"));
+  if (!balance || balance.object !== "balance" || !Array.isArray(balance.available)) throw new Error("the account's balance did not read");
   const out = new Map<string, number>();
-  for (const row of Array.isArray(balance.available) ? (balance.available as { amount?: unknown; currency?: unknown }[]) : []) {
-    if (typeof row.currency === "string" && typeof row.amount === "number") out.set(row.currency.toLowerCase(), (out.get(row.currency.toLowerCase()) ?? 0) + row.amount);
+  for (const item of balance.available) {
+    const row = objectOf(item);
+    if (!row || !Number.isSafeInteger(row.amount) || typeof row.currency !== "string" || !CURRENCY.test(row.currency) || out.has(row.currency)) {
+      throw new Error("a row of the account's balance did not read");
+    }
+    out.set(row.currency, row.amount as number);
   }
   return out;
 }
@@ -193,13 +231,28 @@ async function available(account: string): Promise<Map<string, number>> {
  * balance, in the currency the charge settled in: an account in Europe or
  * Canada that sold in dollars holds euros or Canadian dollars. Read from the
  * charge's balance transaction, rounded up; the charge's own currency when
- * Stripe names none.
+ * Stripe names none (null).
+ *
+ * Read exactly (CX-123 rule 24; audit R24 round 6, finding 1): a balance
+ * transaction that is neither null nor an object with a whole positive amount
+ * and a currency (missing, an id Stripe did not expand, an amount that does
+ * not read), or a charge whose amount or currency does not read, throws, so
+ * the member is tried again; the cost is never weighed in another currency.
  */
 export function settledCost(give: number, charge: { amount?: unknown; currency?: unknown; balance_transaction?: unknown }): { cur: string; amount: number } {
-  const bt = charge.balance_transaction && typeof charge.balance_transaction === "object" ? (charge.balance_transaction as { amount?: unknown; currency?: unknown }) : null;
-  const paid = Number(charge.amount);
-  if (bt && typeof bt.currency === "string" && Number(bt.amount) > 0 && paid > 0) return { cur: bt.currency.toLowerCase(), amount: Math.ceil((give * Number(bt.amount)) / paid) };
-  return { cur: typeof charge.currency === "string" ? charge.currency.toLowerCase() : "", amount: give };
+  const paid = charge.amount;
+  if (!Number.isSafeInteger(paid) || (paid as number) <= 0) throw new Error("what this payment's charge took could not be read");
+  if (!Object.hasOwn(charge, "balance_transaction")) throw new Error("this payment's charge did not say what it settled as");
+  const bt = charge.balance_transaction;
+  if (bt === null) {
+    if (typeof charge.currency !== "string" || !CURRENCY.test(charge.currency)) throw new Error("this payment's charge currency could not be read");
+    return { cur: charge.currency, amount: give };
+  }
+  const row = objectOf(bt);
+  if (!row || !Number.isSafeInteger(row.amount) || (row.amount as number) <= 0 || typeof row.currency !== "string" || !CURRENCY.test(row.currency)) {
+    throw new Error("what this payment's charge settled as could not be read");
+  }
+  return { cur: row.currency, amount: Math.ceil((give * (row.amount as number)) / (paid as number)) };
 }
 
 /**
@@ -313,21 +366,23 @@ export async function giveBackUnused(
         }
         count();
         const pi = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge.balance_transaction`);
-        // Rule 30: only this payment's own reply, and its own charge, decide "disputed", what was refunded and the fee.
-        // Another payment's reply, one with no id, or a charge that names another payment throws, so the member is
-        // counted failed and tried again, never settled from someone else's charge.
+        // Read exactly (rules 24 and 30): only this payment's own reply, and its own charge, decide "disputed", what was
+        // refunded and the fee. Another payment's reply, one with no id, a charge not expanded or naming another payment,
+        // or a charge whose dispute, amount or refunds do not read decides nothing; the member is counted failed and tried
+        // again, never settled as disputed, refunded or owed nothing from someone else's charge.
         if (!isOwnReply(pi, intent)) throw new Error("Stripe answered for another payment");
-        const charge = pi.latest_charge && typeof pi.latest_charge === "object" ? (pi.latest_charge as Record<string, unknown>) : {};
+        const charge = objectOf(pi.latest_charge);
+        if (!charge) throw new Error("this payment's charge could not be read");
         if (Object.hasOwn(charge, "payment_intent") && idOf(charge.payment_intent) !== intent) throw new Error("Stripe answered with another payment's charge");
-        // What was already given back is read exactly (Codex G's second money review of #3097): a charge not expanded,
-        // or an amount_refunded that is not a whole, non-negative number, would read as 0 and give it back again.
-        if (!(pi.latest_charge && typeof pi.latest_charge === "object")) throw new Error("this payment's charge could not be read");
+        if (typeof charge.disputed !== "boolean") throw new Error("this payment's charge did not read");
         if (!Number.isSafeInteger(charge.amount) || (charge.amount as number) <= 0) throw new Error("what this payment's charge took could not be read");
+        // What was already given back is read exactly (Codex G's second money review of #3097): an amount_refunded that is
+        // not a whole, non-negative number, or more given back than the charge took (Codex G's focal on #3097), would read
+        // as 0 or as a reading of this charge and give it back again.
         if (!Number.isSafeInteger(charge.amount_refunded) || (charge.amount_refunded as number) < 0 || (charge.amount_refunded as number) > (charge.amount as number)) {
-          // More given back than the charge took (Codex G's focal on #3097) is not a reading of this charge.
           throw new Error("what this payment's charge gave back could not be read");
         }
-        if (charge.disputed === true) {
+        if (charge.disputed) {
           await settle("disputed");
           out.disputed += 1;
           continue;

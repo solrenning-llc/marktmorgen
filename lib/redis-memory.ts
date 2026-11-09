@@ -188,7 +188,7 @@ export class MemoryRedis {
             const [op, rawAt, rawN] = argv.slice(i, i + 3);
             const at = Number(rawAt), n = Number(rawN);
             if (!Number.isInteger(at) || !Number.isInteger(n) || at < 2 || at > keys.length || n < 0 || i + 3 + n > argv.length) return -1;
-            if (op === "DEL" ? n !== 0 : ["SREM", "ZREM", "HDEL"].includes(op) ? n < 1 : op === "SETEX" ? n !== 2 || !Number.isFinite(Number(argv[i + 4])) : true) return -1;
+            if (op === "DEL" ? n !== 0 : ["SREM", "ZREM", "HDEL"].includes(op) ? n < 1 : op === "SETEX" ? n !== 2 || !Number.isFinite(Number(argv[i + 4])) : op === "HSET" ? n !== 2 : true) return -1;
             plan.push({ op, key: keys[at - 1], words: argv.slice(i + 3, i + 3 + n) });
             i += 3 + n;
           }
@@ -197,6 +197,7 @@ export class MemoryRedis {
           for (const { op, key: target, words } of plan) {
             if (op === "DEL") this.run(["DEL", target]);
             else if (op === "SETEX") this.run(["SET", target, words[0], "EX", words[1]]);
+            else if (op === "HSET") this.run(["HSET", target, words[0], words[1]]);
             else this.run([op, target, ...words]);
           }
           return 1;
@@ -207,6 +208,39 @@ export class MemoryRedis {
           const [, room, target, boardKey, mapKey, lock, month, sid, token] = args;
           if (this.run(["GET", lock]) !== token) return [-9, 0];
           return this.run(["EVAL", "-- marktmorgen:path-forget:v1\n", "4", room, target, boardKey, mapKey, month, sid]);
+        }
+        // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
+        if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, listKey, id, kept] = args;
+          this.live(listKey);
+          if (!this.data.has(listKey)) return null;
+          for (const raw of this.list(listKey).slice(0, Number(kept))) {
+            if (!raw.includes(`"id":"${id}"`)) continue;
+            try {
+              const value = JSON.parse(raw) as unknown;
+              if (!value || typeof value !== "object" || Array.isArray(value) || (value as { id?: unknown }).id === id) return raw;
+            } catch {
+              return raw;
+            }
+          }
+          return null;
+        }
+        // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
+        if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, members, handles, handle, who] = args;
+          if (this.run(["HGET", handles, handle]) !== who) return 0;
+          const raw = this.run(["HGET", members, who]);
+          if (typeof raw === "string") {
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { h?: unknown }).h === handle) return 0;
+          }
+          return this.run(["HDEL", handles, handle]);
         }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
@@ -387,6 +421,13 @@ export class MemoryRedis {
           const [, lock, target, token, value] = args;
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", target, value]);
+          return 1;
+        }
+        // An agreement's record, written with its expiry only while the agreement's lock is the writer's (lib/agreement-store.ts, AGREEMENT_SAVE).
+        if (key.startsWith("-- marktmorgen:agreement-save:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, lock, target, token, value, seconds] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", target, value, "EX", seconds]);
           return 1;
         }
         // The customer voice's summary, written only while its reading's lock is its own (lib/customer-voice.ts, VOICE_KEEP).
@@ -605,6 +646,25 @@ export class MemoryRedis {
           this.until.set(openKey, this.now() + Number(keep) * 1000);
           this.until.set(heldKey, this.now() + Number(keep) * 1000);
           return 1;
+        }
+        // lib/order-admission.ts MOVE_HELD_ORDERS: the orders held for an unknown window moved into its count in
+        // one step, nothing written unless both keys read as whole counts.
+        if (key.startsWith("-- marktmorgen:orders-held-move:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, pending, count, rawKeep] = args;
+          const whole = (raw: string) => raw.length <= 15 && (raw === "0" || /^-?[1-9]\d*$/.test(raw)) ? Number(raw) : null;
+          const raw = this.run(["GET", pending]);
+          if (raw === null) return 0;
+          const n = whole(String(raw));
+          if (n === null || n < 0) return -1;
+          const have = this.run(["GET", count]);
+          if (have !== null && whole(String(have)) === null) return -1;
+          const keep = Number(rawKeep);
+          if (rawKeep.trim() === "" || !Number.isFinite(keep) || keep < 1) return -1;
+          this.run(["DEL", pending]);
+          if (n === 0) return 0;
+          this.run(["INCRBY", count, n]);
+          this.run(["EXPIRE", count, keep]);
+          return n;
         }
         if (key.startsWith("-- marktmorgen:order-admission-settle:v2\n") && args[0] === "2" && args.length === 6) {
           const [, openKey, heldKey, field, rawN, rawBytes] = args;
@@ -1132,16 +1192,18 @@ export class MemoryRedis {
           for (const k of keys) this.live(k);
           let ours = true;
           for (let i = 0; i < n; i += 1) {
-            if (this.data.get(keys[i]) !== argv[1 + i]) ours = false;
-            const hold = this.data.get(keys[n + i]);
-            if (hold !== undefined && !(hold instanceof Map)) return -1;
+            const lock = this.data.get(keys[i]), hold = this.data.get(keys[n + i]);
+            // GET and HEXISTS on a key of another type fail the script, as Redis does.
+            if (lock !== undefined && typeof lock !== "string") throw new Error("WRONGTYPE");
+            if (hold !== undefined && !(hold instanceof Map)) throw new Error("WRONGTYPE");
+            if (lock !== argv[1 + i]) ours = false;
             if (!(hold instanceof Map) || !hold.has(pending)) ours = false;
           }
-          if (ours) return 1;
-          for (let i = 0; i < n; i += 1) {
-            const hold = this.data.get(keys[n + i]);
-            if (hold instanceof Map) this.run(["HDEL", keys[n + i], pending]);
+          if (ours) {
+            for (let i = 0; i < n; i += 1) this.run(["DEL", keys[i]]);
+            return 1;
           }
+          for (let i = 0; i < n; i += 1) if (this.data.get(keys[n + i]) instanceof Map) this.run(["HDEL", keys[n + i], pending]);
           return 0;
         }
         if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
@@ -1152,6 +1214,7 @@ export class MemoryRedis {
           for (const k of keys) this.live(k);
           for (const k of keys) {
             const hold = this.data.get(k);
+            if (hold !== undefined && !(hold instanceof Map)) throw new Error("WRONGTYPE");
             if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
           }
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
@@ -1515,20 +1578,33 @@ export class MemoryRedis {
 
       case "ZADD": {
         const z = this.zset(key);
-        // "NX": a member already there keeps the score it has. "XX": only a member already there is moved.
-        const onlyNew = args[0] === "NX";
-        const onlyOld = args[0] === "XX";
-        const pairs = onlyNew || onlyOld ? args.slice(1) : args;
+        // Flags before the first score, in any order, as Redis reads them. "NX": a member already there keeps the
+        // score it has. "XX": only a member already there is moved. "CH": count the members changed too.
+        let flags = 0;
+        while (flags < args.length && ["NX", "XX", "CH"].includes(String(args[flags]).toUpperCase())) flags += 1;
+        const set = new Set(args.slice(0, flags).map((flag) => String(flag).toUpperCase()));
+        const onlyNew = set.has("NX");
+        const onlyOld = set.has("XX");
+        const pairs = args.slice(flags);
+        // Redis's answer: the members added, or with CH the members added or whose score changed.
+        let added = 0;
+        let changed = 0;
         for (let i = 0; i + 1 < pairs.length; i += 2) {
           const score = Number(pairs[i]);
           const member = pairs[i + 1];
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) {
-            if (!onlyNew) z[at].score = score;
-          } else if (!onlyOld) z.push({ score, member });
+            if (!onlyNew && z[at].score !== score) {
+              z[at].score = score;
+              changed += 1;
+            }
+          } else if (!onlyOld) {
+            z.push({ score, member });
+            added += 1;
+          }
         }
         z.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
-        return 1;
+        return set.has("CH") ? added + changed : added;
       }
       case "ZREM": {
         const z = this.zset(key);

@@ -65,7 +65,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
     usedThisMonth(store.listId, windowId(store)),
-    listBroadcastsStrict(store.listId).catch(() => null),
+    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.
+    listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),
     readFlowListStrict(store.listId).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one
     // command, where reading every card was one per product (lib/catalog.ts).

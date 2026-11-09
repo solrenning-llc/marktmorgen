@@ -48,7 +48,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
@@ -791,21 +791,55 @@ export async function disconnect(store: Store): Promise<SyncView> {
 export async function forgetSyncPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
-  const ids = (Array.isArray(logged) ? logged : []).map(String).slice(0, LOG_SIZE * 2);
+  const { logged, ids } = await loggedJobIds(statsId);
   if (!ids.length) return 0;
-  const raws = await redisPipeline(ids.map((id) => ["GET", jobKey(id)]));
+  const jobs = await loggedJobs(ids);
   const theirs = ids.filter((_, i) => {
-    try {
-      const job = JSON.parse(String(raws[i])) as Partial<Job>;
-      return typeof job.email === "string" && normaliseEmail(job.email) === address;
-    } catch {
-      return false;
-    }
+    const job = jobs[i];
+    return job !== null && normaliseEmail(job.email) === address;
   });
   if (!theirs.length) return 0;
-  await redisPipeline([["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]]);
+  // Each delete answers a count (CX-123 rule 24): DEL and ZREM at most the jobs named, LREM at most the log's length.
+  // Another shape throws, so the erasure is said as not finished and a retry finds what is left.
+  const commands = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const within = (reply: unknown, most: number) => {
+    const n = countOf(reply);
+    return n !== null && n <= most;
+  };
+  if (!replies || !within(replies[0], theirs.length) || !within(replies[replies.length - 1], theirs.length) || !replies.slice(1, -1).every((reply) => within(reply, logged))) {
+    throw new UnknownReplyError("deleting a person's email-platform jobs");
+  }
   return theirs.length;
+}
+
+/**
+ * A store's logged job ids, read exactly (CX-123 rule 24): only an exact list of
+ * strings is the log, and an empty one is "no jobs"; another shape throws
+ * UnknownReplyError. `logged` is the whole log's length.
+ */
+async function loggedJobIds(statsId: string): Promise<{ logged: number; ids: string[] }> {
+  const listed = repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1);
+  const all = listed ? stringList(listed[0]) : null;
+  if (!all) throw new UnknownReplyError("listing a store's email-platform jobs");
+  return { logged: all.length, ids: all.slice(0, LOG_SIZE * 2) };
+}
+
+/**
+ * The records of logged jobs, one for each id, read exactly: an expired record
+ * (null) is known absence; any other shape, or a record that cannot be read as a
+ * job with its address (empty for a person not sent), throws UnknownReplyError,
+ * never "not theirs".
+ */
+async function loggedJobs(ids: string[]): Promise<(Job | null)[]> {
+  const read = repliesFor(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length);
+  if (!read) throw new UnknownReplyError("reading a store's email-platform jobs");
+  return read.map((raw) => {
+    if (raw === null) return null;
+    const job = parseJob(raw);
+    if (!job || typeof job.email !== "string") throw new UnknownReplyError("an email-platform job record");
+    return job;
+  });
 }
 
 /**
@@ -816,18 +850,12 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
 export async function syncJobsOf(statsId: string | null, email: string): Promise<JobView[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const address = normaliseEmail(email);
-  const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
-  const ids = (Array.isArray(logged) ? logged : []).map(String).slice(0, LOG_SIZE * 2);
+  // Read as the erasure reads them (rule 30): another shape throws, so the copy fails whole rather than miss a part.
+  const { ids } = await loggedJobIds(statsId);
   if (!ids.length) return [];
-  const raws = await redisPipeline(ids.map((id) => ["GET", jobKey(id)]));
-  return raws.flatMap((raw) => {
-    try {
-      const job = JSON.parse(String(raw)) as Job;
-      if (typeof job.email !== "string" || normaliseEmail(job.email) !== address) return [];
-      const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
-      return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
-    } catch {
-      return [];
-    }
+  return (await loggedJobs(ids)).flatMap((job) => {
+    if (job === null || normaliseEmail(job.email) !== address) return [];
+    const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
+    return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
   });
 }

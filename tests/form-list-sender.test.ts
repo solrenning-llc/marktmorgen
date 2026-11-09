@@ -14,6 +14,11 @@
  * the box to hear from the creator but the sender cannot be told, nobody is
  * asked to join, and the page after the form said nothing about it. It now
  * says so, in the store's language, only then.
+ *
+ * Claude 5's pre-review, MEDIUM (VR 2): an optional email question left blank
+ * with the box checked showed "We could not tell which email address is
+ * yours", though the person typed no address at all. The two cases now have
+ * their own words: no address given, or addresses that disagree.
  */
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -76,6 +81,9 @@ async function main(): Promise<void> {
   part("The box checked and the sender not known: the page after the form says nobody was added");
   is("said in every language of the store, in its own words", Object.entries(FORM_WORDS).map(([lang, w]) => [lang, typeof w.listUnknown === "string" && w.listUnknown.length > 20 && (lang === "en" || w.listUnknown !== FORM_WORDS.en.listUnknown)]), Object.keys(FORM_WORDS).map((lang) => [lang, true]));
   is("in plain English", FORM_WORDS.en.listUnknown, "We could not tell which email address is yours, so you were not added to the list.");
+  is("no address given: said in every language of the store, in its own words", Object.entries(FORM_WORDS).map(([lang, w]) => [lang, typeof w.listNoAddress === "string" && w.listNoAddress.length > 20 && w.listNoAddress !== w.listUnknown && (lang === "en" || w.listNoAddress !== FORM_WORDS.en.listNoAddress)]), Object.keys(FORM_WORDS).map((lang) => [lang, true]));
+  is("no address given, in plain English", FORM_WORDS.en.listNoAddress, "You were not added to the list because no email address was given.");
+  is("the Italian says which address is yours in the subjunctive", FORM_WORDS.it.listUnknown.includes("quale indirizzo email sia il tuo"), true);
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
   const OWNER = "listsender@example.com";
@@ -86,21 +94,36 @@ async function main(): Promise<void> {
   is("the form is kept with its box", [saved.offerList, saved.fields.length], [true, 3]);
   await setSitePages(OWNER, [{ id: "pagelist01", slug: "invite", title: "Invite", nav: false, target: "", from: 0 }]);
   const shop = (await storeForEmail(OWNER))!;
-  await writePage(shop.statsId!, siteKey("pagelist01"), { ...parsePage({}), blocks: [{ id: "blk001", kind: "form", heading: "", form: saved.id }] } as never, ROOM);
+  const optional = parseForm({ id: "optmail001", name: "Opt", fields: [{ id: "mail01", type: "email", label: "Your email", required: false }, { id: "name01", type: "short", label: "Name", required: false }], offerList: true })!;
+  const savedOpt = ((await (await saveForms(new NextRequest("https://marktmorgen.com/api/store/forms", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ form: { ...optional, id: undefined } }) }))).json()) as { form: FormDef }).form;
+  is("the form with an optional email is kept with its box", [savedOpt.offerList, savedOpt.fields.map((f) => f.required)], [true, [false, false]]);
+  await writePage(shop.statsId!, siteKey("pagelist01"), { ...parsePage({}), blocks: [{ id: "blk001", kind: "form", heading: "", form: saved.id }, { id: "blk002", kind: "form", heading: "", form: savedOpt.id }] } as never, ROOM);
   const [friend, yours] = saved.fields.map((f) => `q_${f.id}`);
-  const post = async (pairs: [string, string][]) => (await sendForm(new NextRequest("https://marktmorgen.com/api/store/form", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "203.0.113.7" }, body: new URLSearchParams([["handle", "listsendershop"], ["form", saved.id], ["page", "pagelist01"], ...pairs]) }))).headers.get("location") ?? "";
+  const post = async (pairs: [string, string][], formId = saved.id) => (await sendForm(new NextRequest("https://marktmorgen.com/api/store/form", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "203.0.113.7" }, body: new URLSearchParams([["handle", "listsendershop"], ["form", formId], ["page", "pagelist01"], ...pairs]) }))).headers.get("location") ?? "";
   const unknown = await post([[friend, TESS], [yours, OLLY], ["consent", "yes"]]);
   is("two addresses and the box checked: sent to the page that says so", [unknown.includes(`/@listsendershop/form/${saved.id}?`), new URL(unknown).searchParams.get("j")], [true, "unknown"]);
   is("the answers are kept, nobody asked to join", (await readResponses(shop.statsId, saved.id)).responses.map((r) => [r.joined, r.answers[saved.fields[0].id]]), [[false, TESS]]);
   const unchecked = await post([[friend, TESS], [yours, OLLY]]);
   is("the box not checked: nothing to say about the list", new URL(unchecked).searchParams.has("j"), false);
+  const [optMail, optName] = savedOpt.fields.map((f) => `q_${f.id}`);
+  const blank = await post([[optMail, ""], [optName, "Ana"], ["consent", "yes"]], savedOpt.id);
+  is("the optional email left blank and the box checked: the page that says no address was given", [blank.includes(`/@listsendershop/form/${savedOpt.id}?`), new URL(blank).searchParams.get("j")], [true, "none"]);
+  is("its answers are kept, nobody asked to join", (await readResponses(shop.statsId, savedOpt.id)).responses.map((r) => [r.joined, r.answers[savedOpt.fields[1].id]]), [[false, "Ana"]]);
+  is("left blank and the box not checked: nothing to say about the list", new URL(await post([[optMail, ""], [optName, "Ana"]], savedOpt.id)).searchParams.has("j"), false);
   is("on a step of a funnel, the page that says so comes before the next step", route.includes("if (here?.next && !outcome && !joined && !unknownSender) return go(here.next);"), true);
 
   const page = async (query: Record<string, string>) => renderToStaticMarkup(await FormDonePage({ params: Promise.resolve({ handle: "@listsendershop", form: saved.id }), searchParams: Promise.resolve({ p: "pagelist01", ...query }) }));
   const told = await page({ j: "unknown" });
-  is("the page says nobody was added, as a status", told.includes(`role="status">${FORM_WORDS.en.listUnknown}</p>`), true);
-  is("and does not say an email is on its way", told.includes(FORM_WORDS.en.confirmSent), false);
+  // Rule 23 (Claude 5's pre-review, LIGHT): this said `role="status"`; the notice now follows confirmSent's, which the
+  // page draws as a plain paragraph with no live role (a page loaded fresh, not a change on a page already open).
+  is("the page says nobody was added, as confirmSent's notice is drawn", told.includes(`<p class="notice notice-info mt-6 text-sm">${FORM_WORDS.en.listUnknown}</p>`), true);
+  is("and does not say an email is on its way, nor that no address was given", [told.includes(FORM_WORDS.en.confirmSent), told.includes(FORM_WORDS.en.listNoAddress)], [false, false]);
   is("without the mark, nothing about the list", [(await page({})).includes(FORM_WORDS.en.listUnknown), (await page({ j: "1" })).includes(FORM_WORDS.en.listUnknown)], [false, false]);
+  const none = await page({ j: "none" });
+  is("no address given: the page says so, in its own words", [none.includes(`<p class="notice notice-info mt-6 text-sm">${FORM_WORDS.en.listNoAddress}</p>`), none.includes(FORM_WORDS.en.listUnknown), none.includes(FORM_WORDS.en.confirmSent)], [true, false, false]);
+  is("neither notice has a live role", [told, none].map((html) => html.includes('role="status"')), [false, false]);
+  is("without the mark or with j=1, nothing about a missing address", [(await page({})).includes(FORM_WORDS.en.listNoAddress), (await page({ j: "1" })).includes(FORM_WORDS.en.listNoAddress)], [false, false]);
+  is("the route compares each mark exactly", [route.includes('joined === "unknown"'), route.includes('joined === "none"')], [true, true]);
   done();
 }
 

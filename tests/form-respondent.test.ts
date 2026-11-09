@@ -151,6 +151,14 @@ async function main(): Promise<void> {
   is("an address in another question is left out, the sender's kept", [friend.includes("Your email: " + OLLY), friend.includes(TESS), friend.includes("Note:")], [true, false, false]);
   const unknownNote = note({ email1: "Ana@Example.com", email2: OLLY, refby1: "Bring your laptop" });
   is("the sender not known: no address at all, the other answers kept", [unknownNote.toLowerCase().includes("ana@example.com"), unknownNote.includes(OLLY), unknownNote.includes("Note: Bring your laptop")], [false, false, true]);
+  // Claude 5's pre-review of this branch, LIGHT (VR 2): with the sender not known, the deal has no contact, and the
+  // note dropped the email questions' lines whole, so the creator could not tell an address had been given. Each
+  // line stays, with the address itself never copied.
+  is("the sender not known: each line that held an address stays, without it", [unknownNote.includes("Friend's email: (address not copied)"), unknownNote.includes("Your email: (address not copied)")], [true, true]);
+  const invited = parseForm({ id: "invitefrm1", name: "Invite", fields: [{ id: "friend", type: "email", label: "Invite a friend (email)", required: false }, { id: "yours1", type: "email", label: "Your email", required: true }], offerList: true })!;
+  const inviteDraft = formDealDraft(invited, response(1, { friend: TESS, yours1: OLLY }));
+  is("the invite form: no contact, both lines kept, neither address", [inviteDraft.email, inviteDraft.note.split("\n").slice(-2), inviteDraft.note.includes(TESS) || inviteDraft.note.includes(OLLY)], ["", ["Invite a friend (email): (address not copied)", "Your email: (address not copied)"], false]);
+  is("a known sender: a friend's address is still left out whole", note({ email1: "", email2: OLLY, refby1: TESS }).includes("(address not copied)"), false);
   const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
   is("the privacy policy says so", privacy.includes("the deal&apos;s note copies the answers but never an email address other than the sender&apos;s, and a deal is deleted with the person it names as its contact."), true);
   is("a text that is not only an address is the person's words, kept as typed", note({ email2: OLLY, refby1: "Ask tess@example.com too" }).includes("Note: Ask tess@example.com too"), true);

@@ -95,9 +95,12 @@ for (const applied of [[], [undefined], [""], ["-1"], ["1.5"], ["10001"], [0], [
 test("G2: confirmed empty search may clear the previous applied percentage", async () => {
   const r = await world(); assert.equal(r.counts.complete, true); assert.equal(r.applied, null); assert.equal(r.posts.length, 0);
 });
-test("confirmed two-page search lowers the percentage before clearing applied", async () => {
+test("confirmed two-page search lowers the percentage; applied waits for a pass that changes none", async () => {
   const r = await world({ pages: n => n === 1 ? page([oldMember], true, "next") : page() });
-  assert.equal(r.counts.complete, true); assert.equal(r.searches, 2); assert.equal(r.applied, null); assert.equal(r.posts.length, 1);
+  // Rule 23: was complete true and applied null on this one run. The search now leaves out ended memberships, so a
+  // member who ends mid-pass can cut a later page short; a pass of several pages that changed a percentage is
+  // confirmed by the next run's pass changing none (tests/share-membership-search.test.ts runs both).
+  assert.equal(r.counts.complete, false); assert.equal(r.counts.failed, 0); assert.equal(r.searches, 2); assert.equal(r.applied, "625"); assert.equal(r.posts.length, 1);
 });
 test("repeated search cursor never certifies applied", async () => {
   const r = await world({ pages: () => page([noFeeMember], true, "same") });

@@ -395,7 +395,28 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
   return true;
 }
 
-/** Step 3, for one store: its memberships' percentage, kept to its plan. */
+/**
+ * Step 3, for one store: its memberships' percentage, kept to its plan.
+ *
+ * The search asks only for what can still pay (Stripe's search query
+ * language: clauses joined by AND, one negated by a leading "-"; status is a
+ * subscription search field): an ended membership never comes back, so a
+ * store that sold thousands over its life is not read past the same first
+ * pages of ended ones on every run (rule 30, the sibling of stopRenewals in
+ * #3332). Until 9 November 2026 it asked for every one ever sold, and a store
+ * with 2,000 ended ones ahead of a live one never reached it: the live one
+ * went on paying the old share (tests/share-membership-search.test.ts).
+ *
+ * A member who ends mid-pass now leaves that search, and a page may be cut
+ * short by an offset into what it matches now, skipping a live one; so a pass
+ * of several pages that changed a percentage is not taken for the last, and
+ * the applied mark is written only on a pass of one page or a pass that
+ * changed none. At the most, for N memberships that can still pay and a run
+ * never out of time: ceil(N / 100) searches a run, and 2 runs when N is at
+ * most 2,000 with pages that stay put (one that changes, one that confirms;
+ * each member ending mid-pass can add one). Past 2,000 a run reads the same
+ * first 20 pages and never writes the mark: never done, never said done.
+ */
 async function keepMemberships(store: Store, ref: string, deadline: number, counts: SettleCounts, live: boolean): Promise<boolean> {
   const target = planShareBps(store, live);
   const saved = await redisPipeline([["HGET", APPLIED, ref]]);
@@ -407,12 +428,15 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
   if (!account) return true;
   let page = "";
   let completeRead = false, allApplied = true;
+  // Pages read, and percentages changed, on this pass.
+  let read = 0, changed = 0;
   const cursors = new Set<string>();
   const statuses = new Set(["active", "trialing", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "paused"]);
   for (let round = 0; round < 20; round += 1) {
     if (Date.now() > deadline) return false;
-    const query = encodeURIComponent(`metadata['store']:'${store.handle}'`);
+    const query = encodeURIComponent(`metadata['store']:'${store.handle}' AND -status:'canceled' AND -status:'incomplete_expired'`);
     const found = await onAccount("GET", account, `/subscriptions/search?limit=100&query=${query}${page ? `&page=${encodeURIComponent(page)}` : ""}`);
+    read += 1;
     if (found.object !== "search_result" || !Array.isArray(found.data) || found.data.length > 100 || typeof found.has_more !== "boolean"
       || (found.has_more && (found.data.length === 0 || typeof found.next_page !== "string" || !found.next_page.trim() || cursors.has(found.next_page)))) throw new UnknownFeeList("Membership settlement page was not confirmed");
     const ids = new Set<string>();
@@ -425,6 +449,7 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
     });
     for (const subscription of rows) {
       const status = str(subscription.status);
+      // Ended already, though the search, which catches up within moments, still gave it: nothing to keep.
       if (status === "canceled" || status === "incomplete_expired") continue;
       try {
         // Stripe's explicit null means that no fee is set; absence is unknown.
@@ -436,6 +461,7 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
         if (!updated || typeof updated !== "object" || Array.isArray(updated) || updated.object !== "subscription"
           || updated.id !== subscription.id || membershipPercent(updated) !== target / 100) throw new Error("Membership fee update was not confirmed");
         counts.memberships += 1;
+        changed += 1;
       } catch (error) {
         allApplied = false;
         countSettlementFailure(counts, error);
@@ -447,6 +473,9 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
     cursors.add(page);
   }
   if (!completeRead || !allApplied) return false;
+  // Several pages, and a percentage changed: a later page may have been cut short by a member who left the search,
+  // so the end reached is not known to have held every one. The next run's pass must change none.
+  if (read > 1 && changed > 0) return false;
   confirmedMarkerWrite(await redisPipeline([target > 0 ? ["HSET", APPLIED, ref, String(target)] : ["HDEL", APPLIED, ref]]));
   return true;
 }

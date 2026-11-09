@@ -52,7 +52,7 @@ async function freshStore(): Promise<Store> {
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestR48Receipts", true);
+  await setStripeAccount(OWNER, "acct_1R48Receipts", true);
   await setSubscription(OWNER, { customerId: "cus_R48Receipt01", subscriptionId: "sub_R48Receipt01", active: true, tier: "creator", period: paidPeriod() });
   return (await storeForEmail(OWNER))!;
 }

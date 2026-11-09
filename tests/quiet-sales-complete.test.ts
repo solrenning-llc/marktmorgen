@@ -119,6 +119,19 @@ async function main(): Promise<void> {
   const sharedChecked = await check(shared);
   is("this store's sales are past the pages read: no email this day", [sharedChecked.outcome, emails.length], ["skipped", 0]);
   is("and the log says the sales could not be read", /quiet: .*sales could not be read/.test(sharedChecked.errors), true);
+
+  part("A stretch cut short by other checkouts never makes a few sales the store's usual pace");
+  // Pre-review of 9 November 2026: 300 completed checkouts on the creator's own Stripe account that are not this
+  // store's sales (Payment Links, another shop) set a stretch of three days; ten sales at its start, then 2.5 quiet
+  // days, read as "about 21.7 sales a week" and "no sales in 2 days", though the store made twelve sales in its 60 days
+  // (1.4 a week), at which 2.5 quiet days are its usual ones.
+  const elsewhere = Array.from({ length: 300 }, (_, i) => ({ id: sid("link", i), created: at(NOW - i * (3 * DAY / 300)), status: "complete", payment_status: "paid", metadata: {} }) as StandInSession);
+  const burst = Array.from({ length: 10 }, (_, i) => paid(sid("burst", i), NOW - 2.5 * DAY - i * (0.045 * DAY)));
+  const older = [paid(sid("older", 0), NOW - 40 * DAY), paid(sid("older", 1), NOW - 45 * DAY)];
+  is("control: at the store's 60-day pace, 2.5 quiet days are not out of the ordinary", quiet.isQuiet([...burst, ...older].map((r) => r.created * 1000), NOW).quiet, false);
+  const cut = await check([...elsewhere, ...burst, ...older]);
+  is("ten sales in a three-day stretch of other checkouts: no email", [cut.outcome, emails.length], ["skipped", 0]);
+  is("and the log says the sales could not be read", /quiet: .*sales could not be read/.test(cut.errors), true);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

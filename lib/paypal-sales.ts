@@ -10,6 +10,7 @@
  *   nl:ppsell:own:<stats>:<address hash>:<product>  the paid orders behind one address's product
  *   nl:ppsell:sales:<stats>     every paid order, scored by when it was paid (400 days): the store's numbers read it
  *   nl:ppsell:refunded:<stats>  paid orders PayPal says were refunded in full, scored by when that was seen
+ *   nl:ppsell:reversed:<stats>  of those, the ones taken back by another way than a refund (reversed, failed, declined)
  *
  * How it fits together. Marktmorgen is a PayPal partner; a creator connects their
  * PayPal Business account through PayPal's own onboarding (Partner Referrals
@@ -113,6 +114,12 @@ export const ownKey = (statsId: string, email: string, productId: string) => `nl
 const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
 /** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */
 export const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
+/**
+ * Of the orders in refundedKey, those PayPal took back by another way than a refund: a capture REVERSED, FAILED or
+ * DECLINED (C4-13). Written before the refund mark and kept as long, so the buyer's thanks page (lib/paypal-handed.ts)
+ * never says "refunded" of a payment that was not (pre-review MEDIUM, VR 2).
+ */
+export const reversedKey = (statsId: string) => `nl:ppsell:reversed:${statsId}`;
 const SALES_KEPT_SECONDS = 400 * 86_400;
 
 type Partner = { client: string; secret: string; merchant: string; bn: string };
@@ -747,6 +754,8 @@ const CAPTURE_KEEPS: ReadonlySet<string> = new Set(["COMPLETED", "PENDING", "PAR
 const CAPTURE_TAKEN_BACK: ReadonlySet<string> = new Set(["REFUNDED", "REVERSED", "FAILED", "DECLINED"]);
 /** How often a paid order whose capture is in a status not known here is looked at once PayPal's 180 days are over. */
 const UNKNOWN_STATUS_LOOK_SECONDS = 86_400;
+/** How many due paid orders one run of the refund watch looks at for a store (PAYPAL_REFUND_WATCH and NOT_A_COST.REFUND_WATCH_BATCH in tests/plan-cost-registry.ts). */
+export const REFUND_WATCH_BATCH = 25;
 
 /**
  * What the sweep asks of PayPal for one store, a few orders at a time:
@@ -818,7 +827,7 @@ export async function watchPayPal(
   }
 
   const dropStart = on.dropStart;
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", watchKey(statsId), "0", String(now), "LIMIT", "0", "25"]]);
+  const [due] = await redisPipeline([["ZRANGEBYSCORE", watchKey(statsId), "0", String(now), "LIMIT", "0", String(REFUND_WATCH_BATCH)]]);
   let revoked = 0;
   for (const order of Array.isArray(due) ? (due as string[]) : []) {
     if (Date.now() >= deadline) break;
@@ -863,6 +872,23 @@ export async function watchPayPal(
     // leave this watch: both replies read exactly, each 0 or 1 (one member added or already there; the key's expiry
     // set). Anything else is unknown, never "written": the order stays watched and is looked at again in an hour,
     // before anything is told or taken off a list (Claude 6 on #2909; CX-123 rules 24 and 30).
+    // Not a refund (reversed, failed, declined): its own mark first, read exactly as the refund mark is, so the refund
+    // mark is never there without it and the buyer is never told "refunded" of it (pre-review MEDIUM on C4-13). Not
+    // written: nothing marked, nothing taken back; looked at again in an hour.
+    if (status !== "REFUNDED") {
+      const reversed = repliesFor(
+        await redisPipeline([
+          ["ZADD", reversedKey(statsId), String(now), order],
+          ["EXPIRE", reversedKey(statsId), SALES_KEPT_SECONDS],
+        ]),
+        2,
+      );
+      if (!reversed || !reversed.every((reply) => reply === 0 || reply === 1)) {
+        console.error("a PayPal payment taken back could not be marked; looked at again in an hour", order);
+        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+        continue;
+      }
+    }
     const marked = repliesFor(
       await redisPipeline([
         ["ZADD", refundedKey(statsId), String(now), order],

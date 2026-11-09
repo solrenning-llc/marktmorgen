@@ -1455,7 +1455,10 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
   const handing = ours !== null && handed === false;
   // Refunded in full by PayPal and taken back by the refund watch: said so, with no link, no purchase event and no
   // hand-over or receipt promised (the Claude 4 team's second money review of #2911).
-  const refunded = ours !== null && handed === "refunded";
+  // Taken back by another way than a refund (reversed, failed or declined): the same, in words true of it, never
+  // "refunded" (pre-review MEDIUM on C4-13).
+  const reversed = ours !== null && handed === "reversed";
+  const refunded = (ours !== null && handed === "refunded") || reversed;
   // A product that cannot be read (or is gone) never sends a paid buyer to the error page or to "not found"
   // (Claude 5's LOW 2 on #2911): the page then says it was paid and opens the list of purchases.
   const product = delivered ? await readListing(store, ours.product).catch(() => null) : null;
@@ -1477,8 +1480,8 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
           {ours && refunded ? (
             <>
               <p className="st-price text-sm">{t.paidWithPayPal}</p>
-              <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.ppRefunded}</h1>
-              <p className="st-muted mt-4">{t.ppRefundedBody}</p>
+              <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{reversed ? t.ppTakenBack : t.ppRefunded}</h1>
+              <p className="st-muted mt-4">{reversed ? t.ppTakenBackBody : t.ppRefundedBody}</p>
               <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
             </>
           ) : ours && handing ? (

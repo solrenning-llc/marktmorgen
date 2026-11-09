@@ -2492,8 +2492,8 @@ export default async function StudioPage({
               <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-soft">
                 <li>For one-time products at one price that hand over a file, a link, a course, a bundle or a podcast.</li>
                 <li>Not for memberships, payment plans, calls, price options, pay what you want, license keys or limited stock, and no add-on, gift or discount code is offered with it.</li>
-                <li>What a buyer gets is sent to the email address of their PayPal account. A refund in full in your PayPal takes it back.</li>
-                <li>Counted in your numbers, your sales file, your affiliates&apos; and partners&apos; book and your webhooks like a Stripe sale, with the channel the buyer came from. A refund in full in your PayPal is counted as a refund.</li>
+                <li>What a buyer gets is sent to the email address of their PayPal account. It is taken back after a refund in full in your PayPal, or when PayPal reverses the payment.</li>
+                <li>Counted in your numbers, your sales file, your affiliates&apos; and partners&apos; book and your webhooks like a Stripe sale, with the channel the buyer came from. A refund in full in your PayPal, or a payment PayPal reverses, is counted as a refund.</li>
               </ul>
               {store.paypalSeller ? (
                 <>

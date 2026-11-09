@@ -231,6 +231,9 @@ const en = {
   ppHandingOverBody: (email: string) => `Your receipt will be emailed to ${email} once it is handed over. Refresh in a minute.`,
   ppRefunded: "Payment refunded",
   ppRefundedBody: "This payment was refunded in full through PayPal, so this purchase is no longer yours to open. Your PayPal account shows the refund.",
+  /** A payment PayPal took back by another way than a refund: reversed, failed or declined (pre-review MEDIUM on C4-13). */
+  ppTakenBack: "Payment taken back",
+  ppTakenBackBody: "This payment was taken back through PayPal, so this purchase is no longer yours to open.",
   waitFew: "Wait a few minutes, then open this page again.",
 };
 
@@ -436,6 +439,8 @@ const es: ThanksWords = {
   ppHandingOverBody: (email) => `Tu recibo se enviará por email a ${email} en cuanto se entregue. Actualiza la página en un minuto.`,
   ppRefunded: "Pago reembolsado",
   ppRefundedBody: "Este pago se reembolsó por completo a través de PayPal, así que ya no puedes abrir esta compra. Tu cuenta de PayPal muestra el reembolso.",
+  ppTakenBack: "Pago revertido",
+  ppTakenBackBody: "Este pago se revirtió a través de PayPal, así que ya no puedes abrir esta compra.",
   waitFew: "Espera unos minutos y vuelve a abrir esta página.",
 };
 
@@ -640,6 +645,8 @@ const fr: ThanksWords = {
   ppHandingOverBody: (email) => `Votre reçu sera envoyé par e-mail à ${email} dès que l'achat vous sera remis. Actualisez la page dans une minute.`,
   ppRefunded: "Paiement remboursé",
   ppRefundedBody: "Ce paiement a été remboursé en totalité via PayPal, vous ne pouvez donc plus ouvrir cet achat. Votre compte PayPal indique le remboursement.",
+  ppTakenBack: "Paiement annulé",
+  ppTakenBackBody: "Ce paiement a été annulé via PayPal, vous ne pouvez donc plus ouvrir cet achat.",
   waitFew: "Patientez quelques minutes, puis rouvrez cette page.",
 };
 
@@ -844,6 +851,8 @@ const de: ThanksWords = {
   ppHandingOverBody: (email) => `Ihre Quittung wird an ${email} gemailt, sobald der Kauf übergeben ist. Laden Sie die Seite in einer Minute neu.`,
   ppRefunded: "Zahlung erstattet",
   ppRefundedBody: "Diese Zahlung wurde über PayPal vollständig erstattet, daher können Sie diesen Kauf nicht mehr öffnen. Ihr PayPal-Konto zeigt die Erstattung.",
+  ppTakenBack: "Zahlung rückgängig gemacht",
+  ppTakenBackBody: "Diese Zahlung wurde über PayPal rückgängig gemacht, daher können Sie diesen Kauf nicht mehr öffnen.",
   waitFew: "Warten Sie ein paar Minuten und öffnen Sie diese Seite dann erneut.",
 };
 
@@ -1048,6 +1057,8 @@ const it: ThanksWords = {
   ppHandingOverBody: (email) => `La ricevuta verrà inviata via email a ${email} appena l'acquisto sarà consegnato. Aggiorna la pagina tra un minuto.`,
   ppRefunded: "Pagamento rimborsato",
   ppRefundedBody: "Questo pagamento è stato rimborsato per intero tramite PayPal, quindi non puoi più aprire questo acquisto. Il tuo account PayPal mostra il rimborso.",
+  ppTakenBack: "Pagamento stornato",
+  ppTakenBackBody: "Questo pagamento è stato stornato tramite PayPal, quindi non puoi più aprire questo acquisto.",
   waitFew: "Aspetta qualche minuto, poi riapri questa pagina.",
 };
 
@@ -1252,6 +1263,8 @@ const nl: ThanksWords = {
   ppHandingOverBody: (email) => `Je bon wordt naar ${email} gemaild zodra de aankoop is overgedragen. Vernieuw de pagina over een minuut.`,
   ppRefunded: "Betaling terugbetaald",
   ppRefundedBody: "Deze betaling is volledig terugbetaald via PayPal, dus je kunt deze aankoop niet meer openen. Je PayPal-rekening toont de terugbetaling.",
+  ppTakenBack: "Betaling teruggedraaid",
+  ppTakenBackBody: "Deze betaling is via PayPal teruggedraaid, dus je kunt deze aankoop niet meer openen.",
   waitFew: "Wacht een paar minuten en open deze pagina dan opnieuw.",
 };
 
@@ -1456,6 +1469,8 @@ const pt: ThanksWords = {
   ppHandingOverBody: (email) => `O recibo será enviado por email para ${email} assim que a compra for entregue. Atualize a página dentro de um minuto.`,
   ppRefunded: "Pagamento reembolsado",
   ppRefundedBody: "Este pagamento foi reembolsado na totalidade através do PayPal, por isso já não pode abrir esta compra. A sua conta PayPal mostra o reembolso.",
+  ppTakenBack: "Pagamento revertido",
+  ppTakenBackBody: "Este pagamento foi revertido através do PayPal, por isso já não pode abrir esta compra.",
   waitFew: "Aguarde alguns minutos e depois abra esta página novamente.",
 };
 

@@ -71,7 +71,7 @@ export function KeptByCurrency({ data, range }: { data: StatsData; range: "d7" |
       ) : null}
       <p className="mt-2 text-xs text-ink-soft">
         A refund or a dispute belongs to the day it was recorded, which may be after the sale it takes back. {DISPUTE_NOTE}
-        {data.paypalDisputesUnread ? " PayPal disputes are not read here; see them in your PayPal account." : ""}
+        {data.paypalDisputesUnread ? " A PayPal payment refunded in full or reversed is counted as a refund. PayPal disputes themselves are not read here; see them in your PayPal account." : ""}
       </p>
     </section>
   );

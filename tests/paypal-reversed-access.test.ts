@@ -21,7 +21,9 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import {
+  REFUND_WATCH_BATCH,
   captureOrder,
+  nextLook,
   openOrder,
   stillPending,
   watchPayPal,
@@ -31,6 +33,7 @@ import { importedFor } from "@/lib/imported-purchases";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { NOT_A_COST, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
 const PARTNER_SECRET = "EPpartnerSecret0123456789";
@@ -240,6 +243,24 @@ async function main(): Promise<void> {
   } finally {
     Date.now = realNow;
     console.error = logged;
+  }
+
+  part("The refund watch's cost line (tests/plan-cost-registry.ts) says what the watch does");
+  {
+    is("NOT_A_COST says why the batch is bounded, naming watchPayPal", typeof NOT_A_COST.REFUND_WATCH_BATCH === "string" && NOT_A_COST.REFUND_WATCH_BATCH.includes("watchPayPal"), true);
+    is("the line's batch is the code's", PAYPAL_REFUND_WATCH.ordersPerStoreRun, REFUND_WATCH_BATCH);
+    const t0 = 1_800_000_000;
+    is("looks a day at the most: hourly the first week", 86_400 / ((nextLook(t0, t0) ?? 0) - t0), PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost);
+    is("daily past day 30", 86_400 / ((nextLook(t0, t0 + 31 * 86_400) ?? 0) - (t0 + 31 * 86_400)), PAYPAL_REFUND_WATCH.looksPerOrderPerDayAfter30Days);
+    is("let go at PayPal's 180 days when known", nextLook(t0, t0 + 180 * 86_400), null);
+    is("an unknown status is watched until the paid record ends", PAYPAL_REFUND_WATCH.daysWatchedAtMost, 400);
+    // One run looks at no more than the batch: one more due order than it is left for the next run.
+    const many = Array.from({ length: REFUND_WATCH_BATCH + 1 }, (_, i) => `9Z${String(i).padStart(15, "0")}`);
+    await redis.pipeline(many.map((order) => ["ZADD", watchKey, "0", order]));
+    await watchPayPal(store, Date.now() + 10_000, on);
+    const left = (await redis.pipeline([["ZRANGEBYSCORE", watchKey, "0", "0"]]))[0] as string[];
+    is("one run looks at the batch, the rest waits for the next run", left.filter((order) => many.includes(order)).length, 1);
+    await redis.pipeline([["ZREM", watchKey, ...many]]);
   }
 
   part("A pending order with a status not known here is waited on (rule 30)");

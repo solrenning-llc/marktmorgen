@@ -84,6 +84,7 @@ export async function finishMetaConnect(request: NextRequest): Promise<Response>
       by: email,
       owner: { email: store.email, handle: store.handle },
       currency: store.currency,
+      startedAt: taken.at,
     });
     if (!result.ok) return back(origin, store, result.error);
     // The first read at once, so the numbers show it on the way back; the daily job reads it from then on.

@@ -374,6 +374,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Meta found no ad account to read",
     body: "The Facebook login you used cannot see any ad account. Nothing was kept. Connect again with the login that runs your ads.",
   },
+  // Meta told us, while it was connecting, that this Facebook login removed the app or asked for its data to be deleted.
+  removed: {
+    title: "Nothing was connected",
+    body: "While this was connecting, Meta told us to delete this Facebook login's data. So nothing was kept, and the permission was given back to Meta. Connect again if you still want your ads read.",
+  },
   refused: {
     title: "Meta did not finish connecting",
     body: "Nothing was kept. Connect again in a moment.",

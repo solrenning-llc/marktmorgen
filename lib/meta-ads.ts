@@ -38,6 +38,9 @@
  *   nl:stats:<statsId>:spend:meta the lines read (lib/ad-spend.ts adds them in)
  *   nl:metaads:state:<hash>       one consent in progress, ten minutes
  *   nl:metaads:user:<hash>        the stores a Meta user connected
+ *   nl:metaads:gone:<hash>        when Meta last told us a user removed the app or
+ *                                 asked for a deletion, a day: a consent flow begun
+ *                                 before it keeps nothing (finishMeta)
  *   nl:metaads:stores             the stores connected, for the daily read
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
@@ -105,6 +108,20 @@ export type MetaAdsView = {
 };
 
 const STATE_SECONDS = 600;
+/**
+ * The longest a consent flow may run, from beginMeta to the write that keeps its connection: the state is taken
+ * within STATE_SECONDS (takeMeta), and the calls to Meta after it are each bounded by REQUEST_MS. A flow older than
+ * this keeps nothing, so a deletion's mark, kept GONE_SECONDS, always outlasts every flow it has to stop.
+ */
+const FLOW_MS = 2 * STATE_SECONDS * 1000;
+/** How long a deletion's mark is kept: far longer than any flow it has to stop (FLOW_MS). */
+const GONE_SECONDS = 86_400;
+/**
+ * The room left for the clocks of two servers (the one that began the flow and the one Meta's notice reached): a
+ * flow is taken as begun before a deletion unless it began more than this after it. A reconnection begun within it
+ * is refused, honestly, and can simply be made again a few seconds later.
+ */
+const GONE_MARGIN_MS = 10_000;
 const KEEP_SECONDS = 400 * 86_400;
 const REQUEST_MS = 10_000;
 // Marketing API's supported version, not the latest Graph API version.
@@ -117,6 +134,7 @@ const readKey = (statsId: string) => `nl:metaads:read:${statsId}`;
 export const linesKey = (statsId: string) => `nl:stats:${statsId}:spend:meta`;
 const stateKey = (state: string) => `nl:metaads:state:${hash(`metaads-state:${state}`)}`;
 const userKey = (user: string) => `nl:metaads:user:${hash(`metaads-user:${user}`)}`;
+const goneKey = (user: string) => `nl:metaads:gone:${hash(`metaads-gone:${user}`)}`;
 const STORES_KEY = "nl:metaads:stores";
 const readingKey = (statsId: string) => `nl:metaads:reading:${statsId}`;
 const context = (statsId: string) => `metaads|${statsId}|token`;
@@ -249,14 +267,35 @@ async function readConnectionAsSeen(statsId: string): Promise<{ c: Connection; s
 
 /**
  * KEYS[1] the connection, KEYS[2] the key written, KEYS[3..] keys deleted with it; ARGV[1] the connection exactly as
- * it was read, ARGV[2] the value, ARGV[3] the seconds it is kept ("0": no expiry). 1 written, 0 the connection is no
- * longer the one read (forgotten, reconnected, another account chosen) and nothing is written. Mirrored for tests in
+ * it was read, ARGV[2] the value, ARGV[3] the seconds it is kept ("0": no expiry, else a whole number of at most nine
+ * digits). 1 written, 0 the connection is no longer the one read (forgotten, reconnected, another account chosen) and
+ * nothing is written, -1 a call of any other shape (fewer than two keys, not exactly three arguments, an expiry Redis
+ * would refuse), refused before anything is read or written (as lib/path-atomic.ts does). Mirrored for tests in
  * lib/redis-memory.ts.
  */
 const WRITE_IF_CONNECTED = `-- marktmorgen:meta-if-connected:v1
+if #KEYS < 2 or #ARGV ~= 3 or (ARGV[3] ~= "0" and (#ARGV[3] > 9 or not string.match(ARGV[3], "^[1-9]%d*$"))) then return -1 end
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
 if ARGV[3] == "0" then redis.call("SET", KEYS[2], ARGV[2]) else redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3]) end
 for i = 3, #KEYS do redis.call("DEL", KEYS[i]) end
+return 1`;
+
+/**
+ * KEYS[1] the connection, KEYS[2] the last read's record, KEYS[3] the stores connected, KEYS[4] the stores the Meta
+ * user connected, KEYS[5] that user's deletion mark (forgetMetaUser); ARGV[1] the new connection, ARGV[2] the cutoff:
+ * the time, in milliseconds, at or after which a deletion of that user stops this flow (finishMeta), ARGV[3] the
+ * store. 1 the connection is kept, its record dropped and the store added to both sets; 0 a deletion at or after the
+ * cutoff (or a mark that does not read as a time) and nothing is written; -1 a call of any other shape, refused
+ * before anything is read or written. Mirrored for tests in lib/redis-memory.ts.
+ */
+const FINISH_UNLESS_GONE = `-- marktmorgen:meta-finish:v1
+if #KEYS ~= 5 or #ARGV ~= 3 or #ARGV[2] > 16 or not string.match(ARGV[2], "^[1-9]%d*$") or ARGV[3] == "" then return -1 end
+local gone = redis.call("GET", KEYS[5])
+if gone and (#gone > 16 or not string.match(gone, "^%d+$") or tonumber(gone) >= tonumber(ARGV[2])) then return 0 end
+redis.call("SET", KEYS[1], ARGV[1])
+redis.call("DEL", KEYS[2])
+redis.call("SADD", KEYS[3], ARGV[3])
+redis.call("SADD", KEYS[4], ARGV[3])
 return 1`;
 
 /**
@@ -328,8 +367,11 @@ export async function beginMeta(input: { statsId: string; sid: string; sessionCo
   return url.toString();
 }
 
-/** Takes the consent a state names, once, if it was started by this session and person. */
-export async function takeMeta(state: string, input: { sessionCookie: string; email: string }): Promise<{ statsId: string; sid: string; redirect: string } | null> {
+/**
+ * Takes the consent a state names, once, if it was started by this session and person; `at` is when it was started
+ * (milliseconds), which finishMeta holds a deletion confirmed since against.
+ */
+export async function takeMeta(state: string, input: { sessionCookie: string; email: string }): Promise<{ statsId: string; sid: string; redirect: string; at: number } | null> {
   if (!/^[A-Za-z0-9_-]{40,64}$/.test(state) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GETDEL", stateKey(state)]]);
   if (typeof raw !== "string") return null;
@@ -338,7 +380,8 @@ export async function takeMeta(state: string, input: { sessionCookie: string; em
     if (p.session !== hash(`metaads-session:${input.sessionCookie}`)) return null;
     if (p.email !== input.email.toLowerCase()) return null;
     if (Date.now() - p.at > STATE_SECONDS * 1000) return null;
-    return { statsId: p.statsId, sid: p.sid, redirect: p.redirect };
+    if (!Number.isSafeInteger(p.at) || p.at <= 0) return null;
+    return { statsId: p.statsId, sid: p.sid, redirect: p.redirect, at: p.at };
   } catch {
     return null;
   }
@@ -351,9 +394,28 @@ export function accountToUse(accounts: (MetaAccount & { active?: boolean })[], c
   return fits.length === 1 ? fits[0].id : "";
 }
 
-export type MetaConnectResult = { ok: true; view: MetaAdsView; account: MetaAccount | null } | { ok: false; error: "seal" | "refused" | "permission" | "accounts" };
+export type MetaConnectResult =
+  | { ok: true; view: MetaAdsView; account: MetaAccount | null }
+  | { ok: false; error: "seal" | "refused" | "permission" | "accounts" | "expired" | "removed" };
 
-/** Trades the code for a long-lived token, lists the ad accounts and keeps the connection, sealed. */
+/** Whether a flow begun at `startedAt` (milliseconds) is still young enough to keep its connection (FLOW_MS). */
+const flowFresh = (startedAt: number): boolean => {
+  const age = Date.now() - startedAt;
+  return Number.isSafeInteger(startedAt) && startedAt > GONE_MARGIN_MS && age <= FLOW_MS && age >= -GONE_MARGIN_MS;
+};
+
+/**
+ * Trades the code for a long-lived token, lists the ad accounts and keeps the connection, sealed.
+ *
+ * Meta's notice that the person removed the app or asked for their data to be deleted (forgetMetaUser) may land at
+ * any moment of this flow, between its calls to Meta. So the connection is kept only in one step with a check of
+ * that person's deletion mark: a deletion confirmed at or after the flow began (`startedAt`, from beginMeta, less
+ * GONE_MARGIN_MS for the clocks of two servers) keeps nothing, gives the token back to Meta and says so ("removed").
+ * The flow's start, not the consent on Meta's page, is the line, because the consent's own moment is not known
+ * here: a deletion between the two is taken as the later word. A flow begun after the deletion (by more than the
+ * margin) is the person's new choice and connects. A flow older than FLOW_MS keeps nothing ("expired"), so the
+ * mark, kept GONE_SECONDS, outlasts every flow it has to stop.
+ */
 export async function finishMeta(input: {
   statsId: string;
   sid: string;
@@ -362,8 +424,11 @@ export async function finishMeta(input: {
   by: string;
   owner: { email: string; handle: string };
   currency: string;
+  /** When the consent flow began (beginMeta), in milliseconds. */
+  startedAt: number;
 }): Promise<MetaConnectResult> {
   if (!canSeal()) return { ok: false, error: "seal" };
+  if (!flowFresh(input.startedAt)) return { ok: false, error: "expired" };
   let short: string;
   try {
     const traded = await call("GET", "/oauth/access_token", { client_id: appId(), client_secret: appSecret(), redirect_uri: input.redirect, code: input.code });
@@ -407,12 +472,19 @@ export async function finishMeta(input: {
     owner: input.owner,
     broken: "",
   };
-  await redisPipeline([
-    ["SET", connKey(input.statsId), JSON.stringify(connection)],
-    ["DEL", readKey(input.statsId)],
-    ["SADD", STORES_KEY, input.statsId],
-    ["SADD", userKey(user), input.statsId],
-  ]);
+  if (!flowFresh(input.startedAt)) {
+    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    return { ok: false, error: "expired" };
+  }
+  const keys = [connKey(input.statsId), readKey(input.statsId), STORES_KEY, userKey(user), goneKey(user)];
+  const replies = repliesFor(await redisPipeline([["EVAL", FINISH_UNLESS_GONE, keys.length, ...keys, JSON.stringify(connection), input.startedAt - GONE_MARGIN_MS, input.statsId]]), 1);
+  const kept = replies ? countOf(replies[0]) : null;
+  if (kept !== 0 && kept !== 1) throw new UnknownReplyError("keeping a Meta connection only while its user was not deleted since");
+  if (kept === 0) {
+    // Deleted since the flow began: nothing is kept, and the permission this flow was holding goes back to Meta.
+    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    return { ok: false, error: "removed" };
+  }
   // Another person's token in its place: theirs is given back.
   if (before && before.user !== user) {
     await giveBack(input.statsId, before).catch(() => {});
@@ -481,10 +553,17 @@ export function signedUser(raw: unknown): string | null {
   }
 }
 
-/** Forgets every store a Meta user connected. Returns, for each, who to tell. */
+/**
+ * Forgets every store a Meta user connected. Returns, for each, who to tell. First, in the same pipeline as the
+ * read of their stores, it marks the user as deleted now (goneKey, kept GONE_SECONDS), so a consent flow still on
+ * its way (finishMeta) keeps nothing: one that wrote before the mark is in the stores read here and forgotten with
+ * them, one that writes after it is refused. A mark that is not confirmed written is unknown (UnknownReplyError),
+ * never a deletion said to be done.
+ */
 export async function forgetMetaUser(user: string): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
   if (!isRedisConfigured() || !user) return [];
-  const [members] = await redisPipeline([["SMEMBERS", userKey(user)]]);
+  const [marked, members] = await redisPipeline([["SET", goneKey(user), String(Date.now()), "EX", GONE_SECONDS], ["SMEMBERS", userKey(user)]]);
+  if (marked !== "OK") throw new UnknownReplyError("the mark of a Meta user's deletion");
   const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
   const forgot: { statsId: string; owner: { email: string; handle: string } }[] = [];
   for (const statsId of stores.slice(0, 50)) {

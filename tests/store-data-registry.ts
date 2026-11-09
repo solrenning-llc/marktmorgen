@@ -684,6 +684,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:save:@lib/membership-manage.ts": { what: "A save offer made to a member", parts: [item(MARK, "One per membership.", "membership")] },
   "nl:mnum:@lib/membership-numbers.ts": { what: "Membership numbers, cached", parts: [capped(512 * KB, "One cached view.")] },
   "nl:metaads:conn:@lib/meta-ads.ts": { what: "The Meta ads connection", parts: [capped(4 * KB, "One a store.")] },
+  "nl:metaads:gone:@lib/meta-ads.ts": company("When Meta told us a user removed the app", "Per Meta user, a hash of its ID and a time, kept a day (GONE_SECONDS): it stops a connection being finished at that moment."),
   "nl:metaads:read:@lib/meta-ads.ts": { what: "When Meta was last read", parts: [capped(KB, "One a store.")] },
   "nl:metaads:reading:@lib/meta-ads.ts": short("A reading under way", "integration", 1, 128),
   "nl:metaads:state:@lib/meta-ads.ts": short("A consent in progress", "integration", 1, 512),

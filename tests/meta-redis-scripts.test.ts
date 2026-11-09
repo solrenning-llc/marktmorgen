@@ -141,7 +141,7 @@ function parse(buffer: Buffer): { value: unknown; rest: Buffer } | null {
 }
 
 function client(socket: Socket): (command: Arg[]) => Promise<unknown> {
-  let buffer = Buffer.alloc(0);
+  let buffer: Buffer = Buffer.alloc(0);
   const waiting: ((value: unknown) => void)[] = [];
   socket.on("data", (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);

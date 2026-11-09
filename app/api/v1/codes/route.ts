@@ -65,7 +65,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const writer = await apiWriter(request);
+  // Its answer is the codes Stripe lists, a read, so it waits while the plan's
+  // renewal is unpaid or disputed, as making a code does (Claude 5's API audit, A3).
+  const writer = await apiWriter(request, true);
   if (writer instanceof Response) return writer;
   const { store } = writer;
   if (!selling(store)) return notSelling();

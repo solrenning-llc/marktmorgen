@@ -1277,6 +1277,9 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "API_WRITE_UNITS"] },
       { file: "lib/api-guard.ts", names: ["takeAllowance", "API_RATE"] },
+      // A paused key is counted in the same minute before it is told why, and a key that may not do what is asked is refused before the month is taken (Claude 5's API audit, A1 and A2).
+      { file: "lib/api-guard.ts", names: ["withinLimit(\"api\", found.id, API_RATE, 60)", "if (found.paused) return", "if (purpose === \"write\" && !found.write) return readOnly()"] },
+      { file: "lib/api-key-rules.ts", names: ["MAX_KEYS"] },
       { file: "lib/api-write.ts", names: ["ADDS_PER_DAY", "GIVES_PER_DAY", "monthly_limit"] },
       // A course's students, the affiliates and the bookings take further requests for what they read, before reading it (4 November 2026).
       { file: "lib/api-read-rules.ts", names: ["API_UNIT_COMMANDS", "API_UNIT_BYTES", "API_UNIT_SENT_BYTES", "API_UNIT_STRIPE_PAGES", "API_UNIT_ROUND_TRIPS", "studentsPageWork", "bookWork", "bookingsWork"] },
@@ -1288,7 +1291,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["API_SALES_UNITS"] },
       { file: "lib/api-sales.ts", names: ["SALES_PAGE", "SALES_TITLE_IDS", "SALE_TEXT_LIMITS", "cutText"] },
     ],
-    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs, and a page of sales API_SALES_UNITS, more than API_SALES_READ, and the listings it reads for titles as further requests (held below). A reading that reads more than a page (a course's students, the affiliates, the bookings) takes further requests for its work before it reads, each priced above what it pays for at every size (apiReadCost, held below); refused, nothing more is read. The per-minute and daily limits only spread them.",
+    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs, and a page of sales API_SALES_UNITS, more than API_SALES_READ, and the listings it reads for titles as further requests (held below). A reading that reads more than a page (a course's students, the affiliates, the bookings) takes further requests for its work before it reads, each priced above what it pays for at every size (apiReadCost, held below); refused, nothing more is read. The per-minute and daily limits only spread them. A request the door refuses takes nothing from the figure: a paused key (its maker left, a role changed, the two-step rule) is counted in the same per-key minute (API_RATE, at most MAX_KEYS keys a store) before it is told why, so past it the key hears 429 like a live one, and a read-only key on a write or a key with no agent scope on a preparation is refused before the month or the paid resource month is taken. What such a refused request reads before it is refused (the key's lookup, its record, hold, last use and the team record, then the minute's counter) is not a plan's figure and is not priced here: like requests with an unknown key and those past a key's minute or month, it is the site's refused traffic, whose ceiling is still open in FW1 (MM-SA-11); unknown, never zero.",
   },
   {
     id: "inbox",

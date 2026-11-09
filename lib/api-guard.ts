@@ -51,16 +51,24 @@ export async function apiStore(request: Request): Promise<Store | Response> {
 
 /**
  * The store this request may change, and the key it came with, or the
- * response that refuses it: a key made to read only is refused here, with
- * the way to make one that writes.
+ * response that refuses it: a key made to read only is refused at the door,
+ * with the way to make one that writes, before any of the month is taken.
+ * `waitsWhilePaused`: a write that reads the store's data back (switching a
+ * discount code off answers with the codes Stripe lists) waits while the
+ * plan's renewal is unpaid or a payment for it is disputed, as reads and
+ * adding writes do; left out, a write that only takes something away
+ * (access, a webhook endpoint) goes through.
  */
-export async function apiWriter(request: Request): Promise<{ store: Store; keyId: string } | Response> {
-  const found = await apiKeyed(request, "write");
+export async function apiWriter(request: Request, waitsWhilePaused = false): Promise<{ store: Store; keyId: string } | Response> {
+  const found = await apiKeyed(request, "write", waitsWhilePaused ? writeWaits : undefined);
   if (found instanceof Response) return found;
-  if (!found.write) {
-    return readOnly();
-  }
   return { store: found.store, keyId: found.keyId };
+}
+
+/** A write's refusal while the plan's renewal is unpaid or a payment for it is disputed, or null. */
+async function writeWaits(store: Store): Promise<Response | null> {
+  const paused = integrationPauseWord(store);
+  return paused ? apiError(409, paused, API_WRITE_PAUSED_WORDS[paused]) : null;
 }
 
 /**
@@ -89,7 +97,6 @@ export async function apiAdder(
     return apiError(409, paused, API_WRITE_PAUSED_WORDS[paused]);
   });
   if (found instanceof Response) return found;
-  if (!found.write) return readOnly();
   if (!body) {
     const read = await readApiBody(request);
     if (read instanceof Response) return read;
@@ -114,16 +121,8 @@ export async function apiAgent(
   request: Request,
   need: "draft" | "execute",
 ): Promise<{ store: Store; keyId: string; agent: AgentScope } | Response> {
-  const found = await apiKeyed(request, need, async (store) => {
-    const paused = integrationPauseWord(store);
-    return paused ? apiError(409, paused, API_WRITE_PAUSED_WORDS[paused]) : null;
-  });
+  const found = await apiKeyed(request, need, writeWaits);
   if (found instanceof Response) return found;
-  if (!agentMay(found.agent, need)) {
-    return need === "draft"
-      ? apiError(403, "cannot_prepare", "This key cannot prepare changes for you to confirm.")
-      : apiError(403, "cannot_prepare_execute", "This key cannot prepare emails or other changes that reach people.");
-  }
   return { store: found.store, keyId: found.keyId, agent: found.agent };
 }
 
@@ -142,14 +141,26 @@ async function apiKeyed(
   // Missing, malformed, unknown and revoked all get the same answer, so the
   // API cannot be used to learn which keys ever existed.
   if (!found) return unauthorized();
-  // Paused by the team's two-step rule (owner C3-100, lib/api-key-pause.ts):
-  // the key is real and kept, so its holder is told why and what to do.
-  if (found.paused) return apiError(403, "key_paused", KEY_PAUSED_WORDS[found.why ?? "rule"]);
+  // Every key the store holds is counted in its minute first, a paused one
+  // too, so a paused key a sync keeps calling hears 429 past API_RATE like
+  // any key, and is not answered without a limit (Claude 5's API audit, A1).
   if (!(await withinLimit("api", found.id, API_RATE, 60))) {
     return apiError(429, "rate_limited", `At most ${API_RATE} requests a minute per key. Try again in a minute.`, { "Retry-After": "60" });
   }
+  // Paused by the team's two-step rule (owner C3-100, lib/api-key-pause.ts):
+  // the key is real and kept, so its holder is told why and what to do.
+  if (found.paused) return apiError(403, "key_paused", KEY_PAUSED_WORDS[found.why ?? "rule"]);
   const store = await storeForId(found.sid);
   if (!store) return unauthorized();
+  // A key that may not do what the route does is refused here, before any of
+  // the store's month or its paid resource month is taken (A2): a read-only
+  // key on a write, a key with no agent scope on a preparation.
+  if (purpose === "write" && !found.write) return readOnly();
+  if ((purpose === "draft" || purpose === "execute") && !agentMay(found.agent, purpose)) {
+    return purpose === "draft"
+      ? apiError(403, "cannot_prepare", "This key cannot prepare changes for you to confirm.")
+      : apiError(403, "cannot_prepare_execute", "This key cannot prepare emails or other changes that reach people.");
+  }
   // 232 [CA1] unit 4b4c: while the plan's renewal is unpaid or a payment for it
   // is disputed, reads wait, before any of the month is taken or Stripe is read.
   if (purpose === "read") {
@@ -157,10 +168,9 @@ async function apiKeyed(
     if (paused) return apiError(409, paused, API_READ_PAUSED_WORDS[paused]);
   }
   // 232 [CA1] unit 4c: a write that adds or changes waits the same way, for a
-  // key that may write (a read-only key still hears it reads only).
+  // key that may write (a read-only key heard it reads only above).
   // An agent's preparation waits the same way, for a key that may prepare it.
-  const may = purpose === "write" ? found.write : purpose === "draft" || purpose === "execute" ? agentMay(found.agent, purpose) : true;
-  if (hold && may) {
+  if (hold) {
     const held = await hold(store);
     if (held) return held;
   }

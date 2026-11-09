@@ -6,14 +6,14 @@
  * Synthetic only: the in-memory Redis double and stand-ins for Stripe and the email provider through `fetch`.
  *
  *   - The link is still proven by the inbox: only customers whose address is the one typed are in it, so a
- *     membership of another person's customer is never listed, cancelled, paused or switched with it.
+ *     membership of another person's customer is never listed, canceled, paused or switched with it.
  *   - Customers known to hold no membership of this store are not read again by the page (no reads past need).
  *   - A customer whose list cannot be read is never "no membership": the page says it cannot list (empty list,
  *     Stripe's own page still there) and an action on a membership it may hold ends in an error, never "gone".
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
-import { membershipsFor, openCancel, openPortal, requestManageLink } from "@/lib/membership-manage";
+import { MANAGE_CUSTOMERS_MAX, MANAGE_GRANT_BYTES, grantRecord, membershipsFor, openCancel, openPortal, requestManageLink } from "@/lib/membership-manage";
 import { pauseMembership } from "@/lib/membership-pause";
 import { previewSwitch } from "@/lib/tier-switch";
 import { POST as openRoute } from "@/app/api/store/manage/open/route";
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   is("both memberships are on the page, the one from the first checkout too", listed.map((m) => m.id).sort(), ["sub_First0000001", "sub_Second000001"]);
   is("a customer known to hold nothing here is not read again", listsOf("cus_Empty0000001") - emptyBefore, 0);
 
-  part("Cancelling either one");
+  part("Canceling either one");
   const first = await openCancel(store, token, "sub_First0000001", "https://marktmorgen.com");
   is("the first checkout's membership opens its cancellation page", first.ok, true);
   is("on Stripe's page for the customer who holds it", sessions().at(-1)?.body.get("customer"), "cus_First0000001");
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
 
   part("Never another person's membership");
   const before = sessions().length;
-  is("another address's membership is not cancelled with this link", (await openCancel(store, token, "sub_Other0000001", "https://marktmorgen.com")).ok, false);
+  is("another address's membership is not canceled with this link", (await openCancel(store, token, "sub_Other0000001", "https://marktmorgen.com")).ok, false);
   is("nor its Stripe page opened", (await openPortal(store, token, "https://marktmorgen.com", "sub_Other0000001")).ok, false);
   is("so no page was made at Stripe for it", sessions().length, before);
   is("nor paused", (await pauseMembership(store, token, "sub_Other0000001", 1)).ok, false);
@@ -152,7 +152,7 @@ async function main(): Promise<void> {
   part("A customer that cannot be read is not 'no membership'");
   failing = "cus_First0000001";
   is("the page says it cannot list, never a list missing one", await membershipsFor(store, token), []);
-  is("cancelling a membership it may hold ends in an error", await openCancel(store, token, "sub_First0000001", "https://marktmorgen.com"), { ok: false, reason: "error" });
+  is("canceling a membership it may hold ends in an error", await openCancel(store, token, "sub_First0000001", "https://marktmorgen.com"), { ok: false, reason: "error" });
   is("switching it too, not 'gone'", await previewSwitch(store, token, "sub_First0000001", b.product.id), { ok: false, reason: "error" });
   const still = await openCancel(store, token, "sub_Second000001", "https://marktmorgen.com");
   is("a membership read on another customer still cancels", [still.ok, sessions().at(-1)?.body.get("customer")], [true, "cus_Second000001"]);
@@ -164,6 +164,24 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", key, JSON.stringify({ a: ACCOUNT, c: "cus_First0000001", h: "harbor" })]]);
   is("still lists its one customer's membership", ((await membershipsFor(store, old)) ?? []).map((m) => m.id), ["sub_First0000001"]);
   is("and cannot reach another customer's", (await openCancel(store, old, "sub_Second000001", "https://marktmorgen.com")).ok, false);
+
+  part("The link's record has a declared ceiling, and past it the page says it cannot list");
+  const many = Array.from({ length: MANAGE_CUSTOMERS_MAX + 5 }, (_, i) => `cus_Many${String(i).padStart(8, "0")}`);
+  const capped = grantRecord(ACCOUNT, "harbor", many, false);
+  is("at most MANAGE_CUSTOMERS_MAX customers, the rest said", [capped.cs?.length, capped.c, capped.m], [MANAGE_CUSTOMERS_MAX, many[0], 1]);
+  const long = Array.from({ length: MANAGE_CUSTOMERS_MAX }, (_, i) => `cus_${String(i).padStart(64, "L")}`);
+  const heavy = grantRecord(ACCOUNT, "harbor", long, false);
+  is("never heavier than MANAGE_GRANT_BYTES, the rest said", [Buffer.byteLength(JSON.stringify(heavy)) <= MANAGE_GRANT_BYTES, (heavy.cs?.length ?? 1) < MANAGE_CUSTOMERS_MAX, heavy.m], [true, true, 1]);
+  is("one customer keeps the record it always had", grantRecord(ACCOUNT, "harbor", ["cus_First0000001"], false), { a: ACCOUNT, c: "cus_First0000001", h: "harbor" });
+  const past = "b".repeat(64);
+  const pastKey = `nl:manage:link:${createHash("sha256").update(`nimbus-manage:${past}`).digest("hex").slice(0, 40)}`;
+  await redis.pipeline([["SET", pastKey, JSON.stringify({ a: ACCOUNT, c: "cus_Second000001", h: "harbor", cs: ["cus_Second000001", "cus_First0000001"], m: 1 })]]);
+  is("a link that may miss customers lists nothing rather than a list missing one", await membershipsFor(store, past), []);
+  is("and an action on a membership not found on it is an error, not 'gone'", await previewSwitch(store, past, "sub_Other0000001", b.product.id), { ok: false, reason: "error" });
+  const forged = "c".repeat(64);
+  const forgedKey = `nl:manage:link:${createHash("sha256").update(`nimbus-manage:${forged}`).digest("hex").slice(0, 40)}`;
+  await redis.pipeline([["SET", forgedKey, JSON.stringify({ a: ACCOUNT, c: "cus_First0000001", h: "harbor", cs: ["cus_Other0000001", "cus_First0000001"] })]]);
+  is("a record whose customers do not start with its own is no link", await membershipsFor(store, forged), null);
   done();
 }
 

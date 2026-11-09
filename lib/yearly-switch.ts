@@ -28,7 +28,7 @@ import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliv
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
-import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
+import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, ownedSub } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
 import { chargedOf, previewBody, previewKnown, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
@@ -148,8 +148,11 @@ async function find(store: Store, token: string, subscription: string): Promise<
   if (!SUB_PATTERN.test(subscription)) return { reason: "gone", emailed: false };
   const granted = await grantFor(store, token, subscription);
   if (!granted) return { reason: "expired", emailed: false };
-  const { grant, emailed } = granted;
-  const sub = (await subsOf(store, grant)).find((s) => s.id === subscription) as (YearlySub & { id?: unknown; items?: { data?: { id?: unknown }[] } }) | undefined;
+  const { emailed } = granted;
+  // Among every customer the link manages; `grant` is then the one who holds it (R43 F1 on #2985).
+  const owned = await ownedSub(store, granted.grant, subscription);
+  const grant = owned?.grant ?? granted.grant;
+  const sub = owned?.sub as (YearlySub & { id?: unknown; items?: { data?: { id?: unknown }[] } }) | undefined;
   if (!sub) return { reason: "gone", emailed };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId) return { reason: "gone", emailed };

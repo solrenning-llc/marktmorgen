@@ -56,6 +56,19 @@ const RATE_WINDOW_SECONDS = 60 * 60;
 const LIVE = new Set(["active", "trialing", "past_due", "unpaid", "incomplete", "paused"]);
 
 export const MANAGE_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * The most customers one link may manage, and the most its record may weigh (Claude 6, R43 F1 on #2985). Every
+ * checkout makes a new customer on the creator's Stripe account, so one address can stand behind several, each
+ * holding its own membership; the link carries every one of them that holds one of this store's, newest first.
+ * MANAGE_CUSTOMERS_MAX is also the one page of customers read for an address. MANAGE_GRANT_BYTES keeps the record
+ * inside what tests/store-data-registry.ts counts for an emailed link (LINK_BYTES, the key beside it). Past either,
+ * the link says so (`m`), and the page lists nothing rather than a list that may miss one (membershipsFor).
+ * The page and each action then read one list of memberships per customer, side by side (ownedSubsOf): Stripe
+ * bills no API call, no store command or byte is added, and the wait is one read's.
+ */
+export const MANAGE_CUSTOMERS_MAX = 20;
+export const MANAGE_GRANT_BYTES = 700;
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 const CONFIG_PATTERN = /^bpc_[A-Za-z0-9]{6,64}$/;
 
@@ -136,15 +149,18 @@ export function sellsMemberships(store: Store): boolean {
 type Listed = { data?: unknown };
 
 /**
- * The creator's customer behind an address, when that customer has a
- * membership of this store that is still running. Null otherwise.
+ * Every one of the creator's customers behind an address that has a membership of this store still running, the
+ * newest membership's first; empty when there is none. Every checkout makes a new customer, so a member who bought
+ * twice has two, and the link must reach both (Claude 6, R43 F1 on #2985). A customer whose memberships could not
+ * be read whole is kept too once another holds one, so the page reads it again and says it cannot list rather
+ * than leave it out; `more` says customers past the one page read may hold more.
  *
  * Asked of the creator's own Stripe account. A membership counts when it was
  * sold by this store under any address the store has used.
  */
-export async function findMember(store: Store, email: string): Promise<string | null> {
+export async function findMembers(store: Store, email: string): Promise<{ customers: string[]; more: boolean }> {
   const account = store.stripeAccountId;
-  if (!account) return null;
+  if (!account) return { customers: [], more: false };
   const handles = saleHandles(store);
 
   // Each list is read in its exact shape (lib/stripe-list.ts; Claude 5, sweep APP2, the findMember sibling of
@@ -153,19 +169,24 @@ export async function findMember(store: Store, email: string): Promise<string | 
   // something went wrong (the route's "error"), never "sent" with no email behind it.
   let unknown = false;
   const customers = readStripePage(
-    await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=20`),
+    await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MANAGE_CUSTOMERS_MAX}`),
     () => true,
     CUSTOMER_PATTERN,
   );
   if (customers.unreadable > 0 || customers.hasMore) unknown = true;
+  const more = customers.unreadable > 0 || customers.hasMore;
 
-  let best: { id: string; at: number } | null = null;
+  const holding = new Map<string, number>();
+  const unread: string[] = [];
   for (const customer of customers.rows) {
     const subs = readStripePage(
       await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`),
       (row) => typeof ownField(row, "status") === "string" && plainObject(ownField(row, "metadata")),
     );
-    if (subs.unreadable > 0 || subs.hasMore) unknown = true;
+    if (subs.unreadable > 0 || subs.hasMore) {
+      unknown = true;
+      unread.push(customer.id);
+    }
     const rows = subs.rows as { status?: unknown; metadata?: Record<string, string> | null; created?: unknown }[];
     for (const sub of rows) {
       if (typeof sub.status !== "string" || !LIVE.has(sub.status)) continue;
@@ -174,11 +195,18 @@ export async function findMember(store: Store, email: string): Promise<string | 
       // membership: it ends by itself and is not cancelled from here.
       if (sub.metadata?.kind === "plan") continue;
       const at = typeof sub.created === "number" ? sub.created : 0;
-      if (!best || at > best.at) best = { id: customer.id, at };
+      if (at >= (holding.get(customer.id) ?? -1)) holding.set(customer.id, at);
     }
   }
-  if (!best && unknown) throw new StripeListUnreadable("the customers or memberships of an address, not read to their end");
-  return best?.id ?? null;
+  if (!holding.size && unknown) throw new StripeListUnreadable("the customers or memberships of an address, not read to their end");
+  if (!holding.size) return { customers: [], more: false };
+  const newest = [...holding].sort((x, y) => y[1] - x[1]).map(([id]) => id);
+  return { customers: [...newest, ...unread.filter((id) => !holding.has(id))], more };
+}
+
+/** The newest membership's customer behind an address, or null when it holds no membership of this store. */
+export async function findMember(store: Store, email: string): Promise<string | null> {
+  return (await findMembers(store, email)).customers[0] ?? null;
 }
 
 /** A name that can sit inside the quotes of an email's From line. */
@@ -197,11 +225,35 @@ export type ManageRequest = "sent" | "email" | "limited" | "unavailable" | "erro
 export type Grant = {
   /** The connected account the membership is on. */
   a: string;
-  /** The creator's customer who owns it. */
+  /** The creator's customer who owns it: the newest membership's, when the address has several customers. */
   c: string;
   /** The store's address when the link was asked for. */
   h: string;
+  /**
+   * Every customer of the address the link manages, `c` first, when there is more than one (findMembers); a link
+   * made before (or for one customer) has only `c`. Proven by the same inbox: each is a customer of that address.
+   */
+  cs?: string[];
+  /** Customers past MANAGE_CUSTOMERS_MAX or MANAGE_GRANT_BYTES may hold more: the page cannot list them whole. */
+  m?: 1;
 };
+
+/** The customers a link manages, `c` first. */
+export function customersOf(grant: Grant): string[] {
+  return grant.cs?.length ? grant.cs : [grant.c];
+}
+
+/** The record of a new link: every customer that fits MANAGE_CUSTOMERS_MAX and MANAGE_GRANT_BYTES, the rest said by `m`. */
+export function grantRecord(account: string, handle: string, customers: string[], more: boolean): Grant {
+  const all = customers.slice(0, MANAGE_CUSTOMERS_MAX);
+  let past = more || customers.length > all.length;
+  for (;;) {
+    const grant: Grant = { a: account, c: all[0], h: handle, ...(all.length > 1 ? { cs: all } : {}), ...(past ? { m: 1 as const } : {}) };
+    if (all.length <= 1 || new TextEncoder().encode(JSON.stringify(grant)).length <= MANAGE_GRANT_BYTES) return grant;
+    all.pop();
+    past = true;
+  }
+}
 
 /**
  * Emails a way in to the address typed, when it has a membership here.
@@ -224,11 +276,11 @@ export async function requestManageLink(input: {
   if (!(await within(await ipKey(ip, store.handle), IP_LIMIT))) return "limited";
   if (!(await within(await addressKey(email), ADDRESS_LIMIT))) return "limited";
 
-  const customer = await findMember(store, email);
-  if (!customer) return "sent";
+  const found = await findMembers(store, email);
+  if (!found.customers.length) return "sent";
 
   const token = randomToken();
-  const grant: Grant = { a: store.stripeAccountId as string, c: customer, h: store.handle };
+  const grant = grantRecord(store.stripeAccountId as string, store.handle, found.customers, found.more);
   await redisPipeline([
     ["SET", await tokenKey(token), JSON.stringify(grant), "EX", MANAGE_LINK_SECONDS],
   ]);
@@ -261,7 +313,19 @@ function parseGrant(raw: unknown): Grant | null {
     const value = JSON.parse(raw) as Partial<Grant>;
     if (typeof value.a !== "string" || !/^acct_[A-Za-z0-9]{8,64}$/.test(value.a)) return null;
     if (typeof value.c !== "string" || !CUSTOMER_PATTERN.test(value.c)) return null;
-    return { a: value.a, c: value.c, h: typeof value.h === "string" ? value.h : "" };
+    const grant: Grant = { a: value.a, c: value.c, h: typeof value.h === "string" ? value.h : "" };
+    if (value.cs !== undefined) {
+      // Every customer exactly as written when the link was made, `c` first, none twice; any other shape is no link.
+      const cs = value.cs as unknown;
+      if (!Array.isArray(cs) || cs.length < 2 || cs.length > MANAGE_CUSTOMERS_MAX || cs[0] !== value.c) return null;
+      if (!cs.every((id) => typeof id === "string" && CUSTOMER_PATTERN.test(id)) || new Set(cs).size !== cs.length) return null;
+      grant.cs = cs as string[];
+    }
+    if (value.m !== undefined) {
+      if (value.m !== 1) return null;
+      grant.m = 1;
+    }
+    return grant;
   } catch {
     return null;
   }
@@ -319,8 +383,13 @@ export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expir
  * The link is checked against the store it is opened on: it only works on the
  * connected account it was issued for, so a link cannot be carried to another
  * store.
+ *
+ * Stripe's page is one customer's. With a membership named, it is the page of
+ * the customer who holds that membership among the link's (R43 F1 on #2985: a
+ * member who bought in two checkouts has two); without, the newest one's.
  */
-export async function openPortal(store: Store, token: string, origin: string): Promise<OpenResult> {
+export async function openPortal(store: Store, token: string, origin: string, subscription = ""): Promise<OpenResult> {
+  if (subscription && !SUB_PATTERN.test(subscription)) return { ok: false, reason: "error" };
   if (!MANAGE_TOKEN_PATTERN.test(token) || !isRedisConfigured()) return { ok: false, reason: "expired" };
   const [raw] = await redisPipeline([["GET", await tokenKey(token)]]);
   const grant = parseGrant(raw);
@@ -330,13 +399,26 @@ export async function openPortal(store: Store, token: string, origin: string): P
   if (count === null) return { ok: false, reason: "error" };
   if (count > MAX_OPENS) return { ok: false, reason: "used" };
 
+  let customer = grant.c;
+  if (subscription) {
+    try {
+      const owned = await ownedSub(store, grant, subscription);
+      // Not one of this link's: the same answer as a refused page, nothing made at Stripe.
+      if (!owned) return { ok: false, reason: "error" };
+      customer = owned.grant.c;
+    } catch (error) {
+      console.error("reading the membership whose page to open failed", error);
+      return { ok: false, reason: "error" };
+    }
+  }
+
   const session = async (configuration: string) =>
     onAccount(
       "POST",
       grant.a,
       "/billing_portal/sessions",
       new URLSearchParams({
-        customer: grant.c,
+        customer,
         configuration,
         return_url: `${origin}/@${store.handle}`,
         locale: stripeLocale(store),
@@ -369,6 +451,8 @@ export async function openPortal(store: Store, token: string, origin: string): P
 /** A membership as the member's own page lists it. */
 export type Membership = {
   id: string;
+  /** The creator's customer who holds it: a member who bought in two checkouts has two (R43 F1 on #2985). */
+  customer: string;
   /** The product it is on now: switching tiers changes it (lib/tier-rules.ts). */
   product: string;
   /** Stripe's state for it, and whether it was sold to end after a set number of payments. */
@@ -473,6 +557,42 @@ export async function subsOf(store: Store, grant: Grant): Promise<SubRow[]> {
   );
 }
 
+/** One membership of the link's, with the link narrowed to the customer who holds it (`c`). */
+export type OwnedSub = { sub: SubRow; grant: Grant };
+
+/**
+ * The live memberships of this store held by every customer a link manages (customersOf), each with the customer
+ * who holds it (Claude 6, R43 F1 on #2985): one list per customer, read side by side, as subsOf reads one. What
+ * could not be read is answered as `unread` (the first failure), never as no membership; `more` when the link
+ * says customers past its record may hold more.
+ */
+export async function ownedSubsOf(store: Store, grant: Grant): Promise<{ subs: OwnedSub[]; unread: unknown; more: boolean }> {
+  const lists = await Promise.allSettled(customersOf(grant).map(async (customer) => {
+    const own: Grant = { a: grant.a, c: customer, h: grant.h };
+    return (await subsOf(store, own)).map((sub) => ({ sub, grant: own }));
+  }));
+  const failed = lists.find((list) => list.status === "rejected");
+  return {
+    subs: lists.flatMap((list) => (list.status === "fulfilled" ? list.value : [])),
+    unread: failed && failed.status === "rejected" ? (failed.reason ?? new StripeListUnreadable("a member's memberships")) : null,
+    more: grant.m === 1,
+  };
+}
+
+/**
+ * One membership of the link's, with the customer who holds it; null only when every customer the link manages
+ * was read whole and none holds it. A membership not found while one of them could not be read, or while the
+ * link says there may be more, throws, so an action ends in its error and never in "not yours" or "gone".
+ */
+export async function ownedSub(store: Store, grant: Grant, subscription: string): Promise<OwnedSub | null> {
+  const { subs, unread, more } = await ownedSubsOf(store, grant);
+  const found = subs.find((owned) => owned.sub.id === subscription);
+  if (found) return found;
+  if (unread) throw unread;
+  if (more) throw new StripeListUnreadable("a member's customers, more than the link holds");
+  return null;
+}
+
 /**
  * The memberships behind a live link, for the page to list. Null when the
  * link is not good, so the page can say so rather than show an empty list.
@@ -483,13 +603,20 @@ export async function subsOf(store: Store, grant: Grant): Promise<SubRow[]> {
 export async function membershipsFor(store: Store, token: string): Promise<Membership[] | null> {
   const grant = await grantOf(store, token);
   if (!grant) return null;
-  let subs: SubRow[];
+  let owned: OwnedSub[];
   try {
-    subs = await subsOf(store, grant);
+    const read = await ownedSubsOf(store, grant);
+    // A list that may miss one of the member's memberships is not shown: the page says it cannot list them, with
+    // Stripe's own page still there, rather than leave one out as if it were not theirs (R43 F1 on #2985).
+    if (read.unread) throw read.unread;
+    if (read.more) throw new StripeListUnreadable("a member's customers, more than the link holds");
+    owned = read.subs;
   } catch (error) {
     console.error("listing a member's memberships failed", error);
     return [];
   }
+  const subs = owned.map((o) => o.sub);
+  const holder = new Map(owned.map((o) => [o.sub.id, o.grant.c]));
   const ids = [...new Set(subs.map((s) => productOfSub(s)).filter(Boolean))];
   const listings = new Map(ids.length ? (await readListings(store, ids).catch(() => [])).map((p) => [p.id, p]) : []);
   const titles = new Map([...listings.values()].map((p) => [p.id, p.title]));
@@ -499,6 +626,7 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
     const product = productOfSub(sub);
     return {
       id: sub.id as string,
+      customer: holder.get(sub.id) ?? grant.c,
       product,
       status: typeof sub.status === "string" ? sub.status : "",
       fixedEnd: Boolean(sub.metadata?.ends_after),
@@ -545,10 +673,14 @@ export async function openCancel(store: Store, token: string, subscription: stri
   if (count > MAX_OPENS) return { ok: false, reason: "used" };
 
   try {
-    const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
+    // Among every customer the link manages, read with the one who holds it (R43 F1 on #2985): a member who bought
+    // in two checkouts cancels either membership. One that could not be read throws, the same "error" below.
+    const owned = await ownedSub(store, grant, subscription);
+    const sub = owned?.sub;
     // Not this member's, not this store's, or already ended: the same answer
     // for all three, so the form cannot be used to learn which.
-    if (!sub || endsAtOf(sub) !== null) return { ok: false, reason: "error" };
+    if (!owned || !sub || endsAtOf(sub) !== null) return { ok: false, reason: "error" };
+    const customer = owned.grant.c;
 
     const price = sub.items?.data?.[0]?.price;
     const interval = typeof price?.recurring?.interval === "string" ? price.recurring.interval : "";
@@ -594,7 +726,7 @@ export async function openCancel(store: Store, token: string, subscription: stri
     if (store.leaving.on) await countLeave(store.statsId, "left");
 
     const body = new URLSearchParams({
-      customer: grant.c,
+      customer,
       configuration: await portalConfiguration(store, origin, false, !said),
       return_url: `${origin}/@${store.handle}/manage?token=${token}`,
       locale: stripeLocale(store),

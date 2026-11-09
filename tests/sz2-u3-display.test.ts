@@ -221,7 +221,8 @@ async function main(): Promise<void> {
 
   part("The studio says why");
   const editor = readFileSync("components/physical-legal-editor.tsx", "utf8");
-  is("the summary of what keeps it from the EU/EEA", editor.includes("gapSummary(safetyGaps("), true);
+  const legalRecord = readFileSync("lib/physical-legal-record.ts", "utf8");
+  is("the summary of what keeps it from the EU/EEA", editor.includes("safetySummary(product.shipping.countries, ") && legalRecord.includes("gapSummary(safetyGaps(info, hasPicture))"), true);
 
   done();
 }

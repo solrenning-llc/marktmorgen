@@ -26,7 +26,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
-import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
+import { StripeError, knownSubscriptionStatus, onAccount, platformKey } from "@/lib/stripe-account";
 import type { Store } from "@/lib/store";
 import { readListings, sellsAny } from "@/lib/catalog";
 import { canOffer, saveOn } from "@/lib/save-offer";
@@ -443,6 +443,11 @@ export async function subsOf(store: Store, grant: Grant): Promise<SubRow[]> {
     `/subscriptions?customer=${encodeURIComponent(grant.c)}&status=all&limit=20`,
   )) as Listed;
   const rows = Array.isArray(listed.data) ? (listed.data as SubRow[]) : [];
+  // A row whose status is not one Stripe has (SUBSCRIPTION_STATUSES) was not
+  // read: it throws as a failed request does, so a tier switch, a move to
+  // yearly, a pause or a cancel says something went wrong, never that the
+  // membership is gone (Claude 5, round 30 sibling of #2912's readableSub).
+  if (rows.some((sub) => !knownSubscriptionStatus(sub.status))) throw new Error("Stripe answered a membership with a status it does not have");
   return rows.filter(
     (sub) =>
       typeof sub.id === "string" &&

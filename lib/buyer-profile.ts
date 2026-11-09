@@ -42,7 +42,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { onAccount } from "@/lib/stripe-account";
+import { knownSubscriptionStatus, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { saleChannel } from "@/lib/stats";
 import { type Store, saleHandles } from "@/lib/store";
@@ -315,7 +315,8 @@ function membershipStatus(sub: Row): ProfileMembership["status"] {
   const status = str(sub.status);
   if (status === "trialing") return "trialing";
   if (status === "past_due" || status === "unpaid") return "past_due";
-  if (sub.pause_collection && typeof sub.pause_collection === "object") return "paused";
+  // Stripe's own paused status (a trial ended without a way to pay) is paused, not ended.
+  if (status === "paused" || (sub.pause_collection && typeof sub.pause_collection === "object")) return "paused";
   if (status === "active") return sub.cancel_at_period_end === true || num(sub.cancel_at) > 0 ? "canceling" : "active";
   return "ended";
 }
@@ -365,6 +366,11 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
           const id = str(session.id);
           const meta = (session.metadata ?? {}) as Record<string, string>;
           if (!id || sessions.has(id) || !handles.has(meta.store ?? "") || !isSettled(session)) continue;
+          // A membership whose status is not one Stripe has was not read: the
+          // page says Stripe could not be read, before any of it is listed,
+          // never that it ended (Claude 5, round 30 sibling of #2912's readableSub).
+          const held = session.subscription;
+          if (held && typeof held === "object" && !knownSubscriptionStatus((held as Row).status)) throw new Error("Stripe answered a membership with a status it does not have");
           sessions.set(id, session);
         }
       }

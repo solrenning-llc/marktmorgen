@@ -45,6 +45,28 @@ export function keyFor(account: string): string | null {
 }
 
 /**
+ * Every status Stripe gives a subscription (the Subscription object's status
+ * enum): the one list every reader of a creator's memberships checks a row
+ * against, the same eight lib/billing.ts reads plans with. A value outside it
+ * is not one Stripe sends, so that answer was not read, never a membership
+ * that ended or is gone (Claude 5, round 30 sibling of #2912's readableSub).
+ */
+export const SUBSCRIPTION_STATUSES: ReadonlySet<string> = new Set([
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+  "paused",
+  "canceled",
+  "incomplete",
+  "incomplete_expired",
+]);
+
+/** Whether a subscription row carries a status Stripe has. */
+export const knownSubscriptionStatus = (status: unknown): status is string =>
+  typeof status === "string" && SUBSCRIPTION_STATUSES.has(status);
+
+/**
  * How long a checkout that holds something stays open.
  *
  * Stripe keeps a checkout open for at least thirty minutes, counted from the

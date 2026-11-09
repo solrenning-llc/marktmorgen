@@ -12,7 +12,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { onAccount } from "@/lib/stripe-account";
+import { SUBSCRIPTION_STATUSES, onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { productOfSub } from "@/lib/tier-rules";
@@ -25,7 +25,6 @@ import { type Band, type HealthFactor, bandOf, scoreOf } from "@/lib/member-heal
 const MAX_PAGES = 10;
 const CACHE_SECONDS = 10 * 60;
 const LIVE = new Set(["active", "trialing", "past_due"]);
-const SUBSCRIPTION_STATES = new Set(["active", "trialing", "past_due", "canceled", "unpaid", "incomplete", "incomplete_expired", "paused"]);
 const cacheKey = (store: Store) => `nl:health:${store.statsId}`;
 
 export type MemberRow = {
@@ -127,7 +126,7 @@ export async function runningMembers(store: Store): Promise<{ rows: Raw[]; compl
     // Validate the entire page, including records filtered out below, before counting.
     for (const raw of data) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw) || typeof raw.id !== "string" || !/^sub_[A-Za-z0-9]+$/.test(raw.id) ||
-          seen.has(raw.id) || typeof raw.status !== "string" || !SUBSCRIPTION_STATES.has(raw.status) ||
+          seen.has(raw.id) || typeof raw.status !== "string" || !SUBSCRIPTION_STATUSES.has(raw.status) ||
           !raw.metadata || typeof raw.metadata !== "object" || Array.isArray(raw.metadata) || Object.values(raw.metadata).some(value => typeof value !== "string")) throw new Error("Membership record could not be confirmed");
       seen.add(raw.id);
     }

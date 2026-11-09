@@ -857,7 +857,7 @@ export default async function StudioPage({
     folder: early(store ? storeFolder(ref) : Promise.resolve("")),
     pictures: early(store ? imageFolder(ref) : Promise.resolve("")),
     aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => 0)) : null,
-    live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId)) : null,
+    live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId, store, "observe")) : null,
     pause: store && isBillingConfigured() ? early(pauseView(store)) : null,
     list: store && may("export") ? early(listSize(store)) : null,
     callProducts: store ? early(readKind(store, "call")) : null,

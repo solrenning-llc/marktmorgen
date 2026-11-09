@@ -62,6 +62,19 @@ def main():
     if not switch_match or '$' + '{' in switch_match.group(1):
         raise RuntimeError('Expected static switch activation Lua')
     switch_script = switch_match.group(1)
+    # The studio's read-only proofs are cut from these two scripts at runtime
+    # (lib/contract-funding.ts observeOnly); the same cut is executed here.
+    committed_branch = '\n return {2,finish}\nend\n'
+    if 'export const OBSERVE_CONTRACT=observeOnly(ACTIVATE_CONTRACT);' not in source or 'export const OBSERVE_SWITCH_CONTRACT=observeOnly(ACTIVATE_SWITCH_CONTRACT);' not in source or "const committed='\\n return {2,finish}\\nend\\n'" not in source:
+        raise RuntimeError('Expected the read-only proofs cut from the activation Lua')
+    def observe_only(text):
+        if text.count(committed_branch) != 1:
+            raise RuntimeError('Expected one committed branch in the activation Lua')
+        observed = text[:text.index(committed_branch) + len(committed_branch)] + 'return 0\n'
+        if set(re.findall(r"redis\.call\('([A-Z]+)'", observed)) != {'HGET', 'TTL', 'TYPE'}:
+            raise RuntimeError('Read-only activation proof would write')
+        return observed
+    observe_script, observe_switch_script = observe_only(activation_script), observe_only(switch_script)
     intent_match = re.search(r'export const CLAIM_RESTART_INTENT = `([^`]+)`;', source)
     if not intent_match or '$' + '{' in intent_match.group(1):
         raise RuntimeError('Expected static integrated restart intent Lua')
@@ -97,7 +110,7 @@ def main():
         raise RuntimeError('Expected static paid resource cohort Lua')
     resource_script = resource_match.group(1)
     prefix = 'marktmorgen:integration:contract:' + uuid.uuid4().hex + ':'
-    keys = [prefix + str(i) for i in range(45)]
+    keys = [prefix + str(i) for i in range(47)]
     intent_refs = ['synthetic-restart-intent-' + uuid.uuid4().hex + '-' + str(i) for i in range(3)]
     from test_contract_command_measurement import main as check_measurement
     check_measurement()
@@ -378,6 +391,31 @@ def main():
         assert redis.command('HGET', keys[29], 'slots:creator_month') == '0'
         assert redis.command('HGET', keys[29], 'activated:ctr_one') is not None
         print('PASS: 64 switch activation observations share one new binding and retain both principals')
+        def read_only(label, operation, expected, key):
+            before = snapshot(key)
+            result, changes = measured_command(redis, operation)
+            changes = {name: count for name, count in changes.items() if count}
+            assert result == expected, (label, result)
+            assert changes.get('eval') == 1 and set(changes) <= {'eval', 'hget', 'type', 'ttl'}, (label, changes)
+            assert snapshot(key) == before, label
+        def observe(key, **args):
+            subscription, now, period_end = args.get('subscription', 'sub_Activation001'), args.get('now', instant+1), args.get('period_end', instant+30*86400)
+            return lambda: redis.command('EVAL', observe_script, 1, key, 'binding', 'review', 'one', 'creator_month', 'ctr_one', subscription, instant, now, 50, 100, 0, 300, 2, 'paid', instant, period_end)
+        funded_activation(keys[45])
+        read_only('checkout before activation', observe(keys[45]), 0, keys[45])
+        assert redis.command('HGET', keys[45], 'pending:one') == 'ctr_one'
+        assert activate(redis, keys[45]) == [1, instant+86400]
+        read_only('checkout committed', observe(keys[45]), [2, instant+30*86400], keys[45])
+        read_only('checkout foreign subscription', observe(keys[45], subscription='sub_Other001'), 0, keys[45])
+        read_only('checkout other period', observe(keys[45], period_end=instant+29*86400), 0, keys[45])
+        def observe_switch(key):
+            return lambda: redis.command('EVAL', observe_switch_script, 1, key, 'binding', 'review', 'one', 'creator_month', 'ctr_switch', 'sub_Activation001', instant, instant+2, 50, 100, 0, 300, 2, 'paid', instant, instant+30*86400, 31*86400)
+        switch_ready(keys[46])
+        read_only('switch before activation', observe_switch(keys[46]), 0, keys[46])
+        assert redis.command('HGET', keys[46], 'pending:one') == 'ctr_switch'
+        assert switch_activate(redis, keys[46]) == [1, instant+86400]
+        read_only('switch committed', observe_switch(keys[46]), [2, instant+30*86400], keys[46])
+        print('PASS: the read-only proofs confirm only committed activations, never activate and write nothing')
         switch_ready(keys[30])
         before = snapshot(keys[30])
         for args in [dict(subscription='sub_Other0001'), dict(created=instant+1), dict(phase='trial', finish=instant+7*86400), dict(finish=instant+32*86400), dict(now=instant+86401)]:

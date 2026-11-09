@@ -101,6 +101,7 @@ test("the read-only scripts are the activation proofs cut before any write", () 
     const script = parts[observe], original = parts[activate];
     assert.equal(typeof script, "string", `${observe} exists`);
     const text = String(script);
+    assert.equal(text.includes("local consumed=redis.call('HGET',KEYS[1],'activated:'..ARGV[5])"), true, `${observe} is a real cut, not the fail-closed answer`);
     assert.equal(writes(text), false, `${observe} cannot write`);
     assert.deepEqual([...new Set(text.match(/redis\.call\('([A-Z]+)'/g))].sort(), ["redis.call('HGET'", "redis.call('TTL'", "redis.call('TYPE'"], `${observe} only reads`);
     assert.equal(String(original).startsWith(text.slice(0, text.lastIndexOf("return 0"))), true, `${observe} keeps every check of ${activate}`);

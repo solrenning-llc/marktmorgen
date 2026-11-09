@@ -2,7 +2,7 @@ import {activateRestartContract,type RestartContractActivation} from "@/lib/cont
 import {publishRestartStore} from "@/lib/contract-restart-publication";
 import {createHash,randomUUID} from 'node:crypto';
 import {canonicalFinancialSnapshot,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
-import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,claimRestartIntent,reserveRestartContractFunding,activateCheckoutContract,activateSwitchContract,type ContractGrant,type OwnedRestartIntent,type ArmedRestartSubmission} from '@/lib/contract-funding';
+import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,claimRestartIntent,reserveRestartContractFunding,activateCheckoutContract,activateSwitchContract,observeCheckoutContract,observeSwitchContract,type ContractGrant,type OwnedRestartIntent,type ArmedRestartSubmission} from '@/lib/contract-funding';
 /**
  * The one way Marktmorgen makes money.
  *
@@ -656,10 +656,19 @@ export function periodOf(subscription: Record<string, unknown>, trialing: boolea
   return isPeriod(period) ? period : null;
 }
 
+/**
+ * How a funded subscription's contract proof is read: "activate" commits the
+ * activation when it is due (the return path, the webhook, the sync);
+ * "observe" only confirms one already committed and writes nothing, for a
+ * page that shows the plan (the studio). Unconfirmed is "unknown" either way.
+ */
+export type FundingRead = "activate" | "observe";
+
 /** Asks Stripe what a subscription is doing right now. */
 export async function readSubscription(
   subscriptionId: string,
   fundingStore?:Store,
+  funding: FundingRead = "activate",
 ): Promise<SubscriptionState> {
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
@@ -689,7 +698,7 @@ export async function readSubscription(
   const state=stateOf(subscription);
   if(state.state==='active'&&hasContractFunding(subscription)){
     if(!fundingStore||subscription.id!==subscriptionId)return{state:'unknown'};
-    const observed=await startedFromObservedSubscription(fundingStore,subscription);if(!observed)return{state:'unknown'};
+    const observed=await startedFromObservedSubscription(fundingStore,subscription,funding);if(!observed)return{state:'unknown'};
     return {...state,period:observed.period};
   }
   return state;
@@ -1428,15 +1437,15 @@ export function hasContractFunding(subscription:Record<string,unknown>):boolean{
  const meta=subscription.metadata as Record<string,unknown>|null|undefined;
  return hasSwitchFunding(subscription)||meta?.funding_grant!==undefined||meta?.funding_review!==undefined;
 }
-async function activateObservedSwitch(statsId:string,grantId:string,reviewId:string,subscriptionId:string,subscription:Record<string,unknown>):Promise<boolean>{
+async function activateObservedSwitch(statsId:string,grantId:string,reviewId:string,subscriptionId:string,subscription:Record<string,unknown>,funding:FundingRead='activate'):Promise<boolean>{
  const state=stateOf(subscription);
  if(subscription.id!==subscriptionId||state.state!=='active'||state.changePending)return false;
  const items=subscription.items as {data?:{quantity?:unknown;price?:Record<string,unknown>}[]}|undefined;
  const price=items?.data?.[0]?.price,recurring=price?.recurring as {interval?:unknown;interval_count?:unknown}|undefined;
  if(items?.data?.length!==1||items.data[0].quantity!==1||price?.currency!=='usd'||recurring?.interval!==state.cycle||recurring?.interval_count!==1||state.amountCents!==PUBLISHED_PLAN_PRICES[state.tier][state.cycle])return false;
- return activateSwitchContract({statsId,grantId,reviewId,subscriptionId,tier:state.tier,cycle:state.cycle,createdSeconds:subscription.created as number,trialing:state.trialing,periodStartSeconds:(state.trialing?subscription.trial_start:periodStart(subscription)) as number,periodEndSeconds:(state.trialing?subscription.trial_end:periodEnd(subscription,false)) as number});
+ return (funding==='observe'?observeSwitchContract:activateSwitchContract)({statsId,grantId,reviewId,subscriptionId,tier:state.tier,cycle:state.cycle,createdSeconds:subscription.created as number,trialing:state.trialing,periodStartSeconds:(state.trialing?subscription.trial_start:periodStart(subscription)) as number,periodEndSeconds:(state.trialing?subscription.trial_end:periodEnd(subscription,false)) as number});
 }
-export async function startedFromObservedSubscription(store:Store,subscription:Record<string,unknown>):Promise<StartedSubscription|null>{
+export async function startedFromObservedSubscription(store:Store,subscription:Record<string,unknown>,funding:FundingRead='activate'):Promise<StartedSubscription|null>{
  const started=startedFrom(subscription);
  if(!started)return null;
  const meta=subscription.metadata as Record<string,unknown>|null|undefined;
@@ -1445,7 +1454,7 @@ export async function startedFromObservedSubscription(store:Store,subscription:R
   const pending=meta?.funding_pending_grant!==undefined||meta?.funding_pending_review!==undefined;
   const grantId=pending?meta?.funding_pending_grant:meta?.funding_grant,reviewId=pending?meta?.funding_pending_review:meta?.funding_review;
   if(typeof grantId!=='string'||typeof reviewId!=='string')return null;
-  return await activateObservedSwitch(store.statsId??'',grantId,reviewId,started.subscriptionId,subscription)?{...started,period:fundedPeriod(started.period)}:null;
+  return await activateObservedSwitch(store.statsId??'',grantId,reviewId,started.subscriptionId,subscription,funding)?{...started,period:fundedPeriod(started.period)}:null;
  }
  if(meta?.funding_grant===undefined&&meta?.funding_review===undefined)return started;
  if(!ownedBy(store,subscription)||meta?.store!==store.handle||typeof meta.funding_grant!=="string"||typeof meta.funding_review!=="string")return null;
@@ -1457,7 +1466,7 @@ export async function startedFromObservedSubscription(store:Store,subscription:R
  if(items?.data?.length!==1||items.data[0].quantity!==1||price?.currency!=="usd"||recurring?.interval!==state.cycle||recurring?.interval_count!==1||state.amountCents!==PUBLISHED_PLAN_PRICES[state.tier][state.cycle])return null;
  const began=state.trialing?subscription.trial_start:periodStart(subscription);
  const until=state.trialing?subscription.trial_end:periodEnd(subscription,false);
- if(!(await activateCheckoutContract({
+ if(!(await (funding==='observe'?observeCheckoutContract:activateCheckoutContract)({
   statsId:store.statsId??"",grantId:meta.funding_grant,reviewId:meta.funding_review,
   subscriptionId:started.subscriptionId,tier:state.tier,cycle:state.cycle,createdSeconds:subscription.created as number,
   trialing:state.trialing,periodStartSeconds:began as number,periodEndSeconds:until as number,

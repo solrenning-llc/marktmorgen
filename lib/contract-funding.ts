@@ -197,7 +197,15 @@ export async function activateCheckoutContract(
  input:CheckoutContractActivation,
  policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,
  context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
-):Promise<boolean>{
+):Promise<boolean>{return checkoutContract(ACTIVATE_CONTRACT,input,policy,context);}
+/** The same proof, read only: true only for an activation already committed
+ * for this exact phase and period; it never activates and never writes. */
+export async function observeCheckoutContract(
+ input:CheckoutContractActivation,
+ policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,
+ context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
+):Promise<boolean>{return checkoutContract(OBSERVE_CONTRACT,input,policy,context);}
+async function checkoutContract(script:string,input:CheckoutContractActivation,policy:ContractFundingPolicy|null,context:ContractFundingContext):Promise<boolean>{
  if(!customerTaxContractContextSupported(context,policy))return false;
  const encoded=canonicalFinancialSnapshot({input,context});
  if(!encoded)return false;
@@ -216,7 +224,7 @@ export async function activateCheckoutContract(
  const seconds=Math.floor(now.getTime()/1000);
  if(createdSeconds>seconds||periodEndSeconds<=seconds)return false;
  try{
-  const result=await redisPipeline([['EVAL',ACTIVATE_CONTRACT,1,'nl:contract-reserve:v1',contractFundingBinding(config),reviewId,statsId,key,grantId,subscriptionId,createdSeconds,seconds,config.grantCents[key],config.cashLimitCents,config.carryForwardCents,CONTRACT_FUNDING_RULES.submissionSeconds,config.fundedGrants[key],trialing?'trial':'paid',periodStartSeconds,periodEndSeconds]]);
+  const result=await redisPipeline([['EVAL',script,1,'nl:contract-reserve:v1',contractFundingBinding(config),reviewId,statsId,key,grantId,subscriptionId,createdSeconds,seconds,config.grantCents[key],config.cashLimitCents,config.carryForwardCents,CONTRACT_FUNDING_RULES.submissionSeconds,config.fundedGrants[key],trialing?'trial':'paid',periodStartSeconds,periodEndSeconds]]);
   const current=contractFundingConfiguration(policy,context,new Date());
   return current!==null&&current.binding===config.binding&&commercialMarginReady(context.review)&&Date.now()>=now.getTime()&&contractObservationAcknowledged(result,createdSeconds,periodStartSeconds,periodEndSeconds);
  }catch{return false;}
@@ -279,7 +287,14 @@ export async function activateSwitchContract(
  input:CheckoutContractActivation,
  policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,
  context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
-):Promise<boolean>{
+):Promise<boolean>{return switchContract(ACTIVATE_SWITCH_CONTRACT,input,policy,context);}
+/** The switch proof, read only, as observeCheckoutContract. */
+export async function observeSwitchContract(
+ input:CheckoutContractActivation,
+ policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,
+ context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
+):Promise<boolean>{return switchContract(OBSERVE_SWITCH_CONTRACT,input,policy,context);}
+async function switchContract(script:string,input:CheckoutContractActivation,policy:ContractFundingPolicy|null,context:ContractFundingContext):Promise<boolean>{
  if(!customerTaxContractContextSupported(context,policy))return false;
  const encoded=canonicalFinancialSnapshot({input,context});if(!encoded)return false;
  ({input,context}=JSON.parse(encoded) as {input:CheckoutContractActivation;context:ContractFundingContext});
@@ -293,11 +308,29 @@ export async function activateSwitchContract(
  const now=new Date(),config=contractFundingConfiguration(policy,context,now);if(!config||config.reviewId!==reviewId)return false;
  const seconds=Math.floor(now.getTime()/1000);if(createdSeconds>seconds||periodStartSeconds>seconds||periodEndSeconds<=seconds)return false;
  try{
-  const result=await redisPipeline([['EVAL',ACTIVATE_SWITCH_CONTRACT,1,'nl:contract-reserve:v1',contractFundingBinding(config),reviewId,statsId,key,grantId,subscriptionId,createdSeconds,seconds,config.grantCents[key],config.cashLimitCents,config.carryForwardCents,CONTRACT_FUNDING_RULES.submissionSeconds,config.fundedGrants[key],trialing?'trial':'paid',periodStartSeconds,periodEndSeconds,span]]);
+  const result=await redisPipeline([['EVAL',script,1,'nl:contract-reserve:v1',contractFundingBinding(config),reviewId,statsId,key,grantId,subscriptionId,createdSeconds,seconds,config.grantCents[key],config.cashLimitCents,config.carryForwardCents,CONTRACT_FUNDING_RULES.submissionSeconds,config.fundedGrants[key],trialing?'trial':'paid',periodStartSeconds,periodEndSeconds,span]]);
   const current=contractFundingConfiguration(policy,context,new Date());
   return current!==null&&current.binding===config.binding&&commercialMarginReady(context.review)&&Date.now()>=now.getTime()&&contractObservationAcknowledged(result,seconds,periodStartSeconds,periodEndSeconds);
  }catch{return false;}
 }
+
+/**
+ * The activation proofs, read only, for a page that shows a plan (the studio's
+ * plan card): cut from the activation scripts themselves just after the branch
+ * that acknowledges a committed activation, so every check stays the same and
+ * no write is left. Where the activation script would commit a new activation,
+ * this one answers 0: activating stays with the return path, the webhook and
+ * the sync. A script that does not cut cleanly confirms nothing (always 0):
+ * the plan card then says it could not confirm, and the tests fail.
+ */
+function observeOnly(script:string):string{
+ const committed='\n return {2,finish}\nend\n',at=script.indexOf(committed);
+ if(at<0||script.indexOf(committed,at+1)>=0)return 'return 0\n';
+ const observed=script.slice(0,at+committed.length)+'return 0\n';
+ return /redis\.call\('(?!(?:HGET|TTL|TYPE)')/.test(observed)?'return 0\n':observed;
+}
+export const OBSERVE_CONTRACT=observeOnly(ACTIVATE_CONTRACT);
+export const OBSERVE_SWITCH_CONTRACT=observeOnly(ACTIVATE_SWITCH_CONTRACT);
 
 /** A committed proof may be observed for its exact current period. This never
  * turns an expired, unconsumed grant into an activation or a renewal. Admission

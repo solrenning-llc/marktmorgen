@@ -56,12 +56,14 @@ function centralAliases(file,root,here){
  if(file==='stream-hook-counter-admission.test.ts')for(const name of ['redis','stream','auto-captions'])aliases['@/lib/'+name]=join(here,'stream-hook-counter-admission-world.ts');
  if(file==='yearly-ask-read-evidence.test.ts')for(const name of ['redis','order-data','stripe-account','email','store','membership-manage','mail','contacts','purchase-email','catalog','store-checkout','auth','member-health','yearly-switch'])aliases['@/lib/'+name]=join(here,'yearly-ask-read-world.ts');
  if(['community-mail-read-evidence.test.ts','nx-community-mail.test.ts'].includes(file))for(const name of ['redis','community','community-access','community-events','email','mail','order-data','calls','phone-alerts'])aliases['@/lib/'+name]=join(here,'community-mail-read-world.ts');
+ if(file==='r30-scan-followup.test.ts')aliases['@/lib/contact-rules']=join(here,'r30-scan-followup-contact-rules.ts');
  if(file==='community-report-queue-view.test.ts'||file==='r30-studio-rsvp-unread.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
  }
  if(file==='preview-counter-admission.test.ts')for(const name of ['redis','store','store-request','catalog','traffic','pdf-preview','serve-file'])aliases['@/lib/'+name]=join(here,'preview-counter-admission-world.ts');
  if(file==='flow-stop-action.test.ts')aliases['@/lib/ses']=join(here,'flow-stop-ses-network.ts');
+ if(file==='thanks-note-unread.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='sales-goal-ack.test.ts')aliases['@/lib/store-request']=join(here,'sales-goal-ack-world.ts');
  if(!['order-email-fallback.test.ts','resend-fallback-budget.test.ts','auth-mail-unavailable.test.ts','course-link-mail-unavailable.test.ts','email-meter-preflight.test.ts'].includes(file))aliases['@/lib/resend-fallback-transport']=join(here,'resend-fallback-fixture.ts');
  if(file==='customer-base-fixed-evidence.test.ts')for(const [name,fixture] of [['upload-budget-policy','upload-budget-approved-policy'],['ai-spend-policy','commercial-ai-approved-policy'],['llc-fixed-costs','llc-fixed-approved-policy']])aliases['@/lib/'+name]=join(here,fixture+'.ts');
@@ -90,7 +92,7 @@ function centralAliases(file,root,here){
  if(file==='numbers-email-claim.test.ts')for(const name of ['request-guard','email','traffic','usage-billing','numbers-ask','ai','team','stats'])aliases['@/lib/'+name]=join(here,'numbers-email-claim-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
- if(file==='plan-refund-page.test.ts'){
+ if(file==='plan-refund-page.test.ts'||file==='kb9-plan-withdrawal.test.ts'||file==='n-2849-plan-recovery.test.ts'||file==='kb9-plan-withdrawal-honest.test.ts'){
   aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
@@ -207,6 +209,8 @@ function centralAliases(file,root,here){
  if(file==='buyer-actions.test.ts')aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');
  if(file==='task-hand-in-kept.test.ts'){aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');aliases['next/headers']=join(here,'security/next-headers.ts');}
  if(file==='task-room-unknown.test.ts'){aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');aliases['next/headers']=join(here,'security/next-headers.ts');}
+ if(file==='task-hand-in-lease.test.ts'){aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');aliases['next/headers']=join(here,'security/next-headers.ts');}
+ if(file==='hand-in-replace-exact.test.ts'){aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');aliases['next/headers']=join(here,'security/next-headers.ts');}
  if(file==='dispute-purchase-review.test.ts')for(const name of ['store','stripe-account','contract-resource-window','store-allowance'])aliases['@/lib/'+name]=join(here,'dispute-review-world.ts');
  if(file==='dispute-review-route.test.ts')for(const name of ['store-request','dispute-purchase-review','dispute-preorder-review'])aliases['@/lib/'+name]=join(here,'dispute-review-route-world.ts');
  if(file==='dispute-preorder-review.test.ts')for(const name of ['redis','contract-resource-window','store-allowance'])aliases['@/lib/'+name]=join(here,'dispute-preorder-world.ts');

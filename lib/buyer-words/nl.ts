@@ -195,7 +195,7 @@ export const nl: BuyerWords = {
     busy: { title: "Iemand anders koopt dit op dit moment", body: "Er is niets afgeschreven. Druk zo meteen opnieuw op kopen." },
     slow: { title: "Veel pogingen in een paar minuten", body: "Er is niets afgeschreven. Wacht een paar minuten en druk dan opnieuw op kopen." },
     error: { title: "De betaalpagina kon niet worden geopend", body: "Er is niets afgeschreven. Probeer het zo meteen opnieuw." },
-    "price-held": { title: "Dit product kan hier vandaag niet worden gekocht", body: "Er is niets afgeschreven. De betaaldienst heeft de prijs die je kiest niet goed klaargezet. Probeer het morgen opnieuw." },
+    "price-held": { title: "Dit product kan nu niet worden gekocht", body: "Er is niets afgeschreven. Kopen is maximaal 25 uur gepauzeerd, omdat de prijs te vaak opnieuw moest worden ingesteld. Probeer het later opnieuw." },
     paused: { title: "Deze winkel neemt nu geen nieuwe bestellingen aan", body: "Er is niets afgeschreven. Nieuwe bestellingen kunnen weer begin volgende maand, of eerder." },
     "paypal-declined": {
       title: "PayPal heeft de betaling niet aangenomen",

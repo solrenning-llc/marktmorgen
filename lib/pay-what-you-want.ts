@@ -104,15 +104,15 @@ type WrittenPwyw = { currency: string; minimum: number; preset: number; maximum:
 
 /**
  * Whether Stripe's reply to POST /prices is the choose-your-price Price just written (rule 30, as ensurePrice in
- * lib/billing.ts): a price id, the currency sent, the buyer's box with the floor, the suggestion and the ceiling sent,
- * no set amount, paid once and never again, the tax treatment when one was sent, and the product it is for. Any other
+ * lib/billing.ts): a price id, active, the currency sent, the buyer's box with the floor, the suggestion and the ceiling
+ * sent, no set amount, paid once and never again, the tax treatment when one was sent, and the product it is for. Any other
  * reply is never used for a checkout, nor kept for the next: the checkout that asked fails, and the next asks again,
  * under a new Idempotency-Key (refusedKey), since Stripe answers the same key with the same reply for a day.
  */
 function isPwywPrice(reply: Record<string, unknown>, written: WrittenPwyw): reply is Record<string, unknown> & { id: string } {
   const box = reply.custom_unit_amount as { minimum?: unknown; preset?: unknown; maximum?: unknown } | null | undefined;
   const metadata = reply.metadata as { product?: unknown } | null | undefined;
-  return typeof reply.id === "string" && /^price_[A-Za-z0-9]{6,64}$/.test(reply.id) && reply.currency === written.currency &&
+  return typeof reply.id === "string" && /^price_[A-Za-z0-9]{6,64}$/.test(reply.id) && reply.active === true && reply.currency === written.currency &&
     !!box && typeof box === "object" && box.minimum === written.minimum && box.preset === written.preset && box.maximum === written.maximum &&
     reply.unit_amount === null && reply.recurring === null &&
     (!written.tax || reply.tax_behavior === written.tax) &&
@@ -180,13 +180,22 @@ const refusedHereAdd = (refused: string, now: number) => herePut(refusedHere, re
 const archivedKey = (account: string, print: string, archived: string) => `nl:pwyw:${account}:${print}:archived:${archived}`;
 const PRICE_ID = /^price_[A-Za-z0-9]{6,64}$/;
 
-/** Stripe kept answering wrong today for this product's Price (REFUSED_MOST): the checkout fails before asking it. */
+/**
+ * This product's Price had to be made again more than REFUSED_MOST times in a day (Stripe answered wrong, or the
+ * creator archived it in their dashboard and each checkout after made another): the checkout fails before asking
+ * Stripe, until the count runs out, at most REFUSED_SECONDS later. `product` is the product's title, for the
+ * creator's notice (lib/checkout-trouble.ts); nothing about the buyer.
+ */
 export class PwywPriceHeld extends Error {
-  constructor() {
-    super("Stripe kept answering wrong for this choose-your-price Price today; not asked again until the count runs out");
+  readonly product: string;
+  constructor(product: string) {
+    super("This choose-your-price Price was made again too many times today; not asked again until the count runs out");
     this.name = "PwywPriceHeld";
+    this.product = product;
   }
 }
+/** How long, at most, a product stays held from any moment it is held: the count's own expiry, set at each refusal. */
+export const HELD_MOST_HOURS = REFUSED_SECONDS / 3600;
 const refusedCount = (value: unknown) => (typeof value === "string" && /^[1-9][0-9]{0,8}$/.test(value) ? Number(value) : typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0);
 
 /**
@@ -235,11 +244,11 @@ export async function pwywPriceId(
     // A count left with no expiry (its EXPIRE never landed) would hold the product for good: it is given its day.
     if (left === -1) await redisPipeline([["EXPIRE", refused, REFUSED_SECONDS]]).catch(() => {});
   }
-  if (refusals > REFUSED_MOST) throw new PwywPriceHeld();
+  if (refusals > REFUSED_MOST) throw new PwywPriceHeld(product.title);
   if (fresh) {
     // The retry asks under a new key, so it is counted before it asks, and held past REFUSED_MOST as any other.
     if (!marked) {
-      if (refusals + 1 > REFUSED_MOST) throw new PwywPriceHeld();
+      if (refusals + 1 > REFUSED_MOST) throw new PwywPriceHeld(product.title);
       if (cache) {
         const [set, mark] = await redisPipeline([["SET", retry, String(refusals + 1), "NX", "EX", REFUSED_SECONDS], ["GET", retry]]);
         marked = refusedCount(mark);
@@ -261,7 +270,7 @@ export async function pwywPriceId(
         refusedHereAdd(refused, now);
       }
     }
-    if (marked > REFUSED_MOST) throw new PwywPriceHeld();
+    if (marked > REFUSED_MOST) throw new PwywPriceHeld(product.title);
     refusals = marked;
   }
 
@@ -285,7 +294,10 @@ export async function pwywPriceId(
   // Nothing is kept on any other reply: the checkout that asked fails, and the count of refusals goes up, so the next
   // one asks Stripe again under a new key instead of being answered this reply again for a day (rule 30).
   const written = { currency: store.currency, minimum: shape.minimum, preset: shape.preset, maximum: shape.maximum, tax: shape.tax, product: product.id };
-  if (!isPwywPrice(price, written)) {
+  // On the retry, Stripe answering with the very Price it just refused at checkout is a refusal too: it is its kept
+  // reply to a key already used (a count that was lost, or a key Stripe keeps past the count's day), and taking it
+  // would send every checkout back to that archived Price until the mark ran out, without ever reaching the ceiling.
+  if (!isPwywPrice(price, written) || (fresh && price.id === archived)) {
     // A retry's key was counted when it was marked: the mark goes, so the next retry is counted and asks under a new key.
     if (fresh) {
       if (cache) await redisPipeline([["DEL", retry]]).catch(() => {});

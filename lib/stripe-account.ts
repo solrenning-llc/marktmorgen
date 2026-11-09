@@ -88,8 +88,23 @@ export class StripeError extends Error {
  * when it runs as lib/fetch-timeout.ts finds it (this module is imported by
  * pages for its constants); where there is none, every work counts as having
  * asked, the safe way to be wrong.
+ *
+ * A request Stripe answered with its own refusal (CHECKOUT_NOT_MADE) is
+ * proven to have made nothing, and stops counting (pre-review of
+ * claude5/switch-price-checked): a choose-your-price checkout whose kept Price
+ * Stripe refused, and whose one retry then ended before asking again, left
+ * its limited unit held for the provisional hold's whole term. Counted per
+ * request, so any other request that may have reached Stripe still counts.
  */
-type OpeningMark = { asked: boolean };
+type OpeningMark = { unproven: number };
+
+/**
+ * Stripe's answer that it did not make the checkout: a 4xx it answers before
+ * doing anything (bad request, key, card, permission, not found, too many
+ * requests). Everything else — no answer, a 5xx, a 409 or 424, a reply
+ * without the checkout's address — may have made one, and is unknown.
+ */
+export const CHECKOUT_NOT_MADE: ReadonlySet<number> = new Set([400, 401, 402, 403, 404, 429]);
 type OpeningStore = { getStore(): OpeningMark | undefined; run<R>(store: OpeningMark, fn: () => R): R };
 const openings: OpeningStore | null = (() => {
   const g = globalThis as { AsyncLocalStorage?: new () => OpeningStore };
@@ -102,8 +117,8 @@ const openings: OpeningStore | null = (() => {
 /** Runs `work`, and tells afterwards whether it may have asked Stripe to open a checkout (true when that cannot be known). */
 export function watchCheckoutOpening<T>(work: () => Promise<T>): { done: Promise<T>; asked: () => boolean } {
   if (!openings) return { done: work(), asked: () => true };
-  const mark: OpeningMark = { asked: false };
-  return { done: openings.run(mark, work), asked: () => mark.asked };
+  const mark: OpeningMark = { unproven: 0 };
+  return { done: openings.run(mark, work), asked: () => mark.unproven > 0 };
 }
 
 /**
@@ -135,11 +150,9 @@ export async function onAccount(
   }
   const key = keyFor(account);
   if (!key) throw new Error("Selling is not configured");
-  // A checkout may exist at Stripe from here on (watchCheckoutOpening).
-  if (method === "POST" && path === "/checkout/sessions") {
-    const mark = openings?.getStore();
-    if (mark) mark.asked = true;
-  }
+  // A checkout may exist at Stripe from here on (watchCheckoutOpening), until Stripe's own refusal proves it does not.
+  const opening = method === "POST" && path === "/checkout/sessions" ? openings?.getStore() : undefined;
+  if (opening) opening.unproven += 1;
 
   // Given up after STRIPE_TIMEOUT_MS (lib/fetch-timeout.ts) as a network
   // failure is: never a StripeError, so a charge that timed out is "no
@@ -163,6 +176,7 @@ export async function onAccount(
     return { response, data: (await response.json()) as Record<string, unknown> };
   });
   if (!response.ok) {
+    if (opening && CHECKOUT_NOT_MADE.has(response.status)) opening.unproven -= 1;
     const error = data.error as
       | { code?: string; type?: string; message?: string }
       | undefined;

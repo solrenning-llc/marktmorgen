@@ -56,8 +56,11 @@ async function main(): Promise<void> {
   is("the refusals could not be read: not checked", checkoutCheck(null).state, "not-checked");
   is("none in 7 days: fine", checkoutCheck({ week: 0, last: null }).state, "ok");
   const refused = checkoutCheck({ week: 3, last: { message: "Your account cannot currently make live charges." } });
-  is("refused: a problem, with Stripe's own words", [refused.state, refused.found], ["problem", 'Stripe would not open a checkout 3 times in the last 7 days. The last time it said: "Your account cannot currently make live charges."']);
-  is("once is said as once", checkoutCheck({ week: 1, last: null }).found, "Stripe would not open a checkout once in the last 7 days.");
+  // Rule 23 (pre-review of claude5/switch-price-checked, tests/pwyw-held-truth.test.ts H5): were 'Stripe would not open a
+  // checkout 3 times in the last 7 days. The last time it said: "..."' and "Stripe would not open a checkout once in the
+  // last 7 days.": the count also holds choose-your-price products held for the day, which Stripe never refused.
+  is("refused: a problem, with Stripe's own words", [refused.state, refused.found], ["problem", 'A checkout did not open 3 times in the last 7 days. The last time, Stripe said: "Your account cannot currently make live charges."']);
+  is("once is said as once", checkoutCheck({ week: 1, last: null }).found, "A checkout did not open once in the last 7 days.");
 
   part("The plan's limits (unit 3)");
   const reset = "This opens again on December 1 (UTC).";

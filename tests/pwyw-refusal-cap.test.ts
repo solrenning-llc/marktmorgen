@@ -71,7 +71,11 @@ async function main() {
 
   part("The buyer of a held checkout is told plainly (app/api/store/checkout/route.ts, ?status=price-held)");
   is("in every store language, nothing charged and when to try again", LANGUAGE_CODES.filter((code) => !(wordsIn(code).notices["price-held"]?.title && wordsIn(code).notices["price-held"]?.body)), []);
-  is("in plain US English", wordsIn("en").notices["price-held"], { title: "This product can't be bought here today", body: "Nothing was charged. The payment company did not set up the price you choose correctly. Try again tomorrow." });
+  // Rule 23 (pre-review of claude5/switch-price-checked, H6 in tests/pwyw-held-truth.test.ts): was { title: "This
+  // product can't be bought here today", body: "Nothing was charged. The payment company did not set up the price you
+  // choose correctly. Try again tomorrow." }, false when the creator archived the Price again and again; the hold lasts
+  // up to 25 hours from any moment (the count's own expiry), not until tomorrow.
+  is("in plain US English", wordsIn("en").notices["price-held"], { title: "This product can't be bought right now", body: "Nothing was charged. Buying it is paused for up to 25 hours, because its price had to be set up again too many times. Please try again later." });
 
   part("P4: held until the count runs out, a day and an hour after the last refusal");
   wrong = false; made = 0; calls = 0;

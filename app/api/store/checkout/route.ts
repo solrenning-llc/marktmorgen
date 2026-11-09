@@ -337,9 +337,13 @@ export async function POST(request: NextRequest) {
     // changed: back to the form it belongs to, said beside the box. Refused
     // before Stripe is reached, so nothing is charged and no unit is held.
     if (error instanceof DigitalConsentMissing) return away(consentBack);
-    // Stripe kept answering wrong today for this product's choose-your-price Price (lib/pay-what-you-want.ts):
-    // not asked again until tomorrow, and said so plainly, rather than "try again in a moment".
-    if (error instanceof PwywPriceHeld) return away(`/@${store.handle}?status=price-held`);
+    // This product's choose-your-price Price had to be made again too many times today (lib/pay-what-you-want.ts):
+    // not asked again for up to 25 hours, said so plainly, rather than "try again in a moment"; and the creator told,
+    // with the product's name and nothing about the buyer (lib/checkout-trouble.ts).
+    if (error instanceof PwywPriceHeld) {
+      after(() => noteCheckoutTrouble(store, error).catch(() => {}));
+      return away(`/@${store.handle}?status=price-held`);
+    }
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));

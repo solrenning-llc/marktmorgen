@@ -201,7 +201,7 @@ export const es: BuyerWords = {
     busy: { title: "Alguien lo está comprando ahora mismo", body: "No se ha cobrado nada. Vuelve a pulsar comprar en un momento." },
     slow: { title: "Demasiados intentos en pocos minutos", body: "No se ha cobrado nada. Espera unos minutos y vuelve a pulsar comprar." },
     error: { title: "No se pudo abrir la página de pago", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },
-    "price-held": { title: "Este producto no se puede comprar aquí hoy", body: "No se ha cobrado nada. La empresa de pagos no configuró bien el precio que eliges. Vuelve a intentarlo mañana." },
+    "price-held": { title: "Este producto no se puede comprar ahora", body: "No se ha cobrado nada. La compra está en pausa hasta 25 horas, porque su precio tuvo que configurarse de nuevo demasiadas veces. Vuelve a intentarlo más tarde." },
     paused: { title: "Esta tienda no acepta pedidos nuevos ahora mismo", body: "No se ha cobrado nada. Los pedidos nuevos vuelven a abrirse a principios del mes que viene, o antes." },
     "paypal-declined": {
       title: "PayPal no aceptó el pago",

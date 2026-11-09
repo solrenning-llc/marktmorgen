@@ -81,6 +81,7 @@ import { canBeBumped, isOneOff } from "@/lib/product-extras";
 import { whyNotInBundle } from "@/lib/bundle-rules";
 import { hasPixels } from "@/lib/pixels";
 import { readTrouble } from "@/lib/checkout-trouble";
+import { PRICE_HELD_CODE } from "@/lib/checkup-rules";
 import { readSalesGoal } from "@/lib/sales-goal";
 import { chatSetup } from "@/lib/chat-summary";
 import { NO_COUNT_COOKIE, isMarkedDevice } from "@/lib/no-count";
@@ -1603,10 +1604,13 @@ export default async function StudioPage({
                 {trouble.week > 0 && trouble.last ? (
                   <div className="notice notice-warn mt-8" role="status">
                     <p className="font-bold text-ink">
-                      {`Stripe would not open a checkout ${trouble.week === 1 ? "once" : `${trouble.week} times`} in the last 7 days`}
+                      {`A checkout did not open ${trouble.week === 1 ? "once" : `${trouble.week} times`} in the last 7 days`}
                     </p>
                     <p className="mt-1 text-sm text-ink-soft">
-                      {`Those buyers could not pay. The last time, ${new Date(trouble.last.at).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })}, Stripe said: “${trouble.last.message}” If it mentions your account, open your Stripe dashboard; if it mentions a price, save the product again.`}
+                      {/* A choose-your-price product held for the day is said in our words, never as Stripe's (lib/checkout-trouble.ts). */}
+                      {trouble.last.code === PRICE_HELD_CODE
+                        ? `Those buyers could not pay. The last time, ${new Date(trouble.last.at).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })}: ${trouble.last.message} Leave the product's price active in your Stripe dashboard.`
+                        : `Those buyers could not pay. The last time, ${new Date(trouble.last.at).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })}, Stripe said: “${trouble.last.message}” If it mentions your account, open your Stripe dashboard; if it mentions a price, save the product again.`}
                     </p>
                   </div>
                 ) : null}

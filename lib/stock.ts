@@ -11,7 +11,7 @@
  * paid for or is paying for right now.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { HOLD_SECONDS, StripeError, onAccount, watchCheckoutOpening } from "@/lib/stripe-account";
+import { CHECKOUT_NOT_MADE, HOLD_SECONDS, StripeError, onAccount, watchCheckoutOpening } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { limitedStock } from "@/lib/product-extras";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
@@ -294,14 +294,8 @@ end
 for i = 1, n do redis.call("HDEL", KEYS[i], ARGV[2]) end
 return 1`;
 
-/**
- * Stripe's answer that it did not make the checkout: a 4xx it answers
- * before doing anything (bad request, key, card, permission, not found, too
- * many requests). Everything else — no answer, a 5xx, a 409 or 424, a reply
- * without the checkout's address — may have made one, and is unknown.
- */
-const NOT_MADE = new Set([400, 401, 402, 403, 404, 429]);
-export const stripeRefusedOpening = (error: unknown): boolean => error instanceof StripeError && NOT_MADE.has(error.status);
+/** Stripe's answer that it did not make the checkout (CHECKOUT_NOT_MADE, lib/stripe-account.ts). */
+export const stripeRefusedOpening = (error: unknown): boolean => error instanceof StripeError && CHECKOUT_NOT_MADE.has(error.status);
 
 /** The refusals every checkout raises before it asks Stripe for anything: orders paused (lib/order-admission.ts), the consent box not checked (lib/digital-consent.ts). */
 export const refusedBeforeStripe = (error: unknown): boolean => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing;
@@ -420,7 +414,9 @@ export async function withCartStockHolds<T extends { id: string }>(
   } catch (error) {
     // Only a proven refusal hands the units back: a lost answer may hide a checkout Stripe made (Codex G2, 5 November 2026).
     // Proven: Stripe was never asked to open one (any error before that request; Claude 4's review of #1732, 6 November
-    // 2026: a false option id held the last unit for the provisional hold's whole term), or refused to.
+    // 2026: a false option id held the last unit for the provisional hold's whole term), or refused to. A checkout
+    // Stripe refused, then a retry that ended before asking again (a choose-your-price product held, PwywPriceHeld),
+    // is never asked: every request Stripe refused stops counting (watchCheckoutOpening).
     if (!opening.asked() || refused(error) || stripeRefusedOpening(error)) await withdraw();
     throw error;
   }

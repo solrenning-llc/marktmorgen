@@ -225,7 +225,7 @@ export const en = {
     busy: { title: "Someone else is buying that right now", body: "Nothing was charged. Press buy again in a moment." },
     slow: { title: "That was a lot of tries in a few minutes", body: "Nothing was charged. Wait a few minutes, then press buy again." },
     error: { title: "The payment page could not be opened", body: "Nothing was charged. Try again in a moment." },
-    "price-held": { title: "This product can't be bought here today", body: "Nothing was charged. The payment company did not set up the price you choose correctly. Try again tomorrow." },
+    "price-held": { title: "This product can't be bought right now", body: "Nothing was charged. Buying it is paused for up to 25 hours, because its price had to be set up again too many times. Please try again later." },
     paused: { title: "This store isn't taking new orders right now", body: "Nothing was charged. New orders open again at the start of next month, or sooner." },
     "paypal-declined": {
       title: "PayPal did not take the payment",

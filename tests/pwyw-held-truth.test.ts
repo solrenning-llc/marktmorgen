@@ -33,7 +33,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_pwyw_held_truth";
-process.env.RESEND_API_KEY = "re_test_pwyw_held_truth_only";
+process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only"; // a synthetic literal (tests/resend-fixture-credentials.ts)
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 
 const kept = new Map<string, Record<string, unknown>>();
@@ -44,7 +44,7 @@ let sessionsMade = 0;
 let inactive = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
-  if (url.hostname === "api.resend.com") {
+  if (url.hostname === "api.resend.com" && init?.method === "POST" && url.pathname === "/emails") {
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
     return new Response(JSON.stringify({ id: `email_${emails.length}` }));
@@ -189,7 +189,8 @@ async function main(): Promise<void> {
   const trouble = await readTrouble(store.statsId);
   is("counted in the studio's checkout refusals, in our words, never as Stripe's", [trouble.week, trouble.last?.code], [1, "pwyw_price_held"]);
   is("the creator is emailed once, about this product, with nothing about the buyer",
-    [emails.length, emails[0]?.to, /Bread Book/.test(emails[0]?.text ?? ""), /in its own words/.test(emails[0]?.text ?? ""), /25 hours/.test(emails[0]?.text ?? "")], [1, OWNER, true, false, true]);
+    [emails.length, emails[0]?.to, /Bread Book/.test(emails[0]?.subject ?? ""), /Bread Book/.test(emails[0]?.text ?? ""), /in its own words/.test(emails[0]?.text ?? ""), /25 hours/.test(emails[0]?.text ?? "")],
+    [1, OWNER, true, true, false, true]);
   const shown = checkoutCheck(trouble);
   is("the studio's checkup never puts our words in Stripe's mouth, and says what helps",
     [shown.state, /Stripe would not open|Stripe said|it said/.test(shown.found), shown.found.includes(trouble.last?.message ?? "-"), /active/.test(shown.fix && "where" in shown.fix ? String(shown.fix.where) : "")], ["problem", false, true, true]);

@@ -187,6 +187,12 @@ export function emailStopped(plan: { pro: boolean; renewalUnpaid: boolean; dispu
 }
 
 /**
+ * The code lib/checkout-trouble.ts keeps for a choose-your-price product held for the day (PwywPriceHeld,
+ * lib/pay-what-you-want.ts): a checkout that did not open, its message in our words, never Stripe's.
+ */
+export const PRICE_HELD_CODE = "pwyw_price_held";
+
+/**
  * Checkouts Stripe refused to open in the last 7 days; null when they could
  * not be read. The count is what lib/checkout-trouble.ts recorded (any
  * Stripe error when opening one, a refusal or Stripe being down), so "ok"
@@ -194,17 +200,30 @@ export function emailStopped(plan: { pro: boolean; renewalUnpaid: boolean; dispu
  * its store cannot be read, so the screen needs a strict reading of it before
  * an "ok" from here can be shown (next unit).
  */
-export function checkoutCheck(trouble: { week: number; last: { message: string } | null } | null): Check {
+export function checkoutCheck(trouble: { week: number; last: { message: string; code?: string } | null } | null): Check {
   const title = "Checkout";
   if (!trouble) return { id: "checkout", title, state: "not-checked", found: "We could not read whether Stripe refused any checkout just now." };
-  if (trouble.week <= 0) return { id: "checkout", title, state: "ok", found: "We recorded no checkout that Stripe would not open in the last 7 days." };
+  if (trouble.week <= 0) return { id: "checkout", title, state: "ok", found: "We recorded no checkout that did not open in the last 7 days." };
   const times = trouble.week === 1 ? "once" : `${trouble.week.toLocaleString("en-US")} times`;
+  // A choose-your-price product held for the day (lib/checkout-trouble.ts): our words, never put in Stripe's mouth,
+  // and what helps with it.
+  if (trouble.last?.code === PRICE_HELD_CODE) {
+    return {
+      id: "checkout",
+      title,
+      state: "problem",
+      found: `A checkout did not open ${times} in the last 7 days. The last time: ${trouble.last.message}`,
+      ifLeft: "A buyer who presses buy gets an error instead of the payment page, and that sale is lost.",
+      fix: { kind: "outside", where: "In your Stripe dashboard, leave the product's price active. Buying it starts again by itself within 25 hours." },
+    };
+  }
   return {
     id: "checkout",
     title,
     state: "problem",
-    // Stripe's own words close the sentence as Stripe wrote them, with no full stop added after the quote.
-    found: `Stripe would not open a checkout ${times} in the last 7 days.${trouble.last ? ` The last time it said: "${trouble.last.message}"` : ""}`,
+    // Stripe's own words close the sentence as Stripe wrote them, with no full stop added after the quote. The count
+    // also holds choose-your-price products held for the day, so it says a checkout did not open, not that Stripe refused.
+    found: `A checkout did not open ${times} in the last 7 days.${trouble.last ? ` The last time, Stripe said: "${trouble.last.message}"` : ""}`,
     ifLeft: "A buyer who presses buy gets an error instead of the payment page, and that sale is lost.",
     fix: { kind: "outside", where: "In your Stripe dashboard, look for a notice asking for information and send what it asks for. If there is none, it may have been Stripe failing for a moment, which passes by itself; if it keeps happening, Stripe's words above say what it would not do." },
   };

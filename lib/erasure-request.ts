@@ -30,6 +30,7 @@
  */
 import { after } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
+import { type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
@@ -205,7 +206,7 @@ async function emailLink(stores: Store[], email: string, origin: string): Promis
       opens = sooner(opens, room.opens);
       continue;
     }
-    const sent = await sendEmail({
+    const outcome = await sendEmailOutcome({
       // `asked` (MM-SA-05): the address was typed by a visitor, and a store knows every address on its
       // list, which a stranger can fill through the sign-up box, so these links take only the share of
       // the access emails such confirmations may (askedCeiling); the rest is kept for buyers' own links.
@@ -214,8 +215,14 @@ async function emailLink(stores: Store[], email: string, origin: string): Promis
       to: email,
       subject: stores.length === 1 ? `Delete your data from ${stores[0].name}` : "Delete your data from stores on Marktmorgen",
       text,
-    });
-    if (sent) return { status: "sent" };
+    }).catch((): SendOutcome => "uncertain");
+    if (outcome === "sent") return { status: "sent" };
+    // It may have gone, unconfirmed: the link stays, so a link that reached the person works, and no other store is
+    // asked for a second email (audit of uncertain sends, 9 November 2026). The answer goes only to the log.
+    if (outcome === "uncertain") {
+      console.warn(`a deletion link may have been emailed, unconfirmed; its link is kept (store ${sender.sid})`);
+      return { status: "sent" };
+    }
     // Its share was spent between the read and the send: the next store is asked. Any other
     // failure (the sender) is not passed on to another store's share, which it would only spend.
     const after = await askedRoom(sender);

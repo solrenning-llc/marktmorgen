@@ -25,7 +25,9 @@ let senderDown = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
-    if (senderDown) return new Response(JSON.stringify({ message: "unavailable" }), { status: 500 });
+    // Rule 23 (uncertain sends, 9 Nov 2026): a certain refusal (422), not a 500, which may follow acceptance and is
+    // now kept as "unsure" (tests/uncertain-send-rights-takedown.test.ts). What the checks below hold is unchanged.
+    if (senderDown) return new Response(JSON.stringify({ message: "unavailable" }), { status: 422 });
     sent.push(JSON.parse(String(init?.body)) as Sent);
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
   }

@@ -92,7 +92,8 @@ export default async function StudioRefundPage({ searchParams }: Params) {
   // "unknown" from the account's own data is shown as the refusal above, which sends the creator to support.
   const withdrawWindow = offer && subscription ? planWithdrawWindow(shown ? reading : null) : null;
   const withdrawOpen = withdrawWindow?.open === true ? withdrawWindow : null;
-  const resend = withdrawn !== null && !withdrawn.sent && withdrawn.tries < PLAN_WITHDRAW_ACK_SENDS;
+  // A receipt that may have gone unconfirmed is never sent again (lib/plan-withdrawal.ts), so the form is not offered for it.
+  const resend = withdrawn !== null && !withdrawn.sent && !withdrawn.unsure && withdrawn.tries < PLAN_WITHDRAW_ACK_SENDS;
   // A refund support has not been told about yet: said, and the form offered again while a try is left.
   const supportOwed = withdrawn !== null && withdrawn.refund && withdrawn.support !== null && !withdrawn.told;
   const supportRetry = supportOwed && withdrawn.supportTries < PLAN_WITHDRAW_SUPPORT_TRIES;
@@ -190,7 +191,7 @@ export default async function StudioRefundPage({ searchParams }: Params) {
                 {withdrawn ? (
                   <>
                     <p className="mt-4 text-ink" data-withdrawn={withdrawn.at}>{W.withdrawn(momentOf(withdrawn.at))}</p>
-                    <p className="mt-2 text-ink-soft">{withdrawn.sent ? W.receiptSent : resend ? W.receiptUnsent : W.receiptGiveUp}</p>
+                    <p className="mt-2 text-ink-soft">{withdrawn.sent ? W.receiptSent : withdrawn.unsure ? W.receiptUnsure : resend ? W.receiptUnsent : W.receiptGiveUp}</p>
                     {supportOwed ? <p className="mt-2 text-ink" data-withdraw-support={supportRetry ? "retry" : "unreached"}>{supportRetry ? W.supportUnsent : W.supportGiveUp(subscription)}</p> : null}
                     {resend || supportRetry ? withdrawForm : null}
                   </>

@@ -44,6 +44,7 @@ export const PLAN_WITHDRAW_WORDS = {
   receiptSent: "We emailed you a receipt with what you sent and when.",
   receiptUnsent: "We could not email your receipt yet. Confirm again below to get it.",
   receiptGiveUp: `We could not email your receipt. Your withdrawal is recorded with its date and time; email ${SUPPORT} for a copy.`,
+  receiptUnsure: `Our email service did not confirm whether your receipt went out. We do not send it again, so you do not get two copies. Your withdrawal is recorded with its date and time; if the receipt is not in your inbox, email ${SUPPORT} for a copy.`,
   supportUnsent: "We could not pass your refund to our support team yet. Confirm again below to try again.",
   supportGiveUp: (subscription: string) => `We could not pass your refund to our support team. Your withdrawal is recorded with its date and time; email ${SUPPORT} with your subscription ${subscription} to get your refund.`,
   notices: {
@@ -54,6 +55,7 @@ export const PLAN_WITHDRAW_WORDS = {
     unreached: { tone: "warn", title: "Your withdrawal was received, but we could not pass on your refund", body: `Your withdrawal is recorded with its date and time. We could not refund your payment at once or reach our support team. Email ${SUPPORT} with your subscription ID to get your refund.` },
     resent: { tone: "success", title: "Your receipt was sent", body: "It shows what you sent and the date and time of your first withdrawal." },
     unsent: { tone: "warn", title: "Your receipt was not sent", body: "Your withdrawal is recorded with its date and time. Try again in a few minutes." },
+    unsure: { tone: "warn", title: "We could not confirm your receipt was sent", body: `Your withdrawal is recorded with its date and time. Our email service did not confirm whether your receipt went out. We do not send it again, so you do not get two copies. If it is not in your inbox, email ${SUPPORT} for a copy.` },
     already: { tone: "success", title: "You already withdrew from your plan", body: "Nothing more is needed. Your first withdrawal and its date stand." },
     closed: { tone: "warn", title: "Your plan cannot be withdrawn from here", body: `The 14 days to withdraw from it online have passed, or it has no payment to withdraw from. Questions: ${SUPPORT}.` },
     form: { tone: "warn", title: "Check the details", body: "A name and a working email address are needed. Nothing was sent." },

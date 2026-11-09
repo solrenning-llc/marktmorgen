@@ -197,7 +197,8 @@ test("a refused acknowledgement can be recovered by the same valid submission", 
     const url = new URL(String(input instanceof Request ? input.url : input));
     if (url.hostname === "api.resend.com") {
       refused++;
-      return new Response(JSON.stringify({ message: "Synthetic temporary outage" }), { status: 503 });
+      // Rule 23 (uncertain sends, 9 Nov 2026): a certain refusal (422); a 5xx may follow acceptance and is now never sent again (tests/uncertain-send-rights-withdrawal.test.ts, -plan-withdrawal.test.ts).
+      return new Response(JSON.stringify({ message: "Synthetic temporary outage" }), { status: 422 });
     }
     return healthyFetch(input, init);
   }) as typeof fetch;

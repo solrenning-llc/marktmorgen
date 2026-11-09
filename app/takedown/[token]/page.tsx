@@ -63,8 +63,9 @@ export default async function TakedownPage({ params }: Params) {
                     <span className="[overflow-wrap:anywhere]">
                       {o.what}
                       {o.up ? <span className="block">It is back up now; the email still explains why it was taken down.</span> : null}
+                      {o.unsure ? <span className="block">Our email service did not confirm whether this email went out. We do not send it again, so the creator never gets two copies. If they did not get it, write to them yourself.</span> : null}
                     </span>
-                    <TakedownButton token={token} action={o.action} label="Send the email to the creator" owed />
+                    {o.unsure ? null : <TakedownButton token={token} action={o.action} label="Send the email to the creator" owed />}
                   </li>
                 ))}
               </ul>

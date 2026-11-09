@@ -30,6 +30,7 @@ const en = {
   notices: {
     done: { title: "Your withdrawal was sent", body: "A confirmation with what you sent and when is on its way to your email." },
     unsent: { title: "Your withdrawal was sent", body: "We could not email the confirmation just now. Your withdrawal is recorded with its date and time; you can ask the store for a copy." },
+    unsure: { title: "Your withdrawal was sent", body: "Your withdrawal is recorded with its date and time, and the store has it. Our email service did not confirm whether your confirmation went out. We do not send it again, so you do not get two copies. If it is not in your inbox, you can ask the store for a copy." },
     unreached: { title: "Your withdrawal is recorded, but not delivered yet", body: "We recorded your withdrawal with its date and time. The store has not received it yet, and no confirmation reached your email. Send this form again to try again." },
     untold: { title: "Your withdrawal is recorded", body: "We could not pass it to the store just now. Send this form again later and we will try again, or write to the store yourself." },
     already: { title: "You already withdrew from this order", body: "Nothing more is needed. Your first withdrawal and its date stand." },
@@ -73,6 +74,7 @@ const es: WithdrawalWords = {
   notices: {
     done: { title: "Tu desistimiento fue enviado", body: "Una confirmación con lo que enviaste y cuándo va camino de tu email." },
     unsent: { title: "Tu desistimiento fue enviado", body: "No pudimos enviar la confirmación por email ahora. Tu desistimiento queda registrado con su fecha y hora; puedes pedir una copia a la tienda." },
+    unsure: { title: "Tu desistimiento fue enviado", body: "Tu desistimiento queda registrado con su fecha y hora, y la tienda lo tiene. Nuestro servicio de email no confirmó si tu confirmación salió. No la enviamos de nuevo, para que no recibas dos copias. Si no está en tu bandeja de entrada, puedes pedir una copia a la tienda." },
     unreached: { title: "Tu desistimiento queda registrado, pero aún no se entregó", body: "Registramos tu desistimiento con su fecha y hora. La tienda aún no lo recibió y no llegó ninguna confirmación a tu email. Envía este formulario de nuevo para volver a intentarlo." },
     untold: { title: "Tu desistimiento queda registrado", body: "No pudimos pasárselo a la tienda ahora. Envía este formulario de nuevo más tarde y lo volveremos a intentar, o escribe tú a la tienda." },
     already: { title: "Ya desististe de este pedido", body: "No hace falta nada más. Tu primer desistimiento y su fecha siguen valiendo." },
@@ -114,6 +116,7 @@ const fr: WithdrawalWords = {
   notices: {
     done: { title: "Votre rétractation a été envoyée", body: "Une confirmation avec ce que vous avez envoyé et quand est en route vers votre e-mail." },
     unsent: { title: "Votre rétractation a été envoyée", body: "Nous n'avons pas pu envoyer la confirmation par e-mail pour l'instant. Votre rétractation est enregistrée avec sa date et son heure ; vous pouvez en demander une copie à la boutique." },
+    unsure: { title: "Votre rétractation a été envoyée", body: "Votre rétractation est enregistrée avec sa date et son heure, et la boutique l'a reçue. Notre service d'e-mail n'a pas confirmé l'envoi de votre confirmation. Nous ne la renvoyons pas, pour que vous n'en receviez pas deux. Si elle n'est pas dans votre boîte de réception, vous pouvez en demander une copie à la boutique." },
     unreached: { title: "Votre rétractation est enregistrée, mais pas encore transmise", body: "Nous avons enregistré votre rétractation avec sa date et son heure. La boutique ne l'a pas encore reçue, et aucune confirmation n'est arrivée dans votre e-mail. Renvoyez ce formulaire pour réessayer." },
     untold: { title: "Votre rétractation est enregistrée", body: "Nous n'avons pas pu la transmettre à la boutique pour l'instant. Renvoyez ce formulaire plus tard et nous réessaierons, ou écrivez vous-même à la boutique." },
     already: { title: "Vous vous êtes déjà rétracté de cette commande", body: "Rien d'autre n'est nécessaire. Votre première rétractation et sa date restent valables." },
@@ -155,6 +158,7 @@ const de: WithdrawalWords = {
   notices: {
     done: { title: "Ihr Widerruf wurde gesendet", body: "Eine Bestätigung mit Ihren Angaben und dem Zeitpunkt ist auf dem Weg zu Ihrer E-Mail." },
     unsent: { title: "Ihr Widerruf wurde gesendet", body: "Die Bestätigung konnte gerade nicht per E-Mail gesendet werden. Ihr Widerruf ist mit Datum und Uhrzeit gespeichert; Sie können den Shop um eine Kopie bitten." },
+    unsure: { title: "Ihr Widerruf wurde gesendet", body: "Ihr Widerruf ist mit Datum und Uhrzeit gespeichert, und der Shop hat ihn erhalten. Unser E-Mail-Dienst hat nicht bestätigt, ob Ihre Bestätigung versendet wurde. Wir senden sie nicht erneut, damit Sie keine zwei Kopien erhalten. Wenn sie nicht in Ihrem Posteingang ist, können Sie den Shop um eine Kopie bitten." },
     unreached: { title: "Ihr Widerruf ist gespeichert, aber noch nicht zugestellt", body: "Wir haben Ihren Widerruf mit Datum und Uhrzeit gespeichert. Der Shop hat ihn noch nicht erhalten, und keine Bestätigung hat Ihre E-Mail erreicht. Senden Sie dieses Formular noch einmal, um es erneut zu versuchen." },
     untold: { title: "Ihr Widerruf ist gespeichert", body: "Wir konnten ihn gerade nicht an den Shop weitergeben. Senden Sie dieses Formular später noch einmal, dann versuchen wir es erneut, oder schreiben Sie dem Shop selbst." },
     already: { title: "Sie haben diese Bestellung bereits widerrufen", body: "Mehr ist nicht nötig. Ihr erster Widerruf und sein Datum gelten weiter." },
@@ -196,6 +200,7 @@ const it: WithdrawalWords = {
   notices: {
     done: { title: "Il tuo recesso è stato inviato", body: "Una conferma con quello che hai inviato e quando sta arrivando alla tua email." },
     unsent: { title: "Il tuo recesso è stato inviato", body: "Non siamo riusciti a inviare la conferma per email in questo momento. Il tuo recesso è registrato con data e ora; puoi chiederne una copia al negozio." },
+    unsure: { title: "Il tuo recesso è stato inviato", body: "Il tuo recesso è registrato con data e ora, e il negozio lo ha ricevuto. Il nostro servizio email non ha confermato se la tua conferma è partita. Non la inviamo di nuovo, così non ne ricevi due copie. Se non è nella tua casella di posta, puoi chiederne una copia al negozio." },
     unreached: { title: "Il tuo recesso è registrato, ma non ancora consegnato", body: "Abbiamo registrato il tuo recesso con data e ora. Il negozio non l'ha ancora ricevuto e nessuna conferma è arrivata alla tua email. Invia di nuovo questo modulo per riprovare." },
     untold: { title: "Il tuo recesso è registrato", body: "Non siamo riusciti a passarlo al negozio in questo momento. Invia di nuovo questo modulo più tardi e riproveremo, oppure scrivi tu al negozio." },
     already: { title: "Hai già receduto da questo ordine", body: "Non serve altro. Il tuo primo recesso e la sua data restano validi." },
@@ -237,6 +242,7 @@ const nl: WithdrawalWords = {
   notices: {
     done: { title: "Je herroeping is verstuurd", body: "Een bevestiging met wat je stuurde en wanneer is onderweg naar je e-mail." },
     unsent: { title: "Je herroeping is verstuurd", body: "We konden de bevestiging nu niet mailen. Je herroeping is vastgelegd met datum en tijd; je kunt de winkel om een kopie vragen." },
+    unsure: { title: "Je herroeping is verstuurd", body: "Je herroeping is vastgelegd met datum en tijd, en de winkel heeft hem ontvangen. Onze e-maildienst heeft niet bevestigd of je bevestiging is verstuurd. We sturen hem niet opnieuw, zodat je geen twee kopieën krijgt. Staat hij niet in je inbox, dan kun je de winkel om een kopie vragen." },
     unreached: { title: "Je herroeping is vastgelegd, maar nog niet bezorgd", body: "We hebben je herroeping vastgelegd met datum en tijd. De winkel heeft hem nog niet ontvangen, en er is geen bevestiging in je e-mail aangekomen. Stuur dit formulier opnieuw om het nog eens te proberen." },
     untold: { title: "Je herroeping is vastgelegd", body: "We konden hem nu niet aan de winkel doorgeven. Stuur dit formulier later opnieuw en we proberen het nog eens, of schrijf de winkel zelf." },
     already: { title: "Je hebt deze bestelling al herroepen", body: "Er is niets meer nodig. Je eerste herroeping en de datum ervan blijven gelden." },
@@ -278,6 +284,7 @@ const pt: WithdrawalWords = {
   notices: {
     done: { title: "A sua desistência foi enviada", body: "Uma confirmação com o que enviou e quando está a caminho do seu email." },
     unsent: { title: "A sua desistência foi enviada", body: "Não foi possível enviar a confirmação por email agora. A sua desistência fica registada com data e hora; pode pedir uma cópia à loja." },
+    unsure: { title: "A sua desistência foi enviada", body: "A sua desistência fica registada com data e hora, e a loja recebeu-a. O nosso serviço de email não confirmou se a sua confirmação foi enviada. Não a enviamos de novo, para que não receba duas cópias. Se não estiver na sua caixa de entrada, pode pedir uma cópia à loja." },
     unreached: { title: "A sua desistência fica registada, mas ainda não foi entregue", body: "Registámos a sua desistência com data e hora. A loja ainda não a recebeu e nenhuma confirmação chegou ao seu email. Envie este formulário de novo para tentar outra vez." },
     untold: { title: "A sua desistência fica registada", body: "Não foi possível passá-la à loja agora. Envie este formulário de novo mais tarde e tentaremos outra vez, ou escreva diretamente à loja." },
     already: { title: "Já desistiu desta encomenda", body: "Não é preciso mais nada. A sua primeira desistência e a data dela continuam válidas." },

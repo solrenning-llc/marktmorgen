@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
-import { type TakedownAction, TakedownNoticeUnsent, openReport, sendOwedNotice, takeDown } from "@/lib/takedown";
+import { type TakedownAction, TakedownNoticeUnsent, TakedownNoticeUnsure, openReport, sendOwedNotice, takeDown } from "@/lib/takedown";
 
 /**
  * Acts on a notice (app/takedown/[token]): `{ token, action }`, where the
@@ -10,7 +10,9 @@ import { type TakedownAction, TakedownNoticeUnsent, openReport, sendOwedNotice, 
  * "Send the email to the creator") it only sends the notice still owed, in
  * its kept words, and never takes anything down, even content up again; a
  * takedown never confirmed as landed, whose content is up, answers 409
- * "unconfirmed" and sends nothing.
+ * "unconfirmed" and sends nothing. A notice to the creator that may have gone
+ * unconfirmed answers "notice_unsure", now and on every later press, and is
+ * never sent again.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -53,6 +55,11 @@ export async function POST(request: NextRequest) {
     if (error instanceof TakedownNoticeUnsent) {
       console.error("the takedown notice to the creator was not sent");
       return Response.json({ ok: false, error: "notice_unsent" }, { status: 500 });
+    }
+    // Down, and the creator's notice may have gone: it is never sent again, so the creator never gets two.
+    if (error instanceof TakedownNoticeUnsure) {
+      console.error("the takedown notice to the creator may have gone; it is not sent again");
+      return Response.json({ ok: false, error: "notice_unsure" }, { status: 500 });
     }
     console.error("taking content down failed", error);
     return Response.json({ ok: false, error: "error" }, { status: 500 });

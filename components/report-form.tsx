@@ -20,7 +20,7 @@ export function ReportForm({ url: given }: { url: string }) {
   const [fields, setFields] = useState({ url: given, work: "", original: "", name: "", email: "", contact: "", signature: "" });
   const [goodFaith, setGoodFaith] = useState(false);
   const [accurate, setAccurate] = useState(false);
-  const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "kept">("idle");
   const [error, setError] = useState("");
   const set = (name: keyof typeof fields) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setFields({ ...fields, [name]: event.target.value });
   const copyright = kind === "copyright";
@@ -44,7 +44,7 @@ export function ReportForm({ url: given }: { url: string }) {
       const raw: unknown = await response.json().catch(() => null);
       const answer = reportAnswer(response.ok, raw);
       if (answer.ok) {
-        setState("sent");
+        setState(answer.kept ? "kept" : "sent");
         return;
       }
       setState("idle");
@@ -53,6 +53,20 @@ export function ReportForm({ url: given }: { url: string }) {
       setState("idle");
       setError("It could not be sent just now. Try again in a moment, or email support@marktmorgen.com.");
     }
+  }
+
+  if (state === "kept") {
+    return (
+      <div role="status" className="card p-6 sm:p-8">
+        <p className="text-lg font-semibold text-ink">Your notice is saved, but we could not confirm it reached our team</p>
+        <p className="mt-2 text-ink-soft">
+          Our email service did not confirm that the copy to our team went out. Please do not send the form again: our
+          team could get it twice. To make sure we have it, email{" "}
+          <a href="mailto:support@marktmorgen.com" className="underline underline-offset-2">support@marktmorgen.com</a> with
+          the address of the page. No copy is emailed to you.
+        </p>
+      </div>
+    );
   }
 
   if (state === "sent") {

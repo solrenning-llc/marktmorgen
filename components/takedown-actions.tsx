@@ -36,6 +36,11 @@ export function TakedownButton({ token, action, label, danger = false, owed = fa
             setState("idle");
             const error = Boolean(raw) && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, "error") ? (raw as Record<string, unknown>).error : null;
             const unsent = error === "notice_unsent";
+            if (error === "notice_unsure") {
+              setSaid("It is down. Our email service did not confirm whether the email to the creator went out. We do not send it again, so the creator never gets two copies. If they did not get it, write to them yourself.");
+              router.refresh();
+              return;
+            }
             if (error === "unconfirmed") {
               setSaid("No email was sent: we could not confirm it was taken down, and it is up now. To take it down, use its own button on this page.");
               router.refresh();

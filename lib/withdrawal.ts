@@ -24,7 +24,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
-import { sendEmail } from "@/lib/email";
+import { type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { fileContact } from "@/lib/inbox";
 import type { Store } from "@/lib/store";
 import { takeData } from "@/lib/store-data";
@@ -167,7 +167,7 @@ export async function withdrawalStanding(store: Pick<Store, "sid">, reference: s
   return { at: record.at, owed };
 }
 
-export type WithdrawOutcome = "done" | "unsent" | "unreached" | "untold" | "already" | "closed" | "full" | "error";
+export type WithdrawOutcome = "done" | "unsent" | "unsure" | "unreached" | "untold" | "already" | "closed" | "full" | "error";
 
 /**
  * Records one withdrawal and sends its acknowledgement and the creator's notice.
@@ -184,6 +184,12 @@ export type WithdrawOutcome = "done" | "unsent" | "unreached" | "untold" | "alre
  * acknowledgement says so, and the next statement tries the notice again, at
  * most WITHDRAWAL_ACK_SENDS times (Codex N on #2827); "full" when the store's
  * data room has no space.
+ *
+ * An acknowledgement whose send is not known (a timeout, a server error) may have
+ * reached the buyer: its tries are spent at once, so no later statement sends a
+ * second copy, and it is never marked sent. With the creator told it is "unsure";
+ * with the creator not told it is "untold", whose words do not say the
+ * acknowledgement went (audit of uncertain sends, 9 November 2026).
  */
 export async function withdraw(store: Store, purchase: Purchase, statement: WithdrawalStatement, nowMs = Date.now()): Promise<WithdrawOutcome> {
   if (!store.sid || !isRedisConfigured() || statement.reference !== purchase.reference) return "error";
@@ -248,16 +254,23 @@ export async function withdraw(store: Store, purchase: Purchase, statement: With
     if (tries === null || tries < 1) return "error";
     if (tries <= WITHDRAWAL_ACK_SENDS) {
       const ack = acknowledgement(statement, purchase.title, store.name, at, w, told);
-      sent = await sendEmail({
+      const outcome = await sendEmailOutcome({
         meter: { by: "store", store, kind: "transactional" },
         from: `"${ordersWords(store.language).ordersFrom(displayName(store.name))}" <${senderAddress()}>`,
         to: statement.email,
         subject: ack.subject,
         text: ack.text,
-      }).catch(() => false);
+      }).catch((): SendOutcome => "uncertain");
+      sent = outcome === "sent";
       if (sent) {
         const marked = repliesFor(await redisPipeline([["HSET", key, "sent", "1"]]).catch(() => null), 1);
         if (!marked || countOf(marked[0]) === null) console.error("a withdrawal's acknowledgement went but could not be marked sent");
+      } else if (outcome === "uncertain") {
+        // It may have gone: no later statement tries it again. The count is what the ceiling reads, so its tries are
+        // spent; the record never says it was sent (its page then says only that the withdrawal stands).
+        const spent = repliesFor(await redisPipeline([["HSET", key, "tries", String(WITHDRAWAL_ACK_SENDS)]]).catch(() => null), 1);
+        if (!spent || countOf(spent[0]) === null) console.error("a withdrawal's acknowledgement may have gone but its tries could not be spent");
+        return told ? "unsure" : "untold";
       }
     }
   }

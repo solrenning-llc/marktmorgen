@@ -69,7 +69,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.resend.com") {
     if (refuseMail > 0) {
       refuseMail -= 1;
-      return answer({ message: "unavailable" }, 500);
+      // Rule 23 (uncertain sends, 9 Nov 2026): a certain refusal (422); a 5xx may follow acceptance and is now never sent again (tests/uncertain-send-rights-withdrawal.test.ts, -plan-withdrawal.test.ts).
+      return answer({ message: "unavailable" }, 422);
     }
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     mails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });

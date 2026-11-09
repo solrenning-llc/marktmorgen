@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { storeFolder } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StudioEmptyState } from "@/components/empty-state";
 import { productSegment } from "@/lib/product-slug";
@@ -149,7 +150,7 @@ export default async function StudioCoursePage({
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Course</p>
+        <StudioTrail store={store} path={[{ label: "Products", href: `${studioPath(store)}#products` }]} here="Course" />
         <h1 className="t-h2 mt-3 break-words">{product.title}</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Modules hold lessons. A lesson can have a video, text, downloads, a link, and a quiz or an assignment, and any lesson can be a

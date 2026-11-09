@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PersonFind } from "@/components/person-find";
 import { PersonNotes } from "@/components/person-notes";
@@ -138,7 +139,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Buyers</p>
+          <StudioTrail store={store} {...(profile ? { path: [{ label: "Buyers", href: studioPath(store, "", "people") }], here: profile.name || profile.email || "One buyer" } : { here: "Buyers" })} />
           {profile ? (
             <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} />
           ) : (

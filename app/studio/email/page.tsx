@@ -16,6 +16,7 @@ import { redirect } from "next/navigation";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { listCounts } from "@/lib/contacts";
 import { listBroadcastsStrict } from "@/lib/broadcasts";
@@ -130,7 +131,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Email</p>
+        <StudioTrail store={store} here="Email" />
         <h1 className="t-h2 mt-3">Write to your list</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Only the people who agreed to hear from you are written to: those who checked the box when they got

@@ -52,8 +52,11 @@ function pages(dir: string): string[] {
   });
 }
 // The studio's first page is where every trail starts: its heading says
-// "Studio" above the store's name, so it needs no trail of one item.
-const EXEMPT = ["app/studio/page.tsx"];
+// "Studio" above the store's name, so it needs no trail of one item. The
+// paused page is shown in place of the studio once its requests are used:
+// it has no way back to the studio by design, since the studio would only
+// send the creator here again, so a link to it would do nothing.
+const EXEMPT = ["app/studio/page.tsx", "app/studio/paused/page.tsx"];
 // Pages added by an open PR (9 November 2026); remove each when it gets a
 // trail. They may not exist yet here, and are then simply not checked.
 const FROM_OPEN_PRS = [

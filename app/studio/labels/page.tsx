@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { BulkLabels } from "@/components/bulk-labels";
 
@@ -32,7 +33,7 @@ export default async function StudioLabelsPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page max-w-3xl pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Your list</p>
+          <StudioTrail store={store} here="Labels" />
           <h1 className="t-h2 mt-3">Labels on your contacts</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Put one label on many contacts, or take it off, by pasting their addresses. You see what it will change before anything is saved, and you can undo it right after.

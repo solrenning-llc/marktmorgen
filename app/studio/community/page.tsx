@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
 import { SITE_URL } from "@/lib/site-url";
@@ -231,7 +232,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Community</p>
+        <StudioTrail store={store} here="Community" />
         <h1 className="t-h2 mt-3">A place for your buyers</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Posts, comments and likes in spaces you set up, live events members RSVP to and join from the page, a

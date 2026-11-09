@@ -26,7 +26,7 @@ const editor = read("components/product-editor.tsx");
 is("the editor's field, its one-off choice, and its buttons for a new product and for one already there", [editor.includes(MEMBERSHIP_EDITOR_WORDS.field), editor.includes(`<option value="">${MEMBERSHIP_EDITOR_WORDS.once}</option>`), editor.includes(`submitLabel="${MEMBERSHIP_EDITOR_WORDS.add}"`), editor.includes(`submitLabel="${MEMBERSHIP_EDITOR_WORDS.save}"`)], [true, true, true, true]);
 is("the four intervals the editor offers", INTERVALS, ["day", "week", "month", "year"]);
 const numbers = read("app/studio/memberships/page.tsx");
-is("the numbers page's own name and the tiles it always shows once Stripe is read", [numbers.includes(`>${MEMBERSHIP_NUMBERS.page}<`), MEMBERSHIP_NUMBERS.tiles.every((t) => numbers.includes(`label: "${t}"`)), numbers.includes("Connect your Stripe account, and your memberships are counted here.")], [true, true, true]);
+is("the numbers page's own name and the tiles it always shows once Stripe is read", [numbers.includes(`here="${MEMBERSHIP_NUMBERS.page}"`), MEMBERSHIP_NUMBERS.tiles.every((t) => numbers.includes(`label: "${t}"`)), numbers.includes("Connect your Stripe account, and your memberships are counted here.")], [true, true, true]);
 const store = read("lib/store.ts");
 is("a call, a bundle and a shipped product are never charged again", [store.includes('if (product.call && (fields.priceCents === 0 || recurring)) return { ok: false, reason: "call" };'), /isBundle\(product\) && \(fields\.priceCents === 0 \|\| recurring/.test(store), /product\.shipping && \(fields\.priceCents === 0 \|\| recurring/.test(store)], [true, true, true]);
 is("a private podcast can be a membership, as the editor says", editor.includes("A course or podcast sold as a membership"), true);

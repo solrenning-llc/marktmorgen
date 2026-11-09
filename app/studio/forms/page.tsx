@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { FormsEditor, type SavedForm } from "@/components/forms-editor";
 import { MAX_CONVERTIBLE_FORM_RESPONSES, formOpportunityRef } from "@/lib/form-opportunity";
@@ -80,7 +81,7 @@ export default async function StudioFormsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Forms</p>
+          <StudioTrail store={store} here="Forms" />
           <h1 className="t-h2 mt-3">Forms, surveys and quizzes</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Ask your questions on one of your own pages: add a Form block to it under Pages. On a page that is a step of a funnel, sending the form leads on to the

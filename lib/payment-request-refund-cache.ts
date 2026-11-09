@@ -7,8 +7,11 @@
  *   nl:payreq:rf:<sid>:<payment>   the cents Stripe says were refunded, for REFUND_CHECK_SECONDS
  *
  * Only a reading Stripe gave whole, with no refund still under way, is kept.
- * A refunded charge the store's Stripe events show forgets it at once
- * (lib/webhooks.ts, charge.refunded); otherwise it goes by itself.
+ * The bound on how old a kept reading can be is REFUND_CHECK_SECONDS: it goes
+ * by itself then. A refunded charge seen by the five-minute Stripe events job
+ * also forgets it (lib/webhooks.ts, charge.refunded), but that job reads only
+ * the stores with an endpoint that wants Stripe events, and usually after the
+ * minute has run out, so it helps only sometimes.
  * Its own small file, so the events reader can forget it without loading
  * what payment requests need.
  */

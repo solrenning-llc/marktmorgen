@@ -382,6 +382,56 @@ async function main(): Promise<void> {
     is("R2 Class B: each part and manifest read back (never the mark), up to 105 reads when the last good copy is lost", line("r2-class-b"), 362_466);
   }
 
+  part("One unknown read of the mark never ends the months' copies (Claude 6's MEDIUM 1 on #3293, after #3273's fix)");
+  {
+    reset();
+    wipe();
+    seed(40);
+    const start = Date.parse("2027-01-01T03:00:00Z");
+    const plain = redis.pipeline.bind(redis);
+    let fail = 0;
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (commands: (string | number)[][]) => {
+      if (fail > 0 && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === "nl:backup:last-ok") {
+        fail -= 1;
+        throw new Error("a transient database error");
+      }
+      return plain(commands);
+    }) as typeof redis.pipeline;
+    const states: string[] = [];
+    try {
+      for (let d = 0; d < 100; d += 1) {
+        at(start + d * DAY);
+        // Day 40 (9 February): one read of the mark fails, and nothing else.
+        if (d === 40) fail = 1;
+        const result = await runBackup({ now: clock, review, store, key });
+        states.push(result.ok ? result.prune : result.reason);
+      }
+    } finally {
+      (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = plain;
+    }
+    is("the day of the unknown read holds its prune, and every day after prunes", [states[40], states.slice(41).filter((s) => s !== "done")], ["prune_unverified", []]);
+    is("the next months' copies are marked again: February, March and April", marked().map((m) => m.month).slice(0, 3), ["2027-04", "2027-03", "2027-02"]);
+  }
+
+  part("A first day's leftover never ends the months' copies (Claude 6's MEDIUM 1 on #3293, case b)");
+  {
+    reset();
+    wipe();
+    seed(10);
+    const start = Date.parse("2027-01-01T03:00:00Z");
+    at(start);
+    // A failed try's part from the same morning: an object that opens as no manifest.
+    filler(9, start - HOUR, 2_000);
+    const states: string[] = [];
+    for (let d = 0; d < 4; d += 1) {
+      at(start + d * DAY);
+      const result = await runBackup({ now: clock, review, store, key });
+      states.push(result.ok ? result.prune : result.reason);
+    }
+    is("the first copy is the base, and every day prunes", states, ["done", "done", "done", "done"]);
+    is("January's copy is marked", marked().map((m) => m.month), ["2027-01"]);
+  }
+
   done();
 }
 

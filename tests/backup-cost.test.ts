@@ -20,6 +20,8 @@
  *     anything it depends on is unknown.
  */
 import { BACKUP_COST_UNKNOWNS, BACKUP_RUNS_PER_MONTH, backupWorstMonth } from "@/lib/backup-cost";
+import * as backupCost from "@/lib/backup-cost";
+import { readFileSync } from "node:fs";
 import type { BackupCostReview } from "@/lib/backup-run";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, FIXED_COST_SOURCE_OBSERVATIONS, LLC_FIXED_COST_IDS, allocateEntireLlcFixedCosts } from "@/lib/llc-fixed-costs";
 import { done, is, part } from "./check";
@@ -67,6 +69,11 @@ is("Vercel: the whole 300 s at 2 GB, CPU all along", line("vercel"), 795_772);
 is("the provider allowance on all of it", line("provider-allowance"), 851_052);
 // 8,510,520 + 851,052 = 9,361,572: $9.36 a month, $112.34 a year.
 is("the month: $9.36", month?.knownMicroUsd, 9_361_572);
+// The quote at the route's own maxDuration (Claude 5's LOW 1 on #3293, 6732268011): the Vercel line at 800 s, not 300.
+const routeSeconds = (backupCost as Record<string, unknown>).BACKUP_ROUTE_SECONDS as number;
+const atRoute = backupWorstMonth(builtAsIs, routeSeconds);
+is("at the route's maxDuration (800 s): $10.82 a month", [routeSeconds, atRoute?.knownMicroUsd], [800, 10_820_417]);
+is("docs/backup.md quotes the month at the route's 800 s, not at 300 s", [readFileSync("docs/backup.md", "utf8").includes("10,820,417"), readFileSync("docs/backup.md", "utf8").includes("worst month at a 300 s route")], [true, false]);
 is("no free quota anywhere: storage, operations and bytes all above zero", [line("r2-storage"), line("r2-class-a"), line("r2-class-b"), line("upstash-transfer")].every((n) => n > 0), true);
 // With fewer commands than the page cap, the walk can read only what its commands allow: 30 - 10 = 20 pages.
 const fewCommands = backupWorstMonth({ ...builtAsIs, maxRows: 2, maxCommands: 30 }, 300)?.lines.find((l) => l.id === "upstash-transfer")?.basis ?? "";

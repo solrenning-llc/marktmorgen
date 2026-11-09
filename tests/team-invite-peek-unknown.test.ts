@@ -110,6 +110,39 @@ async function main(): Promise<void> {
       restore();
     }
   })(), "none");
+
+  // Claude 1 on #2969 (the team case of K2's MEDIUM, rule 24): the team behind the invitation is read exactly too. A
+  // team GET with no reply, or in a shape that is not a string or nil, was an empty team and sent a valid invitation
+  // to expired.
+  part("The team behind the invitation read in an unknown shape is unknown, never 'no longer works'");
+  const TEAM_TOKEN = "f".repeat(64);
+  const inviteId = "3".repeat(16);
+  await real([["SET", inviteKey(TEAM_TOKEN), JSON.stringify({ sid, id: inviteId, email: "ada@example.com", role: "editor" })]]);
+  await real([["SET", `nl:team:${sid}`, JSON.stringify({ members: [], invites: [{ id: inviteId, email: "ada@example.com", role: "editor", createdAt: "", expiresAt: Math.floor(Date.now() / 1000) + 3600 }] })]]);
+  is("control: the invitation on a healthy team is read", await outcome(TEAM_TOKEN), "read");
+  is("control: and its page renders", await landing(TEAM_TOKEN), "page");
+  const isTeamRead = (b: Command[]) => b.length === 1 && b[0][0] === "GET" && b[0][1] === `nl:team:${sid}`;
+  const teamShapes: [string, unknown][] = [
+    ["the team: no reply", []],
+    ["the team: a number", [7]],
+    ["the team: an object", [{ members: [] }]],
+    ["the team: two replies", ["{}", "{}"]],
+    ["the team: not a list at all", { 0: null }],
+  ];
+  for (const [name, reply] of teamShapes) {
+    redis.pipeline = (async (batch: Command[]) => (isTeamRead(batch) ? reply : real(batch))) as typeof redis.pipeline;
+    is(`${name}: peekInvite is unknown`, await outcome(TEAM_TOKEN), "unknown");
+    is(`${name}: the page says the invitation could not be read, never that it expired`, await landing(TEAM_TOKEN), "page");
+    restore();
+  }
+  is("control: a team that is truly not there is none", await (async () => {
+    redis.pipeline = (async (batch: Command[]) => (isTeamRead(batch) ? [null] : real(batch))) as typeof redis.pipeline;
+    try {
+      return await outcome(TEAM_TOKEN);
+    } finally {
+      restore();
+    }
+  })(), "none");
   done();
 }
 

@@ -36,6 +36,7 @@
 import { CALENDAR_LIST_PAUSED, integrationPauseWord } from "@/lib/integration-pause";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimValue, releaseMark } from "@/lib/claim-mark";
 import type { Busy } from "@/lib/call-setup";
 import { readFeed, providerOf } from "@/lib/calendar-sync";
 import { checkUrl, problemWords as fetchProblemWords, SafeFetchError } from "@/lib/safe-fetch";
@@ -287,9 +288,12 @@ export async function hostSync(
   // Failed automatic reads share the same host-wide retry interval as good reads.
   // A kept failure must not turn each booking-page view into another provider call.
   if (!options.force && failure && Number.isFinite(failure.at) && failure.at <= now && now - failure.at < SYNC_SECONDS * 1000) return fallback();
+  // One pass at a time, under a value only this pass writes (lib/claim-mark.ts claimValue), taken only on an exact
+  // "OK": nil is another pass's lock, and any other answer is unknown, so nothing is read on it and nothing let go.
+  const token = claimValue(now);
   let mine: string | null;
   try {
-    [mine] = storedValues(await redisPipeline([["SET", lockKey(host), "1", "NX", "EX", 20]]), 1);
+    [mine] = storedValues(await redisPipeline([["SET", lockKey(host), token, "NX", "EX", 20]]), 1);
   } catch {
     return fallback();
   }
@@ -308,7 +312,9 @@ export async function hostSync(
     if (age < STALE_SECONDS * 1000) return result(source, "ok", good, message);
     return result(source, good ? "stale" : "failed", good, message);
   } finally {
-    await redisPipeline([["DEL", lockKey(host)]]).catch(() => {});
+    // Let go only while it still holds this pass's own value: a pass whose lock ran out never deletes the lock another
+    // pass took since, so no third pass reads the calendar beside it (releaseMark never throws).
+    await releaseMark(lockKey(host), token);
   }
 }
 

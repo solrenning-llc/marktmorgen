@@ -35,6 +35,7 @@ import { stockLeft } from "@/lib/stock";
 import { addProduct, claimHandle, setProductFile, setSubscription, storeFolder, storeForEmail, storeForHandle, storeForPage } from "@/lib/store";
 import { isResting, recordVisit, visitedFolders, visitsIn } from "@/lib/traffic";
 import { firstWordOnVisits } from "@/lib/traffic-billing";
+import { forgetStoreLookups } from "@/lib/store-lookup";
 import {
   SETUP_VISITS,
   TRIAL_VISITS,
@@ -307,6 +308,10 @@ async function main(): Promise<void> {
   const listings = await drawFront();
   // And the request the page is, counted in the store's window: priced apart (tests/plan-cost-registry.ts, public-requests).
   is("a full page of a store that pays is drawn in a few reads", [listings.length, (await counted(drawFront)) <= COMMANDS.frontPage + REQUEST_COMMANDS], [24, true]);
+  // On a server that has not seen the store yet (a cold start, a new instance, every hour): the same model, since the
+  // visitor's lookup sends a real store's address exactly the reads storeForHandle sends (lib/store-lookup.ts).
+  forgetStoreLookups();
+  is("and so is its first page on a server that never saw it", (await counted(drawFront)) <= COMMANDS.frontPage + REQUEST_COMMANDS, true);
   const countFront = async (ip: string) => {
     const store = (await storeForHandle("joy"))!;
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
@@ -334,6 +339,8 @@ async function main(): Promise<void> {
     ]);
   };
   is("a product's page is drawn inside it", (await counted(drawLater)) <= COMMANDS.laterPage + REQUEST_COMMANDS, true);
+  forgetStoreLookups();
+  is("and so is a product's first page on a server that never saw the store", (await counted(drawLater)) <= COMMANDS.laterPage + REQUEST_COMMANDS, true);
   const countLater = async (ip: string) => {
     const store = (await storeForHandle("joy"))!;
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);

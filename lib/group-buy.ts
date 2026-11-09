@@ -50,7 +50,7 @@ import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { refundRowKnown } from "@/lib/refunds";
+import { refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { STRIPE_ACCOUNT_PATTERN, type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -901,12 +901,29 @@ export async function revokeRefundedGroups(
   let hold = kept?.hold;
   let revoked = 0;
 
+  /**
+   * Whether a refund row takes its purchase back, read by the one shared rule (lib/refunds.ts rowGivesBack), as the
+   * other jobs that take things back read them (gifts and pre-orders since 0cbcc276b1): a full refund going through,
+   * succeeded or still pending; and, as before, a refund that succeeded on a charge marked refunded.
+   */
+  const givesBack = (refund: Record<string, unknown>): boolean => {
+    const charge = refund.charge as { refunded?: unknown } | null;
+    return rowGivesBack(refund) || (refund.status === "succeeded" && charge?.refunded === true);
+  };
+  /**
+   * A refund Stripe has not finished (pending, or waiting on an action) that does not give the purchase back yet: it
+   * holds the anchor at its time (audit of refunds, A1), so a later refund never moves the read past it, and it is
+   * listed again and taken back once it goes through.
+   */
+  const notFinal = (refund: Record<string, unknown>): boolean =>
+    (refund.status === "pending" || refund.status === "requires_action") && !givesBack(refund);
+
   /** One refund row read whole: false when something it needed was left unknown, and then it is not marked handled. */
   const handle = async (refund: Record<string, unknown>): Promise<boolean> => {
     const id = refund.id as string;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-    const charge = refund.charge as { refunded?: unknown } | null;
-    if (!pi || refund.status !== "succeeded" || charge?.refunded !== true) return true;
+    // Nothing to take back (yet): a refund not final is held by the pass below, never marked read here.
+    if (!pi || !givesBack(refund)) return true;
     const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
     const handled = countOf(looked?.[0]);
     const groupId = looked?.[1];
@@ -1098,10 +1115,13 @@ export async function revokeRefundedGroups(
     // A row not readable holds the anchor at its time, so the next pass reads it again, and never holds back the pages
     // after it (the sibling of M1 on #3301).
     if (read.holdAt !== null) hold = hold === undefined ? read.holdAt : Math.min(hold, read.holdAt);
+    // A refund not final yet holds the anchor the same way (audit of refunds, A1; as gifts and pre-orders since
+    // 0cbcc276b1): the next pass reads it again, and its places go once it went through.
+    for (const refund of read.rows) if (notFinal(refund)) hold = hold === undefined ? (refund.created as number) : Math.min(hold, refund.created as number);
     for (const refund of read.rows) newest = Math.max(newest, refund.created as number);
     if (!read.hasMore) {
-      // Every row read: the anchor goes to the newest. A row not read: no further than its time, never back before
-      // where this pass started.
+      // Every row read and final: the anchor goes to the newest. A row not read, or a refund not final yet: no further
+      // than its time, never back before where this pass started.
       const at = hold === undefined ? newest : Math.max(since + 300, hold);
       const ended = repliesFor(await redisPipeline([["EVAL", REFUNDS_END, 4, anchorKey(sid), ownerKey(sid), leftKey(sid), passKey(sid), String(at), account]]), 1);
       if (ended?.[0] !== 1) console.error("ending a pass over group refunds was left unknown");

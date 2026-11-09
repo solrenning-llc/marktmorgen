@@ -84,9 +84,6 @@ export async function putOnList(store: Store, order: ListedOrder): Promise<"done
   if (claimed === "unknown") return "failed";
   const products = order.products.filter((p, i) => order.products.findIndex((q) => q.id === p.id) === i);
   try {
-    // A paid order: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125),
-    // only if it was paid after they were deleted: one listed late is not a return (Codex D, #2287).
-    await personReturned(store.statsId, order.email, order.created * 1000);
     if (order.news) {
       const [first, ...rest] = products;
       const added = await upsertContact(store.listId, order.email, {
@@ -114,6 +111,10 @@ export async function putOnList(store: Store, order: ListedOrder): Promise<"done
         }
       }
     }
+    // A paid order: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125),
+    // only if it was paid after they were deleted: one listed late is not a return (Codex D, #2287). Taken only once the
+    // order is on the list, so a run that fails part way leaves the mark for the run that lists it.
+    await personReturned(store.statsId, order.email, order.created * 1000);
     await redisPipeline([["SET", key, "done", "EX", DONE_SECONDS]]);
     return "done";
   } catch (error) {

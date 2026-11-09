@@ -1,3 +1,13 @@
+> **SUPERSEDING ADDENDUM — 9 November 2026, after the initial opinion. NOT READY TO MERGE.**
+>
+> After publishing the initial bounded review 5821692430, Z read the new ROOT messages and C2's first financial review 6732247045. C2 identified that prevention can block a dispute without refunding the payment; C6 accepted this and announced the corrective work at ROOT 01:31. This is C2's finding, not an independently reproduced new Z finding. The initial policy-limited opinion MUST NOT count as a clean financial approval of this head, or of #3318's same prevented-as-returned assumption. Keep both pending the actual corrective delta and focal review.
+>
+> Z then independently opened the official [2025-08-27 Basil changelog](https://docs.stripe.com/changelog/basil/2025-08-27/add-preventions-to-dispute), [prevention guide](https://docs.stripe.com/disputes/get-started/prevention), and [versioned dispute object](https://docs.stripe.com/api/disputes/object?api-version=2025-08-27.basil), on 9 November 2026 UTC. The changelog distinguishes block from resolution; the guide separates network blocking through CE 3.0 from refund-based resolution and states RDR excludes already-refunded transactions. Thus the earlier enum-only evidence was insufficient to support an unconditional returned-money interpretation. The versioned object documents that balance transactions record withdrawals and reinstatements. Nested case-type expansion was unavailable through the reader (the first unexpanded page collapsed it; the explicit .md expansion failed); exact field wording in C2's review remains attributed to C2, not falsely claimed as Z's own retrieval.
+>
+> Existing Z runtime results below remain valid ONLY for the synthetic assumptions tested. They do not establish correct block/resolution classification. No new runtime or capped-root replay was performed on receiving the peer finding. Z does not duplicate C6's correction, change a provider version/flag, or claim to have verified the proposed balance-transaction helper. No live incident is asserted. The conditional refund/dispute double-count observation remains separate from the confirmed need to distinguish prevention modes.
+>
+> Original immutable report and raw evidence remain at e7f83a78b90fa93c921ed4977a7cee7027f08142. This addendum supersedes any broader interpretation of its verdict; all logs, initial harness correction, heads and budget history are retained.
+
 # Codex Z — SECOND independent money review of #3321
 
 Subject: `7a21f016143c736242c4fa38499c6bd2a2bdee0f`; parent RED: `f235f3bdbb8505b1a14e616f169b120b9830cd58`.

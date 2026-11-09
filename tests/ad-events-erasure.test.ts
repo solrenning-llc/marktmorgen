@@ -156,6 +156,54 @@ async function main(): Promise<void> {
   is("the renewal is sent", await sendRenewals(store, NOW), 1);
   is("to Meta", toMeta, 1);
 
+  part("A person deleted while a renewal pass is between its reads and its send: nothing goes (Codex P on #3324)");
+  // The pass reads the kept cookies and the deleted addresses first; the
+  // person is then deleted by the real door before the pass claims and
+  // sends. Read at the claim, the deletion is seen: nothing goes to Meta.
+  const RACE = "sub_Racing0000001";
+  const RACER = "racing@example.com";
+  sessions = [paid("cs_test_racing000001", RACER, RACE)];
+  is("the purchase is sent", await sendServerPurchase(store, "cs_test_racing000001", buyer, NOW), "sent");
+  invoices = [renewal("in_Racing00000001", RACER, RACE)];
+  let erasedMidway: boolean | null = null;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await real(commands);
+    if (erasedMidway === null && commands.some((c) => c[0] === "GET" && c[1] === subKey(RACE)) && commands.some((c) => c[0] === "HMGET")) {
+      redis.pipeline = real;
+      erasedMidway = (await erasePerson(store, RACER, { kind: "person" })).ok;
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  toMeta = 0;
+  const raced = await sendRenewals(store, NOW);
+  redis.pipeline = real;
+  is("the erasure ran between the pass's reads and its send, and finished", erasedMidway, true);
+  is("what was kept for the membership is gone", redis.run(["GET", subKey(RACE)]), null);
+  is("no renewal sent", raced, 0);
+  is("Meta asked nothing", toMeta, 0);
+
+  part("The same, for a record kept before the fix, which the erasure cannot find: the deleted address is asked again at the claim");
+  const RACE_OLD = "sub_RacingOld00001";
+  const RACER_OLD = "racing-old@example.com";
+  redis.run(["SET", subKey(RACE_OLD), JSON.stringify({ _fbp: "fb.1.1.racingold" }), "EX", 400 * 86_400]);
+  invoices = [renewal("in_RacingOld00001", RACER_OLD, RACE_OLD)];
+  let erasedOld: boolean | null = null;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await real(commands);
+    if (erasedOld === null && commands.some((c) => c[0] === "GET" && c[1] === subKey(RACE_OLD)) && commands.some((c) => c[0] === "HMGET")) {
+      redis.pipeline = real;
+      erasedOld = (await erasePerson(store, RACER_OLD, { kind: "person" })).ok;
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  toMeta = 0;
+  const racedOld = await sendRenewals(store, NOW);
+  redis.pipeline = real;
+  is("the erasure ran between the pass's reads and its send, and finished", erasedOld, true);
+  is("no renewal sent", racedOld, 0);
+  is("Meta asked nothing", toMeta, 0);
+  is("and what was kept for it goes", redis.run(["GET", subKey(RACE_OLD)]), null);
+
   part("Nothing is kept that nothing could find, or for an address already deleted");
   const NOMAIL = "sub_NoMail00000001";
   sessions = [paid("cs_test_nomail000001", null, NOMAIL)];

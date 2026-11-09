@@ -308,13 +308,14 @@ export default function PrivacyPage() {
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
           behalf and under its own privacy policy. A visitor who did not allow
-          ad measurement is never sent, and neither is a purchase or sign-up
-          of somebody deleted from the store. We keep the token sealed; for
+          ad measurement is never sent, and neither is a purchase, payment or
+          sign-up of somebody deleted from the store, unless it was already
+          being sent when they were deleted. We keep the token sealed; for
           four days at the most, the request that opened a checkout, deleted
           once its purchase is known; for 400 days, the cookies and ad
           click id a membership&apos;s later payments are sent with, never an
           address or browser, deleted with the buyer when they are deleted
-          from the store, after which none of their later payments is sent;
+          from the store;
           for three days (40 for a membership payment) that
           each was sent; and the platform&apos;s last answer for the creator to
           see.

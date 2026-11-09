@@ -185,6 +185,8 @@ async function main(): Promise<void> {
   // #3411's watchLater keeps a record six hours from a capture's answer that came back after the ceiling: an hour
   // before it here, the record ends six hours from now. Asked about and still pending, it keeps those six hours, and
   // its next look comes before they end, not before the ceiling's hour.
+  // A fresh in-memory Redis, its clock back on Date.now (the part above moved it five days on).
+  redis.clear();
   const late = "5O190127TNLATE0001";
   const lateNow = Math.floor(Date.now() / 1000);
   redis.run(["SET", orderKey(late), JSON.stringify({ s: STATS, h: "harbor", p: "guide01", c: 4900, cur: "usd", m: SELLER, at: lateNow - 30 * DAY + 3600, meta: {} })]);
@@ -239,7 +241,9 @@ async function main(): Promise<void> {
       if (!recordEnd && redis.run(["EXISTS", orderKey(tail)]) === 0) recordEnd = t;
     }
     onAsk = () => undefined;
-    is("the record ends thirty days from opening", recordEnd > 0 && recordEnd - (t0 - 2 * DAY) <= 30 * DAY + 300, true);
+    // Rule 23: was "ends thirty days from opening" (the sweep cut it to the ceiling). Since the focal review of #3411 the
+    // sweep never cuts a record: this one, kept thirty days from the capture asked for (main's watchLater), ends then.
+    is("the record ends at its own end, not cut by the sweep", recordEnd > 0 && recordEnd - t0 <= 30 * DAY + 300 && recordEnd - t0 > 30 * DAY - 300, true);
     is("asked within one run (600 s) of its end, not a six-hour step before", recordEnd - (askedAt.at(-1) ?? 0) <= 600, true);
     is("and let go of pending only then", redis.run(["ZSCORE", PENDING, tail]), null);
     is("letting it go is logged, with the order", errors.some((e) => e.includes("record ended") && e.includes(tail)), true);

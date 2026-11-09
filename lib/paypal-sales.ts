@@ -757,16 +757,22 @@ export function nextPendingLook(openedAt: number, now: number): number {
  * none (its life ended); a reply in another envelope, text that is not JSON, or a record without its store, merchant
  * and a positive whole opening time is "unknown", never "ended", so a pending order is not dropped on a read that
  * failed, nor asked about as if opened in 1970 (#3411's record cap reads the opening time and throws on one that is not).
+ * With it, when the record ends, in whole seconds (PEXPIRETIME, in the same pipeline: milliseconds since the epoch),
+ * so the sweep never cuts a record kept past the ceiling (#3411's watchLater keeps one six hours from a late answer)
+ * and asks before its real end: null for a record with no end (-1; none is written here), "unknown" for a record gone
+ * between the two reads (-2) or any other answer.
  */
-async function readOpenedExact(order: string): Promise<Opened | null | "unknown"> {
-  const read = repliesFor(await redisPipeline([["GET", orderKey(order)]]), 1);
+async function readOpenedExact(order: string): Promise<{ opened: Opened; ends: number | null } | null | "unknown"> {
+  const read = repliesFor(await redisPipeline([["GET", orderKey(order)], ["PEXPIRETIME", orderKey(order)]]), 2);
   if (!read) return "unknown";
   if (read[0] === null) return null;
   if (typeof read[0] !== "string") return "unknown";
+  const ends = read[1];
+  if (typeof ends !== "number" || !Number.isSafeInteger(ends) || (ends !== -1 && ends <= 0)) return "unknown";
   try {
     const opened = JSON.parse(read[0]) as Opened | null;
     return opened && typeof opened === "object" && typeof opened.s === "string" && typeof opened.m === "string" && Number.isSafeInteger(opened.at) && opened.at > 0
-      ? opened
+      ? { opened, ends: ends === -1 ? null : Math.floor(ends / 1000) }
       : "unknown";
   } catch {
     return "unknown";
@@ -803,37 +809,42 @@ export async function watchPayPal(
   // from opening, so a payment PayPal took is not let go unread when the record's own three days end. Its next look
   // never falls past five minutes before that end (pre-review MEDIUM 1): a six-hour step would let the record end
   // unread, and a payment PayPal completed in its last hours would never be handed over; at or past it, every run asks.
-  // XX: an order the return wrote down meanwhile (settle takes it off pending) is not put back. One pipeline of at most
-  // two commands.
-  const keep = async (order: string, opened: Opened): Promise<void> => {
+  // The record is only ever extended, never cut (focal review of #3411): one that ends later than the ceiling (#3411's
+  // watchLater keeps one six hours from a late answer) keeps its end, and the last look is five minutes before that
+  // real end. XX: an order the return wrote down meanwhile (settle takes it off pending) is not put back. One pipeline
+  // of at most two commands.
+  const keep = async (order: string, opened: Opened, ends: number | null): Promise<void> => {
     const until = opened.at + PENDING_KEPT_SECONDS;
-    const next = Math.min(nextPendingLook(opened.at, now), Math.max(now + 1, until - 300));
+    const extend = until > now && (ends === null || ends < until);
+    const end = extend ? until : ends;
+    const next = end === null ? nextPendingLook(opened.at, now) : Math.min(nextPendingLook(opened.at, now), Math.max(now + 1, end - 300));
     await redisPipeline([
       ["ZADD", pendingKey(statsId), "XX", String(next), order],
-      ...(until > now ? [["EXPIREAT", orderKey(order), String(until)]] : []),
+      ...(extend ? [["EXPIREAT", orderKey(order), String(until)]] : []),
     ]);
   };
   for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
     if (Date.now() >= deadline) return result;
-    const opened = await readOpenedExact(order);
+    const read = await readOpenedExact(order);
     // A record that could not be read is not one that ended: asked again in an hour, its record left as it is.
-    if (opened === "unknown") {
+    if (read === "unknown") {
       await redisPipeline([["ZADD", pendingKey(statsId), "XX", String(now + 3600), order]]);
       continue;
     }
     // Thirty days from opening without PayPal settling it (its record ended): no longer asked about, and said so in the
     // logs, since a payment PayPal completes after this is not handed over by the sweep.
-    if (!opened || (await readPaid(order))) {
-      if (!opened) console.error("a pending PayPal order was let go: its record ended before PayPal settled it", order);
+    if (!read || (await readPaid(order))) {
+      if (!read) console.error("a pending PayPal order was let go: its record ended before PayPal settled it", order);
       await redisPipeline([["ZREM", pendingKey(statsId), order]]);
       continue;
     }
+    const { opened, ends } = read;
     let done: Record<string, unknown>;
     try {
       done = await call("GET", `/v2/checkout/orders/${encodeURIComponent(order)}`, { merchant: opened.m });
     } catch (error) {
       console.error("reading a PayPal order failed", error);
-      await keep(order, opened);
+      await keep(order, opened, ends);
       continue;
     }
     const { capture, payee, email } = captureIn(done);
@@ -841,16 +852,16 @@ export async function watchPayPal(
     // other answer (approved, created, saved, completed without its captures, no status) is kept and asked again
     // (CX-123 rule 24; review of Codex G on #2681). A kept order is let go when its record ends (30 days).
     if (!capture) {
-      await (done.status === "VOIDED" ? redisPipeline([["ZREM", pendingKey(statsId), order]]) : keep(order, opened));
+      await (done.status === "VOIDED" ? redisPipeline([["ZREM", pendingKey(statsId), order]]) : keep(order, opened, ends));
       continue;
     }
     if (capture.status === "PENDING" || typeof capture.status !== "string") {
-      await keep(order, opened);
+      await keep(order, opened, ends);
       continue;
     }
     // Completed and what was asked, but without the buyer's address or the capture's id: paid, not yet readable.
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) {
-      await keep(order, opened);
+      await keep(order, opened, ends);
       continue;
     }
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && email && typeof capture.id === "string") {

@@ -698,9 +698,10 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  * - listReadsPerStoreRun: one ZRANGEBYSCORE of the store's pending orders whose turn has come;
  * - ordersPerStoreRun: at most 25 of them read a run;
  * - payPalReadsPerOrderLook: one GET of the order at PayPal (PayPal bills no API call; inside the job's deadline);
- * - ownCommandsPerOrderLook: for an order kept, the record's GET, the paid record's GET and one pipeline of ZADD XX
- *   (its next look) and EXPIREAT (its record); an order let go takes one ZREM in place of those two, and one written
- *   down takes settle's own step, the order's (line orders);
+ * - ownCommandsPerOrderLook: for an order kept, the record's GET and PEXPIRETIME (when it ends, so it is never cut),
+ *   the paid record's GET and one pipeline of ZADD XX (its next look) and, only to extend it, EXPIREAT (its record);
+ *   an order let go takes one ZREM in place of those two, and one written down takes settle's own step, the order's
+ *   (line orders);
  * - looksPerOrderPerRunAtMost: the bound that holds whatever happens, one look a run of the job (288 a day): the
  *   sweep reads each pending order at most once a run, and the return page, each time it is loaded again, puts the
  *   order's turn back to now (captureOrder), so looksPerOrderPerDayAtMost is not a ceiling;
@@ -711,7 +712,7 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  *   thirty days from the capture asked for, up to three days after opening, ends thirty days from opening only once
  *   #3411 caps it the same way, so until then up to 33 days from opening.
  * Before this an order kept was read every run of the job (288 a day, two commands each): 576 commands an order a
- * day, against 232 when only the sweep schedules it, and at most 288 x 4 = 1,152 when the return page is reloaded
+ * day, against 290 when only the sweep schedules it, and at most 288 x 5 = 1,440 when the return page is reloaded
  * every five minutes all day. A scheduled job bounded by its schedule and the batch, a company fixed cost like
  * HAND_OVER_BATCH; its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.
  * Held by tests/paypal-pending-backoff.test.ts.
@@ -720,7 +721,7 @@ export const PAYPAL_PENDING_WATCH = {
   listReadsPerStoreRun: 1,
   ordersPerStoreRun: 25,
   payPalReadsPerOrderLook: 1,
-  ownCommandsPerOrderLook: 4,
+  ownCommandsPerOrderLook: 5,
   looksPerOrderPerDayAtMost: 58,
   looksPerOrderPerRunAtMost: 1,
   daysWatchedAtMost: 30,

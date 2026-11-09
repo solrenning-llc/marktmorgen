@@ -16,7 +16,7 @@ export function originFrom(request: NextRequest): string {
   // else (a protocol carrying a URL, a host with a path, a user part or a
   // space) is never pasted into a link; the request's own URL is used.
   const host = firstValue(request.headers.get("x-forwarded-host") ?? request.headers.get("host"));
-  if (!host || !PLAIN_HOST.test(host)) return new URL(request.url).origin;
+  if (!host || !isPlainHost(host)) return new URL(request.url).origin;
 
   const forwardedProto = firstValue(request.headers.get("x-forwarded-proto")).toLowerCase();
   const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
@@ -26,6 +26,17 @@ export function originFrom(request: NextRequest): string {
 
 /** One host name (or bracketed IPv6 address) with an optional port, and nothing else. */
 const PLAIN_HOST = /^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::\d{1,5})?$/i;
+
+/** PLAIN_HOST's shape, and an authority the URL parser itself accepts (a real IPv6 address, a port up to 65535). */
+function isPlainHost(host: string): boolean {
+  if (!PLAIN_HOST.test(host)) return false;
+  try {
+    new URL(`http://${host}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** The first value of a header that may hold a comma-separated list, trimmed. */
 const firstValue = (value: string | null): string => (value ?? "").split(",")[0].trim();

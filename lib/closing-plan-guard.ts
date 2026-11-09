@@ -167,6 +167,8 @@ export async function plansByCustomer(store: Store): Promise<Record<string, unkn
   const observedStore = { ...store, previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], stripeCustomerId: customer };
   const query = new URLSearchParams({ customer, status: "all", limit: "100" });
   query.append("expand[]", "data.customer");
+  // A past-due plan is live only while Stripe still tries it (lib/billing.ts startedFrom, retryLeft).
+  query.append("expand[]", "data.latest_invoice");
   const page = await onPlatform("GET", `/subscriptions?${query}`);
   // The independent fallback may save a store and activate a funded plan.
   // It needs the same full-page proof as the two-read recovery path.

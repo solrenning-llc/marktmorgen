@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
-import { COST_LINES, PLATFORM_SUBSCRIPTION_SEARCH as profile, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD as event } from "./plan-cost-registry";
+import { COMMAND, COST_LINES, PLATFORM_SUBSCRIPTION_SEARCH as profile, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD as event } from "./plan-cost-registry";
 
 test("CX-61 prices two full timeout waits using the highest published regional memory rate", () => {
   assert.equal(MAX_ADDRESSES, 10);
@@ -20,7 +20,10 @@ test("only shared essential checkout/deletion events and daily closing receive t
   assert.equal(profile.essentialEventsPerWindow, 320);
   assert.equal(profile.closingEventsPerWindow, 32);
   for (const tier of ["creator", "pro", "scale"] as const) {
-    assert.equal(line.monthlyUsd(tier), event * (320 + 32));
+    // Regra 23 (pre-review M-b): was event * (320 + 32). Each closing event may also take room in the weekly brake on
+    // plans missing, at most six Redis commands.
+    assert.equal(profile.missingBrakeCommands, 6);
+    assert.equal(line.monthlyUsd(tier), event * (320 + 32) + 32 * 6 * COMMAND);
   }
   assert.equal(line.sources.some(source => source.file === "lib/traffic.ts"), false);
 });

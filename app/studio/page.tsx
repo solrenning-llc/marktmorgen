@@ -463,7 +463,11 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
   },
   "canceling-unpaid": {
     title: "Canceled",
-    body: "Your plan will not renew. The renewal payment that did not go through is canceled at Stripe, so your card is not tried for it again. Until the date below your store's page stays up, but its checkout stays closed, as it has been since that payment failed; then your plan ends. You can change your mind on this page until then, and your plan is next charged on that date.",
+    body: "Your plan will not renew. The renewal payment that did not go through is canceled at Stripe, so your card is not tried for it again. Until the date below your store's page stays up, but its checkout stays closed, as it has been since that payment failed; then your plan ends. You can change your mind on this page until then; if you do, it is next charged on that date.",
+  },
+  "canceling-paused": {
+    title: "Canceled",
+    body: "Your plan will not renew. Collection of its payments is paused at Stripe, so nothing is charged, and until the date below your store's page stays up but its checkout stays closed; then your plan ends. You can change your mind on this page until then.",
   },
   "canceling-unpaid-open": {
     title: "Canceled, but one payment may still be tried",
@@ -941,6 +945,8 @@ export default async function StudioPage({
   const recordedSince = (written ?? store)?.renewalUnpaidSince ?? 0;
   const unpaidSince = plan ? (plan.renewalUnpaid ? Math.max(1, recordedSince) : 0) : paid ? recordedSince : 0;
   const current = store ? { ...store, subscriptionActive: paid, ...(plan ?? {}), renewalUnpaidSince: unpaidSince } : null;
+  // Unpaid because collection is paused at Stripe, not because a payment failed: said in its own words (pre-review L-3).
+  const collectionPaused = live?.state === "active" && live.collectionPaused === true;
   // How this creator is billed, and what the other way would cost them.
   const billedYearly = live?.state === "active" ? live.cycle === "year" : current?.cycle === "year";
   const tier = current?.tier ?? "creator";
@@ -1369,7 +1375,7 @@ export default async function StudioPage({
         {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
         {store && twoStepRead !== null && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
 
-        {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
+        {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} paused={collectionPaused} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
 
         {notice ? (
@@ -2955,7 +2961,9 @@ export default async function StudioPage({
                     <p className="mt-5 notice notice-warn font-semibold">
                       {trialing
                         ? `Canceled during the trial. Your card will not be charged, and your store keeps taking payments until ${endsOn ?? "the trial ends"}.`
-                        : unpaidSince > 0
+                        : collectionPaused
+                          ? `Canceled. Your plan will not renew. Collection of your plan's payments is paused at Stripe, so until ${endsOn ?? "the end of this period"} your store's page stays up but its checkout stays closed, and then your plan ends.`
+                          : unpaidSince > 0
                           ? `Canceled. Your plan will not renew. Its last renewal payment did not go through, so until ${endsOn ?? "the end of this period"} your store's page stays up but its checkout stays closed, and then your plan ends.`
                           : `Canceled. Nothing more will be charged, and your store keeps taking payments until ${endsOn ?? "the end of the period you paid for"}.`}
                     </p>
@@ -3143,7 +3151,9 @@ export default async function StudioPage({
                       <p className="mt-3 text-sm text-ink-soft">
                         {trialing
                           ? `Your store keeps taking payments until ${endsOn ?? "the trial ends"}, and your card is never charged.`
-                          : unpaidSince > 0
+                          : collectionPaused
+                            ? `Your plan will not renew. Its payments are paused at Stripe, so nothing is charged, and your checkout stays closed until ${endsOn ?? "the end of this period"}, when your plan ends.`
+                            : unpaidSince > 0
                             ? `Your plan will not renew, and the renewal payment that did not go through is canceled at Stripe, so your card is not tried for it again. Your checkout stays closed until ${endsOn ?? "the end of this period"}, when your plan ends.`
                             : `Your store keeps taking payments until ${endsOn ?? "the end of the period you already paid for"}, and nothing more is charged.`}
                       </p>

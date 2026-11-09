@@ -111,13 +111,15 @@ export async function onPlatform(
   method: "GET" | "POST" | "DELETE",
   path: string,
   body?: URLSearchParams,
-  pinned?: { version?: string; idempotencyKey?: string },
+  pinned?: { version?: string; idempotencyKey?: string; timeoutMs?: number },
 ): Promise<Record<string, unknown>> {
   const key = platformKey();
   if (!key) throw new Error("Billing is not configured");
 
-  // Given up after STRIPE_TIMEOUT_MS as a network failure is (lib/fetch-timeout.ts).
-  const { response, data } = await timed(STRIPE_TIMEOUT_MS, async (signal) => {
+  // Given up after STRIPE_TIMEOUT_MS as a network failure is (lib/fetch-timeout.ts),
+  // or sooner when the caller has less of its time left (never longer).
+  const wait = Math.min(STRIPE_TIMEOUT_MS, pinned?.timeoutMs ?? STRIPE_TIMEOUT_MS);
+  const { response, data } = await timed(wait, async (signal) => {
     const response = await fetch(`${STRIPE_API}${path}`, {
       method,
       headers: {
@@ -423,6 +425,12 @@ export type StartedSubscription = {
   shared: boolean;
   /** The period paid for, which the store's allowances follow (lib/allowance-window.ts); null when Stripe did not say. */
   period: BillingPeriod | null;
+  /**
+   * Set only when the renewal now running is unpaid (SubscriptionState's
+   * renewalUnpaid), so a plan found running again is written down unpaid,
+   * never as a store paid up (pre-review A1).
+   */
+  renewalUnpaid?: true;
 };
 
 /**
@@ -535,6 +543,12 @@ export type SubscriptionState =
        */
       renewalUnpaid: boolean;
       /**
+       * Set when the renewal is unpaid because collection is paused at Stripe
+       * (`pause_collection`), not because a payment failed: the studio says
+       * so in its own words, and a cancel has no renewal to void (pre-review L-3).
+       */
+      collectionPaused?: true;
+      /**
        * The period being paid for, which the store's allowances follow
        * (lib/allowance-window.ts): null while trialing, and when Stripe did
        * not give both ends. `renews` is false when it is set to stop.
@@ -586,21 +600,57 @@ export function pastDueInGrace(subscription: Record<string, unknown>): boolean {
 }
 
 /**
- * Whether a renewal that failed still has another attempt coming, read from
- * the subscription's latest invoice when it was expanded: "no" when that
- * invoice is open (or marked uncollectible) with `next_payment_attempt` null,
- * which is Stripe having stopped trying; "yes" when an attempt is scheduled;
- * "unread" when the invoice is not there to read, or says neither. The
- * subscription carries no retry date of its own (#3370 reads memberships the
- * same way, lib/membership-access.ts).
+ * Stripe's longest retry window (Smart Retries: up to two months; a custom
+ * schedule has at most three retries), with a day to spare: a renewal with no
+ * try scheduled ends its plan only once its invoice is older than this
+ * (pre-review M-a). A null `next_payment_attempt` is not, by itself, Stripe
+ * having stopped: 3DS waiting on the customer and Billing automations can
+ * leave it null too (docs/stripe-charge-recovery-study-2026-11-06.md, gap 4;
+ * docs.stripe.com could not be read again on 9 November 2026). Waiting for
+ * the longest window means no plan ends while Stripe may still try it.
  */
-export function retryLeft(subscription: Record<string, unknown>): "yes" | "no" | "unread" {
+export const NO_TRY_WAIT_DAYS = 63;
+
+/**
+ * Whether a renewal that failed still has another attempt coming, read from
+ * the subscription's latest invoice when it was expanded:
+ * - "yes": an attempt is scheduled (`next_payment_attempt`);
+ * - "no": an invoice charged automatically, open (or marked uncollectible),
+ *   with none scheduled and made more than NO_TRY_WAIT_DAYS ago: Stripe has
+ *   stopped trying, and the plan has ended;
+ * - "waiting": the same, but younger than that, or of an age that cannot be
+ *   read: the renewal's grace, nothing ends;
+ * - "manual": an invoice sent to be paid by its link (`send_invoice`), whose
+ *   `next_payment_attempt` is always null: the grace, nothing ends;
+ * - "unread": the invoice is not there to read, or says none of these.
+ * The subscription carries no retry date of its own (#3370 reads memberships
+ * the same way, lib/membership-access.ts).
+ */
+export function retryLeft(subscription: Record<string, unknown>, nowSeconds = Math.floor(Date.now() / 1000)): "yes" | "no" | "waiting" | "manual" | "unread" {
   const invoice = subscription.latest_invoice;
   if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return "unread";
-  const { status, next_payment_attempt: next } = invoice as { status?: unknown; next_payment_attempt?: unknown };
+  const { status, next_payment_attempt: next, collection_method: collection, created } = invoice as {
+    status?: unknown; next_payment_attempt?: unknown; collection_method?: unknown; created?: unknown;
+  };
+  if (collection === "send_invoice" || subscription.collection_method === "send_invoice") return "manual";
   if (typeof next === "number" && Number.isSafeInteger(next) && next > 0) return "yes";
-  if (next === null && (status === "open" || status === "uncollectible")) return "no";
-  return "unread";
+  if (next !== null || (status !== "open" && status !== "uncollectible")) return "unread";
+  // Charged automatically, or Stripe would not retry it at all: anything else is not known to be.
+  if (collection !== "charge_automatically") return "unread";
+  if (typeof created !== "number" || !Number.isSafeInteger(created) || created <= 0) return "waiting";
+  return nowSeconds - created >= NO_TRY_WAIT_DAYS * 86_400 ? "no" : "waiting";
+}
+
+/**
+ * When a renewal with no try scheduled ends its plan if it is still unpaid,
+ * in seconds: its invoice's date and NO_TRY_WAIT_DAYS. 0 when that cannot be
+ * read, or a try is scheduled, or it is paid by link.
+ */
+export function noTryEndsAt(subscription: Record<string, unknown>): number {
+  const left = retryLeft(subscription);
+  if (left !== "waiting" && left !== "no") return 0;
+  const created = (subscription.latest_invoice as { created?: unknown }).created;
+  return typeof created === "number" && Number.isSafeInteger(created) && created > 0 ? created + NO_TRY_WAIT_DAYS * 86_400 : 0;
 }
 
 /** Whether Stripe's collection of the subscription is paused (`pause_collection` set): nothing is collected. */
@@ -609,10 +659,26 @@ function collectionPaused(subscription: Record<string, unknown>): boolean {
   return pause !== undefined && pause !== null;
 }
 
-/** Whether the subscription's latest invoice, when expanded, was voided: its period was never paid. */
+/**
+ * The subscription metadata a cancel writes (writeCancelAtPeriodEnd): the
+ * moment, in seconds, from which a renewal left unpaid was unpaid when the
+ * plan was canceled (the store's record of it, or the cancel's own time).
+ * A renewal voided after that cancel (cancelAndStopUnpaidRenewal) is read as
+ * ours only when it is a renewal (`subscription_cycle`) that already existed
+ * then: a switch's pending update Stripe voided when it expired, or a later
+ * renewal anyone voided, is not (pre-review G1). Written in the cancel's own
+ * request, so the mark costs no call of its own.
+ */
+export const RENEWAL_VOIDED_KEY = "renewal_voided_before";
+
+/** Whether the latest invoice, when expanded, is a renewal our cancel voided unpaid: its period was never paid. */
 function latestInvoiceVoided(subscription: Record<string, unknown>): boolean {
   const invoice = subscription.latest_invoice;
-  return Boolean(invoice) && typeof invoice === "object" && !Array.isArray(invoice) && (invoice as { status?: unknown }).status === "void";
+  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return false;
+  const { status, billing_reason: reason, created } = invoice as { status?: unknown; billing_reason?: unknown; created?: unknown };
+  if (status !== "void" || reason !== "subscription_cycle") return false;
+  const mark = Number((subscription.metadata as Record<string, unknown> | null | undefined)?.[RENEWAL_VOIDED_KEY]);
+  return Number.isSafeInteger(mark) && mark > 0 && typeof created === "number" && Number.isSafeInteger(created) && created > 0 && created <= mark;
 }
 
 /**
@@ -670,10 +736,15 @@ export function stateOf(subscription: Record<string, unknown>): SubscriptionStat
   if (!GOOD.has(status)) return { state: "inactive", reason: status || "unknown" };
   if (status === "past_due" && !pastDueInGrace(subscription)) return { state: "inactive", reason: "past_due" };
   // Stripe tries no more: the plan has ended, whether or not our account is
-  // set to cancel it then, and section 8 of the Terms applies. An invoice not
-  // expanded is read as before (the grace: costs paused, nothing closes);
-  // readSubscription and the daily job always expand it.
-  if (status === "past_due" && retryLeft(subscription) === "no") return { state: "inactive", reason: "past_due_no_retry" };
+  // set to cancel it then, and section 8 of the Terms applies. Only for an
+  // invoice charged automatically and older than Stripe's longest retry
+  // window (retryLeft, pre-review M-a); one paid by link, a fresh one, or one
+  // not expanded is the grace (costs paused, nothing closes); readSubscription
+  // and the daily job always expand it. Collection paused at Stripe is a
+  // pause, not Stripe giving up, even with its invoices marked uncollectible
+  // (pre-review L-4): it never ends the plan here.
+  const paused = collectionPaused(subscription);
+  if (status === "past_due" && !paused && retryLeft(subscription) === "no") return { state: "inactive", reason: "past_due_no_retry" };
 
   const trialing = status === "trialing";
   // Newer versions also fill `cancel_at` when a subscription is set to stop at
@@ -687,12 +758,14 @@ export function stateOf(subscription: Record<string, unknown>): SubscriptionStat
     cancelsAtEnd: subscription.cancel_at_period_end === true || cancelAt > 0,
     ...planOf(subscription),
     changePending: Boolean(subscription.pending_update),
-    // A renewal voided unpaid (a cancel while it was unpaid, cancelAndStopUnpaidRenewal)
-    // leaves its period unpaid however Stripe then reads the subscription; and
-    // collection paused at Stripe (only its dashboard sets it, lib/plan-pause.ts)
-    // collects nothing while the subscription stays active. Either way what
-    // costs us to run is paused, as for any period not paid; nothing closes.
-    renewalUnpaid: status === "past_due" || latestInvoiceVoided(subscription) || collectionPaused(subscription),
+    // A renewal our cancel voided unpaid (cancelAndStopUnpaidRenewal, marked
+    // RENEWAL_VOIDED_KEY) leaves its period unpaid however Stripe then reads
+    // the subscription; and collection paused at Stripe (only its dashboard
+    // sets it, lib/plan-pause.ts) collects nothing while the subscription
+    // stays active. Either way what costs us to run is paused, as for any
+    // period not paid; nothing closes.
+    renewalUnpaid: status === "past_due" || latestInvoiceVoided(subscription) || paused,
+    ...(paused ? { collectionPaused: true as const } : {}),
     period: periodOf(subscription, trialing, subscription.cancel_at_period_end === true || cancelAt > 0),
   };
 }
@@ -1219,9 +1292,10 @@ export async function setCancelAtPeriodEnd(
  * What became of a renewal left unpaid when its plan was canceled: "none"
  * when nothing was owed (paid up, in a trial, or paid since), "voided" when
  * the open invoice is void at Stripe, so its card is not tried for it again,
- * and "unknown" when that could not be confirmed.
+ * "paused" when nothing failed because collection is paused at Stripe (there
+ * is no renewal to void), and "unknown" when that could not be confirmed.
  */
-export type UnpaidRenewalOutcome = "none" | "voided" | "unknown";
+export type UnpaidRenewalOutcome = "none" | "voided" | "paused" | "unknown";
 
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
 
@@ -1230,14 +1304,25 @@ const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
  * the open renewal invoice too (plan-lifecycle audit, M3): otherwise Stripe
  * keeps retrying it after the studio has said nothing more will be charged.
  * The invoice is the one Stripe sends back on the cancellation itself (no
- * extra read); it is voided once, under its own idempotency key, and only a
- * reply that names it as void counts.
+ * extra read), and the cancellation carries the mark that makes its void read
+ * as ours (RENEWAL_VOIDED_KEY, pre-review G1): nothing is voided unless the
+ * reply shows the mark. It is voided once, under its own idempotency key, and
+ * only a reply that names it as void counts; any other answer is checked by
+ * reading the invoice once more before the studio says the card may still be
+ * tried (pre-review L-1), within the time the two Stripe waits this event is
+ * priced at leave (tests/plan-cost-registry.ts, platform-subscription-search).
+ * `unpaidSince` is when the store first recorded the renewal unpaid, if it did.
  */
 export async function cancelAndStopUnpaidRenewal(
   subscriptionId: string,
+  unpaidSince = 0,
 ): Promise<{ state: SubscriptionState; renewal: UnpaidRenewalOutcome }> {
-  const { state, subscription } = await writeCancelAtPeriodEnd(subscriptionId, true);
+  const began = Date.now();
+  const mark = String(Number.isSafeInteger(unpaidSince) && unpaidSince > 0 ? unpaidSince : Math.floor(began / 1000));
+  const { state, subscription } = await writeCancelAtPeriodEnd(subscriptionId, true, mark);
   if (state.state !== "active" || !state.renewalUnpaid || !subscription) return { state, renewal: "none" };
+  // Collection paused at Stripe: no payment failed and none is tried (pre-review L-3).
+  if (state.collectionPaused) return { state, renewal: "paused" };
   const invoice = subscription.latest_invoice;
   if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return { state, renewal: "unknown" };
   const { id, status } = invoice as { id?: unknown; status?: unknown };
@@ -1245,18 +1330,30 @@ export async function cancelAndStopUnpaidRenewal(
   if (status === "void") return { state, renewal: "voided" };
   if (status === "paid") return { state, renewal: "none" };
   if (status !== "open") return { state, renewal: "unknown" };
+  // Never a void our own reading would not count as an unpaid period.
+  if ((subscription.metadata as Record<string, unknown> | null | undefined)?.[RENEWAL_VOIDED_KEY] !== mark) return { state, renewal: "unknown" };
   try {
     const voided = await onPlatform("POST", `/invoices/${encodeURIComponent(id)}/void`, new URLSearchParams(), { idempotencyKey: `plan-cancel-void:${id}` });
-    return { state, renewal: voided?.id === id && voided.status === "void" ? "voided" : "unknown" };
+    if (voided?.id === id && voided.status === "void") return { state, renewal: "voided" };
   } catch (error) {
     console.error("voiding a canceled plan's unpaid renewal failed", error);
-    return { state, renewal: "unknown" };
   }
+  // Its answer did not say void: it may have gone through all the same.
+  const left = 2 * STRIPE_TIMEOUT_MS - (Date.now() - began);
+  if (left < 1_000) return { state, renewal: "unknown" };
+  try {
+    const read = await onPlatform("GET", `/invoices/${encodeURIComponent(id)}`, undefined, { timeoutMs: left });
+    if (read?.id === id && read.status === "void") return { state, renewal: "voided" };
+  } catch (error) {
+    console.error("reading a canceled plan's unpaid renewal again failed", error);
+  }
+  return { state, renewal: "unknown" };
 }
 
 async function writeCancelAtPeriodEnd(
   subscriptionId: string,
   cancel: boolean,
+  mark?: string,
 ): Promise<{ state: SubscriptionState; subscription: Record<string, unknown> | null }> {
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: { state: "inactive", reason: "shape" }, subscription: null };
@@ -1264,6 +1361,7 @@ async function writeCancelAtPeriodEnd(
   // With its latest invoice: whether the renewal is still retried, and the
   // invoice a cancel with the renewal unpaid voids (cancelAndStopUnpaidRenewal).
   const body = new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false" });
+  if (mark) body.set(`metadata[${RENEWAL_VOIDED_KEY}]`, mark);
   body.append("expand[]", "latest_invoice");
   const subscription = await onPlatform(
     "POST",
@@ -1522,6 +1620,11 @@ export function startedFrom(subscription: Record<string, unknown>): StartedSubsc
   const customerId = customerOf(subscription).id;
   const subscriptionId = typeof subscription.id === "string" ? subscription.id : "";
   if (state.state !== "active") return null;
+  // Past due without its latest invoice: whether Stripe still tries it is not
+  // known, so it is no proof of a plan running (pre-review A1). Every reader
+  // that may adopt one asks for the invoice (observeStoreSubscriptions,
+  // listSubscriptions, lib/closing-plan-guard.ts plansByCustomer).
+  if (subscription.status === "past_due" && retryLeft(subscription) === "unread") return null;
   if (!CUSTOMER_PATTERN.test(customerId) || !SUBSCRIPTION_PATTERN.test(subscriptionId)) return null;
   return {
     customerId,
@@ -1532,6 +1635,7 @@ export function startedFrom(subscription: Record<string, unknown>): StartedSubsc
     trialEnds: state.trialing ? state.until : 0,
     shared: state.shared,
     period: state.period,
+    ...(state.renewalUnpaid ? { renewalUnpaid: true as const } : {}),
   };
 }
 
@@ -1675,6 +1779,10 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
   }
   member.metadata = metadata;
   member.customer = customer;
+  // An expanded latest invoice decides whether a past-due plan is live: plain data only.
+  if (member.latest_invoice !== null && typeof member.latest_invoice === "object") {
+    member.latest_invoice = searchDataRecord(member.latest_invoice, "member latest invoice");
+  }
 
   // A good-standing row can block checkout and be adopted as paid rights, so
   // its one product, price, interval and paid/trial window must also be
@@ -1791,12 +1899,17 @@ export async function observeStoreSubscriptions(store: Store): Promise<StoreSubs
     limit: String(SEARCH_LIMIT),
   });
   query.append("expand[]", "data.customer");
+  // Each plan with its latest invoice: a past-due one is live only while
+  // Stripe still tries it, and read without it is no proof either way
+  // (startedFrom, retryLeft; pre-review A1).
+  query.append("expand[]", "data.latest_invoice");
   let search: unknown[] | null = null, own: unknown[] | null = ownership.customerId ? null : [];
   let searchError: unknown = null, ownError: unknown = null;
   try { search = completeSubscriptionPage(await onPlatform("GET", `/subscriptions/search?${query}`)); }
   catch (error) { searchError = error instanceof Error ? error : new Error("Subscription search observation is unknown"); }
   const ownQuery = new URLSearchParams({ customer: ownership.customerId ?? "", status: "all", limit: String(SEARCH_LIMIT) });
   ownQuery.append("expand[]", "data.customer");
+  ownQuery.append("expand[]", "data.latest_invoice");
   if (ownership.customerId) {
     try { own = completeSubscriptionPage(await onPlatform("GET", `/subscriptions?${ownQuery}`)); }
     catch (error) { ownError = error instanceof Error ? error : new Error("Subscription customer observation is unknown"); }

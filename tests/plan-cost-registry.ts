@@ -809,6 +809,12 @@ export const PLATFORM_SUBSCRIPTION_SEARCH = {
   memoryUsdPerGet: STRIPE_TIMEOUT_MS / 1000 * 2 * 0.0183 / 3600,
   essentialEventsPerWindow: ESSENTIAL_PER_DAY * DAY_WINDOWS,
   closingEventsPerWindow: DAY_WINDOWS,
+  /**
+   * Pre-review M-b: a closing day that takes a 404 as Stripe's word first takes
+   * room in the weekly brake on plans missing (lib/billing-sync.ts,
+   * reserveMissingEnds): at most MISSING_AT_MOST (3) + 3 Redis commands.
+   */
+  missingBrakeCommands: 6,
   stripeGetFeeUsd: null,
   deploymentRegionVerified: false,
 } as const;
@@ -875,7 +881,8 @@ export const COST_LINES: CostLine[] = [
   {
     id: "platform-subscription-search",
     feature: "Platform subscription recovery during checkout, store deletion and scheduled closing (CX-61)",
-    monthlyUsd: () => PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD * (PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow + PLATFORM_SUBSCRIPTION_SEARCH.closingEventsPerWindow),
+    monthlyUsd: () => PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD * (PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow + PLATFORM_SUBSCRIPTION_SEARCH.closingEventsPerWindow) +
+      PLATFORM_SUBSCRIPTION_SEARCH.closingEventsPerWindow * PLATFORM_SUBSCRIPTION_SEARCH.missingBrakeCommands * COMMAND,
     sources: [
       { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
       { file: "lib/fetch-timeout.ts", names: ["STRIPE_TIMEOUT_MS"] },
@@ -884,12 +891,14 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/billing/checkout/route.ts", names: ["creatorFrom(request, \"billing\")", "findStoreSubscriptions(store)"] },
       { file: "app/api/store/stores/route.ts", names: ["creatorFrom(request, \"delete\")", "findStoreSubscriptions(store)"] },
       // Plan-lifecycle audit, M3: a cancel with the renewal unpaid is the cancellation POST and one void POST, two waits.
-      { file: "app/api/billing/cancel/route.ts", names: ["creatorFrom(request, \"billing\")", "cancelAndStopUnpaidRenewal(store.subscriptionId)"] },
-      { file: "lib/billing.ts", names: ["cancelAndStopUnpaidRenewal", "plan-cancel-void:"] },
+      { file: "app/api/billing/cancel/route.ts", names: ["creatorFrom(request, \"billing\")", "cancelAndStopUnpaidRenewal(store.subscriptionId, store.renewalUnpaidSince ?? 0)"] },
+      { file: "lib/billing.ts", names: ["cancelAndStopUnpaidRenewal", "plan-cancel-void:", "2 * STRIPE_TIMEOUT_MS - (Date.now() - began)", "timeoutMs: left"] },
+      { file: "lib/billing-sync.ts", names: ["MISSING_AT_MOST = 3", "reserveMissingEnds"] },
+      { file: "lib/plan-closing.ts", names: ["reserveMissingEnds([storeRef(store)], now)"] },
       { file: "lib/plan-closing.ts", names: ["observeStoreSubscriptions(store)", "refuseLatePlans"] },
       { file: "vercel.json", names: ["/api/cron/closing", "30 9 * * *"] },
     ],
-    basis: "CX-61, sources read 2026-11-04: at most two GETs (one Search over at most MAX_ADDRESSES current names, one captured-customer List), each waited on for STRIPE_TIMEOUT_MS at 2 GB and the highest regional memory rate $0.0183/GB-hour (https://vercel.com/docs/functions/usage-and-pricing). Billing and deletion share ESSENTIAL_PER_DAY, not that many each; scheduled closing is counted at DAY_WINDOWS. A plan canceled with its renewal unpaid (app/api/billing/cancel, plan-lifecycle audit M3) makes two Stripe calls on one of those essential events, the cancellation POST (its latest invoice expanded in the same reply) and at most one void POST of the open renewal invoice, so it stays within the two waits each event is priced at here; a void already done is read from that reply and not sent again. Never multiplied by visits. This is a function-memory ceiling; existing CPU, invocation and other costs remain. Stripe GET tariff stays null (https://stripe.com/pricing does not establish an endpoint-specific zero); deployment region and financed post-cancellation exposure remain unverified. No sale, price, quota or gate is activated.",
+    basis: "CX-61, sources read 2026-11-04: at most two GETs (one Search over at most MAX_ADDRESSES current names, one captured-customer List), each waited on for STRIPE_TIMEOUT_MS at 2 GB and the highest regional memory rate $0.0183/GB-hour (https://vercel.com/docs/functions/usage-and-pricing). Billing and deletion share ESSENTIAL_PER_DAY, not that many each; scheduled closing is counted at DAY_WINDOWS. A plan canceled with its renewal unpaid (app/api/billing/cancel, plan-lifecycle audit M3) makes two Stripe calls on one of those essential events, the cancellation POST (its latest invoice expanded in the same reply, and the mark that makes the void read as ours, pre-review G1, written in that same request) and at most one void POST of the open renewal invoice, so it stays within the two waits each event is priced at here; a void already done is read from that reply and not sent again. When the void's answer does not say void, the invoice is read once more (pre-review L-1) only in the time the two waits leave (its timeout is what is left of 2 x STRIPE_TIMEOUT_MS since the cancellation began, and none under a second), so the event never waits longer than the two it is priced at. A closing day that takes a 404 as Stripe's word adds at most missingBrakeCommands (6) Redis commands for the weekly brake (pre-review M-b), counted per closing event at COMMAND. Never multiplied by visits. This is a function-memory ceiling; existing CPU, invocation and other costs remain. Stripe GET tariff stays null (https://stripe.com/pricing does not establish an endpoint-specific zero); deployment region and financed post-cancellation exposure remain unverified. No sale, price, quota or gate is activated.",
   },
   {
     id: "storage",

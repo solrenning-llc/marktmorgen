@@ -17,9 +17,11 @@
  *      the first step failed to apply or could not read, and one Stripe says
  *      it does not have (404). That last one ends only when the same key
  *      reads the store's own customer, so the key reaches the account the
- *      plan was made on, and never when more than a few plans of one run say
- *      404 at once: a key for another account or mode says 404 for every
- *      plan, and must not end every paid store (plan-lifecycle audit, M2).
+ *      plan was made on; only in a run that read at least one subscription on
+ *      that key; and never past MISSING_AT_MOST such plans in a week, however
+ *      the runs are cut: a key for another account or mode says 404 for every
+ *      plan, and must not end every paid store (plan-lifecycle audit, M2;
+ *      pre-review M-b).
  *
  * Bounded by a deadline, safe to run as often as it is called, and it only
  * writes where the snapshot is actually wrong. The walk through the stores
@@ -54,26 +56,62 @@ const CURSOR_SECONDS = 7 * 24 * 60 * 60;
 const LIST_CURSOR_KEY = "nl:billing:sync:after";
 const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]+$/;
 /**
- * The most plans one run may end because Stripe says it does not have them
- * (404 on a key that reads their customers), or a tenth of the stores the run
- * asked about when that is more. Past it none is ended: so many at once is a
- * key, mode or account changed, not plans that ended.
+ * The most plans that may end, in MISSING_WINDOW_DAYS, because Stripe says it
+ * does not have them (404 on a key that reads their customers). Counted
+ * across runs, so runs cut by their deadline and resumed by the cursor do not
+ * end them a few at a time (pre-review M-b); the closing day takes such a
+ * 404 as Stripe's word only within the same count (lib/plan-closing.ts).
+ * Past it none is ended: so many is a key, mode or account changed.
  */
-const MISSING_AT_MOST = 3;
+export const MISSING_AT_MOST = 3;
+export const MISSING_WINDOW_DAYS = 7;
+/** The stores whose plans were ended as missing, scored by when: at most MISSING_AT_MOST members, each kept MISSING_WINDOW_DAYS. */
+export const MISSING_ENDS_KEY = "nl:billing:sync:missing";
+const MISSING_WINDOW_MS = MISSING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * Takes room in the week's count for these stores' plans to end as missing.
+ * True when they all fit, a store already counted this week taking no more
+ * room; false, keeping nothing, when they do not or Redis could not be asked
+ * (unknown is never room). At most MISSING_AT_MOST + 3 commands in two
+ * pipelines, the second only to give room back (tests/plan-cost-registry.ts).
+ */
+export async function reserveMissingEnds(refs: string[], nowMs = Date.now()): Promise<boolean> {
+  const wanted = [...new Set(refs)];
+  if (!wanted.length) return true;
+  if (wanted.length > MISSING_AT_MOST) return false;
+  try {
+    const replies = await redisPipeline([
+      ["ZREMRANGEBYSCORE", MISSING_ENDS_KEY, 0, nowMs - MISSING_WINDOW_MS],
+      ...wanted.map((ref) => ["ZADD", MISSING_ENDS_KEY, "NX", nowMs, ref]),
+      ["ZCARD", MISSING_ENDS_KEY],
+      ["PEXPIRE", MISSING_ENDS_KEY, MISSING_WINDOW_MS],
+    ]);
+    const added = wanted.filter((_, at) => Number(replies[1 + at]) === 1);
+    const count = Number(replies[1 + wanted.length]);
+    if (Number.isSafeInteger(count) && count <= MISSING_AT_MOST) return true;
+    if (added.length) await redisPipeline([["ZREM", MISSING_ENDS_KEY, ...added]]);
+    return false;
+  } catch (error) {
+    console.error("the brake on plans missing could not be read", error);
+    return false;
+  }
+}
 
 /** A paid store whose plan Stripe answered 404 for, on a key that reads its customer. */
 type Missing = { store: Store; state: SubscriptionState };
 
 /**
- * Ends the plans one run found missing, unless there are more than
- * MISSING_AT_MOST (or a tenth of those checked): then none is ended, each is
- * a failure of the run, and the run says why so a person looks.
+ * Ends the plans one run found missing, only when the run read at least one
+ * subscription on the same key and they fit in the week's count
+ * (reserveMissingEnds): otherwise none is ended, each is a failure of the
+ * run, and the run says why so a person looks.
  */
-async function settleMissing(missing: Missing[], counts: SyncCounts): Promise<void> {
+async function settleMissing(missing: Missing[], counts: SyncCounts, readable: boolean): Promise<void> {
   if (!missing.length) return;
-  if (missing.length > Math.max(MISSING_AT_MOST, Math.floor(counts.checked / 10))) {
+  if (!readable || !(await reserveMissingEnds(missing.map(({ store }) => storeRef(store))))) {
     counts.failed += missing.length;
-    console.error(`billing-sync ALERT: Stripe says ${missing.length} of ${counts.checked} paid stores' plans do not exist; none was ended (wrong key, mode or account?)`);
+    console.error(`billing-sync ALERT: Stripe says ${missing.length} of ${counts.checked} paid stores' plans do not exist; none was ended (${readable ? `more than ${MISSING_AT_MOST} this week` : "no subscription was read on this key"}: wrong key, mode or account?)`);
     return;
   }
   for (const { store, state } of missing) {
@@ -266,14 +304,16 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
 /** Step 2: stores still paid up whose subscription step 1 did not see. */
 async function syncStores(deadline: number, seen: Set<string>, counts: SyncCounts): Promise<boolean> {
   const missing: Missing[] = [];
+  // Whether this run read a subscription on the key: step 1's list, or one store's own below.
+  const walk = { readable: counts.seen > 0 };
   try {
-    return await walkStores(deadline, seen, counts, missing);
+    return await walkStores(deadline, seen, counts, missing, walk);
   } finally {
-    await settleMissing(missing, counts);
+    await settleMissing(missing, counts, walk.readable);
   }
 }
 
-async function walkStores(deadline: number, seen: Set<string>, counts: SyncCounts, missing: Missing[]): Promise<boolean> {
+async function walkStores(deadline: number, seen: Set<string>, counts: SyncCounts, missing: Missing[], walk: { readable: boolean }): Promise<boolean> {
   const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
   // `cursor|store`: the batch at `cursor` was cut short after that store (below). Only `cursor` (or an older value):
   // the batch from its start. Anything else: from the top, as every run read before this cursor existed.
@@ -334,6 +374,7 @@ async function walkStores(deadline: number, seen: Set<string>, counts: SyncCount
           counts.failed += 1;
           continue;
         }
+        walk.readable = true;
         if (await recordState(store, state)) counts.updated += 1;
       } catch (error) {
         counts.failed += 1;

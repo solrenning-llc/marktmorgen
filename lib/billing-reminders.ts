@@ -10,7 +10,7 @@
  * charge, and says the date, the amount and the one click that stops it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
+import { isAddOn, keepCardThatPays, listSubscriptions, noTryEndsAt, pastDueInGrace, periodEnd, planOf, retryLeft } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { recordUnpaidRenewal } from "@/lib/billing-sync";
@@ -157,8 +157,17 @@ export type FailedPlan = {
   email: string;
   amountCents: number;
   payUrl: string;
-  /** When Stripe tries the card again, in seconds, or 0 when it will not. */
+  /** When Stripe tries the card again, in seconds, or 0 when no try is scheduled. */
   nextTry: number;
+  /**
+   * With no try scheduled (pre-review M-a): "manual" for an invoice paid by
+   * its link only (`send_invoice`), whose card is never tried on its own;
+   * "waiting" while the plan has not ended (lib/billing.ts, retryLeft), until
+   * `endsAt` when that can be read; "ended" once it has. "" with a try scheduled.
+   */
+  noTry: "" | "manual" | "waiting" | "ended";
+  /** With noTry "waiting": the day the plan ends if it is still unpaid, in seconds; 0 when that cannot be read. */
+  endsAt: number;
   /** The first charge after the free trial: nothing was ever paid. */
   afterTrial: boolean;
   tier: Tier;
@@ -189,13 +198,18 @@ export function failedPlan(subscription: Record<string, unknown>): FailedPlan | 
   // its checkout has already stopped, and the email must say so.
   const afterTrial = !pastDueInGrace(subscription);
   const nextTry = typeof invoice.next_payment_attempt === "number" && invoice.next_payment_attempt > 0 ? invoice.next_payment_attempt : 0;
-  return { subscription: id, invoice: invoiceId, email, amountCents, payUrl, nextTry, afterTrial, tier: planOf(subscription).tier };
+  // A null next try is Stripe having stopped only for an invoice charged
+  // automatically, and only past Stripe's longest retry window (pre-review M-a).
+  const left = retryLeft(subscription);
+  const noTry = nextTry ? "" : left === "manual" ? "manual" : left === "no" ? "ended" : "waiting";
+  const endsAt = noTry === "waiting" ? noTryEndsAt(subscription) : 0;
+  return { subscription: id, invoice: invoiceId, email, amountCents, payUrl, nextTry, noTry, endsAt, afterTrial, tier: planOf(subscription).tier };
 }
 
 /** The email itself, plain text. */
 export function failedPlanEmail(failed: FailedPlan, endedSeconds = Math.floor(Date.now() / 1000)): { subject: string; text: string } {
   const name = PLAN_NAMES[failed.tier];
-  // With no other try, the plan has ended (lib/billing.ts, retryLeft) and the
+  // Once Stripe has stopped trying (noTry "ended"), the plan has ended (lib/billing.ts, retryLeft) and the
   // store closes as the Terms say: nothing is removed before CLOSING_DAYS
   // after the day its end is written down (lib/plan-closing.ts, removalDay),
   // the day the store records, or today when it has not been written yet.
@@ -224,12 +238,18 @@ export function failedPlanEmail(failed: FailedPlan, endedSeconds = Math.floor(Da
             "",
             failed.nextTry
               ? `We will try your card again on ${day(failed.nextTry)}. If it is still unpaid after the last try, your plan can end, and then your store closes as our Terms say.`
-              : "Stripe will not try your card again for it, so your plan has ended. If you pay it on that page, your plan goes on; if you do not, your store closes as our Terms say.",
+              : failed.noTry === "ended"
+                ? "Stripe will not try your card again for it, so your plan has ended. If you pay it on that page, your plan goes on; if you do not, your store closes as our Terms say."
+                : failed.noTry === "waiting"
+                  ? failed.endsAt
+                    ? `Stripe has not scheduled another try for it. If it is still unpaid on ${day(failed.endsAt)}, your plan ends, and then your store closes as our Terms say; nothing is removed before ${day(failed.endsAt + CLOSING_DAYS * DAY)}.`
+                    : "Stripe has not scheduled another try for it. If it stays unpaid, your plan can end, and then your store closes as our Terms say."
+                  : "If it is not paid, your plan can end, and then your store closes as our Terms say.",
           ].join("\n"),
       "",
-      failed.nextTry
-        ? `If you meant to stop, you do not need to do anything, or you can cancel in your studio: ${studio}`
-        : `If you meant to stop, your plan has already ended and this card is not tried for it again. Your store closes as our Terms say, we email you before anything is removed, and nothing is removed before ${keptUntil}.`,
+      failed.noTry === "ended"
+        ? `If you meant to stop, your plan has already ended and this card is not tried for it again. Your store closes as our Terms say, we email you before anything is removed, and nothing is removed before ${keptUntil}.`
+        : `If you meant to stop, you do not need to do anything, or you can cancel in your studio: ${studio}`,
       "",
       `Questions: reply to this email, or write to ${SUPPORT_EMAIL}.`,
       "",
@@ -273,7 +293,7 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
         if (!due.afterTrial) await recordUnpaidRenewal(subscription);
         // First, so the card that pays is the one the next renewal uses.
         await keepCardThatPays(due.subscription);
-        const { subject, text } = failedPlanEmail(due, due.nextTry ? undefined : await planEndedSeconds(subscription));
+        const { subject, text } = failedPlanEmail(due, due.noTry === "ended" ? await planEndedSeconds(subscription) : undefined);
         const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: due.email, subject, text, replyTo: SUPPORT_EMAIL });
         if (!ok) throw new Error("the email was not sent");
         counts.sent += 1;

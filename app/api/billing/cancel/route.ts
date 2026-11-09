@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     // Canceling with the renewal unpaid also voids its open invoice, so the
     // card is not tried for it after the studio says the plan will not renew.
     const { state, renewal } = intent === "cancel"
-      ? await cancelAndStopUnpaidRenewal(store.subscriptionId)
+      ? await cancelAndStopUnpaidRenewal(store.subscriptionId, store.renewalUnpaidSince ?? 0)
       : { state: await setCancelAtPeriodEnd(store.subscriptionId, false), renewal: "none" as const };
     // Leaving outright: a break that was set has nothing left to start again.
     if (intent === "cancel") await dropPause(store).catch((error) => console.error("dropping a break failed", error));
@@ -67,7 +67,9 @@ export async function POST(request: NextRequest) {
     if (intent !== "cancel") return away(origin, studio("billing=resumed"));
     // With the renewal unpaid the store takes no payments until the period
     // ends; the studio says that, and says so when the void is not confirmed.
-    return away(origin, studio(renewal === "voided" ? "billing=canceling-unpaid" : renewal === "unknown" ? "billing=canceling-unpaid-open" : "billing=canceling"));
+    // Collection paused at Stripe: nothing failed and nothing is tried, so the
+    // notice says that instead of a failed payment (pre-review L-3).
+    return away(origin, studio(renewal === "voided" ? "billing=canceling-unpaid" : renewal === "unknown" ? "billing=canceling-unpaid-open" : renewal === "paused" ? "billing=canceling-paused" : "billing=canceling"));
   } catch (error) {
     // Stripe refuses to change a subscription that is already over. Ask what
     // it is doing before saying so, because a refusal for any other reason

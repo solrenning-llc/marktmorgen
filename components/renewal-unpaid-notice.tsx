@@ -9,8 +9,28 @@ import { RENEWAL_KEPT_WORDS, RENEWAL_PAUSED_WORDS, RENEWAL_RESUME_WORDS } from "
  * Stripe did not give one, the notice says how to get it from a person.
  * `canPay` is false for a team member without the billing permission, who
  * is told to ask the owner instead of being shown a link to pay.
+ * `paused`: unpaid because collection is paused at Stripe, where no payment
+ * failed and there is nothing to pay by link (pre-review L-3): its own words.
  */
-export function RenewalUnpaidNotice({ payUrl, canPay }: { payUrl: string | null; canPay: boolean }) {
+export function RenewalUnpaidNotice({ payUrl, canPay, paused = false }: { payUrl: string | null; canPay: boolean; paused?: boolean }) {
+  if (paused) {
+    return (
+      <section id="renewal-unpaid" aria-labelledby="renewal-unpaid-title" className="notice notice-warn mt-6 scroll-mt-24">
+        <h2 id="renewal-unpaid-title" className="font-bold text-ink">
+          Collection of your plan&apos;s payments is paused at Stripe
+        </h2>
+        <p className="mt-1 max-w-[80ch] text-sm leading-relaxed text-ink-soft">Nothing is charged for your plan while it is paused, so it counts as unpaid. {RENEWAL_PAUSED_WORDS}</p>
+        <p className="mt-1 max-w-[80ch] text-sm leading-relaxed text-ink-soft">{RENEWAL_KEPT_WORDS}</p>
+        <p className="mt-2 max-w-[80ch] text-sm leading-relaxed text-ink-soft">
+          Everything starts again once collection is resumed and Stripe records the payment. If you did not ask for this pause, write to{" "}
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
+            {SUPPORT_EMAIL}
+          </a>
+          .
+        </p>
+      </section>
+    );
+  }
   return (
     <section id="renewal-unpaid" aria-labelledby="renewal-unpaid-title" className="notice notice-warn mt-6 scroll-mt-24">
       <h2 id="renewal-unpaid-title" className="font-bold text-ink">

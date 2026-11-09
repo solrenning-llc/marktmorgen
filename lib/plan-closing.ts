@@ -65,6 +65,7 @@ import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recor
  */
 import { createHash } from "node:crypto";
 import { customerReachable, observeStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
+import { reserveMissingEnds } from "@/lib/billing-sync";
 import { readAllListings } from "@/lib/catalog";
 import { editCourse, filesInCourse, readCourse, saveCourse } from "@/lib/course";
 import { bytesWords } from "@/lib/delivery";
@@ -865,6 +866,8 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   if (mayObserve && !(await mayObserve())) return { key, state: "held", coverage: "unknown", note: "daily-recheck-budget" };
   if (!isBillingConfigured()) return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
   let live;
+  // Whether the store's own plan answered 404 on a key that reads its customer.
+  let ownMissing = false;
   try {
     if (store.subscriptionId) {
       const own = await readSubscription(store.subscriptionId);
@@ -874,8 +877,10 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
       if (own.state === "unknown" && !(own.notFound && (await customerReachable(store.stripeCustomerId)) === "yes")) {
         return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
       }
+      ownMissing = own.state === "unknown";
+      // A renewal unpaid comes back unpaid: never a store paid up again (pre-review A1).
       if (own.state === "active") {
-        await setSubscription(key, { active: true, tier: own.tier, cycle: own.cycle, trialEnds: own.trialing ? own.until : 0, shared: own.shared, period: own.period });
+        await setSubscription(key, { active: true, tier: own.tier, cycle: own.cycle, trialEnds: own.trialing ? own.until : 0, shared: own.shared, period: own.period, renewalUnpaid: own.renewalUnpaid });
         await redisPipeline([["DEL", stateKey(key)]]);
         return { key, state: "running", note: "Stripe says the plan runs" };
       }
@@ -899,9 +904,16 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   }
   if (live) {
     // Our note was wrong, or the plan was started again a moment ago: put right.
-    await setSubscription(key, { customerId: live.customerId, subscriptionId: live.subscriptionId, active: true, tier: live.tier, cycle: live.cycle, trialEnds: live.trialEnds, shared: live.shared, period: live.period });
+    // As Stripe has it: a renewal unpaid stays unpaid, costs paused (pre-review A1).
+    await setSubscription(key, { customerId: live.customerId, subscriptionId: live.subscriptionId, active: true, tier: live.tier, cycle: live.cycle, trialEnds: live.trialEnds, shared: live.shared, period: live.period, renewalUnpaid: live.renewalUnpaid === true });
     await redisPipeline([["DEL", stateKey(key)]]);
     return { key, state: "running", note: "Stripe says the plan runs" };
+  }
+  // A 404 taken as Stripe's word counts against the daily job's weekly brake
+  // (lib/billing-sync.ts, reserveMissingEnds): past it, a key or account
+  // changed, and nothing is removed (pre-review M-b).
+  if (ownMissing && !(await reserveMissingEnds([storeRef(store)], now))) {
+    return { key, state: "held", coverage: "unknown", note: "too many plans Stripe says it does not have" };
   }
 
   if (closes) return closingDay(store, key, state, endedAt, day, folder, now, hands, until, save);

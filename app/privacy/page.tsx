@@ -1620,9 +1620,9 @@ export default function PrivacyPage() {
           >
             support@marktmorgen.com
           </a>
-          , and we will not contact you again. Before we send any research
-          message, we check it against that list, and we do not send it to
-          anyone on the list.
+          , and we will not contact you again. We keep your request on that
+          list, and nothing on our site sends a research message without first
+          checking it.
         </p>
         <p>
           <strong className="text-black">Outreach by creators.</strong> A

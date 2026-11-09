@@ -1154,6 +1154,30 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/research-do-not-contact.ts ADD_DO_NOT_CONTACT: the ceilings read before the contact is looked for, then one HSETNX.
+        if (key.startsWith("-- marktmorgen:research-dnc-add:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, list, day, field, name, most, perDayRaw, seconds] = args;
+          this.scriptCalls += 1;
+          if ((this.run(["HLEN", list]) as number) >= Number(most)) return -1;
+          const perDay = Number(perDayRaw);
+          if (perDay > 0) {
+            this.scriptCalls += 1;
+            const held = this.run(["GET", day]);
+            const today = held === null || held === undefined ? 0 : Number(held);
+            if (!Number.isFinite(today)) throw new Error("ERR user_script: attempt to compare nil with number");
+            if (today >= perDay) return -2;
+          }
+          this.scriptCalls += 1;
+          if (this.run(["HSETNX", list, field, name]) === 0) return 0;
+          if (perDay > 0) {
+            this.scriptCalls += 1;
+            if (this.run(["INCR", day]) === 1) {
+              this.scriptCalls += 1;
+              this.run(["EXPIRE", day, seconds]);
+            }
+          }
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
         if (key.startsWith("-- marktmorgen:studio-demo-door:v2\n")) return this.studioDemo("door", args);

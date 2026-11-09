@@ -6,8 +6,9 @@ import { isValidElement, type ReactNode } from "react";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/privacy/do-not-contact/route";
 import DoNotContactPage from "@/app/privacy/do-not-contact/page";
+import { DoNotContactForm } from "@/components/do-not-contact-form";
+import { DO_NOT_CONTACT_TRAP } from "@/lib/research-contact";
 import {
-  DO_NOT_CONTACT_COUNT_KEY,
   DO_NOT_CONTACT_KEY,
   RESEARCH_DO_NOT_CONTACT_MAX,
   RESEARCH_STOP_PER_HOUR,
@@ -17,6 +18,8 @@ import {
 } from "@/lib/research-do-not-contact";
 import { PERSON_DATA } from "@/lib/person-data";
 import { UPSTASH_MICRO_USD_PER_GB_MONTH } from "@/lib/spend-cost-table";
+import { mount } from "./client-hooks";
+import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 
 // The privacy policy promises that a person who asks Marktmorgen to stop its
@@ -48,7 +51,8 @@ function form(fields: Record<string, string>, headers: Record<string, string> = 
       "x-forwarded-for": `203.0.113.${ip}`,
       ...headers,
     },
-    body: new URLSearchParams(fields),
+    // The person confirms the entry stays on the list (WCAG 3.3.6); tests/research-do-not-contact-operator.test.ts holds the refusal without it.
+    body: new URLSearchParams({ confirm: "yes", ...fields }),
   });
 }
 
@@ -78,7 +82,7 @@ test("asking to be left alone keeps only the contact detail and the name given, 
   assert.deepEqual(redis.run(["HGETALL", DO_NOT_CONTACT_KEY]), ["email:ana.lima@example.com", "Ana Lima"], "only the contact and the name");
   assert.equal(await addToDoNotContact({ contact: "ana.lima@example.com", name: "" }), "listed", "asking twice keeps one entry");
   assert.equal(redis.run(["HLEN", DO_NOT_CONTACT_KEY]), 1);
-  assert.equal(redis.run(["GET", DO_NOT_CONTACT_COUNT_KEY]), "1", "a second ask takes no place on the list");
+  assert.equal(redis.run(["HLEN", DO_NOT_CONTACT_KEY]), 1, "a second ask takes no place on the list");
   assert.equal(await addToDoNotContact({ contact: "instagram.com/anamakes", name: "" }), "added");
   assert.deepEqual(redis.run(["HGET", DO_NOT_CONTACT_KEY, "link:instagram.com/anamakes"]), "", "no name given, none kept");
   assert.equal(await mayContactForResearch("https://www.instagram.com/AnaMakes"), false);
@@ -108,13 +112,12 @@ test("a contact the check cannot read, or a list it cannot read, is never contac
 
 test("the list has a fixed ceiling, so what it costs the company is bounded", async () => {
   redis.clear();
-  redis.run(["SET", DO_NOT_CONTACT_COUNT_KEY, String(RESEARCH_DO_NOT_CONTACT_MAX)]);
+  for (let i = 0; i < RESEARCH_DO_NOT_CONTACT_MAX; i += 1) redis.run(["HSET", DO_NOT_CONTACT_KEY, `email:fill${i}@example.com`, ""]);
   assert.equal(await addToDoNotContact({ contact: "full@example.com", name: "Full" }), "full");
-  assert.equal(redis.run(["HLEN", DO_NOT_CONTACT_KEY]), 0, "nothing written past the ceiling");
-  assert.equal(redis.run(["GET", DO_NOT_CONTACT_COUNT_KEY]), String(RESEARCH_DO_NOT_CONTACT_MAX), "the place taken is given back");
+  assert.equal(redis.run(["HLEN", DO_NOT_CONTACT_KEY]), RESEARCH_DO_NOT_CONTACT_MAX, "nothing written past the ceiling");
   assert.ok(RESEARCH_DO_NOT_CONTACT_MAX > 0 && RESEARCH_DO_NOT_CONTACT_MAX <= 20_000);
-  // About 600 bytes an entry with what Redis keeps beside it (tests/store-data-registry.ts, nl:research:dnc).
-  const monthlyUsd = (RESEARCH_DO_NOT_CONTACT_MAX * 600 / 1e9) * (UPSTASH_MICRO_USD_PER_GB_MONTH / 1e6);
+  // About 700 bytes an entry with what Redis keeps beside it (tests/store-data-registry.ts, nl:research:dnc).
+  const monthlyUsd = (RESEARCH_DO_NOT_CONTACT_MAX * 700 / 1e9) * (UPSTASH_MICRO_USD_PER_GB_MONTH / 1e6);
   assert.ok(monthlyUsd > 0 && monthlyUsd < 0.002, `the full list kept a month: $${monthlyUsd}`);
 });
 
@@ -125,7 +128,7 @@ test("the public form adds a person without an account, and refuses what it shou
   assert.equal(statusOf(await POST(form({ contact: "bo@example.com", name: "" }))), "done", "asking again says the same");
   assert.equal(statusOf(await POST(form({ contact: "nobody", name: "" }))), "contact");
   // A field no person sees: told it worked, and nothing kept.
-  assert.equal(statusOf(await POST(form({ contact: "bot@example.com", name: "", website: "spam" }))), "done");
+  assert.equal(statusOf(await POST(form({ contact: "bot@example.com", name: "", [DO_NOT_CONTACT_TRAP]: "spam" }))), "done");
   assert.equal(await mayContactForResearch("bot@example.com"), true);
   const other = (await POST(form({ contact: "x@example.com" }, { origin: "https://evil.example", "sec-fetch-site": "cross-site" })));
   assert.equal(other.status, 403);
@@ -138,7 +141,7 @@ test("the public form adds a person without an account, and refuses what it shou
   // A list that cannot be written says so, never "done".
   const original = redis.pipeline;
   redis.pipeline = (async (commands) =>
-    commands.some((c) => String(c[1]).startsWith("nl:research:")) ? [] : original.call(redis, commands)) as typeof redis.pipeline;
+    commands.some((c) => c.some((part) => String(part).startsWith("nl:research:"))) ? [] : original.call(redis, commands)) as typeof redis.pipeline;
   try {
     assert.equal(statusOf(await POST(form({ contact: "err@example.com" }))), "error");
   } finally {
@@ -150,7 +153,7 @@ test("the privacy policy names the page that does it and says exactly what is ke
   const outreach = paragraph('<strong className="text-black">Research outreach.</strong>');
   assert.match(outreach, /href="\/privacy\/do-not-contact"/, "the objection names the page that adds you to the list");
   assert.match(outreach, /mailto:support@marktmorgen\.com/, "and the support address still works");
-  assert.match(outreach, /before (we send )?any research message[^.]*check/i, "no research contact without checking the list");
+  assert.match(outreach, /nothing on our site sends a research message without first checking it/, "no research contact without checking the list");
   const kept = paragraph("Research outreach records");
   assert.match(kept, /only the contact detail you gave us and, if you gave it, your name/);
   assert.match(kept, /even if you ask us to delete your data/);
@@ -170,20 +173,30 @@ function find(node: ReactNode, match: (p: Props, type: unknown) => boolean, out:
 }
 
 test("the page labels each field, says a wrong entry as an alert tied to its field, and posts to the route", async () => {
-  const show = async (status?: string) => DoNotContactPage({ searchParams: Promise.resolve(status ? { status } : {}) });
-  const plain = await show();
+  answering(new Request("https://marktmorgen.com/privacy/do-not-contact"));
+  let page: ReactNode;
+  try {
+    page = await DoNotContactPage({ searchParams: Promise.resolve({ status: "contact" }) });
+  } finally {
+    answering(null);
+  }
+  const placed = find(page, (_p, t) => t === DoNotContactForm) as unknown as { status: string; operator: boolean }[];
+  assert.deepEqual(placed.map((p) => [p.status, p.operator]), [["contact", false]], "the page hands the form the server's answer");
+  assert.equal(find(page, (p, t) => t === "nav").length, 1, "a breadcrumb says where the page is");
+  const show = async (status: string) => (await mount(DoNotContactForm, { status, operator: false })).tree() as ReactNode;
+  const plain = await show("");
   assert.equal(find(plain, (p, t) => t === "form" && p.action === "/api/privacy/do-not-contact").length, 1);
   assert.equal(find(plain, (p, t) => t === "label" && p.htmlFor === "dnc-contact").length, 1);
   assert.equal(find(plain, (p, t) => t === "label" && p.htmlFor === "dnc-name").length, 1);
+  assert.equal(find(plain, (p, t) => t === "label" && p.htmlFor === "dnc-confirm").length, 1);
   assert.equal(find(plain, (p) => p.id === "dnc-contact")[0]["aria-invalid"], undefined);
-  assert.equal(find(plain, (p, t) => t === "nav").length, 1, "a breadcrumb says where the page is");
   const wrong = await show("contact");
   assert.equal(find(wrong, (p) => p.role === "alert" && p.id === "dnc-status").length, 1);
   const field = find(wrong, (p) => p.id === "dnc-contact")[0];
   assert.equal(field["aria-invalid"], true);
   assert.equal(field["aria-describedby"], "dnc-contact-hint dnc-status");
   assert.equal(find(await show("done"), (p) => p.role === "status").length, 1);
-  assert.equal(find(await show("made-up"), (p) => p.role === "alert" || p.role === "status").length, 0);
+  for (const made of ["made-up", "constructor", "toString"]) assert.equal(find(await show(made), (p) => p.role === "alert" || p.role === "status").length, 0, made);
 });
 
 test("the list is in the registry of what is kept about people, as Marktmorgen's own", () => {

@@ -7,6 +7,7 @@ import DoNotContactPage from "@/app/privacy/do-not-contact/page";
 import { DoNotContactForm } from "@/components/do-not-contact-form";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import {
+  ADD_DO_NOT_CONTACT,
   DO_NOT_CONTACT_DAY_PREFIX,
   DO_NOT_CONTACT_KEY,
   RESEARCH_DO_NOT_CONTACT_MAX,
@@ -201,4 +202,23 @@ test("the page shows the operator's form only to the operator", async () => {
     assert.equal((await formOf(`${SESSION_COOKIE}=${await openSession("stranger@example.test")}`)).operator, false);
     assert.equal((await formOf(`${SESSION_COOKIE}=${await openSession(OPERATOR)}`)).operator, true);
   });
+});
+
+test("the stand-in answers the script as a real Redis did, step for step", () => {
+  // Run by hand against redis-server 7 on 9 November 2026 (redis-cli EVAL, the same keys and arguments):
+  // 1 0 1 -2 -2, TTL 172800, 1 -1 -1, name "", HLEN 3, day "2"; a day count that is not a number fails the script.
+  redis.clear();
+  const ev = (field: string, name: string, perDay: number) => redis.run(["EVAL", ADD_DO_NOT_CONTACT, "2", "L", "D", field, name, "3", String(perDay), "172800"]);
+  assert.deepEqual(
+    [ev("email:a", "", 2), ev("email:a", "x", 2), ev("email:b", "", 2), ev("email:c", "", 2), ev("email:a", "", 2)],
+    [1, 0, 1, -2, -2],
+  );
+  assert.equal(redis.run(["TTL", "D"]), 172_800);
+  assert.deepEqual([ev("email:c", "", 0), ev("email:d", "", 0), ev("email:a", "", 0)], [1, -1, -1]);
+  assert.equal(redis.run(["HGET", "L", "email:a"]), "");
+  assert.equal(redis.run(["HLEN", "L"]), 3);
+  assert.equal(redis.run(["GET", "D"]), "2");
+  redis.run(["SET", "D", "abc"]);
+  redis.run(["DEL", "L"]);
+  assert.throws(() => ev("email:z", "", 2));
 });

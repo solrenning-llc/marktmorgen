@@ -6,116 +6,111 @@
  * gave it, their name. This is that list, and nothing more:
  *
  *   - one hash for the company, a field a contact detail in one normalized
- *     form ("email:" or "link:"), its value the name given or "";
- *   - one count of the places taken, so the list never holds more than
- *     RESEARCH_DO_NOT_CONTACT_MAX entries (a fixed, bounded company cost:
- *     tests/plan-cost-registry.ts, NOT_A_COST).
+ *     form ("email:" or "link:", lib/research-contact.ts), its value the name
+ *     given or "";
+ *   - one small count a day of the entries the public form added, which
+ *     expires after two days.
  *
- * A person joins it from /privacy/do-not-contact, with no account (the route
- * app/api/privacy/do-not-contact, RESEARCH_STOP_PER_HOUR a connection), and
- * support adds whoever emails to object through the same page.
+ * An entry is written by one script that reads the list's size, the day's
+ * count and the entry together (ADD_DO_NOT_CONTACT), so the list never holds
+ * more than RESEARCH_DO_NOT_CONTACT_MAX entries and a failed write takes no
+ * place. The public form (app/api/privacy/do-not-contact, RESEARCH_STOP_PER_HOUR
+ * a connection) stops at RESEARCH_DO_NOT_CONTACT_PUBLIC_MAX and at
+ * RESEARCH_STOP_NEW_PER_DAY new entries a day; past either it answers the same
+ * whether or not the contact is already listed. The room above the public
+ * ceiling is the operator's (app/api/operator/do-not-contact), for whoever
+ * emails support to object.
  *
  * No code sends a research message today. Whatever does, later, asks
  * mayContactForResearch first and sends nothing unless it says yes; it says
- * no for a contact it cannot read and for a list it cannot read.
+ * no for a contact it cannot read and for a list it cannot read
+ * (tests/research-do-not-contact-truth.test.ts fails on a sender that does not).
  *
  * It is kept when the person asks to be deleted: it exists so we never
  * contact them again (lib/person-data.ts). It is never read for anything else.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { cleanResearchName, normalizeResearchContact } from "@/lib/research-contact";
+
+export { CONTACT_FIELD_MAX_BYTES, CONTACT_MAX_LENGTH, NAME_MAX_LENGTH, cleanResearchName, normalizeResearchContact } from "@/lib/research-contact";
 
 export const DO_NOT_CONTACT_KEY = "nl:research:dnc";
-export const DO_NOT_CONTACT_COUNT_KEY = "nl:research:dnc:n";
+/** The day's count of entries the public form added, the UTC date (as 2026-11-09) after this prefix. */
+export const DO_NOT_CONTACT_DAY_PREFIX = "nl:research:dnc:day:";
+/** How long a day's count is kept: two days, so it outlives its day wherever the clock stands. */
+export const DO_NOT_CONTACT_DAY_SECONDS = 2 * 86_400;
 
-/** The most entries the list holds; past it the page says so and points to support. */
+/** The most entries the list holds, whoever adds them. */
 export const RESEARCH_DO_NOT_CONTACT_MAX = 10_000;
+/** The most entries the public form fills the list to; the rest is the operator's, for requests sent by email. */
+export const RESEARCH_DO_NOT_CONTACT_PUBLIC_MAX = 9_000;
+/** New entries the public form may add in a day (UTC), for everyone together. */
+export const RESEARCH_STOP_NEW_PER_DAY = 100;
 
 /** Requests one connection may make to join the list in an hour (essentialLimitState, scope "research-stop"). */
 export const RESEARCH_STOP_PER_HOUR = 5;
 
-/** The longest contact detail and name taken, as the creator research form takes them (lib/creator-research.ts, LIMITS). */
-export const CONTACT_MAX_LENGTH = 300;
-export const NAME_MAX_LENGTH = 80;
+/**
+ * KEYS[1] the list, KEYS[2] the day's count. ARGV: the contact, the name, the
+ * ceiling, the day's ceiling (0 for none: the operator) and the day count's
+ * lifetime. Answers -1 when the list is at its ceiling and -2 when the day's
+ * new entries are, before it looks for the contact, so neither says who is
+ * listed; 0 when the contact is already there (its first name stays); 1 when
+ * written, counted in the day when there is a day's ceiling.
+ * lib/redis-memory.ts models it, answer for answer with redis-server 7.0.15 run by hand on
+ * 9 November 2026 (tests/research-do-not-contact-operator.test.ts).
+ */
+export const ADD_DO_NOT_CONTACT = `-- marktmorgen:research-dnc-add:v1
+if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[3]) then return -1 end
+local perDay = tonumber(ARGV[4])
+if perDay > 0 and tonumber(redis.call('GET', KEYS[2]) or '0') >= perDay then return -2 end
+if redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2]) == 0 then return 0 end
+if perDay > 0 and redis.call('INCR', KEYS[2]) == 1 then redis.call('EXPIRE', KEYS[2], tonumber(ARGV[5])) end
+return 1`;
 
-const EMAIL = /^[^\s@/:]+@[^\s@/:]+\.[^\s@/:]+$/;
-const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+export type DoNotContactResult = "added" | "listed" | "full" | "busy";
+
+/** How far an add may fill the list: the operator's (the default) or the public form's. */
+export type DoNotContactCeiling = { most: number; perDay: number };
+export const OPERATOR_CEILING: DoNotContactCeiling = { most: RESEARCH_DO_NOT_CONTACT_MAX, perDay: 0 };
+export const PUBLIC_CEILING: DoNotContactCeiling = { most: RESEARCH_DO_NOT_CONTACT_PUBLIC_MAX, perDay: RESEARCH_STOP_NEW_PER_DAY };
+
+const RESULTS: Record<string, DoNotContactResult> = { "1": "added", "0": "listed", "-1": "full", "-2": "busy" };
 
 /**
- * A contact detail in the one form the list keeps and checks: an email
- * address in lower case, or a link to a site or profile as its host (without
- * "www.") and path, in lower case, without its query, fragment or trailing
- * slash. Anything else is null: it is neither kept nor contacted.
+ * Puts a contact detail on the list, with the name given (or none), in one
+ * script: "added", "listed" when it is already there, "full" at the
+ * ceiling's entries and "busy" at the day's, both said before the contact is
+ * looked for. Throws when the contact detail does not read (check it with
+ * normalizeResearchContact first) or when the reply is not one of those:
+ * then nothing is said as done.
  */
-export function normalizeResearchContact(raw: string): string | null {
-  if (typeof raw !== "string") return null;
-  const text = raw.trim().toLowerCase();
-  if (!text || text.length > CONTACT_MAX_LENGTH) return null;
-  if (EMAIL.test(text)) return `email:${text}`;
-  if (/\s/.test(text)) return null;
-  const withScheme = /^[a-z][a-z0-9+.-]*:/.test(text) ? text : `https://${text}`;
-  let url: URL;
-  try {
-    url = new URL(withScheme);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-  if (url.username || url.password || url.port) return null;
-  const host = url.hostname.replace(/^www\./, "");
-  if (!HOST.test(host)) return null;
-  const path = url.pathname.replace(/\/+$/, "");
-  return `link:${host}${path}`;
-}
-
-/** The name as given, its spaces closed up and control characters taken out, at most NAME_MAX_LENGTH characters. */
-function cleanName(raw: string): string {
-  return String(raw ?? "")
-    .replace(/\p{Cc}/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, NAME_MAX_LENGTH);
-}
-
-/** One reply of a one-command pipeline, read from its own slot (lib/redis-reply.ts). */
-async function one(command: (string | number)[], what: string): Promise<unknown> {
-  const replies = repliesFor(await redisPipeline([command]), 1);
-  if (!replies) throw new UnknownReplyError(what);
-  return replies[0];
-}
-
-/** Whether a reply is exactly 0 or 1, as HEXISTS and HSETNX answer. */
-function bit(reply: unknown, what: string): 0 | 1 {
-  if (reply === 0 || reply === 1) return reply;
-  throw new UnknownReplyError(what);
-}
-
-export type DoNotContactResult = "added" | "listed" | "full";
-
-/**
- * Puts a contact detail on the list, with the name given (or none). "listed"
- * when it is already there (the first name given stays), "full" when the list
- * holds RESEARCH_DO_NOT_CONTACT_MAX entries. Throws when the contact detail
- * does not read (check it with normalizeResearchContact first) or when a
- * reply is not in its exact shape: then nothing is said as done.
- */
-export async function addToDoNotContact(input: { contact: string; name: string }): Promise<DoNotContactResult> {
+export async function addToDoNotContact(
+  input: { contact: string; name: string },
+  ceiling: DoNotContactCeiling = OPERATOR_CEILING,
+  now: Date = new Date(),
+): Promise<DoNotContactResult> {
   const contact = normalizeResearchContact(input.contact);
   if (!contact) throw new Error("Not a contact detail the do-not-contact list keeps");
   if (!isRedisConfigured()) throw new Error("The do-not-contact list cannot be reached");
-  if (bit(await one(["HEXISTS", DO_NOT_CONTACT_KEY, contact], "the do-not-contact check"), "the do-not-contact check") === 1) return "listed";
-  // A place is taken before the entry is written, so the list can never hold more than its ceiling.
-  const taken = countOf(await one(["INCR", DO_NOT_CONTACT_COUNT_KEY], "the do-not-contact count"));
-  if (taken === null || taken < 1) throw new UnknownReplyError("the do-not-contact count");
-  if (taken > RESEARCH_DO_NOT_CONTACT_MAX) {
-    await one(["DECR", DO_NOT_CONTACT_COUNT_KEY], "the do-not-contact count");
-    return "full";
-  }
-  const written = bit(await one(["HSETNX", DO_NOT_CONTACT_KEY, contact, cleanName(input.name)], "the do-not-contact entry"), "the do-not-contact entry");
-  if (written === 1) return "added";
-  // Written by another request in between: the place is given back.
-  await one(["DECR", DO_NOT_CONTACT_COUNT_KEY], "the do-not-contact count");
-  return "listed";
+  const most = Math.min(ceiling.most, RESEARCH_DO_NOT_CONTACT_MAX);
+  if (!Number.isSafeInteger(most) || most < 1 || !Number.isSafeInteger(ceiling.perDay) || ceiling.perDay < 0) throw new Error("Not a ceiling");
+  const day = `${DO_NOT_CONTACT_DAY_PREFIX}${now.toISOString().slice(0, 10)}`;
+  const replies = repliesFor(
+    await redisPipeline([["EVAL", ADD_DO_NOT_CONTACT, 2, DO_NOT_CONTACT_KEY, day, contact, cleanResearchName(input.name), most, ceiling.perDay, DO_NOT_CONTACT_DAY_SECONDS]]),
+    1,
+  );
+  const reply = replies?.[0];
+  const result = typeof reply === "number" && Number.isInteger(reply) ? RESULTS[String(reply)] : undefined;
+  if (!result) throw new UnknownReplyError("the do-not-contact entry");
+  return result;
+}
+
+/** Whether a reply is exactly 0 or 1, as HEXISTS answers. */
+function bit(reply: unknown): 0 | 1 {
+  if (reply === 0 || reply === 1) return reply;
+  throw new UnknownReplyError("the do-not-contact check");
 }
 
 /**
@@ -127,7 +122,9 @@ export async function mayContactForResearch(contact: string): Promise<boolean> {
   const normalized = normalizeResearchContact(contact);
   if (!normalized || !isRedisConfigured()) return false;
   try {
-    return bit(await one(["HEXISTS", DO_NOT_CONTACT_KEY, normalized], "the do-not-contact check"), "the do-not-contact check") === 0;
+    const replies = repliesFor(await redisPipeline([["HEXISTS", DO_NOT_CONTACT_KEY, normalized]]), 1);
+    if (!replies) return false;
+    return bit(replies[0]) === 0;
   } catch {
     return false;
   }

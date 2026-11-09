@@ -64,7 +64,8 @@ const FULL: [string, string, Job][] = [
   ["monthly", "nl:monthly:lock", monthlyCron as Job],
   ["weekly", "nl:weekly:lock", weeklyCron as Job],
 ];
-/** Jobs whose bodies call Stripe's demo account, Bunny or the mail checker: only the lock's own answers are shown. */
+/** Jobs whose bodies call Stripe's demo account, Bunny or the mail checker: the lock's own answers are shown, and on
+ * stripe-check and mail-check also a slow run whose lock the next run took (their checks fail fast on the stand-ins). */
 const LOCK_ONLY: [string, string, Job][] = [
   ["stripe-check", "nl:stripe-check:lock", stripeCheckCron as Job],
   ["stream", "nl:stream:lock", streamCron as Job],
@@ -184,6 +185,16 @@ async function main(): Promise<void> {
     const overtaken = await run(name, lock, GET, { takeOver: "the-next-run" });
     // Before: its finally deleted whoever held the lock, here the next run's.
     is("its lock ran out and the next run took it: the next run's lock is kept", [overtaken.ran > 0, overtaken.lockAfter], [true, "the-next-run"]);
+  }
+
+  // stripe-check and mail-check against stand-ins: Stripe's demo account and the mail checker answer nothing useful
+  // here, so their checks fail fast, but each still reads and writes its last result in Redis after taking the lock,
+  // which is where the next run takes it over. The slow run is shown on these two as on the jobs above.
+  for (const [name, lock, GET] of LOCK_ONLY.filter(([job]) => job === "stripe-check" || job === "mail-check")) {
+    part(`cron/${name}: a slow run whose lock the next run took`);
+    const overtaken = await run(name, lock, GET, { takeOver: "the-next-run" });
+    // Before: its finally deleted whoever held the lock, here the next run's.
+    is("its lock ran out and the next run took it: it ran, answered, and the next run's lock is kept", [overtaken.status, overtaken.ran > 0, overtaken.lockAfter], [200, true, "the-next-run"]);
   }
 
   part("cron/shares: settles only while COMMISSION_LIVE (false today, not changed here), so its lock is read from the source");

@@ -78,7 +78,7 @@ import { PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { ENDED_INDEX, SETUP_STORAGE_BYTES, standingOf } from "@/lib/plan-standing";
 import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
 import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
@@ -1100,6 +1100,25 @@ const FINAL_AFTER = "nl:held:walk";
 const PAGE = 200;
 
 /**
+ * A page of the ended line (ZRANGEBYSCORE ... WITHSCORES), read exactly (CX-123 rules 24 and 30): member and score
+ * pairs, each member a text and each score a number or its text, at most PAGE pairs. Anything else is
+ * UnknownReplyError: never an empty page, which ended the walk, deleted its cursor and left the stores on that page
+ * and after it unlooked at that day.
+ */
+function endedPageOf(replies: unknown): { key: string; score: string }[] {
+  const flat = listSlots(repliesFor(replies, 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0 || flat.length > 2 * PAGE) throw new UnknownReplyError("a page of the ended closing line");
+  const rows: { key: string; score: string }[] = [];
+  for (let i = 0; i < flat.length; i += 2) {
+    const [key, score] = [flat[i], flat[i + 1]];
+    const value = typeof score === "number" ? score : typeof score === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(score) ? Number(score) : Number.NaN;
+    if (typeof key !== "string" || !Number.isFinite(value)) throw new UnknownReplyError("a page of the ended closing line");
+    rows.push({ key, score: String(score) });
+  }
+  return rows;
+}
+
+/**
  * The daily run: every store whose plan has ended, the longest ended first.
  *
  * Stops at `deadline`, and writes down the day the store it stopped at lost
@@ -1165,14 +1184,13 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
   // Rank shifts caused by concurrent removals may skip a row until the next
   // cycle. Continue next time, but never certify that partial monthly count.
   finalWalkComplete &&= typeof finalCount === "number" && Number.isSafeInteger(finalCount) && finalCount >= 0 && afterFinalCount === finalCount;
-  const [saved] = await redisPipeline([["GET", AFTER]]);
-  let from: string = typeof saved === "string" && /^\d+$/.test(saved) ? saved : "0";
+  // Redis's null is no cursor; a cursor that does not read is unknown (rule 24), never "0", which started the walk over.
+  const [saved] = exactly(await redisPipeline([["GET", AFTER]]), 1, "the ended closing line's cursor");
+  if (saved !== null && (typeof saved !== "string" || !/^\d+$/.test(saved))) throw new UnknownReplyError("the ended closing line's cursor");
+  let from: string = typeof saved === "string" ? saved : "0";
   const out = finals;
   for (;;) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]);
-    const flat = Array.isArray(raw) ? raw : [];
-    const rows: { key: string; score: string }[] = [];
-    for (let i = 0; i + 1 < flat.length; i += 2) rows.push({ key: String(flat[i]), score: String(flat[i + 1]) });
+    const rows = endedPageOf(await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]));
     for (const row of rows) {
       if (seen.has(row.key)) continue;
       if (Date.now() > deadline) {

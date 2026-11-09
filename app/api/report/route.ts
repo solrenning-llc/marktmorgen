@@ -3,7 +3,7 @@ import { originFrom } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { handleIn, readReport } from "@/lib/takedown-rules";
 import { fileReport } from "@/lib/takedown";
-import { alertOwner, holdReported } from "@/lib/child-safety";
+import { type HoldOutcome, alertOwner, holdReported } from "@/lib/child-safety";
 import { storeForHandle } from "@/lib/store";
 
 /**
@@ -31,8 +31,10 @@ export async function POST(request: NextRequest) {
     const result = await fileReport(read.report, clientAddress(request), originFrom(request));
     if (result !== "limited" && (read.report.kind === "child_safety" || read.report.kind === "intimate_image")) {
       const handle = handleIn(read.report.url);
-      const store = handle ? await storeForHandle(handle).catch(() => null) : null;
-      const outcome = store ? await holdReported(read.report, store) : read.report.kind === "child_safety" ? "no_product" : "not_held";
+      // A store that cannot be read is said as such, never as an address that names nothing.
+      const store = read.report.kind === "child_safety" && handle ? await storeForHandle(handle).catch(() => undefined) : null;
+      const outcome: HoldOutcome =
+        read.report.kind !== "child_safety" ? "not_held" : store === undefined ? "unknown" : store ? await holdReported(read.report, store) : "no_product";
       await alertOwner(read.report, outcome);
     }
     if (result === "sent") return Response.json({ ok: true });

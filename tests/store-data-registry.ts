@@ -949,7 +949,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stream:v:@lib/stream.ts": { what: "What is known about a video", room: ["app/api/store/stream/route.ts", "lib/stream.ts"] },
 
   // ---------------------------------------------------------------- lib/ t–z
-  "nl:csa:held:@lib/child-safety.ts": short("How many products child-safety reports took off a store that day, two days: the cap on the automatic step", "studio", 2, 64),
+  "nl:csa:held:@lib/child-safety.ts": short("Which products child-safety reports took off a store that day (a set of at most the cap's product ids), two days: the cap on the automatic step", "studio", 2, 128),
   "nl:report:@lib/takedown.ts": company("A takedown report", "Reports to the company."),
   "nl:report:t:@lib/takedown.ts": company("A takedown report's token", "Reports to the company."),
   "nl:callteam:@lib/team-booking.ts": { what: "A team event type: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },

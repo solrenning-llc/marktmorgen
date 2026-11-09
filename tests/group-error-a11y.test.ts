@@ -211,7 +211,7 @@ async function main(): Promise<void> {
   few.set("product", limited.product.id);
   few.set("people", "4");
   const refusedLimited = await checkoutRoute(post(withConsent(few)));
-  is("a product with limited stock: refused for several people before any unit is held, said in the group form", [stocked.ok, refusedLimited.headers.get("location")], [true, `https://marktmorgen.com/@${store.handle}/p/${limited.product.id}?group=product#group`]);
+  is("a product with limited stock: refused for several people before any unit is held (?group=product; its page draws no group form, so only a hand-made form gets here)", [stocked.ok, refusedLimited.headers.get("location")], [true, `https://marktmorgen.com/@${store.handle}/p/${limited.product.id}?group=product#group`]);
   const route = readFileSync("app/api/store/checkout/route.ts", "utf8");
   is("a group that could not be written down goes back to the group form, read as not available", /if \(!started\) return away\(groupBack\("unavailable"\)\)/.test(route), true);
   is("a busy unit or paused orders send a group back to its form too", [/group && held\.reason === "busy" \? groupBack\("busy"\)/.test(route), /OrdersPausedError\)[^\n]*\n?[^\n]*group \? groupBack\(/.test(route)], [true, true]);

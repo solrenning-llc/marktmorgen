@@ -64,12 +64,15 @@ export function draftStrings(value: unknown): string[] {
  * left out or read only in the phrase that is about the subject: "treats"
  * (dog treats), "cured" (cured meats), "stock" (stock photos, chicken stock),
  * "earn" (earn a certificate), "license" (a font's commercial license),
- * "court" (a basketball court), "money-back" (a guarantee).
+ * "court" (a basketball court), "money-back" (a guarantee), "taxing" (a
+ * taxing workout). Sale wording is not a subject either: "save money",
+ * "big savings", "savings on", "while stocks last", "trading cards",
+ * "treated wood" (or with care, like, to), "the law of attraction".
  */
 const TOPIC_WORDS: Record<SensitiveTopic, RegExp> = {
-  health: /\b(health|medical|medicine|medications?|doctors?|nurses?|diagnos(e|es|is|ed|ing)|diseases?|illness(es)?|disorders?|symptoms?|cures?|treat(ed|ing|ments?)|therap(y|ies)|therapists?|diet(s|ing)?|weight[- ]loss|pregnan(cy|t)|supplements?|anxiety|depression|injur(y|ies)|cancer|(chronic|back|joint|neck) pain|pain relief|heal(s|ed|ing)|trauma)\b/i,
-  money: /\b(money(?![- ]back)|financ(e|es|ial|ially)|invest(s|ed|ing|ment|ments|or|ors)?|trading|stocks|stock (market|trading)|crypto|bitcoin|forex|income|profits?|earnings|retire(d|ment)?|savings|loans?|debts?|mortgages?|tax(es|ed|ing)?|credit scores?|passive income)\b/i,
-  law: /\b(law|laws|legal(ly)?|lawyers?|attorneys?|contracts?|lawsuits?|sue|sued|suing|(in|to|before) court|courtrooms?|court (case|order|date|hearing)s?|visas?|immigration|copyrights?|trademarks?)\b/i,
+  health: /\b(health|medical|medicine|medications?|doctors?|nurses?|diagnos(e|es|is|ed|ing)|diseases?|illness(es)?|disorders?|symptoms?|cures?|(?<!(pressure|heat)-)treated(?! (wood|lumber|timber|pine|cedar|glass|steel|leather|fabric|paper|water|with care|like|to)\b)|treat(ing|ments?)|therap(y|ies)|therapists?|diet(s|ing)?|weight[- ]loss|pregnan(cy|t)|supplements?|anxiety|depression|injur(y|ies)|cancer|(chronic|back|joint|neck) pain|pain relief|heal(s|ed|ing)|trauma)\b/i,
+  money: /\b((?<!\b(save|saves|saved|saving) )money(?![- ]back)|financ(e|es|ial|ially)|invest(s|ed|ing|ment|ments|or|ors)?|trading(?! cards?\b)|stocks(?! last\b)|stock (market|trading)|crypto|bitcoin|forex|income|profits?|earnings|retire(d|ment)?|(?<!\b(big|bigger|huge|great|extra|instant|bundle) )savings(?! on\b)|loans?|debts?|mortgages?|tax(es|ed)?|credit scores?|passive income)\b/i,
+  law: /\b(law(?! of (attraction|averages)\b)|laws|legal(ly)?|lawyers?|attorneys?|contracts?|lawsuits?|sue|sued|suing|(in|to|before) court|courtrooms?|court (case|order|date|hearing)s?|visas?|immigration|copyrights?|trademarks?)\b/i,
 };
 
 const TOPIC_ORDER: SensitiveTopic[] = ["health", "money", "law"];

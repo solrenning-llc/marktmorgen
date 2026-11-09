@@ -88,7 +88,7 @@ async function main(): Promise<void> {
   // The lesson page is not inside [data-store-layout], so the store front's summary rule does not reach it: the
   // summary carries its own 44 px row (WCAG 2.5.5), by height and padding, and stays a list item (its triangle).
   is("every delete summary is a 44 px row of its own, and keeps its disclosure triangle", asks.map((a) => [
-    /class="[^"]*\bmin-h-11\b/.test(a.summaryTag),
+    /min-height:2\.75rem/.test(a.summaryTag),
     /padding-block:calc\(\(2\.75rem - 1lh\) \/ 2\)/.test(a.summaryTag),
     /class="[^"]*\b(?:inline-)?flex\b/.test(a.summaryTag),
   ]), asks.map(() => [true, true, false]));

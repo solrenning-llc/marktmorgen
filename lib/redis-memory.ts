@@ -202,6 +202,37 @@ export class MemoryRedis {
           }
           return out;
         }
+        // lib/contacts.ts CONTACT_WRITE_IF: a contact's row written only while it and the address's deleted mark are as read.
+        if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && args[0] === "2" && args.length === 9) {
+          const [list, marks, field, was, value, print, existed, lift] = args.slice(1);
+          const current = this.run(["HGET", list, field]);
+          const seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+          if (seen !== was || String(this.run(["HEXISTS", marks, print])) !== existed) return 0;
+          this.run(["HSET", list, field, value]);
+          if (lift === "1") this.run(["HDEL", marks, print]);
+          return 1;
+        }
+        // lib/order-data.ts ORDER_WRITE_IF_SAME: each check, then ORDER_WRITE as it is on the rest.
+        if (key.startsWith("-- marktmorgen:order-write-if-same:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const checks = Number(argv[0]);
+          if (!Number.isInteger(checks) || checks < 1 || checks > 4 || argv.length < 1 + 4 * checks) return [-1];
+          for (let c = 0; c < checks; c += 1) {
+            const target = keys[Number(argv[1 + 4 * c]) - 1];
+            const [kind, field, want] = argv.slice(2 + 4 * c, 5 + 4 * c);
+            if (target === undefined) return [-1];
+            let seen: string;
+            if (kind === "v") {
+              const current = this.run(["HGET", target, field]);
+              seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+            } else if (kind === "e") seen = String(this.run(["HEXISTS", target, field]));
+            else return [-1];
+            if (seen !== want) return [-2];
+          }
+          return this.orderWrite([String(count), ...keys, ...argv.slice(1 + 4 * checks)]);
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

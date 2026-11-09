@@ -318,3 +318,62 @@ export async function releaseOrderData(store: DataStore, bytes: number): Promise
   if (!Number.isFinite(bytes) || bytes <= 0) return;
   await giveData(store, [{ slot: "o", bytes: Math.floor(bytes) }]);
 }
+
+/**
+ * ORDER_WRITE run only while a few hash fields are still as they were read, in the same step (consent audit of
+ * 9 November 2026: a contact an order writes is written only over the row it was decided from, so an unsubscribe,
+ * a complaint or a deletion that lands in between is never written over, lib/contacts.ts). ARGV[1] is how many
+ * checks, then each as the index of its hash in KEYS, "v" or "e", the field, and what was read: for "v" the SHA-1
+ * of the field's value ("" when there was none), for "e" "1" when it existed and "0" when not. Any check that no
+ * longer holds answers {-2} and nothing is written; a malformed check answers {-1}. Otherwise ORDER_WRITE runs as
+ * it is, every command and the room's charge, on the rest of ARGV, its sizes held on a real Redis by
+ * scripts/test_order_data_redis.py.
+ */
+export const ORDER_WRITE_IF_SAME = `-- marktmorgen:order-write-if-same:v1
+local g = tonumber(ARGV[1])
+if not g or g < 1 or g > 4 or #ARGV < 1 + 4 * g then return {-1} end
+for c = 0, g - 1 do
+  local key = KEYS[tonumber(ARGV[2 + 4 * c]) or 0]
+  local kind, field, want = ARGV[3 + 4 * c], ARGV[4 + 4 * c], ARGV[5 + 4 * c]
+  if not key then return {-1} end
+  local seen
+  if kind == 'v' then
+    local cur = redis.call('HGET', key, field)
+    seen = ''
+    if cur then seen = redis.sha1hex(cur) end
+  elseif kind == 'e' then
+    seen = tostring(redis.call('HEXISTS', key, field))
+  else
+    return {-1}
+  end
+  if seen ~= want then return {-2} end
+end
+local function write(ARGV)
+${ORDER_WRITE.slice(ORDER_WRITE.indexOf("\n") + 1)}
+end
+return write({select(2 + 4 * g, unpack(ARGV))})`;
+
+/** One check of orderWriteIfSame: a hash field's value as read (its SHA-1, "" for none), or whether it existed. */
+export type SameField = { key: string; field: string } & ({ sha1: string } | { exists: boolean });
+
+/**
+ * Writes an order's records and charges its room as orderWrite does, in one script (ORDER_WRITE_IF_SAME), only
+ * while every check still holds: answers null when one no longer does (nothing written), or the replies. Any
+ * other answer is unknown and thrown (rule 24), never taken for either. A store with no room key has its records
+ * written by the caller another way: this throws for it.
+ */
+export async function orderWriteIfSame(owner: DataOwner, same: SameField[], commands: Command[]): Promise<unknown[] | null> {
+  if (!same.length || same.length > 4) throw new Error("an order's write checks one to four fields");
+  if (!commands.length || commands.length > ORDER_WRITE_MAX) throw new Error("an order's checked write is one script");
+  for (const command of commands) if (!checked(command)) throw new Error(`not a command an order's records are written with: ${String(command[0])}`);
+  const room = dataKey(owner);
+  if (!room || !isRedisConfigured()) throw new Error("an order's checked write needs its store's room");
+  const script = scriptOf(room, commands);
+  const count = Number(script[2]);
+  const keys = script.slice(3, 3 + count).map(String);
+  for (const { key } of same) if (!keys.includes(key)) keys.push(key);
+  const checks = same.flatMap((s) => [keys.indexOf(s.key) + 1, "sha1" in s ? "v" : "e", s.field, "sha1" in s ? s.sha1 : s.exists ? "1" : "0"]);
+  const reply = repliesFor(await redisPipeline([["EVAL", ORDER_WRITE_IF_SAME, keys.length, ...keys, same.length, ...checks, ...script.slice(3 + count)]]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 1 && reply[0] === -2) return null;
+  return readScript(reply, commands).replies;
+}

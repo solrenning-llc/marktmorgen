@@ -35,11 +35,12 @@ import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
 import { AI_RUN_ID, AI_STEP_PADDING_BYTES, type AiStepLine } from "@/lib/ai-steps";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
+import { writeProductIdeas } from "@/lib/product-ideas";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
 
 /**
- * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research", … }`.
+ * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research" | "ideas", … }`.
  * It writes into the studio's own boxes and saves nothing: whatever comes back
  * is the creator's to read, change and keep, or not.
  *
@@ -73,6 +74,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, value: done.value, left: done.left });
   };
 
+  // Ideas for a new product (758 [STN5], unit 2): from the store's own record and the creator's words; it needs the products permission, like adding one.
+  if (body.kind === "ideas") return answer(writeProductIdeas(store, { notes }));
   if (body.kind === "product") {
     const kind = KINDS.includes(body.productKind as ProductKind) ? (body.productKind as ProductKind) : "download";
     return answer(writeProduct(store, { title: text(body.title, 200), price: text(body.price, 40), kind, notes }));

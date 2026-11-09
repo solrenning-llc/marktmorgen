@@ -44,6 +44,7 @@ import {
 import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, priceBounds, priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { StoreCurrency, useStoreCurrency } from "@/components/store-currency";
 import { AiAssist, AiOn } from "@/components/ai-assist";
+import { ProductIdeas } from "@/components/product-ideas";
 import {
   ACCEPT_ATTRIBUTE,
   MAX_FILE_BYTES,
@@ -414,6 +415,15 @@ function ProductForm({
           className="field mt-2"
         />
       </div>
+
+      {!product ? (
+        <ProductIdeas
+          title={draft.title}
+          summary={draft.summary}
+          titleFieldId={`product-title-${id}`}
+          onUse={(next) => setDraft({ ...draft, title: next.title, summary: next.summary })}
+        />
+      ) : null}
 
       <AiAssist<{ summary: string; about: string }>
         title="Write the description with AI"

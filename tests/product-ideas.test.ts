@@ -48,6 +48,7 @@ import { POST } from "@/app/api/store/ai/route";
 import { COST_LINES } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { reservations } from "./ai-steps-spend-stub";
 import { paidPeriod } from "./billing-period-fixture";
 
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
@@ -78,17 +79,10 @@ let reply: unknown = { ideas: CLEAN };
 let calls = 0;
 let sentBodies: Record<string, unknown>[] = [];
 let reservedBeforeSend: number[] = [];
-const commands: (string | number)[][] = [];
-const realPipeline = redis.pipeline.bind(redis);
-redis.pipeline = async (batch: (string | number)[][]) => {
-  commands.push(...batch);
-  return realPipeline(batch);
-};
-const reserves = () => commands.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:ai-spend-reserve"));
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   if (new URL(String(input)).hostname !== "api.anthropic.com") return new Response("{}", { status: 404 });
   calls += 1;
-  reservedBeforeSend.push(reserves().length);
+  reservedBeforeSend.push(reservations.count);
   sentBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
   return new Response(JSON.stringify({ content: [{ type: "text", text: typeof reply === "string" ? reply : JSON.stringify(reply) }] }));
 }) as typeof fetch;
@@ -106,13 +100,13 @@ async function main(): Promise<void> {
   part("What the model is sent");
   is("nothing to work from: no line, no product, no words", ideaRequest(shape({}), ""), null);
   const contact = ideaRequest(
-    shape({ bio: "Sourdough lessons for home bakers. Write to ann@example.com, see https://ann.example/shop or call +1 555 123 4567." }),
+    shape({ bio: "Sourdough lessons for home bakers. Write to ann@example.com, see https://ann.example/shop or call 555 010 4567." }),
     "I bake <b>every</b> day. www.annbakes.example",
   );
   is("the store's own words go, and its name", [contact?.prompt.includes("Sourdough lessons for home bakers"), contact?.prompt.includes("Ann's Bread")], [true, true]);
   is(
     "email addresses, links and phone numbers are taken out first",
-    ["ann@example.com", "https://", "ann.example/shop", "555 123 4567", "www."].map((x) => contact?.prompt.includes(x) ?? true),
+    ["ann@example.com", "https://", "ann.example/shop", "555 010 4567", "www."].map((x) => contact?.prompt.includes(x) ?? true),
     [false, false, false, false, false],
   );
   is("the creator's words cannot close the quote they are in", [/[<>]/.test(contact?.prompt ?? "<"), contact?.prompt.includes("‹b›")], [false, true]);
@@ -207,7 +201,7 @@ async function main(): Promise<void> {
   calls = 0;
   sentBodies = [];
   reservedBeforeSend = [];
-  commands.length = 0;
+  reservations.count = 0;
   reply = { ideas: CLEAN };
   const first = await writeProductIdeas(store, { notes: "" });
   is("five ideas come back, with one job of the month used", [first.ok, first.ok ? first.value.ideas.length : 0, first.ok ? first.left : -1], [true, 5, AI_MONTHLY.scale - 1]);
@@ -215,8 +209,11 @@ async function main(): Promise<void> {
   is("its money was reserved before it was sent", reservedBeforeSend, [1]);
   const sent = sentBodies[0] ?? {};
   is("on the cheapest model, with the priced output ceiling", [sent.model, sent.max_tokens], [answerModel(), IDEAS_OUTPUT_TOKENS]);
-  const charged = Number(reserves()[0]?.[6]);
-  is("what was reserved is at most a priced writing job", Number.isSafeInteger(charged) && charged > 0 && charged <= WRITING_JOB_MICRO_USD, true);
+  const asked = ideaRequest(store, "");
+  const bounded = asked ? boundedAiRequest(asked.system, asked.prompt, IDEAS_OUTPUT_TOKENS, answerModel()) : null;
+  const held = bounded?.ok ? aiRequestHoldMicroUsd(answerModel(), bounded.shape) : null;
+  is("what that request reserves is at most a priced writing job", held !== null && held > 0 && held <= WRITING_JOB_MICRO_USD, true);
+  is("and it is the request that was sent", [sent.system, (sent.messages as { content?: unknown }[] | undefined)?.[0]?.content], [asked?.system, asked?.prompt]);
 
   reply = { ideas: refused.map((t) => idea(t)) };
   const none = await writeProductIdeas(store, { notes: "" });
@@ -284,7 +281,7 @@ async function main(): Promise<void> {
   is("it saves nothing and submits no form", [/onSubmit|method: "PUT"|\/api\/store\/product/.test(box)], [false]);
   is("the count is said politely, in a region that is always there", /role="status" aria-live="polite"/.test(boxFlat), true);
   is("errors are said as alerts", /role="alert"/.test(boxFlat), true);
-  is("each button names its idea for screen readers", /Use this idea\s*<span className="sr-only">: \{idea\.title\}<\/span>/.test(boxFlat), true);
+  is("each button names its idea for screen readers", [IDEAS_COPY.use, /\{IDEAS_COPY\.use\}\s*<span className="sr-only">: \{idea\.title\}<\/span>/.test(boxFlat)], ["Use this idea", true]);
   const buttons = box.match(/<(button|summary)\b[^>]*>/g) ?? [];
   is("every button and the opener are at least 44 px tall", [buttons.length >= 4, buttons.every((b) => b.includes("min-h-11"))], [true, true]);
   is("an undo puts back what the fields had", boxFlat.includes(`{IDEAS_COPY.undo}`) && /Put back/.test(IDEAS_COPY.undo), true);

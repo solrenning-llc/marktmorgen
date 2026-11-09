@@ -12,9 +12,10 @@
  * unknown shape (CX-123 rule 24) never sends to the assignee: the owner is
  * told and the conversation is left as it is.
  */
-import { assignTo, readInbox, startChat, visitorSend } from "@/lib/inbox";
+import { assignTo, forgetInboxPerson, readInbox, startChat, tokenKey, visitorSend } from "@/lib/inbox";
 import { claimHandle, ensureStatsId, setInboxSetting, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
-import { putMember, readTeam, removeMember, setMemberRole } from "@/lib/team";
+import { moveMemberships, putMember, readTeam, removeMember, setMemberRole } from "@/lib/team";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { can } from "@/lib/team-roles";
 import type { Store } from "@/lib/store";
 import { advance, store as redis } from "./redis-stub";
@@ -39,6 +40,10 @@ const OWNER = "r25-owner@example.com";
 const HELPER = "r25-helper@example.com";
 const EDITOR = "r25-editor@example.com";
 const STAYS = "r25-stays@example.com";
+const MOVER = "r25-mover@example.com";
+const MOVED = "r25-mover-new@example.com";
+const RACER = "r25-racer@example.com";
+const SWAPPED = "r25-swapped@example.com";
 
 type Commands = (string | number)[][];
 const original = redis.pipeline.bind(redis);
@@ -48,6 +53,50 @@ async function withGet<T>(key: string, reply: unknown, work: () => Promise<T>): 
   redis.pipeline = (async (commands: Commands) => {
     const replies = await original(commands);
     return commands.map((c, at) => (c[0] === "GET" && c[1] === key ? reply : replies[at]));
+  }) as typeof redis.pipeline;
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+/**
+ * Runs work and, once the team was read for a send and the conversation `conv` read again after it (the give-back's
+ * read), runs `between` just before the next Redis call: whatever the give-back writes then lands after it.
+ */
+async function betweenGiveBack<T>(teamKey: string, conv: string, between: () => Promise<unknown>, work: () => Promise<T>): Promise<{ result: T; ran: boolean }> {
+  let teamRead = false;
+  let armed = false;
+  let ran = false;
+  redis.pipeline = (async (commands: Commands) => {
+    if (armed && !ran) {
+      ran = true;
+      redis.pipeline = original;
+      try {
+        await between();
+      } finally {
+        redis.pipeline = wrapped;
+      }
+    }
+    const replies = await original(commands);
+    if (commands.some((c) => c[0] === "GET" && c[1] === teamKey)) teamRead = true;
+    else if (teamRead && !ran && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === conv) armed = true;
+    return replies;
+  }) as typeof redis.pipeline;
+  const wrapped = redis.pipeline;
+  try {
+    return { result: await work(), ran };
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+/** Runs work with the give-back script's reply replaced by `reply` (the script itself still runs). */
+async function withEval<T>(reply: unknown, work: () => Promise<T>): Promise<T> {
+  redis.pipeline = (async (commands: Commands) => {
+    const replies = await original(commands);
+    return commands.map((c, at) => (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:inbox-give-back:v1\n") ? reply : replies[at]));
   }) as typeof redis.pipeline;
   try {
     return await work();
@@ -147,6 +196,71 @@ async function main(): Promise<void> {
   }
   const toldU = await writesAgain(u.token, "Asking once more with the team read again.");
   is("once the team reads again, the teammate who stays is told", toldU.map((m) => m.to), [STAYS]);
+
+  part("A teammate's sign-in address moved (lib/team.ts moveMemberships) with the conversation still on the old one");
+  is("(setup) the teammate who moves is on the team", await putMember(store, MOVER, "support"), true);
+  const m = await conversation(store, "mia.buyer@example.com", "Mia Buyer", "Is my invoice ready for order 77?", "10.0.0.7");
+  is("(setup) given to the teammate before the move", (await assignTo(store, m.id, MOVER, await allowedNow(store.sid, OWNER)))?.assigned, MOVER);
+  await moveMemberships(MOVER, MOVED);
+  is("(setup) the team now holds the new address, not the old one", (await readTeam(store.sid)).members.map((x) => x.email).filter((x) => x === MOVER || x === MOVED), [MOVED]);
+  const toldM = await writesAgain(m.token, "Asking again about the invoice for order 77.");
+  is("the old address gets no email with the buyer's message", toldM.some((x) => x.to === MOVER), false);
+  is("the owner is told after the move", toldM.map((x) => x.to), [OWNER]);
+  is("the conversation no longer names the old address", await assignedOf(store, m.id), "");
+
+  part("The buyer's erasure lands between the give-back's read and its write");
+  is("(setup) the teammate who leaves is on the team", await putMember(store, RACER, "support"), true);
+  const r = await conversation(store, "rui.buyer@example.com", "Rui Buyer", "Please delete everything you hold about me.", "10.0.0.8");
+  is("(setup) given to that teammate", (await assignTo(store, r.id, RACER, await allowedNow(store.sid, OWNER)))?.assigned, RACER);
+  is("(setup) the teammate is taken off the team", await removeMember(store, RACER), true);
+  store = (await storeForEmail(OWNER))!;
+  const rConv = `nl:inbox:${store.statsId}:c:${r.id}`;
+  let erased = -1;
+  const before = sent.length;
+  const raced = await betweenGiveBack(teamKey, rConv, async () => { erased = await forgetInboxPerson(store.statsId, "rui.buyer@example.com"); }, async () => {
+    advance(31 * 60_000);
+    return visitorSend(r.token, "One more message before I ask to be erased.", (h) => storeForHandle(h));
+  });
+  const toldR = sent.slice(before).filter((x) => x.subject.startsWith("New message from"));
+  is("(setup) the erasure ran between the give-back's read and its write", [raced.ran, erased], [true, 1]);
+  is("the former teammate is not told", toldR.some((x) => x.to === RACER), false);
+  is("the owner is told", toldR.map((x) => x.to), [OWNER]);
+  is("the erased conversation's record does not come back", (await original([["GET", rConv]]))[0], null);
+  is("its entry in the inbox's index does not come back", (await original([["ZSCORE", `nl:inbox:${store.statsId}:all`, r.id]]))[0], null);
+  is("its chat link does not come back", (await original([["GET", tokenKey(r.token)]]))[0], null);
+  is("the studio's inbox no longer lists the buyer", (await readInbox(store.statsId)).some((x) => x.email === "rui.buyer@example.com"), false);
+
+  part("The owner gives the conversation to someone else between the give-back's read and its write");
+  is("(setup) two teammates", [await putMember(store, RACER, "support"), await putMember(store, SWAPPED, "support")], [true, true]);
+  const w = await conversation(store, "wen.buyer@example.com", "Wen Buyer", "Who is handling my return?", "10.0.0.9");
+  is("(setup) given to the first", (await assignTo(store, w.id, RACER, await allowedNow(store.sid, OWNER)))?.assigned, RACER);
+  is("(setup) the first is taken off the team", await removeMember(store, RACER), true);
+  store = (await storeForEmail(OWNER))!;
+  const wConv = `nl:inbox:${store.statsId}:c:${w.id}`;
+  const allowed = await allowedNow(store.sid, OWNER);
+  const swapped = await betweenGiveBack(teamKey, wConv, () => assignTo(store, w.id, SWAPPED, allowed), async () => {
+    advance(31 * 60_000);
+    return visitorSend(w.token, "Asking who handles my return again.", (h) => storeForHandle(h));
+  });
+  is("(setup) the owner's choice landed between the give-back's read and its write", swapped.ran, true);
+  is("the owner's new choice is kept, not cleared by the give-back", await assignedOf(store, w.id), SWAPPED);
+
+  part("Rule 24: the give-back's write answered in an unknown shape");
+  const shapes: [string, unknown][] = [["the text \"1\"", "1"], ["null", null], ["an array", [1]], ["undefined", undefined], ["2", 2]];
+  for (const [at, [label, reply]] of shapes.entries()) {
+    is(`(setup) ${label}: a teammate on the team`, await putMember(store, RACER, "support"), true);
+    const g = await conversation(store, `gia.${at}@example.com`, "Gia Buyer", "A question about delivery times.", `10.0.1.${at + 1}`);
+    is(`(setup) ${label}: given to that teammate`, (await assignTo(store, g.id, RACER, await allowedNow(store.sid, OWNER)))?.assigned, RACER);
+    is(`(setup) ${label}: taken off the team`, await removeMember(store, RACER), true);
+    store = (await storeForEmail(OWNER))!;
+    const errors: unknown[] = [];
+    console.error = (...args: unknown[]) => { errors.push(args[1]); };
+    const told = await writesAgain(g.token, `Asking again while the give-back answers ${label}.`, (work) => withEval(reply, work));
+    console.error = () => {};
+    is(`${label}: the former teammate is not told`, told.some((x) => x.to === RACER), false);
+    is(`${label}: the owner is told`, told.map((x) => x.to), [OWNER]);
+    is(`${label}: the unknown answer is reported as unknown, never taken as written or not`, errors.some((e) => e instanceof UnknownReplyError), true);
+  }
 
   part("Confirmed empty: the team record is gone (null)");
   const e = await conversation(store, "eli.buyer@example.com", "Eli Buyer", "Can I change my order size?", "10.0.0.6");

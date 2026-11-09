@@ -19,6 +19,7 @@ import { sendTo } from "@/lib/mail";
 import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimHandle, ensureListId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
+import { joinedKeys } from "@/lib/joined-stores";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { paidPeriod } from "./billing-period-fixture";
@@ -251,6 +252,75 @@ async function main() {
     await redis.pipeline([["HSET", suppressedKey(list), suppressionPrint(list, email), mark]]);
     const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free", at }, ROOM);
     is(`${what}: not known to be older, so nothing is written and nothing lifted`, [row(list, email), result.joined, redis.run(["HLEN", suppressedKey(list)])], [null, false, 1]);
+  }
+
+  part("Pre-review of f1d8ec7b0e: a time that cannot be read, the erasure's end, the stores-joined index, the counts");
+  {
+    // P4: recordLead hands on claim.at as "" when a free request's record is malformed (lib/free.ts).
+    const list = "pre_p4", email = "blank.time@example.com";
+    await setup(list, email);
+    await forgetContactPerson(list, email);
+    await real([suppressCommand(list, email, Math.floor(Date.now() / 1000) - 5)]);
+    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free", at: "" }, orderRoom(OWNER));
+    is("P4: a yes whose time is \"\" is not after the deletion: nothing written, nothing lifted", [row(list, email), result.joined, redis.run(["HLEN", suppressedKey(list)])], [null, false, 1]);
+  }
+  {
+    // P7: the same blank time against an unsubscribe a minute old.
+    const list = "pre_p7", email = "blank.left@example.com";
+    await setup(list, email);
+    await stopWriting(list, email, "complained");
+    const left = JSON.parse(String(row(list, email)));
+    redis.run(["HSET", leadsKey(list), email, JSON.stringify({ ...left, unsubAt: new Date(Date.now() - 60_000).toISOString() })]);
+    await upsertContact(list, email, { agreed: true, explicit: true, source: "free", at: "" }, ROOM);
+    const after = JSON.parse(String(row(list, email)));
+    is("P7: a yes whose time is \"\" is not after the unsubscribe: still off, still for the complaint", [after.unsub, after.gone], [true, "complained"]);
+  }
+  {
+    // P5: the erasure writes its mark first and deletes the row last (lib/person-erasure.ts); a join confirmed in
+    // between (lib/store-join.ts, at: now) is after the first mark and lifts it. The row's deletion keeps the mark.
+    const list = "pre_p5", email = "join.racer@example.com";
+    await setup(list, email);
+    await real([suppressCommand(list, email, Math.floor(Date.now() / 1000) - 2)]);
+    await upsertContact(list, email, { agreed: true, explicit: true, source: "free", at: new Date().toISOString() }, ROOM);
+    await forgetContactPerson(list, email);
+    is("P5: when the erasure ends, its mark is there and the row is gone", [redis.run(["HLEN", suppressedKey(list)]), row(list, email)], [1, null]);
+    is("P5: and the next send does not select them", (await tokensFor(list, [email], handle)).has(email), false);
+  }
+  {
+    // P6: the stores an address joined (lib/joined-stores.ts) are how "delete me from every store" finds this one.
+    const list = "pre_p6", email = "joiner@example.com";
+    let wrote = false;
+    redis.pipeline = async (commands: Commands) => {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-write-if:v1"))) {
+        wrote = true;
+        return real(commands);
+      }
+      if (wrote && commands.some((c) => c[0] === "SADD" && String(c[1]).startsWith("nl:lib:joined:"))) throw new Error("synthetic network failure");
+      return real(commands);
+    };
+    await upsertContact(list, email, { agreed: true, explicit: true, source: "free", sid: ROOM.sid, at: new Date().toISOString() }, ROOM).catch(() => null);
+    redis.pipeline = real;
+    const listed = joinedKeys(email).some((k) => redis.run(["SISMEMBER", k, ROOM.sid]) === 1);
+    is("P6: a row written is always findable by \"delete me from every store\"", row(list, email) === null || listed, true);
+  }
+  {
+    // The counts go with the row, in the same step: a round trip lost after it never leaves them behind.
+    const list = "pre_counts", email = "counted.once@example.com";
+    const lone = (key: string) => (c: Commands) => c.length === 1 && (c[0][0] === "INCR" || c[0][0] === "DECR") && c[0][1] === key;
+    redis.pipeline = async (commands: Commands) => {
+      if (lone(`nl:store:leads:${list}:agreed`)(commands) || lone(`nl:store:leads:${list}:unsub`)(commands)) throw new Error("synthetic network failure");
+      return real(commands);
+    };
+    await upsertContact(list, email, { agreed: true, explicit: true, source: "free" }, ROOM).catch(() => null);
+    redis.pipeline = real;
+    const token = (await tokensFor(list, [email], handle)).get(email) ?? "";
+    redis.pipeline = async (commands: Commands) => {
+      if (lone(`nl:store:leads:${list}:unsub`)(commands)) throw new Error("synthetic network failure");
+      return real(commands);
+    };
+    await unsubscribe(token).catch(() => null);
+    redis.pipeline = real;
+    is("a sign-up and its unsubscribe are each counted with their row", [JSON.parse(String(row(list, email))).unsub, redis.run(["GET", `nl:store:leads:${list}:agreed`]), redis.run(["GET", `nl:store:leads:${list}:unsub`])], [true, "1", "1"]);
   }
 
   part("The deleted mark where links are handed out (tokensFor, sendTo)");

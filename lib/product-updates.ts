@@ -378,6 +378,14 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
       await redisPipeline([["SREM", QUEUE, id]]);
       return job;
     }
+    // A send lives KEEP_SECONDS from its start, as its recipient list does: past that it ends here, before either
+    // wait below, so a send held while the store is off or its plan has no email never stays queued without end.
+    if (Math.floor(Date.now() / 1000) >= job.createdAt + KEEP_SECONDS) {
+      job = { ...job, status: "failed", note: "The recipient list expired. Nothing more was sent." };
+      await save(job);
+      await redisPipeline([["DEL", toKey(id)], ["SREM", QUEUE, id]]);
+      return job;
+    }
     // Switched off after notices about its content (lib/takedown.ts; any value but "" is off, rule 24): the send
     // waits where it is, nothing reserved, sent or counted, and goes on once the store is back on. Read once a run,
     // from the store read above (no read of its own): a run already under way goes on at most to its deadline.

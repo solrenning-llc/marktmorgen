@@ -42,6 +42,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { PAYPAL_HAND_OVER_RETRY } from "./plan-cost-registry";
+import { FAMILIES } from "./store-data-registry";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { sendEmailPinned } from "@/lib/email";
 import { NextRequest } from "next/server";
@@ -515,6 +516,8 @@ async function main(): Promise<void> {
   const ttl = Number(redis.run(["TTL", mailKeyOf(j2)]));
   is("for a day at most", ttl > 0 && ttl <= delivery.RECEIPT_MAIL_SECONDS, true);
   is("within the bytes the store-data registry prices", Buffer.byteLength(String(kept)) <= delivery.RECEIPT_MAIL_BYTES, true);
+  const priced = FAMILIES["nl:ppsell:mail:@lib/paypal-delivery.ts"]?.parts?.[0];
+  is("which prices the kept receipt at its most, for as long as it is kept", Boolean(priced && "per" in priced && priced.bytes >= delivery.RECEIPT_MAIL_BYTES && priced.days * 86_400 >= delivery.RECEIPT_MAIL_SECONDS), true);
   await rename(`${title}, Third Edition`);
   resendMode = "up";
   redis.run(["SET", mailKeyOf(j2), "{\"subject\":", "EX", String(ttl)]);

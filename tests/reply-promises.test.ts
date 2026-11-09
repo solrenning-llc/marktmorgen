@@ -27,9 +27,13 @@ import { thanksWords } from "@/lib/buyer-words/thanks";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { givingWords } from "@/lib/buyer-words/giving";
 
-/** Every `sendEmail({ ... })` object in a file, braces balanced; `sendEmailPinned({ ... })` (lib/email.ts) is one too. */
+/**
+ * Every `sendEmail({ ... })` object in a file, braces balanced; `sendEmailPinned({ ... })` (lib/email.ts) is one too,
+ * and so is a PayPal receipt as made (`(): PayPalReceipt => ({ ... })`, lib/paypal-sales.ts), which is sent as made or
+ * as first kept (lib/paypal-delivery.ts), never with other fields.
+ */
 function sends(file: string): string[] {
-  const text = readFileSync(file, "utf8").replaceAll("sendEmailPinned({", "sendEmail({");
+  const text = readFileSync(file, "utf8").replaceAll("sendEmailPinned({", "sendEmail({").replaceAll("(): PayPalReceipt => ({", "sendEmail({");
   const out: string[] = [];
   let at = text.indexOf("sendEmail({");
   while (at >= 0) {

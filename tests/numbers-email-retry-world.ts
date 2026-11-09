@@ -14,6 +14,15 @@ export const retry = {
   /** A post whose outcome the chat did not say (a timeout, an abort, a thrown error, a 5xx): it may have been shown. */
   postUnknown: false,
   posts: [] as string[],
+  /**
+   * A sender that keeps each idempotency key for a day, as SES's once-key and Resend's idempotency do: the first
+   * email under a key is delivered but its answer is lost (false, as lib/email.ts answers an unknown outcome); a
+   * repeat inside the day is not delivered again and is not confirmed either; a repeat after the day is delivered
+   * again.
+   */
+  lostAnswer: false,
+  /** The emails that reached their address, in order (a try is not a delivery). */
+  delivered: [] as string[],
   spends: "none" as "none" | "throws",
   team: "members" as "members" | "throws",
 };
@@ -26,14 +35,30 @@ export function resetRetry(): void {
   retry.postOk = true;
   retry.postUnknown = false;
   retry.posts.length = 0;
+  retry.lostAnswer = false;
+  retry.delivered.length = 0;
+  firstUnder.clear();
   retry.spends = "none";
   retry.team = "members";
 }
 
+const DAY_MS = 86_400_000;
+const firstUnder = new Map<string, number>();
+
 export async function sendEmail(message: { to: string; subject: string; idempotencyKey?: string }): Promise<boolean> {
   retry.mails.push(message.to);
   retry.keys.push(message.idempotencyKey);
-  return retry.sendOk(message.to);
+  const key = message.idempotencyKey;
+  if (retry.lostAnswer && key) {
+    const first = firstUnder.get(key);
+    if (first !== undefined && Date.now() - first < DAY_MS) return false;
+    firstUnder.set(key, Date.now());
+    retry.delivered.push(message.to);
+    return first !== undefined;
+  }
+  if (!retry.sendOk(message.to)) return false;
+  retry.delivered.push(message.to);
+  return true;
 }
 
 export async function storeOf(folder: string) {

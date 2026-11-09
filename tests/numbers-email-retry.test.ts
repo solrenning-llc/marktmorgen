@@ -243,6 +243,75 @@ async function main(): Promise<void> {
   is("one email, one post", [body.sent, body.posted, body.failed, owner(), retry.posts.length], [1, 1, 0, 1, 1]);
   is("claimed", held("nl:monthly:sent:"), true);
 
+  // Claude 2's first review of #3297 (MEDIUM): an owner email whose answer was lost may have been delivered, and
+  // lib/email.ts answers it as false, the same as a refusal. The sender keeps its key for a day and the crons try a
+  // period for two, so a try more than a day after the first must never send it blind.
+  const realNow = Date.now;
+  const HOUR = 3_600_000;
+  const ownerDelivered = () => retry.delivered.filter((to) => to === "owner@example.test").length;
+  try {
+    part("Weekly: an owner email whose answer was lost is delivered once, even when the next try is more than a day later");
+    reset();
+    chooseMember();
+    retry.lostAnswer = true;
+    const monday = Date.parse("2026-11-09T00:20:00Z");
+    let clock = monday;
+    Date.now = () => clock;
+    body = await run(weekly, "/api/cron/weekly");
+    is("delivered, not counted as sent, no team copy yet", [ownerDelivered(), body.sent, member()], [1, 0, 0]);
+    control.numbers = "throws";
+    for (let hour = 1; hour <= 24; hour += 1) {
+      clock = monday + hour * HOUR;
+      commands.length = 0;
+      await run(weekly, "/api/cron/weekly");
+    }
+    control.numbers = "visitors-5";
+    clock = monday + 25 * HOUR;
+    commands.length = 0;
+    body = await run(weekly, "/api/cron/weekly");
+    is("Tuesday 01:20: the owner has the week's summary exactly once", ownerDelivered(), 1);
+    is("no team copy goes on an owner's email that was never confirmed", member(), 0);
+    is("counted as unconfirmed, and the week stays claimed", [body.unconfirmed, body.failed, held("nl:weekly:sent:")], [1, 0, true]);
+    commands.length = 0;
+    await run(weekly, "/api/cron/weekly");
+    is("a further run tries nothing", [ownerDelivered(), retry.mails.filter((to) => to === "owner@example.test").length], [1, 1]);
+
+    part("Weekly control: inside the day, a lost answer is tried again under the same key, and delivered once");
+    reset();
+    retry.lostAnswer = true;
+    clock = monday;
+    await run(weekly, "/api/cron/weekly");
+    for (let hour = 1; hour <= TRIES + 1; hour += 1) {
+      clock = monday + hour * HOUR;
+      commands.length = 0;
+      await run(weekly, "/api/cron/weekly");
+    }
+    is(`${TRIES} tries in all, one delivery, every try under one key`, [owner(), ownerDelivered(), new Set(retry.keys).size], [TRIES, 1, 1]);
+
+    part("Monthly: an email whose answer was lost is delivered once, even when the next try is more than a day later");
+    reset();
+    retry.lostAnswer = true;
+    const today = new Date();
+    const first = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1, 0, 20);
+    clock = first;
+    body = await run(monthly, "/api/cron/monthly");
+    is("delivered, not counted as sent", [ownerDelivered(), body.sent], [1, 0]);
+    control.numbers = "throws";
+    for (let hour = 1; hour <= 24; hour += 1) {
+      clock = first + hour * HOUR;
+      commands.length = 0;
+      await run(monthly, "/api/cron/monthly");
+    }
+    control.numbers = "visitors-5";
+    clock = first + 25 * HOUR;
+    commands.length = 0;
+    body = await run(monthly, "/api/cron/monthly");
+    is("the 2nd at 01:20: the owner has the month's summary exactly once", ownerDelivered(), 1);
+    is("counted as unconfirmed, and the month stays claimed", [body.unconfirmed, body.failed, held("nl:monthly:sent:")], [1, 0, true]);
+  } finally {
+    Date.now = realNow;
+  }
+
   done();
 }
 

@@ -249,6 +249,14 @@ async function main(): Promise<void> {
     is("the refund in full is written down", redis.run(["ZSCORE", `nl:ppsell:refunded:${statsId}`, order(1)]) !== null, true);
     const third = JSON.parse(String(redis.run(["GET", `nl:ppsell:paid:${order(3)}`]))) as Record<string, unknown>;
     is("the record of the one seen again carries no mark", third.blind, undefined);
+    // A deployment that asks the wrong PayPal (sandbox about a live capture) gets 404: the same blind watch, so the sale
+    // leaves the count until a look succeeds (Claude 6's L-N3 on #3443).
+    captureRefused.set("CAPTURE3", 404);
+    await look(3);
+    is("404 from PayPal (the wrong environment): the 1500 sale leaves the count", await money(store), [1, 1000]);
+    captureRefused.clear();
+    await look(3);
+    is("and counts again once PayPal shows it", await money(store), [2, 2500]);
 
     ({ store, statsId } = await setup());
     sessions = [];

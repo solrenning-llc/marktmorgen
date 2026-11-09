@@ -778,11 +778,11 @@ async function saleCandidates(store: Store): Promise<{ id: string; title: string
  * "Goes well with" can pick (lib/store-collections.ts). One read of the
  * cards, whatever the store's size (lib/catalog.ts, readCards).
  */
-async function publishedChoices(store: Store, cardsRead: Promise<Map<string, { title: string }> | null>): Promise<{ id: string; title: string }[]> {
+async function publishedChoices(store: Store, cardsRead: Promise<Map<string, { title: string }> | null>): Promise<{ id: string; title: string }[] | null> {
   const cards = await cardsRead;
-  // Not read just now: no choice is offered, so "Goes well with" is not drawn (components/pairs-editor.tsx) and its
-  // picks are left as they are.
-  if (!cards) return [];
+  // Not read just now: null, so "Goes well with" says its picks could not be read and are kept as they are
+  // (components/pairs-editor.tsx), never left out as if the store had no other product to pick (VR 2).
+  if (!cards) return null;
   return store.catalog.items
     .filter((item) => (item.kind & KIND.hidden) === 0)
     .map((item) => ({ id: item.id, title: cards.get(item.id)?.title ?? "" }))
@@ -1965,7 +1965,7 @@ export default async function StudioPage({
                   </p>
                 ) : calls === null ? (
                   <p className="mt-2 text-ink-soft">
-                    Your calls could not be read from Stripe just now. Nothing is lost; reload the page in a moment.
+                    Your calls could not be read from Stripe just now. Nothing is lost. Reload this page in a moment to check again.
                   </p>
                 ) : calls.length === 0 ? (
                   <p className="mt-2 text-ink-soft">
@@ -3694,6 +3694,12 @@ export default async function StudioPage({
               <p className="font-bold text-ink">We could not check just now how you log in with a second step</p>
               <p className="mt-1 text-sm text-ink-soft">This store&rsquo;s owner asks everyone on the team to log in with a passkey or an authenticator app. Nothing was changed. Reload this page in a moment to check again.</p>
             </div>
+            {/* A way forward meanwhile: the login page asks for the second step this store wants, whichever it is. */}
+            <p className="mt-4 text-sm text-ink-soft">
+              <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
+                Go to the login page
+              </Link>
+            </p>
           </section>
         ) : secondStep ? (
           <section aria-labelledby="second-step-title" className="card mt-8 p-6 sm:p-8">

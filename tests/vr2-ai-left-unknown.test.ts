@@ -28,7 +28,9 @@ import { paidPeriod } from "./billing-period-fixture";
 
 const now = Date.UTC(2026, 10, 8, 9);
 const fixture = { statsId: "vr2-ai", tier: "pro", period: paidPeriod(now) } as Store;
-const UNKNOWN = /We could not check your AI allowance just now\. Reload the page in a minute to try again\./;
+// Rule 23: the sentence's last words follow the studio's one reload sentence (studio-rest-reads-2: one sentence on Today);
+// same strictness, the whole sentence matched.
+const UNKNOWN = /We could not check your AI allowance just now\. Reload this page in a moment to check again\./;
 const SAYS_A_COUNT = /\b(0|null|NaN|undefined) (left|AI jobs left)/;
 // What a page hands a component when aiLeft threw: null as a prop, or `known: false` in AiOn
 // (the fix: `.catch(() => null)`; before it, `.catch(() => 0)` handed over a plain 0).

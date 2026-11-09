@@ -18,7 +18,7 @@ export const AiOn = createContext<{ on: boolean; left: number; known?: false }>(
 export const allowanceOf = (ai: { left: number; known?: false }): number | null => (ai.known === false ? null : ai.left);
 
 /** What every AI box says when the month's allowance could not be read (rule 24, VR item 2): never "0 left". */
-export const AI_ALLOWANCE_UNKNOWN = "We could not check your AI allowance just now. Reload the page in a minute to try again.";
+export const AI_ALLOWANCE_UNKNOWN = "We could not check your AI allowance just now. Reload this page in a moment to check again.";
 
 const REFUSED_BEFORE_START = new Set(["long", "invalid", "unknown"]);
 

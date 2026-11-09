@@ -384,8 +384,10 @@ async function main(): Promise<void> {
   is("never told to set up a second step it may already have", has(doorDown, SECOND_STEP_WORDS.set_up.title), false);
   is("the second step that could not be read is said so", [has(doorDown, "We could not check just now how you log in with a second step"), has(doorDown, RELOAD)], [true, true]);
   // A way forward, as the other ways of this notice have one: the login page, where the second step is asked for anyway.
-  const login = drawn.find((one) => one.props.href === "/signin" && String(one.props.children).includes("Go to the login page"));
-  is("with a way forward: a link to the login page", [login !== undefined, has(doorDown, "Go to the login page")], [true, true]);
+  // next/link is not a plain function component, so the walk does not keep it: its href is read in the branch drawn.
+  const doorSource = readFileSync("app/studio/page.tsx", "utf8");
+  const unreadBranch = doorSource.slice(doorSource.indexOf(') : secondStep === "unread" ? ('), doorSource.indexOf(") : secondStep ? ("));
+  is("with a way forward: a link to the login page", [/<Link href="\/signin"[^>]*>\s*Go to the login page\s*<\/Link>/.test(unreadBranch), has(doorDown, "Go to the login page")], [true, true]);
 
   part("One sentence to reload, on the whole of Today");
   // The studio's notices say "Reload this page in a moment to check again."; the AI allowance and the calls not read

@@ -27,19 +27,30 @@ export function PairsEditor({
 }: {
   productId: string;
   initial: string[];
-  /** The store's published products, by name. */
-  choices: { id: string; title: string }[];
+  /** The store's published products, by name; null when their names could not be read just now. */
+  choices: { id: string; title: string }[] | null;
 }) {
   const router = useRouter();
   const [saved, setSaved] = useState(initial);
   const [slots, setSlots] = useState<string[]>(() => Array.from({ length: MAX_PAIRS }, (_, i) => initial[i] ?? ""));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const others = choices.filter((p) => p.id !== productId);
-  const titles = new Map(choices.map((p) => [p.id, p.title]));
+  const others = (choices ?? []).filter((p) => p.id !== productId);
+  const titles = new Map((choices ?? []).map((p) => [p.id, p.title]));
   const picked = slots.filter(Boolean);
   const changed = picked.join(",") !== saved.join(",");
 
+  // The names could not be read: said, with the picks kept as they are, never left out as if there were none (VR 2).
+  if (choices === null) {
+    return (
+      <div data-pairs-editor={productId} className="mt-4 rounded-2xl bg-paper p-4 ring-1 ring-line">
+        <p className="font-semibold text-ink">Goes well with</p>
+        <p className="mt-1 text-sm text-ink-soft" role="status">
+          We could not read your other products&apos; names just now, so your picks cannot be changed here. They are kept as they are. Reload this page in a moment to check again.
+        </p>
+      </div>
+    );
+  }
   if (others.length === 0) return null;
 
   async function save() {

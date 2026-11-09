@@ -1842,7 +1842,8 @@ export function ProductEditor({
   /** The store's look, for the preview of a product's own words. */
   look?: StoreLook | null;
   /** The store's published products, by name: what a product's "Goes well with" can pick (lib/store-collections.ts). */
-  pairChoices?: { id: string; title: string }[];
+  /** The store's published products for "Goes well with"; null when their names could not be read just now. */
+  pairChoices?: { id: string; title: string }[] | null;
   /** The store's own domain, if it has one: not warned as "another site" in what the creator writes (493 [DE2]). */
   ownHosts?: string[];
   /** The plans members switch between (lib/tier-switch.ts): none takes an introductory or yearly price. */

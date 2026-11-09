@@ -25,7 +25,7 @@
  */
 import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { CODE, CODE_LETTERS, MAX_LINKS, type ShortLink, linkName, linkPlace, readTarget } from "@/lib/short-link-rules";
 
 export { type LinkTarget, type ShortLink, shortUrl, landingUrl } from "@/lib/short-link-rules";
@@ -63,11 +63,17 @@ export async function countLinks(statsId: string | null): Promise<number> {
   return n;
 }
 
-/** A store's links, the newest first. */
+/**
+ * A store's links, the newest first. The list is read only in its exact shape, a list of strings (CX-123 rule 24):
+ * any other reply throws UnknownReplyError, never [] ("no links made"), so the studio says it could not read them
+ * and addLink is not let past MAX_LINKS or a name taken on a list it could not read.
+ */
 export async function readLinks(statsId: string | null): Promise<ShortLink[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", storeKey(statsId)]]);
-  const list = (Array.isArray(raw) ? (raw as unknown[]) : []).map(parse).filter((l): l is Kept => Boolean(l && l.statsId === statsId));
+  const replies = repliesFor(await redisPipeline([["HVALS", storeKey(statsId)]]), 1);
+  const values = replies ? stringList(replies[0]) : null;
+  if (!values) throw new UnknownReplyError("a store's short links");
+  const list = values.map(parse).filter((l): l is Kept => Boolean(l && l.statsId === statsId));
   return list.sort((a, b) => b.made - a.made || a.code.localeCompare(b.code)).map(shown);
 }
 

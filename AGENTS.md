@@ -60,6 +60,14 @@ Autorização do dono, nas palavras dele: "faça o correto. e tambem quero mais 
 
 (e) **Falha fora do PR que se repete.** Quando a mesma verificação obrigatória falhar ou for cancelada em 3 ou mais PRs sem relação entre si, avise o coordenador no canal como causa comum, com o nome da verificação e os números dos PRs, em vez de pedir para reenfileirar um a um.
 
+(f) **PR pronto não espera.** Com as revisões exigidas válidas no head exato e (a) conferido, o próprio autor pede a fila na mesma rodada. Quem revisar e aprovar escreve "pode entrar" com o número e o head. Em 09/11/2026, 177 PRs verdes estavam fora da fila, e dezenas já tinham revisão favorável sem ninguém pedir a fila.
+
+(g) **PR que saiu da fila tem dono.** O autor lê o motivo em até 1 hora de trabalho: falha de infraestrutura, `reexecutar #N @sha` ou novo `fila #N @sha`; conflito ou falha do código, correção. Nunca deixar um PR expulso sem resposta no canal.
+
+(h) **PR empilhado.** Quando a base entrar no main, o autor muda a base do PR para `main` na mesma rodada, sem push novo se não houver conflito.
+
+(i) **Próximo responsável.** Todo aviso de "aguardando" diz quem age em seguida e por quê: autor, revisor nomeado, coordenador ou dono.
+
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
 ## TX — Política tributária vigente (dono,27/10/2026 12h34 Fortaleza)

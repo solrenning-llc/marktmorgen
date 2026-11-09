@@ -73,7 +73,7 @@ export function reachShares(order: string[], stopped: Record<string, number>, vi
   const shares: Record<string, number> = {};
   let below = 0;
   for (let i = order.length - 1; i >= 0; i -= 1) {
-    below += stopped[order[i]] ?? 0;
+    below += Object.hasOwn(stopped, order[i]) ? stopped[order[i]] : 0;
     shares[order[i]] = visitors > 0 ? Math.round((Math.min(below, visitors) / visitors) * 100) : 0;
   }
   return { shares, visitors };
@@ -98,13 +98,15 @@ export async function readDepth(
     const n = Number(value);
     const [head, video] = field.split("!");
     const [block, answer] = head.split("?");
-    stopped[block] = (stopped[block] ?? 0) + n;
+    // A block id is whatever a visitor of the page sent (BLOCK_ID_PATTERN lets "constructor" through), so only the
+    // record's own fields are read: `stopped.constructor` would otherwise be the Object function.
+    stopped[block] = (Object.hasOwn(stopped, block) ? stopped[block] : 0) + n;
     if (isWhyNot(answer)) whyNot[answer] = (whyNot[answer] ?? 0) + n;
     if (video) {
       const [videoBlock, step] = video.split(".");
       const at = VIDEO_STEPS.indexOf(step as VideoStep);
       if (at >= 0) {
-        const row = (videos[videoBlock] ??= { played: 0, quarter: 0, half: 0, threeQuarters: 0, end: 0 });
+        const row = Object.hasOwn(videos, videoBlock) ? videos[videoBlock] : (videos[videoBlock] = { played: 0, quarter: 0, half: 0, threeQuarters: 0, end: 0 });
         row.played += n;
         if (at >= 1) row.quarter += n;
         if (at >= 2) row.half += n;

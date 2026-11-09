@@ -188,6 +188,10 @@ async function main(): Promise<void> {
       const n = (notice as (w: string) => { title: string; body: string } | undefined)(`${word}-unconfirmed`);
       is(`${word}-unconfirmed: says Meta did not confirm, how to remove it on Facebook, and never that it was given back`, [Boolean(n?.title), /did not confirm/.test(n?.body ?? ""), /Business integrations/.test(n?.body ?? ""), /given back/i.test(`${n?.title} ${n?.body}`)], [true, true, true, false]);
     }
+    // Pre-review (9 November 2026): on "permission" Meta never gave the permission to read the ads, so the words for
+    // an unconfirmed give-back must not say that permission may stay on (the title says it was not given).
+    const missing = (notice as (w: string) => { title: string; body: string } | undefined)("permission-unconfirmed");
+    is("permission-unconfirmed: never says the permission to read the ads, which Meta did not give, may stay on", /permission to read your ads, so that access may stay on/.test(missing?.body ?? ""), false);
     is("any other word is no notice", ["connected-unconfirmed", "constructor-unconfirmed", "__proto__-unconfirmed", "disconnected", ""].map((w) => (notice as (w: string) => unknown)(w)), [undefined, undefined, undefined, undefined, undefined]);
   }
   const page = readFileSync("app/studio/page.tsx", "utf8");

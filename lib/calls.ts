@@ -2112,18 +2112,10 @@ export async function tellNewLink(input: {
   previous: string;
   people: PaidCall[];
   origin: string;
-  /**
-   * The meeting was on the own calendar of a host who has left the team, and
-   * was given up there (lib/meet-links.ts, replaceFormerHost): `meeting.link`
-   * is the store's own meeting, the call's room, or "" when the call has no
-   * link at all, and the owner is told why.
-   */
-  formerHost?: boolean;
 }): Promise<number> {
   if (!writesAboutBookings(input.store)) return 0;
   const { store, product, meeting, previous, people, origin } = input;
   const setup = product.call;
-  if (input.formerHost) return tellFormerHostLink({ store, product, meeting, previous, people, origin });
   const name = meeting.provider === "google" ? "Google Meet" : "Zoom";
   let told = 0;
   // The buyers' emails speak the store's language (lib/buyer-words/booking.ts).
@@ -2177,16 +2169,59 @@ export async function tellNewLink(input: {
 }
 
 /**
- * tellNewLink for a meeting given up on the calendar of a host who has left
- * the team: each buyer is emailed the link that replaces it (or, with none,
- * that the store will send one), with a calendar file that replaces the one
- * sent before, and the owner is told why and what was given. Never the host.
+ * The people of a booking whose meeting was on the own calendar of a host who
+ * has left the team, and was given up there (lib/meet-links.ts,
+ * replaceFormerHost), emailed the link that replaces it: `meeting.link` is
+ * the store's own meeting, the call's room, or "" when there is none yet
+ * (`pending`: the store's own meeting is still being made, and they are
+ * emailed it when it is, tellNewLink) or none at all. Each email has a
+ * calendar file that replaces the one sent before and keeps one idempotency
+ * key, so a try made again never sends it twice. The owner is told why once
+ * every buyer was emailed, never the host. True when nothing is left to send
+ * (a store that sends no booking emails sends none); false to try again.
+ * `gaveUp`: the tries are spent, and only the owner is told who to send it to.
  */
-async function tellFormerHostLink(input: { store: Store; product: CallListing; meeting: MeetRecord; previous: string; people: PaidCall[]; origin: string }): Promise<number> {
-  const { store, product, meeting, previous, people, origin } = input;
+export async function tellFormerHost(input: {
+  store: Store;
+  product: CallListing;
+  meeting: MeetRecord;
+  previous: string;
+  people: PaidCall[];
+  origin: string;
+  pending: boolean;
+  gaveUp?: boolean;
+}): Promise<boolean> {
+  const { store, product, meeting, previous, people, origin, pending } = input;
+  if (!writesAboutBookings(store)) return true;
   const setup = product.call;
   const link = meeting.link;
   const kind = roomKind(link || null);
+  const emails = people.map((p) => p.email).filter((e): e is string => !!e);
+  const at = `${readableTime(meeting.start, setup.tz)} (${zoneName(meeting.start, setup.tz)}, your time zone)`;
+  const ownerKey = `meet-link:${meeting.scope}:${meeting.updates}:creator`.slice(0, 256);
+  // The store's own meeting still being made: said so, never that the owner set no link.
+  const later = `Your ${setup.meet === "zoom" ? "Zoom" : "Google Meet"} link for it could not be made yet. It is tried again, and they are emailed it when it is made.`;
+  const what = link
+    ? `The booking now has ${kind === "room" ? "a private video room" : kind === "meet" ? "your own Google Meet link" : kind === "zoom" ? "your own Zoom link" : "your meeting link"}: ${link}${pending ? `\n${later}` : ""}`
+    : pending
+      ? later
+      : `You have not set a meeting link, so send them one before the call${emails.length ? ` at ${emails.join(", ")}` : ""}.`;
+  if (input.gaveUp) {
+    return sendEmail({ meter: { by: "store", store: store, kind: "email" },
+      from: `"Marktmorgen" <${senderAddress()}>`,
+      to: store.email,
+      subject: `Send the new link: ${product.title}, ${readableTime(meeting.start, setup.tz)}`,
+      text: [
+        `The meeting for ${product.title} was on the Google Calendar of a host who is no longer on your team. It was removed from their calendar.`,
+        "",
+        at,
+        what,
+        "",
+        `We could not email ${emails.length ? emails.join(", ") : "the buyer"} about it after several tries, so please send it to them yourself.`,
+      ].join("\n"),
+      idempotencyKey: `${ownerKey}:gave-up`.slice(0, 256),
+    }).catch(() => false);
+  }
   let told = 0;
   const b = bookingWords(store.language);
   const locale = LANGUAGES[parseLanguage(store.language)].locale;
@@ -2219,23 +2254,20 @@ async function tellFormerHostLink(input: { store: Store; product: CallListing; m
     }).catch(() => false);
     if (sent) told += 1;
   }
-  const emails = people.map((p) => p.email).filter((e): e is string => !!e);
-  await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  if (told < emails.length) return false;
+  return sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: store.email,
     subject: `New link: ${product.title}, ${readableTime(meeting.start, setup.tz)}`,
     text: [
-      `The meeting for ${product.title} was on the Google Calendar of a host who is no longer on your team. It was removed from their calendar, so they no longer see the buyer or the time.`,
+      `The meeting for ${product.title} was on the Google Calendar of a host who is no longer on your team. It was removed from their calendar.`,
       "",
-      `${readableTime(meeting.start, setup.tz)} (${zoneName(meeting.start, setup.tz)}, your time zone)`,
-      link
-        ? `The booking now has ${kind === "room" ? "a private video room" : kind === "meet" ? "your own Google Meet link" : kind === "zoom" ? "your own Zoom link" : "your meeting link"}: ${link}`
-        : `You have not set a meeting link, so send them one before the call${emails.length ? ` at ${emails.join(", ")}` : ""}.`,
+      at,
+      what,
       ...(previous ? [`It replaces the link they were given before: ${previous}`] : []),
       "",
       `${told} ${told === 1 ? "person was" : "people were"} emailed${link ? " the new link" : ""}.`,
     ].join("\n"),
-    idempotencyKey: `meet-link:${meeting.scope}:${meeting.updates}:creator`.slice(0, 256),
+    idempotencyKey: ownerKey,
   }).catch(() => false);
-  return told;
 }

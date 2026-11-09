@@ -614,6 +614,8 @@ export async function removeMember(store: Store, email: string, options: { repea
       throw new KeysNotSwept();
     }
   }
+  // Their meetings on their own Google Calendar, and guest lists they are on: looked at in the five-minute job's next run.
+  if (removed) await import("@/lib/meet-links").then((m) => m.markHostLeft(store)).catch((error: unknown) => console.error("marking a store a host left failed", error));
   return removed;
 }
 

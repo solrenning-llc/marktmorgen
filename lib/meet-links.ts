@@ -221,6 +221,128 @@ export async function replaceFormerHost(
   return { meeting: { ...given, start, end, link: room ?? "", made: false }, previous: given.link };
 }
 
+/** The record that marks a store whose team a host left, for the five-minute job (lib/call-meetings.ts). */
+export const hostLeftScope = (callsId: string) => `c:${callsId}:h`;
+/** The record that keeps a booking's people to be told its new link until they are (lib/call-meetings.ts). */
+export const tellScope = (scope: string) => `${scope}:tell`;
+
+/** A record that is only a piece of work for the five-minute job: kept a day, never a meeting. */
+function workRecord(store: StoreRef, scope: string, todo: "sweep" | "tell", fields: Partial<MeetRecord> = {}): MeetRecord {
+  const now = Date.now();
+  return {
+    provider: "google",
+    scope,
+    statsId: store.statsId ?? "",
+    handle: store.handle,
+    callsId: store.callsId ?? "",
+    product: "",
+    session: "",
+    group: false,
+    id: "",
+    account: "",
+    link: "",
+    made: false,
+    start: now,
+    // writeRecord keeps a record until 60 days after its end: a day here.
+    end: now - 59 * 86_400_000,
+    tz: "UTC",
+    title: "",
+    guests: [],
+    added: [],
+    tries: 0,
+    error: "",
+    updates: 0,
+    gone: false,
+    host: "",
+    calendar: "",
+    ...fields,
+    todo,
+    next: now,
+  };
+}
+
+/**
+ * A host was taken off the store's team (lib/team.ts, removeMember): the
+ * store is looked at in the five-minute job's next run, whatever its place
+ * in the list of stores with meetings, for meetings on that host's own
+ * calendar and guest lists they are on. Only a store with calls.
+ */
+export async function markHostLeft(store: StoreRef): Promise<void> {
+  if (!store.callsId || !store.statsId || !isRedisConfigured()) return;
+  await writeRecord(workRecord(store, hostLeftScope(store.callsId), "sweep"));
+}
+
+/**
+ * The people of a booking whose meeting was replaced (replaceFormerHost) are
+ * to be emailed its new link: written down before the first try, so a try
+ * that fails or is cut short is made again by the next run until it goes or
+ * MAX_TRIES are spent (finishPending).
+ */
+export async function rememberTell(store: StoreRef, scope: string, booking: { session: string; product: string; start: number; end: number }, given: MeetRecord): Promise<MeetRecord> {
+  const record = workRecord(store, tellScope(scope), "tell", {
+    session: booking.session,
+    product: booking.product,
+    start: booking.start,
+    end: booking.end,
+    updates: given.updates,
+    ...(given.link ? { previous: given.link } : {}),
+  });
+  await writeRecord(record);
+  return record;
+}
+
+/**
+ * A "sweep" or "tell" record's try is over: done (the record goes), or to be
+ * tried again later; "gave-up" when its tries are spent (the record goes).
+ */
+export async function finishPending(scope: string, done: boolean): Promise<"done" | "again" | "gave-up"> {
+  let result: "done" | "again" | "gave-up" = "done";
+  await onRecord(scope, async (record) => {
+    if (record.todo !== "sweep" && record.todo !== "tell") return null;
+    if (!done) {
+      const next = nextTry(record, Date.now());
+      if (next.todo) {
+        result = "again";
+        return next;
+      }
+      result = "gave-up";
+    }
+    await redisPipeline([
+      ["DEL", recordKey(scope)],
+      ["ZREM", MEET_QUEUE, scope],
+    ]);
+    return null;
+  });
+  return result;
+}
+
+/** A record's current try put off as a failed one is (nextTry): tried again later, at most MAX_TRIES. */
+export async function postponeRecord(scope: string): Promise<void> {
+  await onRecord(scope, async (record) => (record.todo ? nextTry(record, Date.now()) : null));
+}
+
+/**
+ * Hosts who have left the team taken off the guest list of a booking's event
+ * on another host's calendar (a collective call's), by address; the buyer
+ * and the hosts still on it stay. Google is told to email nobody. A change
+ * Google did not take is tried again as any guest list is.
+ */
+export async function dropFormerGuests(store: StoreRef, scope: string, leaving: string[]): Promise<void> {
+  const drop = new Set(leaving.map((e) => e.trim().toLowerCase()));
+  await onRecord(scope, async (record) => {
+    if (record.gone || record.provider !== "google" || !record.guests.some((g) => drop.has(g))) return null;
+    const changed: MeetRecord = { ...record, guests: record.guests.filter((g) => !drop.has(g)) };
+    if (!record.made) return changed;
+    try {
+      return await perform({ ...changed, todo: "guests" }, store);
+    } catch (error) {
+      const words = problemWords(error, "google");
+      await logProblem(record.statsId, "google", `Taking a host who left your team off "${record.title}"`, words);
+      return nextTry({ ...changed, todo: record.todo === "" ? "guests" : record.todo, tries: 0, error: words }, Date.now());
+    }
+  });
+}
+
 function nextTry(record: MeetRecord, now: number): MeetRecord {
   const tries = record.tries + 1;
   if (tries >= MAX_TRIES) return { ...record, tries, next: 0, todo: "", error: `${record.error} (gave up after ${tries} tries)`.slice(0, 300) };
@@ -512,7 +634,9 @@ export type RetryOutcome =
    * left the team: nothing was done or written; the caller replaces the
    * meeting (replaceFormerHost) and tells the people booked.
    */
-  | { kind: "former-host"; record: MeetRecord };
+  | { kind: "former-host"; record: MeetRecord }
+  /** A store a host left ("sweep") or a booking's people to tell ("tell"): nothing done; the caller does it and calls finishPending. */
+  | { kind: "sweep" | "tell"; record: MeetRecord };
 
 /**
  * One try of what a record still has to do, for the five-minute job.
@@ -524,6 +648,10 @@ export async function retryRecord(store: StoreRef & Pick<Store, "sid">, scope: s
     const now = Date.now();
     if (!record.todo || record.next > now) {
       outcome = { kind: "skipped", record };
+      return null;
+    }
+    if (record.todo === "sweep" || record.todo === "tell") {
+      outcome = { kind: record.todo, record };
       return null;
     }
     // Nothing is made or moved on the calendar of a host who has left the
@@ -705,9 +833,9 @@ export async function callMoved(input: {
   if (own) {
     // On the own calendar of a host who has left the team: deleted there, never moved, and the
     // store's own meeting (or the call's room) takes the new time, so the move's emails carry it.
+    // Replaced already by the five-minute job meanwhile (null): what replaced it is moved as any meeting is.
     if (own.host && !own.gone && !(await stillHosts(store, own.host))) {
-      await replaceFormerHost(store, product, { session, start: input.start, end: input.end, email: input.email, host: own.host });
-      return;
+      if (await replaceFormerHost(store, product, { session, start: input.start, end: input.end, email: input.email, host: own.host })) return;
     }
     await moveMeeting(store, one, input.start, input.end, setup.tz);
     return;

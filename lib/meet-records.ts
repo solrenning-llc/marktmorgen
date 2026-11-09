@@ -34,8 +34,14 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type MeetProvider, isMeetProvider } from "@/lib/call-setup";
 
-/** What is still to be done on the provider's side for a record. */
-export type MeetTodo = "" | "create" | "patch" | "delete" | "guests";
+/**
+ * What is still to be done on the provider's side for a record; and, for the
+ * work about a host who left a team (lib/meet-links.ts, lib/call-meetings.ts),
+ * "sweep": a store whose team a host left, to be looked at (its record's
+ * scope is hostLeftScope), and "tell": the people of a booking whose meeting
+ * was replaced, to be emailed its new link (its scope is "<scope>:tell").
+ */
+export type MeetTodo = "" | "create" | "patch" | "delete" | "guests" | "sweep" | "tell";
 
 export type MeetRecord = {
   provider: MeetProvider;
@@ -83,6 +89,8 @@ export type MeetRecord = {
    */
   host: string;
   calendar: string;
+  /** A "tell" record: the link the people booked had before. */
+  previous?: string;
 };
 
 export const MEET_QUEUE = "nl:meet:q";
@@ -102,7 +110,7 @@ export function callScope(callsId: string, input: { group: boolean; session: str
   return input.group ? `c:${callsId}:t:${input.product}:${input.start}` : `c:${callsId}:b:${input.session}`;
 }
 
-const TODOS: MeetTodo[] = ["", "create", "patch", "delete", "guests"];
+const TODOS: MeetTodo[] = ["", "create", "patch", "delete", "guests", "sweep", "tell"];
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 600) : []);
@@ -140,6 +148,7 @@ export function parseRecord(raw: unknown): MeetRecord | null {
       gone: v.gone === true,
       host: typeof v.host === "string" && /^[0-9a-f]{24}$/.test(v.host) ? v.host : "",
       calendar: text(v.calendar, 300),
+      ...(typeof v.previous === "string" && v.previous ? { previous: text(v.previous, 600) } : {}),
     };
   } catch {
     return null;

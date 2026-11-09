@@ -124,7 +124,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     google.push({ method, path: path + url.search, token, body: String(init?.body ?? "") });
     if (path === "/google/token") {
       const form = new URLSearchParams(String(init?.body ?? ""));
-      const who = form.get("code") ?? "x@example.com";
+      // A renewal names its person by the refresh token, so an hour on the job's clock keeps each token whose it is.
+      const who = form.get("code") ?? form.get("refresh_token")?.replace(/^rt-/, "") ?? "x@example.com";
       return answer({ access_token: `at-${who}`, refresh_token: `rt-${who}`, expires_in: 3600, scope: GOOGLE_HOST_SCOPES.join(" "), id_token: idToken(who) });
     }
     if (path === "/google/calendar/v3/freeBusy") {
@@ -264,12 +265,15 @@ async function teamStore(owner: string, handle: string, account: string, meet: "
 }
 
 const stores = new Map<string, Store>();
-/** Every five-minute run of the next hour, so each store's hourly look comes once. */
+/** Every five-minute run of the next hour of the job's own clock. */
+let jobClock = 0;
 async function jobHour(): Promise<void> {
   const real = Date.now;
   try {
+    // The job's clock goes on from one hour to the next, so what a run puts off for later comes due in a later hour.
     for (let k = 0; k < 12; k += 1) {
-      const at = real() + k * 300_000;
+      jobClock += 300_000;
+      const at = real() + jobClock;
       Date.now = () => at;
       await syncMeetings(async (handle) => stores.get(handle) ?? null, at + 60_000, ORIGIN);
     }

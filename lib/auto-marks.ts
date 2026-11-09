@@ -62,13 +62,16 @@ const fromStudio = (store: Store): PayFirst => async (units) => {
 /**
  * The marks for the days the chart can show, read from the store's own records: one list of emails and the catalog.
  * The emails are read without their bodies, and what that comes to is taken from the store's studio requests (`pay`)
- * before any is read (lib/broadcasts.ts, readBroadcastHeads): not taken or not read, the chart has no email marks.
+ * before any is read (lib/broadcasts.ts, readBroadcastHeads): not taken, the chart has no email marks. A read that
+ * fails rejects: marks that could not be read are unknown, never none (VR2 audit, rule 24), and the caller says so.
  */
 export async function readMarks(store: Store, from: string, to: string, now = Date.now(), pay: PayFirst = fromStudio(store)): Promise<AutoMark[]> {
   const [emails, products] = await Promise.all([
-    // An email whose record expired is gone, left out (as main's listBroadcasts read it), never "no marks" for all.
-    readBroadcastHeads(store.listId, pay, MARK_EMAILS, { expired: "skip" }).then((read) => (read.ok ? read.heads : []), () => []),
-    readListings(store).catch(() => []),
+    // Strict: a malformed list or record reply rejects instead of reading as no campaigns; a record Redis answers as
+    // its own nil expired (RECORD_DAYS) and is left out, known (Codex M, #3146).
+    // Requests the plan did not give (`pay` refused) are a known limit: the chart has no email marks, the sale's stay.
+    readBroadcastHeads(store.listId, pay, MARK_EMAILS, { expired: "skip" }).then((read) => (read.ok ? read.heads : [])),
+    readListings(store),
   ]);
   return marksFrom({ emails, products, sales: [...(store.pastSales ?? []), store.sale], from, to, now });
 }

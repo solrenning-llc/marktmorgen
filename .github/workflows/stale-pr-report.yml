@@ -8,11 +8,12 @@
 #
 # The same workflow runs, every hour but the daily report's, the queue-health report (C1-20261109-
 # 1332-TODOS-60, scripts/queue_health_report.mjs, tests/queue-health-report.test.ts): read-only too,
-# it writes ONE issue labeled fila-doente, and closes it when there is nothing to warn about.
-# actions: read is there only to read runs and jobs. Skipping the daily report's hour keeps the two
-# reports from sharing the token's hourly calls. GitHub-hosted standard runners cost nothing in a
-# public repository (GitHub Docs, "About billing for GitHub Actions"; not re-read on 9 November 2026:
-# docs.github.com was out of this session's network).
+# it writes ONE issue labeled fila-doente, and closes it when there is nothing to warn about. Its job
+# has its own permission block, with actions read only to read runs and jobs, and no checks read. GITHUB_TOKEN
+# allows 1,000 requests an hour per repository, shared by every workflow here, so skipping the daily
+# report's hour does not keep the two apart; the health report keeps its own reads small (see the
+# script). GitHub-hosted standard runners are free in public repositories (github/docs, content/
+# billing/concepts/product-billing/github-actions.md, as Claude 6 read it on 9 November 2026).
 name: Stale PR report
 on:
   schedule:
@@ -29,7 +30,6 @@ permissions:
   contents: read
   pull-requests: read
   checks: read
-  actions: read
   issues: write
 concurrency:
   group: stale-pr-report
@@ -56,6 +56,11 @@ jobs:
   health:
     name: Queue health report
     if: ${{ github.event.schedule == '43 0-10,12-23 * * *' || (github.event_name == 'workflow_dispatch' && inputs.report == 'health') }}
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      issues: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

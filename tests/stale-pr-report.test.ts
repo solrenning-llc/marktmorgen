@@ -31,10 +31,13 @@ is("no pull_request, push, merge_group or workflow_run trigger",
   /\n {2}(pull_request|pull_request_target|push|merge_group|workflow_run|issues|issue_comment):/.test(onBlock), false);
 
 part("minimal permissions, pinned actions, no secret, and not a required check");
-// actions: read is the queue-health report's, to read runs and jobs (C1-TODOS-60).
-is("permissions are contents, pull-requests, checks and actions read, and issues write, nothing else, and no job widens them",
-  [/\npermissions:\n {2}contents: read\n {2}pull-requests: read\n {2}checks: read\n {2}actions: read\n {2}issues: write\n(?! )/.test(triggers),
-    (workflow.match(/permissions:/g) ?? []).length, (workflow.match(/: write/g) ?? []).length], [true, 1, 1]);
+// The daily report's permissions are the workflow's, unchanged. The queue-health job (C1-TODOS-60) has its own block,
+// held in tests/queue-health-report.test.ts: actions read instead of checks read, and the same issues write (Claude 6 on
+// #3426, L6). So two blocks and two issues writes, and no other job.
+is("permissions are contents, pull-requests and checks read, and issues write, nothing else; only the health job has its own",
+  [/\npermissions:\n {2}contents: read\n {2}pull-requests: read\n {2}checks: read\n {2}issues: write\n(?! )/.test(triggers),
+    (workflow.match(/permissions:/g) ?? []).length, (workflow.match(/: write/g) ?? []).length, (workflow.match(/issues: write/g) ?? []).length,
+    /\n {2}report:\n(?: {4}.*\n)*? {4}permissions:/.test(workflow)], [true, 2, 2, 2, false]);
 is("every action is pinned by a full commit SHA already used in product-checks",
   [...workflow.matchAll(/uses: ([^@\s]+)@(\S+)/g)].every(([, action, sha]) =>
     /^[0-9a-f]{40}$/.test(sha) && read(".github/workflows/product-checks.yml").includes(`uses: ${action}@${sha}`)), true);

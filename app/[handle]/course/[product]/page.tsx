@@ -35,6 +35,7 @@ import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { WhoAnswers } from "@/components/who-answers";
+import { ownEntry } from "@/lib/own-entry";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -74,7 +75,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const w = coursesWords(store.language);
 
   const query = await searchParams;
-  const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
+  const notice = ownEntry(w.linkNotices, query.link) ?? null;
   const jar = await cookies();
   const access = await courseAccess(store, product, jar);
   // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
@@ -110,7 +111,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const held = studying ? heldBack(course, passed) : new Map<string, string>();
   const finished = studying && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
-  const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
+  const certNotice = ownEntry(w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME), query.cert) ?? null;
 
   // What the code knows of the course, never what anyone typed (292 [SQ3], lib/course-facts.ts).
   const facts = await readCourseFacts(course);

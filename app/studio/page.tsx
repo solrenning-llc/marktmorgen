@@ -238,6 +238,7 @@ import { readLinks } from "@/lib/short-links";
 import { storeBase } from "@/lib/purchase-email";
 import { feeWords } from "@/lib/fee-words";
 import { NewTab } from "@/components/new-tab";
+import { ownEntry } from "@/lib/own-entry";
 
 /** "October 19": a day of a window, for the studio. */
 const windowDay = (ms: number) => new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric" });
@@ -888,16 +889,16 @@ export default async function StudioPage({
   // The writing help, and what is left of it this month: read once for the whole studio page.
   const ai = store && aiAvailableFor(store) ? { on: true, left: firstReads.aiLeft ? await firstReads.aiLeft : 0 } : { on: false, left: 0 };
   const notice =
-    ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
-    STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
+    ownEntry(ADDRESS_NOTICES, params.address) ??
+    ownEntry(STRIPE_NOTICES, params.stripe) ??
     // A call to PayPal or Meta refused for the store's calls to connected services (lib/metered-limits.ts).
     (store && typeof params.paypal === "string" && serviceAllowanceWords(store, params.paypal) ? { title: "PayPal can't be connected just now", body: serviceAllowanceWords(store, params.paypal) ?? "" } : undefined) ??
     (store && typeof params.metaads === "string" && serviceAllowanceWords(store, params.metaads) ? { title: "Meta can't be connected just now", body: serviceAllowanceWords(store, params.metaads) ?? "" } : undefined) ??
-    PAYPAL_NOTICES[typeof params.paypal === "string" ? params.paypal : ""] ??
-    META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""] ??
-    BILLING_NOTICES[BILLING_ALIASES[String(params.billing)] ?? (typeof params.billing === "string" ? params.billing : "")] ??
-    TEAM_NOTICES[typeof params.team === "string" ? params.team : ""] ??
-    STORES_NOTICES[typeof params.stores === "string" ? params.stores : ""] ??
+    ownEntry(PAYPAL_NOTICES, params.paypal) ??
+    ownEntry(META_NOTICES, params.metaads) ??
+    ownEntry(BILLING_NOTICES, ownEntry(BILLING_ALIASES, params.billing) ?? params.billing) ??
+    ownEntry(TEAM_NOTICES, params.team) ??
+    ownEntry(STORES_NOTICES, params.stores) ??
     (found.ok && found.fellBack ? TEAM_NOTICES.gone : undefined);
   // The snapshot the public store page trusts is refreshed here, because this
   // is the page the creator opens and therefore the moment they would notice

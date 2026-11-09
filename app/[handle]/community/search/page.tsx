@@ -23,6 +23,7 @@ import { CommunityBar, Face, PostCard, communityNotices, storeWhen } from "@/com
 import { type CommunityWords, communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { ConfirmDeletes } from "@/components/community-composer";
+import { ownEntry } from "@/lib/own-entry";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -98,7 +99,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const asked = (typeof query.q === "string" ? query.q : "").slice(0, MAX_QUERY_LENGTH);
   const w = communityWords(store.language);
   const locale = LANGUAGES[store.language].locale;
-  const notice = communityNotices(store.language)[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notice = ownEntry(communityNotices(store.language), query.n) ?? null;
   const beforeRaw = typeof query.before === "string" ? Number(query.before) : NaN;
   const before = Number.isInteger(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;
   const { config, owner, key, canWrite, email } = viewer;

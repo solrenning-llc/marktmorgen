@@ -11,6 +11,7 @@ import { Carry, CommunityBar, communityNotices } from "@/components/community-pa
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { levelOf, pointsOf, toNextLevel } from "@/lib/community-points";
+import { ownEntry } from "@/lib/own-entry";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -35,7 +36,7 @@ export default async function CommunityYouPage({ params, searchParams }: Params)
   const query = await searchParams;
   const w = communityWords(store.language);
   const NOTICES = communityNotices(store.language);
-  const notice = NOTICES[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notice = ownEntry(NOTICES, query.n) ?? null;
   const member = viewer.member;
   const points = member ? (await pointsOf(store.community.id, [member.k])).get(member.k) ?? 0 : 0;
   const toNext = toNextLevel(points);

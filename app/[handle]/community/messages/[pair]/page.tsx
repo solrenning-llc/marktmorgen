@@ -11,6 +11,7 @@ import { CommunityBar, Face, PostText, authorName, communityNotices, storeWhen }
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EmptyState } from "@/components/empty-state";
+import { ownEntry } from "@/lib/own-entry";
 
 type Params = {
   params: Promise<{ handle: string; pair: string }>;
@@ -60,7 +61,7 @@ export default async function MessageThreadPage({ params, searchParams }: Params
   const query = await searchParams;
   const w = communityWords(store.language);
   const NOTICES = communityNotices(store.language);
-  const notice = NOTICES[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notice = ownEntry(NOTICES, query.n) ?? null;
   const members = other === CREATOR ? new Map() : await readMembers(id, [other]);
   const name = authorName(store, other, members);
   const refused = mayMessage(config.dm, key, other);

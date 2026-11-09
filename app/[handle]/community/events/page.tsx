@@ -11,6 +11,7 @@ import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EventCard } from "@/components/community-events";
 import { EmptyState } from "@/components/empty-state";
+import { ownEntry } from "@/lib/own-entry";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -42,7 +43,7 @@ export default async function CommunityEventsPage({ params, searchParams }: Para
   const id = store.community.id;
   const query = await searchParams;
   const w = communityWords(store.language);
-  const notice = communityNotices(store.language)[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notice = ownEntry(communityNotices(store.language), query.n) ?? null;
   const beforeRaw = typeof query.before === "string" ? Number(query.before) : NaN;
   const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;
   const now = eventClock();

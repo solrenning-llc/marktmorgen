@@ -30,6 +30,7 @@ import {
   storeWhen,
 } from "@/components/community-parts";
 import { ConfirmDeletes } from "@/components/community-composer";
+import { ownEntry } from "@/lib/own-entry";
 
 type Params = { params: Promise<{ handle: string; post: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -187,7 +188,7 @@ export default async function CommunityPostPage({ params, searchParams }: Params
   const query = await searchParams;
   const w = communityWords(store.language);
   const notices = communityNotices(store.language);
-  const notice = notices[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notice = ownEntry(notices, query.n) ?? null;
   const all = await readComments(id, post.id);
   const [members, numbers, polls, likes, points] = await Promise.all([
     readMembers(id, [post.a, ...all.map((c) => c.a)]),

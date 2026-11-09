@@ -27,6 +27,7 @@ import { DoorTimer, LocalTime, RoomEmbed } from "@/components/community-event-ro
 import { VideoEmbed } from "@/components/video-embed";
 import { productSegment } from "@/lib/product-slug";
 import { NewTab } from "@/components/new-tab";
+import { ownEntry } from "@/lib/own-entry";
 
 type Params = {
   params: Promise<{ handle: string; event: string }>;
@@ -69,7 +70,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
   const query = await searchParams;
   const w = communityWords(store.language);
   const locale = LANGUAGES[store.language].locale;
-  const notice = communityNotices(store.language)[typeof query.n === "string" ? query.n : ""] ?? null;
+  const notice = ownEntry(communityNotices(store.language), query.n) ?? null;
   const now = eventClock();
 
   const [allowed, numbers, meetings] = await Promise.all([

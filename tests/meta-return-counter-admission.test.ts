@@ -88,5 +88,7 @@ test("Meta keeps a confirmed counter, one-use state and its original TTL", async
 test("Meta's existing error notice offers an honest retry instead of a slowdown", () => {
   const page = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");
   assert.match(page, /error:\s*{\s*title: "Something went wrong",\s*body: "Nothing was kept\. Try again in a moment\."/);
-  assert.ok(page.includes('META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""]'));
+  // Rule 23: was `META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""]`; the
+  // notice is now read only from the table's own keys (tests/query-own-entry.test.ts).
+  assert.ok(page.includes("ownEntry(META_NOTICES, params.metaads)"));
 });

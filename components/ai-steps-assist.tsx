@@ -21,9 +21,11 @@ import { type AiStep, type AiStepId, type AiStepLine, readStepLine } from "@/lib
  * once writing has started it stays too, unavailable and saying why, so
  * focus on it is never dropped mid-run. Nothing moves on the screen.
  *
- * A draft that comes back after the creator pressed Stop (writing had
- * already started, so it finished and counts) never replaces the page on
- * its own: the box says so and asks "Use this draft" or "Keep my page".
+ * A draft that comes back after the creator pressed Stop (the Stop reached
+ * the server after writing had started, so it finished and counts) never
+ * replaces the page on its own: the box says so and asks "Use this draft"
+ * or "Keep my page". The words never say when Stop was pressed: it may have
+ * been pressed during the reading and read by the server too late.
  */
 
 export type StepView = "waiting" | "running" | "done" | "skipped";
@@ -46,6 +48,8 @@ const MESSAGES: Record<string, string> = {
   file: "The product's PDF could not be read. Draft the page without it, or upload the PDF again.",
 };
 const REFUSED_BEFORE_START = new Set(["long", "invalid", "unknown"]);
+// True whenever writing started after a Stop: pressed before or after it began, the server read it too late.
+const LATE_STOP = "Your Stop arrived after writing had started,";
 
 /** Minutes and seconds since a job began, as the clock shows them. */
 export function elapsedWords(seconds: number): string {
@@ -161,6 +165,8 @@ export function AiStepsAssist<T>({
   // A draft that came back after Stop was pressed: kept here until the creator says whether to use it.
   const [late, setLate] = useState<{ value: T } | null>(null);
   const runRef = useRef("");
+  // Whether a run is going on now, read after an await, when `busy` is a stale copy.
+  const busyRef = useRef(false);
   const stopRequested = useRef(false);
   const focusResult = useRef(false);
   const startedAt = useRef(0);
@@ -219,10 +225,10 @@ export function AiStepsAssist<T>({
             ? " A step that did not run is not charged; we could not confirm the writing jobs given back: reload to check your allowance."
             : ` A step that did not run is not charged: ${plural(line.returned)} given back, ${line.left} left this month.`;
       if (stopRequested.current) {
-        // The creator asked to stop, but writing had already started: the draft is paid for, so it is kept, never put in the page unasked.
+        // The creator asked to stop, but the stop reached the server after writing had started: the draft is paid for, so it is kept, never put in the page unasked.
         setLate({ value: line.value as T });
         finish({
-          said: `Writing had already started when you pressed Stop, so it finished and counts toward this month.${given} Your page is unchanged. Use this draft, or keep your page as it is?`,
+          said: `${LATE_STOP} so it finished and counts toward this month.${given} Your page is unchanged. Use this draft, or keep your page as it is?`,
         });
         return;
       }
@@ -271,8 +277,8 @@ export function AiStepsAssist<T>({
     setStates((now) => ({ ...now, [line.step]: line.state === "started" ? "running" : "done" }));
     if (line.state !== "started") return;
     const step = `Step ${index + 1} of ${steps.length}: ${steps[index].label}`;
-    // A step that starts after Stop was pressed: the stop came too late for it, and that is said at once.
-    setAnnounce(stopRequested.current ? `Writing had already started when you pressed Stop, so it will finish and count toward this month. ${step}` : step);
+    // A step that starts after Stop was pressed: the stop reached the server too late for it, and that is said at once.
+    setAnnounce(stopRequested.current ? `${LATE_STOP} so it will finish and count toward this month. ${step}` : step);
   }
 
   /** The creator's answer about a draft that came back after Stop. */
@@ -302,6 +308,7 @@ export function AiStepsAssist<T>({
     setAnnounce("");
     setError(null);
     setSaid(null);
+    busyRef.current = true;
     setBusy(true);
     let last: AiStepLine | null = null;
     try {
@@ -344,11 +351,13 @@ export function AiStepsAssist<T>({
       finish({ error: words.unconfirmed });
     }
     setStopping(false);
+    busyRef.current = false;
     setBusy(false);
   }
 
   async function stop() {
     if (stopping || !busy) return;
+    const run = runRef.current;
     stopRequested.current = true;
     setStopping(true);
     setAnnounce("Stopping after this step.");
@@ -363,6 +372,8 @@ export function AiStepsAssist<T>({
     } catch {
       // Said below.
     }
+    // The run ended (or another began) while the stop was on its way: there is no Stop left to press, and what the run's end said stands.
+    if (!busyRef.current || runRef.current !== run) return;
     stopRequested.current = false;
     setStopping(false);
     setAnnounce("We could not stop it just now. The draft keeps going; you can press Stop again.");

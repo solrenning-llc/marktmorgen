@@ -61,27 +61,32 @@ const RATE = `\\d[\\d.,\\s]*k?\\s*(?:${[
  * currency sign (any of Unicode's), the code of every currency a store may
  * sell in (lib/money.ts) and currency words, a percentage, a rate per month
  * or week after a number, earnings, income, revenue, profit, money, wealth
- * and sales words with their stems, a guarantee, and urgency. Read after
- * NFKC, so a full-width or small-form sign is the sign (keptIdeas). Numbers,
- * deals and links are held to the store's own words separately (heldToFacts,
- * lib/store-assistant-rules.ts). Any such list can miss a wording: the
- * model's instruction comes first, and the box promises only what this keeps.
+ * and sales words with their stems ("sales" and "paid" only where they speak
+ * of earning: a sales page or a paid newsletter is a product), a guarantee,
+ * and urgency. Read after NFKC, so a full-width or small-form sign is the
+ * sign (keptIdeas). Numbers, deals and links are held to the store's own
+ * words separately (heldToFacts, lib/store-assistant-rules.ts). Any such list
+ * can miss a wording: the model's instruction comes first, and the box
+ * promises only what this keeps.
  */
 export const IDEA_REFUSED = new RegExp(
   [
     "[\\p{Sc}%‰]",
     `\\b(?:${CURRENCIES.map((c) => c.code).join("|")})\\b`,
-    `\\d[\\d.,\\s]*(?:kr|zł|sfr)(?![\\p{L}\\p{N}])`,
+    // A currency word that is also an everyday word ("pesos": weights in Portuguese) only after a number
+    `\\d[\\d.,\\s]*(?:kr|zł|sfr|pesos?)(?![\\p{L}\\p{N}])`,
     RATE,
+    // A large number of months or thousands a month or a year: "a 5000 month", "a 5k month" (a 12 month plan stays)
+    `\\d{3,}[\\d.,]*\\s*[- ]?months?(?![\\p{L}\\p{N}])|\\d[\\d.,]*\\s*k[- ]?(?:months?|years?)(?![\\p{L}\\p{N}])`,
     // Currency words, in the store languages
-    word("dollars?|d[oó]lar(?:es)?|dollar[oi]|bucks|quid|euros?|yen|francs?|franken|kronor|kroner|krona|krone|kronen|zlot(?:y|ys|ych)|złot\\p{L}*|pesos?|reais|cents?|centavos?|c[ée]ntimos?|centimes?|make bank"),
+    word("dollars?|d[oó]lar(?:es)?|dollar[oi]|bucks|quid|euros?|yen|francs?|franken|kronor|kroner|krona|krone|kronen|zlot(?:y|ys|ych)|złot\\p{L}*|reais|cents?|centavos?|c[ée]ntimos?|centimes?|make bank"),
     // Wealth, income and sales, with stems, in the store languages
     word(
-      "(?:get|getting|grow|become|be) rich|riches|wealthy|lucr\\p{L}*|rentab\\p{L}*|financial(?:ly)? (?:freedom|independence|security)|quit your (?:day )?job|side (?:business|income|gig)|pay(?:s|ing|out|outs|check|checks|day)?|paid|sales?|sell(?:s|ing)? more|best[- ]?sell\\p{L}*",
+      "(?:get|getting|grow|become|be) rich|riches|wealthy|lucr\\p{L}*|rentab\\p{L}*|financial(?:ly)? (?:freedom|independence|security)|quit your (?:day )?job|side (?:business|income|gig)|pays|paying|payouts?|paychecks?|payday|get(?:s|ting)? paid|paid (?:to|gigs?|work)|(?:more|boost\\p{L}*|doubl\\p{L}*|tripl\\p{L}*|increas\\p{L}*|grow\\p{L}*|higher|bigger)\\s+(?:your\\s+|in\\s+)?sales|sales (?:boost|growth)|sell(?:s|ing)? more|best[- ]?sell\\p{L}*",
     ),
     word("gan(?:a|as|an|amos|ar|ando|ado|ada|e|es|en|ancias?)|ganh\\p{L}*|ventas?|vendas?|ventes?|verkauf\\p{L}*|vendite|verkoop\\p{L}*|hacerse rico|ficar rico|devenir riche|richesse|reich werden|reichtum|diventare ricco|ricchezza|rijk worden|rijkdom|riqueza|libertad financiera|liberdade financeira|libert[ée] financi[èe]re|finanzielle freiheit|libert[àa] finanziaria|financi[ëe]le vrijheid"),
     // English
-    "\\b(?:earn\\w*|income|revenue|profit\\w*|money|cash|salary|paycheck|wealth\\w*|millionaire|six[- ]figures?|passive|side hustle|per ?cent|percent(?:age)?|guarantee\\w*|proven|risk[- ]free|promise\\w*|hurry|today only|right now|act now|last chance|limited|don'?t miss|before it'?s gone)\\b",
+    "\\b(?:earn\\w*|income|revenue|profit\\w*|money|cash|salary|paycheck|wealth\\w*|millionaire|(?:five|six|seven)[- ]figures?|make (?:a|your) living|monetiz\\w*|monetis\\w*|(?:rake|rakes|raking|bring|brings|bringing|pull|pulls|pulling) in\\s+\\d+|retire early|early retirement|funds? your retirement|turn (?:your|a) (?:hobby|passion|skill|craft) into (?:a )?(?:business|income|career)|passive|side hustle|per ?cent|percent(?:age)?|guarantee\\w*|proven|risk[- ]free|promise\\w*|hurry|today only|right now|act now|last chance|limited|don'?t miss|before it'?s gone)\\b",
     // Spanish
     "\\b(?:ganar|ganancias?|ingresos?|dinero|beneficios? econ[oó]micos?|porcentaje|por ciento|garantizad[oa]s?|garant[ií]as?|ahora mismo|date prisa|limitad[oa]s?)\\b",
     // French

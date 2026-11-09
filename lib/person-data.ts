@@ -175,6 +175,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/team.ts", how: "account", what: "A store's team and invitations" },
   { file: "lib/pipeline-access.ts", how: "account", what: "What each teammate may do with each sales pipeline, under the teammate's sign-in address; it goes when they leave the team" },
   { file: "lib/store.ts", how: "account", what: "Which stores an account owns" },
+  { file: "lib/account-exists.ts", how: "account", what: "Reads, never writes, whether an address already owns a store, from the same records lib/store.ts keeps, when a team invitation is taken" },
   { file: "lib/phone-alerts.ts", how: "account", what: "The creator's own phone, and one-way marks of events already told" },
   { file: "lib/path.ts", how: "account", what: "The store owner's own Path: their four answers, days, best level, cached facts and optional mission-board token/count/time; private record downloadable only by the owner through /api/store/path, board removed when Path/store is deleted, nothing about a buyer" },
   { file: "lib/stats-report.ts", how: "none", what: "Weekly reports to the store's own team; no buyer's address" },

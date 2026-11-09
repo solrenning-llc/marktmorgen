@@ -257,7 +257,7 @@ async function main(): Promise<void> {
     const sendKey = `nl:wl:${s.sid}:${s.pid}:send`;
     const jobKey = `nl:wl:${s.sid}:${s.pid}:job`;
     is("after 100 days its send list is still whole", redis.run(["LLEN", sendKey]), 2);
-    is("the held run renewed the send list for 30 days", near(redis.run(["TTL", sendKey]), 30 * DAY), true);
+    is("the held run renewed the send list for 120 days, as long as the record", near(redis.run(["TTL", sendKey]), 120 * DAY), true);
     is("and the launch's record for 120 days", near(redis.run(["TTL", jobKey]), 120 * DAY), true);
     is("still queued", inJobs(s.sid, s.pid), 1);
     const view = (await waitlistViews(await s.current(), [s.pid]))[s.pid];
@@ -348,6 +348,91 @@ async function main(): Promise<void> {
     is("control: a store that is on still says it is going out", /On sale\. The waitlist email is going out: 0 of 2 so far/.test(sending), true);
     const finished = panelText({ soon: false, confirmed: 0, waiting: 0, launch: { ...job, cursor: 2, sent: 2, finished: started + 60 }, switchedOff: false });
     is("control: a finished launch still says launched", /Launched\. 2 of 2 waitlist emails went out\./.test(finished), true);
+  }
+
+  part("A gap of more than 30 days between held runs keeps the send list, so nobody is emailed twice");
+  {
+    const s = await makeStore();
+    for (const [i, email] of people.entries()) redis.run(["HSET", `nl:wl:${s.sid}:${s.pid}`, email, place(i, 1)]);
+    is("launched for both", (await launch(await s.current(), s.product, { note: "", address: ADDRESS }).then((r) => (r.ok ? r.total : r.reason))), 2);
+    const sendKey = `nl:wl:${s.sid}:${s.pid}:send`;
+    const jobKey = `nl:wl:${s.sid}:${s.pid}:job`;
+    is("at the start, the send list lives as long as the launch's record", near(redis.run(["TTL", sendKey]), Number(redis.run(["TTL", jobKey]))), true);
+    // The first address was emailed before the switch-off (the list is sorted: dana, then hal).
+    const job = JSON.parse(String(redis.run(["GET", jobKey]))) as Record<string, number>;
+    redis.run(["SET", jobKey, JSON.stringify({ ...job, cursor: 1, sent: 1 }), "EX", 120 * DAY]);
+    await noteTakedown(s.owner, null, true);
+    batches.length = 0;
+    await run();
+    // No held run reaches the launch for 45 days (the job not running, or its deadline spent before it).
+    later(45);
+    await run();
+    is("after 45 days with no held run, its send list is still whole", redis.run(["LLEN", sendKey]), 2);
+    const view = (await waitlistViews(await s.current(), [s.pid]))[s.pid];
+    is("and the launch is still held, not stopped", [inJobs(s.sid, s.pid), Boolean(view?.launch?.stopped)], [1, false]);
+    later(76);
+    await run();
+    is("stopped at 121 days: whoever had it is off the waitlist, the other kept", redis.run(["HKEYS", `nl:wl:${s.sid}:${s.pid}`]), ["hal@example.com"]);
+    is("nobody was emailed while held", batches.flat().length, 0);
+    await noteTakedown(s.owner, null, false);
+    await setSoon(await s.current(), s.pid, true);
+    is("started again: only the one not emailed", await launch(await s.current(), s.product, { note: "", address: ADDRESS }), { ok: true, total: 1 });
+    is("and only that one is emailed, once", [await run(), batches.flat().map((m) => m.to[0])], [1, ["hal@example.com"]]);
+  }
+
+  part("Every batch keeps the send list alive as long as the launch's record");
+  {
+    const many = Array.from({ length: 101 }, (_, i) => `member${String(i).padStart(3, "0")}@example.com`);
+    const s = await makeStore();
+    for (const [i, email] of many.entries()) redis.run(["HSET", `nl:wl:${s.sid}:${s.pid}`, email, place(i % 10, 1)]);
+    is("launched for 101", (await launch(await s.current(), s.product, { note: "", address: ADDRESS }).then((r) => (r.ok ? r.total : r.reason))), 101);
+    later(10);
+    await setSubscription(s.owner, { customerId: "cus_Launch00009", subscriptionId: "sub_Launch00009", active: true, tier: "pro", period: paidPeriod() });
+    batches.length = 0;
+    duringBatch = () => noteTakedown(s.owner, null, true);
+    await run();
+    is("one batch went, ten days after the start", batches.map((b) => b.length), [100]);
+    const sendKey = `nl:wl:${s.sid}:${s.pid}:send`;
+    const jobKey = `nl:wl:${s.sid}:${s.pid}:job`;
+    is("the batch's record write renewed the send list as long as the record", [near(redis.run(["TTL", sendKey]), Number(redis.run(["TTL", jobKey]))), near(redis.run(["TTL", jobKey]), 120 * DAY)], [true, true]);
+  }
+
+  part("A renewal that keeps answering in an unknown shape stops the launch in its last week, before its record could lapse unseen");
+  {
+    const s = await makeStore();
+    for (const [i, email] of people.entries()) redis.run(["HSET", `nl:wl:${s.sid}:${s.pid}`, email, place(i, 1)]);
+    is("launched for both", (await launch(await s.current(), s.product, { note: "", address: ADDRESS }).then((r) => (r.ok ? r.total : r.reason))), 2);
+    const jobKey = `nl:wl:${s.sid}:${s.pid}:job`;
+    const job = JSON.parse(String(redis.run(["GET", jobKey]))) as Record<string, number>;
+    redis.run(["SET", jobKey, JSON.stringify({ ...job, cursor: 1, sent: 1 }), "EX", 120 * DAY]);
+    await noteTakedown(s.owner, null, true);
+    batches.length = 0;
+    const real = redis.pipeline.bind(redis);
+    // Every renewal (a pipeline of EXPIRE) answers in a shape that is not a count.
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands[0]?.[0] === "EXPIRE" ? commands.map(() => "QUEUED") : real(commands)) as typeof redis.pipeline;
+    try {
+      for (let day = 0; day <= 100; day += 25) {
+        if (day) later(25);
+        await run();
+      }
+      later(12);
+      await run();
+      is("at 112 days, an unknown renewal waits: still held", inJobs(s.sid, s.pid), 1);
+      later(3);
+      await run();
+      is("at 115 days, in the hold's last week, it stops", inJobs(s.sid, s.pid), 0);
+    } finally {
+      redis.pipeline = real;
+    }
+    const view = (await waitlistViews(await s.current(), [s.pid]))[s.pid];
+    is("its record says it stopped unfinished: 1 of 2", [Boolean(view?.launch?.finished), Boolean(view?.launch?.stopped), view?.launch?.sent, view?.launch?.total], [true, true, 1, 2]);
+    is("whoever had it is off the waitlist; the other is kept, confirmed", [redis.run(["HKEYS", `nl:wl:${s.sid}:${s.pid}`]), view?.confirmed], [["hal@example.com"], 1]);
+    is("nobody was emailed while held", batches.flat().length, 0);
+    await noteTakedown(s.owner, null, false);
+    await setSoon(await s.current(), s.pid, true);
+    is("started again: only the one not emailed", await launch(await s.current(), s.product, { note: "", address: ADDRESS }), { ok: true, total: 1 });
+    is("and only that one is emailed, once", [await run(), batches.flat().map((m) => m.to[0])], [1, ["hal@example.com"]]);
   }
 
   part("The held runs' commands are in the cost registry");

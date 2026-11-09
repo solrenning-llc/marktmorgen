@@ -228,6 +228,20 @@ export class MemoryRedis {
           this.run(["HDEL", imported, field]);
           return 1;
         }
+        // lib/paypal-sales.ts PAYPAL_SETTLE: a completed payment written down, once, with every list it belongs in, in one step.
+        if (key.startsWith("-- marktmorgen:paypal-settle:v1\n") && args[0] === "6" && args.length === 14) {
+          const [, paid, handOver, watch, own, pending, sales, record, life, order, at, look, floor, salesLife] = args;
+          if (this.run(["SET", paid, record, "NX", "EX", life]) === null) return 0;
+          this.run(["ZADD", handOver, at, order]);
+          this.run(["ZADD", watch, look, order]);
+          this.run(["SADD", own, order]);
+          this.run(["EXPIRE", own, life]);
+          this.run(["ZREM", pending, order]);
+          this.run(["ZADD", sales, at, order]);
+          this.run(["ZREMRANGEBYSCORE", sales, "-inf", floor]);
+          this.run(["EXPIRE", sales, salesLife]);
+          return 1;
+        }
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;

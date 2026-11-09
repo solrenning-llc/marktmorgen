@@ -86,6 +86,32 @@ local ok, record = pcall(cjson.decode, raw)
 if not ok or type(record) ~= 'table' or record.job ~= ARGV[2] then return 0 end
 redis.call('HDEL', KEYS[1], ARGV[1])
 return 1`;
+/**
+ * A completed payment written down, once, with every list it belongs in, in one step (Claude 5's triage of the money
+ * section of the tolerant-reads inventory, 9 November 2026; rules 24 and 30). Before, the record's SET NX and the lists
+ * were two requests: a second one that did not reach Redis, or a first whose answer was lost, left the paid order in
+ * no list, and every later try found the SET refused and wrote nothing; the buyer was never handed what they paid for.
+ * KEYS: the paid record, the hand-over list, the refund watch, the buyer's payments for the product, pending, the
+ * store's sales. ARGV: the record, its life, the order, the paid time, the watch's first look, the sales' floor, their
+ * life. It is owed a hand-over from here, first and in the same step that takes it off pending, so a paid order is never
+ * in neither list (Claude 5 on #2909): lib/paypal-delivery.ts takes it out once it is handed over, and the sweep hands
+ * over what is still in it after the return's own hand-over has had its time; counted in the store's numbers like a
+ * Stripe sale (lib/stats.ts readPaidSales). Answers 1 when written here, 0 when the record was there already (nothing
+ * else is written then). Billed as the EVAL plus each redis.call (Upstash): one command more a sale than the SET and
+ * the pipeline it replaces (10 against 9), inside the order's own work, which ORDER_COMPUTE prices (tests/
+ * plan-cost-registry.ts, line "orders"); the hand-over list still gets one write a sale (PAYPAL_HAND_OVER_RETRY).
+ */
+const PAYPAL_SETTLE = `-- marktmorgen:paypal-settle:v1
+if not redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2]) then return 0 end
+redis.call('ZADD', KEYS[2], ARGV[4], ARGV[3])
+redis.call('ZADD', KEYS[3], ARGV[5], ARGV[3])
+redis.call('SADD', KEYS[4], ARGV[3])
+redis.call('EXPIRE', KEYS[4], ARGV[2])
+redis.call('ZREM', KEYS[5], ARGV[3])
+redis.call('ZADD', KEYS[6], ARGV[4], ARGV[3])
+redis.call('ZREMRANGEBYSCORE', KEYS[6], '-inf', ARGV[6])
+redis.call('EXPIRE', KEYS[6], ARGV[7])
+return 1`;
 /** A product id as the catalog makes them, and a PayPal capture id: what the refund watch reads a paid order by. */
 const PAID_PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const CAPTURE_ID = /^[A-Za-z0-9-]{1,64}$/;
@@ -593,22 +619,22 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
     ...(opened.via ? { via: opened.via } : {}),
     ...(opened.off ? { off: opened.off, sale: opened.sale } : {}),
   };
-  const [fresh] = await redisPipeline([["SET", paidKey(order), JSON.stringify(paid), "NX", "EX", PAID_KEPT_SECONDS]]);
-  if (fresh === null) return { paid: (await readPaid(order)) ?? paid, fresh: false };
-  await redisPipeline([
-    // Owed a hand-over from here, first and in the same pipeline that takes it off pending, so a paid order is never
-    // in neither list (Claude 5 on #2909): lib/paypal-delivery.ts takes it out once it is handed over, and the sweep
-    // hands over what is still in it after the return's own hand-over has had its time.
-    ["ZADD", handOverKey(opened.s), String(paid.at), order],
-    ["ZADD", watchKey(opened.s), String(nextLook(paid.at, paid.at) ?? paid.at), order],
-    ["SADD", ownKey(opened.s, email, opened.p), order],
-    ["EXPIRE", ownKey(opened.s, email, opened.p), PAID_KEPT_SECONDS],
-    ["ZREM", pendingKey(opened.s), order],
-    // Counted in the store's numbers like a Stripe sale (lib/stats.ts readPaidSales).
-    ["ZADD", salesKey(opened.s), String(paid.at), order],
-    ["ZREMRANGEBYSCORE", salesKey(opened.s), "-inf", String(paid.at - SALES_KEPT_SECONDS)],
-    ["EXPIRE", salesKey(opened.s), SALES_KEPT_SECONDS],
-  ]);
+  // The record and every list it belongs in, written in one step (PAYPAL_SETTLE): a paid order is never written down
+  // and left in no list, whatever reaches Redis or comes back from it. The answer read exactly (rule 24): 1 written
+  // here, 0 written before; anything else is unknown and thrown, never taken for either, and the next try finds the
+  // payment either written with every list or not written at all (the capture itself is asked again under its own
+  // request id).
+  const wrote = repliesFor(
+    await redisPipeline([[
+      "EVAL", PAYPAL_SETTLE, 6,
+      paidKey(order), handOverKey(opened.s), watchKey(opened.s), ownKey(opened.s, email, opened.p), pendingKey(opened.s), salesKey(opened.s),
+      JSON.stringify(paid), PAID_KEPT_SECONDS, order, String(paid.at), String(nextLook(paid.at, paid.at) ?? paid.at),
+      String(paid.at - SALES_KEPT_SECONDS), SALES_KEPT_SECONDS,
+    ]]),
+    1,
+  );
+  if (!wrote || (wrote[0] !== 0 && wrote[0] !== 1)) throw new UnknownReplyError("writing a PayPal payment down");
+  if (wrote[0] === 0) return { paid: (await readPaid(order)) ?? paid, fresh: false };
   return { paid, fresh: true };
 }
 

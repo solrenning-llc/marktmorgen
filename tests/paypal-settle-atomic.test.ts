@@ -80,9 +80,10 @@ const timeout = () => new Error("Synthetic: Redis timed out");
 /**
  * How Redis fails around the paid record while the return runs ("none": it does not):
  *  - "after": every request after the paid record exists never reaches Redis (nothing of it is applied);
- *  - "lost": the request that writes the paid record is applied, but its answer is lost on the way back.
+ *  - "lost": the request that writes the paid record is applied, but its answer is lost on the way back;
+ *  - "shape": that request is applied and answers in a shape not known (rule 24): unknown, never "written here".
  */
-type Fault = "none" | "after" | "lost";
+type Fault = "none" | "after" | "lost" | "shape";
 
 async function buy(store: Store, productId: string, buyer: string, fault: Fault): Promise<string> {
   const product = (await readListing(store, productId))!;
@@ -97,6 +98,7 @@ async function buy(store: Store, productId: string, buyer: string, fault: Fault)
     if (fault === "after" && before) throw timeout();
     const replies = await pipeline(commands);
     if (fault === "lost" && !before && (await exists())) throw timeout();
+    if (fault === "shape" && !before && (await exists())) return [{ result: replies[0] }];
     return replies;
   }) as typeof redis.pipeline;
   try {
@@ -154,6 +156,7 @@ async function main(): Promise<void> {
   for (const [fault, label] of [
     ["after", "Redis does not answer anything after the paid record is written"],
     ["lost", "the paid record's write is applied but its answer is lost"],
+    ["shape", "the paid record's write is applied and answers in a shape not known"],
   ] as [Fault, string][]) {
     part(`Claude 5: ${label}`);
     swept = 0;

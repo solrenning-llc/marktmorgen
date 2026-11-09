@@ -304,6 +304,8 @@ export const nl: BuyerWords = {
   askTermsCut: () => "Ik heb de volledige voorwaarden hier niet. Vraag het de maker voordat je koopt.",
 
   noLongerOnSale: "Dit product is niet meer te koop.",
+  cardUnread: "Dit product kon nu niet worden geladen. Probeer het zo meteen opnieuw.",
+  cardBuyUnread: "Kopen is nu niet mogelijk. Probeer het zo meteen opnieuw.",
   seeStore: (store) => `Bekijk ${store}`,
   cardTestMode: "Testmodus: er wordt geen echte kaart belast.",
   cardCheckout: "Veilig betalen via Stripe, in een nieuw tabblad.",

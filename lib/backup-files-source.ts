@@ -37,7 +37,7 @@
  *     for its etag (api-reference/stream/manage-videos/get-video);
  *   - NOT confirmed, so it stays off: the library's pull zone host and its
  *     URL token key (neither is a setting of this site: BUNNY_STREAM_TOKEN_KEY
- *     is the player's embed key, a different value); whether the owner's
+ *     is the player's embed key, and no page says it is the zone's); whether the owner's
  *     library keeps originals, which must be on BEFORE a video is uploaded
  *     (stream/encoding, "Keep original files"), and lib/stream.ts's record of
  *     its setup does not say; and the original's byte size, which a video's

@@ -349,12 +349,27 @@ export async function membersOf(folder: string): Promise<{ emails: string[]; mis
   return out;
 }
 
+/**
+ * A store's score in the final line (one ZSCORE's pipeline), read exactly (CX-123 rule 24; Claude 5's second money
+ * review of #3279): null when Redis says it is not in the line, else the end of its plan (ms), a positive number or
+ * its numeric text, as Upstash answers a ZSCORE. Anything else, a reply missing included, is UnknownReplyError: never
+ * "not in its closing day", which would let a paid plan be written down for a store already closing.
+ */
+export function finalScoreOf(replies: unknown): number | null {
+  const reply = repliesFor(replies, 1);
+  if (!reply) throw new UnknownReplyError("a store's place in the final closing line");
+  const raw = reply[0];
+  if (raw === null) return null;
+  const value = typeof raw === "number" ? raw : typeof raw === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(value) || value <= 0) throw new UnknownReplyError("a store's place in the final closing line");
+  return value;
+}
+
 /** Whether a store's closing day has begun: then no plan may be started for it (app/api/billing/checkout). Throws when it cannot be read. */
 export async function inClosingDay(ref: string): Promise<boolean> {
   // With no database there is no closing day to be in (the line lives there); one that does not answer throws, and the caller refuses.
   if (!isRedisConfigured()) return false;
-  const [score] = await redisPipeline([["ZSCORE", FINAL_INDEX, ref]]);
-  return score !== null && score !== undefined;
+  return finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]])) !== null;
 }
 
 /** How the hold stands: the members it could not reach yet, and those past the budget. */

@@ -1,6 +1,6 @@
 import { formatMoney } from "@/lib/money";
 import { readAffiliatePromotion } from "@/lib/affiliate-promotion";
-import { affiliateCreditGroups, affiliateLineScope, type AffiliateCommissionLine } from "@/lib/affiliate-commission-view";
+import { HELD_PARTLY_REFUNDED, affiliateCreditGroups, affiliateLineScope, type AffiliateCommissionLine } from "@/lib/affiliate-commission-view";
 import type { Credit } from "@/lib/affiliates";
 const CREDIT_WORDS: Record<Credit, string> = {
   click: "Their link", code: "Their code", buyer: "A buyer who was already theirs", contact: "A confirmed lead of theirs who bought",
@@ -35,7 +35,9 @@ export function AffiliateCommissionHistory({ lines, total, who, refundsChecked, 
           <span className="block text-xs text-ink-soft [overflow-wrap:anywhere]">{line.how === "bonus" ? `${day(line.at)} · ${who.get(line.aff)?.email ?? "A removed affiliate"} · ${CREDIT_WORDS.bonus}` : `${day(line.at)} · ${who.get(line.aff)?.email ?? "A removed affiliate"} · ${money(line.base,line.currency)} before tax · ${line.rate}% · ${CREDIT_WORDS[line.how]}`}{line.refunded ? ` · ${money(line.refunded,line.currency)} refunded` : ""}</span>
           <span className="mt-1 block text-xs text-ink-soft [overflow-wrap:anywhere]">{tags ? `Source: ${tags.source || "Not recorded"} · Campaign: ${tags.campaign || "Not recorded"} · Variant: ${tags.content || "Not recorded"}` : "No campaign labels recorded"}</span>
         </span>
-        <span className="text-right"><span className="block font-semibold tabular-nums text-ink">{money(line.commission,line.currency)}</span>{line.status !== "earned" ? <span className="block text-xs font-semibold text-ink-soft">{line.status === "own purchase" ? "Their own purchase" : line.status === "refunded" ? "Refunded" : "Partly refunded"}</span> : null}</span>
+        {/* A held sale (lib/affiliates.ts, holdLine): no amount is shown as earned, and the reason is said in full. */}
+        <span className="text-right"><span className="block font-semibold tabular-nums text-ink">{line.status === "held" ? "Held" : money(line.commission,line.currency)}</span>{line.status !== "earned" ? <span className="block text-xs font-semibold text-ink-soft">{line.status === "own purchase" ? "Their own purchase" : line.status === "refunded" ? "Refunded" : line.status === "held" ? "Partly refunded, amount unknown" : "Partly refunded"}</span> : null}</span>
+        {line.status === "held" ? <span className="block w-full text-xs text-ink-soft">{HELD_PARTLY_REFUNDED}</span> : null}
       </li>;
     })}</ul>}
   </section>;

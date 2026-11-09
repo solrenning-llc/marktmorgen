@@ -70,6 +70,7 @@ part("Numbers written in words (MEDIUM 2)");
 is("English number words, as written", safely(() => unsourcedNumbers(["Twenty minutes a day, three days a week, a dozen recipes"], "")), ["Twenty", "three", "a dozen"]);
 is("double and half", safely(() => unsourcedNumbers(["Double your sales in half the time"], "")), ["Double", "half"]);
 is("compound words", safely(() => unsourcedNumbers(["Twenty-five lessons and two hundred pages"], "")), ["Twenty-five", "two hundred"]);
+is("'double-check' asks for a check, it claims no number", safely(() => unsourcedNumbers(["Double-check each step"], "")), []);
 is("'one' is too common to read", safely(() => unsourcedNumbers(["One of the best, the one thing you need"], "")), []);
 is("a word the creator gave in digits", safely(() => unsourcedNumbers(["Twenty recipes, a dozen cakes"], "20 recipes and 12 cakes")), []);
 is("digits the creator gave in words", safely(() => unsourcedNumbers(["20 recipes, twice a week"], "twenty recipes, double the fun")), []);

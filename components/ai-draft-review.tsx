@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, ESTIMATE_BADGE, reviewDone, sensitiveLabel, sensitiveWarning, type DraftTopics } from "@/lib/ai-draft-review";
+import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, ESTIMATE_BADGE, ESTIMATE_NOTE, reviewDone, sensitiveLabel, sensitiveWarning, type DraftTopics } from "@/lib/ai-draft-review";
 
 /**
  * The "AI draft" badge and the three checks drawn under every draft the
@@ -30,9 +30,12 @@ export function AiDraftReview({
   const done = reviewDone(checks);
   const warning = sensitiveWarning(topics);
   const warningId = `${base}-topic`;
+  const estimatesId = `${base}-estimates`;
+  // The warning and the numbers to check describe the group, so a screen reader reads them with the checks
+  // (Claude 6's reviews of #3436, LOW 5, and #3437, LOW 6).
+  const describedBy = [warning ? warningId : null, estimates.length ? estimatesId : null].filter(Boolean).join(" ") || undefined;
   return (
-    // The warning describes the group, so a screen reader reads it with the checks (Claude 6's review of #3436, LOW 5).
-    <fieldset className="rounded-xl border border-line bg-white p-3" data-ai-review aria-describedby={warning ? warningId : undefined}>
+    <fieldset className="rounded-xl border border-line bg-white p-3" data-ai-review aria-describedby={describedBy}>
       <legend className="flex flex-wrap items-center gap-2 px-1 text-sm font-semibold text-ink">
         <span className="rounded-full border border-ink px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-ink">{AI_DRAFT_BADGE}</span>
         <span>Before you save it, check:</span>
@@ -43,8 +46,8 @@ export function AiDraftReview({
         </p>
       ) : null}
       {estimates.length ? (
-        <div className="mt-2 text-sm text-ink">
-          <p>These numbers are not in what you gave. Check each one, or change it to a figure you know.</p>
+        <div id={estimatesId} className="mt-2 text-sm text-ink">
+          <p>{ESTIMATE_NOTE}</p>
           <ul className="mt-1 flex flex-wrap gap-2" aria-label="Numbers to check">
             {estimates.map((figure) => (
               <li key={figure} className="inline-flex items-center gap-1">

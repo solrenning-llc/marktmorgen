@@ -52,11 +52,16 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
   // (review of #3331, siblings of R20 finding 3). The way to take an address off
   // the list, and what it says after (taken off, or the link no longer works), is
   // a right kept past the public share: it counts on the share kept for what
-  // people already have ("buyer") and rests only when the whole window is used.
+  // people already have ("buyer"). With the whole window used it never rests
+  // (pre-review of 9 November 2026: leaving a list is a right): it is drawn
+  // with nothing read past the store, neither the link's token nor the
+  // product, and the button's own request (app/api/store/waitlist/leave)
+  // checks the token.
   const removal = !token && (leave !== "" || status === "left" || status === "expired");
-  if (await isResting(store, Date.now(), removal ? "buyer" : "public")) return <StoreResting store={store} />;
-  const grant = token && WAIT_TOKEN.test(token) ? await readWaitToken(token) : leave && WAIT_TOKEN.test(leave) ? await readWaitToken(leave) : null;
-  const productId = grant?.p ?? read("product");
+  const resting = await isResting(store, Date.now(), removal ? "buyer" : "public");
+  if (resting && !removal) return <StoreResting store={store} />;
+  const grant = resting ? null : token && WAIT_TOKEN.test(token) ? await readWaitToken(token) : leave && WAIT_TOKEN.test(leave) ? await readWaitToken(leave) : null;
+  const productId = resting ? "" : (grant?.p ?? read("product"));
   const listed = productId ? await readListing(store, productId) : null;
   // A draft is named only through its own wait-list link; the product in the address alone is not known here (MM-SA-30).
   const product = listed && (!listed.hidden || grant?.p === listed.id) ? listed : null;
@@ -86,7 +91,7 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
       );
   } else if (leave) {
     body =
-      grant && grant.k === "leave" ? (
+      (resting ? WAIT_TOKEN.test(leave) : grant && grant.k === "leave") ? (
         <>
           <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{g.removeTitle}</h1>
           <p className="st-muted mt-4 text-lg">{g.notTold(title)}</p>

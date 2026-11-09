@@ -51,7 +51,11 @@ function withGpc<T>(on: boolean, run: () => T): T {
 }
 
 const visible = (html: string) =>
-  html.replace(/<[^>]+>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
+  html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(#x27|apos|quot|amp);/g, (_, name: string) => (name === "quot" ? '"' : name === "amp" ? "&" : "'"))
+    .replace(/\s+/g, " ")
+    .trim();
 
 /** English words a banner in another language must not carry. */
 const ENGLISH = /\b(the|your|you|with|this|that|and|of|for|from|here|sent|Allow|No thanks|More about this|measures|permission|nothing|Turn off|settings|Affiliate link|Ad measurement)\b/;

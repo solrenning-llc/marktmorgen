@@ -32,7 +32,7 @@ const OLD = "old-plan-shop";
 const SUB = "sub_ReleasedPlan01";
 const CUSTOMER = "cus_ReleasedPlan01";
 
-let listed: Record<string, unknown>[] = [];
+const listed: Record<string, unknown>[] = [];
 const asked: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));

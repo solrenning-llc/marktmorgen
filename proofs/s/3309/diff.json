@@ -1,0 +1,12 @@
+{
+  "command": [
+    "git",
+    "diff",
+    "--check"
+  ],
+  "timeoutSeconds": 120,
+  "status": 0,
+  "stdout": "",
+  "stderr": "",
+  "seconds": 0.236
+}

@@ -1,0 +1,10 @@
+{
+  "command": "tsc --noEmit --project proofs/s/3309/tsconfig.json",
+  "roots": 4,
+  "memoryMiB": 1024,
+  "timeoutSeconds": 120,
+  "status": 0,
+  "stdout": "",
+  "stderr": "",
+  "seconds": 14.474
+}

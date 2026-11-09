@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/closing-holds.ts",
+    "../../../lib/plan-closing.ts",
+    "../../../tests/closing-call-budget-ack.test.ts",
+    "../../../proofs/s/3309/interleaving.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

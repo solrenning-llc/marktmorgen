@@ -1,0 +1,11 @@
+{
+  "file": "proofs/s/3309/interleaving.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "20e748dfc15bdb4bce34ad75022cecc20ce003c6",
+  "stdout": "\nTwo budget starts interleave after the first DEL; the newer worker spends one call\n  ok    the controlled interleaving actually ran\n  ok    the newer budget was accepted and one call taken\n  ok    the late HSET is exactly a replacement, not a fresh field\nS_INTERLEAVING {\"rejected\":true,\"modelHsetReply\":1,\"remaining\":\"5\"}\n  FAIL  one already consumed call remains debited after the late write\n        expected \"4\"\n        got      \"5\"\n  FAIL  only the four unspent calls can still be taken\n        expected [true,false]\n        got      [true,true]\n\n5 checks, 2 failing.\nS_VOLUME {\"runs\":10,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 1,
+  "signal": null,
+  "error": null
+}

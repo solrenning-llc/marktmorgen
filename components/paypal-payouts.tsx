@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { NewTab } from "@/components/new-tab";
@@ -10,6 +10,8 @@ import { formatMoney } from "@/lib/money";
 import { ordinal } from "@/lib/affiliate-setting";
 
 type View = { client: string; at: number; auto: boolean; broken: boolean };
+/** A payment PayPal could not confirm, left for the creator's own check (lib/paypal-payouts.ts, paypalOwnChecks). */
+export type OwnCheckView = { id: string; at: number; currency: string; people: { id: string; email: string; cents: number }[] };
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -27,6 +29,9 @@ const MESSAGES: Record<string, string> = {
   slow: "Too many tries for now. Try again in an hour.",
   error: "PayPal could not be reached. Nothing was sent. Try again in a moment.",
   unknown: "We sent the batch to PayPal, but its answer did not reach us, so we do not know whether it was paid. Nobody in it will be sent again: they show as on their way. Look at your PayPal activity to see whether it went.",
+  gone: "That payment was already sorted out. Reload the page to see where things stand.",
+  changed: "Your answers no longer match that payment. Reload the page and answer again.",
+  "own-error": "Your answers were not saved, and nothing was sent. Try again in a moment.",
   pending: "Nobody was paid just now. But we could not confirm that this payment was cleared from our records, so our daily check may still send it from your PayPal, to the same people for the same amounts. Until then, they show as on their way. Do not pay them another way, or they could be paid twice.",
 };
 
@@ -47,6 +52,7 @@ export function PayPalPayouts({
   onTheirWay,
   checking = 0,
   manualCheck = 0,
+  ownChecks = [],
   payday,
 }: {
   initial: View | null;
@@ -60,6 +66,8 @@ export function PayPalPayouts({
   checking?: number;
   /** Of those, the ones PayPal could not confirm after a week, or said exist without saying which: not sent again. */
   manualCheck?: number;
+  /** Those payments, one by one, for the creator to say what PayPal shows; null when they could not be read. */
+  ownChecks?: OwnCheckView[] | null;
   /** The day of the month the creator pays; 0 when none is set. */
   payday: number;
 }) {
@@ -80,7 +88,8 @@ export function PayPalPayouts({
     setSure(false);
     if (!data.ok) {
       // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
-      setError((typeof (data as { message?: unknown }).message === "string" && (data as { message: string }).message) || (MESSAGES[String(data.error)] ?? MESSAGES.error));
+      const reason = op === "resolve" && data.error === "error" ? "own-error" : String(data.error);
+      setError((typeof (data as { message?: unknown }).message === "string" && (data as { message: string }).message) || (MESSAGES[reason] ?? MESSAGES.error));
       return null;
     }
     return data;
@@ -194,18 +203,41 @@ export function PayPalPayouts({
           ) : null}
           {checking > 0 ? (
             <p className="mt-3 text-sm text-ink-soft" role="status">
-              {`${checking} of these ${checking === 1 ? "is" : "are"} being checked with PayPal: its answer to the payment did not reach us, so the same payment request is sent to PayPal once a day until it answers. Nobody is paid twice.`}
+              {`${checking} of these ${checking === 1 ? "is" : "are"} being checked with PayPal: we do not know yet whether PayPal has ${checking === 1 ? "this payment" : "these payments"}, so the same payment request is sent to PayPal once a day until it answers. Nobody is paid twice.`}
             </p>
           ) : null}
           {manualCheck > 0 ? (
-            <p className="notice notice-warn mt-3 text-sm" role="status">
-              {`PayPal could not confirm ${manualCheck} ${manualCheck === 1 ? "payment" : "payments"}, so we will not send ${manualCheck === 1 ? "it" : "them"} again. Please check them in your PayPal activity, and pay anyone PayPal did not pay from there: `}
-              <a className="underline underline-offset-2" href="https://www.paypal.com/myaccount/activities/" target="_blank" rel="noreferrer">
-                your PayPal activity
-                <NewTab />
-              </a>
-              .
-            </p>
+            <div className="notice notice-warn mt-3 text-sm">
+              <p role="status">
+                {`PayPal could not confirm ${manualCheck} ${manualCheck === 1 ? "payment" : "payments"}, so we will not send ${manualCheck === 1 ? "it" : "them"} again. Until you tell us what happened, the people in ${manualCheck === 1 ? "it" : "them"} show as on their way and are left out of new payments. Look each one up in `}
+                <a className="underline underline-offset-2" href="https://www.paypal.com/myaccount/activities/" target="_blank" rel="noreferrer">
+                  your PayPal activity
+                  <NewTab />
+                </a>
+                {ownChecks && ownChecks.length ? ", then answer below." : ", then reload this page to answer."}
+              </p>
+              {ownChecks && ownChecks.length ? (
+                <p className="mt-2">
+                  If PayPal shows a payment as Pending or Unclaimed, wait until it is completed or returned before you answer.
+                </p>
+              ) : null}
+              {(ownChecks ?? []).map((batch) => (
+                <OwnCheckForm
+                  key={batch.id}
+                  batch={batch}
+                  disabled={busy !== null}
+                  saving={busy === "resolve"}
+                  onSave={async (paid, unpaid) => {
+                    const data = await act("resolve", { batch: batch.id, paid, unpaid });
+                    if (data) {
+                      toast(`${Number(data.paid)} written down as paid, ${Number(data.unpaid)} owed again.`);
+                      router.refresh();
+                    }
+                    return data !== null;
+                  }}
+                />
+              ))}
+            </div>
           ) : null}
           <label className="mt-4 flex min-h-[44px] items-center gap-3 text-sm text-ink">
             <input
@@ -246,5 +278,104 @@ export function PayPalPayouts({
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * One payment PayPal could not confirm: the creator says, person by person, what their PayPal activity shows, reviews
+ * what that will do, and only then saves it (lib/paypal-payouts.ts, resolveOwnCheck). Nothing is sent to PayPal.
+ */
+function OwnCheckForm({
+  batch,
+  disabled,
+  saving,
+  onSave,
+}: {
+  batch: OwnCheckView;
+  disabled: boolean;
+  saving: boolean;
+  onSave: (paid: string[], unpaid: string[]) => Promise<boolean>;
+}) {
+  const id = useId();
+  const [answers, setAnswers] = useState<Record<string, "paid" | "unpaid">>({});
+  const [sure, setSure] = useState(false);
+  const [missing, setMissing] = useState(false);
+  const money = (cents: number) => formatMoney(cents, batch.currency);
+  const sent = new Date(batch.at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const total = batch.people.reduce((n, p) => n + p.cents, 0);
+  const paid = batch.people.filter((p) => answers[p.id] === "paid");
+  const unpaid = batch.people.filter((p) => answers[p.id] === "unpaid");
+  const sum = (list: typeof paid) => money(list.reduce((n, p) => n + p.cents, 0));
+  const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+
+  return (
+    <form
+      className="mt-3 rounded-xl border border-line bg-white p-3 text-ink"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!sure) {
+          if (paid.length + unpaid.length < batch.people.length) {
+            setMissing(true);
+            return;
+          }
+          setMissing(false);
+          setSure(true);
+          return;
+        }
+        const saved = await onSave(paid.map((p) => p.id), unpaid.map((p) => p.id));
+        if (!saved) setSure(false);
+      }}
+    >
+      <h4 className="font-semibold">{`Payment sent on ${sent}: ${money(total)} to ${people(batch.people.length)}`}</h4>
+      <p className="mt-1">What does your PayPal activity show?</p>
+      {batch.people.map((person) => (
+        <fieldset key={person.id} className="mt-3" disabled={disabled || sure}>
+          <legend className="font-medium">{`${person.email}, ${money(person.cents)}`}</legend>
+          <div className="mt-1 flex flex-wrap gap-x-6">
+            {(["paid", "unpaid"] as const).map((value) => (
+              <label key={value} className="flex min-h-[44px] items-center gap-2">
+                <input
+                  type="radio"
+                  className="h-4 w-4"
+                  name={`${id}-${person.id}`}
+                  value={value}
+                  checked={answers[person.id] === value}
+                  onChange={() => setAnswers((before) => ({ ...before, [person.id]: value }))}
+                />
+                <span>{value === "paid" ? "PayPal paid them" : "PayPal did not pay them"}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ))}
+      {missing ? (
+        <p className="notice notice-error mt-3" role="alert">
+          Choose an answer for everyone in this payment.
+        </p>
+      ) : null}
+      {sure ? (
+        <div className="mt-3" role="status">
+          <p>
+            {`If you save this, ${people(paid.length)} will be written down as paid (${sum(paid)}), and ${people(unpaid.length)} will be owed again (${sum(unpaid)}) and go in your next payment. Nothing is sent now.`}
+          </p>
+          {unpaid.length ? (
+            <p className="mt-2 font-medium">
+              Only choose &ldquo;PayPal did not pay them&rdquo; when PayPal shows the payment failed, was returned or was canceled.
+              If PayPal did pay them, your next payment would pay them twice.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button type="submit" className="btn btn-primary btn-sm" disabled={disabled}>
+          {sure ? (saving ? "Saving…" : "Yes, save this") : "Review my answers"}
+        </button>
+        {sure ? (
+          <button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={() => setSure(false)}>
+            Go back and change them
+          </button>
+        ) : null}
+      </div>
+    </form>
   );
 }

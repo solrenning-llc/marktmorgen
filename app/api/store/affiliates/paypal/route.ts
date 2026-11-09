@@ -4,7 +4,7 @@ import { storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { clientAddress } from "@/lib/request-guard";
 import { affiliatesOn } from "@/lib/affiliates";
-import { connectPayPal, disconnectPayPal, payWithPayPal, readPayPal, setAutoPay, settlePayPal } from "@/lib/paypal-payouts";
+import { connectPayPal, disconnectPayPal, payWithPayPal, readOwnCheckAnswer, readPayPal, resolveOwnCheck, setAutoPay, settlePayPal } from "@/lib/paypal-payouts";
 
 /**
  * The creator's own PayPal, for paying affiliates (lib/paypal-payouts.ts):
@@ -14,11 +14,14 @@ import { connectPayPal, disconnectPayPal, payWithPayPal, readPayPal, setAutoPay,
  *   { op: "auto", on }                  pay by itself on payday, or not
  *   { op: "pay" }                       send everyone owed and cleared, now, from their PayPal
  *   { op: "settle" }                    ask PayPal what has been paid since
+ *   { op: "resolve", batch, paid, unpaid }  the creator's own check of a batch PayPal could not confirm: who it paid
+ *                                       (written down as paid) and who it did not (owed again); nothing is sent
  *
  * For the owner and Admins ("settings"): it moves the creator's own money.
  */
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "settings", 4_000);
+  // Room for the creator's own check of a large batch: two lists of 12-character ids (lib/paypal-payouts.ts).
+  const guarded = await guardStoreWrite(request, "settings", 40_000);
   if (!guarded.ok) return guarded.response;
   const body = guarded.body;
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
@@ -46,6 +49,12 @@ export async function POST(request: NextRequest) {
       if (refused) return serviceRefusedJson(refused, "slow");
       const result = await payWithPayPal(store);
       return result.ok ? Response.json(result) : fail(result.reason, result.reason === "error" || result.reason === "unknown" || result.reason === "pending" ? 502 : 409);
+    }
+    if (op === "resolve") {
+      const answer = readOwnCheckAnswer(body);
+      if (!answer) return fail("changed");
+      const result = await resolveOwnCheck(store, answer.batch, answer);
+      return result.ok ? Response.json(result) : fail(result.reason, result.reason === "error" ? 502 : 409);
     }
     if (op === "settle") {
       return Response.json({ ok: true, ...(await settlePayPal(store)) });

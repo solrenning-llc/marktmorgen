@@ -10,7 +10,7 @@ import { isSenderConfigured } from "@/lib/email";
 import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
 import { PayPalPayouts } from "@/components/paypal-payouts";
-import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { onTheirWay, payableLines, paypalChecks, paypalOwnChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { batchTotal } from "@/lib/affiliate-payouts";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { offerWords, waitingFor } from "@/lib/partner-invites";
@@ -82,6 +82,25 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
     console.error("reading the affiliate book failed", error);
     return null;
   });
+  // The batches left for the creator's own check, read only when there are any, with each person's address so the
+  // creator can find them in PayPal. Null when not read: the panel then only says to check PayPal.
+  const ownChecks = checks && checks.manual > 0
+    ? await paypalOwnChecks(store).then(
+        (list) => {
+          const emails = new Map((book?.rows ?? []).map((row) => [row.affiliate.id, row.affiliate.email]));
+          return list.map((batch) => ({
+            id: batch.id,
+            at: batch.at,
+            currency: batch.currency,
+            people: batch.lines.map((line) => ({ id: line.a, email: emails.get(line.a) ?? "An affiliate no longer in your program", cents: line.c })),
+          }));
+        },
+        (error: unknown) => {
+          console.error("reading the PayPal payments left for the creator's check failed", error);
+          return null;
+        },
+      )
+    : [];
   // Every card, read once for the lists on this page.
   // Names only, which is one command rather than one per product. Which of
   // them are paid, and which are one-off rather than a membership, is already
@@ -202,6 +221,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
                 onTheirWay={away.size}
                 checking={checks.checking}
                 manualCheck={checks.manual}
+                ownChecks={ownChecks}
                 payday={store.affiliates.payday}
               />
             ) : null

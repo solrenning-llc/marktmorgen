@@ -379,7 +379,10 @@ async function main(): Promise<void> {
 
   part("The studio says it, with the way to look in PayPal");
   const panel = readFileSync("components/paypal-payouts.tsx", "utf8");
-  is("words for a batch being checked and one that needs a manual check, and PayPal's activity page", [/being checked with PayPal/.test(panel), /check them in your PayPal activity/.test(panel), /href="https:\/\/www\.paypal\.com\/myaccount\/activities\/"/.test(panel)], [true, true, true]);
+  // Rule 23 (Claude 5, 09/11/2026, tests/paypal-own-check.test.ts): the manual-check words changed from "check them in
+  // your PayPal activity" to "Look each one up in your PayPal activity", followed by the creator's answer form; the
+  // assertion still requires words for the manual check that send the creator to PayPal's activity page.
+  is("words for a batch being checked and one that needs a manual check, and PayPal's activity page", [/being checked with PayPal/.test(panel), /Look each one up in/.test(panel), /href="https:\/\/www\.paypal\.com\/myaccount\/activities\/"/.test(panel)], [true, true, true]);
   const page = readFileSync("app/studio/affiliates/page.tsx", "utf8");
   is("the studio page passes both counts", [/checking=\{/.test(page), /manualCheck=\{/.test(page)], [true, true]);
   done();

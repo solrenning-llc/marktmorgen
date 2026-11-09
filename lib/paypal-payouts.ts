@@ -37,7 +37,7 @@ import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affilia
 import { plainAmount } from "@/lib/money";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
 /** Local tests may point this at a stand-in on 127.0.0.1; nothing else is taken. */
@@ -399,6 +399,114 @@ export async function paypalChecks(store: Store): Promise<{ checking: number; ma
 /** The open batch's field for a batch sent whose answer is not known yet: "?" and our own sender_batch_id. */
 export const UNKNOWN_BATCH_PREFIX = "?";
 
+/** A batch left for the creator's own check, as the studio lists it: when it was sent, and who for how much. */
+export type OwnCheck = { id: string; at: number; currency: string; lines: { a: string; c: number }[] };
+
+/** The batches left for the creator's own check (`m: 1`), oldest first. Throws when the open batches are not read. */
+export async function paypalOwnChecks(store: Store): Promise<OwnCheck[]> {
+  if (!store.statsId || !isRedisConfigured()) throw new Error("Pending payout records are unavailable");
+  const open = await readOpen(store.statsId);
+  const known = heldUnknowns(open);
+  return [...open]
+    .filter(([id, batch]) => id.startsWith(UNKNOWN_BATCH_PREFIX) && !known.has(id) && batch.m === 1)
+    .map(([id, batch]) => ({ id, at: batch.at, currency: batch.currency, lines: batch.lines.map(({ a, c }) => ({ a, c })) }))
+    .sort((x, y) => x.at - y.at);
+}
+
+/** The creator's answer for one such batch: who PayPal paid, and who it did not. */
+export type OwnCheckAnswer = { batch: string; paid: string[]; unpaid: string[] };
+const OWN_CHECK_PERSON = /^[0-9a-f]{12}$/;
+const OWN_CHECK_MAX_PEOPLE = 2_000;
+
+/** Reads the route's body into an answer, or null when it is not one (the people are checked against the batch later). */
+export function readOwnCheckAnswer(body: unknown): OwnCheckAnswer | null {
+  if (!record(body) || typeof body.batch !== "string" || !body.batch.startsWith(UNKNOWN_BATCH_PREFIX) || body.batch.length > 128) return null;
+  const list = (v: unknown): string[] | null =>
+    Array.isArray(v) && v.length <= OWN_CHECK_MAX_PEOPLE && v.every((id) => typeof id === "string" && OWN_CHECK_PERSON.test(id)) ? [...(v as string[])] : null;
+  const paid = list(body.paid);
+  const unpaid = list(body.unpaid);
+  if (!paid || !unpaid || paid.length + unpaid.length === 0) return null;
+  return { batch: body.batch, paid, unpaid };
+}
+
+export type OwnCheckResult =
+  | { ok: true; paid: number; unpaid: number; gone: number }
+  /** "gone": no batch left for the creator's check under that id; "changed": the answer does not fit the batch; "error": not saved, safe to send again. */
+  | { ok: false; reason: "gone" | "changed" | "busy" | "error" };
+
+/** The reference a payout written by the creator's own check carries: it names the batch, so it is written once. */
+const ownCheckReference = (field: string) => `PayPal ${field.slice(UNKNOWN_BATCH_PREFIX.length)}, checked by you`;
+/** lib/affiliates.ts, payoutsKey: where the book's payouts are kept. */
+const payoutsKey = (statsId: string) => `nl:aff:${statsId}:payouts`;
+
+/**
+ * The affiliates already written down as paid under this reference, read exactly (rule 24): a reply that is not a
+ * list of field and value pairs throws. A value that does not read as a payout is not in the book (readBook), so it
+ * is not one of these either.
+ */
+async function writtenUnder(statsId: string, reference: string): Promise<Set<string>> {
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", payoutsKey(statsId)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the payouts written down");
+  const out = new Set<string>();
+  for (let i = 1; i < flat.length; i += 2) {
+    let payout: unknown;
+    try { payout = JSON.parse(flat[i]); } catch { continue; }
+    if (record(payout) && payout.reference === reference && typeof payout.aff === "string") out.add(payout.aff);
+  }
+  return out;
+}
+
+/**
+ * The creator's answer to a batch left for their own check, from what their PayPal activity shows (Claude 5,
+ * 09/11/2026; pre-review of #3335). Before it, such a batch kept its people on their way for good: out of every new
+ * payment, payout file and recorded batch, with the store in the daily job.
+ *
+ * Under the payment's own lock, and only for a batch still marked for the creator's check whose people the answer
+ * names exactly, each once. Those PayPal paid are written into the book, for what the batch sent them, under a
+ * reference naming the batch, so a second answer finds them and never writes them twice. Then the batch is taken
+ * away, on Redis's exact word, and those PayPal did not pay are owed again: they go in the next payment the creator
+ * confirms. Nothing is sent to PayPal here. A person written down as paid who is now answered as not paid is refused.
+ * Anything not known leaves the batch where it is, its people on their way, and the answer can be sent again.
+ */
+export async function resolveOwnCheck(store: Store, field: string, answer: { paid: string[]; unpaid: string[] }): Promise<OwnCheckResult> {
+  if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "error" };
+  const statsId = store.statsId;
+  if (!field.startsWith(UNKNOWN_BATCH_PREFIX)) return { ok: false, reason: "gone" };
+  try {
+    return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (): Promise<OwnCheckResult> => {
+      const open = await readOpen(statsId);
+      const batch = open.get(field);
+      if (!batch || batch.m !== 1 || heldUnknowns(open).has(field)) return { ok: false, reason: "gone" };
+      const paid = new Set(answer.paid);
+      const unpaid = new Set(answer.unpaid);
+      const people = new Set(batch.lines.map((l) => l.a));
+      const named = [...answer.paid, ...answer.unpaid];
+      if (named.length !== people.size || new Set(named).size !== named.length || !named.every((a) => people.has(a))) {
+        return { ok: false, reason: "changed" };
+      }
+      const reference = ownCheckReference(field);
+      const written = await writtenUnder(statsId, reference);
+      if ([...unpaid].some((a) => written.has(a))) return { ok: false, reason: "changed" };
+      const date = new Date(batch.at).toISOString().slice(0, 10);
+      let gone = 0;
+      for (const line of batch.lines) {
+        if (!paid.has(line.a) || written.has(line.a)) continue;
+        // Throws (DataRoomError, UnknownReplyError) when it is not known to be written: the batch stays, and the next
+        // answer finds a payout that did go in under this reference.
+        const payout = await addPayout(store, { aff: line.a, cents: line.c, currency: batch.currency, date, reference });
+        // No longer in the program: there is no book to write in for them.
+        if (!payout) gone += 1;
+      }
+      if (!(await removedExactly(statsId, field))) return { ok: false, reason: "error" };
+      return { ok: true, paid: paid.size - gone, unpaid: unpaid.size, gone };
+    });
+  } catch (error) {
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
+    console.error("saving the creator's own check of a PayPal batch failed", error);
+    return { ok: false, reason: "error" };
+  }
+}
+
 /**
  * Sends everyone owed and cleared, from the creator's PayPal, as one batch.
  * The book is read again here, so a refund made a moment ago is counted.
@@ -441,6 +549,9 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
         // (settleUnknown), so the creator is told the batch may still go and not to pay its people another way.
         if (await removedExactly(statsId, unknownField)) return { ok: false, reason: "error" };
         console.error("a PayPal batch's '?' entry could be confirmed neither written nor removed; the settling may still send it");
+        // The store may not be in the daily job either (the SADD went with the write): put it there again, so the
+        // settling finds the entry without the creator opening the studio. A failure here is only logged.
+        await redisPipeline([["SADD", STORES, store.sid]]).catch((error) => console.error("putting a PayPal store back in the daily job failed", error));
         return { ok: false, reason: "pending" };
       }
       let made: Record<string, unknown>;

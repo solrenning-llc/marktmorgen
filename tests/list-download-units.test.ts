@@ -16,7 +16,7 @@
  */
 import { NextRequest } from "next/server";
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { importContactRows, leadsKey } from "@/lib/contacts";
+import { CONTACT_READ_BYTES, importContactRows, leadsKey } from "@/lib/contacts";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { allowanceUsed, forceAllowance } from "@/lib/store-allowance";
 import { NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
@@ -35,7 +35,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import * as registry from "./plan-cost-registry";
 import { ORIGIN_PER_BYTE, UNIT_COST, closureCost, request } from "./plan-cost-registry";
 import { MAX_LEADS } from "@/lib/contact-rules";
-import { LIST_CONTACTS_PER_COMMAND, LIST_READ_BYTES_PER_CONTACT, LIST_SENT_BYTES_PER_CONTACT, listDownloadHeld, listDownloadUnits } from "@/lib/list-download";
+import { LIST_CONTACTS_PER_COMMAND, listDownloadHeld, listDownloadUnits, listPageMost } from "@/lib/list-download";
 
 const N = 3_000;
 
@@ -140,15 +140,22 @@ async function main(): Promise<void> {
     is("nothing more taken", spent.taken, 0);
   }
 
-  part("The units pay for the reads and the file at every size, up to MAX_LEADS, by the registry's prices");
+  part("The units pay for whatever a download sends and moves, read from the database or sent to the browser, by the registry's prices");
+  // Measured, not estimated (second cost review of #3354): the units of `commands` commands and `bytes` bytes, every
+  // byte priced as read (DB_BYTE) and, apart, as sent (ORIGIN_PER_BYTE), at a heavy request's shape.
+  for (const commands of [0, 1, LIST_CONTACTS_PER_COMMAND, 16, 17, 2_330]) {
+    for (const bytes of [0, 1, 1_000_000, 1_000_001, 37_000_000, 600_000_000]) {
+      const units = listDownloadUnits(commands, bytes);
+      const read = request("heavy", commands, bytes);
+      const sent = request("heavy", commands, 0) + bytes * ORIGIN_PER_BYTE;
+      is(`${commands} commands, ${bytes.toLocaleString("en-US")} bytes: ${units} units pay for them read or sent`, units * UNIT_COST.studio >= Math.max(read, sent), true);
+    }
+  }
   for (const contacts of [0, 1, N, MAX_LEADS]) {
-    const sent = contacts * LIST_SENT_BYTES_PER_CONTACT;
-    const commands = Math.ceil(contacts / LIST_CONTACTS_PER_COMMAND) + 20;
-    const units = listDownloadUnits(contacts, sent);
-    const cost = costOf(commands, contacts * LIST_READ_BYTES_PER_CONTACT + sent, sent);
-    console.log(`${contacts} contacts: ${units} units ($${(units * UNIT_COST.studio).toFixed(5)}) for $${cost.toFixed(5)}; held first ${listDownloadHeld(contacts)}`);
-    is(`${contacts} contacts: the units pay for it`, units * UNIT_COST.studio >= cost, true);
-    is(`${contacts} contacts: what is held first is never less`, listDownloadHeld(contacts) >= units, true);
+    const first = listDownloadUnits(1, listPageMost(contacts) + 100);
+    console.log(`${contacts} contacts: held first ${listDownloadHeld(contacts)}; the first page at its most ${first}; a page at its most ${listPageMost(contacts).toLocaleString("en-US")} bytes`);
+    is(`${contacts} contacts: what is held first covers the first page of the walk at the most it can answer with`, listDownloadHeld(contacts) >= first, true);
+    is(`${contacts} contacts: a page is held at the whole list as counted, never at COUNT alone`, listPageMost(contacts) >= contacts * CONTACT_READ_BYTES, true);
   }
 
   part("A list download when the studio figure has some room left, but less than the download needs");
@@ -181,10 +188,12 @@ async function main(): Promise<void> {
     for (const [name, route, path] of [
       ["agreed-only file", leadsGet, "/api/store/leads?who=agreed"],
       ["buyers audience", audienceGet, "/api/store/audience"],
+      // And everyone in the file, each with every field's value at its cap read for them (second cost review of #3354).
+      ["whole file", leadsGet, "/api/store/leads"],
     ] as const) {
       const got = await download(route, path, capped.store, capped.session);
       console.log(`${name}: status ${got.status}; commands ${got.commands}; bytes read ${got.bytes} (${Math.round(got.bytes / N)} a person); bytes sent ${got.sent}; units ${got.taken} ($${(got.taken * UNIT_COST.studio).toFixed(6)}) for $${costOf(got.commands, got.bytes, got.sent).toFixed(6)}`);
-      is(`${name}: (setup) answered with a file of nobody`, [got.status, got.walked, got.sent < 1_000], [200, true, true]);
+      is(`${name}: (setup) answered with its file (of nobody, but for the whole file)`, [got.status, got.walked, name === "whole file" ? got.text.includes(`capped${N - 1}@example.com`) && got.text.includes("v".repeat(MAX_FIELD_VALUE)) : got.sent < 1_000], [200, true, true]);
       is(`${name}: the studio units it takes pay for every person it read, sent or not`, got.taken * UNIT_COST.studio >= costOf(got.commands, got.bytes, got.sent), true);
     }
   }
@@ -282,12 +291,12 @@ async function main(): Promise<void> {
     );
   }
 
-  part("Control: an empty list still downloads, for a unit or two");
+  part("Control: an empty list still downloads, for a few units");
   redis.clear();
   const empty = await storeWith("r31-empty@example.com", "rthirtyoneempty", 0);
   const nothing = await download(leadsGet, "/api/store/leads", empty.store, empty.session);
   is("answered with the file", nothing.status, 200);
-  is("a unit or two of the studio figure", nothing.taken >= 1 && nothing.taken <= 2, true);
+  is("three units of the studio figure at the most: the request, its one command and its few bytes", nothing.taken >= 1 && nothing.taken <= 3, true);
   done();
 }
 

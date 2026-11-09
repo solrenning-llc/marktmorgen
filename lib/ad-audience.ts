@@ -18,7 +18,7 @@
  * require that they have their customers' permission, and in some places
  * that means asking for it in so many words.
  */
-import { audience } from "@/lib/contacts";
+import { type ListRead, audience, plainRead } from "@/lib/contacts";
 import { whoOf } from "@/lib/broadcasts";
 import { isRedisConfigured } from "@/lib/redis";
 import type { Store } from "@/lib/store";
@@ -29,9 +29,10 @@ export function audienceCsv(emails: string[]): string {
   return `${rows.join("\r\n")}\r\n`;
 }
 
-export async function buyerAudience(store: Store): Promise<{ csv: string; rows: number }> {
+/** The buyers' file; the list's pages read through `read` (a download's metered read, lib/list-download.ts). */
+export async function buyerAudience(store: Store, read: ListRead = plainRead): Promise<{ csv: string; rows: number }> {
   if (!store.listId || !isRedisConfigured()) return { csv: audienceCsv([]), rows: 0 };
-  const emails = await audience(store.listId, undefined, undefined, whoOf(store, "buyers"));
+  const emails = await audience(store.listId, undefined, undefined, whoOf(store, "buyers"), undefined, undefined, read);
   const csv = audienceCsv(emails);
   return { csv, rows: csv.split("\r\n").length - 2 };
 }

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
-import { csvPeople, holdListDownload } from "@/lib/list-download";
+import { ListDownloadRefused, holdListDownload } from "@/lib/list-download";
 import { listAsCsv } from "@/lib/free";
 
 /**
@@ -28,14 +28,15 @@ export async function GET(request: NextRequest) {
   if (!held.ok) return new Response(held.message, { status: held.status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
 
   try {
-    const csv = await listAsCsv(store, onlyAgreed);
+    // Each read held before it is made and counted at what it moved; the file held before it is sent.
+    const csv = await listAsCsv(store, onlyAgreed, held.read);
     const day = new Date().toISOString().slice(0, 10);
     const name = `${store.handle}-${onlyAgreed ? "agreed" : "everyone"}-${day}.csv`;
     // The byte-order mark makes Excel read the file as UTF-8, so a name with
     // an accent arrives with its accent. Every email tool ignores it.
     const body = `\uFEFF${csv}`;
-    // Settled at what was sent and at the people the file holds: those read and left out are paid for too.
-    await held.settle(new TextEncoder().encode(body).length, csvPeople(csv));
+    await held.send(new TextEncoder().encode(body).length);
+    await held.settle();
     return new Response(body, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
@@ -46,6 +47,9 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    // What was read is paid for, the rest given back; a read or the file the figure could not hold is said as such.
+    await held.settle();
+    if (error instanceof ListDownloadRefused) return new Response(error.message, { status: error.status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     console.error("exporting a list failed", error);
     return new Response("We could not read your list right now. Try again in a moment.", {
       status: 502,

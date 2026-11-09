@@ -40,6 +40,7 @@ const CE = "lib/community-erasure.ts";
 type ErasureBy = "team" | "person";
 
 export const PERSON_DATA: PersonData[] = [
+  { file: "lib/child-safety.ts", how: "none", what: "Keeps nothing about a store's people: the child-safety hold marks products (nl:csa:keep:, nl:csa:held:) by the store's id and the product's id only, and reads the signed-in person's address only to compare it with the store owner's, never storing it. The report itself, with the reporter's email, is the notice kept by lib/takedown.ts." },
   { file: "lib/checkout-sweep.ts", how: "none", what: "Checkout observations are inactive: there is no production persistence policy. Synthetic integration tests may keep a hashed checkout reference, provider creation time, country/state, currency and gross amount under an absolute expiry of at most one day. No name, email or street address is kept; fiscal coverage remains incomplete. Enabling real records needs a separate scope, retention, erasure and cost review." },
   { file: "lib/redis-memory.ts", how: "none", what: "In-memory database adapter: follows callers' keys and deletions and keeps no separate per-person index" },
   // ---------------------------------------------------------------- the list and email

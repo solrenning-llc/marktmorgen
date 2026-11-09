@@ -134,7 +134,7 @@ export function buyersFrom(rows: Record<string, unknown>[], handles: ReadonlySet
 
 export type StartResult =
   | { ok: true; job: UpdateJob }
-  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe"; until?: number }
+  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe" | "switched_off"; until?: number }
   | { ok: false; reason: "studio_used"; message: string; until?: undefined };
 
 /**
@@ -177,6 +177,9 @@ export async function nextUpdateAt(store: Store, productId: string): Promise<num
 
 /** Writes down an update to go to every buyer of the product now. */
 export async function startUpdate(store: Store, product: Listing, rawNote: unknown, nowSeconds = Math.floor(Date.now() / 1000)): Promise<StartResult> {
+  // Switched off after notices about its content (lib/takedown.ts): the creator's words go to nobody, and nothing is
+  // read, counted or claimed. Any value but "" (on) is taken as off (rule 24).
+  if (store.suspended) return { ok: false, reason: "switched_off" };
   if (!canWrite(store) || !store.statsId || !store.stripeAccountId) return { ok: false, reason: "plan" };
   if (!canTellBuyers(product)) return { ok: false, reason: "kind" };
   const next = await nextUpdateAt(store, product.id);
@@ -373,6 +376,18 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
       job = { ...job, status: "failed", note: "The store is not here anymore." };
       await save(job);
       await redisPipeline([["SREM", QUEUE, id]]);
+      return job;
+    }
+    // Switched off after notices about its content (lib/takedown.ts; any value but "" is off, rule 24): the send
+    // waits where it is, nothing reserved, sent or counted, and goes on once the store is back on. Read once a run,
+    // from the store read above (no read of its own): a run already under way goes on at most to its deadline.
+    if (store.suspended) {
+      job = {
+        ...job,
+        status: "waiting",
+        note: "Your store's pages and sales are switched off after notices about its content. Nothing more was sent. The rest go out once your store is back on.",
+      };
+      await save(job);
       return job;
     }
     if (monthlyAllowance(store) === 0 || !store.mail) {

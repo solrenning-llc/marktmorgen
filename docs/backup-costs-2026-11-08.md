@@ -21,6 +21,8 @@ Every Cloudflare and bunny figure below was read today on the page named beside 
 
 **Revision of 9 November 2026 (the code built locally: `claude4/bk1-files-worker` at `15068ab5c2` and `claude4/bk1-files-pages` at `40d3912f9c`, not yet pull requests; the listing route is #3313).** The orphan alarm of section 5.1 item 2 now says what the built Worker does; the company line and the per-plan lines (sections 5a, 5b and 5c) add what that code spends, every figure derived from its constants; section 7a says what is built and what is still pending. No code is changed here, and nothing is admitted.
 
+**Revision of 9 November 2026, database line (#3293 at `6e6f08904`).** The database copy is now priced from the code, not from this document's own arithmetic: `backupWorstMonth` in `lib/backup-cost.ts` on #3293 (`claude4/bk1-monthly`), at the route's own 800 s (`BACKUP_ROUTE_SECONDS`), gives **10,820,417 micro-dollars, $10.8204 a month** for the design as built. It replaces the $21.7517 this document had. The two figures differ only in what they count, not in the 10% allowance: the earlier figure also carried the proposals of section 3 (items 2, 3, 4 and 8) that the code does not adopt yet. Those stay in section 5a as a separate line, each at its known price, marked not in the code yet. The per-store lines do not include the database copy and do not change.
+
 ## 2. Official sources read today
 
 | Source (URL) | Page date | What it says, as used here |
@@ -138,20 +140,32 @@ From https://developers.cloudflare.com/r2/buckets/bucket-locks/ ("Notes") and ht
 
 ### 5a. Worst month and year: the company line (fixed cost, 100% Marktmorgen, FX275)
 
-The database copy, as built plus the proposals of section 3 (one part of 4 MiB, 10,000 keys, 20,210 commands a run, 64 runs a month (two a day on 32 UTC days), 800 s a run at `gru1` rates, `DUMP` batch 1, 3 monthly copies added to the stored ceiling). R2, Upstash and Vercel rates read today (the R2 values did not change since 2026-11-04, so the database lines below are as before).
+The database copy, as built (one part of 4 MiB, 10,000 keys, 20,210 commands a run, 30 days kept, 35 sets under the stored ceiling, 64 runs a month: two a day on 32 UTC days, 800 s a run). **Every figure in this table is `backupWorstMonth` in `lib/backup-cost.ts` on #3293** (`claude4/bk1-monthly` at `6e6f08904`; `tests/backup-cost.test.ts` holds the total), at the route's `maxDuration` of 800 s (`BACKUP_ROUTE_SECONDS`) and the rates of `lib/spend-cost-table.ts`. No supplier's free quota is credited; R2's rounding to the next unit is counted once, here.
 
-| Line | Per month | How |
+| Line (code id) | Per month | How (from the code) |
 | --- | ---: | --- |
-| R2 storage | $0.0173 | (138,417,152 + 3 × 4,325,536 bytes) + 1 GB-month of rounding, at $0.015 |
-| R2 Class A | $4.5021 | as docs/backup-cost-2026-11-04.md §5e (448 operations + 1 million of rounding) + the monthly copies' 12 |
-| R2 Class B | $0.3615 | as §5e (4,224 reads + 1 million of rounding) |
-| Upstash commands | $2.7870 | 64 × 20,210 + 32 × 2 report reads, at $2.00 a million, + one 100K block |
-| Upstash bandwidth | $0.5312 | 64 × (127,720,448 bytes + 133,333,333 bytes of one oversized key) at $0.03 a GB, + 1 GB |
-| Upstash storage | $0.2500 | the six marks, under 1 KB, rounded up to one GB (item 8) |
-| Vercel compute | $3.9030 | 64 × (2 GB × 800 s at $0.0183 + 800 s of CPU at $0.221 + $0.0000006), + 1 CPU-hour + 1 GB-hour |
-| Vercel transfer (ceiling, item 3) | $7.4223 | 17.26 GB a month (every byte above, plus the write and the read-back) at $0.43 |
-| Provider allowance, 10% (`PROVIDER_CHARGES_BPS`) | $1.9774 | |
-| **Total, database copy** | **$21.7517 a month** | **$261.02 a year** (12 worst months) |
+| R2 storage (`r2-storage`) | $0.0173 | the review's ceiling of 151,393,760 bytes (35 sets of 4,325,536: the retention, two more and the 3 months' copies) + 1 GB-month of rounding, at $0.015 |
+| R2 Class A (`r2-class-a`) | $4.5028 | 64 runs × (3 objects (part, manifest, a month's mark) × 2 (written, then deleted) + 2 listings of 1 page) + 105 objects alive at the month's start, deleted = 617, + 1 million of rounding, at $4.50 |
+| R2 Class B (`r2-class-b`) | $0.3625 | 64 runs × (2 read-backs + up to 105 reads to find the verified copies) = 6,848, + 1 million of rounding, at $0.36 |
+| Upstash commands (`upstash-commands`) | $2.5870 | 64 × 20,210 + 32 × 2 report reads = 1,293,504, at $2.00 a million |
+| Upstash bandwidth (`upstash-transfer`) | $0.2452 | 64 × 127,720,448 bytes (200 SCAN pages of 500 names of 1,024 bytes, 4,194,304 copied bytes, each key's name sent twice, the marks), at $0.03 a GB |
+| Upstash storage (`upstash-storage`) | $0.000002 | the six marks of at most 1,024 bytes, at $0.25 a GB-month |
+| Vercel compute (`vercel`) | $2.1220 | 64 × (2 GB × 800 s at $0.0106 a GB-hour + 800 s of CPU at $0.128 an hour + $0.0000006), the repository's `iad1` rates |
+| Provider allowance, 10% (`PROVIDER_CHARGES_BPS`) | $0.9837 | |
+| **Total, database copy (code)** | **$10.8204 a month** | **$129.85 a year** (12 worst months); 10,820,417 micro-dollars |
+
+**What this document counted before and the code does not count yet** (the proposals of section 3, items 2, 3, 4 and 8; known prices, same 10% allowance). They are **not in `lib/backup-cost.ts`**: the code lists them in `BACKUP_COST_UNKNOWNS` (`vercel-rates`, `vercel-transfer`, `upstash-overshoot`, `billing-units`), so the code's figure above stands only with them outside it, and the line stays unreviewed, never zero, until the code adopts them or closes them:
+
+| Not in the code yet | Per month | How |
+| --- | ---: | --- |
+| Vercel at the dearest region (item 2) | $1.5417 | the same 64 × 800 s at `gru1` ($0.221 a CPU-hour, $0.0183 a GB-hour) less the code's `iad1` rates; the live region is not verified |
+| Billing blocks (item 8) | $0.7193 | one block of each, as R2 does: +100,000 Upstash commands ($0.20), +1 GB of Upstash bandwidth ($0.03), the marks rounded up to one GB of Upstash storage ($0.25 in place of the code's $0.000002), +1 CPU-hour ($0.221) and +1 GB-hour ($0.0183) at `gru1` |
+| One oversized key a run (item 4, with `DUMP` batch 1) | $0.2560 | 64 × 133,333,333 bytes (Upstash's 100 MB record cap, as base64) at $0.03 a GB |
+| Vercel transfer (ceiling, item 3) | $7.4223 | 17.26 GB a month (every byte above, the oversized key, the write and the read-back) at $0.43 |
+| Provider allowance, 10% | $0.9939 | |
+| **Total not in the code yet** | **$10.9332 a month** | **$131.20 a year** |
+
+The code's figure plus these lines is $21.7536 a month. The $21.7517 this document had before 9 November counted the same proposals, but R2 operations as of 2026-11-04 (460 Class A and 4,224 Class B); the code also counts a month's mark, two listings a run, the objects alive at the month's start and the reads to find the verified copies, $0.0017 more.
 
 With the code's current batch of up to 500 keys the same month would carry up to $128.00 of Upstash bandwidth and $1,834.67 of the transfer ceiling more: that is why item 4 proposes batch 1.
 
@@ -175,7 +189,7 @@ The last two rows come from the built Worker (9 November 2026): each run reads i
 
 Each further lane (another hourly cron, if one does not copy every store in time) adds 768 × 900,000 ms more: **$15.21 a month** with the allowance ($182.48 a year), its own resume re-reads (+$2.43) and its runs' state and report (+$0.0079). How many bytes one lane copies in 15 minutes is **not on any page** (it depends on the sources and on R2): the number of lanes is unknown until measured in the owner's account.
 
-**Company line, both parts: $44.7441 a month, $536.93 a year** (database copy $21.7517 + files-and-videos as built $22.9924). It was $44.7362 and $536.83 with the line as designed on 8 November, and $44.4094 and $532.91 before the route's pages were counted for all three sources.
+**Company line, both parts: $33.8128 a month, $405.75 a year** (database copy $10.8204 from `lib/backup-cost.ts` on #3293 + files-and-videos as built $22.9924). The database proposals not in the code yet add **$10.9332 a month ($131.20 a year)**, kept outside this total as a separate line: with them, $44.7460 a month and $536.95 a year. Until 9 November this total was $44.7441 and $536.93, with the database at this document's $21.7517 (before that, $44.7362 and $536.83 with the line as designed on 8 November, and $44.4094 and $532.91 before the route's pages were counted for all three sources).
 
 Still outside this total, and **each one keeps the line unapproved**: the number of Worker lanes (throughput not stated); the external monitor that receives both heartbeats (the owner's, not chosen: price unknown, not zero); Workers Logs from 1 December 2026, if turned on; the lock's answer through the Workers binding (section 4a); whether the sources' signed GETs honor `Range`, send a strong `ETag` (the built Worker refuses a read without one) and answer without a redirect (it refuses redirects) (item 4); whether bunny bills `List Videos`; the R2 binding's error shape for a locked object (the Worker counts any throw as not done); whether `nodejs_compat` gives the contract's `Buffer` in the account's runtime; the `SCAN` page size (item 5 of section 3); the restore test's runner (item 9). In a separate Cloudflare account, the minimum billing unit of each R2 class (the "+1 million" and "+1 GB-month" above) falls entirely on the backup; it is counted **once**, in the database line, and not again in the per-plan lines.
 
@@ -217,9 +231,10 @@ The monthly and annual intervals have the same worst month; the year is 12 of th
 
 | | Per month | Per year |
 | --- | ---: | ---: |
-| Company line: database copy | $21.75 | $261.02 |
+| Company line: database copy (`lib/backup-cost.ts` on #3293, 800 s) | $10.82 | $129.85 |
 | Company line: files-and-videos (Workers Paid, one lane, resume re-reads, route, the built Worker's state and report) | $22.99 | $275.91 |
-| **Company line, total** | **$44.74** | **$536.93** |
+| **Company line, total** | **$33.81** | **$405.75** |
+| + database proposals not in the code yet (dearest Vercel region, billing blocks, one oversized key, Vercel transfer ceiling) | $10.93 | $131.20 |
 | + each further Worker lane, if needed | $15.21 (+ $2.43 re-reads, + $0.01 state and report) | $182.48 (+ $29.11, + $0.09) |
 | + per store on Store / Studio / Scale, ceiling while the Blob inventory is unknown (with the built code and the deletion records) | $16.60 / $114.59 / $229.66 | $199.17 / $1,375.09 / $2,755.96 |
 | the same, as a share of the plan's price (monthly / yearly plan a month) | 24.1% / 25.5% / 23.0% of $69 / $449 / $999; 28.9% / 30.6% / 27.6% of $57.50 / $374.17 / $832.50 | |

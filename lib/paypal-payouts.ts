@@ -594,8 +594,12 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
   if (seen.t !== undefined && now - seen.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
   return withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async () => {
     // Read again under the payment's own lock: a press or another settling may have moved it.
-    const sent = (await readOpen(statsId)).get(field);
+    const fresh = await readOpen(statsId);
+    const sent = fresh.get(field);
     if (!sent || sent.m === 1) return sent ? "manual" : "waiting";
+    // Held under PayPal's id since the settling read it (its "?" removal not confirmed): never sent again; the next
+    // run drops the entry (heldUnknowns).
+    if (heldUnknowns(fresh).has(field)) return "waiting";
     if (sent.t !== undefined && now - sent.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
     // The same request may make the batch now, if the first never reached PayPal, so it is sent only while the book
     // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds that cannot be read: not known,

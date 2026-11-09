@@ -17,6 +17,7 @@
  */
 import * as sdk from "@vercel/blob";
 import { BLOB_TIMEOUT_MS, BLOB_WRITE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { deletable } from "@/lib/held-files";
 
 type Options<F extends (...args: never[]) => unknown, I extends number> = NonNullable<Parameters<F>[I]>;
 
@@ -28,8 +29,15 @@ export function head(pathname: string, options: Options<typeof sdk.head, 1> = {}
   return timed(BLOB_TIMEOUT_MS, (abortSignal) => sdk.head(pathname, { ...options, abortSignal }));
 }
 
-export function del(pathnames: string | string[], options: Options<typeof sdk.del, 1> = {}): ReturnType<typeof sdk.del> {
-  return timed(BLOB_TIMEOUT_MS, (abortSignal) => sdk.del(pathnames, { ...options, abortSignal }));
+/**
+ * Deletes files, except any kept for a child-safety report (lib/held-files.ts):
+ * those stay where they are, whoever asks. A mark that cannot be read throws
+ * before anything is deleted.
+ */
+export async function del(pathnames: string | string[], options: Options<typeof sdk.del, 1> = {}): ReturnType<typeof sdk.del> {
+  const free = await deletable(Array.isArray(pathnames) ? pathnames : [pathnames]);
+  if (!free.length) return;
+  return timed(BLOB_TIMEOUT_MS, (abortSignal) => sdk.del(free, { ...options, abortSignal }));
 }
 
 export function list(options: Options<typeof sdk.list, 0> = {}): ReturnType<typeof sdk.list> {

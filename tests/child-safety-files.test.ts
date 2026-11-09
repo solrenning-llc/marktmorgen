@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   part("Nobody gets a held file from Marktmorgen");
   is("no signed address", await fileUrl(heldPath, 300, "held.bin"), null);
   const served = await serveFile(file(heldPath));
-  is("a download is refused, without saying why", [served.status, await served.text(), served.headers.get("cache-control")], [404, "This file is not available.", "private, no-store"]);
+  is("a download is refused, without saying why", [served.status, await served.text(), served.headers.get("cache-control")], [404, "This file is not available.", "no-store"]);
   const pic = await imageRoute(picture(HELD_PICTURE), { params: Promise.resolve({ folder: FOLDER, file: HELD_PICTURE }) });
   is("the public picture is not found, and not cached", [pic.status, pic.headers.get("cache-control")], [404, "no-store"]);
   const other = await imageRoute(picture(FREE_PICTURE), { params: Promise.resolve({ folder: FOLDER, file: FREE_PICTURE }) });
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
   is("deleting is refused", await fails(() => del(freePath)), "refused");
   is("no signed address", await fileUrl(freePath, 300, "free.bin"), null);
   const unread = await serveFile(file(freePath));
-  is("a download is refused as not checked", [unread.status, unread.headers.get("cache-control")], [503, "private, no-store"]);
+  is("a download is refused as not checked", [unread.status, unread.headers.get("cache-control")], [503, "no-store"]);
   const unreadPic = await imageRoute(picture(FREE_PICTURE), { params: Promise.resolve({ folder: FOLDER, file: FREE_PICTURE }) });
   is("the picture answers try again, not cached", [unreadPic.status, unreadPic.headers.get("cache-control")], [503, "no-store"]);
   redis.pipeline = real;

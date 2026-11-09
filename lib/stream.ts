@@ -82,6 +82,7 @@
  * How long a store's videos have been watched is read from the service too
  * (streamWatched), and what is done with it is in lib/watch.ts.
  */
+import { heldAmong, isFileHeld } from "@/lib/held-files";
 import { VIDEO_RECORD_BYTES } from "@/lib/stream-rules";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { STREAM_PEEK_TIMEOUT_MS, STREAM_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
@@ -162,6 +163,8 @@ const GONE = "nl:stream:gone";
 
 /** Persist deletion intent before contacting the provider or forgetting local records. */
 async function removeProviderVideo(config: Config, id: string, ms = STREAM_TIMEOUT_MS): Promise<void> {
+  // The last guard for every removal: a video kept for a child-safety report is never removed (lib/held-files.ts).
+  if ((await heldAmong([`v:${id}`])).size) return;
   const [queued] = await redisPipeline([["SADD", GONE, id]]);
   if (queued !== 0 && queued !== 1) throw new Error("Video deletion could not be queued");
   const answer = await ask(config, "DELETE", `/videos/${id}`, undefined, ms);
@@ -399,10 +402,14 @@ export async function dropAllStreams(folder: string, until = Number.POSITIVE_INF
   if (!videos.length) return 0;
   const config = streamConfig();
   if (!config) return null;
+  // Videos kept for a child-safety report stay (lib/held-files.ts); a mark that cannot be read removes none.
+  const held = await heldAmong(videos.map(({ id }) => `v:${id}`)).catch(() => null);
+  if (!held) return null;
   for (const { id } of videos) {
     // Out of time: not seen through, and said so. The rest is there to be
     // listed the next time.
     if (Date.now() > until) return null;
+    if (held.has(`v:${id}`)) continue;
     await removeProviderVideo(config, id);
     await redisPipeline([["DEL", recordKey(id), captionsKey(id)], ["ZREM", DUE, id]]);
   }
@@ -685,6 +692,9 @@ export async function playerFor(pathname: string, now = Date.now()): Promise<Pla
 export async function dropStream(pathname: string, room?: DataStore): Promise<boolean> {
   const parts = readStreamPath(pathname);
   if (!parts) return false;
+  // A video kept for a child-safety report stays at the service with its record (lib/held-files.ts);
+  // a mark that cannot be read throws, so nothing is removed.
+  if (await isFileHeld(pathname)) return true;
   if (room) await giveData(room, [{ slot: "sv", bytes: VIDEO_RECORD_BYTES }]);
   if (!isRedisConfigured()) return true;
   const config = streamConfig();

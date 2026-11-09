@@ -40,6 +40,8 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeRef } from "@/lib/store";
 import { type Report, reportedProduct } from "@/lib/takedown";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
+import { holdFiles } from "@/lib/held-files";
+import { productFilePaths } from "@/lib/held-product-files";
 
 /** Automatic holds a store takes from child-safety reports in one UTC day; past them the owner decides. */
 export const CHILD_SAFETY_HOLDS_PER_DAY = 3;
@@ -49,7 +51,7 @@ const COUNT_SECONDS = 2 * 86_400;
 /** How long a reported product is kept from removal, editing and publishing: a year from the report and a margin. */
 export const KEEP_SECONDS = 400 * 86_400;
 
-export type HoldOutcome = "held" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
+export type HoldOutcome = "held" | "files_unconfirmed" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
 
 const storeTag = (store: Pick<Store, "statsId" | "handle">) => store.statsId || `h:${store.handle}`;
 const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${storeTag(store)}:${day}`;
@@ -125,8 +127,13 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
     // Kept before it is taken off: a creator who acts in between can still not remove or change it.
     const kept = repliesFor(await redisPipeline([["SET", keepKey(store, product.id), "1", "EX", KEEP_SECONDS]]), 1);
     if (kept?.[0] !== "OK") return "unknown";
+    // Its files are kept and closed to everyone before it is taken off (unit 3b, lib/held-files.ts).
+    const files = await productFilePaths(product)
+      .then(holdFiles)
+      .catch(() => false);
     const done = await setProductHidden(storeRef(store), product.id, true);
-    return done.ok ? "held" : done.reason === "unknown" ? "unknown" : "failed";
+    if (!done.ok) return done.reason === "unknown" ? "unknown" : "failed";
+    return files ? "held" : "files_unconfirmed";
   } catch (error) {
     console.error("a child-safety hold could not be confirmed", error instanceof Error ? error.message : "unknown");
     return "unknown";
@@ -135,6 +142,7 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
   held: "The product it points at was taken off the store at once (unpublished). Nothing was deleted: its files and records are kept as they are, and the creator cannot remove, edit or publish it for 400 days.",
+  files_unconfirmed: "The product it points at was taken off the store at once (unpublished), but keeping its files from deletion and download could not be confirmed. Suspend the store now, as docs/incident-response.md section 8 says.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it from the notice email.",
   not_held: "Nothing was taken off automatically. Act on it from the notice email.",
   capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it from the notice email.`,

@@ -39,6 +39,8 @@ import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
 import type { Store } from "@/lib/store";
 import { stringList } from "@/lib/redis-reply";
+import { type Member, readTeam } from "@/lib/team";
+import { can } from "@/lib/team-roles";
 import {
   CHAT_TOKEN,
   CONVERSATION_ID,
@@ -315,6 +317,41 @@ export async function visitorSend(
   return { ok: true, thread: forVisitor(next, await readMessages(found.statsId, found.id)) };
 }
 
+/**
+ * Who is told of a buyer's new message (`to`: whoever the conversation is
+ * given to, else the owner): the person it was given to only while they still
+ * may answer buyers, read again at every send as lib/phone-alerts.ts reads
+ * roles: the owner, or someone on the store's team now whose role may see
+ * orders (lib/team-roles.ts). A person taken off the team, or moved to a
+ * role that does not see orders, is never sent the buyer's words: the owner
+ * is told instead, and the conversation goes back to nobody. A team that
+ * cannot be read, or reads in an unknown shape (CX-123 rule 24), tells the
+ * owner and leaves the conversation as it is.
+ */
+async function answering(store: Store, id: string, to: string): Promise<string> {
+  const given = normaliseEmail(to);
+  if (!given || given === normaliseEmail(store.email)) return store.email;
+  let members: Member[];
+  try {
+    members = store.sid ? (await readTeam(store.sid)).members : [];
+  } catch (error) {
+    console.error("an inbox conversation's team could not be read; the owner is told", error instanceof UnknownReplyError ? error.message : error);
+    return store.email;
+  }
+  const member = members.find((m) => normaliseEmail(m.email) === given);
+  if (member && can(member.role, "orders")) return given;
+  await giveBack(store, id, to).catch((error) => console.error("giving back a conversation whose person left failed", error));
+  return store.email;
+}
+
+/** Gives a conversation back to nobody, if it is still given to `stale` when read now. */
+async function giveBack(store: Store, id: string, stale: string): Promise<void> {
+  if (!store.statsId) return;
+  const current = await readKept(store.statsId, id);
+  if (!current || current.assigned !== stale) return;
+  await write(store, store.statsId, store.handle, { ...current, assigned: "" }, null, false);
+}
+
 /** One email to whoever has the conversation (the owner when nobody does), at most every half hour for one conversation. */
 async function tellTeam(store: Store, conversation: Kept, text: string): Promise<void> {
   if (!isSenderConfigured() || !store.statsId) return;
@@ -324,7 +361,7 @@ async function tellTeam(store: Store, conversation: Kept, text: string): Promise
   const sid = store.sid ? `store=${store.sid}&` : "";
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
-    to,
+    to: await answering(store, conversation.id, to),
     subject: `New message from ${who.slice(0, 60)} on ${store.name}`.slice(0, 200),
     text: [
       `${who} wrote in ${store.name}'s inbox:`,

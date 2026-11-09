@@ -35,6 +35,9 @@
  *                              its requests together
  *   nl:rl:code-day:<hash>   -> the same, for a day from the first try
  *   nl:rl:code-ip:<hash>    -> the code tries from one machine in the hour
+ *   nl:rl:code-fails:<hash> -> the wrong codes an address took in a row, until a
+ *                              login; past EMAIL_CODE_FAILS_IN_A_ROW only the link
+ *                              opens (a year from the last try at the most)
  *
  * A passkey (lib/passkeys.ts) opens exactly the same kind of session, so
  * everything here — "log out of all devices" included — covers it too.
@@ -109,6 +112,9 @@ const codeTriesKey = async (address: string) =>
   `nl:rl:code-addr:${(await sha256Hex(`nimbus-auth-code-tries:${address}`)).slice(0, 32)}`;
 const codeDayKey = async (address: string) =>
   `nl:rl:code-day:${(await sha256Hex(`nimbus-auth-code-day:${address}`)).slice(0, 32)}`;
+/** Under the address's hourly key, so a record made before this key existed (it holds that key) reaches it too. */
+const codeFailsKey = async (triesKey: string) =>
+  `nl:rl:code-fails:${(await sha256Hex(`nimbus-auth-code-fails:${triesKey}`)).slice(0, 32)}`;
 const codeIpKey = async (ip: string) =>
   `nl:rl:code-ip:${(await sha256Hex(`nimbus-auth-code-ip:${ip}`)).slice(0, 32)}`;
 /**
@@ -538,6 +544,18 @@ export const EMAIL_CODE_TRIES_PER_IP_HOUR = 30;
 const CODE_DAY_SECONDS = 24 * 60 * 60;
 
 /**
+ * Wrong codes one address may take in a row, all its requests and days
+ * together, before no code opens for it, only the link (Claude 5's
+ * authentication audit, M1; NIST SP 800-63B §5.2.2 asks for at most 100). The
+ * hourly and daily limits renew; this does not: only a login starts it again
+ * (noteSignIn). No CAPTCHA and no test of any kind (AX274 3.3.9): the link in
+ * the same email is the way in, and the owner is told once.
+ */
+export const EMAIL_CODE_FAILS_IN_A_ROW = 100;
+/** How long the count of wrong codes in a row is kept after the last try: long enough that waiting does not start it again. */
+const CODE_FAILS_SECONDS = 366 * 24 * 60 * 60;
+
+/**
  * Where a machine stands against its code tries of the hour (Claude 3 on
  * #2736): counted before any record is read, so a machine cannot buy reads
  * of made-up ids without bound; unknown is said as such, and nothing is read.
@@ -733,9 +751,18 @@ export async function takeSignInCode(request: unknown, typed: unknown): Promise<
   if (forAddress > EMAIL_CODE_TRIES_PER_ADDRESS_HOUR || forDay > EMAIL_CODE_TRIES_PER_ADDRESS_DAY) return "address-blocked";
   const verifier = codeHash(request, code);
   if (!verifier) return "expired";
+  // The address's tries in a row, counted before the comparison as the others are (M1): a try that will be compared is
+  // one more, until a login starts the count again (noteSignIn). Past the ceiling, nothing is compared.
+  const fails = await codeFailsKey(tries as string);
+  const streak = repliesFor(await redisPipeline([["INCR", fails], ["EXPIRE", fails, CODE_FAILS_SECONDS]]), 2);
+  const inRow = countOf(streak?.[0]);
+  if (!streak || inRow === null || inRow < 1 || countOf(streak[1]) !== 1) return "unknown";
+  if (inRow > EMAIL_CODE_FAILS_IN_A_ROW) return "address-blocked";
   const expected = Buffer.from(hash as string, "hex");
   const given = Buffer.from(verifier, "hex");
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
+    // The try that reaches the ceiling tells the owner, once: the next one is past it, and only a login counts from zero.
+    if (inRow === EMAIL_CODE_FAILS_IN_A_ROW) await tellCodesOff(link as string);
     return { wrong: Math.max(0, EMAIL_CODE_TRIES - forRequest) };
   }
   const owner = await spendLinkKey(link as string);
@@ -747,6 +774,36 @@ export async function takeSignInCode(request: unknown, typed: unknown): Promise<
   if (owner === undefined || !after || (after[0] !== null && typeof after[0] !== "string")) return "unknown";
   if (after[0] !== record) return "expired";
   return owner ? { owner } : "expired";
+}
+
+/**
+ * Tells the address its login codes stopped (M1), from the link's record of
+ * the request that reached the ceiling, which holds the address. Best effort:
+ * the codes stop whether or not this reaches the inbox.
+ */
+async function tellCodesOff(link: string): Promise<void> {
+  try {
+    const read = repliesFor(await redisPipeline([["GET", link]]), 1);
+    const address = typeof read?.[0] === "string" ? read[0] : "";
+    if (!address || !EMAIL_PATTERN.test(address) || !isSenderConfigured()) return;
+    await sendEmail({ meter: { by: "company" },
+      from: NIMBUS_FROM,
+      to: address,
+      replyTo: "support@marktmorgen.com",
+      subject: "Login codes are off for your Marktmorgen account",
+      text: [
+        `Someone typed a wrong login code for your Marktmorgen account (${address}) ${EMAIL_CODE_FAILS_IN_A_ROW} times in a row. Nobody got in.`,
+        "",
+        "To keep your account safe, the six-digit codes in login emails no longer work for this address. The link in a login email still works, and so does a passkey.",
+        "",
+        "When you log in with the link or a passkey, the codes work again.",
+        "",
+        "If this was not you, there is nothing else to do. Somebody may be trying to get into your account, so keep your email safe.",
+      ].join("\n"),
+    });
+  } catch (error) {
+    console.error("telling an address its login codes stopped failed", error);
+  }
 }
 
 const googleKey = async (state: string) =>
@@ -957,6 +1014,9 @@ export async function noteSignIn(
   const secure = process.env.NODE_ENV === "production";
   const cookie = `${DEVICE_COOKIE}=${id}; Path=/; Max-Age=${DEVICE_TTL_SECONDS}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
   if (!isRedisConfigured()) return cookie;
+  // A login starts the count of wrong emailed codes again (M1, EMAIL_CODE_FAILS_IN_A_ROW), on its own: its reply is
+  // not read, since a count that stays only keeps the codes off (the safe side), and it never holds the login up.
+  await redisPipeline([["DEL", await codeFailsKey(await codeTriesKey(normaliseEmail(email)))]]).catch((error: unknown) => console.error("starting the count of wrong login codes again failed", error));
   try {
     const key = await devicesKey(email);
     const seen = (await sha256Hex(`nimbus-device:${id}`)).slice(0, 40);

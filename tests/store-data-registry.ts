@@ -308,6 +308,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:lastcode:@lib/auth.ts": company("An address's newest sign-in code, the only one that opens", "An account's, minutes (652 [WG12])."),
   "nl:rl:code-addr:@lib/auth.ts": company("Sign-in code tries for one address in the hour", "An account's, an hour (652 [WG12])."),
   "nl:rl:code-day:@lib/auth.ts": company("Sign-in code tries for one address in a day", "An account's, a day from its first try (652 [WG12], Claude 3 on #2736)."),
+  "nl:rl:code-fails:@lib/auth.ts": company("Wrong sign-in codes one address took in a row", "An account's count, ended by a login, at most a year after its last try (Claude 5's authentication audit, M1)."),
   "nl:rl:code-ip:@lib/auth.ts": company("Sign-in code tries from one machine in the hour", "A machine's count under a one-way hash of its address on the internet, an hour (652 [WG12], Claude 3 on #2736)."),
   "nl:auth:move:@lib/auth.ts": company("An address change", "An account's, a day."),
   "nl:auth:moving:@lib/auth.ts": company("An address in the middle of a move", "An account's, minutes."),

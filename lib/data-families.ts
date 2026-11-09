@@ -43,7 +43,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
   "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:moving:", "nl:auth:rec:",
   "nl:auth:second:",
-  "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
+  "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:", "nl:rl:code-fails:",
   "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
   "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
@@ -190,7 +190,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:2fa:": C, "nl:2fa:hold:": C, "nl:2fa:locked:": C, "nl:2fa:lock:": C, "nl:2fa:lockedset:": C, "nl:2fa:keptstar:": Cr(400), "nl:2fa:once:": C, "nl:2fa:rescue:": C, "nl:2fa:setup:": C,
   "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:move-broken:": C, "nl:auth:moving:": C, "nl:auth:rec:": C, "nl:auth:rec:link:": C,
   "nl:auth:rec:set:": C, "nl:auth:rec:until:": C, "nl:auth:second:": C, "nl:auth:session:": C, "nl:auth:sessions:": C,
-  "nl:auth:code:": C, "nl:auth:linkcode:": C, "nl:auth:lastcode:": C, "nl:rl:code-addr:": C, "nl:rl:code-day:": C, "nl:rl:code-ip:": C,
+  "nl:auth:code:": C, "nl:auth:linkcode:": C, "nl:auth:lastcode:": C, "nl:rl:code-addr:": C, "nl:rl:code-day:": C, "nl:rl:code-ip:": C, "nl:rl:code-fails:": Cr(366),
   "nl:pk:": C, "nl:pk:auth:": C, "nl:pk:cred:": C, "nl:pk:drop:": C, "nl:pk:lock:": C, "nl:pk:reg:": C, "nl:rl:address:": C, "nl:rl:signin:": C,
   "nl:account:stores:": D("prepare"),
   // ---------------------------------------------------------------- a-b

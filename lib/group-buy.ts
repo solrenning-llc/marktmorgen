@@ -153,7 +153,7 @@ const now = () => Math.floor(Date.now() / 1000);
  * charge read refunded in full without covering the charge by itself): past it, the refund holds the anchor and is
  * read in the next run. A scheduled job bounded by its schedule, like REFUND_PAGES; Stripe bills no API call.
  */
-const CHARGE_REFUND_LOOKUPS = 10;
+export const CHARGE_REFUND_LOOKUPS = 10;
 /**
  * A refund still on its way this long is said in the log, and still takes nothing back (the owner's decision 18, 9
  * November 2026: a refund pending for many days raises an alert, never a revocation). Stripe finishes almost every
@@ -1041,7 +1041,7 @@ export async function revokeRefundedGroups(
         // succeeded. At most once a payment a day: the mark is written first, and only a mark already there is quiet.
         const mark = typeof groupId === "string" && GROUP_ID.test(groupId) ? repliesFor(await redisPipeline([["SET", stuckKey(groupId), "1", "NX", "EX", STUCK_SAID_SECONDS]]), 1)?.[0] : undefined;
         if (mark !== null) {
-          console.error("a refund for a group purchase has been pending for more than seven days; its places are kept until it succeeds", { store: sid, account, refund: id, status: refund.status, created: refund.created });
+          console.error("a refund for a group purchase has been pending for more than seven days; its places are kept while it is on its way, and for good if it is only a part", { store: sid, account, refund: id, status: refund.status, created: refund.created });
         }
       }
       return "hold";
@@ -1274,7 +1274,12 @@ export async function revokeRefundedGroups(
       // Every row read and final: the anchor goes to the newest. A row not read, or a refund not final yet: no further
       // than its time, never back before where this pass started.
       // The lost disputes of this run count only here, at the pass's end: they are read again on every run.
-      const until = lostHold === undefined ? hold : hold === undefined ? lostHold : Math.min(hold, lostHold);
+      // The lost disputes' bound is capped at the newest refund this pass read, as lib/gifts.ts and lib/preorders.ts
+      // cap theirs (first money review of #3410): a sweep that went on from a kept place may have read closings newer
+      // than a refund made during the pass, seen only on the newest page, whose holds never move the anchor. Only that
+      // bound is capped: a row not readable may rightly hold later than `newest` (read.holdAt).
+      const lostAt = lostHold === undefined ? undefined : Math.min(lostHold, newest);
+      const until = lostAt === undefined ? hold : hold === undefined ? lostAt : Math.min(hold, lostAt);
       const at = until === undefined ? newest : Math.max(since + 300, until);
       const ended = repliesFor(await redisPipeline([["EVAL", REFUNDS_END, 4, anchorKey(sid), ownerKey(sid), leftKey(sid), passKey(sid), String(at), account]]), 1);
       if (ended?.[0] !== 1) console.error("ending a pass over group refunds was left unknown");

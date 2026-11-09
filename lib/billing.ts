@@ -299,9 +299,76 @@ function writeInline(body: URLSearchParams, tier: Tier, cycle: Cycle): void {
  * that decides whether we are worth paying for. Every other store an account
  * makes is a subscription of its own from its first day — five stores are
  * not five trials in a row.
+ *
+ * This reads the store record only. A closed store's record is gone, so the
+ * checkout and the studio ask trialOfferedTo below, which also reads the
+ * person's history at Stripe.
  */
 export function trialOffered(store: Pick<Store, "stripeCustomerId" | "subscriptionId" | "extra">): boolean {
   return !store.extra && !store.stripeCustomerId && !store.subscriptionId;
+}
+
+/** The most of our customers with one address whose subscriptions are read for an earlier plan or trial (as lib/plan-refund.ts reads). */
+export const TRIAL_HISTORY_CUSTOMERS = 5;
+
+/**
+ * Whether the person behind this store is offered the free trial: the store's
+ * own rule above, and nothing at our own Stripe account showing the same person
+ * already had a store of ours on a plan, or any trial. Once per person, as the
+ * money-back guarantee is (lib/plan-refund.ts): a store that closes takes its
+ * record with it (closeStoreRecord), not its customer at Stripe, so a person
+ * whose first store closed and who makes another is not offered a second trial.
+ * The checkout and the studio read this same answer.
+ *
+ * Read: every customer of ours with the store's sign-in address (Stripe's
+ * customer search by `email`, the query lib/plan-refund.ts uses; it can lag a
+ * new customer by under a minute) and the customer the checkout opens for, then
+ * every subscription of each, in any status. A subscription naming a store
+ * (`metadata[store]`, a plan of ours) or with a `trial_start` ends the offer.
+ *
+ * Never a trial on a guess (CX-123 rule 24): a failed request, an answer in
+ * another shape, an unreadable row, a list longer than one page or more
+ * same-address customers than TRIAL_HISTORY_CUSTOMERS all answer false, and
+ * the checkout opens from today.
+ */
+export async function trialOfferedTo(
+  store: Pick<Store, "email" | "stripeCustomerId" | "subscriptionId" | "extra">,
+  customerId: string | null = store.stripeCustomerId,
+): Promise<boolean> {
+  if (!trialOffered(store)) return false;
+  try {
+    const email = normaliseEmail(store.email);
+    if (!email) return false;
+    const people = new Set<string>();
+    if (customerId) {
+      if (!CUSTOMER_PATTERN.test(customerId)) return false;
+      people.add(customerId);
+    }
+    const search: unknown = await onPlatformAt(STRIPE_LIST_VERSION, "GET", `/customers/search?${new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" })}`);
+    if (!plainObject(search) || ownField(search, "object") !== "search_result") return false;
+    const found = readStripePage(search, (row) => typeof ownField(row, "email") === "string", CUSTOMER_PATTERN);
+    if (found.unreadable > 0 || found.hasMore) return false;
+    for (const row of found.rows) if (normaliseEmail(ownField(row, "email") as string) === email) people.add(row.id);
+    if (people.size > TRIAL_HISTORY_CUSTOMERS) return false;
+    const answers = await Promise.all([...people].map(async (customer) => {
+      const listed: unknown = await onPlatformAt(STRIPE_LIST_VERSION, "GET", `/subscriptions?${new URLSearchParams({ customer, status: "all", limit: "100" })}`);
+      if (!plainObject(listed) || ownField(listed, "object") !== "list") return false;
+      const read = readStripePage(listed, (row) => {
+        const started = ownField(row, "trial_start");
+        const meta = ownField(row, "metadata");
+        return ownField(row, "customer") === customer && hasOwnField(row, "trial_start") && (started === null || (Number.isSafeInteger(started) && (started as number) >= 0)) && plainObject(meta);
+      }, SUBSCRIPTION_PATTERN);
+      const before = read.rows.some((row) => {
+        const named = ownField(ownField(row, "metadata") as Record<string, unknown>, "store");
+        return ownField(row, "trial_start") !== null || (typeof named === "string" && named !== "");
+      });
+      return !before && read.unreadable === 0 && !read.hasMore;
+    }));
+    return answers.every(Boolean);
+  } catch (error) {
+    console.error("reading whether this person had a plan or trial before failed; no trial is offered", error);
+    return false;
+  }
 }
 
 /**
@@ -356,7 +423,7 @@ export async function createBillingCheckout(
   } else {
     body.set("customer_email", store.email);
   }
-  if (trialOffered(store)) {
+  if (await trialOfferedTo(store, customerId)) {
     body.set("subscription_data[trial_period_days]", String(TRIAL_DAYS));
     body.set("subscription_data[trial_settings][end_behavior][missing_payment_method]", "cancel");
   }

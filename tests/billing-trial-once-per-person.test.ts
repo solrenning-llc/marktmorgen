@@ -16,6 +16,7 @@
  * row, a longer list or too many customers mean no trial, never a trial. The
  * checkout still opens, from today.
  */
+import { readFileSync } from "node:fs";
 import { createBillingCheckout, trialOffered } from "@/lib/billing";
 import { prepareStore } from "@/lib/closed-store-data";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -173,6 +174,13 @@ async function main(): Promise<void> {
   is("more same-address customers than are read: no trial", (await checkout(fresh(crowded))).trial, null);
   is("a customer the checkout opens for that Stripe no longer has: no trial, from the address", await checkout(fresh(brandNew), "cus_GoneFromStripe1"), { trial: null, missing: null, sessions: 2, opened: true });
   is("(control) after the unknowns, a new person still gets the trial", (await checkout(fresh(brandNew))).trial, String(TRIAL_DAYS));
+
+  part("The studio's buttons read the same answer the checkout opens with");
+  const flat = (path: string) => readFileSync(path, "utf8").replace(/\s+/g, " ");
+  const studio = flat("app/studio/page.tsx");
+  const email = flat("app/studio/email/page.tsx");
+  is("the studio asks the person's history while plans are on sale", [studio.includes("trialTo: PLANS_ON_SALE && store && trialOffered(store) ? early(trialOfferedTo(store, null)) : null,"), studio.includes("const withTrial = store ? (planReads.trialTo ? await planReads.trialTo : trialOffered(store)) : true;")], [true, true]);
+  is("the email page too, for both of its trial sentences", [email.includes("const withTrial = PLANS_ON_SALE && trialOffered(store) ? await trialOfferedTo(store, null) : trialOffered(store);"), email.includes("{withTrial ? `Start the ${TRIAL_DAYS}-day trial on Pro"), email.includes("{trialOffered(store)"), email.includes("&& trialOffered(store) ? (")], [true, true, false, false]);
   done();
 }
 main().catch((error) => { console.error = globalThis.console.log; console.log(error); process.exitCode = 1; });

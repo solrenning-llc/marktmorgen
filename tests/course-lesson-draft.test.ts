@@ -2,8 +2,10 @@
  * Each lesson of a draft course says so (754 [STN1], unit 3).
  *
  * While the course's product is hidden from the store, every lesson row in
- * the studio's course editor reads "Hidden — course is draft", so the creator
- * never takes a lesson (or its free preview) for one buyers can see. A
+ * the studio's course editor says it is off the store and that people who
+ * already bought the course still see it (Claude 3 on #3433, MEDIUM 1: the
+ * server hides a draft course only from people without access), so the
+ * creator never takes a lesson students can read for a private one. A
  * published course draws no such line. The studio's course page passes the
  * product's own hidden flag; nothing new is read or written for it.
  */
@@ -20,7 +22,7 @@ const made = applyTemplate(emptyCourse(), templateById("weekly")!);
 if (!made.ok) throw new Error("no course");
 const course = made.course;
 const lessons = lessonCount(course);
-const LINE = "Hidden — course is draft";
+const LINE = "Off your store: new buyers cannot see it, but people who already bought the course still do.";
 
 const draw = (draft?: boolean) =>
   renderToStaticMarkup(

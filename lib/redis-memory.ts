@@ -681,6 +681,14 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        // lib/inbox.ts INBOX_GIVE_BACK: a conversation's record written only over exactly the text read, its expiry kept.
+        if (key.startsWith("-- marktmorgen:inbox-give-back:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, record, expected, next] = args;
+          if (this.run(["GET", record]) !== expected) return 0;
+          // Match SET KEEPTTL: no expiry extension or removal.
+          this.data.set(record, next);
+          return 1;
+        }
         // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
         if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, people, field, expected, next] = args;

@@ -120,6 +120,9 @@ async function main(): Promise<void> {
   const off = await render("@viewershop", late.code);
   is("a store switched off: its drafts are not shown", off.includes("Six calm lessons"), false);
 
+  // Review of bf809f14 (Claude 6), LOW 4: a description that cannot be read is said, not shown as missing.
+  is("a description that cannot be read is said", readFileSync("app/[handle]/preview/[code]/page.tsx", "utf8").includes("The description could not be loaded just now."), true);
+
   part("The studio's link");
   const button = renderToStaticMarkup(createElement(DraftPreviewLink, { productId: id, handle: "viewershop" }));
   is("one plain button, and a live region", [button.includes("Get a private preview link"), button.includes('role="status"')], [true, true]);

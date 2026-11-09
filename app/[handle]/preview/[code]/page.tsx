@@ -65,7 +65,14 @@ export default async function DraftPreviewPage({ params }: Params) {
   }
   if (!product) notFound();
   const language = parseLanguage(store.language);
-  const about = product.about ? await readAbout(store.statsId, product.id).catch(() => "") : "";
+  // A description that cannot be read is said, never shown as missing (Claude 6 on #3440, LOW 4).
+  let aboutUnread = false;
+  const about = product.about
+    ? await readAbout(store.statsId, product.id).catch(() => {
+        aboutUnread = true;
+        return "";
+      })
+    : "";
   const until = new Date(preview.expiresAt * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   return (
     <div className={`st-page st-theme-${store.look.theme} min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -86,6 +93,11 @@ export default async function DraftPreviewPage({ params }: Params) {
           {product.summary ? <p className="st-muted mt-4 text-lg leading-relaxed">{product.summary}</p> : null}
           <p className="mt-4 font-semibold">{product.priceCents > 0 ? formatMoney(product.priceCents, store.currency) : "Free"}</p>
           {about.trim() ? <ProductAbout blocks={aboutBlocks(about)} language={language} /> : null}
+          {aboutUnread ? (
+            <p className="mt-4 text-ink" role="status">
+              The description could not be loaded just now. Reload the page in a minute to see it.
+            </p>
+          ) : null}
         </div>
       </main>
     </div>

@@ -18,6 +18,9 @@
  *   L4  Dutch says "cursist" throughout.
  */
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { LessonNotesKept } from "@/components/lesson-notes-kept";
 import * as notes from "@/lib/lesson-notes";
 import * as rules from "@/lib/lesson-notes-rules";
 import { MAX_NOTE_CHARS, MAX_NOTES_PER_STUDENT, forgetLessonNotesPerson, notesOf, readNote, saveNote } from "@/lib/lesson-notes";
@@ -55,7 +58,8 @@ async function corruptTally() {
   }
   is("the erasure part finishes and counts the note it deleted", answer, 1);
   is("after the person's erasure, none of their notes is left (deleting needs no tally)", (await readNote(STATS, who, COURSE, lessonId(1))).state, "none");
-  is("and the key is gone, tally and all", (await real([["EXISTS", `nl:lnote:${STATS}:${who}`]]))[0], 0);
+  // Rule 23: HLEN, not EXISTS: the stand-in makes an empty hash on any hash read (readNote above), which Redis does not.
+  is("and the key holds nothing, tally and all", (await real([["HLEN", `nl:lnote:${STATS}:${who}`]]))[0], 0);
   is("a weight that could not be read is not given back: the room stays fuller, never storage unpaid", await used(), before);
 }
 
@@ -131,6 +135,13 @@ function pageLink() {
   is("setup: a signed-in learner without this course is 'closed' with a learner", /return \{ state: "closed", learner \}/.test(learn), true);
   is("no notes control on a page any signed-in learner reaches without the course", /access\.state !== "open" && access\.learner && !access\.learner\.owner \?/.test(page), false);
   is("the notes control is shown only when access ended", /\{access\.state === "ended" \? \(\s*<LessonNotesKept\b/.test(page), true);
+  const w = lessonNotesWords("en");
+  const html = renderToStaticMarkup(createElement(LessonNotesKept, { handle: "bakery", product: "p1", language: "en" }));
+  is("the ended course's page offers the download", html.includes(w.download) && html.includes('href="/api/store/course/note?h=bakery&amp;p=p1"'), true);
+  is("and a control to delete the course's notes", html.includes(w.clearAll), true);
+  is("which asks before deleting: the yes is not there until asked", html.includes(w.clearYes), false);
+  is("its section is named by its heading", /aria-labelledby="lesson-notes-kept-heading"/.test(html) && html.includes(w.keptHeading), true);
+  is("its targets are at least 44 px tall", (html.match(/min-h-\[44px\]/g) ?? []).length >= 2, true);
 }
 
 async function emptyWithoutAccess() {

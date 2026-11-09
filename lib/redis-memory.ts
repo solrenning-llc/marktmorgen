@@ -883,14 +883,16 @@ export class MemoryRedis {
           });
           return out;
         }
-        // lib/lesson-notes.ts NOTE_SAVE and NOTE_FORGET: a student's note, their tally and the notes' slot in one step.
+        // lib/lesson-notes.ts NOTE_SAVE, NOTE_FORGET and NOTE_CLEAR: a student's notes, their tally and the notes' slot in
+        // one step. Redis's TIME is this stand-in's clock.
         if (key.startsWith("-- marktmorgen:lesson-note-save:v1\n")) {
           if (args[0] !== "3" || args.length !== 17) return [-1, 0];
-          const [, room, notes, prints, limit, month, field, seen, json, rawOld, rawNew, rawMost, rawMine, rawShare, rawTally, print, rawStart] = args;
-          const [oldB, newB, most, mine, share, tally, start] = [rawOld, rawNew, rawMost, rawMine, rawShare, rawTally, rawStart].map(Number);
-          if (![oldB, newB, most, mine, share, tally, start].every(Number.isFinite) || field === "#" || field === "") return [-1, 0];
+          const [, room, notes, prints, limit, month, field, seen, json, rawOld, rawNew, rawMost, rawMine, rawShare, rawTally, print, rawSince] = args;
+          const [oldB, newB, most, mine, share, tally, since] = [rawOld, rawNew, rawMost, rawMine, rawShare, rawTally, rawSince].map(Number);
+          if (![oldB, newB, most, mine, share, tally, since].every(Number.isFinite) || since < 0 || field === "#" || field === "") return [-1, 0];
           if (print !== "") {
             const erased = this.run(["HGET", prints, print]);
+            const start = Math.floor(this.now() / 1000) - since;
             if (typeof erased === "string" && !(Number(erased) < start - 1)) return [2, 0];
           }
           const held = this.run(["HGET", notes, field]);
@@ -925,22 +927,46 @@ export class MemoryRedis {
           else this.run(["HDEL", notes, "#"]);
           return taken;
         }
-        if (key.startsWith("-- marktmorgen:lesson-note-forget:v1\n")) {
+        if (key.startsWith("-- marktmorgen:lesson-note-forget:v2\n")) {
           if (args[0] !== "2" || args.length !== 6) return [-1, 0];
           const [, room, notes, limit, month, rawTally] = args;
           const tally = Number(rawTally);
           if (!Number.isFinite(tally)) return [-1, 0];
           const sum = this.run(["HGET", notes, "#"]);
-          let had = 0;
-          if (typeof sum === "string") {
-            had = Number(sum);
-            if (!Number.isInteger(had) || had < 0) return [-1, 0];
-          }
           const n = Number(this.run(["HLEN", notes])) - (typeof sum === "string" ? 1 : 0);
           this.run(["DEL", notes]);
+          if (typeof sum !== "string") return [n, 1];
+          const had = Number(sum);
+          if (!Number.isInteger(had) || had < 0) return [n, -1];
           if (had === 0) return [n, 1];
           const taken = this.storeData([room, limit, "1", month, "a", "lnote", String(-(had + tally))]);
           return [n, Array.isArray(taken) ? taken[0] : -1];
+        }
+        if (key.startsWith("-- marktmorgen:lesson-note-clear:v1\n")) {
+          if (args[0] !== "2" || args.length !== 9) return [-1, 0];
+          const [, room, notes, limit, month, prefix, rawTally, rawEntry, rawStep] = args;
+          const [tally, entry, step] = [rawTally, rawEntry, rawStep].map(Number);
+          if (![tally, entry, step].every(Number.isFinite) || step <= 0 || prefix === "") return [-1, 0];
+          const gone: string[] = [];
+          let freed = 0;
+          for (const [field, value] of this.hash(notes)) {
+            if (field === "#" || !field.startsWith(prefix)) continue;
+            gone.push(field);
+            freed += Math.ceil((entry + Buffer.byteLength(field) + Buffer.byteLength(value)) / step) * step;
+          }
+          if (gone.length === 0) return [0, 1];
+          this.run(["HDEL", notes, ...gone]);
+          const sum = this.run(["HGET", notes, "#"]);
+          const had = typeof sum === "string" ? Number(sum) : NaN;
+          if (!Number.isInteger(had) || had < 0 || freed > had) return [gone.length, -1];
+          const left = had - freed;
+          let back = freed;
+          if (left === 0) {
+            back += tally;
+            this.run(["HDEL", notes, "#"]);
+          } else this.run(["HSET", notes, "#", String(left)]);
+          const taken = this.storeData([room, limit, "1", month, "a", "lnote", String(-back)]);
+          return [gone.length, Array.isArray(taken) ? taken[0] : -1];
         }
         // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
         if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {

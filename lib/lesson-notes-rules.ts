@@ -31,12 +31,35 @@ export function notesRoomFor(contentRoom: number): number {
  * before it reads them (Codex J's review of #3031, M3): one for the request
  * itself, and one for each 64 KiB it may read, the bytes one public request
  * pays for reading (lib/public-read-rules.ts AFFILIATE_LOAD_BYTES_PER_UNIT).
- * It reads at most what one student keeps (MAX_NOTES_BYTES_PER_STUDENT, or
- * the read is refused), and Redis's JSON answer may escape each byte of a
- * note's stored JSON once more: twice that, at the most.
+ *
+ * The notes are read in one HGETALL, asked for in base64 (lib/redis.ts
+ * redisPipelineBase64), so how the reply's text could be escaped no longer
+ * matters (third review of #3031, M3: an encoder escaping < > & as \u003c
+ * made each byte six): every string crosses as base64, 4 bytes for each 3,
+ * at most NOTE_BASE64_ROOM more for its padding, its quotes and its comma.
+ * One HGETALL is one snapshot, and every save keeps what a student's notes
+ * weigh (each note's lesson and stored value, counted by the tally) at most
+ * MAX_NOTES_BYTES_PER_STUDENT; it holds at most MAX_NOTES_PER_STUDENT notes
+ * and the tally, two strings each. NOTE_DOWNLOAD_FIXED_BYTES holds the
+ * tally's own field and value, the count read before it and every reply's
+ * brackets.
  */
 export const NOTE_DOWNLOAD_BYTES_PER_UNIT = 65_536;
-export const NOTE_DOWNLOAD_UNITS = 1 + Math.ceil((2 * MAX_NOTES_BYTES_PER_STUDENT) / NOTE_DOWNLOAD_BYTES_PER_UNIT);
+export const NOTE_BASE64_ROOM = 6;
+export const NOTE_DOWNLOAD_FIXED_BYTES = 1_024;
+export const NOTE_DOWNLOAD_READ_BYTES =
+  Math.ceil((4 * MAX_NOTES_BYTES_PER_STUDENT) / 3) + 2 * (MAX_NOTES_PER_STUDENT + 1) * NOTE_BASE64_ROOM + NOTE_DOWNLOAD_FIXED_BYTES;
+export const NOTE_DOWNLOAD_UNITS = 1 + Math.ceil(NOTE_DOWNLOAD_READ_BYTES / NOTE_DOWNLOAD_BYTES_PER_UNIT);
+
+/**
+ * Whether a student may change their note on a lesson: write it only while
+ * the lesson is open to them, empty it at any time, also once their access
+ * has ended, since their notes still count against the store's caps (third
+ * review of #3031, M2). Never writes without access.
+ */
+export function mayChangeNote(lessonOpen: boolean, text: string): boolean {
+  return lessonOpen || text === "";
+}
 
 /** Characters as people count them: code points, so "é🙂a" is three. */
 export function noteLength(text: string): number {

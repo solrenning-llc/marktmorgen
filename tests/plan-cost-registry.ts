@@ -1287,9 +1287,12 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
-      // The download takes what its most costs to read (Codex J's review of #3031, M3; tests/sq1-lesson-notes-review.test.ts).
-      { file: "app/api/store/course/note/route.ts", names: ["takeBuyerAction(store)", "takeBuyerRead(store, NOTE_DOWNLOAD_UNITS)", "NOTE_SAVES_PER_HOUR"] },
-      { file: "lib/lesson-notes-rules.ts", names: ["MAX_NOTES_BYTES_PER_STUDENT", "NOTE_DOWNLOAD_BYTES_PER_UNIT", "NOTE_DOWNLOAD_UNITS"] },
+      // The download takes what its most costs to read (Codex J's review of #3031, M3; tests/sq1-lesson-notes-review.test.ts),
+      // read in base64 so no escaping can grow it (third review, M3; tests/sq1-lesson-notes-third.test.ts). A save, an
+      // emptied note and a course's notes cleared are each one buyer action, under the same hourly limit.
+      { file: "app/api/store/course/note/route.ts", names: ["takeBuyerAction(store)", "takeBuyerRead(store, NOTE_DOWNLOAD_UNITS)", "NOTE_SAVES_PER_HOUR", "clearCourseNotes"] },
+      { file: "lib/lesson-notes-rules.ts", names: ["MAX_NOTES_BYTES_PER_STUDENT", "NOTE_DOWNLOAD_BYTES_PER_UNIT", "NOTE_DOWNLOAD_READ_BYTES", "NOTE_DOWNLOAD_UNITS"] },
+      { file: "lib/lesson-notes.ts", names: ["redisPipelineBase64([[\"HGETALL\", key]])"] },
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR"] },
     ],

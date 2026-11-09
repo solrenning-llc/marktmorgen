@@ -26,7 +26,7 @@ import { CourseOutline, WithDay } from "@/components/course-outline";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
-import { lessonNotesWords } from "@/lib/buyer-words/lesson-notes";
+import { LessonNotesKept } from "@/components/lesson-notes-kept";
 import { productSegment } from "@/lib/product-slug";
 import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
@@ -174,20 +174,6 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
-          {access.state !== "open" && access.learner && !access.learner.owner ? (
-            // Their private lesson notes stay theirs once the course is no longer open to them (Claude 2's review of
-            // #3031, M4): the download still works while they are signed in (app/api/store/course/note).
-            <p className="mt-6 text-sm">
-              <a
-                href={`/api/store/course/note?h=${encodeURIComponent(store.handle)}&p=${encodeURIComponent(product.id)}`}
-                download
-                className="st-footer-link inline-flex min-h-[44px] items-center font-semibold"
-              >
-                {lessonNotesWords(store.language).download}
-              </a>
-            </p>
-          ) : null}
-
           {access.state === "ended" ? (
             <div className="st-note mt-6" role="status">
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.endedTitle}</p>
@@ -202,6 +188,13 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </p>
               ) : null}
             </div>
+          ) : null}
+
+          {/* Their private lesson notes stay theirs once their access ended (Claude 2's review of #3031, M4): download or
+              delete them here; only to someone who once had the course, never to any signed-in visitor (third review,
+              M4). A student with the course open has them on each lesson. */}
+          {access.state === "ended" ? (
+            <LessonNotesKept handle={store.handle} product={product.id} language={store.language} />
           ) : null}
 
           {open ? (

@@ -39,9 +39,9 @@
  * note could not be loaded and gives no box to type over it, and a save is
  * refused.
  */
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured, redisPipeline, redisPipelineBase64 } from "@/lib/redis";
 import { type DataStore, TAKE_DATA, dataKey, monthOf } from "@/lib/store-data";
-import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
+import { DATA_STEP_BYTES, ENTRY_BYTES, contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 import { COURSE_ID_PATTERN, ITEM_ID_PATTERN } from "@/lib/course";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
@@ -85,9 +85,12 @@ end`;
  * value the save read ("" for none), the value to write ("" to delete), what
  * each weighs, the most notes, the most one student's notes weigh, the most
  * all students' notes take, the tally's own weight, the student's print (""
- * for none) and the second the save started. Answers {1, total} written;
- * {0, total} the room is full; {2, 0} changed, or the person deleted since a
- * second before the save started; {3, 0} one note too many;
+ * for none) and the whole seconds since the save began reading. The second
+ * the save started is taken on Redis's own clock (TIME, less those seconds,
+ * measured on the instance's monotonic clock), never on an instance's wall
+ * clock, which may run ahead (third review of #3031, L1a). Answers {1, total}
+ * written; {0, total} the room is full; {2, 0} changed, or the person deleted
+ * since a second before the save started; {3, 0} one note too many;
  * {4, 0} the student's own weight passed; {5, 0} the notes' share of the room
  * full; {-1, 0} what it cannot read. Modelled by lib/redis-memory.ts.
  */
@@ -95,12 +98,13 @@ export const NOTE_SAVE = `-- marktmorgen:lesson-note-save:v1
 ${NOTE_ROOM}
 if #KEYS ~= 3 or #ARGV ~= 13 then return {-1, 0} end
 local field, seen, json = ARGV[3], ARGV[4], ARGV[5]
-local oldB, newB, most, mine, share, tally, start = tonumber(ARGV[6]), tonumber(ARGV[7]), tonumber(ARGV[8]), tonumber(ARGV[9]), tonumber(ARGV[10]), tonumber(ARGV[11]), tonumber(ARGV[13])
-if not (oldB and newB and most and mine and share and tally and start) or field == '${TALLY}' or field == '' then return {-1, 0} end
+local oldB, newB, most, mine, share, tally, since = tonumber(ARGV[6]), tonumber(ARGV[7]), tonumber(ARGV[8]), tonumber(ARGV[9]), tonumber(ARGV[10]), tonumber(ARGV[11]), tonumber(ARGV[13])
+if not (oldB and newB and most and mine and share and tally and since) or since < 0 or field == '${TALLY}' or field == '' then return {-1, 0} end
 if ARGV[12] ~= '' then
   local erased = redis.call('HGET', KEYS[3], ARGV[12])
   if erased then
     local at = tonumber(erased)
+    local start = tonumber(redis.call('TIME')[1]) - since
     if not at or at >= start - 1 then return {2, 0} end
   end
 end
@@ -139,26 +143,71 @@ return taken`;
 /**
  * KEYS: the room, the student's notes. ARGV: the room's limit, the month, the
  * tally's own weight. Deletes every note and gives their weight back to the
- * room, in one step. Answers {notes deleted, the room's answer}, or {-1, 0}
- * for what it cannot read (nothing deleted). Modelled by lib/redis-memory.ts.
+ * room, in one step. The notes are always deleted: only giving their weight
+ * back depends on the tally, and a tally that cannot be read gives nothing
+ * back (the room stays fuller than it is, never storage unpaid; third review
+ * of #3031, M1). Answers {notes deleted, the room's answer, -1 for a weight
+ * not given back}, or {-1, 0} for arguments it cannot read (nothing deleted).
+ * Modelled by lib/redis-memory.ts.
  */
-export const NOTE_FORGET = `-- marktmorgen:lesson-note-forget:v1
+export const NOTE_FORGET = `-- marktmorgen:lesson-note-forget:v2
 ${NOTE_ROOM}
 if #KEYS ~= 2 or #ARGV ~= 3 then return {-1, 0} end
 local tally = tonumber(ARGV[3])
 if not tally then return {-1, 0} end
 local sum = redis.call('HGET', KEYS[2], '${TALLY}')
-local had = 0
-if sum then
-  had = tonumber(sum)
-  if not had or had < 0 or had ~= math.floor(had) then return {-1, 0} end
-end
 local n = redis.call('HLEN', KEYS[2])
 if sum then n = n - 1 end
 redis.call('DEL', KEYS[2])
+if not sum then return {n, 1} end
+local had = tonumber(sum)
+if not had or had < 0 or had ~= math.floor(had) then return {n, -1} end
 if had == 0 then return {n, 1} end
 local taken = noteRoom(ARGV[1], '1', ARGV[2], tostring(-(had + tally)))
 return {n, taken[1]}`;
+
+/**
+ * KEYS: the room, the student's notes. ARGV: the room's limit, the month, the
+ * course's prefix ("<course>:"), the tally's own weight, and the data room's
+ * ENTRY_BYTES and DATA_STEP_BYTES (lib/store-data-rules.ts). Deletes every
+ * note the student keeps on that course and gives their weight back, each
+ * counted as the save counted it (dataBytes of its field and value; Lua's #
+ * counts UTF-8 bytes), in one step: a student may empty their notes also once
+ * their access has ended (third review of #3031, M2). The notes are always
+ * deleted; their weight is given back only when the tally can be read and
+ * holds it (else the room stays fuller). Answers {notes deleted, the room's
+ * answer, -1 for a weight not given back}, or {-1, 0} for arguments it cannot
+ * read (nothing deleted). Modelled by lib/redis-memory.ts.
+ */
+export const NOTE_CLEAR = `-- marktmorgen:lesson-note-clear:v1
+${NOTE_ROOM}
+if #KEYS ~= 2 or #ARGV ~= 6 then return {-1, 0} end
+local prefix, tally, entry, step = ARGV[3], tonumber(ARGV[4]), tonumber(ARGV[5]), tonumber(ARGV[6])
+if not (tally and entry and step) or step <= 0 or prefix == '' then return {-1, 0} end
+local all = redis.call('HGETALL', KEYS[2])
+local gone, freed = {}, 0
+for i = 1, #all, 2 do
+  local f, v = all[i], all[i + 1]
+  if f ~= '${TALLY}' and string.sub(f, 1, #prefix) == prefix then
+    gone[#gone + 1] = f
+    freed = freed + math.ceil((entry + #f + #v) / step) * step
+  end
+end
+if #gone == 0 then return {0, 1} end
+for i = 1, #gone, 100 do redis.call('HDEL', KEYS[2], unpack(gone, i, math.min(i + 99, #gone))) end
+local sum = redis.call('HGET', KEYS[2], '${TALLY}')
+local had = sum and tonumber(sum)
+if not had or had < 0 or had ~= math.floor(had) or freed > had then return {#gone, -1} end
+local left = had - freed
+local back = freed
+if left == 0 then
+  back = back + tally
+  redis.call('HDEL', KEYS[2], '${TALLY}')
+else
+  redis.call('HSET', KEYS[2], '${TALLY}', tostring(left))
+end
+local taken = noteRoom(ARGV[1], '1', ARGV[2], tostring(-back))
+return {#gone, taken[1]}`;
 
 type Kept = { t: string; at: number };
 
@@ -237,6 +286,9 @@ export async function saveNote(input: {
   const key = notesKey(statsId, learner);
   const field = fieldOf(courseId, lessonId);
   const now = input.now ?? Date.now();
+  // How long the save has been on its way is measured on this instance's monotonic clock; when it started is then
+  // read on Redis's own clock, in the script (third review of #3031, L1a).
+  const began = performance.now();
   try {
     const [raw] = exactReplies(await redisPipeline([["HGET", key, field]]), 1, "a student's note");
     if (raw !== null && typeof raw !== "string") return { ok: false, reason: "unknown" };
@@ -270,7 +322,7 @@ export async function saveNote(input: {
             notesRoomFor(content),
             TALLY_BYTES,
             input.erasure?.listId ? suppressionPrint(input.erasure.listId, input.erasure.email) : "",
-            Math.floor(now / 1000),
+            Math.max(0, Math.ceil((performance.now() - began) / 1000)),
           ],
         ]),
         1,
@@ -290,12 +342,13 @@ export async function saveNote(input: {
   }
 }
 
-/** A field name a student's hash holds, read exactly: every one a string, or UnknownReply. */
-function fieldsOf(reply: unknown): string[] {
-  const list = plainList(reply);
-  if (!list || list.some((field) => typeof field !== "string")) throw new UnknownReply("a student's notes");
-  return list as string[];
+/** A string as redisPipelineBase64 answers it, decoded; UnknownReply for anything that is not base64 text. */
+function fromBase64(value: unknown): string {
+  if (typeof value !== "string" || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new UnknownReply("a student's notes");
+  return Buffer.from(value, "base64").toString("utf8");
 }
+
+const tallyOf = (raw: unknown) => (raw === null || raw === undefined ? 0 : typeof raw === "string" && /^\d{1,15}$/.test(raw) ? Number(raw) : -1);
 
 export type KeptNote = { course: string; lesson: string; text: string; at: number };
 
@@ -304,33 +357,76 @@ export type KeptNote = { course: string; lesson: string; text: string; at: numbe
  * data copy. Throws UnknownReply when a reply is not exactly what was asked,
  * and when the notes weigh more than one student may keep (more than the
  * download paid for: Codex J's review of #3031, M3): nothing past that is
- * read.
+ * read. The notes are read in one HGETALL, one snapshot, asked for in base64,
+ * so what crosses is bounded however their text could be escaped
+ * (lib/lesson-notes-rules.ts NOTE_DOWNLOAD_READ_BYTES; third review, M3).
  */
 export async function notesOf(statsId: string, learner: string): Promise<KeptNote[]> {
   if (!STATS_PATTERN.test(statsId) || !LEARNER_PATTERN.test(learner)) return [];
   if (!isRedisConfigured()) throw new UnknownReply("a student's notes");
   const key = notesKey(statsId, learner);
-  const [listed, tally] = exactReplies(await redisPipeline([["HKEYS", key], ["HGET", key, TALLY]]), 2, "a student's notes");
-  const fields = fieldsOf(listed).filter((field) => field !== TALLY);
-  const weight = tally === null ? 0 : typeof tally === "string" && /^\d{1,15}$/.test(tally) ? Number(tally) : -1;
-  if (weight < 0 || weight > MAX_NOTES_BYTES_PER_STUDENT || fields.length > MAX_NOTES_PER_STUDENT) throw new UnknownReply("a student's notes");
+  const [count, tally] = exactReplies(await redisPipeline([["HLEN", key], ["HGET", key, TALLY]]), 2, "a student's notes");
+  const weight = tallyOf(tally);
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) throw new UnknownReply("a student's notes");
+  if (weight < 0 || weight > MAX_NOTES_BYTES_PER_STUDENT || count > MAX_NOTES_PER_STUDENT + 1) throw new UnknownReply("a student's notes");
+  if (count === 0) return [];
+  const flat = plainList(exactReplies(await redisPipelineBase64([["HGETALL", key]]), 1, "a student's notes")[0]);
+  if (!flat || flat.length % 2 !== 0 || flat.length > 2 * (MAX_NOTES_PER_STUDENT + 1)) throw new UnknownReply("a student's notes");
   const out: KeptNote[] = [];
-  for (let i = 0; i < fields.length; i += 50) {
-    const some = fields.slice(i, i + 50);
-    const values = plainList(exactReplies(await redisPipeline([["HMGET", key, ...some]]), 1, "a student's notes")[0]);
-    if (!values || values.length !== some.length) throw new UnknownReply("a student's notes");
-    some.forEach((field, n) => {
-      const raw = values[n];
-      // Deleted since the fields were listed.
-      if (raw === null) return;
-      if (typeof raw !== "string") throw new UnknownReply("a student's notes");
-      const match = FIELD_PATTERN.exec(field);
-      const kept = parseKept(raw);
-      // A value not as saved is still theirs: it is given as it is.
-      out.push({ course: match?.[1] ?? field, lesson: match?.[2] ?? "", text: kept?.t ?? raw, at: kept?.at ?? 0 });
-    });
+  for (let i = 0; i < flat.length; i += 2) {
+    const field = fromBase64(flat[i]);
+    const raw = fromBase64(flat[i + 1]);
+    if (field === TALLY) {
+      // The snapshot's own tally, read again: a weight past the cap is never taken as read.
+      const held = tallyOf(raw);
+      if (held < 0 || held > MAX_NOTES_BYTES_PER_STUDENT) throw new UnknownReply("a student's notes");
+      continue;
+    }
+    const match = FIELD_PATTERN.exec(field);
+    const kept = parseKept(raw);
+    // A value not as saved is still theirs: it is given as it is.
+    out.push({ course: match?.[1] ?? field, lesson: match?.[2] ?? "", text: kept?.t ?? raw, at: kept?.at ?? 0 });
   }
   return out;
+}
+
+/**
+ * Deletes every note one student keeps on one course and gives their weight
+ * back to the room, in one step (NOTE_CLEAR): what a student whose access to
+ * the course ended can still do, as they can still download them (third
+ * review of #3031, M2). How many notes were deleted. Throws UnknownReply when
+ * the reply is not exactly what was asked: then nothing is taken for gone.
+ */
+export async function clearCourseNotes(statsId: string, learner: string, courseId: string, room: DataStore): Promise<number> {
+  if (!STATS_PATTERN.test(statsId) || !LEARNER_PATTERN.test(learner) || !COURSE_ID_PATTERN.test(courseId)) return 0;
+  const roomKey = dataKey(room);
+  if (!isRedisConfigured() || !roomKey) throw new UnknownReply("a course's notes");
+  const now = Date.now();
+  const [count, taken] = scriptAnswer(
+    exactReplies(
+      await redisPipeline([
+        [
+          "EVAL",
+          NOTE_CLEAR,
+          2,
+          roomKey,
+          notesKey(statsId, learner),
+          contentRoomFor(room, now / 1000),
+          monthOf(now),
+          `${courseId}:`,
+          TALLY_BYTES,
+          ENTRY_BYTES,
+          DATA_STEP_BYTES,
+        ],
+      ]),
+      1,
+      "a course's deleted notes",
+    )[0],
+    "a course's deleted notes",
+  );
+  // A weight that could not be read or given back stays counted: fuller than it is, never storage unpaid.
+  if (count < 0 || (taken !== 1 && taken !== -1)) throw new UnknownReply("a course's deleted notes");
+  return replyCount(count, "a course's deleted notes");
 }
 
 /**
@@ -354,7 +450,8 @@ export async function forgetLessonNotesPerson(statsId: string, learner: string, 
     )[0],
     "deleted notes",
   );
-  // A room whose total could not be read keeps the notes' weight counted: fuller than it is, never storage unpaid.
+  // A room whose total, or a tally that, could not be read keeps the notes' weight counted: fuller than it is, never
+  // storage unpaid. The notes themselves are deleted either way (third review of #3031, M1).
   if (count < 0 || (taken !== 1 && taken !== -1)) throw new UnknownReply("deleted notes");
   return replyCount(count, "deleted notes");
 }

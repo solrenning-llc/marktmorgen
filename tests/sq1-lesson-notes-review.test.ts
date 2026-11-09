@@ -187,9 +187,14 @@ async function download(): Promise<void> {
     if (!r.ok) break;
   }
   let replyBytes = 0;
+  // Rule 23 (third review of #3031, M3): the notes are read in base64 since, so a reply asked for that way is
+  // measured as it crosses, base64 text, not as the stand-in's own strings.
+  const encode = (value: unknown): unknown =>
+    typeof value === "string" ? (value === "OK" ? value : Buffer.from(value, "utf8").toString("base64")) : Array.isArray(value) ? value.map(encode) : value;
   redis.pipeline = (async (commands: Command[]) => {
+    const base64 = (new Error().stack ?? "").includes("redisPipelineBase64");
     const reply = await real(commands);
-    replyBytes += Buffer.byteLength(JSON.stringify(reply), "utf8");
+    replyBytes += Buffer.byteLength(JSON.stringify(base64 ? encode(reply) : reply), "utf8");
     return reply;
   }) as Pipeline;
   let kept: number;

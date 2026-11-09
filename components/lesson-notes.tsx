@@ -21,7 +21,8 @@ export type NoteShown = { state: "kept"; text: string } | { state: "none" } | { 
  * What is typed while a save is on its way stays in the box, and leaving
  * the page stays guarded until it is saved too; deleting a whole note offers
  * to undo it; the count is said to a screen reader only once the student has
- * typed (Claude 2's review of #3031, M2, L6, L7).
+ * typed (Claude 2's review of #3031, M2, L6, L7). Undo leaves focus in the
+ * box (third review of #3031, L2).
  *
  * Said in the store's `language` (lib/buyer-words/lesson-notes.ts).
  */
@@ -48,6 +49,8 @@ export function LessonNotes({
   const latest = useRef(start);
   // Whether the student has typed: nothing is said to a screen reader before that.
   const typed = useRef(false);
+  // The box, for focus to land on when Undo, the control that had it, goes away (third review of #3031, L2).
+  const area = useRef<HTMLTextAreaElement | null>(null);
   const length = noteLength(text);
   const over = length > MAX_NOTE_CHARS;
   const count = w.count(length, MAX_NOTE_CHARS);
@@ -130,6 +133,8 @@ export function LessonNotes({
     if (busy || lost === null) return;
     latest.current = lost;
     setText(lost);
+    // Undo disappears once the box holds words again: focus goes to the words it put back, not to the page.
+    area.current?.focus();
     await send(lost, "");
   }
 
@@ -140,6 +145,7 @@ export function LessonNotes({
       <form onSubmit={save} className="mt-3">
         <label htmlFor="lesson-notes-text" className="st-label block">{w.label}</label>
         <textarea
+          ref={area}
           id="lesson-notes-text"
           name="text"
           value={text}

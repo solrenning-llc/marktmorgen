@@ -22,17 +22,49 @@ export class BackupKeyUnknownError extends Error {
 }
 export type BackupRow = { key: string; dump: string; expiresAt: number | null };
 export type BackupSnapshot = { version: 1; capturedAt: number; rows: BackupRow[] };
-function validate(raw: unknown): BackupSnapshot {
+/**
+ * The most one key's DUMP may weigh in a backup, in bytes (key-size inventory of 9 November 2026): the largest proven
+ * writer is the affiliate book's snapshot under nl:aff:, 8,000,000 bytes (lib/affiliate-book-snapshot.ts,
+ * BOOK_SNAPSHOT_MAX_BYTES), and 12 MiB leaves it more than half again for DUMP's framing and a hash's per-field
+ * encoding. Upstash's own record cap (100 MiB) is far above it. A key larger than a part is copied in chunks up to
+ * this ceiling (lib/backup-parts.ts); one past it is left out under its own state, never cut short.
+ */
+export const BACKUP_KEY_MAX_BYTES = 12 * 1024 * 1024;
+/**
+ * One piece of a key larger than a part (lib/backup-parts.ts): its place `at` of `of` pieces, the key's whole DUMP
+ * length in bytes and SHA-256, and this piece of its base64. A chunk row has no `dump`, so a reader that knows only
+ * whole rows (openBackup, restoreRows, an older offline tool) refuses the part rather than take a piece for a key.
+ */
+export type BackupChunk = { at: number; of: number; bytes: number; sha256: string; data: string };
+export type BackupChunkRow = { key: string; expiresAt: number | null; chunk: BackupChunk };
+/** One part of a set in parts: whole rows, and the chunks of keys larger than a part. */
+export type BackupPart = { version: 1; capturedAt: number; rows: (BackupRow | BackupChunkRow)[] };
+// Linear (9 November 2026): the quad-grouped pattern overflows V8's regexp stack past about 5 million characters,
+// which a key in chunks reaches (a DUMP of 8 MB is 10.7 million); the length and the round trip do the rest.
+const BASE64_CHARS = /^[A-Za-z0-9+/]*={0,2}$/;
+const BASE64 = { test: (text: string) => text.length % 4 === 0 && BASE64_CHARS.test(text) };
+const canonical = (text: unknown): text is string => typeof text === "string" && text.length > 0 && BASE64.test(text) && Buffer.from(text,"base64").toString("base64") === text;
+function validChunk(raw: unknown): raw is BackupChunk {
+ if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+ const c = raw as Partial<BackupChunk>;
+ const last = c.at === Number(c.of) - 1;
+ return Number.isSafeInteger(c.of) && Number(c.of) >= 2 && Number(c.of) <= 10_000 && Number.isSafeInteger(c.at) && Number(c.at) >= 0 && Number(c.at) < Number(c.of) &&
+  Number.isSafeInteger(c.bytes) && Number(c.bytes) > 0 && Number(c.bytes) <= BACKUP_KEY_MAX_BYTES &&
+  typeof c.sha256 === "string" && /^[0-9a-f]{64}$/.test(c.sha256) &&
+  // Every piece but the last is whole base64 quads with no padding, so the pieces joined are the key's base64.
+  canonical(c.data) && (last || !c.data.endsWith("="));
+}
+function validate(raw: unknown, chunks = false): BackupSnapshot {
  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid backup");
- const x = raw as Partial<BackupSnapshot>;
+ const x = raw as Partial<BackupPart>;
  if (x.version !== 1 || !Number.isSafeInteger(x.capturedAt) || Number(x.capturedAt) < 0 || !Array.isArray(x.rows) || x.rows.length > 10000) throw new Error("Invalid backup");
  const keys = new Set<string>();
  for (const row of x.rows) {
   if (!row || typeof row !== "object" || Array.isArray(row) || typeof row.key !== "string" ||
       !row.key.startsWith("nl:") || Buffer.byteLength(row.key) > 1024 || keys.has(row.key) ||
-      typeof row.dump !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(row.dump) ||
-      !row.dump || Buffer.from(row.dump,"base64").toString("base64") !== row.dump ||
       (row.expiresAt !== null && (!Number.isSafeInteger(row.expiresAt) || row.expiresAt <= Number(x.capturedAt)))) throw new Error("Invalid backup row");
+  // A chunk only where the caller reads parts (openPart); everywhere else a row without a whole dump is refused.
+  if ("dump" in row ? !canonical(row.dump) || "chunk" in row : !chunks || !validChunk((row as BackupChunkRow).chunk)) throw new Error("Invalid backup row");
   keys.add(row.key);
  }
  return x as BackupSnapshot;
@@ -98,6 +130,21 @@ export function sealBackup(snapshot: BackupSnapshot, key: Uint8Array): Buffer {
  const plain = Buffer.from(JSON.stringify(validate(snapshot)));
  if (plain.length > MAX) throw new Error("Backup exceeds codec bound");
  return sealWithKid(PART_FORMAT,key,gzipSync(plain));
+}
+/** A part of a set in parts, whole rows and chunks, sealed as sealBackup seals (lib/backup-parts.ts). */
+export function sealPart(part: BackupPart, key: Uint8Array): Buffer {
+ validKey(key);
+ const plain = Buffer.from(JSON.stringify(validate(part,true)));
+ if (plain.length > MAX) throw new Error("Backup exceeds codec bound");
+ return sealWithKid(PART_FORMAT,key,gzipSync(plain));
+}
+/** A part opened as openBackup opens, its chunks kept as chunks: lib/backup-parts.ts joins and checks them. */
+export function openPart(sealed: Uint8Array, keys: BackupKeys): BackupPart {
+ const ring = keysOf(keys);
+ const blob = Buffer.from(sealed);
+ if (blob.length < 34 || blob.length > MAX+65536) throw new Error("Invalid backup envelope");
+ const packed = openSealed(PART_FORMAT,ring,blob);
+ return validate(JSON.parse(gunzipSync(packed,{maxOutputLength:MAX}).toString("utf8")),true) as BackupPart;
 }
 export function openBackup(sealed: Uint8Array, keys: BackupKeys): BackupSnapshot {
  const ring = keysOf(keys);

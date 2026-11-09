@@ -323,7 +323,13 @@ export type BackupRunResult =
         | "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked" | "room_shrunk"
         | "export_limits" | "export_budget" | "export_cutoff" | "export_scan_pages" | "export_too_many" | "export_too_big" | "export_too_many_parts" | "export_unreadable" | "export_error"
         | "verify";
-    };
+    }
+  /**
+   * A key over the backup's ceiling (BACKUP_KEY_MAX_BYTES, lib/backup-parts.ts): every other key copied as a verified
+   * set (`id`), but `missing` keys left out, so it is never the last good copy: the mark stays on the previous one,
+   * nothing is pruned, and the owner's report and the alarm carry this state (rule 24).
+   */
+  | { ok: false; reason: "export_key_over_ceiling"; id: string; missing: number; keys: number; bytes: number; parts: number };
 
 /** 32 bytes from a setting's base64; null for anything else. */
 function keyFrom(raw: string | undefined): Uint8Array | null {
@@ -500,7 +506,7 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
                 ? [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: "last_good_copy_lost", note: LOST_NOTE }), "EX", keep]]
                 : []),
           ]
-        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason, ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep]],
+        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason, ...("missing" in result ? { missing: result.missing, set: result.id } : {}), ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep]],
     );
   } catch {
     // The copy stands as it is; a lost note only makes the report look older.
@@ -844,6 +850,7 @@ async function copy(
   if (done.ok) return { ok: true, id: (folder ?? "") + done.id, keys: done.keys, bytes: done.bytes, parts: done.parts };
   // Sealing, a write or a read-back failed: every earlier set is left as it was.
   if (done.reason === "verify") return { ok: false, reason: "verify" };
+  if (done.reason === "key_over_ceiling") return { ok: false, reason: "export_key_over_ceiling", id: (folder ?? "") + done.id, missing: done.missing, keys: done.keys, bytes: done.bytes, parts: done.parts };
   return { ok: false, reason: `export_${done.reason}` };
 }
 
@@ -855,13 +862,15 @@ export async function backupStale(now: number = Date.now()): Promise<boolean> {
 }
 
 /** The latest failure kept, if any. */
-export async function backupLastFailure(): Promise<{ at: number; reason: string; note?: string } | null> {
+export async function backupLastFailure(): Promise<{ at: number; reason: string; note?: string; missing?: number } | null> {
   const [raw] = await redisPipeline([["GET", LAST_FAIL]]);
   if (typeof raw !== "string") return null;
   try {
-    const parsed = JSON.parse(raw) as { at: unknown; reason: unknown; note?: unknown };
+    const parsed = JSON.parse(raw) as { at: unknown; reason: unknown; note?: unknown; missing?: unknown };
     if (typeof parsed.at !== "number" || typeof parsed.reason !== "string") return null;
-    return typeof parsed.note === "string" ? { at: parsed.at, reason: parsed.reason, note: parsed.note } : { at: parsed.at, reason: parsed.reason };
+    // How many keys were left out over the ceiling (export_key_over_ceiling), when the failure says.
+    const missing = Number.isSafeInteger(parsed.missing) && Number(parsed.missing) > 0 ? { missing: Number(parsed.missing) } : {};
+    return typeof parsed.note === "string" ? { at: parsed.at, reason: parsed.reason, note: parsed.note, ...missing } : { at: parsed.at, reason: parsed.reason, ...missing };
   } catch {
     return null;
   }

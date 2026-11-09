@@ -11,6 +11,7 @@ import { SITE_URL } from "@/lib/site-url";
 import {
   type Member,
   directorySize,
+  memberNames,
   memberPage,
   postCount,
   readConfig,
@@ -100,7 +101,10 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     // does not read is null for its event alone, shown as not known, never as
     // 0 or a short list, and the rest of the page is drawn as usual.
     const lists = await Promise.all(shownEvents.map((e) => rsvpList(id, e.id).catch(() => null)));
-    const people = await readMembers(id, lists.flatMap((l) => (l ?? []).slice(0, PEOPLE_SHOWN).map((r) => r.key)));
+    // Their names, read exactly (rules 24 and 30): when they could not be read, each event with people coming says
+    // who is coming could not be read, as for its list, never a count with nobody named.
+    const { members: people, unread: peopleUnread } = await memberNames(id, lists.flatMap((l) => (l ?? []).slice(0, PEOPLE_SHOWN).map((r) => r.key)));
+    const listOf = (i: number) => (peopleUnread && lists[i]?.length ? null : lists[i]);
     // What was made on Google or Zoom for the events that use them (lib/event-meetings.ts).
     const meetings = await eventMeetings(store, shownEvents).catch(() => null);
     const shape = (e: CommunityEvent, i: number): StudioEvent => ({
@@ -128,8 +132,8 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
       started: e.start <= now,
       when: eventTime(e),
       length: lengthWords(e.minutes),
-      going: lists[i]?.length ?? null,
-      people: (lists[i] ?? []).slice(0, PEOPLE_SHOWN).flatMap((r) => {
+      going: listOf(i)?.length ?? null,
+      people: (listOf(i) ?? []).slice(0, PEOPLE_SHOWN).flatMap((r) => {
         const m = people.get(r.key);
         return m ? [{ name: m.n, email: m.e, at: r.at }] : [];
       }),

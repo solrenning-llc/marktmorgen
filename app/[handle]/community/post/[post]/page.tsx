@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage, type Store } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { CREATOR, type Comment, type Member, commentNumbers, postNumbers, readComments, readMembers, readPost } from "@/lib/community";
+import { CREATOR, type Comment, type Member, commentNumbers, memberNames, postNumbers, readComments, readPost } from "@/lib/community";
 import { levelOf, pointsOf } from "@/lib/community-points";
 import { requestCount } from "@/lib/community-dm";
 import { unreadCount } from "@/lib/community-notify";
@@ -30,6 +30,7 @@ import {
   storeWhen,
 } from "@/components/community-parts";
 import { ConfirmDeletes } from "@/components/community-composer";
+import { NamesUnread } from "@/components/community-names-unread";
 
 type Params = { params: Promise<{ handle: string; post: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -189,8 +190,9 @@ export default async function CommunityPostPage({ params, searchParams }: Params
   const notices = communityNotices(store.language);
   const notice = notices[typeof query.n === "string" ? query.n : ""] ?? null;
   const all = await readComments(id, post.id);
-  const [members, numbers, polls, likes, points] = await Promise.all([
-    readMembers(id, [post.a, ...all.map((c) => c.a)]),
+  // Names that could not be read (rules 24 and 30) show as "A member", and the page says so.
+  const [{ members, unread: membersUnread }, numbers, polls, likes, points] = await Promise.all([
+    memberNames(id, [post.a, ...all.map((c) => c.a)]),
     postNumbers(id, [post], key),
     pollViews(id, [post], key, owner),
     commentNumbers(id, post.id, all, key),
@@ -203,7 +205,14 @@ export default async function CommunityPostPage({ params, searchParams }: Params
   const news = await unreadCount(id, key);
   // Which @ in this post and its comments belong to somebody. Looked up once,
   // for the whole page.
-  const named = await whoIs(id, mentionsIn([post.title, post.text, ...all.map((c) => c.text)].join("\n")));
+  // An @ whose owner could not be read (rules 24 and 30) stays as it was written, and the page says some names could
+  // not be loaded, as for an author's name.
+  const mentioned = await whoIs(id, mentionsIn([post.title, post.text, ...all.map((c) => c.text)].join("\n"))).catch((error: unknown) => {
+    console.error("community @s could not be read", error);
+    return null;
+  });
+  const named = mentioned ?? new Map<string, string>();
+  const namesUnread = membersUnread || mentioned === null;
   const visible = (c: Comment) => owner || !c.hid;
   const tops = all.filter((c) => !c.parent);
   const repliesOf = (c: Comment) => all.filter((r) => r.parent === c.id && visible(r));
@@ -222,6 +231,7 @@ export default async function CommunityPostPage({ params, searchParams }: Params
           <Link href={home} className="cm-quiet-link text-sm font-semibold underline underline-offset-4">{w.backToFeed}</Link>
         </p>
         {notice ? <p className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p> : null}
+        {namesUnread ? <NamesUnread language={store.language} className="mb-5" /> : null}
 
         {editingPost ? (
           <form action="/api/store/community" method="post" className="st-card p-5 sm:p-6">

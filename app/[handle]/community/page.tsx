@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { feed, postNumbers, readMembers, readPosts } from "@/lib/community";
+import { feed, memberNames, postNumbers, readPosts } from "@/lib/community";
 import { accessProducts, visibleSpaces } from "@/lib/community-access";
 import { communityVisitor } from "@/lib/community-page";
 import { requestCount } from "@/lib/community-dm";
@@ -27,6 +27,7 @@ import { MAX_POLL_OPTIONS } from "@/lib/community-polls";
 import { LANGUAGES } from "@/lib/store-language";
 import { CommunityComposer, ConfirmDeletes } from "@/components/community-composer";
 import { EmptyState } from "@/components/empty-state";
+import { NamesUnread } from "@/components/community-names-unread";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -101,8 +102,9 @@ export default async function CommunityPage({ params, searchParams }: Params) {
     .filter((p): p is NonNullable<typeof p> => Boolean(p && (owner || !p.hid) && open(p)));
   const stream = page.posts.filter((p) => !topIds.includes(p.id) && open(p));
   const shown = [...top, ...stream];
-  const [members, numbers, polls, points] = await Promise.all([
-    readMembers(id, shown.map((p) => p.a)),
+  // Names that could not be read (rules 24 and 30) show as "A member", and the page says so.
+  const [{ members, unread: namesUnread }, numbers, polls, points] = await Promise.all([
+    memberNames(id, shown.map((p) => p.a)),
     postNumbers(id, shown, key),
     pollViews(id, shown, key, owner),
     pointsOf(id, [...shown.map((p) => p.a), key]),
@@ -159,6 +161,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
           {notice ? (
             <p className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p>
           ) : null}
+          {namesUnread ? <NamesUnread language={store.language} className="mb-5" /> : null}
 
           {owner && !store.community.on ? (
             <div className="st-note mb-5 text-sm" role="status">

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { CREATOR, readMembers } from "@/lib/community";
+import { CREATOR, memberNames } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
 import { quietFor, room } from "@/lib/community-chat";
 import { grantRoom } from "@/lib/chat-grant";
@@ -14,6 +14,7 @@ import { unreadCount } from "@/lib/community-notify";
 import { CommunityBar } from "@/components/community-parts";
 import { CommunityRoom } from "@/components/community-room";
 import { communityWords, roomWords } from "@/lib/buyer-words/community";
+import { communityNamesUnreadWords } from "@/lib/buyer-words/community-names-unread";
 import { LANGUAGES } from "@/lib/store-language";
 import { AWAY_AFTER_MS, IDLE_MS, LIVE_MS } from "@/lib/chat-pace";
 
@@ -50,7 +51,9 @@ export default async function CommunityChatPage({ params }: Params) {
   const w = communityWords(store.language);
   const locale = LANGUAGES[store.language].locale;
   const page = await room(id);
-  const members = await readMembers(id, page.messages.map((m) => m.a).filter((a) => a !== CREATOR));
+  // Names that could not be read (rules 24 and 30) fall back to the one the message carries, or "A member", and the
+  // room says some names could not be loaded.
+  const { members, unread: namesUnread } = await memberNames(id, page.messages.map((m) => m.a).filter((a) => a !== CREATOR));
   const names: Record<string, string> = {};
   for (const message of page.messages) {
     names[message.a] = message.a === CREATOR ? store.name : members.get(message.a)?.n || message.n || w.aMember;
@@ -97,6 +100,8 @@ export default async function CommunityChatPage({ params }: Params) {
           slow={config.chat.slow}
           links={config.chat.links}
           words={roomWords(store.language, locale, { live: LIVE_MS / 1000, idle: IDLE_MS / 1000, away: AWAY_AFTER_MS / 60_000, kept: 500 })}
+          namesUnread={namesUnread}
+          namesUnreadText={communityNamesUnreadWords(store.language).names}
         />
       </main>
     </div>

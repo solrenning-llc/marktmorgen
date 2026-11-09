@@ -45,7 +45,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -464,17 +464,43 @@ function exactMember(raw: unknown, key: string): Member | null {
   return member && member.k === key ? member : null;
 }
 
+/**
+ * The members of `keys`, for showing who they are: names, faces, the directory. Read exactly (rules 24 and 30): a
+ * row that answered nil is nobody there and is left out, and a record that does not parse is passed over, as before.
+ * A reply lost, cut short or in another shape, or a row that is neither text nor nil, throws UnknownReplyError: read
+ * as an empty map, every name on a community page said "A member", the members page listed nobody and the search
+ * walk took an unread page for the end of the directory. A page that only shows names reads them with memberNames.
+ */
 export async function readMembers(id: string, keys: string[]): Promise<Map<string, Member>> {
   const out = new Map<string, Member>();
   const unique = [...new Set(keys)].filter((k) => k !== CREATOR);
   if (!unique.length) return out;
-  const [rows] = await redisPipeline([["HMGET", membersKey(id), ...unique]]);
-  const list = Array.isArray(rows) ? rows : [];
+  const replies = repliesFor(await redisPipeline([["HMGET", membersKey(id), ...unique]]), 1);
+  const rows = replies && repliesFor(replies[0], unique.length);
+  if (!rows) throw new UnknownReplyError("community members");
   unique.forEach((key, i) => {
-    const member = parseMember(list[i]);
+    const row = rows[i];
+    if (row === null) return;
+    if (typeof row !== "string") throw new UnknownReplyError("a community member record");
+    const member = parseMember(row);
     if (member) out.set(key, member);
   });
   return out;
+}
+
+/**
+ * The members of `keys` for a page that shows their names, and whether they could be read. Names that did not read
+ * (readMembers threw: a reply in no known shape, or none) leave the map empty and `unread` true, and the page says
+ * some names could not be loaded (lib/buyer-words/community-names-unread.ts) beside the "A member" it draws in their
+ * place, instead of failing the page or passing that off as their names.
+ */
+export async function memberNames(id: string, keys: string[]): Promise<{ members: Map<string, Member>; unread: boolean }> {
+  try {
+    return { members: await readMembers(id, keys), unread: false };
+  } catch (error) {
+    console.error("community names could not be read", error);
+    return { members: new Map(), unread: true };
+  }
 }
 
 /**
@@ -728,13 +754,18 @@ export async function moderateMember(
 /** One page of the member directory: those who chose to be listed, newest first. */
 export async function directory(id: string, before: number | null, page: number): Promise<{ members: Member[]; next: number | null }> {
   const max = before === null ? "+inf" : `(${before}`;
-  const [raw] = await redisPipeline([["ZREVRANGEBYSCORE", dirKey(id), max, "-inf", "WITHSCORES", "LIMIT", 0, page + 1]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  // A page of [member, score, ...] read exactly (rules 24 and 30): one lost, cut short or in another shape, or a
+  // score that is not a number, throws UnknownReplyError, never an empty directory or its end.
+  const replies = repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", dirKey(id), max, "-inf", "WITHSCORES", "LIMIT", 0, page + 1]]), 1);
+  const flat = stringList(replies?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a community's directory");
   const keys: string[] = [];
   const scores: number[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
+    const score = flat[i + 1].trim() === "" ? NaN : Number(flat[i + 1]);
+    if (!Number.isFinite(score)) throw new UnknownReplyError("a page of a community's directory");
     keys.push(flat[i]);
-    scores.push(Number(flat[i + 1]));
+    scores.push(score);
   }
   const more = keys.length > page;
   const shown = keys.slice(0, page);

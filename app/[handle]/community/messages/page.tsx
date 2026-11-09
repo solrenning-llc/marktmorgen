@@ -4,13 +4,14 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { CREATOR, readMembers } from "@/lib/community";
+import { CREATOR, memberNames } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
 import { type Conversation, inbox } from "@/lib/community-dm";
 import { CommunityBar, Face, authorName, communityNotices, storeWhen } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EmptyState } from "@/components/empty-state";
+import { NamesUnread } from "@/components/community-names-unread";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -52,7 +53,8 @@ export default async function MessagesPage({ params, searchParams }: Params) {
   const notice = communityNotices(store.language)[typeof query.n === "string" ? query.n : ""] ?? null;
   const [talks, asks] = await Promise.all([inbox(id, key), inbox(id, key, true)]);
   const people = [...talks, ...asks].map((c) => c.other).filter((who) => who !== CREATOR);
-  const members = await readMembers(id, people);
+  // Names that could not be read (rules 24 and 30) show as "A member", and the page says so.
+  const { members, unread: namesUnread } = await memberNames(id, people);
   const nameOf = (who: string) => authorName(store, who, members);
 
   const list = (rows: Conversation[], request: boolean) => (
@@ -105,6 +107,7 @@ export default async function MessagesPage({ params, searchParams }: Params) {
           <Link href={home} className="cm-quiet-link text-sm font-semibold underline underline-offset-4">{w.backToFeed}</Link>
         </p>
         {notice ? <p className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p> : null}
+        {namesUnread ? <NamesUnread language={store.language} className="mb-5" /> : null}
 
         <h1 className="font-display text-2xl font-semibold tracking-[-0.02em]">{w.tabMessages}</h1>
         <p className="st-muted mt-1 text-sm">

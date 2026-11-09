@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { readMembers } from "@/lib/community";
+import { memberNames } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
 import { type Notice, markSeen, noticesFor } from "@/lib/community-notify";
 import { requestCount } from "@/lib/community-dm";
@@ -14,6 +14,7 @@ import { CommunityBar, Face, authorName, storeWhen } from "@/components/communit
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EmptyState } from "@/components/empty-state";
+import { NamesUnread } from "@/components/community-names-unread";
 
 type Params = { params: Promise<{ handle: string }> };
 
@@ -52,7 +53,8 @@ export default async function NotificationsPage({ params }: Params) {
   const w = communityWords(store.language);
   const WHAT: Record<Notice["kind"], (who: string) => string> = { reply: w.whatReply, answer: w.whatAnswer, mention: w.whatMention };
   const { notices } = await noticesFor(id, key);
-  const members = await readMembers(id, notices.map((n) => n.by));
+  // Names that could not be read (rules 24 and 30) show as "A member", and the page says so.
+  const { members, unread: namesUnread } = await memberNames(id, notices.map((n) => n.by));
   const waiting = config.dm.on ? await requestCount(id, key) : 0;
   const devices = canPush() ? await deviceCount(id, key) : 0;
   // Read is read. Done after the list is built, so this visit still shows
@@ -67,6 +69,7 @@ export default async function NotificationsPage({ params }: Params) {
           <Link href={home} className="cm-quiet-link text-sm font-semibold underline underline-offset-4">{w.backToFeed}</Link>
         </p>
         <h1 className="font-display text-2xl font-semibold tracking-[-0.02em]">{w.whatHappened}</h1>
+        {namesUnread ? <NamesUnread language={store.language} className="mt-3" /> : null}
         <p className="st-muted mt-1 text-sm">
           {w.whatHappenedNote}
         </p>

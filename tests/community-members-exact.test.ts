@@ -48,7 +48,7 @@ import CommunityMembersPage from "@/app/[handle]/community/members/page";
 import CommunitySearchPage from "@/app/[handle]/community/search/page";
 import StudioCommunityPage from "@/app/studio/community/page";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { CREATOR, addComment, createPost, directory, freshConfig, readMembers, readPost, saveConfig, setProfile, touchMember } from "@/lib/community";
+import { CREATOR, addComment, createPost, directory, freshConfig, readMembers, saveConfig, setProfile, touchMember } from "@/lib/community";
 import { claimHandle, whoIs } from "@/lib/community-mentions";
 import { membersFound } from "@/lib/community-found";
 import { say } from "@/lib/community-chat";
@@ -216,13 +216,14 @@ async function main(): Promise<void> {
   const ownerPost = await createPost(cid, { space, author: CREATOR, title: "Welcome", text: "Say hi to @zed-quill", img: null, kind: "post", poll: null }, club);
   if (!ownerPost.ok) throw new Error("no post");
   {
-    const commentsOf = async () => (await readPost(cid, ownerPost.post.id))?.cc ?? (await original([["HLEN", `nl:cm:${cid}:c:${ownerPost.post.id}`]]))[0];
+    const commentsOf = async () => (await original([["HLEN", `nl:cm:${cid}:c:${ownerPost.post.id}`]]))[0];
     const before = await commentsOf();
     for (const [what, reply] of shapes(1)) {
       is(`a comment, ${what}: refused as "error"`, await withOdd(hmget(HANDLES), reply, () => press({ action: "comment", post: ownerPost.post.id, from: "post", text: `Thanks @zed-quill (${what})` })), "error");
     }
     is("and no comment was written", await commentsOf(), before);
     is("control: the comment goes in", await press({ action: "comment", post: ownerPost.post.id, from: "post", text: "Thanks @zed-quill" }), "commented");
+    is("control: and it is written", Number(await commentsOf()), Number(before) + 1);
   }
 
   // What the pages show: Zed's post and comment, a room line said before names were kept with it, a conversation,
@@ -260,7 +261,11 @@ async function main(): Promise<void> {
     is(`${what}, names unread: says so, as a status`, typeof broken === "string" && new RegExp(`role="status"[^>]*>${NAMES.replace(/\./g, "\\.")}`).test(broken), true);
   }
   {
-    const broken = await withOdd(hmget(HANDLES), ["QUEUED"], () => draw(pages[1][1]));
+    // The post that names @zed-quill (Zed's own post names nobody, so its page asks for no @ at all).
+    const named = () => CommunityPostPage({ params: Promise.resolve({ ...handle, post: ownerPost.post.id }), searchParams: Promise.resolve({}) });
+    const html = await draw(named);
+    is("a post naming somebody, control: the @ is a link to them, no notice", [html.startsWith("PAGE_FAILED"), /@zed-quill<\/a>|>@zed-quill</.test(html), html.includes(NAMES)], [false, true, false]);
+    const broken = await withOdd(hmget(HANDLES), ["QUEUED"], () => draw(named));
     is("a post, its @s unread: drawn, and says some names could not be loaded", [typeof broken === "string" && broken.startsWith("PAGE_FAILED"), typeof broken === "string" && broken.includes(NAMES)], [false, true]);
   }
 

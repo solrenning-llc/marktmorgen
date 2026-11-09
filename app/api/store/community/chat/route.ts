@@ -3,7 +3,7 @@ import { fromAnotherSite, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { CREATOR, readMembers, within } from "@/lib/community";
+import { CREATOR, memberNames, within } from "@/lib/community";
 import { communityViewer } from "@/lib/community-access";
 import { MAX_CHAT_TEXT, clearRoom, lastSaid, room, say, unsay } from "@/lib/community-chat";
 import { grantRoom } from "@/lib/chat-grant";
@@ -44,11 +44,14 @@ export async function GET(request: NextRequest) {
   // The names, so the page never has to ask separately and never sees an
   // address. A member who chose no name is "A member", as everywhere else.
   // Messages said since October 7, 2026 carry theirs and need nothing read.
+  // Names that could not be read (rules 24 and 30) are left out and said with `namesUnread`, so the page draws
+  // its own "A member" and says some names could not be loaded, never a name passed off as known.
   const unnamed = page.messages.filter((m) => !m.n && m.a !== CREATOR).map((m) => m.a);
-  const members = unnamed.length ? await readMembers(id, unnamed) : new Map<string, { n?: string }>();
+  const { members, unread: namesUnread } = unnamed.length ? await memberNames(id, unnamed) : { members: new Map<string, { n?: string }>(), unread: false };
   const names: Record<string, string> = {};
   for (const message of page.messages) {
-    names[message.a] = message.a === CREATOR ? store.name : message.n || members.get(message.a)?.n || "A member";
+    const name = message.a === CREATOR ? store.name : message.n || members.get(message.a)?.n || (namesUnread ? "" : "A member");
+    if (name) names[message.a] = name;
   }
   // Leave to ask the shared route for the next ten minutes, when asked for.
   const want = url.searchParams.get("grant");
@@ -60,7 +63,7 @@ export async function GET(request: NextRequest) {
     given = await grantRoom(store, id, { key: viewer.key, owner: viewer.owner }, want === "live", talking);
   }
   return Response.json(
-    { ok: true, messages: page.messages, cursor: page.cursor, names, grant: given === "resting" ? null : given, resting: given === "resting" },
+    { ok: true, messages: page.messages, cursor: page.cursor, names, ...(namesUnread ? { namesUnread: true } : {}), grant: given === "resting" ? null : given, resting: given === "resting" },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

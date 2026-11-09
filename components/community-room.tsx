@@ -58,6 +58,8 @@ export function CommunityRoom({
   resting: firstResting,
   quiet,
   words: t,
+  namesUnread: firstNamesUnread = false,
+  namesUnreadText = "",
 }: {
   handle: string;
   /** The community's id: what the shared route is asked about. */
@@ -83,9 +85,15 @@ export function CommunityRoom({
   quiet: number;
   /** Everything it says, in the store's language (lib/buyer-words/community.ts). */
   words: RoomWords;
+  /** Whether some names could not be read when the page was drawn (rules 24 and 30). */
+  namesUnread?: boolean;
+  /** What it says then, in the store's language (lib/buyer-words/community-names-unread.ts). */
+  namesUnreadText?: string;
 }) {
   const [messages, setMessages] = useState<Message[]>(first);
   const [names, setNames] = useState<Record<string, string>>(firstNames);
+  // Some names did not read, here or on a later look: those people show as "A member", and the room says so.
+  const [namesLost, setNamesLost] = useState(firstNamesUnread);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -149,11 +157,13 @@ export function CommunityRoom({
           ok?: boolean;
           messages?: Message[];
           names?: Record<string, string>;
+          namesUnread?: boolean;
           grant?: Leave | null;
           resting?: boolean;
         };
         if (!data.ok) return;
         take(data.messages ?? [], data.names);
+        if (data.namesUnread === true) setNamesLost(true);
         if (want) {
           held.current = data.grant ? { pass: data.grant.pass, until: Date.now() + data.grant.ms, live: data.grant.live } : null;
           restingNow.current = data.resting === true;
@@ -373,6 +383,7 @@ export function CommunityRoom({
 
   return (
     <div className="mt-5">
+      {namesLost && namesUnreadText ? <p className="cm-flash cm-flash-warn mb-3" role="status">{namesUnreadText}</p> : null}
       <ul
         ref={list}
         className="cm-room"

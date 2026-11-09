@@ -236,7 +236,9 @@ async function main(): Promise<void> {
   is("a failed room or message search is kept as unknown", page.includes("unread(searchRoom(id, used))") && page.includes("unread(searchMessages(id, key, used))"), true);
   is("an unknown tab carries no number", page.includes('{n === null ? null : <span className="cm-tab-n">{n}</span>}'), true);
   is("an unknown tab says so in a live region", page.includes('role="status">{w.searchUnread(unsearched)}</p>'), true);
-  is("an unknown tab never says No match", page.includes("{shown === 0 && !unsearched ? ("), true);
+  // Rule 23 (claude5/community-members-exact): the same guard now also holds back No match when the members found
+  // could not be read (people === null, tests/community-members-exact.test.ts); the room and messages case is unchanged.
+  is("an unknown tab never says No match", page.includes("{shown === 0 && !unsearched && people !== null ? ("), true);
   is("an unknown tab never says what was searched", page.includes('tab === "room" && roomHits ?') && page.includes('tab === "dm" && dmHits ?'), true);
   const english = COMMUNITY_WORDS.en.searchUnread;
   is("the English words, plain", [english("room"), english("dm")], [

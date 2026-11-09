@@ -12,6 +12,7 @@ import { CommunityBar, CreatorBadge, Face, LevelBadge } from "@/components/commu
 import { levelOf, pointsOf } from "@/lib/community-points";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
+import { NamesUnread } from "@/components/community-names-unread";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -47,7 +48,15 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
   const query = await searchParams;
   const beforeRaw = typeof query.before === "string" ? Number(query.before) : NaN;
   const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;
-  const [page, total] = await Promise.all([directory(id, before, DIRECTORY_PAGE), directorySize(id)]);
+  // A page of the directory that could not be read (rules 24 and 30) is said so, never drawn as nobody listed.
+  const [read, total] = await Promise.all([
+    directory(id, before, DIRECTORY_PAGE).catch((error: unknown) => {
+      console.error("the community directory could not be read", error);
+      return null;
+    }),
+    directorySize(id),
+  ]);
+  const page = read ?? { members: [], next: null };
   const listed = viewer.member?.dir && viewer.member.n;
   const points = await pointsOf(id, page.members.map((m) => m.k));
   const { config, key } = viewer;
@@ -82,6 +91,7 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
           </p>
         ) : null}
 
+        {read === null ? <NamesUnread language={store.language} what="membersList" className="mt-6" /> : null}
         <ul className="mt-6 grid gap-3 sm:grid-cols-2">
           {!before ? (
             <li className="st-card flex items-center gap-3 p-4">

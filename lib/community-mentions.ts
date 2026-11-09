@@ -25,6 +25,7 @@
  * turns a community's notifications into something people switch off.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { CREATOR } from "@/lib/community";
 
 const handlesKey = (id: string) => `nl:cm:${id}:h`;
@@ -82,10 +83,16 @@ export async function claimHandle(id: string, who: string, name: string, had: st
   if (wanted === had) return had;
   for (let n = 0; n < 50; n += 1) {
     const tryThis = n === 0 ? wanted : `${wanted.slice(0, MAX_HANDLE - String(n + 1).length)}${n + 1}`;
-    const [got] = await redisPipeline([["HSETNX", handlesKey(id), tryThis, who]]);
-    if (Number(got) === 1) return tryThis;
+    // Each answer in its exact shape (rules 24 and 30): a claim answered "1" as text or not at all is not
+    // "somebody else holds it", which would hand the member a numbered handle; it throws UnknownReplyError, and
+    // the change is refused with nothing written to the record (setProfile).
+    const got = countOf(repliesFor(await redisPipeline([["HSETNX", handlesKey(id), tryThis, who]]), 1)?.[0]);
+    if (got === null || got > 1) throw new UnknownReplyError("a community handle claim");
+    if (got === 1) return tryThis;
     // Already ours: nothing to claim.
-    const [owner] = await redisPipeline([["HGET", handlesKey(id), tryThis]]);
+    const read = repliesFor(await redisPipeline([["HGET", handlesKey(id), tryThis]]), 1);
+    const owner = read?.[0];
+    if (!read || (owner !== null && typeof owner !== "string")) throw new UnknownReplyError("whose handle it is");
     if (owner === who) return tryThis;
   }
   return had;
@@ -110,6 +117,12 @@ export function mentionsIn(text: string): string[] {
  * Which of these handles belong to somebody, as handle -> member key. The
  * creator's own is answered without a lookup, so it works in a community
  * where nobody has chosen a name yet.
+ *
+ * Read exactly (rules 24 and 30): a handle that answered nil names nobody; a
+ * reply lost, cut short or in another shape, or a row that is not a member's
+ * key, throws UnknownReplyError. Read as nobody, a post naming somebody went
+ * in and they were never told; the route now reads this before it writes,
+ * and refuses with nothing written (app/api/store/community/route.ts).
  */
 export async function whoIs(id: string, handles: string[]): Promise<Map<string, string>> {
   const found = new Map<string, string>();
@@ -118,11 +131,14 @@ export async function whoIs(id: string, handles: string[]): Promise<Map<string, 
   const mine = asked.filter((h) => h !== CREATOR_HANDLE);
   if (asked.includes(CREATOR_HANDLE)) found.set(CREATOR_HANDLE, CREATOR);
   if (!mine.length) return found;
-  const [rows] = await redisPipeline([["HMGET", handlesKey(id), ...mine]]);
-  const list = Array.isArray(rows) ? rows : [];
+  const replies = repliesFor(await redisPipeline([["HMGET", handlesKey(id), ...mine]]), 1);
+  const rows = replies && repliesFor(replies[0], mine.length);
+  if (!rows) throw new UnknownReplyError("community handles");
   mine.forEach((handle, i) => {
-    const key = list[i];
-    if (typeof key === "string" && key) found.set(handle, key);
+    const key = rows[i];
+    if (key === null) return;
+    if (typeof key !== "string" || !key) throw new UnknownReplyError("a community handle");
+    found.set(handle, key);
   });
   return found;
 }

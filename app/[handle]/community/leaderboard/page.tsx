@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { readMembers } from "@/lib/community";
+import { memberNames } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
 import { LEVELS, type Period, board, levelOf, pointsOf, readRewards, toNextLevel } from "@/lib/community-points";
 import { readListings } from "@/lib/catalog";
@@ -12,6 +12,7 @@ import { CommunityBar, Face, LevelBadge } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EmptyState } from "@/components/empty-state";
+import { NamesUnread } from "@/components/community-names-unread";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -54,8 +55,9 @@ export default async function CommunityLeaderboardPage({ params, searchParams }:
     readRewards(id),
     owner ? Promise.resolve(new Map<string, number>()) : pointsOf(id, [key]),
   ]);
-  const [members, allTime, courses] = await Promise.all([
-    readMembers(id, standing.top.map((s) => s.key)),
+  // Names that could not be read (rules 24 and 30) show as "A member", and the page says so.
+  const [{ members, unread: namesUnread }, allTime, courses] = await Promise.all([
+    memberNames(id, standing.top.map((s) => s.key)),
     pointsOf(id, standing.top.map((s) => s.key)),
     rewards.length ? readListings(store, rewards.map((r) => r.product)) : Promise.resolve([]),
   ]);
@@ -80,6 +82,7 @@ export default async function CommunityLeaderboardPage({ params, searchParams }:
       <CommunityBar store={store} config={config} tab="leaderboard" signedIn messages={config.dm.on} room={config.chat.on} />
       <main id="content" className="mx-auto max-w-3xl px-4 pb-16 pt-6">
         <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] sm:text-3xl">{w.tabLeaderboard}</h1>
+        {namesUnread ? <NamesUnread language={store.language} className="mt-3" /> : null}
         <p className="st-muted mt-2">
           {w.pointsRule(store.name)}
         </p>

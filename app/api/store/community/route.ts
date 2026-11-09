@@ -188,6 +188,10 @@ export async function POST(request: NextRequest) {
       if (!owner && !viewer.member?.n) return back(`${home}/you`, "name");
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
       if (!owner && (!(await within(id, key, "post")) || !(await within(id, key, "postDay")))) return back(fromPage, "slow");
+      // Who the @s name is read before anything is written or a picture taken (rules 24 and 30): a reply that does
+      // not read throws, and the member is told nothing was changed, instead of a post going up whose people named
+      // are never told.
+      const named = await whoIs(id, mentionsIn(`${title}\n${text}`));
       let img: CommunityImage | null = null;
       if (path) {
         const side = (raw: string) => {
@@ -229,7 +233,6 @@ export async function POST(request: NextRequest) {
         return back(fromPage, "fullposts");
       }
       if (!made.post.hid) {
-        const named = await whoIs(id, mentionsIn(`${title}\n${text}`));
         await tell(
           id,
           [...named.values()],
@@ -267,6 +270,8 @@ export async function POST(request: NextRequest) {
       if (!owner && !viewer.member?.n) return back(`${home}/you`, "name");
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
       if (!owner && !(await within(id, key, "comment"))) return back(postPage, "slow", "reply");
+      // Read before the comment is written, as for a post (rules 24 and 30); a hidden post tells nobody, so asks nothing.
+      const named = post.hid ? new Map<string, string>() : await whoIs(id, mentionsIn(text));
       const parent = field("parent", 12);
       const made = await addComment(id, post.id, { parent: ITEM_ID.test(parent) ? parent : "", author: key, text }, store);
       if (!made.ok) return back(postPage, made.reason === "full" ? "fullcomments" : "gone");
@@ -274,7 +279,6 @@ export async function POST(request: NextRequest) {
       // answers, and anybody named in it. A hidden post reaches nobody — one
       // the creator took down should not keep arriving in somebody's day.
       if (!post.hid) {
-        const named = await whoIs(id, mentionsIn(text));
         const above = made.comment.parent ? await readComment(id, post.id, made.comment.parent) : null;
         // The name a phone shows: the creator's store name, or the name this
         // member chose. Never an address, and never "a member" on a phone —

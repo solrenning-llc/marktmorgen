@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { postNumbers, readMembers, readPosts } from "@/lib/community";
+import { memberNames, postNumbers, readPosts } from "@/lib/community";
 import { SEARCH_CONVERSATIONS, SEARCH_MESSAGES, mayMessage, pairOf, requestCount, searchMessages, searchedConversations } from "@/lib/community-dm";
 import { readLessonRef } from "@/lib/community-index";
 import { checkUnits, searchUnits } from "@/lib/community-read-rules";
@@ -23,6 +23,7 @@ import { CommunityBar, Face, PostCard, communityNotices, storeWhen } from "@/com
 import { type CommunityWords, communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { ConfirmDeletes } from "@/components/community-composer";
+import { NamesUnread } from "@/components/community-names-unread";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -167,7 +168,14 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   if (checks && !(await takePublicRequest(store, "buyer", undefined, checkUnits(checks)))) redirect(`/@${store.handle}/resting`);
   const lessons = tab === "lesson" ? await lessonsFound(store, config, page.posts, gate) : [];
   const events = tab === "event" ? await eventsFound(store, config, page.posts, gate) : [];
-  const people = tab === "member" ? await membersFound(id, page.posts) : [];
+  // Members found that could not be read (rules 24 and 30) are null: the tab says they could not be searched,
+  // never "No match".
+  const people = tab === "member"
+    ? await membersFound(id, page.posts).catch((error: unknown) => {
+        console.error("community members found could not be read", error);
+        return null;
+      })
+    : [];
 
   const talk = tab === "room" ? (roomHits ?? []).slice(0, SHOWN_TALK) : [];
   const mine = tab === "dm" ? (dmHits ?? []).slice(0, SHOWN_TALK) : [];
@@ -175,8 +183,9 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const unsearched: "room" | "dm" | null = tab === "room" && roomHits === null ? "room" : tab === "dm" && dmHits === null ? "dm" : null;
   // Names for whoever wrote what is listed, never their addresses.
   const talkers = [...talk.map((m) => m.a), ...mine.map((h) => h.other)].filter((a) => a !== CREATOR);
-  const [members, numbers, polls] = await Promise.all([
-    readMembers(id, [...posts.map((p) => p.a), ...talkers]),
+  // Names that could not be read (rules 24 and 30) show as "A member", and the page says so.
+  const [{ members, unread: namesUnread }, numbers, polls] = await Promise.all([
+    memberNames(id, [...posts.map((p) => p.a), ...talkers]),
     postNumbers(id, posts, key),
     pollViews(id, posts, key, owner),
   ]);
@@ -192,7 +201,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
     tab === "post" ? posts.length
     : tab === "lesson" ? lessons.length
     : tab === "event" ? events.length
-    : tab === "member" ? people.length
+    : tab === "member" ? (people?.length ?? 0)
     : tab === "room" ? talk.length
     : mine.length;
   const link = (kind: Tab) => `${home}/search?q=${encodeURIComponent(asked)}${kind === "post" ? "" : `&k=${kind}`}`;
@@ -260,6 +269,8 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
 
             {unsearched ? (
               <p className="cm-flash cm-flash-warn mt-3" role="status">{w.searchUnread(unsearched)}</p>
+            ) : people === null ? (
+              <NamesUnread language={store.language} what="membersSearch" className="mt-3" />
             ) : (
               <p className="st-muted mt-3 text-sm">
                 {w.found(tab, shown, used.length === 1)}
@@ -268,7 +279,9 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
               </p>
             )}
 
-            {shown === 0 && !unsearched ? (
+            {namesUnread ? <NamesUnread language={store.language} className="mt-3" /> : null}
+
+            {shown === 0 && !unsearched && people !== null ? (
               <div className="st-note mt-5 text-center">
                 <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.noMatch}</p>
                 <p className="mt-1 text-sm">
@@ -335,7 +348,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
 
             {tab === "member" ? (
               <ul className="mt-5 grid gap-3 sm:grid-cols-2">
-                {people.map((person) => (
+                {(people ?? []).map((person) => (
                   <li key={person.k} className="st-card flex items-center gap-3 p-4">
                     <Face store={store} author={person.k} name={person.n} size={44} />
                     <div className="min-w-0">

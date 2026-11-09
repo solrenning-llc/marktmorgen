@@ -145,10 +145,13 @@ export async function eventsFound(
   return kept;
 }
 
-/** The members among these keys who are still listed, in the index's order. */
+/**
+ * The members among these keys who are still listed, in the index's order. Members that could not be read throw
+ * (readMembers, rule 24), never "no match": the search page says the members could not be searched.
+ */
 export async function membersFound(communityId: string, keys: string[]): Promise<Member[]> {
   if (!keys.length) return [];
-  const found = await readMembers(communityId, keys).catch(() => new Map<string, Member>());
+  const found = await readMembers(communityId, keys);
   return keys
     .map((k) => found.get(k))
     .filter((m): m is Member => Boolean(m && m.dir && m.n && !m.removed));

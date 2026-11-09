@@ -4,13 +4,14 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { CREATOR, readMembers } from "@/lib/community";
+import { CREATOR, memberNames } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
 import { MAX_MESSAGE_TEXT, mayMessage, otherIn, thread } from "@/lib/community-dm";
 import { CommunityBar, Face, PostText, authorName, communityNotices, storeWhen } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EmptyState } from "@/components/empty-state";
+import { NamesUnread } from "@/components/community-names-unread";
 
 type Params = {
   params: Promise<{ handle: string; pair: string }>;
@@ -61,7 +62,8 @@ export default async function MessageThreadPage({ params, searchParams }: Params
   const w = communityWords(store.language);
   const NOTICES = communityNotices(store.language);
   const notice = NOTICES[typeof query.n === "string" ? query.n : ""] ?? null;
-  const members = other === CREATOR ? new Map() : await readMembers(id, [other]);
+  // A name that could not be read (rules 24 and 30) shows as "A member", and the page says so.
+  const { members, unread: namesUnread } = other === CREATOR ? { members: new Map(), unread: false } : await memberNames(id, [other]);
   const name = authorName(store, other, members);
   const refused = mayMessage(config.dm, key, other);
   if (refused && talk.messages.length === 0) redirect(`${box}?n=${refused.reason === "between" ? "dmbetween" : "dmoff"}`);
@@ -77,6 +79,7 @@ export default async function MessageThreadPage({ params, searchParams }: Params
           <Link href={box} className="cm-quiet-link text-sm font-semibold underline underline-offset-4">{w.backToMessages}</Link>
         </p>
         {notice ? <p className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p> : null}
+        {namesUnread ? <NamesUnread language={store.language} className="mb-5" /> : null}
 
         <header className="flex items-center gap-3">
           <Face store={store} author={other} name={name} size={44} />

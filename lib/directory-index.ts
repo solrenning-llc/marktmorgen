@@ -17,8 +17,9 @@
  *
  *   nl:dir:listed   set  the sid of every store whose creator said yes
  *   nl:dir:page     the directory's rows, kept a few minutes; dropped on a save that can change them
- *   nl:dir:last     the last good build's rows with the sid of each, shown filtered while a build is not due
- *   nl:dir:build    the claim of the last build, held DIRECTORY_BUILD_SECONDS whatever dropped the page
+ *   nl:dir:build    "building" while one build runs, "failed" for a while after a build that could not finish
+ *   nl:dir:builds   the builds counted in the window's ten minutes, so they have a ceiling
+ *   nl:dir:last     the last good build's rows with the sid of each, shown filtered past the ceiling
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -30,16 +31,24 @@ const LISTED = "nl:dir:listed";
 export const DIRECTORY_CACHE = "nl:dir:page";
 
 /**
- * The claim lib/affiliate-directory.ts takes before it builds the rows (SET NX EX): one build start at a time for the
- * whole site, and none again until it expires, whether a save dropped the page or a build kept none.
+ * The directory's build mark (lib/affiliate-directory.ts, readDirectory): taken with SET NX before a build, so one
+ * build runs at a time, dropped by a build that finished with the page kept, and set to "failed" for the cache's ten
+ * minutes by one that could not finish, so a failure persisting in one listed store is built again once in that time,
+ * not on every visit (#2921, CX-116 A1). Never dropped by a save: what it holds is no row of any store.
  */
 export const DIRECTORY_BUILD = "nl:dir:build";
 
 /**
+ * The builds of the directory counted in a window (lib/affiliate-directory.ts, DIRECTORY_BUILDS_PER_TEN_MINUTES):
+ * INCR once the build mark is taken and before a build, the window's ten minutes set once on a count that has no
+ * end, so the builds have a ceiling however often a save drops the kept page. What it holds is no row of any store.
+ */
+export const DIRECTORY_BUILDS = "nl:dir:builds";
+
+/**
  * The last good build of the directory, with the sid of each row (lib/affiliate-directory.ts, readDirectory). A save
- * never drops it: a visit that finds no kept page while DIRECTORY_BUILD is held is shown these rows, filtered by one
- * SMISMEMBER against the listed set, so a store just taken out is gone at once and the page stays up (Claude 6 on
- * #3062: one account saving in a loop could otherwise keep the page "unavailable").
+ * never drops it: a visit past the window's ceiling is shown these rows, filtered by one SMISMEMBER against the
+ * listed set, so a store just taken out is gone at once and the page stays up (Claude 6 on #3062).
  */
 export const DIRECTORY_LAST = "nl:dir:last";
 

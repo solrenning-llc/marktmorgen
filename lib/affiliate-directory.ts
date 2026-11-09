@@ -33,15 +33,18 @@
  * creator pays their own affiliates on the day they promise, as their program
  * page says. The directory says so too.
  *
- *   nl:dir:page   the rows, as JSON, kept KEEP_SECONDS (15 minutes); dropped
- *                 whenever a creator saves a program that is listed, or was,
- *                 so taking a store out is immediate
+ *   nl:dir:page   the rows, as JSON, kept 10 minutes; dropped whenever a
+ *                 creator saves their program, so taking a store out is
+ *                 immediate
+ *   nl:dir:build  the build mark (lib/directory-index.ts, DIRECTORY_BUILD):
+ *                 one build at a time, and none for 10 minutes after one
+ *                 that could not finish
+ *   nl:dir:builds the builds counted in the window's 10 minutes, at most
+ *                 DIRECTORY_BUILDS_PER_TEN_MINUTES (DIRECTORY_BUILDS)
  *   nl:dir:last   the last good build's rows with the sid of each, kept
- *                 LAST_KEEP_SECONDS and never dropped by a save: while a
- *                 build is not due, a visit is shown them filtered by the
- *                 listed set, so a store taken out is gone at once
- *   nl:dir:build  the claim of the last build, kept DIRECTORY_BUILD_SECONDS:
- *                 the page is built at most once in that time, site-wide
+ *                 LAST_KEEP_SECONDS and never dropped by a save: past the
+ *                 ceiling, a visit is shown them without every store no
+ *                 longer listed (DIRECTORY_LAST)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeForId } from "@/lib/store";
@@ -52,7 +55,7 @@ import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
-import { DIRECTORY_BUILD, DIRECTORY_CACHE, DIRECTORY_LAST, listedStores, stillListed, wouldList } from "@/lib/directory-index";
+import { DIRECTORY_BUILD, DIRECTORY_BUILDS, DIRECTORY_CACHE, DIRECTORY_LAST, listedStores, stillListed, wouldList } from "@/lib/directory-index";
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
@@ -62,6 +65,52 @@ export { MIN_CLICKS_FOR_RATES };
 
 /** Products shown under one program: the rest are on its store. */
 export const PRODUCTS_PER_ROW = 4;
+
+/** How long the rows are kept before they are read again. */
+const KEEP_SECONDS = 600;
+
+/**
+ * How long one build holds the build mark before another may start: past the
+ * longest a healthy build takes, so a build cut short (a function stopped
+ * mid-way) holds the page "unavailable" for at most this long.
+ */
+const BUILD_HOLD_SECONDS = 60;
+
+/**
+ * How long, after a build that could not finish, the page answers "could not
+ * be checked" without building again: the time a kept page is kept, so a
+ * failure that persists costs one build in it, as a kept page does.
+ */
+const FAILED_SECONDS = KEEP_SECONDS;
+
+/**
+ * The most builds of the directory in a window of BUILD_WINDOW_SECONDS, for the whole site (MR: a ceiling before
+ * every spend). #2921's mark lets one build run at a time, but a save of a listed program drops the kept page and the
+ * next visit builds at once, so without a count one creator saving in a loop built the whole directory once a save.
+ * Each build reserves its place (DIRECTORY_BUILDS, INCR) once it holds the mark and before it reads anything; past
+ * the ceiling, or with a count whose reply is unknown, nothing is built and the visit is shown the last good build,
+ * filtered (lastDirectory). 10 in ten minutes: at most 43,200 builds in 30 days, priced in tests/plan-cost-registry.ts
+ * (NOT_A_COST.DIRECTORY_BUILDS_PER_TEN_MINUTES).
+ */
+export const DIRECTORY_BUILDS_PER_TEN_MINUTES = 10;
+
+/** The window the builds are counted in: the kept page's own ten minutes, set once on a count that has no end. */
+const BUILD_WINDOW_SECONDS = 600;
+
+/**
+ * How long the last good build is kept (nl:dir:last): the kept page's ten minutes and one more window, so a visit
+ * past the ceiling has it whenever in the window the ceiling was reached. Older than that, the visit is told the
+ * list is unavailable rather than shown rows from longer ago.
+ */
+const LAST_KEEP_SECONDS = KEEP_SECONDS + BUILD_WINDOW_SECONDS;
+
+/** Past the window's ceiling with no last good build kept: the page says the list is unavailable just now. */
+export class DirectoryBusyError extends Error {
+  constructor() {
+    super("The affiliate directory was built as often as a window allows and no last build is kept: unavailable just now");
+    this.name = "DirectoryBusyError";
+  }
+}
 
 /** The most programs read for the page: far past what one page lists. */
 const MAX_ROWS = 2_000;
@@ -82,45 +131,6 @@ const SCAN_COUNT = 200;
  * (NOT_A_COST.DIRECTORY_SCAN_PAGES).
  */
 export const DIRECTORY_SCAN_PAGES = 64;
-
-/**
- * The fewest seconds between two builds of the directory, for the whole site (MR: a ceiling before every spend): 15
- * minutes, so at most 4 builds an hour (C1-20261107-1627-C4-5 on #3062: at one a minute, 12,068 commands a build came
- * to about US$1,042.68 in 30 days, a fixed company cost; at 15 minutes, with the listed-set check after each build, 12,070
- * commands a build, about US$69.52). A creator's change shows at the
- * next build, so within 15 minutes; a store taken out is gone at once (below).
- * A save drops the kept page and a build that could not read every program's numbers keeps none, so without it
- * every visit after either would build again, and concurrent visits would all build at once. Each build first
- * claims DIRECTORY_BUILD for this long (SET NX EX): the claim is the single-flight lock and the interval in one key,
- * never released early. The claim only spaces the starts: a build still running after it expires does not stop the
- * next one, so it bounds builds to one a window, not to one at a time. A visit that finds no kept page while the claim
- * is held is shown the last good build (nl:dir:last) without every store no longer in the listed set (one SMISMEMBER),
- * so a store whose creator has just taken it out is gone at once and the page stays up whatever saves drop it
- * (Claude 6 on #3062); with no last build kept, it is told the list is unavailable just now (DirectoryBusyError),
- * never an empty or partial list. Counted in tests/plan-cost-registry.ts (NOT_A_COST.DIRECTORY_BUILDS_PER_HOUR).
- */
-export const DIRECTORY_BUILD_SECONDS = 900;
-
-/** The most builds of the directory in an hour, for the whole site. */
-export const DIRECTORY_BUILDS_PER_HOUR = 3_600 / DIRECTORY_BUILD_SECONDS;
-
-/** How long the rows are kept before they are read again: the build window, so a page is built again when it may be. */
-const KEEP_SECONDS = DIRECTORY_BUILD_SECONDS;
-
-/**
- * How long the last good build is kept (nl:dir:last): past the kept page's own 15 minutes, by two build windows, so a
- * visit while the next build is not due, or right after one that failed, still has it. Older than that, the visit is
- * told the list is unavailable rather than shown rows from longer ago.
- */
-const LAST_KEEP_SECONDS = KEEP_SECONDS + 2 * DIRECTORY_BUILD_SECONDS;
-
-/** The page is not kept, no last build is either, and another build holds the claim or one ran less than DIRECTORY_BUILD_SECONDS ago. */
-export class DirectoryBusyError extends Error {
-  constructor() {
-    super("The affiliate directory was built less than 15 minutes ago and is not kept: unavailable just now");
-    this.name = "DirectoryBusyError";
-  }
-}
 
 export type DirectoryProduct = {
   id: string;
@@ -276,7 +286,27 @@ export function sortRows(rows: DirectoryRow[]): DirectoryRow[] {
   return [...rows].sort((a, b) => b.topRate - a.topRate || b.earning - a.earning || a.name.localeCompare(b.name, "en"));
 }
 
-/** Every listed program, read from the stores themselves, kept a few minutes. */
+/**
+ * Every listed program, read from the stores themselves, kept a few minutes.
+ *
+ * At most one build runs at a time, and none for FAILED_SECONDS after one that
+ * could not finish (a store read that failed, a numbers read that failed, the
+ * SSCAN page ceiling; #2921, CX-116 A1): before building, the build mark
+ * (DIRECTORY_BUILD) is taken with SET NX. A read that finds no kept page and
+ * cannot take the mark throws UnknownReplyError, so the page shows its own
+ * "The program list is unavailable just now" state; it never builds again and
+ * never shows a list that was not read whole. A finished build keeps the page
+ * and drops the mark; one that could not finish sets the mark to "failed" for
+ * FAILED_SECONDS. A failed numbers read still shows that build's rows without
+ * those numbers to the one request that built them, and keeps no page.
+ *
+ * Once the mark is taken, the build reserves its place in the window's count
+ * (reserveBuild). Past DIRECTORY_BUILDS_PER_TEN_MINUTES, or when the count's
+ * reply is unknown (rule 24: never room to build), nothing is built: the mark is
+ * dropped in the same pipeline as the last good build is read, and the visit is
+ * shown that build without every store no longer listed (lastDirectory). A
+ * finished build keeps that last build too, with the sid of each row.
+ */
 export async function readDirectory(): Promise<DirectoryRow[]> {
   if (!isRedisConfigured()) return [];
   const [kept] = await redisPipeline([["GET", DIRECTORY_CACHE]]);
@@ -288,11 +318,85 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
       // Read again below.
     }
   }
-  // At most one build start per DIRECTORY_BUILD_SECONDS: "OK" is ours, null (NX) is held by another or a recent build
-  // (the last good page is then shown, filtered), anything else is unknown and nothing is built.
-  const claimed = repliesFor(await redisPipeline([["SET", DIRECTORY_BUILD, "1", "NX", "EX", DIRECTORY_BUILD_SECONDS]]), 1);
-  if (!claimed || (claimed[0] !== "OK" && claimed[0] !== null)) throw new UnknownReplyError("the directory's build claim (SET NX)");
-  if (claimed[0] === null) return lastDirectory();
+  const [claim] = await redisPipeline([["SET", DIRECTORY_BUILD, "building", "EX", BUILD_HOLD_SECONDS, "NX"]]);
+  // null: another build is running, or one could not finish FAILED_SECONDS ago. Any other shape is unknown, and builds nothing either.
+  if (claim !== "OK") throw new UnknownReplyError(claim === null ? "the directory's build mark, held," : "the directory's build mark");
+  const room = await reserveBuild().catch(() => "unknown" as const);
+  if (room !== "build") return lastDirectory(room);
+  let built: { rows: DirectoryRow[]; sids: string[]; partial: boolean };
+  try {
+    built = await buildDirectory();
+  } catch (error) {
+    await markFailed();
+    throw error;
+  }
+  if (built.partial) {
+    await markFailed();
+    return built.rows;
+  }
+  await redisPipeline([
+    ["SET", DIRECTORY_CACHE, JSON.stringify(built.rows), "EX", KEEP_SECONDS],
+    ["SET", DIRECTORY_LAST, JSON.stringify({ sids: built.sids, rows: built.rows }), "EX", LAST_KEEP_SECONDS],
+    ["DEL", DIRECTORY_BUILD],
+  ]).catch(() => null);
+  return built.rows;
+}
+
+/**
+ * This build's place in the window's count: "build" inside DIRECTORY_BUILDS_PER_TEN_MINUTES, "full" past it,
+ * "unknown" for any reply not in the exact shape asked for (a count that is a positive whole number, a TTL that is a
+ * whole number of -1 or more; -2, the count gone, is unknown). A count with no end (TTL -1: just made, or left so by
+ * a write cut short) gets the window's seconds, and an EXPIRE that does not answer 1 is unknown.
+ */
+async function reserveBuild(): Promise<"build" | "full" | "unknown"> {
+  const counted = repliesFor(await redisPipeline([["INCR", DIRECTORY_BUILDS], ["TTL", DIRECTORY_BUILDS]]), 2);
+  if (!counted) return "unknown";
+  const [count, left] = counted;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
+  if (typeof left !== "number" || !Number.isSafeInteger(left) || left < -1) return "unknown";
+  if (left === -1) {
+    const ended = repliesFor(await redisPipeline([["EXPIRE", DIRECTORY_BUILDS, BUILD_WINDOW_SECONDS]]), 1);
+    if (!ended || ended[0] !== 1) return "unknown";
+  }
+  return count <= DIRECTORY_BUILDS_PER_TEN_MINUTES ? "build" : "full";
+}
+
+/**
+ * The last good build, without every store no longer in the listed set, for a visit that may not build: nothing is
+ * kept from it. The build mark is dropped in the same pipeline, so the next visit is not held by a build that never
+ * ran (the DEL's own reply changes nothing: a mark it did not drop ends by its BUILD_HOLD_SECONDS). No last build is
+ * DirectoryBusyError past the ceiling and UnknownReplyError after an unknown count; a reply in any other shape, or
+ * rows that do not match their sids, is UnknownReplyError, never the rows unfiltered or an empty list.
+ */
+async function lastDirectory(room: "full" | "unknown"): Promise<DirectoryRow[]> {
+  const replies = repliesFor(await redisPipeline([["DEL", DIRECTORY_BUILD], ["GET", DIRECTORY_LAST]]), 2);
+  if (!replies) throw new UnknownReplyError("the directory's last build (GET)");
+  const reply = replies[1];
+  if (reply === null) {
+    if (room === "full") throw new DirectoryBusyError();
+    throw new UnknownReplyError("the directory's build count");
+  }
+  let last: unknown = null;
+  try {
+    last = typeof reply === "string" ? JSON.parse(reply) : null;
+  } catch {
+    last = null;
+  }
+  const { sids, rows } = (last ?? {}) as { sids?: unknown; rows?: unknown };
+  if (!Array.isArray(sids) || !Array.isArray(rows) || sids.length !== rows.length || sids.some((sid) => typeof sid !== "string" || !sid)) {
+    throw new UnknownReplyError("the directory's last build (GET)");
+  }
+  const listed = await stillListed(sids as string[]);
+  return (rows as DirectoryRow[]).filter((_, at) => listed[at]);
+}
+
+/** A build that could not finish: the next ones wait FAILED_SECONDS. A mark that cannot be written still ends by its BUILD_HOLD_SECONDS. */
+async function markFailed(): Promise<void> {
+  await redisPipeline([["SET", DIRECTORY_BUILD, "failed", "EX", FAILED_SECONDS]]).catch(() => null);
+}
+
+/** One build of the rows from the listed set and the stores, with each row's sid; `partial` when a numbers read failed. */
+async function buildDirectory(): Promise<{ rows: DirectoryRow[]; sids: string[]; partial: boolean }> {
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
@@ -311,7 +415,7 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
   // A failed numbers read still shows the row without numbers, but that page is
   // not kept for the next visitors.
   let partial = false;
-  // Each row's sid, kept with the last good build so a visit while a build is not due can drop a store taken out.
+  // Each row's sid, kept with the last good build so a visit past the ceiling can drop a store taken out.
   const sidOf = new Map<DirectoryRow, string>();
   const rows = sortRows(
     (
@@ -334,53 +438,5 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
       )
     ).filter((row): row is DirectoryRow => row !== null),
   );
-  const built = rows.map((row) => sidOf.get(row) ?? "");
-  if (!partial) {
-    await redisPipeline([
-      ["SET", DIRECTORY_CACHE, JSON.stringify(rows), "EX", KEEP_SECONDS],
-      ["SET", DIRECTORY_LAST, JSON.stringify({ sids: built, rows }), "EX", LAST_KEEP_SECONDS],
-    ]).catch(() => null);
-  }
-  // A creator who unchecked "List my program" while this build ran leaves the page at once (Claude 6 on #3118): the
-  // build read the store before the save's SREM and DEL, and its SET above may have written the store back. So the
-  // listed set is asked once, after the SETs: a store no longer in it drops the kept page, and so does a reply in any
-  // other shape (then the build is unknown). Against the save's SREM-then-DEL this is linearizable: an SREM before
-  // this check is seen here; one after it is followed by the save's own DEL. The last good build (nl:dir:last) is
-  // filtered the same way whenever it is shown (lastDirectory).
-  if (!built.length) return rows;
-  let listed: boolean[] | null = null;
-  try {
-    listed = await stillListed(built);
-  } catch {
-    listed = null;
-  }
-  if (listed && listed.every(Boolean)) return rows;
-  if (!partial) await redisPipeline([["DEL", DIRECTORY_CACHE]]);
-  if (!listed) throw new UnknownReplyError("the directory's listed set after a build (SMISMEMBER)");
-  const still = listed;
-  return rows.filter((_, at) => still[at]);
-}
-
-/**
- * The last good build, without every store no longer in the listed set, for a visit while a build is not due. Nothing
- * is kept from it. A confirmed absence (no last build) is DirectoryBusyError; a reply in any other shape, or rows that
- * do not match their sids, is UnknownReplyError, never the rows unfiltered or an empty list.
- */
-async function lastDirectory(): Promise<DirectoryRow[]> {
-  const replies = repliesFor(await redisPipeline([["GET", DIRECTORY_LAST]]), 1);
-  if (!replies) throw new UnknownReplyError("the directory's last page (GET)");
-  const [reply] = replies;
-  if (reply === null) throw new DirectoryBusyError();
-  let last: unknown = null;
-  try {
-    last = typeof reply === "string" ? JSON.parse(reply) : null;
-  } catch {
-    last = null;
-  }
-  const { sids, rows } = (last ?? {}) as { sids?: unknown; rows?: unknown };
-  if (!Array.isArray(sids) || !Array.isArray(rows) || sids.length !== rows.length || sids.some((sid) => typeof sid !== "string" || !sid)) {
-    throw new UnknownReplyError("the directory's last page (GET)");
-  }
-  const listed = await stillListed(sids as string[]);
-  return (rows as DirectoryRow[]).filter((_, at) => listed[at]);
+  return { rows, sids: rows.map((row) => sidOf.get(row) ?? ""), partial };
 }

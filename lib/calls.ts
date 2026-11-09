@@ -109,6 +109,7 @@ import {
   holdTeam,
   hostEmails,
   moveTeamClaim,
+  possibleHosts,
   readTeams,
   releaseClaim,
   teamContext,
@@ -1535,13 +1536,16 @@ async function tellMoved(input: {
     });
   }
 
+  // Never to a host who has left the team since the booking was made (creatorSideOf).
+  const creatorSide = await creatorSideOf(store, hosts);
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: `"Marktmorgen" <${senderAddress()}>`,
-    to: hostRecipient(store, hosts),
+    to: creatorSide.to,
     subject: `Moved: ${product.title}, now ${readableTime(start, setup.tz)}`,
     text: [
       `${email ?? "A buyer"} moved their booking of ${product.title}.`,
       ...(hosts.length ? [hostLine(hosts)] : []),
+      ...(creatorSide.note ? [creatorSide.note] : []),
       "",
       `Now: ${at(start, setup.tz)}, your time zone`,
       `Was: ${at(from.start, setup.tz)}`,
@@ -1571,6 +1575,31 @@ async function teamForMove(store: Store, product: CallListing) {
 export function hostRecipient(store: Pick<Store, "email">, hosts: string[]): string {
   const owner = store.email.trim().toLowerCase();
   return !hosts.length || hosts.includes(owner) ? store.email : hosts[0];
+}
+
+/**
+ * Who the creator's side of a team booking's emails goes to now: hostRecipient,
+ * but only while that host is still on the store's team, read the way a new
+ * booking reads it (lib/team-booking.ts, possibleHosts). These emails carry the
+ * buyer's address and answers, the meeting link and a reply-to the buyer, and a
+ * booking keeps the hosts it was made with: a host taken off the team since is
+ * sent nothing about it, and the owner is sent it instead, told why. A team that
+ * cannot be read is not known (rule 24): the owner only, never a host who may
+ * have left. The owner is never checked, so an email to them reads nothing.
+ */
+async function creatorSideOf(store: Store, hosts: string[]): Promise<{ to: string; note: string | null }> {
+  const to = hostRecipient(store, hosts);
+  if (to === store.email) return { to, note: null };
+  let team: Set<string>;
+  try {
+    team = new Set(await possibleHosts(store));
+  } catch (error) {
+    console.error("reading the team for a booking's host failed; the owner is told instead", error);
+    return { to: store.email, note: "Your team could not be read just now, so this came to you instead of the booking's host." };
+  }
+  if (team.has(to.trim().toLowerCase())) return { to, note: null };
+  const gone = hosts.filter((h) => !team.has(h.trim().toLowerCase()));
+  return { to: store.email, note: `${gone.join(", ")} ${gone.length === 1 ? "is" : "are"} no longer on your team, so this came to you instead.` };
 }
 
 function hostLine(hosts: string[]): string {
@@ -1914,7 +1943,9 @@ export async function confirmBooking(input: {
     stage = "buyer";
   }
 
-  const creatorSide = hostRecipient(store, hosts);
+  // Never to a host who has left the team since the booking was made (creatorSideOf).
+  const told = await creatorSideOf(store, hosts);
+  const creatorSide = told.to;
   const theirs = onTheirCalendar(meeting, creatorSide, store.email);
   // The reminders before the call go to the store's own address (lib/call-reminders.ts, remindCreator).
   const toOwner = creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase();
@@ -1926,6 +1957,7 @@ export async function confirmBooking(input: {
     text: [
       `${buyerEmail ?? "A buyer"} booked ${product.title} (${minutes} minutes) ${input.amountCents === 0 ? "as one session of a package they bought from you, so nothing more was charged" : "and paid on your Stripe account"}.`,
       ...(hosts.length ? [hostLine(hosts)] : []),
+      ...(told.note ? [told.note] : []),
       "",
       ...(input.answers?.length
         ? ["What they answered before paying:", ...input.answers.map((answer) => `${answer.label}: ${answer.value}`), ""]

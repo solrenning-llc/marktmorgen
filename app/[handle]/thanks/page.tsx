@@ -73,7 +73,7 @@ import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
 import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
-import { groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
+import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
 import { speech } from "@/lib/buyer-words";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
@@ -690,16 +690,23 @@ export default async function ThanksPage({ params, searchParams }: Params) {
           .filter(reviewable)
           .filter((p, i, all) => all.findIndex((q) => q.id === p.id) === i)
       : [];
-  const reviewed = new Map<string, Review | null>();
+  // A review of theirs that could not be read is unknown (CX-123 rule 24, inventory R24 item 13): the section says so
+  // instead of a blank form that would post over the review they already wrote.
+  const reviewed = new Map<string, Review | null | "unknown">();
   if (toReview.length && store.statsId && order.state === "paid" && order.email) {
     const statsId = store.statsId;
     const email = order.email;
     await Promise.all(
       toReview.map(async (p) => {
-        reviewed.set(p.id, await readReview(statsId, p.id, reviewId(statsId, p.id, email)).catch(() => null));
+        reviewed.set(p.id, await readReview(statsId, p.id, reviewId(statsId, p.id, email)).catch(() => "unknown" as const));
       }),
     );
   }
+  const reviewedKnown = (id: string): Review | null => {
+    const review = reviewed.get(id);
+    return review === "unknown" ? null : (review ?? null);
+  };
+  const giving = givingWords(store.language);
   const reviewStatus = typeof query.review === "string" && REVIEW_NOTICES[query.review] ? query.review : "";
   const reviewProduct = typeof query.product === "string" ? query.product : "";
 
@@ -1363,19 +1370,25 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               {t.reviewWhenever(store.name)}
             </p>
             <div className="mt-6 space-y-10">
-              {toReview.map((product) => (
-                <ReviewForm
-                  key={product.id}
-                  handle={store.handle}
-                  door={{ session_id: sessionId }}
-                  product={{ id: product.id, title: product.title }}
-                  existing={reviewed.get(product.id) ?? null}
-                  storeName={store.name}
-                  back="thanks"
-                  notice={reviewProduct === product.id ? reviewStatus || null : null}
-                  lang={store.language}
-                />
-              ))}
+              {toReview.map((product) =>
+                reviewed.get(product.id) === "unknown" ? (
+                  <p key={product.id} role="status" className="st-note text-sm">
+                    {giving.reviewUnread(product.title)}
+                  </p>
+                ) : (
+                  <ReviewForm
+                    key={product.id}
+                    handle={store.handle}
+                    door={{ session_id: sessionId }}
+                    product={{ id: product.id, title: product.title }}
+                    existing={reviewedKnown(product.id)}
+                    storeName={store.name}
+                    back="thanks"
+                    notice={reviewProduct === product.id ? reviewStatus || null : null}
+                    lang={store.language}
+                  />
+                ),
+              )}
             </div>
           </section>
         ) : null}

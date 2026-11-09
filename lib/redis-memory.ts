@@ -1106,16 +1106,18 @@ export class MemoryRedis {
           for (const k of keys) this.live(k);
           let ours = true;
           for (let i = 0; i < n; i += 1) {
-            if (this.data.get(keys[i]) !== argv[1 + i]) ours = false;
-            const hold = this.data.get(keys[n + i]);
-            if (hold !== undefined && !(hold instanceof Map)) return -1;
+            const lock = this.data.get(keys[i]), hold = this.data.get(keys[n + i]);
+            // GET and HEXISTS on a key of another type fail the script, as Redis does.
+            if (lock !== undefined && typeof lock !== "string") throw new Error("WRONGTYPE");
+            if (hold !== undefined && !(hold instanceof Map)) throw new Error("WRONGTYPE");
+            if (lock !== argv[1 + i]) ours = false;
             if (!(hold instanceof Map) || !hold.has(pending)) ours = false;
           }
-          if (ours) return 1;
-          for (let i = 0; i < n; i += 1) {
-            const hold = this.data.get(keys[n + i]);
-            if (hold instanceof Map) this.run(["HDEL", keys[n + i], pending]);
+          if (ours) {
+            for (let i = 0; i < n; i += 1) this.run(["DEL", keys[i]]);
+            return 1;
           }
+          for (let i = 0; i < n; i += 1) if (this.data.get(keys[n + i]) instanceof Map) this.run(["HDEL", keys[n + i], pending]);
           return 0;
         }
         if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
@@ -1126,6 +1128,7 @@ export class MemoryRedis {
           for (const k of keys) this.live(k);
           for (const k of keys) {
             const hold = this.data.get(k);
+            if (hold !== undefined && !(hold instanceof Map)) throw new Error("WRONGTYPE");
             if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
           }
           for (const k of keys) this.run(["HDEL", k, argv[1]]);

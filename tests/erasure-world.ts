@@ -223,7 +223,9 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
     const them = emailKey(normaliseEmail(other));
     const pair = pairOf(learner, them);
     await redisPipeline([
-      ["RPUSH", `nl:cm:${id}:dm:${pair}`, JSON.stringify({ f: learner, t: "hi", at: now })],
+      // A line in the shape lib/community-dm.ts writes ({ a, text, at }, type Message): the data copy reads every line
+      // and refuses one it cannot read rather than leave it out (rule 24).
+      ["RPUSH", `nl:cm:${id}:dm:${pair}`, JSON.stringify({ a: learner, text: "hi", at: now })],
       ["ZADD", `nl:cm:${id}:dm:i:${learner}`, now, pair],
       ["ZADD", `nl:cm:${id}:dm:q:${them}`, now, pair],
       ["HSET", `nl:cm:${id}:dm:r:${pair}`, learner, now],

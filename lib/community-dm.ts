@@ -414,14 +414,21 @@ export type MessageHit = { pair: string; other: string; message: Message };
  */
 export async function searchMessages(id: string, who: string, used: string[]): Promise<MessageHit[]> {
   if (!used.length) return [];
-  const [raw] = await redisPipeline([["ZREVRANGE", inboxKey(id, who), 0, SEARCH_CONVERSATIONS - 1]]);
-  const pairs = (Array.isArray(raw) ? raw.map(String) : []).filter((pair) => otherIn(pair, who) !== "");
+  // Each list in its exact shape (CX-123 rule 24): a lost or off-shape reply is
+  // not "no match", so the search page says it could not search the messages.
+  // Only an exact empty list has nothing to find.
+  const what = "a member's conversations for a search";
+  const inbox = stringList(repliesFor(await redisPipeline([["ZREVRANGE", inboxKey(id, who), 0, SEARCH_CONVERSATIONS - 1]]), 1)?.[0]);
+  if (!inbox) throw new UnknownReplyError(what);
+  const pairs = inbox.filter((pair) => otherIn(pair, who) !== "");
   const hits: MessageHit[] = [];
   for (let at = 0; at < pairs.length; at += SEARCH_BATCH) {
     const batch = pairs.slice(at, at + SEARCH_BATCH);
-    const rows = await redisPipeline(batch.map((pair) => ["LRANGE", chatKey(id, pair), -SEARCH_MESSAGES, -1]));
+    const rows = repliesFor(await redisPipeline(batch.map((pair) => ["LRANGE", chatKey(id, pair), -SEARCH_MESSAGES, -1])), batch.length);
+    if (!rows) throw new UnknownReplyError(what);
     batch.forEach((pair, i) => {
-      const list = Array.isArray(rows[i]) ? (rows[i] as unknown[]) : [];
+      const list = stringList(rows[i]);
+      if (!list) throw new UnknownReplyError(what);
       for (const entry of list) {
         const message = parseMessage(entry);
         if (message && holdsAll(message.text, used)) hits.push({ pair, other: otherIn(pair, who), message });
@@ -487,18 +494,33 @@ export async function forgetDmPerson(id: string, who: string, room?: DataStore):
  * reads: no read mark is set.
  */
 export async function conversationsOf(id: string, who: string): Promise<{ request: boolean; messages: { mine: boolean; fromCreator: boolean; text: string; at: number }[] }[]> {
-  const [mine, asked] = await redisPipeline([["ZRANGEBYSCORE", inboxKey(id, who), "-inf", "+inf"], ["ZRANGEBYSCORE", askedKey(id, who), "-inf", "+inf"]]);
-  const requests = new Set((Array.isArray(asked) ? asked : []).map(String));
-  const pairs = [...new Set([...(Array.isArray(mine) ? mine : []), ...requests].map(String))].filter((p) => p.split(".").includes(who));
+  // Every list and line in its exact shape (CX-123 rule 24): a lost or
+  // off-shape reply, or a line that cannot be read as a message, is not "no
+  // conversations" or "no messages". It throws, so lib/person-copy.ts fails the
+  // whole copy rather than hand over one with a part silently missing. Only
+  // exact empty lists mean none.
+  const what = "a member's private conversations for their data copy";
+  const heads = repliesFor(await redisPipeline([["ZRANGEBYSCORE", inboxKey(id, who), "-inf", "+inf"], ["ZRANGEBYSCORE", askedKey(id, who), "-inf", "+inf"]]), 2);
+  const mine = stringList(heads?.[0]);
+  const asked = stringList(heads?.[1]);
+  if (!mine || !asked) throw new UnknownReplyError(what);
+  const requests = new Set(asked);
+  const pairs = [...new Set([...mine, ...asked])].filter((p) => p.split(".").includes(who));
   if (!pairs.length) return [];
-  const lists = await redisPipeline(pairs.map((pair) => ["LRANGE", chatKey(id, pair), 0, -1]));
-  return pairs.map((pair, i) => ({
-    request: requests.has(pair),
-    messages: (Array.isArray(lists[i]) ? (lists[i] as unknown[]) : [])
-      .map(parseMessage)
-      .filter((m): m is Message => m !== null)
-      .map((m) => ({ mine: m.a === who, fromCreator: m.a === CREATOR, text: m.text, at: m.at })),
-  }));
+  const lists = repliesFor(await redisPipeline(pairs.map((pair) => ["LRANGE", chatKey(id, pair), 0, -1])), pairs.length);
+  if (!lists) throw new UnknownReplyError(what);
+  return pairs.map((pair, i) => {
+    const lines = stringList(lists[i]);
+    if (!lines) throw new UnknownReplyError(what);
+    return {
+      request: requests.has(pair),
+      messages: lines.map((line) => {
+        const m = parseMessage(line);
+        if (!m) throw new UnknownReplyError(what);
+        return { mine: m.a === who, fromCreator: m.a === CREATOR, text: m.text, at: m.at };
+      }),
+    };
+  });
 }
 
 /** How many conversations and requests one member is in: what deleting them goes through (lib/community-erasure.ts). */

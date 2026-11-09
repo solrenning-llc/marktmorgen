@@ -57,7 +57,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -703,20 +703,27 @@ export async function rsvpNumbers(id: string, events: CommunityEvent[], member: 
   return out;
 }
 
-/** Everyone coming, as member keys with when they said so (seconds), a page of Redis's at a time. */
+/** The most pages of who is coming one read takes (a thousand asked for a page). */
+const RSVP_PAGES = 200;
+
+/**
+ * Everyone coming, as member keys with when they said so (seconds), a page of Redis's at a time.
+ *
+ * Everyone or not at all (rules 24 and 30, review of #2921): a page that does not read, or a walk not at its end
+ * after RSVP_PAGES before `limit` is reached, throws UnknownReplyError, never fewer people coming. A reminder, move
+ * or cancellation is then not sent to a short list as if it were everyone (lib/community-event-mail.ts, startJob).
+ */
 export async function rsvpList(id: string, eventId: string, limit = 100_000): Promise<{ key: string; at: number }[]> {
   const out: { key: string; at: number }[] = [];
   let cursor = "0";
-  for (let page = 0; page < 200; page += 1) {
-    // Each page in its exact shape (CX-123 rule 24; Claude 5 on #2954): a page in another shape is not the end of the
-    // list, so it throws, and nothing is written down for only part of the people coming.
-    const page = repliesFor(repliesFor(await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]), 1)?.[0], 2);
-    const next = page?.[0];
-    const flat = page ? stringList(page[1]) : null;
-    const cursorText = typeof next === "string" && /^\d+$/.test(next) ? next : typeof next === "number" && Number.isSafeInteger(next) && next >= 0 ? String(next) : null;
-    if (cursorText === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("who is coming to an event");
-    for (let i = 0; i < flat.length; i += 2) out.push({ key: flat[i], at: Number(flat[i + 1]) || 0 });
-    cursor = cursorText;
+  for (let page = 0; ; page += 1) {
+    if (page === RSVP_PAGES) throw new UnknownReplyError(`an event's HSCAN, not at its end after ${RSVP_PAGES} pages,`);
+    const read = scanPage(await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]));
+    // A hash answers field and value: an odd page is not one.
+    if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("an event's HSCAN");
+    const flat = read.items;
+    for (let i = 0; i + 1 < flat.length; i += 2) out.push({ key: flat[i], at: Number(flat[i + 1]) || 0 });
+    cursor = read.next;
     if (cursor === "0" || out.length >= limit) break;
   }
   return out.slice(0, limit).sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));

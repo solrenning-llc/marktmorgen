@@ -246,10 +246,15 @@ export async function visibleReviews(
   return [...shownFirst, ...rest].slice(0, Math.max(limit, shownFirst.length));
 }
 
-/** One review, when it exists. */
+/** One review, when it exists; null when it does not. Throws when the answer is not in its exact shape. */
 export async function readReview(statsId: string, productId: string, id: string): Promise<Review | null> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", productKey(statsId, productId), id]]);
+  // Only in its exact shape (CX-123 rule 24, inventory R24 item 13): one reply, the review as text or nil when there is
+  // none. Anything else is unknown and throws, never "no review yet", so a buyer is never shown a blank form over the
+  // review they already wrote.
+  const one = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+  const raw = one?.[0];
+  if (!one || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a buyer's review");
   return parseReview(raw);
 }
 

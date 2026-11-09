@@ -33,7 +33,7 @@ import { freeCopiesLimitFor } from "@/lib/order-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage } from "@/lib/redis-reply";
 import { isPaidUp } from "@/lib/billing";
 import { csvCell } from "@/lib/csv";
 import { type Listing, type Store, isFree } from "@/lib/store";
@@ -400,6 +400,13 @@ function cell(value: string): string {
  * Read in pages, so a large list never has to fit in one answer from Redis.
  * With `onlyAgreed`, the file holds only the people who ticked the box —
  * the ones a creator in Europe may write to about anything new.
+ *
+ * Whole or not at all (rules 24 and 30, review of #2921): a page that does not
+ * read, or a walk not at its end after its page ceiling, throws
+ * UnknownReplyError, never a shorter list handed over as the list. The
+ * download then answers that the list could not be read just now
+ * (app/api/store/leads/route.ts), and the store's whole export says that part
+ * could not be read (lib/store-export.ts).
  */
 export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<string> {
   const fields = await readFields(store.statsId).catch(() => []);
@@ -415,14 +422,16 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
   const key = leadsKey(store.listId);
   let cursor = "0";
   // Bounded, so a cursor that never comes back to zero cannot hold the
-  // function forever.
-  for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
-    const [reply] = await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    cursor = String(reply[0]);
-    const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  // function forever; a list not read to its end by then is unknown.
+  const pages = MAX_LEADS / 500 + 10;
+  for (let page = 0; ; page += 1) {
+    if (page === pages) throw new UnknownReplyError(`a list's HSCAN, not at its end after ${pages} pages,`);
+    const read = scanPage(await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]));
+    if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("a list's HSCAN");
+    cursor = read.next;
+    const flat = read.items;
     for (let i = 0; i + 1 < flat.length; i += 2) {
-      const email = String(flat[i]);
+      const email = flat[i];
       const lead = parseContact(flat[i + 1]);
       if (!lead) continue;
       if (onlyAgreed && !mailable(lead)) continue;

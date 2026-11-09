@@ -77,8 +77,10 @@ async function seed(): Promise<void> {
   ]);
 }
 
-const refund = (over: Record<string, unknown> = {}) => ({ id: "re_1", object: "refund", status: "succeeded", payment_intent: "pi_cs_1", amount: 10000, ...over });
-const dispute = (over: Record<string, unknown> = {}) => ({ id: "dp_1", object: "dispute", status: "lost", payment_intent: "pi_cs_1", amount: 10000, ...over });
+// Rule 23 (merging #3189, which reads refunds and disputes for the book): a counted row now needs its currency,
+// as Stripe always gives it, so a refund in another currency is never added to the sale's cents; the rows carry it.
+const refund = (over: Record<string, unknown> = {}) => ({ id: "re_1", object: "refund", status: "succeeded", payment_intent: "pi_cs_1", amount: 10000, currency: "usd", ...over });
+const dispute = (over: Record<string, unknown> = {}) => ({ id: "dp_1", object: "dispute", status: "lost", payment_intent: "pi_cs_1", amount: 10000, currency: "usd", ...over });
 
 /** Each envelope or row that cannot be read as Stripe gave it, for a list of `row`. */
 function unreadable(row: (over?: Record<string, unknown>) => Record<string, unknown>): [string, unknown][] {
@@ -95,12 +97,10 @@ function unreadable(row: (over?: Record<string, unknown>) => Record<string, unkn
     ["a counted row whose amount is text", { object: "list", data: [row({ amount: "10000" })], has_more: false }],
     ["a counted row whose amount is negative", { object: "list", data: [row({ amount: -10000 })], has_more: false }],
     ["a counted row whose amount is a fraction", { object: "list", data: [row({ amount: 99.5 })], has_more: false }],
-    // Rule 23: this row's status was null; Stripe documents a refund's status as a nullable string, and a null
-    // one is now taken off as a refund that may still go back (tests/affiliate-recurring-payment-exact.test.ts),
-    // so the unreadable status held here for both lists is a number. A dispute's status is never null in Stripe's
-    // reference and stays unreadable (the case right below).
+    // Rule 23: a status that is not one Stripe gives a refund or a dispute holds the book for both lists (#3189's
+    // reading, which this branch follows): a number, and null, which proves nothing about the money either.
     ["a row whose status is a number", { object: "list", data: [row({ status: 42 })], has_more: false }],
-    ...(row({}).object === "dispute" ? [["a dispute whose status is null", { object: "list", data: [row({ status: null })], has_more: false }] as [string, unknown]] : []),
+    ["a row whose status is null", { object: "list", data: [row({ status: null })], has_more: false }],
     ["a counted row whose payment is a number", { object: "list", data: [row({ payment_intent: 42 })], has_more: false }],
     ["a counted row whose payment is an object without an id", { object: "list", data: [row({ payment_intent: { object: "payment_intent" } })], has_more: false }],
   ];

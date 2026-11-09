@@ -12,11 +12,10 @@
  * word or counted its tax as commission. Each is now a payment the book does
  * not count and says so (invoicesChecked false): nothing is paid on it.
  *
- * A refund whose status Stripe gives as null (its API reference documents
- * the status as a nullable string) or as requires_action is money that may
- * go back: it is taken off as a pending one is, and does not stop every
- * other commission of the store from being paid. Only failed and canceled
- * refunds are passed over.
+ * A refund whose status is requires_action is money that may go back: it is
+ * taken off as a pending one is. Only failed and canceled refunds are passed
+ * over. A status that is not one Stripe gives a refund, null among them,
+ * holds the book (refunds not checked), as #3189 reads it.
  *
  * All through the real readBook and payWithPayPal, with Stripe and PayPal
  * stood in for by fetch; only the reply bodies change.
@@ -92,7 +91,8 @@ function invoice(over: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
-const refund = (over: Record<string, unknown> = {}) => ({ id: "re_1", object: "refund", status: "succeeded", payment_intent: "pi_inv_1", amount: 3000, ...over });
+// Rule 23 (merging #3189): a counted refund carries its currency, as Stripe always gives it.
+const refund = (over: Record<string, unknown> = {}) => ({ id: "re_1", object: "refund", status: "succeeded", payment_intent: "pi_inv_1", amount: 3000, currency: "usd", ...over });
 const list = (...data: unknown[]) => ({ object: "list", data, has_more: false });
 
 /** The book and a PayPal round on it: [invoices checked, refunds checked, payment lines, owed now, commissions PayPal was asked to send]. */
@@ -169,10 +169,11 @@ async function main(): Promise<void> {
   const taxed = await readBook(store);
   is("the tax is not commission: 30% of $25.00", [taxed.invoicesChecked, taxed.rows[0]?.payable], [true, 750]);
 
-  part("A refund's status: null and requires_action may still go back, failed and canceled did not");
+  part("A refund's status: requires_action may still go back, failed and canceled did not");
   invoicesBody = list(invoice());
   for (const [what, status, owed] of [
-    ["null (Stripe documents the status as nullable)", null, 0],
+    // Rule 23: the null case moved below; under #3189's reading a null status holds the book rather than
+    // counting as a refund, which pays nothing on it either way.
     ["requires_action", "requires_action", 0],
     ["pending", "pending", 0],
     ["failed", "failed", 900],
@@ -184,6 +185,10 @@ async function main(): Promise<void> {
   }
   refundsBody = list(refund({ status: 42 }));
   is("a refund whose status is a number is not read: refunds not checked", (await readBook(store)).refundsChecked, false);
+  refundsBody = list(refund({ status: null }));
+  const held = await readBook(store);
+  is("a refund whose status is null is not read: refunds not checked", held.refundsChecked, false);
+  is("its line still on the book, and PayPal is asked for nothing while refunds are not checked", await round(store), [true, false, 1, 900, 0]);
 
   part("Last: everything read whole, the commission is paid once");
   refundsBody = EMPTY;

@@ -22,7 +22,7 @@
 import { addProduct, claimHandle, ensureStatsId, setProductKeys, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { addKeys, keyForSale } from "@/lib/licence-keys";
-import { OWED_MAIL_RETRY_SECONDS, sendOwedOrderMail } from "@/lib/order-mail-owed";
+import { OWED_MAIL_COMMANDS, OWED_MAIL_RETRY_SECONDS, sendOwedOrderMail } from "@/lib/order-mail-owed";
 import { REFUSED_TRIES } from "@/lib/refused-tries";
 import { answers, sends } from "./licence-notice-world";
 import { store as redis } from "./redis-stub";
@@ -71,6 +71,7 @@ async function main(): Promise<void> {
   await setSubscription(OWNER, { customerId: "cus_KeyShop0001", subscriptionId: "sub_KeyShop0001", active: true, period: paidPeriod() });
   const product = async (title: string, lowAt: number, keys: number) => {
     const made = await addProduct(OWNER, title, "", "29", null);
+    if (!made.ok) throw new Error(`synthetic product ${title} was not made`);
     await setProductKeys(OWNER, made.product.id, { source: "pool", prefix: "", groups: 4, groupLength: 4, lowAt });
     const store = (await storeForEmail(OWNER))!;
     const listing = (await readListing(store, made.product.id))!;
@@ -160,7 +161,33 @@ async function main(): Promise<void> {
     reset();
     for (let i = 0; i < REFUSED_TRIES + 2; i += 1) answers.push("refused");
     await keyForSale(store, listing, "cs_gone_1", "gone@example.test");
-    for (const seconds of [...OWED_MAIL_RETRY_SECONDS, ...OWED_MAIL_RETRY_SECONDS]) {
+    // The job's share of its life (its tries again and its end): each try reads first whether it is still true. The
+    // store's own read is the job's, as for every owed email (OWED_MAIL_PER_RUN), and not counted here.
+    const counted = redis.pipeline;
+    let commands = 0;
+    let reading = false;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      if (!reading) commands += list.length;
+      return counted(list);
+    }) as typeof redis.pipeline;
+    const storeRead = async (handle: string) => {
+      reading = true;
+      try {
+        return await storeForHandle(handle);
+      } finally {
+        reading = false;
+      }
+    };
+    try {
+      for (const seconds of OWED_MAIL_RETRY_SECONDS) {
+        wait(seconds);
+        await sendOwedOrderMail(storeRead, Date.now() + 10_000);
+      }
+    } finally {
+      redis.pipeline = counted;
+    }
+    is("the job's share, inside OWED_MAIL_COMMANDS past the 7 its first refusal took", [commands, commands <= OWED_MAIL_COMMANDS - 7], [15, true]);
+    for (const seconds of OWED_MAIL_RETRY_SECONDS) {
       wait(seconds);
       await run();
     }

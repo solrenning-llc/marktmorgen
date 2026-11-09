@@ -135,7 +135,7 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = counted;
   }
-  is("its whole life, given up and its creator told, at most OWED_MAIL_COMMANDS", [commands <= OWED_MAIL_COMMANDS, OWED_MAIL_COMMANDS], [true, 21]);
+  is("its whole life, given up and its creator told, at most OWED_MAIL_COMMANDS", [commands <= OWED_MAIL_COMMANDS, OWED_MAIL_COMMANDS], [true, 23]);
   is("and three tries of its own, then one note", sends.length, REFUSED_TRIES + 1);
 
   part("An email to the creator's own address: given up without telling the address that refused it");

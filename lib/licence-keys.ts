@@ -51,6 +51,7 @@
  * <store> is the store's statsId, which follows it through a new address and
  * a new sign-in email.
  */
+import { randomBytes } from "node:crypto";
 import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
@@ -58,8 +59,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { NIMBUS_FROM, sendEmail } from "@/lib/email";
-import { sendOrderMail } from "@/lib/order-mail-owed";
+import { NIMBUS_FROM } from "@/lib/email";
+import { sendOrderMail, sendStoreNotice } from "@/lib/order-mail-owed";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -725,16 +726,23 @@ function senderAddress(): string {
   return (match ? match[1] : NIMBUS_FROM).trim();
 }
 
-/** Once per top-up: the pool is at or under the number the creator chose. */
+/**
+ * Once per top-up: the pool is at or under the number the creator chose.
+ * The mark holds this warning's own claim, so a certain refusal is owed and
+ * tried again (lib/order-mail-owed.ts, sendStoreNotice; rule 30 of EM1) only
+ * while that claim stands: a top-up lets it go, and the warning with it.
+ */
 async function warnIfLow(store: Store, product: Listing): Promise<void> {
   const setup = activeKeys(product);
   if (!setup || setup.source !== "pool") return;
   const [left] = await redisPipeline([["LLEN", poolKey(store, product)]]);
   const count = Number(left) || 0;
   if (count > setup.lowAt) return;
-  const [claimed] = await redisPipeline([["SET", warnedKey(store, product), "1", "NX", "EX", 90 * 86_400]]);
+  const claim = randomBytes(8).toString("hex");
+  const [claimed] = await redisPipeline([["SET", warnedKey(store, product), claim, "NX", "EX", 90 * 86_400]]);
   if (claimed === null) return;
-  await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  if (!store.email.trim()) return;
+  await sendStoreNotice(store, {
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: store.email,
     subject: count === 0 ? `No license keys left for ${product.title}` : `${count} license ${count === 1 ? "key" : "keys"} left for ${product.title}`,
@@ -747,12 +755,19 @@ async function warnIfLow(store: Store, product: Listing): Promise<void> {
       "",
       "This email comes once each time the pool runs low; adding keys resets it.",
     ].join("\n"),
-  }).catch((error) => console.error("warning about license keys failed", error));
+    idempotencyKey: `nimbus-key-low:${store.statsId}:${product.id}:${claim}`,
+    still: { key: warnedKey(store, product), value: claim },
+  }, "warning about license keys");
 }
 
-/** A buyer paid in the moment the last key went: the creator hears at once. */
+/**
+ * A buyer paid in the moment the last key went: the creator hears at once.
+ * A certain refusal is owed and tried again (lib/order-mail-owed.ts,
+ * sendStoreNotice; rule 30 of EM1) only while the buyer still waits.
+ */
 async function tellCreatorEmpty(store: Store, product: Listing, reference: string, email: string): Promise<void> {
-  await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  if (!store.email.trim()) return;
+  await sendStoreNotice(store, {
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: store.email,
     subject: `A buyer of ${product.title} is waiting for a license key`,
@@ -763,7 +778,9 @@ async function tellCreatorEmpty(store: Store, product: Listing, reference: strin
       `Add keys in your studio, under the product: ${SITE_URL}/studio${store.sid ? `?store=${store.sid}` : ""}#products`,
       "The moment you do, they are given the first one and it is emailed to them. Nothing else is needed from you.",
     ].join("\n"),
-  }).catch((error) => console.error("telling a creator about a waiting buyer failed", error));
+    idempotencyKey: `nimbus-key-wait:${store.statsId}:${product.id}:${reference}`,
+    still: { key: waitingKey(store, product), field: reference },
+  }, "telling a creator about a waiting buyer");
 }
 
 /** Gives every waiting buyer a key from a fresh upload, and emails it. */

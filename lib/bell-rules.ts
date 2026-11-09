@@ -9,7 +9,8 @@
  * says it, and leads to the place that deals with it:
  *
  *   Needs you
- *     renewal        the plan's renewal payment did not go through: the
+ *     renewal        the plan's renewal payment did not go through, on a
+ *                    plan that is paid up (renewalUnpaid): the
  *                    home's notice #renewal-unpaid (which tells a role that
  *                    may not pay to ask the owner);
  *     plan-disputed  a plan payment disputed with the bank, by the home's
@@ -29,6 +30,7 @@
  * "Nothing needs you right now."
  */
 import { type PlanDispute, planDisputed } from "@/lib/plan-dispute-rules";
+import { renewalUnpaid } from "@/lib/plan-standing";
 import type { Store } from "@/lib/store";
 import { type Role, can } from "@/lib/team-roles";
 
@@ -58,7 +60,8 @@ function dayWords(at: string): string | null {
 
 export function bellView(store: { sid: string } & BellFacts, role: Role, nowMs: number): BellView {
   const needs: BellItem[] = [];
-  if ((store.renewalUnpaidSince ?? 0) > 0) {
+  // The home's own rule: a renewal mark counts only on a plan that is paid up.
+  if (renewalUnpaid({ subscriptionActive: store.subscriptionActive === true, renewalUnpaidSince: store.renewalUnpaidSince })) {
     needs.push({ id: "renewal", words: "Your plan's renewal payment did not go through.", link: { href: home(store.sid, "renewal-unpaid"), label: "See what to do about your plan's payment" } });
   }
   if (store.subscriptionActive === true && planDisputed(store, nowMs / 1000)) {

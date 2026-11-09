@@ -122,7 +122,7 @@ const header = (current: Record<string, unknown>, role: Role = "owner") =>
       createElement(PathnameContext.Provider, { value: "/studio/bundles" }, createElement(StudioHeader, { current: { name: "Harbor", handle: "harbor", ...current, sid: "s1" }, role, stores: [], owned: 1, action: { href: "/studio?store=s1", label: "Back to the studio", short: "Studio" } })),
     ),
   );
-const bar = header({ renewalUnpaidSince: 1 });
+const bar = header({ subscriptionActive: true, renewalUnpaidSince: 1 });
 is("the bell is in the help's row, after it", [bar.includes("Notifications: 1 needs you"), bar.indexOf("Help for this screen") > -1 && bar.indexOf("Notifications") > bar.indexOf("Help for this screen")], [true, true]);
 is("a page that hands over only the store's name has a quiet bell, never a made-up one", header({}).includes("Nothing needs you right now."), true);
 is("the studio home hands over the store as it read it on this load, so the bell and the home's notices agree", /<StudioHeader\s+current=\{current \?\? store\}/.test(read("app/studio/page.tsx")), true);

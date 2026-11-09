@@ -58,10 +58,10 @@ async function storeOf(link: Link): Promise<{ store: Store } | { refused: string
   }
   const store = await storeForHandle(link.handle);
   if (!store) {
-    return { refused: `The address @${esc(link.handle)} does not lead to a store anymore, so this link cannot change its emails. You can stop them with the link in a newer email, or by replying to one.` };
+    return { refused: `The address @${esc(link.handle)} does not lead to a store anymore, so this link cannot change its emails. You can stop them with the link at the bottom of the newest one of these emails.` };
   }
   if (!addressLinkHolds(store, link.handle)) {
-    return { refused: `The address @${esc(link.handle)} may belong to another store than the one this older link was sent for, so it cannot change its emails. You can stop them with the link in a newer email, or by replying to one.` };
+    return { refused: `The address @${esc(link.handle)} may belong to another store than the one this older link was sent for, so it cannot change its emails. You can stop them with the link at the bottom of the newest one of these emails.` };
   }
   return { store };
 }
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
       `<h1>Your copy of the weekly email</h1><p>You get the weekly email of @${esc(link.handle)} because its owner added you. This stops your copy only.</p><form method="post" action="${esc(actionOf(link))}"><button>Stop my copy</button></form>`,
     );
   }
-  if (!link) return page("Link not recognized", "<p>This link is not one we recognize. Your weekly email can also be stopped by replying to it.</p>", 400);
+  if (!link) return page("Link not recognized", "<p>This link is not one we recognize. You can stop these emails with the link at the bottom of the newest one.</p>", 400);
   return page(
     "Weekly email",
     `<h1>Emails about your numbers</h1><p>Every Monday we email the week of your store, @${esc(link.handle)}, while it has visitors, on a day that is clearly busier than usual we tell you while it is happening, and when your sales stop for clearly longer than usual we tell you that too.</p><form method="post" action="${esc(actionOf(link))}"><input type="hidden" name="do" value="off"><button>Stop these emails</button></form>`,

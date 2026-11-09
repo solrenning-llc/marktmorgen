@@ -67,7 +67,7 @@ export function monthKey(now = new Date()): string {
  * pays us, the calendar month otherwise (lib/allowance-window.ts). A store
  * that pays and whose period is not known sends nothing that counts here.
  */
-const usedKey = (listId: string, window: string) => `nl:mail:used:${listId}:${window}`;
+export const usedKey = (listId: string, window: string) => `nl:mail:used:${listId}:${window}`;
 const windowOf = (store: Store) => windowId(store);
 
 /** Whether a store's pages may ask visitors to hear from the creator: Pro, and set up. */

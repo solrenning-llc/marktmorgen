@@ -56,7 +56,8 @@
  * import will check it, against the store as it is, and nothing written.
  */
 import { DataRoomError } from "@/lib/store-data";
-import { windowId } from "@/lib/allowance-window";
+import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
+import { admitNonPaying } from "@/lib/free-pool";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -84,7 +85,7 @@ import { csvLine, readConsent } from "@/lib/csv";
 import { grantImported, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
-import { giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth } from "@/lib/mail";
+import { giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, usedKey } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
 import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
@@ -170,6 +171,39 @@ export async function releaseMoved(store: Store, n: number, now = Date.now()): P
   if (monthlyAllowance(store) > 0) return giveBackToMonth(store, n);
   const window = utcMonth(store, now);
   if (window) await redisPipeline([["DECRBY", movedKey(store.sid, window), n]]);
+}
+
+/**
+ * A monthly counter read exactly (CX-123 rule 24): a confirmed absent key is 0, a whole number (a give-back can take
+ * it below zero) is itself; any other reply throws UnknownReplyError, never read as a month untouched.
+ */
+async function counterExact(key: string, what: string): Promise<number> {
+  const replies = repliesFor(await redisPipeline([["GET", key]]), 1);
+  const raw = replies?.[0];
+  if (replies && raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|-?[1-9][0-9]{0,14})$/.test(raw)) throw new UnknownReplyError(what);
+  return Number(raw);
+}
+
+/**
+ * How many emails to people brought over the store may still send now: what reserveMoved would let go, read from
+ * the same counter without taking anything. 0 when none could go (no window known, no list, no place this month for
+ * a store that does not pay). A counter that cannot be read throws (counterExact), so whoever decides on it refuses.
+ */
+export async function movedLeft(store: Store, now = Date.now()): Promise<number> {
+  if (!store.sid) return 0;
+  const allowance = monthlyAllowance(store, now / 1000);
+  if (allowance > 0) {
+    const window = windowId(store, now);
+    if (!store.listId || !window || !(await admitNonPaying(store, now))) return 0;
+    const used = await counterExact(usedKey(store.listId, window), "the month's emails used");
+    return Math.min(allowance, Math.max(0, allowance - used));
+  }
+  const cap = importAllowanceFor(store, now / 1000).movedEmails;
+  const window = utcMonth(store, now);
+  if (cap <= 0 || !window) return 0;
+  const used = await counterExact(movedKey(store.sid, window), "the emails to people brought over this month");
+  return Math.min(cap, Math.max(0, cap - used));
 }
 
 /**
@@ -394,13 +428,26 @@ export async function startImport(
   by: string,
   kind: ImportKind,
   input: StartInput,
-): Promise<{ ok: true; job: ImportJob } | { ok: false; reason: StartProblem; limit?: number }> {
+): Promise<{ ok: true; job: ImportJob } | { ok: false; reason: StartProblem | "emails_month"; limit?: number; opens?: string }> {
   const problem = startProblem(store, kind, input);
   if (problem) return { ok: false, ...problem };
   const expected = Math.floor(Number(input.expected));
   const ref = storeRef(store);
   if (kind === "contacts" && !store.listId && !(await ensureListId(ref))?.listId) return { ok: false, reason: "list" };
   if ((kind === "purchases" || kind === "products" || kind === "members") && !store.statsId) await ensureStatsId(ref);
+  // Every member is emailed their own link, and the creator stops the old renewals on that word: a file with more
+  // members than the emails that can go now does not start, so nobody is invited without being told (audit R46).
+  // Read before anything is claimed; a count that cannot be read throws, and nothing starts.
+  if (kind === "members") {
+    let current = store;
+    if (monthlyAllowance(store) > 0 && !store.listId) {
+      const listed = await ensureListId(ref);
+      if (!listed?.listId) return { ok: false, reason: "list" };
+      current = listed;
+    }
+    const left = await movedLeft(current);
+    if (expected > left) return { ok: false, reason: "emails_month", limit: left, opens: resetWords(current) };
+  }
 
   const id = randomBytes(12).toString("hex");
   // The slot's SET NX in its exact shape (sweep A3, CX-123 rule 24): "OK" is claimed, nothing is held by another;
@@ -1526,6 +1573,12 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
       if ((await reserveMoved(store, 1)) < 1) {
         await releaseDay(1);
+        // The month's emails are spent: tried once more when they open again, while that is still before the renewal
+        // date (after it, reminderEmail has nothing to send). Due REMIND_DAYS_BEFORE days before it, and every window
+        // longer than that, a second refusal finds the next opening past the renewal date, so it is put back at most
+        // once. Nothing went, so nothing goes twice.
+        const opens = allowanceWindow(store)?.end;
+        if (opens && opens < invite.r * 1000) await remindLater(sid, field, opens - 3_600_000);
         continue;
       }
       const sent = await sendBatch(

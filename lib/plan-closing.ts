@@ -78,6 +78,7 @@ import { PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { ENDED_INDEX, SETUP_STORAGE_BYTES, standingOf } from "@/lib/plan-standing";
 import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
@@ -159,6 +160,51 @@ function parseState(raw: unknown): State {
   }
 }
 
+/**
+ * A closing state as Redis answered it, read only in its exact shape (CX-123
+ * rule 24): null is no record yet, {}; anything else must be the text of a
+ * JSON object whose every field is a finite number, buyersAfter a string, as
+ * State is written. A reply of another shape (cut short, a number, an object
+ * not its text, a list, a field of another type, a missing reply) throws
+ * UnknownReplyError: it is never "nothing written down yet", so no closing
+ * day, notice, refund, access or deletion is decided on it.
+ */
+function readState(raw: unknown): State {
+  if (raw === null) return {};
+  let value: unknown;
+  try {
+    if (typeof raw !== "string") throw new Error("not text");
+    value = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("a store's closing state");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a store's closing state");
+  for (const [name, field] of Object.entries(value)) {
+    if (name === "buyersAfter" ? typeof field !== "string" : typeof field !== "number" || !Number.isFinite(field)) throw new UnknownReplyError("a store's closing state");
+  }
+  return parseState(raw);
+}
+
+/**
+ * A store's score in the final line (ZSCORE): null when it is not in it, the
+ * day its plan ended (ms), or UnknownReplyError. A plan end time is a positive
+ * number, so 0 or a negative score is unknown too, the same rule as
+ * closingScore (lib/closing-holds.ts).
+ */
+function finalScoreOf(raw: unknown): number | null {
+  if (raw === null) return null;
+  const value = typeof raw === "number" ? raw : typeof raw === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(value) || value <= 0) throw new UnknownReplyError("a store's place in the final closing line");
+  return value;
+}
+
+/** A pipeline's replies, exactly one for each command sent, or UnknownReplyError. */
+function exactly(replies: unknown, count: number, what: string): unknown[] {
+  const list = repliesFor(replies, count);
+  if (!list) throw new UnknownReplyError(what);
+  return list;
+}
+
 /** The day what a store keeps is removed, from the day its plan ended: both in ms. */
 export function removalDay(endedAt: number): number {
   return endedAt + CLOSING_DAYS * DAY_MS;
@@ -184,24 +230,28 @@ async function breakHolds(store: Store, nowSeconds: number): Promise<boolean> {
  * way the job counts it. Null when the store's plan has not ended, or when
  * what it kept has been removed already. Whether the store keeps more than
  * its room, which is what makes the day matter, is for the caller to measure.
+ * Throws when its record or its place in the final line is not answered in
+ * its exact shape (UnknownReplyError): the refunds and the checkout refuse
+ * then, never acting on a day made up from an unknown.
  */
 export async function closingOf(store: Store, now = Date.now()): Promise<{ endedAt: number; day: number; today?: boolean; buyers?: { by: number; done: boolean; untold: number } } | null> {
   // Its closing day has begun (queue item 307 [EC1]): it closes today, whatever the plan says.
   if (isRedisConfigured()) {
-    const [finalScore, rawFinal] = await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)], ["GET", stateKey(storeRef(store))]]);
-    if (finalScore !== null && finalScore !== undefined) {
-      const kept = parseState(rawFinal);
+    const [finalScore, rawFinal] = exactly(await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)], ["GET", stateKey(storeRef(store))]]), 2, "a store's closing");
+    const finalEnded = finalScoreOf(finalScore);
+    if (finalEnded !== null) {
+      const kept = readState(rawFinal);
       // Removed already, and waiting for the walk that deletes its records.
       if (kept.removed) return null;
-      return { endedAt: Number(finalScore), day: kept.day ?? now, today: true };
+      return { endedAt: finalEnded, day: kept.day ?? now, today: true };
     }
   }
   const endedAt = Date.parse(store.planEndedAt);
   if (standingOf(store, now / 1000) !== "ended" || !Number.isFinite(endedAt) || !isRedisConfigured()) return null;
   // A break the creator chose keeps everything until it ends (lib/plan-pause.ts).
   if (await breakHolds(store, now / 1000)) return null;
-  const [raw] = await redisPipeline([["GET", stateKey(storeRef(store))]]);
-  const read = parseState(raw);
+  const [raw] = exactly(await redisPipeline([["GET", stateKey(storeRef(store))]]), 1, "a store's closing state");
+  const read = readState(raw);
   const state: State = read.of === endedAt ? read : {};
   if (state.removed) return null;
   // Never sooner than a week after the last notice, which, where it has not
@@ -711,11 +761,11 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   // A closing day that has begun (its memberships ended at Stripe) is seen
   // through, whatever happens to the plan since: its buyers have lost what
   // they paid for, so it can no longer "stay open" (queue item 307 [EC1]).
-  const [finalScore] = await redisPipeline([["ZSCORE", FINAL_INDEX, key]]);
-  if (finalScore !== null && finalScore !== undefined && Number.isFinite(Number(finalScore))) {
-    const was = Number(finalScore);
-    const [rawFinal] = await redisPipeline([["GET", stateKey(key)]]);
-    const kept = parseState(rawFinal);
+  const [finalScore] = exactly(await redisPipeline([["ZSCORE", FINAL_INDEX, key]]), 1, "a store's place in the final closing line");
+  const was = finalScoreOf(finalScore);
+  if (was !== null) {
+    const [rawFinal] = exactly(await redisPipeline([["GET", stateKey(key)]]), 1, "a store's closing state");
+    const kept = readState(rawFinal);
     const final: State = kept.of === was ? kept : { of: was, renewals: now };
     // A plan paid for it since its day began (a checkout opened before and
     // finished on it) is ended and returned in full (lib/closing-plan-guard.ts).
@@ -750,8 +800,8 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   // nobody is written to until it ends. Nothing is written down either, so
   // the day after it ends this store is looked at as if for the first time.
   if (await onBreak(key, now / 1000)) return { key, state: "held", note: "on a break" };
-  const [raw] = await redisPipeline([["GET", stateKey(key)]]);
-  const read = parseState(raw);
+  const [raw] = exactly(await redisPipeline([["GET", stateKey(key)]]), 1, "a store's closing state");
+  const read = readState(raw);
   // Notices about an earlier ending say nothing about this one.
   const state: State = read.of === endedAt ? read : { of: endedAt };
   const save = (next: State) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]);
@@ -1051,8 +1101,8 @@ async function refuseLatePlans(store: Store): Promise<boolean> {
  */
 export async function finishClosed(entry: Batched, now = Date.now()): Promise<void> {
   const key = stateKey(entry.ref);
-  const [raw] = await redisPipeline([["GET", key]]);
-  await redisPipeline([["SET", key, JSON.stringify({ ...parseState(raw), erased: now }), "EX", ERASED_KEPT_DAYS * 86_400]]);
+  const [raw] = exactly(await redisPipeline([["GET", key]]), 1, "a closed store's closing state");
+  await redisPipeline([["SET", key, JSON.stringify({ ...readState(raw), erased: now }), "EX", ERASED_KEPT_DAYS * 86_400]]);
 }
 
 /** How long the closing record of a deleted store is kept: dates only, the company's. */

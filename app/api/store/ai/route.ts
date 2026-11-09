@@ -320,6 +320,9 @@ export async function POST(request: NextRequest) {
     const facts = (p: (typeof listings)[number]) => ({ title: p.title, summary: p.summary, price: priceWords(p, store.currency, store.tiers), link: productLink(store, p.id) });
     let followed: ReturnType<typeof facts> | null = null;
     if (trigger === "product" || trigger === "finished") {
+      // A product held for a child-safety report goes to no AI provider (lib/child-safety.ts).
+      const onHold = await heldRefusal(store, text(body.productId, 40));
+      if (onHold) return onHold;
       const chosen = await readListing(store, text(body.productId, 40));
       if (!chosen) return fail("unknown", 404);
       followed = facts(chosen);

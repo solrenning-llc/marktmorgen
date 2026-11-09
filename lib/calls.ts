@@ -53,7 +53,7 @@ import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeListUnreadable, plainObject, ownField, readStripePage } from "@/lib/stripe-list";
-import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
+import { fieldReleaseBytes, orderWrite, orderWriteOnce, releaseOrderData } from "@/lib/order-data";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isHouseStore } from "@/lib/house-store";
@@ -156,6 +156,16 @@ export const confirmedKey = (session: string) => `nl:call:confirmed:${session}`;
  * gone by itself, so a closed store leaves none for good (18 October 2026).
  */
 export const CONFIRMED_SECONDS = 430 * 86_400;
+/**
+ * Where a booking's confirmation stands, by its mark (Claude 5, 9 November 2026; rules 24 and 30). "sending": the
+ * time is kept for good (written in the same step as the mark) and what follows is owed; "booked": the orders, the
+ * lead, the reminders and the webhook are done, both emails owed; "buyer": the buyer's email went, the creator's is
+ * owed; "done": all of it. "1" is the mark written before this day, and by a move before any confirmation, and reads
+ * as done, as it always did. Each value is no longer than "sending", which the store's room was charged for.
+ */
+type ConfirmStage = "sending" | "booked" | "buyer" | "done";
+const CONFIRM_OWED: ReadonlySet<string> = new Set<ConfirmStage>(["sending", "booked", "buyer"]);
+const CONFIRM_DONE: ReadonlySet<string> = new Set(["done", "1"]);
 
 /** A time as the diary's writers make it: a whole number of milliseconds since 1970, after 1970. */
 const diaryTime = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
@@ -599,10 +609,14 @@ export async function catchUpBookings(store: Store, paid: PaidCall[], origin: st
   const now = Date.now();
   const due = paid.filter((c) => c.session && c.end > now).slice(0, 20);
   if (!due.length) return;
-  const seen = await redisPipeline(due.map((c) => ["EXISTS", confirmedKey(c.session)]));
+  // Each one's mark, read exactly: only a confirmation done is left; one never made or left short of done (a try that
+  // failed after the mark) is confirmed now, and confirmBooking decides on a mark it does not know.
+  const seen = repliesFor(await redisPipeline(due.map((c) => ["GET", confirmedKey(c.session)])), due.length);
+  if (!seen) throw new UnknownReplyError("the confirmation marks of a store's paid calls");
   const find = listingFinder(store);
   for (let i = 0; i < due.length; i += 1) {
-    if (Number(seen[i]) === 1) continue;
+    const held = seen[i];
+    if (typeof held === "string" && CONFIRM_DONE.has(held)) continue;
     const call = due[i];
     const product = await find(call.product);
     if (!product || !isCallProduct(product)) continue;
@@ -633,10 +647,26 @@ export function isCallProduct<T extends Listing>(product: T): product is T & { c
   return product.call !== null;
 }
 
-/** Whether a booking was already confirmed, so the mail job knows to leave it. */
+/**
+ * Whether a booking's confirmation was made, or begun: its time is then kept for good (written with the mark), so a
+ * package's session is spent (lib/call-packages.ts). Whether it is finished is confirmationOwed's question.
+ */
 export async function isConfirmed(session: string): Promise<boolean> {
   const [seen] = await redisPipeline([["EXISTS", confirmedKey(session)]]);
   return Number(seen) === 1;
+}
+
+/**
+ * Whether a booking's confirmation is still owed, so the mail job knows to make it or to leave it: never begun, or
+ * begun and left short of done by a try that failed (ConfirmStage). A mark in any other shape is unknown and thrown
+ * (rule 24), which keeps the booking in the job's queue.
+ */
+export async function confirmationOwed(session: string): Promise<boolean> {
+  const held = repliesFor(await redisPipeline([["GET", confirmedKey(session)]]), 1)?.[0];
+  if (held === null) return true;
+  if (typeof held === "string" && CONFIRM_DONE.has(held)) return false;
+  if (typeof held === "string" && CONFIRM_OWED.has(held)) return true;
+  throw new UnknownReplyError("a booking's confirmation mark");
 }
 
 // ---- Saving a product's setup --------------------------------------------
@@ -1601,6 +1631,14 @@ export function storeSender(store: Store): string {
  * against Stripe before this is reached, and the write is guarded so a page
  * refreshed ten times sends one pair of emails. The reminders a day and an
  * hour before are planned here too.
+ *
+ * The once-only mark and the time kept for good are written in one step
+ * (orderWriteOnce), and the mark says how far the rest got (ConfirmStage): a
+ * try that fails after it leaves the mark short of "done", and the next try
+ * (the thanks page, the studio's catch-up, the mail job) does what is still
+ * owed, each email under its own idempotency key and at most once (Claude 5,
+ * 9 November 2026). Before, a failure after the mark left the paid call on
+ * its checkout's hold, which runs out, and no email ever went.
  */
 export async function confirmBooking(input: {
   store: Store;
@@ -1667,66 +1705,98 @@ export async function confirmBooking(input: {
   } catch (error) {
     throw new Error("reading a team booking's hosts failed; confirmed later", { cause: error });
   }
-  const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
-  if (fresh === null) return;
-  // Booked: the orders it was admitted as are the window's (lib/orders.ts), once, by the checkout.
-  for (let unit = 1; unit <= CALL_ORDER_UNITS; unit += 1) await countOrder(store, `call:${session}:${unit}`, input.amountCents ?? 0);
-  // Booked through an affiliate's link, where the store pays per call that takes place: written down now,
-  // earning only once the call's time has passed, it was not refunded and the creator approves it (lib/affiliate-leads.ts).
-  if (input.lead && buyerEmail) {
-    await recordLead(store, { aff: input.lead, kind: "booking", email: buyerEmail, end: Math.floor(end / 1000), ref: session, pi: input.pi ?? "", paid: input.amountCents ?? 0, title: product.title });
-  }
-
   // A team booking keeps its hosts and the claim on their time, now for good (read above).
   const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(team ? { h: team.hosts, c: team.claim } : {}) };
-  // Kept for good now that it is paid: written anew, so the store's room is
-  // charged the whole entry (lib/order-data.ts), not only what it grew by
-  // since its checkout held the time.
-  await orderWrite(store, [["HDEL", busyKey(store.callsId), session], ["HSET", busyKey(store.callsId), session, JSON.stringify(entry)]]);
-  if (team) {
-    await confirmTeam(store, product.id, team.hosts, team.claim, start, end).catch((error) => console.error("confirming a team booking's hosts failed", error));
-    // The five-minute job reads this store's refunds while it has team bookings to come, so a refund gives the hosts their time back.
-    await redisPipeline([["ZADD", MEET_STORES, end, `${store.callsId}|${store.handle}`]]).catch(() => {});
+  // The once-only mark and the time kept for good now that it is paid, in one step (orderWriteOnce): a mark is never
+  // written without the time kept, so a paid call never stays on its checkout's hold, which runs out and frees the
+  // time to be sold again. The entry is written anew, so the store's room is charged the whole entry
+  // (lib/order-data.ts), not only what it grew by since its checkout held the time; a mark already there writes
+  // nothing, so a refreshed page is never charged twice.
+  const write = await orderWriteOnce(store, [
+    ["SET", confirmedKey(session), "sending", "NX", "EX", CONFIRMED_SECONDS],
+    ["HDEL", busyKey(store.callsId), session],
+    ["HSET", busyKey(store.callsId), session, JSON.stringify(entry)],
+  ]);
+  let stage: ConfirmStage = "sending";
+  if ("held" in write) {
+    if (CONFIRM_DONE.has(write.held)) return;
+    // A mark not known is never taken for done or for owed (rule 24): thrown, so the mail job keeps it.
+    if (!CONFIRM_OWED.has(write.held)) throw new UnknownReplyError("a booking's confirmation mark");
+    // A try that stopped after the mark: what it did not finish is done now. Only while the time is still kept: one
+    // let go since (a cancellation, a refund, a call long past) is not told to anybody as booked.
+    const kept = repliesFor(await redisPipeline([["HGET", busyKey(store.callsId), session]]), 1)?.[0];
+    if (kept !== null && typeof kept !== "string") throw new UnknownReplyError("a booking's time, resuming its confirmation");
+    if (kept === null) {
+      await markConfirmed(session, "done");
+      return;
+    }
+    stage = write.held as ConfirmStage;
+  }
+  if (stage === "sending") {
+    // Booked: the orders it was admitted as are the window's (lib/orders.ts), once each by its reference, however
+    // often this is tried, by the checkout.
+    for (let unit = 1; unit <= CALL_ORDER_UNITS; unit += 1) await countOrder(store, `call:${session}:${unit}`, input.amountCents ?? 0);
+    // Booked through an affiliate's link, where the store pays per call that takes place: written down now (once:
+    // the lead's HSETNX), earning only once the call's time has passed, it was not refunded and the creator approves
+    // it (lib/affiliate-leads.ts).
+    if (input.lead && buyerEmail) {
+      await recordLead(store, { aff: input.lead, kind: "booking", email: buyerEmail, end: Math.floor(end / 1000), ref: session, pi: input.pi ?? "", paid: input.amountCents ?? 0, title: product.title });
+    }
+    if (team) {
+      await confirmTeam(store, product.id, team.hosts, team.claim, start, end).catch((error) => console.error("confirming a team booking's hosts failed", error));
+      // The five-minute job reads this store's refunds while it has team bookings to come, so a refund gives the hosts their time back.
+      await redisPipeline([["ZADD", MEET_STORES, end, `${store.callsId}|${store.handle}`]]).catch(() => {});
+    }
+    // Reminders are emails too, so the demo plans none (writesAboutBookings). Planning the same booking twice plans nothing new.
+    if (writesAboutBookings(store)) {
+      await planReminders(store.callsId, store.handle, session, start).catch((error) =>
+        console.error("planning call reminders failed", error),
+      );
+    }
+    // Once per checkout however often it is noticed: its event id is made from the session (lib/webhooks.ts).
+    await emitEvent(store, "call.booked", session, {
+      checkout_session: session,
+      product: { id: product.id, title: product.title },
+      start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(),
+      kind: product.call.kind === "live" ? "live_session" : product.call.seats > 1 ? "group_call" : "call",
+      buyer: { email: buyerEmail, name: input.buyerName ?? null, timezone: input.buyerTz },
+      answers: (input.answers ?? []).map((answer) => ({ question: answer.label, answer: answer.value })),
+    }).catch((error) => console.error("queueing the call.booked webhook failed", error));
+    // The creator's phone, when a device of theirs asked for bookings
+    // (lib/phone-alerts.ts): what, when in their own time zone, and what was paid, once per `seed`.
+    // In the currency it was paid in: the store's own, unless the store changed its currency since.
+    const paid = typeof input.amountCents === "number" && input.amountCents > 0 ? formatMoney(input.amountCents, input.currency || store.currency) : "";
+    await alertCreator(
+      store,
+      "booking",
+      {
+        title: paid ? `New booking: ${paid}` : "New booking",
+        body: `${product.title} · ${readableTime(start, product.call.tz)}`,
+        url: store.sid ? `/studio?store=${store.sid}` : "/studio",
+      },
+      { seed: session },
+    ).catch((error) => console.error("a booking notification failed", error));
+    // Written down at once, so a later try never counts the team's round robin again (confirmTeam's HINCRBY).
+    if (writesAboutBookings(store)) {
+      if (!(await markConfirmed(session, "booked"))) return;
+      stage = "booked";
+    }
   }
   const hosts = team?.emails ?? [];
-  // Reminders are emails too, so the demo plans none (writesAboutBookings).
-  if (writesAboutBookings(store)) {
-    await planReminders(store.callsId, store.handle, session, start).catch((error) =>
-      console.error("planning call reminders failed", error),
-    );
-  }
-  await emitEvent(store, "call.booked", session, {
-    checkout_session: session,
-    product: { id: product.id, title: product.title },
-    start: new Date(start).toISOString(),
-    end: new Date(end).toISOString(),
-    kind: product.call.kind === "live" ? "live_session" : product.call.seats > 1 ? "group_call" : "call",
-    buyer: { email: buyerEmail, name: input.buyerName ?? null, timezone: input.buyerTz },
-    answers: (input.answers ?? []).map((answer) => ({ question: answer.label, answer: answer.value })),
-  }).catch((error) => console.error("queueing the call.booked webhook failed", error));
-  // The creator's phone, when a device of theirs asked for bookings
-  // (lib/phone-alerts.ts): what, when in their own time zone, and what was paid.
-  // In the currency it was paid in: the store's own, unless the store changed its currency since.
-  const paid = typeof input.amountCents === "number" && input.amountCents > 0 ? formatMoney(input.amountCents, input.currency || store.currency) : "";
-  await alertCreator(
-    store,
-    "booking",
-    {
-      title: paid ? `New booking: ${paid}` : "New booking",
-      body: `${product.title} · ${readableTime(start, product.call.tz)}`,
-      url: store.sid ? `/studio?store=${store.sid}` : "/studio",
-    },
-    { seed: session },
-  ).catch((error) => console.error("a booking notification failed", error));
   // A Google Meet or Zoom meeting, when the product makes them: made now, on
   // the creator's account, so both emails carry its link, and made even
   // where email is off, since the pages show it too (lib/meet-links.ts). It
-  // never holds the booking up: a failure gives the fallback link.
+  // never holds the booking up: a failure gives the fallback link. A later
+  // try finds the meeting already made (its record, by scope).
   const meeting = await callMeeting({ store, product, session, start, end, buyerEmail, buyerName: input.buyerName, ...(hosts.length ? { team: { hosts } } : {}) }).catch((error) => {
     console.error("making a booking's meeting failed", error);
     return null;
   });
-  if (!writesAboutBookings(store)) return;
+  if (!writesAboutBookings(store)) {
+    await markConfirmed(session, "done");
+    return;
+  }
 
   const setup = product.call;
   const buyerTz = isTimeZone(input.buyerTz) ? input.buyerTz : setup.tz;
@@ -1742,12 +1812,16 @@ export async function confirmBooking(input: {
     ).toString("base64");
   const minutes = Math.round((end - start) / 60_000);
 
-  if (buyerEmail) {
+  // Each email at most once: under its own idempotency key (a repeat within a day is answered without sending it
+  // again, by Resend or by lib/email.ts's own claim for Amazon), and written down as sent before the next is tried, so
+  // a later try never sends it again. A send that answered "not sent" is not tried again, as before.
+  if (buyerEmail && stage !== "buyer") {
     // The buyer's email speaks the store's language (lib/buyer-words/booking.ts).
     const b = bookingWords(store.language);
     const locale = LANGUAGES[parseLanguage(store.language)].locale;
     const hours = Math.max(setup.noticeHours, 1);
     await sendEmail({ meter: { by: "order" },
+      idempotencyKey: confirmEmailKey(session, "buyer"),
       from: storeSender(store),
       to: buyerEmail,
       subject: b.bookedSubject(product.title, store.name),
@@ -1779,6 +1853,7 @@ export async function confirmBooking(input: {
       replyTo: store.email,
       attachments: [{ filename: "call.ics", content: invite(buyerNote(b, store, room, place), b) }],
     });
+    if (!(await markConfirmed(session, "buyer"))) return;
   }
 
   const creatorSide = hostRecipient(store, hosts);
@@ -1786,6 +1861,7 @@ export async function confirmBooking(input: {
   // The reminders before the call go to the store's own address (lib/call-reminders.ts, remindCreator).
   const toOwner = creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase();
   await sendEmail({ meter: { by: "order" },
+    idempotencyKey: confirmEmailKey(session, "creator"),
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: creatorSide,
     subject: `New booking: ${product.title}, ${readableTime(start, setup.tz)}`,
@@ -1830,6 +1906,24 @@ export async function confirmBooking(input: {
       ? {}
       : { attachments: [{ filename: "call.ics", content: invite(place ? `With ${buyerEmail ?? "your buyer"}. In person, at: ${placeLine(place)}` : `With ${buyerEmail ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`) }] }),
   });
+  await markConfirmed(session, "done");
+}
+
+/** The idempotency key of a booking's confirmation email: the same on every try, a different one for each side. */
+function confirmEmailKey(session: string, side: "buyer" | "creator"): string {
+  return `call-booked:${side}:${session}`.slice(0, 256);
+}
+
+/**
+ * Moves a booking's confirmation mark on to `stage` (ConfirmStage), only while it is there (XX): true when written,
+ * false when the mark is gone (the store's data erased since), and then nothing more is done or sent. Any other
+ * answer is unknown and thrown (rule 24), and the next try does this stage again.
+ */
+async function markConfirmed(session: string, stage: Exclude<ConfirmStage, "sending">): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["SET", confirmedKey(session), stage, "XX", "EX", CONFIRMED_SECONDS]]), 1)?.[0];
+  if (reply === "OK") return true;
+  if (reply === null) return false;
+  throw new UnknownReplyError("a booking's confirmation mark");
 }
 
 /**

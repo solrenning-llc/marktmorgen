@@ -21,7 +21,8 @@
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
-import { type CallListing, type PaidCall, catchUpBookings, confirmBooking, confirmedKey, holdAndCheckout } from "@/lib/calls";
+import { type CallListing, type PaidCall, catchUpBookings, confirmBooking, confirmationOwed, confirmedKey, holdAndCheckout } from "@/lib/calls";
+import { dataKey } from "@/lib/store-data";
 import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
 import { sendCallReminders } from "@/lib/call-reminders";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
@@ -230,6 +231,41 @@ async function main(): Promise<void> {
       is("later tries send no confirmation again", confirmations(settledHere), [0, 0]);
     }
     is("no booking was left half confirmed", owed, 0);
+
+    part("A refreshed page writes and charges nothing more");
+    const room = dataKey(store)!;
+    const charged = async () => (await run([["HGET", room, "o"]]))[0];
+    const roomBefore = await charged();
+    await thanks(control, free[0]);
+    await thanks(control, free[0]);
+    is("the store's room is charged once for the booking", await charged(), roomBefore);
+
+    part("A mark from before this day, one left short of done whose time was let go, and one not known");
+    const take = async () => {
+      slot += 1;
+      return { start: free[slot], session: await book(free[slot]) };
+    };
+    const legacy = await take();
+    await run([["SET", confirmedKey(legacy.session), "1", "EX", 60]]);
+    let from = postsNow();
+    await thanks(legacy.session, legacy.start);
+    is("a mark written before this day (\"1\") reads as done, as it always did", [confirmations(from), await confirmationOwed(legacy.session)], [[0, 0], false]);
+    const gone = await take();
+    await run([["SET", confirmedKey(gone.session), "sending", "EX", 60], ["HDEL", diary, gone.session]]);
+    from = postsNow();
+    await thanks(gone.session, gone.start);
+    is(
+      "a confirmation left short of done whose time was let go since tells nobody it is booked, and is done",
+      [confirmations(from), (await run([["GET", confirmedKey(gone.session)]]))[0], await confirmationOwed(gone.session)],
+      [[0, 0], "done", false],
+    );
+    const odd = await take();
+    await run([["SET", confirmedKey(odd.session), "maybe", "EX", 60]]);
+    from = postsNow();
+    const refused = await thanks(odd.session, odd.start).then(() => "returned", (error) => String(error?.name ?? error));
+    const owedOdd = await confirmationOwed(odd.session).then(String, (error) => String(error?.name ?? error));
+    is("a mark not known is thrown, never taken for done or owed, and sends nothing (rule 24)", [refused, owedOdd, confirmations(from)], ["UnknownReplyError", "UnknownReplyError", [0, 0]]);
+    is("the mail job's question: owed when never begun or left short, not once done", [await confirmationOwed("cs_test_never_begun_000001"), await confirmationOwed(control)], [true, false]);
     done();
   } finally {
     console.error = quiet;

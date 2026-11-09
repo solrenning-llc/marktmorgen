@@ -97,6 +97,9 @@ async function main() {
   const manualInvoice = { ...openInvoice(null), collection_method: "send_invoice" };
   const manual = subscription("sub_PastDueManual01", "manual", manualInvoice);
   is("an invoice paid by link (send_invoice) always has no try scheduled: not an ended plan", stateOf({ ...manual, collection_method: "send_invoice" }).state, "active");
+  // Second pre-review G-1: one paid by link has its own clock, its due date and the same window.
+  const overdue = stateOf({ ...subscription("sub_PastDueManual02", "manual-overdue", { ...manualInvoice, due_date: NOW - (NO_TRY_WAIT_DAYS + 1) * DAY }), collection_method: "send_invoice" });
+  is("(G-1) paid by link and unpaid past its due date and the window: ended", overdue.state, "inactive");
   const pausedUncollectible = stateOf({ ...subscription("sub_PastDuePaused01", "paused", { ...openInvoice(null), status: "uncollectible" }), pause_collection: { behavior: "mark_uncollectible", resumes_at: null } });
   is("(L-4) collection paused at Stripe, its invoices marked uncollectible: paused, not ended", pausedUncollectible.state === "active" && pausedUncollectible.renewalUnpaid, true);
 

@@ -89,10 +89,20 @@ async function main() {
   is("the open renewal invoice is voided, once", voids().length, 1);
   is("under its own idempotency key", voids()[0]?.key, `plan-cancel-void:${INVOICE}`);
   // Pre-review G1: only a voided renewal marked as ours keeps its period unpaid. The mark rides on the cancellation
-  // itself (no call of its own): since when the store recorded the renewal unpaid.
-  const since = (await storeForEmail(email))!.renewalUnpaidSince ?? 0;
-  is("the cancellation itself carries the mark, the moment the store recorded the renewal unpaid, and nothing else is sent", [changes().length, new URLSearchParams(changes()[0]?.body ?? "").get("metadata[renewal_voided_before]"), since > 0], [1, String(since), true]);
+  // itself (no call of its own). Regra 23 (second pre-review, A-1): was the store's first unpaid day; a later
+  // month's renewal is newer than that and would not read as ours. It is now the moment of the cancel.
+  const markSent = Number(new URLSearchParams(changes()[0]?.body ?? "").get("metadata[renewal_voided_before]"));
+  is("the cancellation itself carries the mark, the moment of the cancel, and nothing else is sent", [changes().length, Math.abs(markSent - Math.floor(Date.now() / 1000)) <= 5], [1, true]);
   is("the studio is sent to the notice for a canceled plan whose renewal was unpaid", first, "canceling-unpaid");
+
+  part("(A-1) an earlier renewal may still be open");
+  // The store first recorded its renewal unpaid well before the latest renewal was made: an earlier one went unpaid.
+  const record = state.store;
+  state.store = { ...record, renewalUnpaidSince: period.start - 30 * 86_400 };
+  invoiceStatus = "open";
+  asked.length = 0;
+  is("the latest is voided, and the studio says an earlier one may still be charged", [await cancel(), voids().length], ["canceling-unpaid-older", 1]);
+  state.store = record;
 
   part("cancel again: nothing to void");
   asked.length = 0;
@@ -147,6 +157,8 @@ async function main() {
   is("there is a notice for a canceled plan whose renewal was unpaid", unpaid !== "", true);
   is("it does not say the store keeps taking payments", /keeps taking payments/.test(unpaid), false);
   is("it says the checkout stays closed", /checkout stays closed/.test(unpaid), true);
+  const older = notice("canceling-unpaid-older");
+  is("(A-1) the notice for an earlier renewal still open says the card may still be charged for it", [older !== "", /earlier/.test(older), /may still be charged/.test(older)], [true, true, true]);
   const open = notice("canceling-unpaid-open");
   is("the notice for an unconfirmed void says the card may still be charged", /may still be charged/.test(open), true);
   is("the plan card has its own words for a canceled plan with the renewal unpaid", page.includes("Its last renewal payment did not go through"), true);

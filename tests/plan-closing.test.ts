@@ -426,7 +426,7 @@ async function main(): Promise<void> {
   await endPlan(liv.email);
   const L = await endedAt(liv.email);
   for (const day of [0, M, W]) await closeOne(liv.email, L + day * DAY, hands);
-  running.set("liv", { id: "sub_liv0002", status: "past_due", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_liv0001", email: liv.email }, metadata: { store: "liv" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] }, latest_invoice: { id: "in_liv0000001", object: "invoice", status: "open", billing_reason: "subscription_cycle", collection_method: "charge_automatically", next_payment_attempt: 1_900_000_000, created: 1_790_000_000 } });
+  running.set("liv", { id: "sub_liv0002", status: "past_due", created: 1_790_000_000, cancel_at: null, cancel_at_period_end: false, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_liv0001", email: liv.email }, metadata: { store: "liv" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] }, latest_invoice: { id: "in_liv0000001", object: "invoice", status: "open", billing_reason: "subscription_cycle", collection_method: "charge_automatically", next_payment_attempt: 1_900_000_000, created: 1_790_000_000 } });
   const livBack = await closeOne(liv.email, L + C * DAY, hands);
   const livNow = (await storeForEmail(liv.email))!;
   is("(A1) running again with its renewal unpaid: costs stay paused", [livBack.state, livNow.subscriptionActive, (livNow.renewalUnpaidSince ?? 0) > 0], ["running", true, true]);

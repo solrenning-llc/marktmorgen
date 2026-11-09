@@ -206,6 +206,8 @@ function centralAliases(file,root,here){
   aliases['@/lib/upload-budget-policy']=join(here,'upload-budget-approved-policy.ts');
   aliases['@/lib/llc-fixed-costs']=join(here,'llc-fixed-approved-policy.ts');
  }
+ // The funded plan read by the yearly offer and the closing day: the contract proof is a double that records which proof was asked.
+ if(file==='funded-plan-siblings.test.ts')aliases['@/lib/contract-funding']=join(here,'contract-activation-billing.ts');
  if(file==='contract-billing-metadata.test.ts'){
   aliases['@/lib/plan']=join(here,'contract-billing-plan.ts');
   aliases['@/lib/contract-funding']=join(here,'contract-activation-billing.ts');

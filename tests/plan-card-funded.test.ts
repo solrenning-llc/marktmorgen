@@ -31,6 +31,7 @@ import { calls, ledger, reset, seed } from "./contract-funding-redis";
 import { planAmountWords, planDueSoon } from "@/components/renewal-unpaid-notice";
 import { PUBLISHED_PLAN_PRICES } from "@/lib/plan";
 import type { Store } from "@/lib/store";
+import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_not_a_real_deployment_key";
 const DAY = 86_400;
@@ -183,4 +184,45 @@ test("every other caller keeps the activation it had", async () => {
   calls.length = 0;
   assert.equal((await readSubscription(store.subscriptionId!)).state, "unknown", "without a store it is still unknown");
   assert.equal(calls.length, 0);
+});
+
+/**
+ * Rule 24: the proof a funded plan is read with is charged before it is read. One EVAL with its whole script, its
+ * arguments and its reply, bounded in tests/plan-cost-registry.ts (FUNDED_PLAN_READS), and the studio's home page that
+ * sends the read-only one still fits the STUDIO_PAGE_UNITS it takes (studio line, held with the page measured in
+ * tests/studio-today-trips.test.ts).
+ */
+test("the funded plan's proof is registered at its commands and bytes, and the studio page still fits its units", async () => {
+  const registry = (await import("./plan-cost-registry")) as unknown as Record<string, unknown>;
+  const reads = registry.FUNDED_PLAN_READS as { observe?: { evals: number; commands: number; bytes: number }; activate?: { evals: number; commands: number; bytes: number } } | undefined;
+  assert.ok(reads?.observe && reads.activate, "FUNDED_PLAN_READS is registered");
+  const inside = (script: string) => (script.match(/redis\.call\(/g) ?? []).length;
+  for (const name of ["OBSERVE_CONTRACT", "OBSERVE_SWITCH_CONTRACT"]) assert.ok(1 + inside(String(parts[name])) <= reads.observe.commands, `${name}: the EVAL and every command inside`);
+  for (const name of ["ACTIVATE_CONTRACT", "ACTIVATE_SWITCH_CONTRACT"]) assert.ok(1 + inside(String(parts[name])) <= reads.activate.commands, `${name}: the EVAL and every command inside`);
+  // Measured: the read-only EVAL the studio sends, with its arguments, and the largest reply it can give.
+  start();
+  const { subscription, activation } = await funded("paid");
+  assert.equal(await activateCheckoutContract(activation), true);
+  calls.length = 0;
+  stripe(subscription);
+  assert.equal((await read("observe")).state, "active");
+  const sent = calls.flat().filter((c) => c[0] === "EVAL");
+  assert.equal(sent.length, reads.observe.evals);
+  const reply = JSON.stringify({ result: [2, Number.MAX_SAFE_INTEGER] }).length;
+  assert.ok(JSON.stringify(sent[0]).length + reply <= reads.observe.bytes, "the checkout proof's bytes");
+  // The switch script is the longest: its text with the same arguments and a grant id at its 84-character ceiling.
+  const longest = Math.max(...["OBSERVE_SWITCH_CONTRACT", "ACTIVATE_CONTRACT", "ACTIVATE_SWITCH_CONTRACT"].map((name) => String(parts[name]).length));
+  const args = JSON.stringify(sent[0].slice(2)).length + 2 * 84 + 32;
+  assert.ok(longest + 32 + args + reply <= Math.min(reads.observe.bytes, reads.activate.bytes), "every proof's bytes");
+  // The studio line names the page's read and the scripts it sends, and the page with it fits its four units.
+  const lines = registry.COST_LINES as { id: string; sources: { file: string; names: string[] }[] }[];
+  const studio = lines.find((line) => line.id === "studio")!;
+  const named = (file: string, name: string) => studio.sources.some((source) => source.file === file && source.names.includes(name));
+  assert.ok(named("app/studio/page.tsx", 'readSubscription(store.subscriptionId, store, "observe")'), "the studio line cites the page's read");
+  assert.ok(named("lib/contract-funding.ts", "OBSERVE_CONTRACT") && named("lib/contract-funding.ts", "OBSERVE_SWITCH_CONTRACT"), "and the read-only scripts");
+  const page = registry.STUDIO_HOME_COMMANDS as number | undefined;
+  assert.ok(typeof page === "number" && page > 0, "the home page's measured commands are registered");
+  const request = registry.request as (shape: string, commands: number, bytes?: number) => number;
+  const unit = (registry.UNIT_COST as Record<string, number>).studio;
+  assert.ok(request("heavy", page + reads.observe.commands, 400_000 + reads.observe.bytes) <= STUDIO_PAGE_UNITS * unit, "the page and the proof fit the units the page takes");
 });

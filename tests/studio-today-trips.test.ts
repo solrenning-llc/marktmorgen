@@ -31,6 +31,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import StudioPage from "@/app/studio/page";
 import { store as redis } from "./redis-stub";
+import { STUDIO_HOME_COMMANDS } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 const DELAY_MS = 40;
@@ -74,13 +75,16 @@ async function main(): Promise<void> {
   let trips = 0;
   let steps = 0;
   let inFlight = 0;
-  redis.pipeline = async (commands) => {
+  // Commands as Upstash bills them: each one sent, and every command a script runs inside (rule 24).
+  let commands = 0;
+  redis.pipeline = async (sent) => {
+    commands += sent.length + sent.reduce((n, command) => n + (command[0] === "EVAL" ? (String(command[1]).match(/redis\.call\(/g) ?? []).length : 0), 0);
     trips += 1;
     if (inFlight === 0) steps += 1;
     inFlight += 1;
     try {
       await new Promise((wait) => setTimeout(wait, DELAY_MS));
-      return await original(commands);
+      return await original(sent);
     } finally {
       inFlight -= 1;
     }
@@ -98,12 +102,16 @@ async function main(): Promise<void> {
     answering(null);
   }
   const ms = Date.now() - started;
-  console.log("TODAY_TRIPS:" + JSON.stringify({ trips, steps, ms }));
+  console.log("TODAY_TRIPS:" + JSON.stringify({ trips, steps, ms, commands }));
 
   part(`Today at ${DELAY_MS} ms a Redis trip`);
   is("the page loads for its owner", loaded, true);
   is(`at most ${MAX_STEPS} steps one after another`, steps <= MAX_STEPS, true);
   is(`no more than ${MAX_TRIPS} trips in all`, trips <= MAX_TRIPS, true);
+  // The commands the page is charged at in tests/plan-cost-registry.ts (STUDIO_HOME_COMMANDS), within its
+  // STUDIO_PAGE_UNITS together with a funded plan's read-only proof (tests/plan-card-funded.test.ts). This store has
+  // no plan, so that proof is not among them; a store with more products, people or calls reads more, not held here.
+  is(`no more than the ${STUDIO_HOME_COMMANDS} commands the page is charged at`, commands <= STUDIO_HOME_COMMANDS, true);
 
   // Codex M on #2900: with the store's cached titles gone (a cold or old cache), the parts that read the cards side by
   // side must not each repair it. Read in order, the page repaired it once.

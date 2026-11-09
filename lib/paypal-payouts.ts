@@ -501,15 +501,14 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   // A "?" entry left beside the batch PayPal named for it (promoteBatch's removal not confirmed) is dropped here, with
   // nothing asked of PayPal: the batch itself is read below. Until Redis confirms the removal, its people stay on their
   // way, the store stays in the daily job, and the batch is not settled either, so its id (`s`) still names the entry
-  // on the next run and it is never taken for a batch whose answer is not known.
+  // on the next run and it is never taken for a batch whose answer is not known. Its people are the batch's own, which
+  // stays in `open` and is counted waiting below (or in the no-token sum), so they are not counted here as well.
   const undropped = new Set<string>();
   for (const field of heldUnknowns(open)) {
-    const people = open.get(field)?.lines.length ?? 0;
     open.delete(field);
     if (!(await removedExactly(statsId, field))) {
       console.error("a PayPal '?' entry already held under its batch id could not be confirmed removed; tried again next run", field);
       undropped.add(field);
-      out.waiting += people;
     }
   }
   const auth = await bearer(store).catch(() => null);

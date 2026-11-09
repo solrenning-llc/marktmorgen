@@ -5,7 +5,7 @@ import { readAiAnswer } from "@/lib/ai-response";
 import { Icon } from "@/components/icons";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { AiDraftReview } from "@/components/ai-draft-review";
-import { freshChecks, reviewDone, sensitiveTopics, type SensitiveTopic } from "@/lib/ai-draft-review";
+import { draftStrings, draftTopics, freshChecks, reviewDone, type DraftTopics } from "@/lib/ai-draft-review";
 
 /**
  * Whether the writing help (lib/ai.ts) is there for this person on this page,
@@ -96,7 +96,7 @@ export function AiAssist<T>({
   // The three checks under the draft it filled in (756 [STN3]).
   const [checks, setChecks] = useState<boolean[]>(freshChecks);
   // What the draft is about that needs a reader who knows it (756 [STN3], unit 2), read from its own words.
-  const [topics, setTopics] = useState<SensitiveTopic[]>([]);
+  const [topics, setTopics] = useState<DraftTopics>([]);
   const [left, setLeft] = useState(startLeft);
   const [allowanceKnown, setAllowanceKnown] = useState(startKnown);
   const [readOnce, setReadOnce] = useState(startKnown);
@@ -129,7 +129,8 @@ export function AiAssist<T>({
         onResult(data.value as T);
         // Every new draft is checked afresh, whatever was checked for the one before.
         setChecks(freshChecks());
-        setTopics(sensitiveTopics(JSON.stringify(data.value)));
+        // Each string as written, never the JSON text, where "\nInvesting" reads as "nInvesting"; in the draft's language.
+        setTopics(draftTopics(draftStrings(data.value), data.language));
         onReviewChange?.(false);
         setDrafted(true);
         setFilled(true);

@@ -29,9 +29,9 @@ is("read from any text the draft holds, deep inside", sensitiveTopics(JSON.strin
 is("nothing: none", sensitiveTopics(""), []);
 
 part("What it says");
-is("one subject", sensitiveWarning(["health"]), "This draft is about health. Before you publish, have someone who knows health read it, and do not promise a result.");
-is("two subjects", sensitiveWarning(["health", "money"]), "This draft is about health and money. Before you publish, have someone who knows health and money read it, and do not promise a result.");
-is("three subjects", sensitiveWarning(["health", "money", "law"]), "This draft is about health, money and the law. Before you publish, have someone who knows health, money and the law read it, and do not promise a result.");
+is("one subject", sensitiveWarning(["health"]), "This draft is about health. Before you publish, have someone who knows the subject read it, such as a doctor, and do not promise a result.");
+is("two subjects", sensitiveWarning(["health", "money"]), "This draft is about health and money. Before you publish, have someone who knows each subject read it, such as a doctor or an accountant, and do not promise a result.");
+is("three subjects", sensitiveWarning(["health", "money", "law"]), "This draft is about health, money and the law. Before you publish, have someone who knows each subject read it, such as a doctor, an accountant or a lawyer, and do not promise a result.");
 is("none: nothing", sensitiveWarning([]), null);
 
 part("Drawn with the checks");
@@ -43,7 +43,7 @@ is("no subject: no warning", plain.includes("Sensitive topic:"), false);
 
 part("Where it is used");
 const assist = readFileSync("components/ai-assist.tsx", "utf8");
-is("the box reads the subjects from the draft it fills in", assist.includes("setTopics(sensitiveTopics(JSON.stringify(data.value)))"), true);
+is("the box reads the subjects from the draft it fills in", assist.includes("setTopics(draftTopics(draftStrings(data.value), data.language))"), true);
 is("and passes them to the checks", assist.includes("topics={topics}"), true);
 
 part("Read from the draft's own words, not its JSON (Claude 6 review of #3436, MEDIUM 1)");

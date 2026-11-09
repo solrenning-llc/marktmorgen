@@ -58,7 +58,9 @@ export async function POST(request: NextRequest) {
   const answer = async <T,>(result: Promise<{ ok: true; value: T; left: number } | { ok: false; reason: string }>) => {
     const done = await result;
     if (!done.ok) return fail(done.reason, done.reason === "failed" ? 502 : 400);
-    return Response.json({ ok: true, value: done.value, left: done.left });
+    // The store's language, which drafts are written in (lib/ai.ts, storeLanguage), so the
+    // "AI draft" checks know whether they can read the draft's subjects (756 [STN3], unit 2).
+    return Response.json({ ok: true, value: done.value, left: done.left, language: store.language });
   };
 
   if (body.kind === "product") {

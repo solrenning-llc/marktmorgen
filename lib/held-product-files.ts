@@ -1,7 +1,8 @@
 /**
  * Every file a product hands over, for the child-safety hold (unit 3b,
  * lib/held-files.ts): its own file, each price option's file, its picture
- * and the picture's smaller copy, the pictures on its sales page, each
+ * and the picture's smaller copy, the pictures on its sales page (both
+ * versions of a page test), each
  * lesson's video and files, and each
  * episode's audio. A page, course or podcast that cannot be read (the reads are
  * exact) leaves the list incomplete: what is known is kept, and the hold says
@@ -11,7 +12,7 @@ import type { Product } from "@/lib/catalog";
 import { readCourseExact } from "@/lib/course";
 import { readPodcast } from "@/lib/podcast";
 import { imagePaths } from "@/lib/product-image";
-import { picturesOf } from "@/lib/sales-page";
+import { picturePaths } from "@/lib/sales-page";
 import { readPageExact } from "@/lib/sales-page-store";
 
 type Hands = Pick<Product, "id" | "file" | "options" | "image" | "course" | "podcast">;
@@ -30,8 +31,9 @@ export async function productFilePaths(product: Hands, statsId?: string): Promis
   // The pictures on its own sales page, read exactly.
   if (statsId) {
     try {
+      // Both versions of the page (a page test's second version too), as lib/sales-page.ts picturePaths reads them.
       const { page } = await readPageExact(statsId, product.id);
-      for (const block of page?.blocks ?? []) for (const picture of picturesOf(block)) paths.push(picture.path);
+      if (page) paths.push(...picturePaths(page));
     } catch {
       complete = false;
     }

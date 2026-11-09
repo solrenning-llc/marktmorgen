@@ -32,6 +32,7 @@ import { addOption, addProduct, addStoreLink, claimHandle, ensureStatsId, imageF
 import { readListing } from "@/lib/catalog";
 import { fileFolder } from "@/lib/product-file";
 import { keepReviewPhoto } from "@/lib/review-photo";
+import { SETUP_STORAGE_BYTES } from "@/lib/plan-standing";
 import { readPodcast, savePodcast } from "@/lib/podcast";
 import { picturePaths } from "@/lib/sales-page";
 import { readPage } from "@/lib/sales-page-store";
@@ -182,8 +183,9 @@ async function main(): Promise<void> {
   is("its own audio is deleted", files.has(other), false);
 
   part("A buyer's review photo, in the same picture folder");
-  const photo = await keepReviewPhoto(OWNER, REVIEW_JPEG);
-  if (photo === "photo") throw new Error("review photo");
+  // Rule 23: keepReviewPhoto takes the store's space since owner's decision 8 (lib/image-space.ts); this store has room.
+  const photo = await keepReviewPhoto(OWNER, REVIEW_JPEG, SETUP_STORAGE_BYTES);
+  if (photo === "photo" || photo === "paused") throw new Error("review photo");
   is("stored in the store's picture folder", photo.path.startsWith(`images/${folder}/`), true);
   is("on product C: refused", await attach(c, photo.path), [400, "in_use"]);
   is("on a link: refused", await linkAttach(linkTwo, photo.path), [400, "in_use"]);

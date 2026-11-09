@@ -7,7 +7,8 @@ import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/requ
 import { type Door, doorFields, openDoor, readDoor } from "@/lib/review-proof";
 import { MAX_REVIEW_PHOTO_BYTES, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { dropReviewPhoto, keepReviewPhoto } from "@/lib/review-photo";
-import { costsPaused } from "@/lib/plan-standing";
+import { costsPaused, standingOf } from "@/lib/plan-standing";
+import { storageBrakeFor } from "@/lib/storage-quota";
 
 /** The words, and a photo shrunk by the buyer's browser (lib/review-photo.ts) sent as text. */
 const MAX_BODY_BYTES = 6_000 + Math.ceil(MAX_REVIEW_PHOTO_BYTES * 1.6);
@@ -109,10 +110,14 @@ export async function POST(request: NextRequest) {
     // While the store's plan renewal is unpaid or its plan payment disputed
     // (232 [CA1] 4b), a new photo is new storage nobody is paying for: the
     // words are still saved, the photo is not kept, and the buyer is told.
-    const photoPaused = Boolean(read("photo")) && costsPaused(store);
-    const sentPhoto = photoPaused ? "" : read("photo");
-    const photo = sentPhoto ? await keepReviewPhoto(storeRef(store), sentPhoto) : null;
-    if (photo === "photo") return answer("photo");
+    const pausedForCost = Boolean(read("photo")) && costsPaused(store);
+    const sentPhoto = pausedForCost ? "" : read("photo");
+    // A photo takes room in the store's space (owner's decision 8, lib/image-space.ts); with none left, or a room that
+    // cannot be read, the words are saved without it and the buyer is told the same way.
+    const kept = sentPhoto ? await keepReviewPhoto(storeRef(store), sentPhoto, storageBrakeFor(standingOf(store), store.tier)) : null;
+    if (kept === "photo") return answer("photo");
+    const photoPaused = pausedForCost || kept === "paused";
+    const photo = kept === "paused" ? null : kept;
     const saved = await saveReview(statsId, {
       productId,
       email: proof.email,

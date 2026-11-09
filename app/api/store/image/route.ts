@@ -27,6 +27,7 @@ import {
 } from "@/lib/product-image";
 import { sniffPhotoType } from "@/lib/store-photo";
 import { dropTakenPictures, takePictureDoor } from "@/lib/picture-door";
+import { adjustImages } from "@/lib/image-space";
 
 const ACTIONS = new Set(["attach", "remove", "alt", "display"]);
 
@@ -171,11 +172,22 @@ export async function POST(request: NextRequest) {
     // The picture and the smaller copy made of it go together, except a name the new picture still uses.
     const still = new Set(imagePaths(image));
     const replaced = imagePaths(result.removed).filter((removed) => !still.has(removed));
+    let given = 0;
     if (replaced.length) {
-      await del(replaced).catch((error: unknown) => {
+      const deleted = await del(replaced).then(() => true, (error: unknown) => {
         console.error("could not delete a replaced product picture", error);
+        return false;
       });
+      // What was deleted gives its room back, at the size the picture was kept with (0 for one from before sizes were kept).
+      if (deleted && result.removed) {
+        const sizes = new Map([[result.removed.path, result.removed.bytes], ...(result.removed.small ? [[result.removed.small.path, result.removed.small.bytes] as const] : [])]);
+        given = replaced.reduce((sum, removed) => sum + (sizes.get(removed) ?? 0), 0);
+      }
     }
+    // The store's space (owner's decision 8, lib/image-space.ts): the pictures this request took from the door counted at
+    // their real sizes in place of what the door held for them, and the ones it deleted given back. Best effort.
+    const settled = image ? [{ path: image.path, bytes: image.bytes }, ...(image.small ? [{ path: image.small.path, bytes: image.small.bytes }] : [])] : [];
+    await adjustImages(ref, settled.filter((each) => fresh.has(each.path)), given);
     return Response.json({ ok: true });
   } catch (error) {
     if (error instanceof StoreFullError) {

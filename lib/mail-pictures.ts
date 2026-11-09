@@ -9,7 +9,8 @@
  * A picture in an email is kept for as long as the store is: an email once
  * sent can be opened years later, and a picture taken away from it would
  * leave a hole in the creator's own words. It counts as a small file in the
- * store's folder, as a product's picture does.
+ * store's folder, as a product's picture does, and takes room from the
+ * store's space (lib/image-space.ts).
  */
 import { randomBytes } from "node:crypto";
 import { put } from "@/lib/blob";
@@ -18,6 +19,7 @@ import { imagePath } from "@/lib/product-image";
 import { imageSize } from "@/lib/image-size";
 import { sniffPhotoType } from "@/lib/store-photo";
 import { MAIL_PICTURE_SIDE, MAX_MAIL_PICTURE_BYTES, pictureUrl } from "@/lib/mail-picture-rules";
+import { admitImage } from "@/lib/image-space";
 
 export type CheckedPicture = { bytes: Uint8Array; width: number; height: number };
 
@@ -33,8 +35,15 @@ export function checkMailPicture(raw: string): CheckedPicture | "picture" {
   return { bytes, width: size.width, height: size.height };
 }
 
-/** Keeps a checked picture and gives the address an email shows it from. */
-export async function keepMailPicture(ref: string, checked: CheckedPicture): Promise<{ url: string; width: number; height: number }> {
+/**
+ * Keeps a checked picture and gives the address an email shows it from. Its
+ * exact bytes are taken from the store's space (`limit`, its plan's storage)
+ * before it is written (owner's decision 8, lib/image-space.ts): past it, or
+ * when the room cannot be read, ImageSpaceRefused is thrown and nothing is
+ * written.
+ */
+export async function keepMailPicture(ref: string, checked: CheckedPicture, limit: number): Promise<{ url: string; width: number; height: number }> {
+  await admitImage(ref, checked.bytes.length, limit);
   const folder = await imageFolder(ref);
   const name = randomBytes(16).toString("hex");
   const path = imagePath(folder, name, "image/jpeg");

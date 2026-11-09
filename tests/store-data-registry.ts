@@ -58,6 +58,7 @@ import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES } from "@/lib/store";
+import { IMAGE_OPEN_MAX } from "@/lib/image-space";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
@@ -298,6 +299,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:tasks:bytes:@lib/assignment.ts": { what: "What a store's students keep handed in, in bytes", parts: [capped(KEY, "One count a store.")] },
   "nl:tasks:taken:@lib/assignment.ts": short("A handed-in file's mark of the bytes it took of the store's room, an hour, so a lost answer gives them back", "buyer", 1, 128),
   "nl:tasks:doors@lib/assignment.ts": company("Hand-in doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's (priced in buyer-actions), gone within two days."),
+  "nl:images:space:@lib/image-space.ts": { what: "A store's pictures counted in its space (owner's decision 8)", parts: [capped((IMAGE_OPEN_MAX + 6) * 200 + KEY, "One hash a store's picture folder: six counters (held, files, pend, fat, try, at) and at most IMAGE_OPEN_MAX door pictures waiting, each field under 200 bytes; an admission past IMAGE_OPEN_MAX is refused.", { file: "lib/image-space.ts", names: ["IMAGE_OPEN_MAX", "n>=most"] })] },
   "nl:pictures:doors:@lib/picture-door.ts": { what: "A store's picture uploads not yet put on anything", parts: [capped(1_000 * 128, "One sorted set a store, trimmed to a day and to its newest 1,000 notes (PICTURE_DOOR_MAX) each time one is added, and expiring a day after the last.")] },
   "nl:auth:devices:@lib/auth.ts": company("Devices an account signed in on", "An account's, not a store's."),
   "nl:auth:fresh:@lib/auth.ts": company("A fresh sign-in", "An account's, minutes."),

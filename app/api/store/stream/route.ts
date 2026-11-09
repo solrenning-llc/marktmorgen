@@ -7,7 +7,8 @@ import { ITEM_ID_PATTERN, VIDEO_TYPES, findLesson, readCourses } from "@/lib/cou
 import { rememberFolderOwner } from "@/lib/delivery";
 import { MAX_FILE_BYTES, safeFileName } from "@/lib/product-file";
 import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
-import { fits, storageBrakeFor, storageUsed } from "@/lib/storage-quota";
+import { fits, storageBrakeFor } from "@/lib/storage-quota";
+import { noteFilesAuthorized, spaceUsed } from "@/lib/image-space";
 import { storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { isStreamConfigured, openUpload } from "@/lib/stream";
@@ -67,9 +68,11 @@ export async function POST(request: NextRequest) {
     if (refused) return serviceRefusedJson(refused, "slow_down");
     // What a store may keep goes by where it stands with its plan (lib/plan-standing.ts).
     const standing = standingOf(store);
-    const held = await storageUsed(folder, storageBrakeFor(standing, store.tier));
+    // Files, lesson videos and the store's pictures together (owner's decision 8, lib/image-space.ts).
+    const held = await spaceUsed(ref, storageBrakeFor(standing, store.tier));
     if (held.available === false) return Response.json({ ok: false, error: "video_unavailable" }, { status: 503 });
     if (!fits(held, bytes)) return Response.json({ ok: false, error: storageRefusal(standing) }, { status: 400 });
+    await noteFilesAuthorized(ref, held.files, bytes);
     await rememberFolderOwner(folder, ref);
     // The video's records (what the service says of it, its captions' languages) take room in the store's data room first.
     if (!(await takeData(store, [{ slot: "sv", bytes: VIDEO_RECORD_BYTES }])).ok) return Response.json({ ok: false, error: "store_full" }, { status: 409 });

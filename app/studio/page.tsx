@@ -2734,7 +2734,7 @@ export default async function StudioPage({
                     </dd>
                   </div>
                   <div>
-                    <dt className="font-semibold text-ink">Files stored</dt>
+                    <dt className="font-semibold text-ink">Files and pictures stored</dt>
                     <dd className="text-ink-soft">
                       {`Up to ${storageWords(storageBrakeFor(standing, store.tier))} for your store${
                         standing === "paid"

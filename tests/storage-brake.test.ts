@@ -42,16 +42,20 @@ test("only an upload is ever refused by it, never a download", () => {
 
   assert.deepEqual(
     callers.map((f) => f.replace(process.cwd() + "/", "")),
-    // The three doors an upload goes through: into the host's file store,
-    // to the video service for a lesson's video (lib/stream.ts), and into
-    // the R2 file store, whose requests can still incur costs (lib/vault.ts).
+    // The three doors an upload goes through (into the host's file store, to the video service for a lesson's video,
+    // lib/stream.ts, and into the R2 file store, lib/vault.ts) measure through lib/image-space.ts since the owner's
+    // decision 8 (9 November 2026), which adds the store's pictures (rule 23: the two routes moved from this list to
+    // the check below; lib/vault-storage.ts keeps its default measure, which the vault route replaces).
     // And the two places a store whose plan has ended is measured against
     // the room of a store with no plan: the daily job that gives what it
     // keeps a date (lib/plan-closing.ts), and the studio, which shows its
-    // owner that date. Neither is a door a buyer comes through.
-    ["app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/studio/page.tsx", "lib/plan-closing.ts", "lib/vault-storage.ts"],
+    // owner that date. Neither is a door a buyer comes through, and neither counts pictures (closing never deletes them).
+    ["app/studio/page.tsx", "lib/image-space.ts", "lib/plan-closing.ts", "lib/vault-storage.ts"],
     "what a store keeps is measured where an upload is let in, and for a store whose plan has ended. No download is ever refused by it.",
   );
+  for (const door of ["app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/api/store/vault/route.ts"]) {
+    assert.match(readFileSync(door, "utf8"), /await spaceUsed\(ref, /, `${door} measures files, videos and pictures together`);
+  }
 });
 
 test("the figures read as figures", () => {

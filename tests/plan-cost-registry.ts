@@ -61,7 +61,7 @@ import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
 import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
-import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
+import { PAID_UPLOAD_OPENS, uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, MAX_REPORT_ROWS } from "@/lib/imports";
@@ -106,7 +106,7 @@ import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/li
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
-  PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
+  PROVIDER_CHARGES_BPS, R2_CLASS_A_MICRO_USD_PER_MILLION, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
@@ -114,6 +114,7 @@ import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
+import { IMAGE_LIST_PAGES, IMAGE_SPACE_COMMANDS, IMAGE_SPACE_READ_BYTES, RECONCILE_MS } from "@/lib/image-space";
 import type { ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
@@ -871,6 +872,38 @@ export type CostLine = {
 
 const ALL_TIERS_SAME = (usd: number) => () => usd;
 
+/**
+ * The store's pictures counted in its space (owner's decision 8, 9 November 2026; lib/image-space.ts, line
+ * images-space). Vercel Blob prices a listing as an Advanced Operation; the dearest rate this review reads is
+ * $7 a million (the regional table of https://vercel.com/docs/vercel-blob/usage-and-pricing as read for #2848,
+ * 7 November 2026), and @vercel/blob tries a request again up to ten times (node_modules/@vercel/blob, VERCEL_BLOB_RETRIES),
+ * so each page is counted eleven times. The vault's pages are R2 Class A, tried once (lib/vault.ts, listVault).
+ */
+export const IMAGE_BLOB_ADVANCED_OP = 7 / 1e6;
+export const IMAGE_BLOB_TRIES = 11;
+/** Pages of files a reconciliation measures besides the pictures: filesHeld's Blob pages and vaultHeld's R2 pages (lib/file-store.ts, lib/vault.ts). */
+export const IMAGE_FILES_BLOB_PAGES = 20;
+export const IMAGE_FILES_VAULT_PAGES = 20;
+/** The function held by one reconciliation: its deadline for listing, and as long again for the measurement it may still be waiting on. */
+export const IMAGE_RECONCILE_SECONDS = (2 * RECONCILE_MS) / 1000;
+/** One reconciliation of a store: its listings, its commands (claim, write, a second admission, a read) and its time. */
+export const IMAGE_RECONCILE_COST =
+  (IMAGE_LIST_PAGES + IMAGE_FILES_BLOB_PAGES) * IMAGE_BLOB_TRIES * IMAGE_BLOB_ADVANCED_OP
+  + IMAGE_FILES_VAULT_PAGES * (R2_CLASS_A_MICRO_USD_PER_MILLION / 1e12)
+  + CALL + 0.5 * CPU_SECOND + IMAGE_RECONCILE_SECONDS * MEMORY_SECOND
+  + (IMAGE_SPACE_COMMANDS.claim + IMAGE_SPACE_COMMANDS.reconcile + IMAGE_SPACE_COMMANDS.door + IMAGE_SPACE_COMMANDS.heldRead) * COMMAND
+  + 2 * IMAGE_SPACE_READ_BYTES * DB_BYTE;
+/** A month of the store's picture counter at its worst, for a plan. */
+export function imagesSpaceMonthlyUsd(tier: Tier): number {
+  const a = STORE_ALLOWANCES[tier];
+  const publicRequests = REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier];
+  const studio = a.studio * (Math.max(IMAGE_SPACE_COMMANDS.door, IMAGE_SPACE_COMMANDS.adjust) * COMMAND + IMAGE_SPACE_READ_BYTES * DB_BYTE);
+  const reviews = publicRequests * IMAGE_SPACE_COMMANDS.take * COMMAND;
+  const mail = a.integration * IMAGE_SPACE_COMMANDS.take * COMMAND;
+  const opens = PAID_UPLOAD_OPENS[tier] * (IMAGE_SPACE_COMMANDS.heldRead + IMAGE_SPACE_COMMANDS.files) * COMMAND;
+  return studio + reviews + mail + opens + DAY_WINDOWS * IMAGE_RECONCILE_COST;
+}
+
 export const COST_LINES: CostLine[] = [
   {
     id: "platform-subscription-search",
@@ -894,6 +927,21 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => (paidStorageBytes(tier) / GB) * STORAGE_PER_GB,
     sources: [{ file: "lib/storage-rules.ts", names: ["PAID_STORAGE_BYTES", "paidStorageBytes"] }],
     basis: "The plan's storage, all used, at the dearest store a file may be in.",
+  },
+  {
+    id: "images-space",
+    feature: "The store's pictures counted in its space (owner's decision 8, 9 November 2026): the counter taken before each picture, settled and given back, and its reconciliation once a day",
+    monthlyUsd: (tier) => imagesSpaceMonthlyUsd(tier),
+    sources: [
+      { file: "lib/image-space.ts", names: ["IMAGE_SPACE_COMMANDS", "IMAGE_SPACE_READ_BYTES", "IMAGE_LIST_PAGES", "RECONCILE_EVERY_MS", "RECONCILE_MS", "IMAGE_OPEN_MAX", "admitImage", "adjustImages", "reconcileImages", "spaceUsed", "noteFilesAuthorized"] },
+      { file: "lib/file-store.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
+      { file: "lib/vault.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
+      { file: "app/api/store/image/upload/route.ts", names: ["await admitImage(ref, MAX_IMAGE_BYTES, storageBrakeFor(standing, store.tier), pathname)"] },
+      { file: "app/api/store/image/route.ts", names: ["await adjustImages(ref, settled.filter((each) => fresh.has(each.path)), given)"] },
+      { file: "lib/review-photo.ts", names: ["await admitImage(ref, checked.bytes.length, limit)"] },
+      { file: "lib/mail-pictures.ts", names: ["await admitImage(ref, checked.bytes.length, limit)"] },
+    ],
+    basis: "Every studio request a door's picture or an attach (IMAGE_SPACE_COMMANDS.door, the dearer of the two, with IMAGE_SPACE_READ_BYTES read), every public request a review with a photo (take), every service request an email's picture (take), every upload start its read and note (heldRead + files); and one reconciliation every day of the window (DAY_WINDOWS), each listing IMAGE_LIST_PAGES pages of pictures and the files' 20 Blob pages, each an Advanced Operation tried IMAGE_BLOB_TRIES times at IMAGE_BLOB_ADVANCED_OP, the vault's 20 pages at R2 Class A, its commands (claim, write, a second admission and a read) and the function held IMAGE_RECONCILE_SECONDS at 2 GB. The pictures' bytes are inside the plan's storage (line storage), which no longer leaves them out.",
   },
   {
     id: "free-delivery",

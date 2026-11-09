@@ -15,7 +15,8 @@ import {
 } from "@/lib/product-file";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
 import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
-import { maximumUploadBytes, storageBrakeFor, storageUsed } from "@/lib/storage-quota";
+import { maximumUploadBytes, storageBrakeFor } from "@/lib/storage-quota";
+import { noteFilesAuthorized, spaceUsed } from "@/lib/image-space";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { isVaultConfigured } from "@/lib/vault";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
@@ -113,10 +114,13 @@ export async function POST(request: NextRequest) {
         // The browser does not supply a trusted file size. Limit both parts
         // of the signed authorization to the confirmed room that remains.
         const standing = standingOf(store);
-        const held = await storageUsed(folder, storageBrakeFor(standing, store.tier));
+        // Files, lesson videos and the store's pictures together (owner's decision 8, lib/image-space.ts).
+        const held = await spaceUsed(ref, storageBrakeFor(standing, store.tier));
         if (held.available === false) throw new Error("files_unavailable");
         const maximumSizeInBytes = maximumUploadBytes(held, MAX_FILE_BYTES);
         if (maximumSizeInBytes <= 0) throw new Error(storageRefusal(standing));
+        // What this door may write, noted on top of what was measured, so a picture asked for before it is listed counts it.
+        await noteFilesAuthorized(ref, held.files, maximumSizeInBytes);
 
         // The one moment this store's folder and its owner are both in hand.
         // Kept so the allowance notice can reach them without anybody

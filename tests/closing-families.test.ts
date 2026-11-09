@@ -37,6 +37,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:adsrv:sent:": ["lib/ad-events.ts", "SENT_SECONDS"],
   // A store's picture uploads not yet put on anything (a capped part): the list expires a window after its last note.
   "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_DOOR_SECONDS"],
+  // A store's pictures counted in its space (a capped part): every script that makes the hash gives it its time.
+  "nl:images:space:": ["lib/image-space.ts", "IMAGE_SPACE_KEEP_SECONDS"],
   // A buyer's withdrawal from an order (EU art. 11a, 588 [KB9]): written with its expiry.
   "nl:withdraw:": ["lib/withdrawal.ts", "WITHDRAWAL_KEEP_DAYS"],
 };

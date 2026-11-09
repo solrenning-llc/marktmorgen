@@ -1,7 +1,9 @@
 import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
-import { costPauseCode } from "@/lib/plan-standing";
+import { costPauseCode, standingOf, storageRefusal } from "@/lib/plan-standing";
+import { storageBrakeFor } from "@/lib/storage-quota";
+import { ImageSpaceRefused } from "@/lib/image-space";
 import { checkMailPicture, keepMailPicture } from "@/lib/mail-pictures";
 import { MAX_MAIL_PICTURE_BYTES } from "@/lib/mail-picture-rules";
 
@@ -25,9 +27,16 @@ export async function POST(request: NextRequest) {
   const refused = await withinServiceWhy("mail-picture", store.statsId ?? ref, 60, 3_600, store);
   if (refused) return serviceRefusedJson(refused, "slow");
   try {
-    const kept = await keepMailPicture(ref, checked);
+    const standing = standingOf(store);
+    const kept = await keepMailPicture(ref, checked, storageBrakeFor(standing, store.tier));
     return Response.json({ ok: true, ...kept });
   } catch (error) {
+    // The store's space (lib/image-space.ts): full is the plan's storage sentence, a room that cannot be read a try-again-later.
+    if (error instanceof ImageSpaceRefused) {
+      return error.reason === "full"
+        ? Response.json({ ok: false, error: storageRefusal(standingOf(store)) }, { status: 409 })
+        : Response.json({ ok: false, error: "files_unavailable" }, { status: 503 });
+    }
     console.error("keeping an email's picture failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

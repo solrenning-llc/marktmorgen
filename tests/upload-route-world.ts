@@ -39,3 +39,6 @@ export async function storageUsed(_folder:string,limit:number){state.events.push
 export const maximumUploadBytes=(held:{left:number},maximum:number)=>Math.min(held.left,maximum);
 export const fits=(held:{available:boolean;left:number},bytes:number)=>held.available&&bytes<=held.left;
 
+// lib/image-space.ts as the three doors use it (owner's decision 8): the files' measurement this world records, with no pictures.
+export async function spaceUsed(_ref:string,limit:number){const held=await storageUsed('',limit);return {...held,files:held.bytes};}
+export async function noteFilesAuthorized(){}

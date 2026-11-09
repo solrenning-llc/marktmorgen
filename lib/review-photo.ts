@@ -14,6 +14,7 @@ import { imagePath } from "@/lib/product-image";
 import { imageSize } from "@/lib/image-size";
 import { sniffPhotoType } from "@/lib/store-photo";
 import { MAX_REVIEW_PHOTO_BYTES, REVIEW_PHOTO_SIDE, type ReviewPhoto } from "@/lib/review-summary";
+import { ImageSpaceRefused, admitImage } from "@/lib/image-space";
 
 export type PhotoProblem = "photo";
 
@@ -37,10 +38,22 @@ export async function reviewPhotoPath(ref: string, type: CheckedPhoto["type"]): 
   return imagePath(await imageFolder(ref), randomBytes(16).toString("hex"), type);
 }
 
-/** What the form sent, made into a kept photo; "photo" when it is not one we keep. */
-export async function keepReviewPhoto(ref: string, raw: string): Promise<ReviewPhoto | PhotoProblem> {
+/**
+ * What the form sent, made into a kept photo; "photo" when it is not one we
+ * keep, "paused" when the store's space (`limit`, its plan's storage) has no
+ * room for it or its room cannot be read (owner's decision 8,
+ * lib/image-space.ts): its exact bytes are taken before it is written, and a
+ * write that fails after leaves them counted until the next reconciliation.
+ */
+export async function keepReviewPhoto(ref: string, raw: string, limit: number): Promise<ReviewPhoto | PhotoProblem | "paused"> {
   const checked = checkReviewPhoto(raw);
   if (checked === "photo") return checked;
+  try {
+    await admitImage(ref, checked.bytes.length, limit);
+  } catch (error) {
+    if (error instanceof ImageSpaceRefused) return "paused";
+    throw error;
+  }
   const path = await reviewPhotoPath(ref, checked.type);
   await put(path, Buffer.from(checked.bytes), { access: "private", contentType: checked.type, addRandomSuffix: false, allowOverwrite: false });
   return { path, width: checked.width, height: checked.height };

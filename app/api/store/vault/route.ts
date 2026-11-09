@@ -1,6 +1,7 @@
 import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { reserveStoreUpload, reserveUploadControl } from "@/lib/upload-budget";
 import { openReservedVault, closeReservedVault, abortReservedVault } from "@/lib/vault-storage";
+import { noteFilesAuthorized, spaceUsed } from "@/lib/image-space";
 import type { NextRequest } from "next/server";
 import { readKind } from "@/lib/catalog";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
@@ -78,8 +79,17 @@ export async function POST(request: NextRequest) {
       if (!(await reserveStoreUpload(store, bytes, "r2"))) return fail("upload_budget_unavailable", 503);
       await rememberFolderOwner(folder, ref);
 
-      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, storageBrakeFor(standing, store.tier));
+      // Files, lesson videos and the store's pictures together (owner's decision 8, lib/image-space.ts).
+      const brake = storageBrakeFor(standing, store.tier);
+      let measured = -1;
+      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, brake, async () => {
+        const held = await spaceUsed(ref, brake);
+        measured = held.available ? held.files : -1;
+        return held;
+      });
       if (!opened.ok) return fail(opened.reason === "off" ? "off" : opened.reason === "invalid" ? "invalid" : "files_unavailable", opened.reason === "off" ? 404 : opened.reason === "invalid" ? 400 : 503);
+      // What this upload may write, noted on top of what was measured, so a picture asked for before it is listed counts it.
+      if (measured >= 0) await noteFilesAuthorized(ref, measured, bytes);
       return Response.json({ ok: true, upload: opened.upload }, { headers: { "Cache-Control": "no-store" } });
     }
 

@@ -9,6 +9,11 @@
  * not written into the report), their emails and the members' reminder skip it, and the API's give-access answers
  * "deleted". Each read is exact (CX-123 rule 24): a reply in any other shape holds the rows, the emails or the
  * reminder as they were, and never takes the person as not deleted. Everybody else goes on exactly as before.
+ *
+ * The check is made where each row is written, in the same step as the write (review of #3383): a deletion that
+ * finishes after the rows were read and before they are written leaves nothing behind, on a store with a list and on
+ * one made before every store had one. A deleted address on several rows is left out on each, never written into
+ * the report or kept among the rows the import saw.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { addRows, finishUpload, previewImport, readJob, reportCsv, runImport, sendMoveReminders, startImport } from "@/lib/imports";
@@ -65,11 +70,49 @@ const UNKNOWN: [string, unknown][] = [
   ["a failed read", "throw"],
 ];
 
+/**
+ * Runs `then` once, right after the first command matching `at` has answered: the store's data room taken for the
+ * rows' writes, the last step before they are written, as a deletion finishing in between would.
+ */
+function afterFirst(at: (c: (string | number)[]) => boolean, then: () => Promise<unknown>) {
+  let fired = false;
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    const out = await original(commands);
+    if (!fired && commands.some(at)) {
+      fired = true;
+      await then();
+    }
+    return out;
+  };
+}
+const roomTaken = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:v1\n");
+
+/** Every text kept under a key (a hash's fields and values, a list's entries), to look for an address in it. */
+function heldUnder(key: string): string {
+  const type = redis.run(["TYPE", key]);
+  if (type === "hash") return JSON.stringify(redis.run(["HGETALL", key]));
+  if (type === "list") return JSON.stringify(redis.run(["LRANGE", key, 0, -1]));
+  return type === "none" ? "" : JSON.stringify(redis.run(["GET", key]));
+}
+
+/** A store as one made before every store had a list: its record kept with no list id (synthetic, in the stand-in). */
+function withoutList(sid: string) {
+  const [, keys] = redis.run(["SCAN", "0", "MATCH", "*"]) as [string, string[]];
+  for (const key of keys) {
+    if (redis.run(["TYPE", key]) !== "string") continue;
+    const raw = String(redis.run(["GET", key]));
+    if (!raw.startsWith("{")) continue;
+    const record = JSON.parse(raw) as { sid?: string; listId?: string | null; handle?: string };
+    if (record.sid === sid && typeof record.handle === "string" && "listId" in record) redis.run(["SET", key, JSON.stringify({ ...record, listId: null })]);
+  }
+}
+
 /** A paid Store plan with a product to give and a membership to move. */
-async function openStore(owner: string, handle: string, account: string, id: string) {
+async function openStore(owner: string, handle: string, account: string, id: string, withList = true) {
   await claimHandle(owner, handle, "Harbor Kitchen", "");
   await ensureStatsId(owner);
-  await ensureListId(owner);
+  if (withList) await ensureListId(owner);
+  else withoutList((await storeForEmail(owner))!.sid);
   await setStripeAccount(owner, account, true);
   await setSubscription(owner, { customerId: `cus_${id}`, subscriptionId: `sub_${id}`, active: true, period: paidPeriod() });
   const guide = await addProduct(owner, "The Guide", "", "12", null);
@@ -274,6 +317,128 @@ async function main(): Promise<void> {
     is("an unknown reply refuses, nothing given or emailed", [unknown, (await importedFor(store, "apiheld@example.com")).length, sentTo("apiheld@example.com", before)], [{ ok: false, error: "unavailable" }, 0, 0]);
     const given = await giveAccess(store, "key_erased_test", { email: "apiheld@example.com", product: guide.product.id, notify: true });
     is("control: anybody else is given it and emailed", [given.ok && given.value.status, given.ok && given.value.emailed, sentTo("apiheld@example.com", before)], ["given", true, 1]);
+  }
+
+  part("Somebody deleted while the past buyers' rows are being given");
+  {
+    store = await fresh();
+    const job = await startImport(store, OWNER, "purchases", { expected: 2, file: "orders.csv", email: true });
+    if (!job.ok) throw new Error(`not started: ${job.reason}`);
+    await addRows(store, job.job.id, [["2", "racebuyer@example.com", "The Guide", "Paid"], ["3", "calmbuyer@example.com", "The Guide", "Paid"]]);
+    await finishUpload(store, job.job.id);
+    before = emails.length;
+    afterFirst(roomTaken, async () => erasePerson(await fresh(), "racebuyer@example.com", { kind: "person" }));
+    let after;
+    try {
+      after = await run(job.job.id);
+    } finally {
+      restore();
+    }
+    store = await fresh();
+    is("control: the other buyer is given the product and emailed", [after?.state, (await importedFor(store, "calmbuyer@example.com")).length, sentTo("calmbuyer@example.com", before)], ["done", 1, 1]);
+    is("the one deleted in between is not given the product (counted as added once, for the other)", [(await importedFor(store, "racebuyer@example.com")).length, after?.counts.added], [0, 1]);
+    is("nor kept among the buyers an import brought", heldUnder(`nl:imp:who:${store.statsId}`).includes("racebuyer@example.com"), false);
+    is("nor emailed", sentTo("racebuyer@example.com", before), 0);
+    const report = after ? await reportCsv(after) : "";
+    is("the row is counted as left out, by its row, the address not written back", [after?.counts.skipped, report.includes("Left out: Deleted from your store before, so left alone"), report.includes("racebuyer@example.com")], [1, true, false]);
+    is("nor kept among the rows the import saw", heldUnder(`nl:import:${job.job.id}:seen`).includes("racebuyer@example.com"), false);
+  }
+
+  part("Somebody deleted while the members' rows are being invited");
+  {
+    store = await fresh();
+    const job = await startImport(store, OWNER, "members", { expected: 2, file: "patrons.csv", stopped: true });
+    if (!job.ok) throw new Error(`not started: ${job.reason}`);
+    await addRows(store, job.job.id, [["2", "racemember@example.com", "The Inner Circle", renews, ""], ["3", "calmmember@example.com", "The Inner Circle", renews, ""]]);
+    await finishUpload(store, job.job.id);
+    before = emails.length;
+    afterFirst(roomTaken, async () => erasePerson(await fresh(), "racemember@example.com", { kind: "person" }));
+    let after;
+    try {
+      after = await run(job.job.id);
+    } finally {
+      restore();
+    }
+    store = await fresh();
+    is("control: the other member is invited and emailed", [after?.state, heldUnder(`nl:mv:${store.statsId}`).includes("calmmember@example.com"), sentTo("calmmember@example.com", before)], ["done", true, 1]);
+    is("the one deleted in between is not kept as invited (counted as added once, for the other)", [heldUnder(`nl:mv:${store.statsId}`).includes("racemember@example.com"), after?.counts.added], [false, 1]);
+    is("nor emailed", sentTo("racemember@example.com", before), 0);
+    const report = after ? await reportCsv(after) : "";
+    is("the row is counted as left out, the address not written back", [after?.counts.skipped, report.includes("racemember@example.com")], [1, false]);
+    is("nor kept among the rows the import saw", heldUnder(`nl:import:${job.job.id}:seen`).includes("racemember@example.com"), false);
+  }
+
+  part("A deleted address on two rows stays out of the report");
+  {
+    store = await fresh();
+    const rows = [["2", "gone@example.com", "The Guide", "Paid"], ["3", "gone@example.com", "The Guide", "Paid"]];
+    const dryTwice = await previewImport(store, "purchases", { expected: 2, file: "orders.csv", email: true }, rows);
+    is("the dry run says both rows are left out, without the address", dryTwice.ok ? [dryTwice.rows.map((r) => [r[0], r[1], r[3]]), JSON.stringify(dryTwice.rows).includes("gone@example.com")] : dryTwice, [[[2, "skipped", "Deleted from your store before, so left alone"], [3, "skipped", "Deleted from your store before, so left alone"]], false]);
+    const job = await startImport(store, OWNER, "purchases", { expected: 2, file: "orders.csv", email: true });
+    if (!job.ok) throw new Error(`not started: ${job.reason}`);
+    await addRows(store, job.job.id, rows);
+    await finishUpload(store, job.job.id);
+    const after = await run(job.job.id);
+    const report = after ? await reportCsv(after) : "";
+    is("past buyers: both rows are left out as deleted, the address in neither", [after?.counts.skipped, report.includes("gone@example.com"), heldUnder(`nl:import:${job.job.id}:errors`).includes("gone@example.com")], [2, false, false]);
+    is("past buyers: nor kept among the rows the import saw", heldUnder(`nl:import:${job.job.id}:seen`).includes("gone@example.com"), false);
+    const m2 = await startImport(store, OWNER, "members", { expected: 2, file: "patrons.csv", stopped: true });
+    if (!m2.ok) throw new Error(`not started: ${m2.reason}`);
+    await addRows(store, m2.job.id, [["2", "gone@example.com", "The Inner Circle", renews, ""], ["3", "gone@example.com", "The Inner Circle", renews, ""]]);
+    await finishUpload(store, m2.job.id);
+    const mafter = await run(m2.job.id);
+    const mreport = mafter ? await reportCsv(mafter) : "";
+    is("members: both rows are left out as deleted, the address in neither", [mafter?.counts.skipped, mreport.includes("gone@example.com"), heldUnder(`nl:import:${m2.job.id}:seen`).includes("gone@example.com")], [2, false, false]);
+  }
+
+  part("Somebody deleted while the API gives them a product");
+  {
+    store = await fresh();
+    before = emails.length;
+    afterFirst(roomTaken, async () => erasePerson(await fresh(), "raceapi@example.com", { kind: "person" }));
+    let raced;
+    try {
+      raced = await giveAccess(store, "key_erased_test", { email: "raceapi@example.com", product: guide.product.id, notify: true });
+    } finally {
+      restore();
+    }
+    store = await fresh();
+    is("answered as deleted, nothing given or emailed", [raced, (await importedFor(store, "raceapi@example.com")).length, sentTo("raceapi@example.com", before)], [{ ok: false, error: "deleted" }, 0, 0]);
+  }
+
+  part("A store with no list yet: somebody deleted while their rows are being given");
+  {
+    const BARE_OWNER = "bare-owner@example.com";
+    await openStore(BARE_OWNER, "bareshop", "acct_1TestBare00001", "BareOwner1", false);
+    const bare = async () => (await storeForEmail(BARE_OWNER))!;
+    let shop = await bare();
+    is("setup: the store has no list yet", shop.listId ?? null, null);
+    const job = await startImport(shop, BARE_OWNER, "purchases", { expected: 2, file: "orders.csv", email: true });
+    if (!job.ok) throw new Error(`not started: ${job.reason}`);
+    await addRows(shop, job.job.id, [["2", "barerace@example.com", "The Guide", "Paid"], ["3", "barecalm@example.com", "The Guide", "Paid"]]);
+    await finishUpload(shop, job.job.id);
+    before = emails.length;
+    afterFirst(roomTaken, async () => erasePerson(await bare(), "barerace@example.com", { kind: "person" }));
+    let after;
+    try {
+      after = await run(job.job.id);
+    } finally {
+      restore();
+    }
+    shop = await bare();
+    is("control: the other buyer is given the product", [after?.state, (await importedFor(shop, "barecalm@example.com")).length], ["done", 1]);
+    is("the one deleted in between is not given the product, nor kept among the buyers brought", [(await importedFor(shop, "barerace@example.com")).length, heldUnder(`nl:imp:who:${shop.statsId}`).includes("barerace@example.com"), sentTo("barerace@example.com", before)], [0, false, 0]);
+    const BARE_API = "bare-api-owner@example.com";
+    const { guide: apiGuide } = await openStore(BARE_API, "bareapishop", "acct_1TestBareApi01", "BareApiOwner1", false);
+    const apiShop = (await storeForEmail(BARE_API))!;
+    afterFirst(roomTaken, async () => erasePerson((await storeForEmail(BARE_API))!, "bareapi@example.com", { kind: "person" }));
+    let raced;
+    try {
+      raced = await giveAccess(apiShop, "key_erased_bare", { email: "bareapi@example.com", product: apiGuide.product.id, notify: true });
+    } finally {
+      restore();
+    }
+    is("the API, on a store with no list yet: answered as deleted, nothing given", [raced, (await importedFor((await storeForEmail(BARE_API))!, "bareapi@example.com")).length], [{ ok: false, error: "deleted" }, 0]);
   }
   done();
 }

@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   const OWNER = "groupdisp@example.com";
   await claimHandle(OWNER, "groupdisp", "Group Disputes", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1GroupDisputes01", true);
+  await setStripeAccount(OWNER, "acct_1GroupDisp01", true);
   await setSubscription(OWNER, { customerId: "cus_GroupDisp001", subscriptionId: "sub_GroupDisp001", active: true, period: paidPeriod() });
   const made = await addProduct(OWNER, "Sourdough Course", "", "49", null);
   if (!made.ok) throw new Error("no product");
@@ -233,6 +233,28 @@ async function main(): Promise<void> {
   is("events fail: the anchor does not move past the closings not read", await anchorNow(), anchorBefore);
   is("the next run reads them and takes both places back", await run(), 2);
   is("and the anchor then moves to the newest refund", await anchorNow(), String(NOW - 2));
+
+  // The first money review of #3410 (Claude 2, MEDIUM; Claude 6, M1): a sweep of the closing events that went on from a
+  // kept place set the anchor to its newest closing, with nothing capping it at the newest refund the pass read, so a
+  // group refund made during a pass of several runs, seen only on the newest page (whose holds never move the anchor),
+  // fell out of the window while still pending. lib/gifts.ts and lib/preorders.ts cap it at the pass's newest.
+  part("a pass of several runs whose disputes read went on from a kept place never moves the anchor past a group refund still pending");
+  const late = await make(8);
+  // More refunds than one run reads (10 pages of 100), and more lost closings than one run reads (3 pages of 100).
+  const many = Array.from({ length: 1100 }, (_, i) => row(`re_GdMultiRun${String(i).padStart(6, "0")}`, NOW + 1 + i, "succeeded", `pi_GdMultiOrd${String(i).padStart(6, "0")}`, true));
+  refunds = many;
+  closings = Array.from({ length: 350 }, (_, i) => closing(1900 + 349 - i, "lost", `pi_GdMultiLost${String(i).padStart(5, "0")}`));
+  is("multi-run: the first run reads 1,000 refunds and 300 closings, and ends nothing", await run(), 0);
+  // Made during the pass, newest of all, and still on its way: only the newest page re-read shows it.
+  const lateAt = NOW + 1200;
+  refunds = [row("re_GdMultiLate0001", lateAt, "pending", late.pi, true), ...many];
+  is("multi-run: the second run ends the pass and takes nothing back while it is pending", await run(), 0);
+  is("multi-run: the anchor stays at or before the pending group refund (anchor - 300 <= its time)", Number(await anchorNow()) - 300 <= lateAt, true);
+  refunds = [row("re_GdMultiLate0001", lateAt, "succeeded", late.pi, true), ...many];
+  closings = [];
+  let back = 0;
+  for (let i = 0; i < 3; i += 1) back += await run();
+  is("multi-run: once it succeeded, both places are taken back", [back, await late.held()], [2, 0]);
   done();
 }
 

@@ -227,20 +227,19 @@ export async function countReach(statsId: string, field: string, now = Date.now(
   await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }]);
 }
 
-/**
- * One address that used its confirmation link (13 [D10]): joining the store's
- * list as an address new to it, a waitlist spot's first press, or a free
- * product's emailed link on its first use. Counted on the all-time record as
- * "lc", which Marktmorgen Path reads its leads from (lib/path-facts.ts); the
- * addresses asked for (fs:<channel>) stay as the store's numbers show them.
- * One command, on a request already counted as a public one.
- */
-export async function countConfirmedLead(statsId: string | null | undefined): Promise<void> {
-  if (!statsId || !isRedisConfigured()) return;
-  await cappedCount(lifeKey(statsId), LIFE_WRITE_MAX, [{ field: CONFIRMED_LEAD_FIELD, by: 1 }]);
-}
-/** The all-time record's field for confirmed leads (countConfirmedLead). */
+/** The all-time record's field for confirmed leads, which Marktmorgen Path reads its leads from (lib/path-facts.ts; 13 [D10]). */
 export const CONFIRMED_LEAD_FIELD = "lc";
+/**
+ * One confirmed lead on the store's all-time record, for lib/path-lead.ts,
+ * which sends it once an address's mark is newly taken. A HINCRBY of its own,
+ * outside the record's capped count (cappedCount), as "u" is: a record already
+ * at LIFE_WRITE_MAX would put a new field under "~" and Path would never see
+ * it (review 6748073377 of #3431, L4). One field more at the most, and its
+ * answer is exactly the new count, which the caller reads.
+ */
+export function confirmedLeadCommand(statsId: string): (string | number)[] {
+  return ["HINCRBY", lifeKey(statsId), CONFIRMED_LEAD_FIELD, 1];
+}
 
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */
 export type Heard = { buyers: number; cents: number; unknownBuyers?: number; unknownCents?: number };
@@ -672,7 +671,7 @@ export async function campaignViews(
 }
 
 /** Fields the all-time record keeps for itself rather than as counts. */
-const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap"]);
+const LIFE_OWN = new Set(["started", "since", "filled", "u", "v", "vgap", CONFIRMED_LEAD_FIELD]);
 /** Beyond this many fields, the smallest sources and tags are let go. */
 const LIFE_MAX_FIELDS = 2000;
 const LIFE_KEEP_PER_KIND = 300;
@@ -1541,8 +1540,10 @@ export function readStoreRefunds(store: Store, since: number, pages: number): Pr
 /**
  * The store's all-time record as it is kept, in one command and without
  * filling it from the days (readLife does that, from the studio's numbers):
- * where visits came from (r:<source>), the addresses asked for (fs:<channel>)
- * and the visitors (u). Empty when there is none; an answer in any other
+ * where visits came from (r:<source>), the visitors (u) and the confirmed
+ * leads (lc: addresses that used their confirmation link, lib/path-lead.ts),
+ * which Marktmorgen Path reads; the addresses only asked for (fs:<channel>)
+ * are there too, for the store's numbers, never as Path's leads. Empty when there is none; an answer in any other
  * shape throws (CX-123 rule 24), so readPathCounts keeps the last reading.
  */
 export async function readLifeRecord(statsId: string | null): Promise<Map<string, number>> {

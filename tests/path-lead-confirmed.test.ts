@@ -30,6 +30,7 @@ import { newWaitlistToken, waitlistTokenKey } from "@/lib/waitlist-tokens";
 import { LIFE_WRITE_MAX, readLifeRecord } from "@/lib/stats";
 import { countsFrom } from "@/lib/path-facts";
 import { forgetNoted } from "@/lib/erasure-index";
+import { PATH_LEAD_COMMANDS, countConfirmedLead } from "@/lib/path-lead";
 import { POST as joinConfirm } from "@/app/api/store/join/confirm/route";
 import { POST as waitConfirm } from "@/app/api/store/waitlist/confirm/route";
 import { POST as freeDownload } from "@/app/api/store/free/download/route";
@@ -186,6 +187,24 @@ async function main(): Promise<void> {
   await joinConfirm(press("/api/store/join/confirm", joinLink(store, "ivy@example.com")));
   redis.pipeline = pipe;
   is("said in the server's log", logged.some((line) => line.includes("counting a confirmed lead failed")), true);
+
+  part("What a lead costs is held: never more commands than PATH_LEAD_COMMANDS, the line's figure (M2)");
+  {
+    const pipe = redis.pipeline.bind(redis);
+    const sent: (string | number)[][] = [];
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      sent.push(...commands);
+      return pipe(commands);
+    }) as typeof redis.pipeline;
+    const first = await countConfirmedLead(store.statsId, "kim@example.com");
+    const firstCommands = sent.length;
+    sent.length = 0;
+    const again = await countConfirmedLead(store.statsId, "kim@example.com");
+    redis.pipeline = pipe;
+    is("the counting call: the note, the mark and the count", [first, firstCommands], ["counted", PATH_LEAD_COMMANDS]);
+    is("a call for an address already counted: the note and the mark only", [again, sent.length], ["already", PATH_LEAD_COMMANDS - 1]);
+    is("and neither takes a public request or touches a capped count", sent.some((c) => c[0] === "EVAL"), false);
+  }
 
   part("Asking counts nothing for Path");
   for (const path of ["app/api/store/join/route.ts", "app/api/store/waitlist/join/route.ts", "app/api/store/free/route.ts"]) {

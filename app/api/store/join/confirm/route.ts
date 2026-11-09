@@ -8,7 +8,7 @@ import { queuePerson } from "@/lib/email-sync";
 import { allowedBy, newLeadId, sendServerLead, sendsFromServer } from "@/lib/ad-events";
 import { emitEvent } from "@/lib/webhooks";
 import { recordLead } from "@/lib/affiliate-leads";
-import { countConfirmedLead } from "@/lib/stats";
+import { countConfirmedLead } from "@/lib/path-lead";
 
 /** The button on the page an emailed sign-up link opens: the address joins the creator's list. */
 export async function POST(request: NextRequest) {
@@ -33,8 +33,9 @@ export async function POST(request: NextRequest) {
       // The creator's welcome sequence, when they have one for people who join,
       // and their own email platform, when they connected one (lib/email-sync.ts).
       await enroll(store, result.grant.e, { joined: result.added.joined });
-      // A lead for Marktmorgen Path, only for an address new to the list (13 [D10]).
-      if (result.added.joined) await countConfirmedLead(store.statsId).catch((error) => console.error("counting a confirmed lead failed", error));
+      // A lead for Marktmorgen Path when the link makes the address newly mailable on the list; the address counts
+      // once for the store, two presses at once included (lib/path-lead.ts; 13 [D10]). An unknown answer is logged.
+      if (result.added.joined) await countConfirmedLead(store.statsId, result.grant.e).catch((error) => console.error("counting a confirmed lead failed", error));
       // A sign-up an affiliate brought, where the store pays per sign-up: credited now that it is confirmed,
       // and only for an address new to the list (lib/affiliate-leads.ts).
       if (result.grant.a && result.added.joined) {

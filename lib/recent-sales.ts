@@ -16,7 +16,8 @@
  *     in that time nothing is shown at all;
  *   - a payment refunded in any part, as the creator's Stripe account says,
  *     is left out; and when Stripe cannot be asked, nothing is shown, because
- *     an unchecked line is a line that might not be true;
+ *     an unchecked line is a line that might not be true; that is remembered
+ *     UNCHECKED_SECONDS, not asked again at every visit;
  *   - a product the creator has since hidden or removed is left out.
  *
  * What it never says: who bought. Not a name, not a city, not a picture. The
@@ -31,7 +32,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import { KIND, readListings } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
-import { RECENT_DAYS, type RecentSale, SHOWN } from "@/lib/recent-sales-rules";
+import { RECENT_DAYS, type RecentSale, SHOWN, UNCHECKED_SECONDS } from "@/lib/recent-sales-rules";
 
 /** How many are kept. */
 const KEPT = 20;
@@ -163,8 +164,12 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
     let shown: RecentSale[] = [];
     if (kept.length) {
       const refunded = await refundedSince(store.stripeAccountId, Math.min(...kept.map((k) => k.at)));
-      // Not cached: the next visit asks again rather than showing nothing for five minutes.
-      if (!refunded) return [];
+      // Nothing is shown, and that is kept for UNCHECKED_SECONDS (not as a feed: a mark that says it was not checked)
+      // so the visits after this one do not each ask Stripe again; a new purchase clears it (rememberSale).
+      if (!refunded) {
+        await redisPipeline([["SET", feedKey(statsId), JSON.stringify({ unchecked: true }), "EX", UNCHECKED_SECONDS]]);
+        return [];
+      }
       const listings = new Map((await readListings(store, [...new Set(kept.map((k) => k.p))])).map((p) => [p.id, p]));
       shown = kept
         .filter((k) => !refunded.has(k.pi))

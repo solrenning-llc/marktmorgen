@@ -103,7 +103,12 @@ async function main(): Promise<void> {
   await redis.pipeline([["DEL", `nl:recent:feed:${base.statsId}`]]);
   is("Stripe cannot be asked: nothing shown", await recentSales(on), []);
   stripeDown = false;
-  is("and asked again on the next visit, not left empty", (await recentSales(on)).length, 3);
+  // Changed (rule 23): the next visit used to ask Stripe again at once, so twenty visits made twenty reads; now the
+  // unchecked mark is kept UNCHECKED_SECONDS (tests/recent-sales-unchecked.test.ts) and the visit after it asks again.
+  const marked = asked;
+  is("the next visit within the mark asks nothing and shows nothing", [(await recentSales(on)).length, asked], [0, marked]);
+  await redis.pipeline([["DEL", `nl:recent:feed:${base.statsId}`]]);
+  is("and once the mark has run out it is asked again, not left empty", (await recentSales(on)).length, 3);
 
   part("Incomplete refund evidence never certifies public purchases");
   const page = (data: unknown, has_more: unknown = false) => ({ object: "list", data, has_more });
@@ -129,9 +134,12 @@ async function main(): Promise<void> {
     refundReply = reply;
     const calls = asked;
     is(name + ": no unchecked purchase shown", await recentSales(on), []);
-    is(name + ": no successful feed cached", await redis.pipeline([["GET", `nl:recent:feed:${base.statsId}`]]), [null]);
+    // Changed (rule 23): was a null feed; now at most the short unchecked mark, which is never a list of purchases.
+    const kept = (await redis.pipeline([["GET", `nl:recent:feed:${base.statsId}`]]))[0];
+    is(name + ": no successful feed cached", kept === null || (typeof kept === "string" && !Array.isArray(JSON.parse(kept))), true);
     is(name + ": only the existing refund read", asked - calls, 1);
   }
+  await redis.pipeline([["DEL", `nl:recent:feed:${base.statsId}`]]);
   refundReply = page([refund]);
   is("a confirmed retry still excludes the refunded purchase", (await recentSales(on)).map(s => s.at), [NOW - 3600, NOW - 3 * 3600, NOW - 30 * 3600]);
   for (const status of ["pending", "requires_action", "succeeded", "failed", "canceled"]) {

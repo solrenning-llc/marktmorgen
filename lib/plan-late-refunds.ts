@@ -48,19 +48,32 @@ const idOf = (value: unknown): unknown => (value !== null && typeof value === "o
 const whole = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
 /** One late payment still to give back. */
-type Owed = { invoice: string; intent: string; currency: string; give: number; charge: Row };
+type Owed = { invoice: string; intent: string; currency: string; give: number; charge: Row; paid: Given };
+/**
+ * A late payment given back in full (by a refund made here, now or before, or already refunded at Stripe), for the
+ * buyer's email (lib/plan-late-notice.ts): its invoice, the address Stripe holds on it (null when none reads), the
+ * amount taken, its currency and when it was taken (seconds).
+ */
+export type Given = { invoice: string; email: string | null; amount: number; currency: string; paidAt: number };
+/** What one try did: see refundLatePayments. */
+export type LateOutcome = { state: "done" | "owed"; refunded: number; disputed: number; given: Given[]; short: string[] };
 
 /**
  * "done": every payment taken at or after `end` is given back (or disputed, or had nothing left to give);
  * "owed": one is still to be given back (the balance did not cover it, Stripe refused it, or more than one try
- * reaches), so the plan is tried again. Anything that does not read throws.
+ * reaches), so the plan is tried again. `given` lists the late payments refunded in full, whoever refunded them and
+ * whenever, for the buyer's email; `short` names the invoices this try could not give back because the balance did
+ * not cover them or Stripe refused the refund (what only the creator can put right), never those merely left for the
+ * next try. Anything that does not read throws.
  */
-export async function refundLatePayments(account: string, subscription: string, end: number): Promise<{ state: "done" | "owed"; refunded: number; disputed: number }> {
+export async function refundLatePayments(account: string, subscription: string, end: number): Promise<LateOutcome> {
   const query = new URLSearchParams({ subscription, status: "paid", "created[gte]": String(end), limit: "100" });
   query.append("expand[]", "data.charge.balance_transaction");
   const list = objectOf(await onAccount("GET", account, `/invoices?${query}`, undefined, AT));
   if (!list || list.object !== "list" || !Array.isArray(list.data) || list.has_more !== false) throw new Error("a plan's late invoices could not be read whole");
   const owed: Owed[] = [];
+  const given: Given[] = [];
+  const short: string[] = [];
   let disputed = 0;
   for (const item of list.data) {
     const row = objectOf(item);
@@ -87,10 +100,13 @@ export async function refundLatePayments(account: string, subscription: string, 
       disputed += 1;
       continue;
     }
+    const email = typeof row.customer_email === "string" ? row.customer_email : null;
+    const paid: Given = { invoice: row.id, email, amount: charge.amount, currency: charge.currency, paidAt: row.created };
     const give = charge.amount - charge.amount_refunded;
-    if (give > 0) owed.push({ invoice: row.id, intent, currency: charge.currency, give, charge });
+    if (give > 0) owed.push({ invoice: row.id, intent, currency: charge.currency, give, charge, paid });
+    else given.push(paid);
   }
-  if (!owed.length) return { state: "done", refunded: 0, disputed };
+  if (!owed.length) return { state: "done", refunded: 0, disputed, given, short };
   const funds = await available(account);
   let refunded = 0;
   let left = owed.length > LATE_REFUNDS_PER_TRY;
@@ -99,10 +115,14 @@ export async function refundLatePayments(account: string, subscription: string, 
     const prior = priorRefund(made, one.intent, one.invoice, one.currency, LATE_MARK);
     if (prior === "unknown") throw new Error("the refunds already made for a plan's late payment could not be read whole");
     // Made here before (succeeded, or pending at Stripe on the creator's account): never a second.
-    if (prior) continue;
+    if (prior) {
+      given.push(one.paid);
+      continue;
+    }
     const cost = settledCost(one.give, one.charge);
     if ((funds.get(cost.cur) ?? 0) < cost.amount) {
       left = true;
+      short.push(one.invoice);
       continue;
     }
     let refund: Record<string, unknown>;
@@ -118,13 +138,17 @@ export async function refundLatePayments(account: string, subscription: string, 
     } catch (error) {
       if (error instanceof StripeError && error.code === "balance_insufficient") {
         left = true;
+        short.push(one.invoice);
         continue;
       }
       if (error instanceof StripeError && (error.code === "charge_disputed" || error.code === "refund_disputed_payment")) {
         disputed += 1;
         continue;
       }
-      if (error instanceof StripeError && error.code === "charge_already_refunded") continue;
+      if (error instanceof StripeError && error.code === "charge_already_refunded") {
+        given.push(one.paid);
+        continue;
+      }
       throw error;
     }
     // Read exactly: only this payment's refund, for this amount, in one of Stripe's own states, counts. Anything else
@@ -135,10 +159,12 @@ export async function refundLatePayments(account: string, subscription: string, 
       // Refused by Stripe (a closed card, say): nothing was given back; tried again on the next pass.
       console.error("a plan's late refund was refused by Stripe; tried again", one.invoice);
       left = true;
+      short.push(one.invoice);
       continue;
     }
     funds.set(cost.cur, (funds.get(cost.cur) ?? 0) - cost.amount);
     refunded += 1;
+    given.push(one.paid);
   }
-  return { state: left ? "owed" : "done", refunded, disputed };
+  return { state: left ? "owed" : "done", refunded, disputed, given, short };
 }

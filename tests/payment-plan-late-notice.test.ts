@@ -157,7 +157,8 @@ async function main(): Promise<void> {
   is("from the store, saying the payment after the plan's end was refunded and the plan ended", [
     /Harbor Notes/.test(letter?.subject ?? ""),
     /refund/i.test(letter?.subject ?? ""),
-    (letter?.text ?? "").includes("$50.00"),
+    // Rule 23: the RED asked for "$50.00"; the store writes a whole amount without cents (lib/money.ts, formatMoney).
+    / \$50 /.test(letter?.text ?? ""),
     (letter?.text ?? "").includes("Twelve-week coaching"),
     /refunded in full/i.test(letter?.text ?? ""),
     /plan has ended/i.test(letter?.text ?? ""),

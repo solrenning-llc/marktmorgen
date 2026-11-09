@@ -42,15 +42,17 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Interval, isInterval } from "@/lib/product-recurring";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { tellPlanStuck } from "@/lib/plan-stuck-notice";
+import { tellPlanOwed, tellPlanStuck } from "@/lib/plan-stuck-notice";
 import { refundLatePayments } from "@/lib/plan-late-refunds";
+import { tellLateRefunds } from "@/lib/plan-late-notice";
 
 const PENDING = "nl:plans:pending";
 /**
  * Plans tried and not settled yet, scored by when they are next due (seconds), so the one due first comes first.
- * A member is `account|session|since[|store|product[|told]]` (Entry): `since` is when the checkout opened, or, for
- * a plan watched for an earlier end or one whose last try failed for a reason not its account's, when that was, the
- * moment its days of refusals by the account count from.
+ * A member is `account|session|since[|store|product[|told[|owed|owedTold]]]` (Entry): `since` is when the checkout
+ * opened, or, for a plan watched for an earlier end or one whose last try failed for a reason not its account's, when
+ * that was, the moment its days of refusals by the account count from; `owed` is when a payment after its end was
+ * first found owed (seconds, empty when none is), and `owedTold` marks its creator told about it.
  */
 const RETRY = "nl:plans:retry";
 /** Plans one run tries at the most (NOT_A_COST.PLANS_PER_RUN and PLAN_SETTLE_RUN in tests/plan-cost-registry.ts). */
@@ -59,26 +61,48 @@ export const PLANS_PER_RUN = 200;
 export const PLAN_GIVE_UP_DAYS = 30;
 /** Days between tries of a plan its account has refused for PLAN_GIVE_UP_DAYS. */
 export const PLAN_STUCK_RETRY_DAYS = 7;
+/**
+ * Days a payment taken after a plan's end may stay owed (the creator's balance short, or Stripe refusing the refund)
+ * before the creator is told, once. Three: the plan is tried every day, and a balance short for a day usually fills as
+ * the next sales settle (Stripe settles card payments in about two business days), so three daily tries tell apart a
+ * passing shortfall from one only the creator can end, while the buyer, charged past a date promised to them, waits
+ * no longer than that for anyone to act.
+ */
+export const PLAN_OWED_TELL_DAYS = 3;
 const DAY = 86_400;
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,64}$/;
 const STORE_ID = /^[0-9a-f]{32}$/;
 const PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** One plan in a line: whose it is, since when its account has refused us, and whether its creator was told. */
-type Entry = { account: string; session: string; since: number; sid: string; product: string; told: boolean };
+/**
+ * One plan in a line: whose it is, since when its account has refused us, whether its creator was told, and since
+ * when a payment after its end has been owed and whether its creator was told about that.
+ */
+type Entry = { account: string; session: string; since: number; sid: string; product: string; told: boolean; owed: number; owedTold: boolean };
 
 /** Reads a member; a store or product that is not one of ours is left out, and a member written before them reads. */
 function entryOf(member: string): Entry {
-  const [account = "", session = "", since = "", sid = "", product = "", told = ""] = member.split("|");
-  return { account, session, since: Number(since), sid: STORE_ID.test(sid) ? sid : "", product: PRODUCT_ID.test(product) ? product : "", told: told === "told" };
+  const [account = "", session = "", since = "", sid = "", product = "", told = "", owed = "", owedTold = ""] = member.split("|");
+  return {
+    account,
+    session,
+    since: Number(since),
+    sid: STORE_ID.test(sid) ? sid : "",
+    product: PRODUCT_ID.test(product) ? product : "",
+    told: told === "told",
+    owed: /^[0-9]{1,12}$/.test(owed) ? Number(owed) : 0,
+    owedTold: owedTold === "told",
+  };
 }
 
-/** The member for an entry: one with nothing but its time is written as before. */
+/** The member for an entry: one with nothing but its time is written as before, one never owed as before too. */
 function memberOf(entry: Entry): string {
   const head = `${entry.account}|${entry.session}|${entry.since}`;
-  if (!entry.sid && !entry.product && !entry.told) return head;
-  return `${head}|${entry.sid}|${entry.product}${entry.told ? "|told" : ""}`;
+  if (!entry.sid && !entry.product && !entry.told && !entry.owed && !entry.owedTold) return head;
+  const base = `${head}|${entry.sid}|${entry.product}`;
+  if (!entry.owed && !entry.owedTold) return `${base}${entry.told ? "|told" : ""}`;
+  return `${base}|${entry.told ? "told" : ""}|${entry.owed || ""}|${entry.owedTold ? "told" : ""}`;
 }
 
 /**
@@ -89,7 +113,7 @@ export async function rememberPlan(account: string, session: string, about?: { s
   if (!isRedisConfigured() || !ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return;
   const sid = about && STORE_ID.test(about.sid) ? about.sid : "";
   const product = about && PRODUCT_ID.test(about.product) ? about.product : "";
-  await redisPipeline([["SADD", PENDING, memberOf({ account, session, since: Math.floor(Date.now() / 1000), sid, product, told: false })]]);
+  await redisPipeline([["SADD", PENDING, memberOf({ account, session, since: Math.floor(Date.now() / 1000), sid, product, told: false, owed: 0, owedTold: false })]]);
 }
 
 /**
@@ -123,10 +147,13 @@ export function addPeriods(anchorSeconds: number, interval: Interval, n: number)
   return Math.floor(target.getTime() / 1000);
 }
 
-export type PlanState = "done" | "open" | "gone" | "early" | "unread" | "owed";
+export type PlanState = "done" | "open" | "gone" | "early" | "unread" | "owed" | "untold";
 
-/** What one try found, and for a plan ending sooner, when it is read again (seconds). */
-type Outcome = { state: PlanState; again?: number };
+/**
+ * What one try found, and for a plan ending sooner, when it is read again (seconds); for a plan owed a refund, the
+ * invoices its creator alone can put right (`short`).
+ */
+type Outcome = { state: PlanState; again?: number; short?: string[] };
 
 /**
  * A Stripe reply decides only when it is the object asked for (rule 30): it
@@ -149,13 +176,26 @@ const isOwnReply = (reply: unknown, id: string): boolean =>
  * does a plan whose account refused the call; "owed" means a payment taken
  * after the plan's own end is still to be given back (lib/plan-late-refunds.ts:
  * the creator's balance did not cover it, Stripe refused it, or more are left
- * than one try gives back), so the job tries the plan again.
+ * than one try gives back), so the job tries the plan again; "untold" means every late payment is given back but
+ * a buyer is still to be told by email (lib/plan-late-notice.ts), so the job tries the plan again for that. A try
+ * that names no store (`about`, as the thanks page's does not) refunds and leaves the telling to the job's pass.
  */
-export async function finishPlan(account: string, session: string): Promise<PlanState> {
-  return (await tryPlan(account, session)).state;
+export async function finishPlan(account: string, session: string, about?: { sid: string; product: string }): Promise<PlanState> {
+  return (await tryPlan(account, session, about)).state;
 }
 
-async function tryPlan(account: string, session: string): Promise<Outcome> {
+/**
+ * Gives back what a plan took after its end and tells each buyer whose payment was given back: "owed" while a
+ * payment is still to be given back, "untold" while a buyer is still to be told, "done" once both are.
+ */
+async function settleLate(account: string, subscription: string, end: number, about?: { sid: string; product: string }): Promise<Outcome> {
+  const late = await refundLatePayments(account, subscription, end);
+  const told = about ? await tellLateRefunds(about, end, late.given) : { told: 0, untold: 0 };
+  if (late.state === "owed") return { state: "owed", short: late.short };
+  return { state: told.untold > 0 ? "untold" : "done" };
+}
+
+async function tryPlan(account: string, session: string, about?: { sid: string; product: string }): Promise<Outcome> {
   if (!ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return { state: "gone" };
   let view: Record<string, unknown>;
   try {
@@ -193,7 +233,7 @@ async function tryPlan(account: string, session: string): Promise<Outcome> {
     // first (the owner's decision of 9 November 2026, item 12). An end Stripe does not state is read as late.
     const endedAt = typeof subscription.ended_at === "number" && subscription.ended_at > 0 ? subscription.ended_at : 0;
     if (now < end || (endedAt && endedAt <= end)) return { state: "done" };
-    return { state: (await refundLatePayments(account, view.subscription, end)).state };
+    return settleLate(account, view.subscription, end, about);
   }
   // An end already set is the plan's when it is the last payment's period's.
   // A later one (set by hand, or left from before) would charge more payments
@@ -218,7 +258,7 @@ async function tryPlan(account: string, session: string): Promise<Outcome> {
   if (now >= end) {
     const ended = await onAccount("DELETE", account, `/subscriptions/${encodeURIComponent(view.subscription)}`, undefined, undefined, `plan-ended:${view.subscription}`);
     if (!(isOwnReply(ended, view.subscription) && ended.status === "canceled")) return { state: "unread" };
-    return { state: (await refundLatePayments(account, view.subscription, end)).state };
+    return settleLate(account, view.subscription, end, about);
   }
   const updated = await onAccount(
     "POST",
@@ -269,8 +309,8 @@ async function leave(member: string): Promise<void> {
 export async function settlePlans(
   limit = PLANS_PER_RUN,
   deadline = Number.POSITIVE_INFINITY,
-): Promise<{ done: number; open: number; dropped: number; failed: number; watched: number; stuck: number; told: number; owed: number }> {
-  const counts = { done: 0, open: 0, dropped: 0, failed: 0, watched: 0, stuck: 0, told: 0, owed: 0 };
+): Promise<{ done: number; open: number; dropped: number; failed: number; watched: number; stuck: number; told: number; owed: number; owedTold: number; untold: number }> {
+  const counts = { done: 0, open: 0, dropped: 0, failed: 0, watched: 0, stuck: 0, told: 0, owed: 0, owedTold: 0, untold: 0 };
   if (!isRedisConfigured() || !Number.isSafeInteger(limit) || limit < 1) return counts;
   const now = Math.floor(Date.now() / 1000);
   const read = repliesFor(
@@ -304,7 +344,7 @@ export async function settlePlans(
     let outcome: Outcome | null = null;
     let failure: unknown = null;
     try {
-      outcome = await withCutoff(deadline, () => tryPlan(account, session));
+      outcome = await withCutoff(deadline, () => tryPlan(account, session, { sid: entry.sid, product: entry.product }));
     } catch (error) {
       failure = error;
       console.error("settling a payment plan failed", error);
@@ -323,11 +363,38 @@ export async function settlePlans(
       await moveTo(member, Math.max(now + 1, outcome.again), memberOf({ ...entry, since: Math.max(now + 1, outcome.again) }));
       continue;
     }
+    if (state === "untold") {
+      // Every late payment given back, a buyer still to be told: tried again the next day, nothing owed any more.
+      counts.untold += 1;
+      await moveTo(member, now + DAY, memberOf({ ...entry, since: now + DAY, owed: 0 }));
+      continue;
+    }
     if (state === "owed") {
       // A payment after its end still to give back (the balance did not cover it, Stripe refused it, or more were
       // left than one try gives back): its account answered, so no day of refusals counts; tried again the next day.
       counts.owed += 1;
-      await moveTo(member, now + DAY, memberOf({ ...entry, since: now + DAY }));
+      const owed = entry.owed || now;
+      const next = memberOf({ ...entry, since: now + DAY, owed });
+      // Owed for PLAN_OWED_TELL_DAYS for a reason only the creator can end (their balance, Stripe refusing the
+      // refund): the creator is told once, the mark written before the email and given back when it was not sent.
+      const short = outcome?.short ?? [];
+      if (entry.owedTold || !short.length || now - owed < PLAN_OWED_TELL_DAYS * DAY) {
+        await moveTo(member, now + DAY, next);
+        continue;
+      }
+      const marked = memberOf({ ...entry, since: now + DAY, owed, owedTold: true });
+      if (!(await moveTo(member, now + DAY, marked))) continue;
+      const said = await withCutoff(deadline, () => tellPlanOwed({ sid: entry.sid, product: entry.product, days: PLAN_OWED_TELL_DAYS, invoices: short })).catch((error: unknown) => {
+        console.error("telling a creator about a plan's payment owed back failed", error);
+        return "unsent" as const;
+      });
+      if (said === "unsent") {
+        await moveTo(marked, now + DAY, next);
+        console.error(`a plan's payment after its end has been owed for ${PLAN_OWED_TELL_DAYS} days; its creator could not be emailed now, tried again the next day`, account);
+        continue;
+      }
+      if (said === "told") counts.owedTold += 1;
+      console.error(`a plan's payment after its end has been owed for ${PLAN_OWED_TELL_DAYS} days: its creator ${said === "told" ? "emailed" : "not found to tell"}`, account);
       continue;
     }
     if (state === "open") {

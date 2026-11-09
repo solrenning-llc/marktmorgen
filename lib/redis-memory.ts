@@ -777,6 +777,28 @@ export class MemoryRedis {
           }
           return changed;
         }
+        // lib/mail.ts GIVE_BACK_FLOOR: a count given back by at most itself, never below zero; one that is not a whole number is an error, nothing changed.
+        if (key.startsWith("-- marktmorgen:give-back-floor:v1\n") && args[0] === "1" && args.length === 3) {
+          const held = this.run(["GET", args[1]]);
+          if (held === null) return 0;
+          if (typeof held !== "string" || !/^-?\d+$/.test(held)) throw new Error("ERR give-back-floor: not a count");
+          const back = Math.min(Number(args[2]), Number(held));
+          if (back <= 0) return 0;
+          this.run(["DECRBY", args[1], back]);
+          return back;
+        }
+        // lib/imports.ts JOB_WRITE_IF: an import written only over the text it was read as, with an upload's batch when it carries one.
+        if (key.startsWith("-- marktmorgen:import-job-write-if:v1\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
+          const two = args[0] === "2";
+          const [expected, text, seconds, batch, rowSeconds] = args.slice(two ? 3 : 2);
+          if (this.run(["GET", args[1]]) !== expected) return 0;
+          this.run(["SET", args[1], text, "EX", seconds]);
+          if (two) {
+            this.run(["RPUSH", args[2], batch]);
+            this.run(["EXPIRE", args[2], rowSeconds]);
+          }
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);
           const n = Number(this.data.get(args[1]) ?? "0") || 0;

@@ -84,7 +84,7 @@ import { csvLine, readConsent } from "@/lib/csv";
 import { grantImported, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
-import { giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
+import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
 import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
@@ -194,12 +194,12 @@ async function takeMovedCount(store: Store, n: number, now: number): Promise<num
   return n - over;
 }
 
-/** Gives back what reserveMoved took for emails that did not go. */
+/** Gives back what reserveMoved took for emails that did not go, never below zero (lib/mail.ts, GIVE_BACK_FLOOR). */
 export async function releaseMoved(store: Store, n: number, now = Date.now()): Promise<void> {
   if (!Number.isSafeInteger(n) || n <= 0 || !store.sid) return;
   if (monthlyAllowance(store) > 0) return giveBackToMonth(store, n);
   const window = utcMonth(store, now);
-  if (window) await redisPipeline([["DECRBY", movedKey(store.sid, window), n]]);
+  if (window) await redisPipeline([["EVAL", GIVE_BACK_FLOOR, 1, movedKey(store.sid, window), n]]);
 }
 
 /**
@@ -253,12 +253,26 @@ const RECEIVING_MS = 2 * 60 * 60 * 1000;
  */
 const HELD_UPLOAD_CLOSES_MS = RECEIVING_MS - 10 * 60 * 1000;
 /**
+ * What a write of an import only over the one it was read as (JOB_WRITE_IF) costs beside the plain SET it replaces:
+ * the EVAL and the GET it compares with, which Upstash bills one by one beside the writes.
+ */
+export const JOB_WRITE_IF_EXTRA_COMMANDS = 2;
+/** The tries an end of an import makes when another writer changed it meanwhile, with a read between them (cancelJob). */
+const END_TRIES = 2;
+/**
+ * The most an end of an import (cancelJob) costs beside the plain SET and DECRBY it used to send: each try's write
+ * only over the one read (JOB_WRITE_IF), a read between tries, and the give-back never below zero (lib/mail.ts,
+ * GIVE_BACK_FLOOR).
+ */
+export const IMPORT_END_EXTRA_COMMANDS = END_TRIES * (1 + JOB_WRITE_IF_EXTRA_COMMANDS) - 1 + (END_TRIES - 1) + GIVE_BACK_FLOOR_EXTRA_COMMANDS;
+/**
  * What an upload holding the month's emails costs the five-minute job until it is given up (priced per start in
  * tests/plan-cost-registry.ts): its SADD to the active set when it starts, one GET each pass while it receives
  * (every five minutes for RECEIVING_MS, and one more), and the give-up at its ceiling of commands (the lock, the
- * read, the save, the store's read, the give-back and the slot).
+ * read, the save, the store's read, the give-back and the slot), with what its end costs beside them
+ * (IMPORT_END_EXTRA_COMMANDS).
  */
-export const HELD_UPLOAD_SWEEP_COMMANDS = 1 + (Math.ceil(RECEIVING_MS / (5 * 60_000)) + 1) + 16;
+export const HELD_UPLOAD_SWEEP_COMMANDS = 1 + (Math.ceil(RECEIVING_MS / (5 * 60_000)) + 1) + 16 + IMPORT_END_EXTRA_COMMANDS;
 const LOCK_SECONDS = 70;
 const LIST_SIZE = 10;
 
@@ -358,11 +372,23 @@ function parseJob(raw: unknown): ImportJob | null {
  * keeps the import on its list and tries again (advanceImports).
  */
 export async function readJob(id: string): Promise<ImportJob | null> {
+  return (await readStored(id))?.job ?? null;
+}
+
+/** readJob, with the text the import was stored as, for a write only over that one (writeJobIf). */
+async function readStored(id: string): Promise<{ job: ImportJob; raw: string } | null> {
   if (!IMPORT_ID_PATTERN.test(id) || !isRedisConfigured()) return null;
   const replies = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1);
   const raw = replies?.[0];
   if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("an import");
-  return parseJob(raw);
+  const job = parseJob(raw);
+  return job && typeof raw === "string" ? { job, raw } : null;
+}
+
+/** readStored for one import of this store, or null when it is not this store's. */
+async function storedOf(store: Store, id: string): Promise<{ job: ImportJob; raw: string } | null> {
+  const read = await readStored(id);
+  return read && store.sid && read.job.sid === store.sid ? read : null;
 }
 
 /** One import of this store, or null when it is not this store's. */
@@ -373,6 +399,36 @@ export async function jobOf(store: Store, id: string): Promise<ImportJob | null>
 
 function saveJob(job: ImportJob): Command {
   return ["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS];
+}
+
+/**
+ * Writes an import only while it is still stored as the text it was read as (ARGV[1]), and with it, for an upload,
+ * its batch of rows (KEYS[2]): one step on the Redis side.
+ */
+const JOB_WRITE_IF = `-- marktmorgen:import-job-write-if:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+if #KEYS == 2 then
+  redis.call('RPUSH', KEYS[2], ARGV[4])
+  redis.call('EXPIRE', KEYS[2], ARGV[5])
+end
+return 1`;
+
+/**
+ * Writes `job` only over the import as it was read (`raw`), with an upload's `batch` (second review on #3384, HIGH):
+ * the writers that do not take the import's lock (a batch, the finish, a new start giving up an old upload) never
+ * write back an import another writer has since canceled or given up, so what it held is never held again after it
+ * was given back. True when written; false when the import changed since, and nothing was written; any other reply
+ * throws UnknownReplyError (CX-123 rule 24), and the caller gives nothing back on it.
+ */
+async function writeJobIf(raw: string, job: ImportJob, batch?: string[][]): Promise<boolean> {
+  const command: Command = batch
+    ? ["EVAL", JOB_WRITE_IF, 2, jobKey(job.id), rowsKey(job.id), raw, JSON.stringify(job), KEEP_SECONDS, JSON.stringify(batch), RAW_DAYS * 86_400]
+    : ["EVAL", JOB_WRITE_IF, 1, jobKey(job.id), raw, JSON.stringify(job), KEEP_SECONDS];
+  const reply = repliesFor(await redisPipeline([command]), 1)?.[0];
+  if (reply === 1) return true;
+  if (reply === 0) return false;
+  throw new UnknownReplyError("an import written only over the one it was read as");
 }
 
 /**
@@ -464,11 +520,13 @@ export async function startImport(
     const held = repliesFor(await redisPipeline([["GET", busyKey(store.sid)]]), 1);
     const holder = held?.[0];
     if (!held || (holder !== null && typeof holder !== "string")) throw new UnknownReplyError("the import holding the store's slot");
-    const other = typeof holder === "string" ? await readJob(holder) : null;
-    if (other && !finished(other.state) && !(other.state === "receiving" && Date.now() - other.at > RECEIVING_MS)) {
+    const other = typeof holder === "string" ? await readStored(holder) : null;
+    if (other && !finished(other.job.state) && !(other.job.state === "receiving" && Date.now() - other.job.at > RECEIVING_MS)) {
       return { ok: false, reason: "busy" };
     }
-    if (other && other.state === "receiving") await cancelJob(other);
+    // Given up only over the upload as it was read here: when the five-minute job gave it up first, this finds it
+    // ended and gives nothing back a second time (cancelJob); one still changing keeps the store busy.
+    if (other && other.job.state === "receiving" && !finished((await cancelJob(other.job, other.raw)).state)) return { ok: false, reason: "busy" };
     // Freed only while it is still that holder's, in one step on the Redis side, and then claimed with NX again: of
     // two starts that both read the same finished holder, one claims the slot and the other is told the store is
     // busy (independent review on #2881, L2). Before, each took it with a plain SET and both ran.
@@ -572,42 +630,63 @@ export type RowsProblem = "unknown" | "state" | "too_many";
 
 /** Adds one batch of rows to an import that is still receiving them. */
 export async function addRows(store: Store, id: string, rows: string[][]): Promise<{ ok: true; job: ImportJob } | { ok: false; reason: RowsProblem }> {
-  const job = await jobOf(store, id);
-  if (!job) return { ok: false, reason: "unknown" };
+  const read = await storedOf(store, id);
+  if (!read) return { ok: false, reason: "unknown" };
+  const { job, raw } = read;
   if (job.state !== "receiving" || closedUpload(job)) return { ok: false, reason: "state" };
   if (job.total + rows.length > Math.min(job.expected, IMPORT_LIMITS[job.kind])) return { ok: false, reason: "too_many" };
   job.total += rows.length;
-  await redisPipeline([
-    ["RPUSH", rowsKey(id), JSON.stringify(rows)],
-    ["EXPIRE", rowsKey(id), RAW_DAYS * 86_400],
-    saveJob(job),
-  ]);
+  // The batch and the count only over the import as it was read: one canceled or given up since stays so, with no
+  // rows kept for it.
+  if (!(await writeJobIf(raw, job, rows))) return { ok: false, reason: "state" };
   return { ok: true, job };
 }
 
 /** Every row is here: the import is queued, for the page and the job to work through. */
 export async function finishUpload(store: Store, id: string): Promise<{ ok: true; job: ImportJob } | { ok: false; reason: RowsProblem }> {
-  const job = await jobOf(store, id);
-  if (!job) return { ok: false, reason: "unknown" };
+  const read = await storedOf(store, id);
+  if (!read) return { ok: false, reason: "unknown" };
+  const { job, raw } = read;
   if (job.state !== "receiving" || closedUpload(job)) return { ok: false, reason: "state" };
   job.state = job.total > 0 ? "queued" : "done";
   if (job.state === "done") job.finishedAt = Date.now();
   const back = job.state === "done" ? heldLeft(job) : undefined;
-  await saveThenGiveBack([saveJob(job), ...(job.state === "queued" ? [["SADD", ACTIVE_KEY, id]] : [])], job.sid, back, store);
-  if (job.state === "done") await releaseBusy(job);
+  // Only over the import as it was read: one canceled or given up since is never queued again with what it held.
+  // What an empty one held is given back once that write is confirmed.
+  if (!(await writeJobIf(raw, job))) return { ok: false, reason: "state" };
+  if (job.state === "queued") await redisPipeline([["SADD", ACTIVE_KEY, id]]);
+  else {
+    await giveBackHeld(job.sid, back, store);
+    await releaseBusy(job);
+  }
   // Past buyers are looked for on the list of purchases from now on.
   if (job.kind === "purchases" && job.state === "queued" && !store.pastBuyers) await setPastBuyers(storeRef(store));
   return { ok: true, job };
 }
 
-async function cancelJob(job: ImportJob): Promise<ImportJob> {
-  if (finished(job.state)) return job;
-  job.state = "canceled";
-  job.finishedAt = Date.now();
-  const back = heldLeft(job);
-  await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, job.id], ["DEL", rowsKey(job.id), seenKey(job.id), mailKey(job.id)]], job.sid, back);
-  await releaseBusy(job);
-  return job;
+/**
+ * Ends an import as canceled, written only over the import as it was read (`raw`, writeJobIf), and gives back what
+ * it held once that write is confirmed. Of two that end the same import (a cancel, the five-minute job giving up an
+ * upload, a new start giving up an old one), one writes it and gives back, and the other finds it ended and gives
+ * nothing back (second review on #3384, HIGH). Read again and tried once more when another writer changed it meanwhile
+ * (a batch arriving); answers the import as it then stands, not ended when it was still changing.
+ */
+async function cancelJob(job: ImportJob, raw: string): Promise<ImportJob> {
+  for (let tries = 1; ; tries += 1) {
+    if (finished(job.state)) return job;
+    const ended: ImportJob = { ...job, state: "canceled", finishedAt: Date.now() };
+    const back = heldLeft(ended);
+    if (await writeJobIf(raw, ended)) {
+      await redisPipeline([["SREM", ACTIVE_KEY, job.id], ["DEL", rowsKey(job.id), seenKey(job.id), mailKey(job.id)]]);
+      await giveBackHeld(ended.sid, back);
+      await releaseBusy(ended);
+      return ended;
+    }
+    if (tries >= END_TRIES) return job;
+    const fresh = await readStored(job.id);
+    if (!fresh) return job;
+    ({ job, raw } = fresh);
+  }
 }
 
 /** A members upload holding the month's emails, too near the time it can be given up to take rows or be finished. */
@@ -618,7 +697,8 @@ function closedUpload(job: ImportJob): boolean {
 /**
  * Saves an ended import (its SET first in `commands`) and only then gives back what it held (heldLeft), once that
  * save is confirmed in its exact shape (CX-123 rule 24): any other reply throws UnknownReplyError and nothing is
- * given back, since the job may still hold it; it stays counted, the conservative side.
+ * given back, since the job may still hold it; it stays counted, the conservative side. For the ends runImport makes
+ * under the import's lock: the writers without it change only an upload, and only over the one read (writeJobIf).
  */
 async function saveThenGiveBack(commands: Command[], sid: string, back: ImportJob["held"], store?: Store | null): Promise<void> {
   const replies = await redisPipeline(commands);
@@ -679,8 +759,8 @@ export async function cancelImport(store: Store, id: string): Promise<ImportJob 
     throw error;
   }
   try {
-    const fresh = (await readJob(id)) ?? job;
-    return await cancelJob(fresh);
+    const fresh = await readStored(id);
+    return fresh ? await cancelJob(fresh.job, fresh.raw) : job;
   } finally {
     await releaseLock(held);
   }
@@ -1389,7 +1469,17 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   const sending = messages.slice(0, room);
   if (held && room > 0) {
     held.n -= room;
-    await redisPipeline([saveJob(job)]);
+    // That save confirmed in its exact shape before anything is sent (CX-123 rule 24; second review on #3384, LOW 1):
+    // on any other reply nothing is sent, the addresses wait again, and nothing is given back on it, since the
+    // import may have saved the smaller hold; those then stay counted, never given back for emails that may go.
+    const saved = repliesFor(await redisPipeline([saveJob(job)]), 1)?.[0];
+    if (saved !== "OK") {
+      held.n += room;
+      await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+      await releaseDay(messages.length);
+      await unsent(portion);
+      throw new UnknownReplyError("an import's hold saved before its send");
+    }
   }
   if (sending.length < messages.length) await releaseDay(messages.length - sending.length);
   if (sending.length === 0) {
@@ -1447,17 +1537,18 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
     if (error instanceof LockBusyError) return readJob(id);
     throw error;
   }
-  let job: ImportJob | null;
+  let read: { job: ImportJob; raw: string } | null;
   try {
-    job = await readJob(id);
+    read = await readStored(id);
   } catch (error) {
     // An import that cannot be read (UnknownReplyError) is not worked on: its lock is let go and the caller hears it.
     await releaseLock(held);
     throw error;
   }
+  const job = read?.job ?? null;
   try {
-    if (!job) return null;
-    if (job.state === "receiving" && Date.now() - job.at > RECEIVING_MS) return await cancelJob(job);
+    if (!read || !job) return null;
+    if (job.state === "receiving" && Date.now() - job.at > RECEIVING_MS) return await cancelJob(job, read.raw);
     if (job.state !== "queued" && job.state !== "running" && job.state !== "mailing") return job;
     const store = await storeForId(job.sid);
     if (!store) {

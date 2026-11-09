@@ -377,10 +377,27 @@ async function takeCounted(key: string, n: number, allowance: number): Promise<n
   return n - over;
 }
 
-/** Gives back to the store's month what takeFromMonth took for emails that did not go. */
+/**
+ * Gives back up to ARGV[1] of a count, never below zero (second review on #3384, HIGH): a give-back that comes twice,
+ * or for more than was taken, never leaves the month's count below what went, so nothing else can send past the plan
+ * on it. The count is read exactly (CX-123 rule 24): absent is nothing to give back; a whole number is taken down by
+ * at most itself; any other value is an error, and nothing is changed. Answers how many were given back.
+ */
+export const GIVE_BACK_FLOOR = `-- marktmorgen:give-back-floor:v1
+local held = redis.call('GET', KEYS[1])
+if not held then return 0 end
+if not string.match(held, '^-?%d+$') then return redis.error_reply('ERR give-back-floor: not a count') end
+local back = math.min(tonumber(ARGV[1]), tonumber(held))
+if back <= 0 then return 0 end
+redis.call('DECRBY', KEYS[1], back)
+return back`;
+/** What GIVE_BACK_FLOOR costs beside the DECRBY it replaces: the EVAL and its GET, which Upstash bills one by one beside the DECRBY. */
+export const GIVE_BACK_FLOOR_EXTRA_COMMANDS = 2;
+
+/** Gives back to the store's month what takeFromMonth took for emails that did not go, never below zero (GIVE_BACK_FLOOR). */
 export async function giveBackToMonth(store: Store, n: number): Promise<void> {
   const window = windowOf(store);
-  if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["DECRBY", usedKey(store.listId, window), n]]);
+  if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["EVAL", GIVE_BACK_FLOOR, 1, usedKey(store.listId, window), n]]);
 }
 
 /** Gives back what was taken for a batch that was not sent. */

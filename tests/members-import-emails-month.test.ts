@@ -374,6 +374,15 @@ async function main(): Promise<void> {
   is("B: and the new one canceled gives its 1 back: 0", await movedNow(PB), "0");
   Date.now = () => fixedStart + (realNow() - realStart);
 
+  // An import let go (its key gone) between a batch's read and its write is not written again, and keeps no rows.
+  const GONE = "r46e-gone@example.com";
+  await creatorStore(GONE, "r46gone", { period: paidPeriod() });
+  const gone = await startImport((await storeForEmail(GONE))!, GONE, "contacts", { expected: 2, file: "list.csv", agreed: true });
+  const goneId = gone.ok ? gone.job.id : "";
+  const goneRows = await afterRead(goneId, () => redis.pipeline([["DEL", `nl:import:${goneId}`]]), async () => addRows((await storeForEmail(GONE))!, goneId, [["2", "a@example.com", "", "", ""]]));
+  const goneLeft = (await redis.pipeline([["EXISTS", `nl:import:${goneId}`], ["EXISTS", `nl:import:${goneId}:rows`]])) as number[];
+  is("an import let go between a batch's read and its write is not written again, and keeps no rows", [gone.ok, goneRows.ok, (goneRows as { reason?: string }).reason, goneLeft], [true, false, "state", [0, 0]]);
+
   part("A give-back never takes a count below zero, and reads it exactly");
   const FLOOR = "r46e-floor@example.com";
   const floorStore = await creatorStore(FLOOR, "r46floor", { period: paidPeriod() });
@@ -399,6 +408,9 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", floorUsed, "many"]]);
   await giveBackToMonth((await storeForEmail(FLOORSTUDIO))!, 5).catch(() => undefined);
   is("Studio: a count that is not a whole number is left as it is, nothing given back on it", (await redis.pipeline([["GET", floorUsed]]))[0], "many");
+  await redis.pipeline([["DEL", floorUsed]]);
+  await giveBackToMonth((await storeForEmail(FLOORSTUDIO))!, 5);
+  is("Studio: a month with nothing counted yet gets nothing given back, and no count is made", (await redis.pipeline([["EXISTS", floorUsed]]))[0], 0);
 
   part("The save before a members send is confirmed before anything goes (second review, LOW 1)");
   const SAVE = "r46e-save@example.com";

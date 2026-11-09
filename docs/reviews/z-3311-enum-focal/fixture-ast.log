@@ -1,0 +1,16 @@
+[
+  {
+    "file": "tests/checkup.test.ts",
+    "assertionCalls": 52,
+    "assertionsByteIdentical": true,
+    "wholeSourceOnlyNominalFixtureSubstitution": true,
+    "substitutions": 1
+  },
+  {
+    "file": "tests/stripe-account-written.test.ts",
+    "assertionCalls": 7,
+    "assertionsByteIdentical": true,
+    "wholeSourceOnlyNominalFixtureSubstitution": true,
+    "substitutions": 2
+  }
+]

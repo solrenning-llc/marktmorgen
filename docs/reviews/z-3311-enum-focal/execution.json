@@ -1,0 +1,28 @@
+[
+  {
+    "label": "old-reader",
+    "status": 1,
+    "files": [
+      "stripe-connect-account-exact.test.ts",
+      "z-3311-enum.proof.ts"
+    ],
+    "seconds": 1.603,
+    "bytes": 9663
+  },
+  {
+    "label": "head",
+    "status": 0,
+    "files": [
+      "stripe-connect-account-exact.test.ts",
+      "z-3311-enum.proof.ts",
+      "z-3311-status-unknown.proof.ts",
+      "stripe-account-written.test.ts",
+      "connect-configuration.test.ts",
+      "checkup-disputes.test.ts",
+      "plan-cost-registry.test.ts",
+      "store-data-registry.test.ts"
+    ],
+    "seconds": 5.744,
+    "bytes": 36908
+  }
+]

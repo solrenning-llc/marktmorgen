@@ -1,0 +1,23 @@
+{
+  "retrieval": "Independently retrieved with GitHub connector after Codex U documentary review 6729312420; no live provider request.",
+  "repository": "stripe/stripe-node",
+  "tag": "v22.6.0",
+  "apiVersion": {
+    "blob": "66181a80523eb33f5444c725f8577e63c77d3375",
+    "content": "// File generated from our OpenAPI spec\n\nexport const ApiVersion = '2026-08-26.dahlia';\nexport const ApiMajorVersion = 'dahlia';\n",
+    "url": "https://github.com/stripe/stripe-node/blob/v22.6.0/src/apiVersion.ts"
+  },
+  "responseTypes": {
+    "blob": "a1c3ff746311f95676e8a1f7e5e40d5af26a36f4",
+    "url": "https://github.com/stripe/stripe-node/blob/v22.6.0/src/resources/V2/Core/Accounts.ts",
+    "card": {
+      "startLine": 2034,
+      "excerpt": "        export namespace CardPayments {\n          export type Status =\n            | 'active'\n            | 'pending'\n            | 'restricted'\n            | 'unsupported';\n"
+    },
+    "deadline": {
+      "startLine": 4003,
+      "excerpt": "      export namespace MinimumDeadline {\n        export type Status = 'currently_due' | 'eventually_due' | 'past_due';\n      }"
+    }
+  },
+  "scope": "Versioned generated response types for the declared API version, not a captured live response, production incident, full API schema validation, v1 capability proof, or budget grant."
+}

@@ -14,6 +14,9 @@
  * And a run that got no further on the course it began with (a page whose sends are slow and fail, their marks let
  * go) leaves the next run to begin with the course after it, so one slow page never holds back every course after
  * it (Claude 2 on #3344); what is sent is never sent twice, and what failed is sent once the sends go again.
+ * The course passed over that way resumes at the page it stopped at when its turn comes, not at its first page, so
+ * its earlier pages are not read again (Claude 2 on #3344, LOW); a resume point not in this job's shape starts the
+ * run at the first course, as any other cursor not in its shape does.
  *
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts) and the synthetic SES (tests/ses-mail-fixture.ts).
  */
@@ -229,6 +232,68 @@ async function main(): Promise<void> {
       await quiet(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, realNow() + 40_000));
     }
     is("once the sends go again, each student of the slow page is emailed exactly once, the other course's not again", [...slow.map(to), to(waiting)], [...slow.map(() => 1), 1]);
+  }
+
+  part("(g) A course passed over at a deep slow page resumes at that page in its turn, without reading its earlier pages again (Claude 2 on #3344)");
+  {
+    const store = await setup();
+    await original([["SADD", DRIP, memberOf(store, A, PA), memberOf(store, B, PB)]]);
+    // Course A's students in three pages (HSCAN COUNT is a hint; the synthetic pages are what a large hash gives):
+    // two pages of students who joined long ago (nothing opens for them) and a third of four whose sends are slow.
+    const longAgo = (email: string) => [emailKey(email), JSON.stringify({ e: email, s: NOW - 400 * 86_400, l: NOW })];
+    const pages: Record<string, { next: string; items: string[] }> = {
+      "0": { next: "11", items: [...longAgo("early-0@example.com"), ...longAgo("early-1@example.com")] },
+      "11": { next: "22", items: [...longAgo("early-2@example.com"), ...longAgo("early-3@example.com")] },
+      "22": { next: "0", items: [] },
+    };
+    const deep: string[] = [];
+    for (let n = 0; n < 4; n += 1) {
+      const email = `deep-slow-${n}@example.com`;
+      deep.push(await student(A, email));
+      pages["22"].items.push(emailKey(email), JSON.stringify({ e: email, s: NOW - 36 * 3600, l: NOW }));
+    }
+    const waiting = await student(B, "waiting-deep-b@example.com");
+    const scans: string[][] = [];
+    inject = (commands) => {
+      const scan = commands.length === 1 && commands[0][0] === "HSCAN" && commands[0][1] === `nl:course:${A.id}:students` ? pages[String(commands[0][2])] : undefined;
+      if (!scan) return null;
+      scans[scans.length - 1].push(String(commands[0][2]));
+      return Promise.resolve([[scan.next, scan.items]]);
+    };
+    sesHooks.onSes = (message) => {
+      if (!message.to.some((address) => address.startsWith("deep-slow-"))) return undefined;
+      skew += 15_000;
+      return new Response(JSON.stringify({ message: "synthetic: the provider is slow and refuses" }), { status: 400, headers: { "content-type": "application/json" } });
+    };
+    const loadCourse = async (id: string) => (id === A.id ? A : id === B.id ? B : null);
+    for (let n = 0; n < 3; n += 1) {
+      skew = 0;
+      scans.push([]);
+      await quiet(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, realNow() + 40_000));
+    }
+    sesHooks.onSes = undefined;
+    inject = null;
+    is("the first run reads the course's three pages and stops at the slow one", scans[0], ["0", "11", "22"]);
+    is("the second run begins at the slow page and gets no further", scans[1], ["22"]);
+    is("the third run reads the course after it, then resumes the passed-over course at its slow page, not from its first", scans[2], ["22"]);
+    is("over the three runs, the course's first two pages are read once each", [scans.flat().filter((c) => c === "0").length, scans.flat().filter((c) => c === "11").length], [1, 1]);
+    is("the course after it is emailed once, nobody of the slow page while its sends fail", [to(waiting), ...deep.map(to)], [1, ...deep.map(() => 0)]);
+  }
+
+  part("(g) A cursor whose passed-over course is not in this job's shape: logged, and the run starts at the first course");
+  for (const [label, kept] of [
+    ["a page that is not a number", { m: "b", h: "0", r: { m: "a", h: "x" } }],
+    ["a resume point that is not an object", { m: "b", h: "0", r: "a" }],
+  ] as [string, unknown][]) {
+    const store = await setup();
+    const tag = label.replace(/\W+/g, "-");
+    await original([["SADD", DRIP, memberOf(store, A, PA), memberOf(store, B, PB)]]);
+    const atA = await student(A, `head-a-${tag}@example.com`);
+    const atB = await student(B, `head-b-${tag}@example.com`);
+    await original([["SET", "nl:courses:cursor", JSON.stringify(kept)]]);
+    const order: string[] = [];
+    const { errors } = await quiet(() => sendDripEmails(async () => store, async (id) => (order.push(id), id === A.id ? A : id === B.id ? B : null), "https://marktmorgen.com", NOW, realNow() + 40_000));
+    is(`${label}: said, the run starts at the first course, every student emailed once`, [errors.some((e) => e.includes("cursor")), order[0], to(atA), to(atB)], [true, A.id, 1, 1]);
   }
 
   part("(f) Control: a course alone whose page is slow is begun with again, and nothing is sent twice");

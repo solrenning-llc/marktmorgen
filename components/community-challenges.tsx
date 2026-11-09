@@ -103,7 +103,7 @@ export function ChallengeCard({
                 {w.streak(progress.streak)}
               </p>
               <details className="mt-2 text-sm">
-                <summary className="cursor-pointer font-semibold">{w.yourDays}</summary>
+                <summary className="inline-flex min-h-11 cursor-pointer items-center font-semibold">{w.yourDays}</summary>
                 <ol className="mt-2 grid gap-1 sm:grid-cols-2">
                   {progress.days.map((done, d) => {
                     const date = challengeDate(locale, c.start + d * CHALLENGE_DAY_MS);

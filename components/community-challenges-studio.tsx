@@ -72,7 +72,12 @@ const STATE_WORDS = { scheduled: "Coming up", active: "On now", ended: "Over" } 
  * part, a form to start one, and a delete that asks first. Days run midnight
  * to midnight UTC, and the form says so beside the dates.
  */
-export function CommunityChallengesStudio({ challenges, canManage }: { challenges: StudioChallenge[]; canManage: boolean }) {
+/**
+ * `challenges` is null when the list could not be read: said so, never shown
+ * as "No challenges yet." (rule 24; Claude 6's review of #3452, L3).
+ */
+export function CommunityChallengesStudio({ challenges: read, canManage }: { challenges: StudioChallenge[] | null; canManage: boolean }) {
+  const challenges = read ?? [];
   const router = useRouter();
   const [draft, setDraft] = useState({ title: "", about: "", task: "", from: "", to: "" });
   const [busy, setBusy] = useState<string | null>(null);
@@ -82,9 +87,17 @@ export function CommunityChallengesStudio({ challenges, canManage }: { challenge
   const taskRef = useRef<HTMLInputElement>(null);
   const fromRef = useRef<HTMLInputElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
-  // Asked whether to delete: the safe answer takes the focus the Delete button had.
+  // Each challenge's Delete button, so the focus can go back to it.
+  const deleteRefs = useRef(new Map<string, HTMLButtonElement>());
+  const asked = useRef<string | null>(null);
+  // Asked whether to delete: the safe answer takes the focus the Delete button
+  // had. When the question closes without deleting ("Keep it", or a delete that
+  // failed), the focus goes back to that Delete button, never to the page
+  // (2.4.3; Claude 6's review of #3452, L5).
   useEffect(() => {
     if (asking) keepRef.current?.focus();
+    else if (asked.current) deleteRefs.current.get(asked.current)?.focus();
+    asked.current = asking;
   }, [asking]);
   const open = challenges.filter((c) => c.state !== "ended").length;
   const set = (patch: Partial<typeof draft>) => setDraft((d) => ({ ...d, ...patch }));
@@ -202,7 +215,9 @@ export function CommunityChallengesStudio({ challenges, canManage }: { challenge
       )}
 
       <h3 className="mt-8 text-sm font-bold uppercase tracking-[0.06em] text-ink-soft">Your challenges</h3>
-      {challenges.length === 0 ? (
+      {read === null ? (
+        <p className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink" role="status">The challenges could not be read just now. Reload the page.</p>
+      ) : challenges.length === 0 ? (
         <p className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">No challenges yet.</p>
       ) : (
         <ul className="mt-3 space-y-3">
@@ -226,7 +241,17 @@ export function CommunityChallengesStudio({ challenges, canManage }: { challenge
                     <button type="button" ref={keepRef} className="btn" disabled={busy !== null} onClick={() => setAsking(null)}>Keep it</button>
                   </div>
                 ) : (
-                  <button type="button" className="btn mt-3" disabled={busy !== null} onClick={() => setAsking(c.id)} aria-label={`Delete the challenge ${c.title}`}>
+                  <button
+                    type="button"
+                    ref={(el) => {
+                      if (el) deleteRefs.current.set(c.id, el);
+                      else deleteRefs.current.delete(c.id);
+                    }}
+                    className="btn mt-3"
+                    disabled={busy !== null}
+                    onClick={() => setAsking(c.id)}
+                    aria-label={`Delete the challenge ${c.title}`}
+                  >
                     Delete
                   </button>
                 )

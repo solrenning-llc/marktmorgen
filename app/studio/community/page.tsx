@@ -83,7 +83,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   let rewards: Reward[] = [];
   let coming: StudioEvent[] = [];
   let over: StudioEvent[] = [];
-  let challenges: StudioChallenge[] = [];
+  let challenges: StudioChallenge[] | null = [];
   // Google Calendar and Zoom (lib/meet-connect.ts): which accounts an event
   // can have a meeting made on, for the form. Nothing is read when the
   // deployment has neither.
@@ -142,9 +142,10 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     });
     // The challenges (lib/community-challenges.ts), with their counts: counts
     // that do not read are shown as not known, never as 0 (rule 30).
-    const kept = await keptChallenges(id, now).catch(() => []);
-    const counted = await challengeCounts(id, kept, now).catch(() => null);
-    challenges = kept.map((c) => {
+    // A list that does not read is said to be unreadable, never shown as none (rule 24).
+    const kept = await keptChallenges(id, now).catch(() => null);
+    const counted = kept ? await challengeCounts(id, kept, now).catch(() => null) : null;
+    challenges = kept === null ? null : kept.map((c) => {
       const state = challengeWindowState(c.start, c.end, now);
       const n = counted?.get(c.id) ?? null;
       return {

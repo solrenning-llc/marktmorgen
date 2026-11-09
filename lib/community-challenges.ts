@@ -140,11 +140,43 @@ function parseChallenge(raw: unknown): Challenge | null {
   return { id: v.id, title: v.title, about: typeof v.about === "string" ? v.about : "", task: v.task, start, end, at };
 }
 
-/** One challenge, or null when it is gone (deleted, or its keep is over). */
+/** A challenge record's reply: text or nothing; any other shape is unknown (rule 24), never "gone". */
+function recordReply(raw: unknown): string | null {
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a challenge");
+  return raw;
+}
+
+/**
+ * One challenge, or null when it is gone (deleted, or its keep is over) or
+ * its record does not parse. A reply of an unknown shape throws.
+ */
 export async function readChallenge(id: string, ch: string): Promise<Challenge | null> {
   if (!ITEM_ID.test(ch)) return null;
-  const [raw] = await redisPipeline([["GET", challengeKey(id, ch)]]);
-  return parseChallenge(raw);
+  const [raw] = repliesFor(await redisPipeline([["GET", challengeKey(id, ch)]]), 1) ?? [undefined];
+  return parseChallenge(recordReply(raw));
+}
+
+/** Whether a challenge is still in the community's list, read exactly. */
+async function stillKept(id: string, ch: string): Promise<boolean> {
+  const [score] = repliesFor(await redisPipeline([["ZSCORE", indexKey(id), ch]]), 1) ?? [undefined];
+  if (score === null) return false;
+  if (typeof score !== "string" && typeof score !== "number") throw new UnknownReplyError("whether a challenge is kept");
+  return true;
+}
+
+/**
+ * After a write to a challenge a delete may have overtaken (it lets the
+ * challenge go between our read and our write): when it is no longer in the
+ * list, what we wrote is taken away again and its slot stays empty, so
+ * nothing is left outside the list and outside the room (Claude 6's review
+ * of #3452, L2). Every writer checks after its own last write, so whichever
+ * comes last, the delete or the check, clears it.
+ */
+async function overtaken(id: string, ch: string, room: DataStore, now: number): Promise<boolean> {
+  if (await stillKept(id, ch)) return false;
+  await redisPipeline([["DEL", joinedKey(id, ch), checkKey(id, ch), countKey(id, ch)]]);
+  await giveData(room, [{ slot: slotOf(ch), bytes: 0, set: true }], now);
+  return true;
 }
 
 /** The ids kept, with when each ends. */
@@ -161,9 +193,10 @@ async function keptIds(id: string, minEnd: number | "-inf"): Promise<string[]> {
 export async function keptChallenges(id: string, now = Date.now()): Promise<Challenge[]> {
   const ids = await keptIds(id, now - KEEP_MS);
   if (!ids.length) return [];
-  const raws = await redisPipeline(ids.map((ch) => ["GET", challengeKey(id, ch)]));
+  const raws = repliesFor(await redisPipeline(ids.map((ch) => ["GET", challengeKey(id, ch)])), ids.length);
+  if (!raws) throw new UnknownReplyError("a community's challenges");
   return ids
-    .map((_, i) => parseChallenge(raws[i]))
+    .map((_, i) => parseChallenge(recordReply(raws[i])))
     .filter((c): c is Challenge => c !== null && c.end + KEEP_MS > now)
     .sort((a, b) => a.start - b.start || a.at - b.at);
 }
@@ -307,6 +340,7 @@ export async function joinChallenge(id: string, c: Challenge, member: string, ro
     await giveData(room, [{ slot: slotOf(c.id), bytes: joinBytes(member) }], now);
     return "already";
   }
+  if (await overtaken(id, c.id, room, now)) return "gone";
   return "joined";
 }
 
@@ -345,6 +379,7 @@ export async function checkIn(id: string, c: Challenge, member: string, room: Da
     ["HINCRBY", countKey(id, c.id), `d${day}`, 1],
     ["EXPIREAT", countKey(id, c.id), expiresAt(c)],
   ]);
+  if (await overtaken(id, c.id, room, now)) return "gone";
   return "checked";
 }
 
@@ -423,26 +458,42 @@ export async function challengeCounts(id: string, challenges: Challenge[], now =
 
 // ------------------------------------------------------------------ one person
 
-/** The challenges a person is in, with the days they checked in: for the copy of their data (619 [SZ3]). */
-export async function challengesOf(id: string, who: string): Promise<{ challenge: string; title: string; joined: number; checkIns: string[] }[]> {
+/** Every day field a person can have in any challenge: never more than MAX_CHALLENGE_DAYS. */
+const personFields = (who: string) => Array.from({ length: MAX_CHALLENGE_DAYS }, (_, d) => field(who, d));
+
+/** A person's check-ins in one challenge, read exactly: the days they did. */
+function daysDone(got: unknown): number[] {
+  if (!Array.isArray(got) || got.length !== MAX_CHALLENGE_DAYS || got.some((x) => x !== null && typeof x !== "string")) throw new UnknownReplyError("a person's check-ins");
+  return got.flatMap((x, d) => (x === null ? [] : [d]));
+}
+
+/**
+ * The challenges a person is in, with the days they checked in: for the copy
+ * of their data (619 [SZ3]). Read from their place and their check-ins, not
+ * from the challenge's record: a record that does not parse still shows
+ * their part, with no title and the days by number (Claude 6's review of
+ * #3452, M1); a reply of an unknown shape throws, never leaves one out.
+ */
+export async function challengesOf(id: string, who: string): Promise<{ challenge: string; title: string | null; joined: number; checkIns: string[] }[]> {
   if (!isRedisConfigured()) return [];
-  const ids = await keptIds(id, "-inf");
-  const kept = (await Promise.all(ids.map((ch) => readChallenge(id, ch)))).filter((c): c is Challenge => c !== null);
-  const out: { challenge: string; title: string; joined: number; checkIns: string[] }[] = [];
-  for (const c of kept) {
-    const days = challengeDays(c);
+  const out: { challenge: string; title: string | null; joined: number; checkIns: string[] }[] = [];
+  for (const ch of await keptIds(id, "-inf")) {
     const replies = repliesFor(await redisPipeline([
-      ["HGET", joinedKey(id, c.id), who],
-      ["HMGET", checkKey(id, c.id), ...Array.from({ length: days }, (_, d) => field(who, d))],
-    ]), 2);
-    const got = replies?.[1];
-    if (!replies || !Array.isArray(got) || got.length !== days) throw new UnknownReplyError("a person's challenges");
-    if (replies[0] === null) continue;
+      ["GET", challengeKey(id, ch)],
+      ["HGET", joinedKey(id, ch), who],
+      ["HMGET", checkKey(id, ch), ...personFields(who)],
+    ]), 3);
+    if (!replies) throw new UnknownReplyError("a person's challenges");
+    const c = parseChallenge(recordReply(replies[0]));
+    const joined = replies[1];
+    if (joined !== null && (typeof joined !== "string" || !/^\d+$/.test(joined))) throw new UnknownReplyError("a person's place in a challenge");
+    const done = daysDone(replies[2]);
+    if (joined === null && !done.length) continue;
     out.push({
-      challenge: c.id,
-      title: c.title,
-      joined: Number(replies[0]) || 0,
-      checkIns: got.flatMap((x, d) => (x === "1" ? [dayDate(c.start, d)] : [])),
+      challenge: ch,
+      title: c ? c.title : null,
+      joined: joined === null ? 0 : Number(joined),
+      checkIns: done.map((d) => (c ? dayDate(c.start, d) : `day ${d + 1}`)),
     });
   }
   return out;
@@ -456,15 +507,13 @@ export async function challengesOf(id: string, who: string): Promise<{ challenge
 export async function forgetChallengesPerson(id: string, who: string, room?: DataStore): Promise<number> {
   if (!isRedisConfigured()) return 0;
   let records = 0;
+  // Not from the challenge's record: a record that does not read must not
+  // keep a person in (Claude 6's review of #3452, M1). Every day field they
+  // can have is at most MAX_CHALLENGE_DAYS, and the room each took is known
+  // from the member and the day alone.
   for (const ch of await keptIds(id, "-inf")) {
-    const c = await readChallenge(id, ch);
-    if (!c) continue;
-    const days = challengeDays(c);
-    const fields = Array.from({ length: days }, (_, d) => field(who, d));
-    const replies = repliesFor(await redisPipeline([["HMGET", checkKey(id, ch), ...fields]]), 1);
-    const got = replies?.[0];
-    if (!Array.isArray(got) || got.length !== days) throw new UnknownReplyError("a person's check-ins");
-    const done = got.flatMap((x, d) => (x === null ? [] : [d]));
+    const [got] = repliesFor(await redisPipeline([["HMGET", checkKey(id, ch), ...personFields(who)]]), 1) ?? [undefined];
+    const done = daysDone(got);
     const removed = repliesFor(await redisPipeline([
       ["HDEL", joinedKey(id, ch), who],
       ...done.map((d) => ["HDEL", checkKey(id, ch), field(who, d)]),

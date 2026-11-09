@@ -3372,9 +3372,10 @@ export function withinMonths(from: number, paidAt: number, months: number): bool
  *    (`full` false, or no `kept` yet) is what the book waits on: it is read
  *    first, then added to `kept`. A full one reads everything again from
  *    `since` every INVOICE_REBUILD_SECONDS, with the pages the newer invoices
- *    leave, and replaces `kept` when it ends, so an older invoice paid late
- *    (an open one paid weeks after it was made) is counted then; while it
- *    runs, `kept` and the newer invoices are the book.
+ *    leave, keeping only the invoices `kept` does not have, and adds them to
+ *    it when it ends, so an older invoice paid late (an open one paid weeks
+ *    after it was made) is counted then; while it runs, `kept` and the newer
+ *    invoices are the book.
  *
  * A record that does not read, of another account, another set of the
  * store's handles or a later `since`, is not taken: the reading starts again.
@@ -3449,7 +3450,11 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
           w.fails = 0;
           changed = true;
           if (read.done) {
-            keep.kept = { lines: w.lines, unlinked: w.unlinked, whole: w.whole, top: w.top, at: w.at };
+            // What it found that was not kept joins what was (pre-review, 9 November 2026: replacing `kept` with it
+            // meant keeping both whole while it ran, which past half INVOICES_KEPT_MAX_LINES never fitted, so it was
+            // dropped each time and an old invoice paid late was never counted on a book said to be whole). Whole
+            // only if every invoice read whole this time.
+            keep.kept = { lines: [...kept.lines, ...w.lines], unlinked: [...kept.unlinked, ...w.unlinked], whole: w.whole, top: w.top, at: w.at };
             keep.walk = null;
           }
         }
@@ -3503,9 +3508,9 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
 const invoiceKeepKey = (statsId: string) => `nl:aff:${statsId}:invoices`;
 /**
  * The most a store's kept invoices may take: INVOICES_KEPT_MAX_LINES paid invoices (each line and each unlinked one,
- * what is kept and a reading under way together) and INVOICES_KEPT_MAX_BYTES (UTF-8 bytes of the record). Past
- * either, a full reading again is dropped and what is kept stays; past either with only that, nothing is kept and the
- * book is not whole (invoicesChecked false). Counted in lib/api-read-rules.ts (BOOK_INVOICES_KEPT_BYTES,
+ * what is kept and a reading under way together, a full reading again keeping only what is not kept) and
+ * INVOICES_KEPT_MAX_BYTES (UTF-8 bytes of the record). Past either, nothing is kept and the book is not whole
+ * (invoicesChecked false), never a book that leaves out what did not fit. Counted in lib/api-read-rules.ts (BOOK_INVOICES_KEPT_BYTES,
  * BOOK_INVOICES_KEPT_LINES), tests/plan-cost-registry.ts and tests/store-data-registry.ts.
  */
 export const INVOICES_KEPT_MAX_LINES = 5_000;
@@ -3608,18 +3613,14 @@ async function writeInvoiceKeep(statsId: string, keep: InvoiceKeep): Promise<boo
     };
   };
   const kept = keep.kept && { ...keep.kept, ...once(keep.kept) };
-  const walking = keep.walk && { ...keep.walk, ...once(keep.walk) };
+  // A full reading again keeps only the invoices not kept already: it adds them to `kept` when it ends.
+  const known = new Set(keep.walk?.full && kept ? [...kept.lines.map((line) => line[0]), ...kept.unlinked.map((u) => u[0])] : []);
+  const fresh = (set: InvoiceSet): InvoiceSet => ({ lines: set.lines.filter((line) => !known.has(line[0])), unlinked: set.unlinked.filter((u) => !known.has(u[0])), whole: set.whole });
+  const walking = keep.walk && { ...keep.walk, ...once(fresh(keep.walk)) };
   const count = (set: InvoiceSet | null) => (set ? set.lines.length + set.unlinked.length : 0);
   const fits = (value: string, sets: (InvoiceSet | null)[]) => Buffer.byteLength(value, "utf8") <= INVOICES_KEPT_MAX_BYTES && sets.reduce((n, set) => n + count(set), 0) <= INVOICES_KEPT_MAX_LINES;
-  let value = JSON.stringify({ ...keep, kept, walk: walking });
-  let ok = fits(value, [kept, walking]);
-  // A full reading again that does not fit beside what is kept is dropped, and what is kept stays: the next one begins
-  // again (an older invoice paid late is then counted only while the two fit together).
-  if (!ok && walking?.full && kept) {
-    value = JSON.stringify({ ...keep, kept, walk: null });
-    ok = fits(value, [kept]);
-  }
-  if (!ok) {
+  const value = JSON.stringify({ ...keep, kept, walk: walking });
+  if (!fits(value, [kept, walking])) {
     console.error("the affiliate book's kept invoices are past their ceiling: nothing kept, the book not whole", statsId);
     await redisPipeline([["DEL", invoiceKeepKey(statsId)]]).catch(() => undefined);
     return false;

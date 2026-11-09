@@ -936,9 +936,10 @@ function dripCursor(reply: unknown): { m: string; h: string } | null {
  *
  * Bounded and fair: nothing new starts after `deadline`, and the next run starts at the course (and the page of its
  * students) this one stopped at, or at the course after it when this run got no further on the course it began with.
- * One course that throws is counted and logged and the rest go on; it is tried again the next run. `load` and `loadCourse` answer null only for a store or a course confirmed absent, and throw when
- * they cannot tell (the route passes the exact readers): only then, or when the product is confirmed gone or no
- * longer holds this course, is the course taken out of the drip set.
+ * One course that throws is counted and logged and the rest go on; it is tried again the next run. `load` and
+ * `loadCourse` answer null only for a store or a course confirmed absent, and throw when they cannot tell (the route
+ * passes the exact readers): only then, or when the product is confirmed gone or no longer holds this course, is the
+ * course taken out of the drip set.
  */
 export async function sendDripEmails(
   load: (handle: string) => Promise<Store | null>,

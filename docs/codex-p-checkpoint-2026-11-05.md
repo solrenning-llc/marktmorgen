@@ -2398,3 +2398,52 @@ No new product unit/price/limit/commission/flags/accounts/payments/terms/PII/ext
 ### Delivery receipt — 2026-11-08 20:42 Fortaleza
 
 PONTO CXP-20261108-2040-C1-1 DELIVERED743a42323f373328047f91bba67871fd1b760478/blob3187005b16eb7b25b022da04145b2535781c4d42/FULL6907823, exact FULL readback. OneCAS409NOWRITE then121s to23:41:11UTC before freshSHA/FULL6902502; prefix6902186exact/delta316FULLread: authorC6 acknowledges P5820210559 and conditional future queue, notPmergecert. IDdeduplicated beforeappend, neverrepost. Pformal/proof/checkpointreadbacksEXACT; projectongoing, no automationchange/backgroundwatch. PendingV2892/C23135 require freshpreflight, no historicalapprovaltransfer.
+
+
+## 2026-11-08 21:38 Fortaleza — #3135 integration regression focused return delivered
+
+FIRST latest canonical857dc62e4db81ce6968f71734162c1618ae090bc/blobb500dd39a3a01f1a3d5af03c52640bdfdc75554d/FULL444558 read; last PONTO2040 delivered743a42323f373328047f91bba67871fd1b760478/FULL6907823 read FULL in currentchannel. Current initialFULL6988850/blobf7dd328dc12a6e55826f64ff30b9fc096b53f7fa all39headers indexed; directed P/C1-C4-46/C23135/S2892+2999/V2111/T2596 read FULL. Not all peer technical payloads claimed read. S delivered2892/5820367412 and2999/5820392795 exactknownheads: SKIP duplication; preserve LOWs and review scope. Zclaimed3024 fullfocal; noPclaim. T2596 unchangedproposedMEDs2 preserved, notPlegalresearch. C1-C4-46 ONLY3199 toC4, noPforeignpromotion.
+
+NEW3135 C2request6728968326 FULLread: ac303 integration lost HAND_IN_WRITE_IF while preserving mainfreedBytes; new1b38 repairsit. Metadata/discussionFULL no current-head focal beforeclaim. Pclaim6729359802 BEFOREcode. RES CXP-20261108-2130-RES DELIVERED50d6e668d0bc651d5c473365cc18844a1c31031d/blob45969d664a41c8d041bed068f407012860da3291/FULL6990654 exactFULLreadback BEFOREdiff/source/tests. OneCAS409NOWRITE then>=123s00:28:56→00:30:59UTC beforefreshSHA/FULL; deltaC6budget3300readFULL/NOGRANTP. Own detachedp3135-return exact1b38fa1cf19813764fc9256c9b81808db7fc0c0d/tree5c534abbf00046e2905ed4b3e6a018aa84a2eb04, comparisonac303f3066ed56e800d37da11a60e45f8382094f. No authorproduct/ref edits; prior ownproofs retained.
+
+FOCAL COMMENT5820457110 DELIVERED/FULLbodyreadbackEXACT anchoredexact1b38. Regression CLOSED in five-path correction/integration scope, no newHIGH/MEDIUM/LOW demonstrated. Earlier P/Ncauseclosure nowrestored; financialchain+9exactrequiredcompleted/success+legitimatequeue stillrequired, notthirdfinancial/globalMR/CI/mergeapproval. C1author3107/financial3160 unchanged. No 3263replay; C6reportsqueued3263b161, notPmergedcert. HistoricalPfourproducts/3218/incorporatedunits not recreated.
+
+Causalproof SAME permanenttask-hand-in-leaseauthor2unchanged: finalgraph withONLYac303 assignment/route/memory modules overlay=>2/1FAIL; final2PASS. Old late200/successor200/olddelete2/currentlate/twofiles2000bytes; new late409/successor200/olddelete1/currentsuccessor/onefile1000bytes. Importantqualifier: mainfreedBytes already avoids undercount in OLDintegratedhead, so currentREDprovesoverwrite+doubledelete, notunpricedstorageatthathead. No oldPSET-only original replay or rebrandingGREEN; incompatibleEVAL qualification preserved. N5815746588/P5815754607 exact3974 histories read FULL, notautomaticallytransferrednewcomposition.
+
+Ownfourrealroute appliedwriteACK[],[null],["1"],[1,1]=>500/notok/appliedrecordkept/nodeletes/twophysicalfiles2000counted. Fixturecreditedauthor; nofalsezeroACKorloss. Finaltotal120PASS overlappingunits:lease2+own4+giveback17+kept8+replace4+dropexact11+roomexact5+assignments52+roomunknown10+dataregistry7. All original author tests intact. Main drop-race counter1200 unchanged; newhook SETorEVAL thenchanged/no work/no newfileentry is correctsemanticrefusal, notsilentoracleweakening. HAND_IN_WRITE_IF rawcompare beforewrites;0changed;1success;unknownACKerror retainsboth. Maingone&&freedBytes/HDELaccountingretained. Existingfailed-deleteorphan/reviewwithoutlease/nonrenewalLOWs and conservative data admission remain.
+
+Strictactual1012-sourceclosure0diag; lint5changedfiles+ownprobe0warnings/errors; officialscanner4645/0+artifactscan0;diff0. Guards BEFOREeachchild120souter512MiB/types1024/256KiB/20kALLnestedMemoryRedis.run/100mockHTTP, networkdeniedbeforecompiler/imports/lint. Max909nested/2mock/no caphitraise/reset/replay. ROexactlockee4ba5640d542cb07c7ed382f256c816b076026d739bbe30d906870f351e67df; noinstall/credentials/providers. Lua source read, C2realRedisclaim AUTHORONLY; noPnativeRedis/realprovider/browser/build/globaltypes/costMR/CI9cert. SubjectAGENTSc145oldervsMAIN787c9eeMV(a), latestmainMV(a) previouslyFULLreadapplies, nodiffauthornormdeletioninthisdelta; no unionnewmain silentlytested.
+
+DURABLE BEFOREopinion: evidenceparts6729427236+6729428199, BOTHFULLbodyreadbackEXACT. Concatenatefencedbase64 INORDER->gzip->UTF8JSON files[path].utf8;35artifacts/325043rawbytes/SHA256402132dff4571d901920bc723956d5ba2d7935a83db963e4ac042cfb76a3d222/perfilehash. ALLoriginalsource/fulloldmoduleoverlays/driver/ownprobe/authorpermanent/actualfivepathdiff/report/heads/ALLrawlogs included, nooldlogsrecreated. Absolutemap paths adjust torecoveredownfiles, notauthor. No proofref/PRinvented. Runtimeinspection missingalias-sidecar is an inspectioncaterror (testaliascentral actualwired), nothidden semanticfailure. Testdriveralljobscompletedexpected.
+
+Fresh directedmain+24pullrefidentity ONLY:
+```
+787c8748ab9124fb861235c59e8e6b221c101bdc	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+daaf5306187d4aa43c9f47590d429dcb10656519	refs/pull/2843/head
+66dfd8a571a734d6b787b4552b7b53759d239a48	refs/pull/2868/head
+6c3077cdaefaac049ca0e12e836be68691bfd875	refs/pull/2892/head
+aae8fcf5f8ce7118007f58d371c2b6c722dd2d18	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+c5db63a1fffc5c79a5866831d54ddff01b3825fa	refs/pull/2999/head
+b5dd4dc3791ed83c60cdc59bd1a38e95f9420b1d	refs/pull/3014/head
+0cdb49725fbb78d341e648ae4758a5f0ab88f0f4	refs/pull/3034/head
+9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+442a057113c87b8728e1a23711510fa852bd0e6d	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+1b38fa1cf19813764fc9256c9b81808db7fc0c0d	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
+```
+Mainstill787c; knownheads unchanged except3135new1b38. OffPR2514candidate8a andfourC6correctivecandidates last-known preserved NOTreconfirmedbythispullrefquery, noforeignpromotion. Old2020scope/2514CodeQLHIGH/3107conditionalMEDR2 remain. G3024oracle only andZnewfocalownedZ, Pnotthird. S2892/2999delivered soPpendingremovedfordedup; C23135newfocalthisentrysupersedesPpending. Any remainingpostmerge/newheadreturn requiresfreshpreflight.
+
+Projectongoing/serialMedium0agents/quotaUNKNOWN/noActionsloop/CIqueryretrycancel/enqueue/merge/pushproduct/reservationdocs/newunit/commercial/flags/price/limit/commission/account/payment/terms/key/PII/contact/automationchanges/backgroundwatch. Keep existing recurringcontinuity; onefocalexecutioncomplete. FinalPONTO2138 afterfreshFULL/dedup/readback.

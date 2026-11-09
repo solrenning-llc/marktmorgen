@@ -15,6 +15,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -634,6 +635,21 @@ export async function readBody(courseId: string, lessonId: string): Promise<stri
   if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return "";
   const [raw] = await redisPipeline([["GET", bodyKey(courseId, lessonId)]]);
   return typeof raw === "string" ? raw : "";
+}
+
+/**
+ * A lesson's text read in its exact shape, for a caller that writes from it
+ * (lib/community-index.ts): "" only when there is none (an absent key), the
+ * text when it is one, and UnknownReplyError for any other reply, so an odd
+ * or partial answer is never taken as a lesson with no text (CX-123 rule 24).
+ */
+export async function readBodyKnown(courseId: string, lessonId: string): Promise<string> {
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return "";
+  const replies = repliesFor(await redisPipeline([["GET", bodyKey(courseId, lessonId)]]), 1);
+  const raw = replies?.[0];
+  if (raw === null) return "";
+  if (typeof raw === "string") return raw;
+  throw new UnknownReplyError("a lesson's text");
 }
 
 /**

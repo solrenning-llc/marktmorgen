@@ -529,6 +529,10 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Stripe did not answer",
     body: "Nothing changed and nothing was charged. Try again in a moment.",
   },
+  "switch-unconfirmed": {
+    title: "We could not confirm the change",
+    body: "Stripe may have changed your plan and charged for it. Each time this page opens, it asks Stripe which plan you are on, and we check again every day. Look at your plan below before you try again.",
+  },
   paused: {
     title: "Your break is set",
     body: "Your store keeps taking payments until the date below, and then nothing is charged until your plan starts again by itself. We have emailed you the dates, and will write a week before.",

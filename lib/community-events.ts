@@ -57,7 +57,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -217,6 +217,21 @@ export async function readEvent(id: string, event: string): Promise<CommunityEve
   if (!ITEM_ID.test(event) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", eventKey(id, event)]]);
   return parseEvent(raw);
+}
+
+/**
+ * The event, read exactly (rules 24 and 30): null only when its GET answered exactly nil, so the event is gone (or
+ * its id names none). A lost reply, one in another shape or a value that does not parse throws UnknownReplyError:
+ * an event that did not read is not one that is gone, so what would be closed because it is gone is kept.
+ */
+export async function readEventExact(id: string, event: string): Promise<CommunityEvent | null> {
+  if (!ITEM_ID.test(event)) return null;
+  const replies = repliesFor(await redisPipeline([["GET", eventKey(id, event)]]), 1);
+  if (!replies) throw new UnknownReplyError("a live event");
+  if (replies[0] === null) return null;
+  const parsed = parseEvent(replies[0]);
+  if (!parsed) throw new UnknownReplyError("a live event");
+  return parsed;
 }
 
 export async function readEvents(id: string, ids: string[]): Promise<CommunityEvent[]> {
@@ -595,13 +610,15 @@ export async function mayAttend(
   config: CommunityConfig,
   event: CommunityEvent,
   viewer: { owner: boolean; email: string },
+  /** `strict`, for deciding who a reminder goes to (lib/community-event-mail.ts): an answer not had throws, never a no. */
+  options: { strict?: boolean } = {},
 ): Promise<boolean> {
   if (viewer.owner) return true;
   if (!event.only.length) return true;
   const ids = event.only.filter((p) => config.access.includes(p));
   if (!ids.length) return false;
   const id = store.community?.id as string;
-  return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`);
+  return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, options);
 }
 
 export type JoinWindow = {
@@ -702,31 +719,49 @@ export async function rsvpNumbers(id: string, events: CommunityEvent[], member: 
   return out;
 }
 
-/** Everyone coming, as member keys with when they said so (seconds), a page of Redis's at a time. */
+/** The most pages of who is coming one read takes (a thousand asked for a page). */
+const RSVP_PAGES = 200;
+
+/**
+ * Everyone coming, as member keys with when they said so (seconds), a page of Redis's at a time.
+ *
+ * Everyone or not at all (rules 24 and 30, review of #2921): a page that does not read, or a walk not at its end
+ * after RSVP_PAGES before `limit` is reached, throws UnknownReplyError, never fewer people coming. A reminder, move
+ * or cancellation is then not sent to a short list as if it were everyone (lib/community-event-mail.ts, startJob).
+ */
 export async function rsvpList(id: string, eventId: string, limit = 100_000): Promise<{ key: string; at: number }[]> {
-  const out: { key: string; at: number }[] = [];
+  // By member: HSCAN may hand the same field back twice during a walk, and a person coming is one person, counted
+  // once and emailed once (a send's readers must not repeat, lib/community-event-mail.ts recipientBatch). The latest
+  // reading of the field is kept.
+  const seen = new Map<string, number>();
   let cursor = "0";
-  for (let page = 0; page < 200; page += 1) {
-    // Each page in its exact shape (CX-123 rule 24; Claude 5 on #2954): a page in another shape is not the end of the
-    // list, so it throws, and nothing is written down for only part of the people coming.
-    const page = repliesFor(repliesFor(await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]), 1)?.[0], 2);
-    const next = page?.[0];
-    const flat = page ? stringList(page[1]) : null;
-    const cursorText = typeof next === "string" && /^\d+$/.test(next) ? next : typeof next === "number" && Number.isSafeInteger(next) && next >= 0 ? String(next) : null;
-    if (cursorText === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("who is coming to an event");
-    for (let i = 0; i < flat.length; i += 2) out.push({ key: flat[i], at: Number(flat[i + 1]) || 0 });
-    cursor = cursorText;
-    if (cursor === "0" || out.length >= limit) break;
+  for (let page = 0; ; page += 1) {
+    if (page >= RSVP_PAGES) throw new UnknownReplyError(`an event's HSCAN, not at its end after ${RSVP_PAGES} pages,`);
+    const read = scanPage(await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]));
+    // A hash answers field and value: an odd page is not one.
+    if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("an event's HSCAN");
+    const flat = read.items;
+    for (let i = 0; i + 1 < flat.length; i += 2) seen.set(flat[i], Number(flat[i + 1]) || 0);
+    cursor = read.next;
+    if (cursor === "0" || seen.size >= limit) break;
   }
-  return out.slice(0, limit).sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
+  return [...seen]
+    .slice(0, limit)
+    .map(([key, at]) => ({ key, at }))
+    .sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
 }
 
-/** Which of these members are still coming, asked when an email to them goes out. */
+/**
+ * Which of these members are still coming, asked when an email to them goes out, read exactly (rules 24 and 30): one
+ * is not coming only when its field answered exactly nil. A reply lost, cut short or in another shape, or a field that
+ * is not a string, throws UnknownReplyError: a list that did not read is not a list of nobody coming.
+ */
 export async function stillGoing(id: string, eventId: string, members: string[]): Promise<Set<string>> {
   if (!members.length) return new Set();
-  const [raw] = await redisPipeline([["HMGET", rsvpKey(id, eventId), ...members]]);
-  const rows = Array.isArray(raw) ? raw : [];
-  return new Set(members.filter((_, i) => rows[i] !== null && rows[i] !== undefined));
+  const replies = repliesFor(await redisPipeline([["HMGET", rsvpKey(id, eventId), ...members]]), 1);
+  const rows = replies && repliesFor(replies[0], members.length);
+  if (!rows || rows.some((row) => row !== null && typeof row !== "string")) throw new UnknownReplyError("who is coming to an event");
+  return new Set(members.filter((_, i) => rows[i] !== null));
 }
 
 // ------------------------------------------------------------------ words and files

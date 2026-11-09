@@ -31,7 +31,9 @@
  *
  * Disconnecting gives the permission back (DELETE /me/permissions), so access
  * ends on Meta's side too, and deletes the connection and every line read
- * from it. Meta's notice that the person removed the app does the same.
+ * from it. Meta's notice that the person removed the app does the same. A
+ * give-back counts as done only when Meta confirms it; otherwise the studio
+ * and the email say Meta did not confirm, and how to remove it on Facebook.
  *
  *   nl:metaads:conn:<statsId>     the connection
  *   nl:metaads:read:<statsId>     when it was last read, and what went wrong
@@ -403,7 +405,15 @@ export function accountToUse(accounts: (MetaAccount & { active?: boolean })[], c
 
 export type MetaConnectResult =
   | { ok: true; view: MetaAdsView; account: MetaAccount | null }
-  | { ok: false; error: "seal" | "refused" | "permission" | "accounts" | "expired" | "removed" };
+  /** `providerAccessRemoved: false` when a token this flow got was not confirmed given back to Meta (revokeToken). */
+  | { ok: false; error: "seal" | "refused" | "permission" | "accounts" | "expired" | "removed"; providerAccessRemoved?: false };
+
+/** A connect that keeps nothing, after giving the token it got back to Meta: says so when Meta did not confirm it. */
+async function keepNothing(token: string, error: "permission" | "accounts" | "expired" | "removed"): Promise<MetaConnectResult> {
+  if (await revokeToken(token)) return { ok: false, error };
+  console.error("a Meta connection that kept nothing could not be confirmed given back", error);
+  return { ok: false, error, providerAccessRemoved: false };
+}
 
 /** Whether a flow begun at `startedAt` (milliseconds) is still young enough to keep its connection (FLOW_MS). */
 const flowFresh = (startedAt: number): boolean => {
@@ -454,8 +464,7 @@ export async function finishMeta(input: {
   const me = await call("GET", "/me", { fields: "id" }, token);
   const user = typeof me.id === "string" ? me.id : "";
   if (!perms.some((p) => p.permission === "ads_read" && p.status === "granted")) {
-    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
-    return { ok: false, error: "permission" };
+    return keepNothing(token, "permission");
   }
   const listed = await call("GET", "/me/adaccounts", { fields: "account_id,name,currency,account_status", limit: "50" }, token);
   const raw = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
@@ -463,8 +472,7 @@ export async function finishMeta(input: {
     .filter((a) => typeof a.id === "string" && /^act_\d{1,30}$/.test(a.id) && typeof a.currency === "string")
     .map((a) => ({ id: String(a.id), name: String(a.name ?? "").replace(/\s+/g, " ").trim().slice(0, 80), currency: String(a.currency).toLowerCase(), active: Number(a.account_status) === 1 }));
   if (!user || !accounts.length) {
-    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
-    return { ok: false, error: "accounts" };
+    return keepNothing(token, "accounts");
   }
   const before = await readConnection(input.statsId);
   const connection: Connection = {
@@ -480,8 +488,7 @@ export async function finishMeta(input: {
     broken: "",
   };
   if (!flowFresh(input.startedAt)) {
-    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
-    return { ok: false, error: "expired" };
+    return keepNothing(token, "expired");
   }
   const keys = [connKey(input.statsId), readKey(input.statsId), STORES_KEY, userKey(user), goneKey(user)];
   const replies = repliesFor(await redisPipeline([["EVAL", FINISH_UNLESS_GONE, keys.length, ...keys, JSON.stringify(connection), input.startedAt - GONE_MARGIN_MS, input.statsId]]), 1);
@@ -489,12 +496,11 @@ export async function finishMeta(input: {
   if (kept !== 0 && kept !== 1) throw new UnknownReplyError("keeping a Meta connection only while its user was not deleted since");
   if (kept === 0) {
     // Deleted since the flow began: nothing is kept, and the permission this flow was holding goes back to Meta.
-    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
-    return { ok: false, error: "removed" };
+    return keepNothing(token, "removed");
   }
   // Another person's token in its place: theirs is given back.
   if (before && before.user !== user) {
-    await giveBack(input.statsId, before).catch(() => {});
+    if (!(await giveBack(input.statsId, before))) console.error("the Meta connection replaced by another person's could not be confirmed given back");
     await redisPipeline([["SREM", userKey(before.user), input.statsId]]).catch(() => {});
   }
   // Lines of an account no longer read go.
@@ -514,19 +520,61 @@ export async function chooseAccount(statsId: string, id: unknown): Promise<boole
   return writeIfConnected(statsId, seen, connKey(statsId), JSON.stringify({ ...c, account: id }), 0, [readKey(statsId), linesKey(statsId)]);
 }
 
-async function giveBack(statsId: string, c: Connection): Promise<void> {
-  const open = unseal(c.token, context(statsId));
-  if (open.ok) await call("DELETE", "/me/permissions", {}, open.value);
+/** How many times one give-back is asked of Meta: once, and once more only when Meta was busy or out of reach. */
+export const GIVE_BACK_TRIES = 2;
+
+/**
+ * Gives a token's permission back to Meta (DELETE /me/permissions). True only when Meta confirmed it, answering
+ * {"success": true}, or answered that the token no longer works (an "auth" error, codes 190 and 102: nothing can be
+ * read with it any more). Anything else is false, never taken as done (CX-123 rule 24): a refusal, {"success":
+ * false}, an answer that cannot be read, a Meta out of reach. Only a busy or unreachable Meta is asked again, at most
+ * GIVE_BACK_TRIES times in all, each call bounded by REQUEST_MS; Graph API calls are not billed. Never throws.
+ */
+async function revokeToken(token: string): Promise<boolean> {
+  for (let attempt = 1; attempt <= GIVE_BACK_TRIES; attempt += 1) {
+    try {
+      const answer = await call("DELETE", "/me/permissions", {}, token);
+      return answer.success === true;
+    } catch (error) {
+      if (error instanceof MetaError && error.kind === "auth") return true;
+      console.error("giving a Meta permission back failed", error instanceof Error ? error.message : error);
+      if (!(error instanceof MetaError && error.kind === "busy")) return false;
+    }
+  }
+  return false;
 }
+
+/** Gives a connection's permission back: true only when Meta confirmed it (revokeToken); a token that does not open is false. */
+async function giveBack(statsId: string, c: Connection): Promise<boolean> {
+  const open = unseal(c.token, context(statsId));
+  return open.ok ? revokeToken(open.value) : false;
+}
+
+/**
+ * What a disconnect found: false when nothing was connected; else the account that was read, and
+ * `providerAccessRemoved`, true only when Meta confirmed the give-back in this request.
+ */
+export type MetaDisconnectOutcome = { account: MetaAccount | null; providerAccessRemoved: boolean } | false;
 
 /** Disconnects: gives the permission back to Meta, then forgets the connection and every line read. */
 export async function disconnectMeta(statsId: string): Promise<MetaAccount | null | false> {
+  const outcome = await disconnectMetaFor(statsId);
+  return outcome === false ? false : outcome.account;
+}
+
+/**
+ * Disconnects as disconnectMeta does, and says whether Meta confirmed the give-back. The connection and what was
+ * read are forgotten here whatever Meta says, since the creator asked to end it; one Meta did not confirm is said
+ * (`providerAccessRemoved: false`), for the studio and the email to tell the creator how to remove it on Facebook,
+ * never that it was given back (VR item 2; the meeting providers do the same, lib/meet-connect.ts disconnectFor).
+ */
+export async function disconnectMetaFor(statsId: string): Promise<MetaDisconnectOutcome> {
   const c = await readConnection(statsId);
   if (!c) return false;
-  // Forgotten here whatever Meta says: a give-back that fails must not keep a connection the creator ended.
-  await giveBack(statsId, c).catch((error) => console.error("giving the Meta permission back failed", error));
+  const removed = await giveBack(statsId, c);
+  if (!removed) console.error("a Meta connection was disconnected here without Meta confirming its permission was given back");
   await forget(statsId, c.user);
-  return c.accounts.find((a) => a.id === c.account) ?? null;
+  return { account: c.accounts.find((a) => a.id === c.account) ?? null, providerAccessRemoved: removed };
 }
 
 async function forget(statsId: string, user: string): Promise<void> {

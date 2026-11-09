@@ -22,6 +22,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 import { MEET_ACCESS_UNCONFIRMED, type MeetProvider, meetAccessRemoveWords } from "@/lib/call-setup";
+import { META_ACCESS_UNCONFIRMED } from "@/lib/meta-ads-rules";
 
 export type AccountChange =
   | { kind: "stripe-connected" }
@@ -43,7 +44,7 @@ export type AccountChange =
   | { kind: "meeting-broken"; name: string }
   | { kind: "discord-connected"; server: string }
   | { kind: "metaads-connected"; account: string }
-  | { kind: "metaads-disconnected"; byMeta?: boolean }
+  | { kind: "metaads-disconnected"; byMeta?: boolean; providerAccessRemoved?: false }
   | { kind: "metaads-broken" };
 
 const SUPPORT = "support@marktmorgen.com";
@@ -133,7 +134,9 @@ export function accountChangeWords(change: AccountChange): { subject: string; li
         subject: "Meta ads were disconnected from your store",
         line: change.byMeta
           ? "Marktmorgen was removed from your Meta account, so your numbers no longer read what your ads spent, and what was read was deleted. What you typed yourself stays."
-          : "Your store's Meta ad account was disconnected and its permission given back. What was read from it was deleted; what you typed yourself stays.",
+          : change.providerAccessRemoved === false
+            ? `Your store's Meta ad account was disconnected, and what was read from it was deleted; what you typed yourself stays. ${META_ACCESS_UNCONFIRMED}`
+            : "Your store's Meta ad account was disconnected and its permission given back. What was read from it was deleted; what you typed yourself stays.",
       };
     case "metaads-broken":
       return {

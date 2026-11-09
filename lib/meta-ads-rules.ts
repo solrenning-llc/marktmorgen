@@ -144,3 +144,28 @@ export function readWindow(now: number): { from: string; to: string } {
     to: new Date(now).toISOString().slice(0, 10),
   };
 }
+
+/**
+ * What the studio and the owner's email add when Meta did not confirm that it took a permission back (lib/meta-ads.ts
+ * revokeToken: refused, {"success": false}, an answer that could not be read, or out of reach): never that it was
+ * given back (VR item 2), and how to end it on Facebook's side.
+ */
+export const META_ACCESS_UNCONFIRMED =
+  "Meta did not confirm that it took back the permission to read your ads, so that access may stay on until Meta ends it. We no longer keep the key Meta gave us. To end it yourself now: on Facebook, open Settings and privacy, then Settings, then Business integrations, and remove Marktmorgen.";
+
+/** The studio's notice for each outcome that gave a permission back without Meta confirming it, before META_ACCESS_UNCONFIRMED. */
+const UNCONFIRMED_NOTICES: Record<string, { title: string; body: string }> = {
+  disconnected: { title: "Meta ads are disconnected here", body: "What was read from Meta was deleted, and your numbers no longer read your ads. What you typed yourself stays." },
+  permission: { title: "Meta did not give the permission to read your ads", body: "Nothing was connected. Connect again and leave “Read your ads” selected on Meta's page." },
+  accounts: { title: "Meta found no ad account to read", body: "The Facebook login you used cannot see any ad account, so nothing was connected. Connect again with the login that runs your ads." },
+  removed: { title: "Nothing was connected", body: "While this was connecting, Meta told us to delete this Facebook login's data, so nothing was kept." },
+  expired: { title: "That took too long", body: "For your safety a connection must be finished within ten minutes, in the same browser. Nothing was connected." },
+};
+
+/** The studio's notice for `metaads=<outcome>-unconfirmed` (lib/meta-routes.ts); undefined for any other word. */
+export function metaUnconfirmedNotice(word: string): { title: string; body: string } | undefined {
+  const outcome = /^([a-z]+)-unconfirmed$/.exec(word)?.[1];
+  if (!outcome || !Object.hasOwn(UNCONFIRMED_NOTICES, outcome)) return undefined;
+  const notice = UNCONFIRMED_NOTICES[outcome];
+  return { title: notice.title, body: `${notice.body} ${META_ACCESS_UNCONFIRMED}` };
+}

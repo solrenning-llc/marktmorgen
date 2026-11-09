@@ -10,7 +10,7 @@ import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { noticeCreator } from "@/lib/account-notice";
-import { MetaError, beginMeta, disconnectMeta, finishMeta, isMetaConfigured, readMetaSpend, takeMeta } from "@/lib/meta-ads";
+import { MetaError, beginMeta, disconnectMetaFor, finishMeta, isMetaConfigured, readMetaSpend, takeMeta } from "@/lib/meta-ads";
 import { clientAddress, essentialLimitState } from "@/lib/request-guard";
 import { originFrom } from "@/lib/request-origin";
 import { ensureStatsId, type Store } from "@/lib/store";
@@ -86,7 +86,8 @@ export async function finishMetaConnect(request: NextRequest): Promise<Response>
       currency: store.currency,
       startedAt: taken.at,
     });
-    if (!result.ok) return back(origin, store, result.error);
+    // A token this flow got that Meta did not confirm taking back is said, never hidden behind the plain word.
+    if (!result.ok) return back(origin, store, result.providerAccessRemoved === false ? `${result.error}-unconfirmed` : result.error);
     // The first read at once, so the numbers show it on the way back; the daily job reads it from then on.
     if (result.account) await readMetaSpend(taken.statsId, store.currency).catch(() => "error");
     after(() => noticeCreator(store, { kind: "metaads-connected", account: result.account?.name ?? "" }));
@@ -106,12 +107,15 @@ export async function stopMeta(request: NextRequest): Promise<Response> {
   const { store, email, role, origin } = creator;
   if (!store.statsId) return back(origin, store, "disconnected");
   try {
-    const gone = await disconnectMeta(store.statsId);
+    const gone = await disconnectMetaFor(store.statsId);
+    // Said given back only when Meta confirmed it (lib/meta-ads.ts revokeToken); otherwise the studio and the email
+    // say Meta did not confirm, and how to remove it on Facebook.
+    const unconfirmed = gone !== false && !gone.providerAccessRemoved;
     if (gone !== false) {
-      after(() => noticeCreator(store, { kind: "metaads-disconnected" }));
+      after(() => noticeCreator(store, { kind: "metaads-disconnected", ...(unconfirmed ? { providerAccessRemoved: false as const } : {}) }));
       if (role !== "owner") await logTeam(store.sid, { who: email, role, what: `${PERMISSION_WORDS.settings}: disconnected Meta ads` });
     }
-    return back(origin, store, "disconnected");
+    return back(origin, store, unconfirmed ? "disconnected-unconfirmed" : "disconnected");
   } catch (error) {
     console.error("disconnecting Meta ads failed", error);
     return back(origin, store, "error");

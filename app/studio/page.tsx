@@ -70,6 +70,7 @@ import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
 import { readSpends } from "@/lib/ad-spend";
 import { metaView } from "@/lib/meta-ads";
+import { metaUnconfirmedNotice } from "@/lib/meta-ads-rules";
 import { readRanges, recordSample } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
 import { heardOff } from "@/lib/heard";
@@ -900,6 +901,8 @@ export default async function StudioPage({
     (store && typeof params.metaads === "string" && serviceAllowanceWords(store, params.metaads) ? { title: "Meta can't be connected just now", body: serviceAllowanceWords(store, params.metaads) ?? "" } : undefined) ??
     PAYPAL_NOTICES[typeof params.paypal === "string" ? params.paypal : ""] ??
     META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""] ??
+    // A permission Meta did not confirm taking back (lib/meta-routes.ts): never said to be given back.
+    metaUnconfirmedNotice(typeof params.metaads === "string" ? params.metaads : "") ??
     BILLING_NOTICES[BILLING_ALIASES[String(params.billing)] ?? (typeof params.billing === "string" ? params.billing : "")] ??
     TEAM_NOTICES[typeof params.team === "string" ? params.team : ""] ??
     STORES_NOTICES[typeof params.stores === "string" ? params.stores : ""] ??

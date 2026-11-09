@@ -1,0 +1,156 @@
+/**
+ * R19 MEDIUM 3 (Claude 6's audit, 9 November 2026): the copy of what a store
+ * keeps about one person (lib/person-copy.ts) read a student's lesson
+ * comments through lessonComments, which reads only a lesson's newest
+ * LESSON_KEPT (2,000) entries. A lesson keeps up to 2,000 threads and 50
+ * answers under each (the answers are not held by the 2,000), so a student's
+ * older comments and answers fell out of the copy, and the copy came out
+ * incomplete without a word. The erasure (FORGET_LESSON_COMMENTS) finds them
+ * all, in the course's whole comment record.
+ *
+ * Held here: the copy finds every comment the student wrote in the course,
+ * where the erasure finds them, whatever their age or lesson; a record it
+ * cannot read, or a read too large for what it paid, fails the copy, never
+ * leaves a part out in silence; and what the read costs is taken from the
+ * store's studio figure before the read is sent, as the erasure's is, so a
+ * store whose figure is used gets a refusal, not an unpaid read.
+ */
+import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
+import { COPIERS } from "@/lib/person-copy";
+import { emailKey } from "@/lib/learn";
+import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
+import { MAX_LESSON_THREADS, MAX_REPLIES, serializeComment, type LessonComment } from "@/lib/lesson-comments-rules";
+import { allowanceFor } from "@/lib/store-allowance-rules";
+import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
+import type { ErasureScope } from "@/lib/erasure-rules";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+const OWNER = "copywhole@example.com";
+const COURSE = "f".repeat(32);
+const L1 = "lessonone001";
+const L2 = "lessontwo002";
+/** A lesson the course no longer lists, whose comments the erasure still finds in the course's record. */
+const GONE = "lessongone03";
+const ana = emailKey("ana@example.com");
+const ben = emailKey("ben@example.com");
+
+const id = (prefix: string, n: number) => `${prefix}${String(n).padStart(12 - prefix.length, "0")}`;
+
+/** Every command sent, in order, for the order of the charge and the read. */
+const log: string[] = [];
+const run = redis.run.bind(redis);
+redis.run = (command: (string | number)[]) => {
+  const verb = String(command[0]).toUpperCase();
+  log.push(verb === "EVAL" ? `EVAL ${String(command[1]).split("\n")[0]}` : `${verb} ${String(command[1] ?? "")}`);
+  return run(command);
+};
+
+/** Writes comments as addComment keeps them (lib/lesson-comments.ts): the record, the lesson's list and the newest. */
+async function keep(comments: LessonComment[]): Promise<void> {
+  for (const c of comments) {
+    redis.run(["HSET", `nl:lc:${COURSE}:c`, c.id, serializeComment(c)]);
+    redis.run(["ZADD", `nl:lc:${COURSE}:l:${c.lesson}`, c.at, c.id]);
+    redis.run(["ZADD", `nl:lc:${COURSE}:all`, c.at, c.id]);
+  }
+}
+
+const comment = (c: Partial<LessonComment> & Pick<LessonComment, "id" | "by" | "at">): LessonComment => ({
+  lesson: L1, name: c.by === ana ? "Ana" : "Ben", text: `Words ${c.id}`, parent: null, hidden: false, ...c,
+});
+
+async function failed(run: () => Promise<unknown>): Promise<string> {
+  try {
+    await run();
+    return "";
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
+  await claimHandle(OWNER, "copywhole", "Copy Whole", "");
+  await ensureStatsId(OWNER);
+  await ensureListId(OWNER);
+  const now = Math.floor(Date.now() / 1000);
+  await setSubscription(OWNER, { customerId: "cus_CopyWhole01", subscriptionId: "sub_CopyWhole01", active: true, tier: "pro", period: { start: now - 10 * 86_400, end: now + 20 * 86_400, renews: true } });
+  const store = (await storeForEmail(OWNER))!;
+  const scope = {
+    store, sid: store.sid, statsId: store.statsId, listId: store.listId, email: "ana@example.com", person: "", learner: ana,
+    courses: [{ productId: "prodcourse01", courseId: COURSE, lessonIds: [L1, L2], moduleIds: [] }], productIds: ["prodcourse01"], communityId: null,
+  } as unknown as ErasureScope;
+  const copy = COPIERS["lib/lesson-comments.ts"];
+  const texts = async () => ((await copy(scope)) as { text: string }[]).map((r) => r.text).sort();
+
+  part("A lesson past the newest 2,000 entries: Ana's older words are still in her copy");
+  const base = now - 400 * 86_400;
+  // Ana's first thread and an answer of hers under Ben's first thread, both the oldest of the lesson.
+  const anaFirst = comment({ id: id("ana", 1), by: ana, at: base, text: "My first question, long ago." });
+  const benFirst = comment({ id: id("ben", 0), by: ben, at: base + 1 });
+  const anaAnswer = comment({ id: id("ana", 2), by: ana, at: base + 2, parent: benFirst.id, text: "My old answer to Ben." });
+  // Then 41 of Ben's threads with 50 answers each from Ben: 2,091 newer entries, every one allowed by the caps.
+  const newer: LessonComment[] = [];
+  for (let t = 1; t <= 41; t += 1) {
+    const top = comment({ id: id("bt", t), by: ben, at: base + 10 + t * 100 });
+    newer.push(top);
+    for (let r = 0; r < MAX_REPLIES; r += 1) newer.push(comment({ id: id(`b${String(t).padStart(2, "0")}r`, r), by: ben, at: top.at + 1 + r, parent: top.id }));
+  }
+  const anaNew = comment({ id: id("ana", 3), by: ana, at: base + 10_000, lesson: L2, text: "A newer one, on lesson two." });
+  const anaGone = comment({ id: id("ana", 4), by: ana, at: base + 20_000, lesson: GONE, text: "Under a lesson the course no longer lists." });
+  await keep([anaFirst, benFirst, anaAnswer, ...newer, anaNew, anaGone]);
+  is("the lesson holds more than the 2,000 newest the lesson page reads", newer.length + 3 > MAX_LESSON_THREADS * 4, true);
+  is("every one of Ana's comments is in her copy: the old thread, the old answer, the newer one and the one under a lesson since removed",
+    await texts(), [anaFirst.text, anaAnswer.text, anaNew.text, anaGone.text].sort());
+  is("only her own: none of Ben's words", (await copy(scope)).some((r) => JSON.stringify(r).includes(ben) || JSON.stringify(r).includes("Words b")), false);
+
+  part("The copy has what the erasure deletes of hers");
+  is("her four, each with its lesson and when", ((await copy(scope)) as { lesson: string; at: string }[]).map((r) => [r.lesson, r.at]).sort(),
+    [anaFirst, anaAnswer, anaNew, anaGone].map((c) => [c.lesson, new Date(c.at * 1000).toISOString()]).sort());
+
+  part("What the read costs is taken from the studio figure before the read is sent");
+  log.length = 0;
+  const before = await allowanceUsed(store, "studio");
+  await copy(scope);
+  const taken = (await allowanceUsed(store, "studio")) - before;
+  const charge = log.findIndex((l) => l.startsWith("INCRBY nl:allow:studio:"));
+  const read = log.findIndex((l) => l.startsWith("EVAL -- marktmorgen:lesson-comments-of:"));
+  is("the figure is taken", taken > 0, true);
+  is("before the read, which is sent", [charge >= 0, read >= 0, charge < read], [true, true, true]);
+  is("the read is one command that answers only hers, never the whole lesson", log.filter((l) => /^(HMGET|HGETALL|ZRANGE|ZREVRANGE|HSCAN) /.test(l)).length, 0);
+
+  part("Many long comments of hers: more than the first read is paid for, still whole, the larger read paid before it is sent");
+  const many: LessonComment[] = [];
+  for (let n = 0; n < 40; n += 1) many.push(comment({ id: id("anl", n), by: ana, at: base + 30_000 + n, text: `${n} ${"x".repeat(1_990)}` }));
+  await keep(many);
+  log.length = 0;
+  const beforeMany = await allowanceUsed(store, "studio");
+  const all = await copy(scope);
+  const takenMany = (await allowanceUsed(store, "studio")) - beforeMany;
+  is("all of them, with the four before", all.length, 44);
+  const reads = log.flatMap((l, i) => (l.startsWith("EVAL -- marktmorgen:lesson-comments-of:") ? [i] : []));
+  const charges = log.flatMap((l, i) => (l.startsWith("INCRBY nl:allow:studio:") ? [i] : []));
+  is("each read sent has its charge before it", reads.length > 0 && reads.every((r, k) => charges[k] !== undefined && charges[k] < r && (k === 0 || charges[k] > reads[k - 1])), true);
+  // One studio unit is twenty commands or fifty kilobytes (lib/erasure-rules.ts): her 80 KB and more cannot be under two.
+  is("what was taken covers the bytes read", takenMany >= Math.ceil(many.reduce((s, c) => s + serializeComment(c).length, 0) / 50_000) + 1, true);
+
+  part("A comment record that does not read fails the copy, never leaves it out in silence");
+  redis.run(["HSET", `nl:lc:${COURSE}:c`, id("bad", 1), "{not json"]);
+  is("the copy fails and says so", (await failed(() => copy(scope))) !== "", true);
+  redis.run(["HDEL", `nl:lc:${COURSE}:c`, id("bad", 1)]);
+  is("and reads again once it is gone", (await copy(scope)).length, 44);
+
+  part("A store whose studio figure is used: refused, and nothing is read");
+  const used = allowanceFor(store, "studio") - (await allowanceUsed(store, "studio"));
+  if (used > 0) await takeAllowance(store, "studio", used);
+  log.length = 0;
+  is("the copy fails and says so", (await failed(() => copy(scope))) !== "", true);
+  is("the read was never sent", log.some((l) => l.startsWith("EVAL -- marktmorgen:lesson-comments-of:")), false);
+
+  part("The erasure still finds every one of them");
+  is("Ana's 44 go, with Ben's answers under her thread (none)", await forgetLessonCommentsPerson(COURSE, [L1, L2], ana), 44);
+  done();
+}
+
+void main();

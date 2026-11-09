@@ -28,6 +28,23 @@ const HAND_OVER_GRACE_SECONDS = 600;
 export const HAND_OVER_BATCH = 25;
 /** The score of an order to be tried at the next sweep: due now, behind those due before it. */
 const dueNow = () => String(Math.floor(Date.now() / 1000) - HAND_OVER_GRACE_SECONDS);
+/**
+ * How long after the payment a receipt the sender did not accept is tried again (audit R48, finding 4): 22 hours. The
+ * first try is made at the payment or after it, and both senders keep the receipt's idempotency key a day from it
+ * (Resend's key; lib/email.ts viaAmazon's once-mark, SET NX EX 86400), so every try, the last one due at the window's
+ * end (receiptDue) and reached by the five-minute job well inside the two hours left, falls under that key: a send
+ * whose answer was lost is never sent a second time. Past it, the order leaves the list without its receipt, as before.
+ */
+export const RECEIPT_RETRY_SECONDS = 22 * 3600;
+/**
+ * When such a receipt is due again: after a wait as long as the payment is old, at least one five-minute run and at
+ * most four hours, and never after the window's end. A refusal that lasts is tried about a dozen times in the window,
+ * never every run (each try runs the hand-over again, whose writes find themselves already there, and makes one
+ * purchases link, kept a day).
+ */
+function receiptDue(paidAt: number, now: number): number {
+  return Math.min(now + Math.min(Math.max(now - paidAt, 300), 4 * 3600), paidAt + RECEIPT_RETRY_SECONDS);
+}
 
 /** Takes a handed-over order out of the list. Not known whether it left: it stays, and the next try finds it handed over. */
 async function handedOver(statsId: string, order: string): Promise<void> {
@@ -38,9 +55,16 @@ async function handedOver(statsId: string, order: string): Promise<void> {
  * Gives the buyer what they paid for and emails the receipt. False when the product is gone (Redis answered that
  * its record is not there). Everything it hands over is read first, a bundle's products too; a read that is
  * unknown throws before anything is handed over, and the order is kept for the sweep to hand over, never taken
- * for a product that is gone.
+ * for a product that is gone. Handed over but its receipt not accepted by the sender (refused, unknown or thrown):
+ * the order stays on the list, due again at receiptDue, until RECEIPT_RETRY_SECONDS after the payment; the
+ * hand-over runs again then, and every step but the receipt finds itself already written (HSETNX, SET NX).
  */
 export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean> {
+  return (await handOver(store, paid)) !== "gone";
+}
+
+/** handOverPayPal, saying whether the order left the list handed over, its product gone, or its receipt still owed. */
+async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "receipt owed"> {
   let product: Listing | null;
   let bundled: Map<string, Listing>;
   try {
@@ -55,10 +79,10 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
   if (!product) {
     console.error("a PayPal purchase named a product the store no longer has", store.handle, paid.order);
     if (store.statsId) await handedOver(store.statsId, paid.order);
-    return false;
+    return "gone";
   }
   const base = storeBase(store);
-  await deliverPayPal({
+  const receipted = await deliverPayPal({
     store,
     paid,
     product,
@@ -85,8 +109,19 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
     channel: paid.meta?.channel ?? null,
     paid_at: new Date(paid.at * 1000).toISOString(),
   }, paid.at * 1000).catch((error) => console.error("telling the webhooks of a PayPal sale failed", error));
-  if (store.statsId) await handedOver(store.statsId, paid.order);
-  return true;
+  if (!store.statsId) return "handed";
+  if (receipted || Math.floor(Date.now() / 1000) >= paid.at + RECEIPT_RETRY_SECONDS) {
+    if (!receipted) console.error("a PayPal purchase's receipt was not accepted within its retry window; no longer tried", store.handle, paid.order);
+    await handedOver(store.statsId, paid.order);
+  } else {
+    // Still in the list since settle wrote it: this only sets when it is due again (receiptDue; the list's score is
+    // the due time less the grace handOverAgain waits). A ZADD that fails leaves it due as it was.
+    console.error("a PayPal purchase's receipt was not accepted; tried again later", store.handle, paid.order);
+    const due = receiptDue(paid.at, Math.floor(Date.now() / 1000)) - HAND_OVER_GRACE_SECONDS;
+    await redisPipeline([["ZADD", handOverKey(store.statsId), String(due), paid.order]]).catch(() => undefined);
+    return "receipt owed";
+  }
+  return "handed";
 }
 
 /**
@@ -122,8 +157,9 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
         await redisPipeline([["ZREM", key, order]]);
         continue;
       }
-      // Handed over, or its product gone: handOverPayPal takes it out of the list.
-      if (await handOverPayPal(store, paid)) handed += 1;
+      // Handed over with its receipt accepted, or its product gone: handOver takes it out of the list. Its receipt
+      // not accepted: kept and tried again later, inside RECEIPT_RETRY_SECONDS, and not counted as handed over yet.
+      if ((await handOver(store, paid)) === "handed") handed += 1;
     } catch (error) {
       // Still unknown: kept, moved behind the others, tried at the next sweep.
       console.error("handing over a PayPal purchase again failed; tried again at the next sweep", store.handle, order, error);

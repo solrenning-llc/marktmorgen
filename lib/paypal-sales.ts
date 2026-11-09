@@ -672,7 +672,10 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
 /**
  * Hands a paid PayPal purchase over, once: written down under the buyer's
  * PayPal address, a course dated from today, and the receipt emailed with
- * the link to the list of purchases.
+ * the link to the list of purchases. True only when the sender accepted the
+ * receipt; false when it refused it, its answer is unknown or it threw, so
+ * the caller keeps the order to send it again (lib/paypal-delivery.ts), under
+ * the same idempotency key. Every other step is written once (HSETNX, SET NX).
  */
 export async function deliverPayPal(input: {
   store: Store;
@@ -682,16 +685,16 @@ export async function deliverPayPal(input: {
   from: string;
   recordStart: (email: string, productId: string, startSeconds: number) => Promise<void>;
   ordersLink: (email: string) => Promise<string | null>;
-}): Promise<void> {
+}): Promise<boolean> {
   const { store, paid, product, base } = input;
-  if (!store.statsId) return;
+  if (!store.statsId) return false;
   const items = product.bundle?.length ? product.bundle : null;
   await grantImported(store.statsId, `paypal:${paid.order}`, [{ email: paid.email, productId: product.id, items }], paid.at, store.sid);
   if (!store.pastBuyers) await setPastBuyers(storeRef(store));
   for (const id of [product.id, ...(items ?? [])]) await input.recordStart(paid.email, id, paid.at);
   const link = (await input.ordersLink(paid.email)) ?? `${base}/orders`;
   const g = givingWords(store.language);
-  await sendEmail({ meter: { by: "order" },
+  const receipted = await sendEmail({ meter: { by: "order" },
     from: input.from,
     to: paid.email,
     subject: g.ppSubject(product.title).slice(0, 200),
@@ -712,10 +715,14 @@ export async function deliverPayPal(input: {
     ].join("\n"),
     replyTo: store.email,
     idempotencyKey: `nimbus-paypal:${paid.order}`,
-  }).catch((error) => console.error("a PayPal purchase email failed", error));
+  }).catch((error) => {
+    console.error("a PayPal purchase email failed", error);
+    return false;
+  });
   // One of the month's orders, like a card checkout's (lib/orders.ts). Not counted until
   // 17 October 2026, so a store's PayPal sales were in no plan's figure.
   await countOrder(store, `paypal:${paid.order}`, paid.cents);
+  return receipted === true;
 }
 
 /**

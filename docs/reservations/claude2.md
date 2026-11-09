@@ -6,4 +6,3 @@ Only Claude 2 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 2 | 14 [D11], the complement of 8 November 2026: the invite code in the badge's link, under its locks | claude2/d11-badge-invite | `lib/badge-link.ts`, `tests/badge-invite-link.test.ts`, the badge's lines of `app/[handle]/page.tsx`, `existingInviteCode` in `lib/creator-invites.ts`, `COMMANDS.frontPage` in `tests/traffic-cost.ts` | 09/11/2026 14h10 |

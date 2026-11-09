@@ -31,12 +31,13 @@
  * charged. A store in its free trial or with no plan is not counted here;
  * its paid orders stay what they were (docs/funded-exposure-review.md).
  *
- * scripts/test_order_admission_redis.py runs both scripts on a real Redis.
+ * scripts/test_order_admission_redis.py runs the scripts on a real Redis.
  */
 import { allowanceWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { admitNonPaying } from "@/lib/free-pool";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { paidOrdersLimitFor } from "@/lib/order-rules";
 import { dataKey } from "@/lib/store-data";
@@ -124,6 +125,71 @@ const countKey = (folder: string, month: string) => `nl:orders:n:${folder}:${mon
 const openKey = (folder: string) => `nl:orders:open:${folder}`;
 const heldKey = (folder: string) => `nl:orders:open:${folder}:b`;
 const hourOf = (now: number) => Math.floor(now / 3_600_000);
+/** Orders paid while their paying store's billing window was unknown, by its folder, until the window is known (rule 30). */
+const pendingKey = (folder: string) => `nl:orders:pending:${folder}`;
+/** As long as a window's count is kept (lib/orders.ts, KEEP_SECONDS). */
+const COUNT_KEEP_SECONDS = 400 * 86_400;
+
+/**
+ * Holds one paid order of a paying store whose billing window is unknown
+ * (lib/orders.ts, countOrder): never counted in the calendar month, which the
+ * admission below never reads for it, but kept to be counted in the window
+ * once it is known (countHeldOrders). Throws when it cannot be written.
+ */
+export async function holdUncountedOrder(folder: string): Promise<void> {
+  await redisPipeline([["INCR", pendingKey(folder)], ["EXPIRE", pendingKey(folder), COUNT_KEEP_SECONDS]]);
+}
+
+/**
+ * KEYS[1] the orders held while the window was unknown, KEYS[2] the window's
+ * count; ARGV[1] seconds to keep the count. Moves the held orders into the
+ * count in one step, so no admission can read the count while they are in
+ * neither key (Claude 4 on #3150). Answers how many it moved (0 when none was
+ * held), or -1, with nothing written, when either key is not a whole count or
+ * the keep is not a number. Nothing is written before both are read and known
+ * to be counts, because Redis keeps a script's earlier writes when a later
+ * command fails: an INCRBY refused after the held orders were taken would lose
+ * them. Both stay under 16 digits, so INCRBY cannot overflow.
+ */
+export const MOVE_HELD_ORDERS = `-- marktmorgen:orders-held-move:v1
+local function whole(raw)
+  if #raw > 15 then return nil end
+  if raw ~= '0' and not string.match(raw, '^%-?[1-9]%d*$') then return nil end
+  return tonumber(raw)
+end
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local n = whole(raw)
+if not n or n < 0 then return -1 end
+local have = redis.call('GET', KEYS[2])
+if have and not whole(have) then return -1 end
+local keep = tonumber(ARGV[1])
+if not keep or keep < 1 then return -1 end
+redis.call('DEL', KEYS[1])
+if n == 0 then return 0 end
+redis.call('INCRBY', KEYS[2], n)
+redis.call('EXPIRE', KEYS[2], keep)
+return n`;
+
+/**
+ * Counts in a known window the orders held while it was unknown, and answers
+ * how many, in one atomic step (MOVE_HELD_ORDERS). Throws when the reply is
+ * not exactly a count from zero up (rule 24): nothing may then be admitted on
+ * a count that may be short of them. A lost reply never loses them and never
+ * counts them twice: the script ran whole or not at all, so they are either in
+ * the window already or still held for the next reading, and nothing here
+ * writes them again. A held key that is not a count is kept, never dropped:
+ * unknown is not zero, so admissions stay refused, as ADMIT_ORDERS refuses on
+ * an unreadable month's count.
+ */
+export async function countHeldOrders(folder: string, window: string): Promise<number> {
+  const reply: unknown = await redisPipeline([["EVAL", MOVE_HELD_ORDERS, 2, pendingKey(folder), countKey(folder, window), COUNT_KEEP_SECONDS]]);
+  const [answer] = repliesFor(reply, 1) ?? [undefined];
+  if (answer === -1) throw new Error("the orders held for an unknown window, or the window's count, could not be read; nothing was moved");
+  const moved = countOf(answer);
+  if (moved === null) throw new UnknownReplyError("the orders held for an unknown window");
+  return moved;
+}
 
 /** What a checkout carries so its order can give its hour back: the hour, as metadata. */
 export const ADMITTED_FIELD = "mm_admit";
@@ -205,6 +271,8 @@ export async function admitOrders(store: Store, n = 1, now = Date.now(), items =
     const folder = await storeFolder(storeRef(store));
     const room = dataKey(store);
     if (!room) return { ok: false, reason: "unavailable" };
+    // Orders paid while this window was unknown are in it before it is read (rule 30).
+    await countHeldOrders(folder, window.id);
     const hour = hourOf(now);
     const evidence=confirmationEvidence(store,window,hour,folder,n,items,now);
     const reply: unknown = await redisPipeline([

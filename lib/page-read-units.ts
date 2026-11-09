@@ -5,19 +5,26 @@
  * MAX_STORED_PAGE_BYTES bytes and five versions of it besides, while one
  * studio request prices fifty kilobytes through the database
  * (UNIT_COST.studio). What it moves through the database and sends on to the
- * browser, past the request's own fifty kilobytes each, takes one more a
- * megabyte (lib/segments.ts, ledgerUnits; lib/sent-bytes.ts, sentUnits), taken
- * before each move: what is read is measured before it is read, and the answer
- * before it is sent. Requests not left, or not counted, refuse with
+ * browser, past the request's own fifty kilobytes, spent once for both
+ * (C3-112 (2): one IncludedBytes a request, as lib/person-agenda-read.ts),
+ * takes one more a megabyte (lib/segments.ts, ledgerUnits; lib/sent-bytes.ts,
+ * sentUnits), taken before each move: what is read is measured before it is
+ * read, and the answer before it is sent. Requests not left, or not counted, refuse with
  * "studio_used" before anything more is read or sent.
  */
 import type { Store } from "@/lib/store";
 import { ledgerUnits } from "@/lib/segments";
-import { sentUnits } from "@/lib/sent-bytes";
+import { IncludedBytes, sentUnits } from "@/lib/sent-bytes";
 import { NOT_COUNTED, countUnits } from "@/lib/person-agenda-read";
 
-/** Studio requests that reading `db` bytes of pages and sending `sent` bytes of them take beyond the request's own. Pure. */
-export const pageReadUnits = (db: number, sent: number): number => ledgerUnits(db) + sentUnits(sent);
+/**
+ * Studio requests that reading `db` bytes of pages and sending `sent` bytes of them take beyond the request's own,
+ * its fifty kilobytes spent once for both (one IncludedBytes, C3-112 (2)). Pure.
+ */
+export const pageReadUnits = (db: number, sent: number): number => {
+  const included = new IncludedBytes();
+  return ledgerUnits(db, included) + sentUnits(sent, included);
+};
 
 const NO_STORE = { "Cache-Control": "private, no-store" };
 

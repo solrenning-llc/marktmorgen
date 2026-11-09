@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { productIdFor } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { keepPictures, picturePaths } from "@/lib/sales-page";
-import { MAX_VERSION_BYTES, countVersions, keptPageBytes, readPage, readVersionsMeasured } from "@/lib/sales-page-store";
+import { MAX_VERSION_BYTES, keptPageBytes, readPage, readVersionsMeasured, versionSizes } from "@/lib/sales-page-store";
 import { PageReadMeter } from "@/lib/page-read-units";
 import { isSiteKey } from "@/lib/site-page-rules";
 
@@ -20,11 +20,13 @@ import { isSiteKey } from "@/lib/site-page-rules";
  * the editor is told how many were left out.
  *
  * Up to MAX_VERSIONS versions are read, each kept at up to MAX_VERSION_BYTES
- * bytes, and, to bring one back, the page: what they weigh at the most (the
- * page measured) is taken from the studio's requests before they are read,
- * past this request's own fifty kilobytes, and the answer before it is sent
- * (lib/page-read-units.ts). A count or a size that does not come back reads
- * nothing (page_unread).
+ * bytes, and, to bring one back, the page: what they weigh at the most (each
+ * version measured in Redis and taken at MAX_VERSION_BYTES, or at what it
+ * weighs when one kept before 9 November 2026 weighs more; the page measured)
+ * is taken from the studio's requests before they are read, past this
+ * request's own fifty kilobytes, and the answer before it is sent
+ * (lib/page-read-units.ts). Sizes that do not come back read nothing
+ * (page_unread).
  */
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
@@ -40,8 +42,9 @@ export async function GET(request: NextRequest) {
   const n = params.get("n");
   if (n !== null && !/^\d$/.test(n)) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   const meter = new PageReadMeter(store);
-  const count = await countVersions(store.statsId, id).catch(() => null);
-  if (count === null) return Response.json({ ok: false, error: "page_unread" }, { status: 503, headers });
+  const sizes = await versionSizes(store.statsId, id).catch(() => null);
+  if (sizes === null) return Response.json({ ok: false, error: "page_unread" }, { status: 503, headers });
+  const count = sizes.length;
   if (n !== null && Number(n) >= count) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   let page = 0;
   try {
@@ -50,12 +53,13 @@ export async function GET(request: NextRequest) {
     console.error("measuring a page before bringing back a version failed", error);
     return Response.json({ ok: false, error: "page_unread" }, { status: 503, headers });
   }
-  const most = count * MAX_VERSION_BYTES;
+  // A version kept before versions were held to MAX_VERSION_BYTES in bytes is taken at what it weighs, before it is read.
+  const most = sizes.reduce((sum, size) => sum + Math.max(size, MAX_VERSION_BYTES), 0);
   const refused = await meter.take(most + page);
   if (refused) return refused;
   try {
     const { versions, bytes } = await readVersionsMeasured(store.statsId, id);
-    // Kept before versions were held to MAX_VERSION_BYTES, or more of them since they were counted: the rest is taken first.
+    // Saved over again since they were measured (another tab): the rest is taken before anything is sent.
     const over = await meter.take(bytes - most);
     if (over) return over;
     if (n === null) {

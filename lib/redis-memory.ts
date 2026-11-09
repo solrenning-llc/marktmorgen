@@ -142,6 +142,14 @@ export class MemoryRedis {
           }
           return null;
         }
+        // lib/sales-page-store.ts VERSION_SIZES: the bytes each of a list's first ARGV[1] entries weighs, the LRANGE inside counted.
+        if (key.startsWith("-- marktmorgen:page-version-sizes:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, listKey, most] = args;
+          this.live(listKey);
+          this.scriptCalls += 1;
+          if (!this.data.has(listKey)) return [];
+          return this.list(listKey).slice(0, Math.max(0, Number(most))).map((entry) => new TextEncoder().encode(entry).length);
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;

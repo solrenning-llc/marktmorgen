@@ -178,11 +178,13 @@ async function main(): Promise<void> {
   is("with only its own request left, the versions are refused as used up", [refusedList.status, refusedList.body.error], [429, "studio_used"]);
   is("and neither they nor the page are read", [reads(refusedList.sent, "LRANGE", versionsKey), reads(refusedList.sent, "GET", pageKey(id))], [false, false]);
   await redis.pipeline([["SET", studioKey(), String(used2)]]);
+  // Altered 2026-11-09 (rule 23): the route measures each version in Redis (versionSizes, an EVAL) instead of counting
+  // them (LLEN), so a version kept larger before is paid for before it is read (pre-review of claude5/page-bytes-cap).
   const unknownCount = await run(
     () => versionsGet(get(`/api/store/page-versions?id=${id}`)),
-    (command) => (command[0] === "LLEN" && command[1] === versionsKey ? [] : undefined),
+    (command) => (command[0] === "EVAL" && command[3] === versionsKey ? [] : undefined),
   );
-  is("a count that does not come back is page_unread, and the versions are never read", [unknownCount.status, unknownCount.body.error, reads(unknownCount.sent, "LRANGE", versionsKey)], [503, "page_unread", false]);
+  is("sizes that do not come back are page_unread, and the versions are never read", [unknownCount.status, unknownCount.body.error, reads(unknownCount.sent, "LRANGE", versionsKey)], [503, "page_unread", false]);
 
   part("A saved section put on pages never grows one past what a page may weigh (lib/saved-blocks.ts, withSection)");
   const sectionId = "sec0000000001";

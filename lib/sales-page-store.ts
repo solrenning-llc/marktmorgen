@@ -212,8 +212,12 @@ export async function writePage(statsId: string, productId: string, page: SalesP
   const commands: (string | number)[][] = [empty ? ["DEL", pageKey(statsId, productId)] : ["SET", pageKey(statsId, productId), json]];
   // What the page was, kept so a save can be undone from the studio. The
   // version pushed takes room; the oldest one it pushes out gives its own back.
+  // Held to MAX_STORED_PAGE_BYTES in bytes, never in UTF-16 units, so no version
+  // weighs past MAX_VERSION_BYTES: a record kept larger before pages were held
+  // in bytes is saved over without a version to undo to (pre-review of
+  // claude5/page-bytes-cap, 9 November 2026).
   let versions = 0;
-  if (typeof before === "string" && before && before !== json && before.length <= MAX_STORED_PAGE_BYTES) {
+  if (typeof before === "string" && before && before !== json && Buffer.byteLength(before, "utf8") <= MAX_STORED_PAGE_BYTES) {
     const entry = `${Date.now()}\n${before}`;
     versions = dataBytes([entry], 1) - (Number(kept) >= MAX_VERSIONS && typeof oldest === "string" ? dataBytes([oldest], 1) : 0);
     commands.push(["LPUSH", key, entry], ["LTRIM", key, 0, MAX_VERSIONS - 1], ["PERSIST", key]);
@@ -331,6 +335,29 @@ export async function keptPageBytes(statsId: string | null, productId: string): 
   const bytes = replies ? replies[0] : null;
   if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) throw new UnknownReplyError("a page's size");
   return bytes;
+}
+
+/** The script that answers the bytes each of a page's first `ARGV[1]` kept versions weighs, without sending them. */
+const VERSION_SIZES = `-- marktmorgen:page-version-sizes:v1
+local list = redis.call('LRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1)
+local sizes = {}
+for i, entry in ipairs(list) do sizes[i] = string.len(entry) end
+return sizes`;
+
+/**
+ * The bytes each of a page's kept versions weighs, newest first and at most MAX_VERSIONS of them, measured in Redis
+ * so none is sent before a studio read of them is paid for (app/api/store/page-versions/route.ts): a version kept
+ * before 9 November 2026 may weigh past MAX_VERSION_BYTES (writePage held it to a length in UTF-16 units). Any
+ * answer that is not one list of whole numbers from zero up throws UnknownReplyError; [] when none is kept.
+ */
+export async function versionSizes(statsId: string | null, productId: string): Promise<number[]> {
+  if (!statsId || !isRedisConfigured()) return [];
+  const replies = repliesFor(await redisPipeline([["EVAL", VERSION_SIZES, 1, versionsKey(statsId, productId), MAX_VERSIONS]]), 1);
+  const sizes = replies ? replies[0] : null;
+  if (!Array.isArray(sizes) || sizes.length > MAX_VERSIONS || !sizes.every((n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0)) {
+    throw new UnknownReplyError("the sizes of a page's versions");
+  }
+  return sizes as number[];
 }
 
 /** readVersions, with the bytes every kept version it read weighs, readable or not. */

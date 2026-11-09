@@ -1224,12 +1224,15 @@ export const COST_LINES: CostLine[] = [
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
       // A product's page is kept at up to MAX_STORED_PAGE_BYTES bytes, and five versions of it: copying one to start a
       // page, and listing or bringing back its versions, take pageReadUnits more studio requests for what they read
-      // (measured first, the versions at MAX_VERSION_BYTES each) and send, before each (Claude 5's proof on main
-      // 0ade0faf; tests/page-bytes-cap.test.ts measures it through the routes).
-      { file: "lib/page-read-units.ts", names: ["class PageReadMeter", "pageReadUnits", "ledgerUnits(db) + sentUnits(sent)", "countUnits(this.store, due)"] },
-      { file: "lib/sales-page-store.ts", names: ["MAX_VERSION_BYTES = MAX_STORED_PAGE_BYTES + 32", "keptPageBytes", "readVersionsMeasured"] },
+      // (measured first, the versions at MAX_VERSION_BYTES each, or at what one kept larger before weighs) and send,
+      // the request's fifty kilobytes spent once for both, before each (Claude 5's proof on main 0ade0faf;
+      // tests/page-bytes-cap.test.ts and tests/page-bytes-cap-versions.test.ts measure it through the routes).
+      // Altered 2026-11-09 (rule 23): one IncludedBytes for the read and the answer, and the versions measured in
+      // Redis (versionSizes) instead of counted (pre-review of claude5/page-bytes-cap).
+      { file: "lib/page-read-units.ts", names: ["class PageReadMeter", "pageReadUnits", "ledgerUnits(db, included) + sentUnits(sent, included)", "countUnits(this.store, due)"] },
+      { file: "lib/sales-page-store.ts", names: ["MAX_VERSION_BYTES = MAX_STORED_PAGE_BYTES + 32", "keptPageBytes", "readVersionsMeasured", "versionSizes", "Buffer.byteLength(before, \"utf8\") <= MAX_STORED_PAGE_BYTES"] },
       { file: "app/api/store/page/route.ts", names: ["new PageReadMeter(store)", "keptPageBytes(store.statsId, id)", "meter.take(kept)", "meter.send({ ok: true, ...copy })"] },
-      { file: "app/api/store/page-versions/route.ts", names: ["new PageReadMeter(store)", "countVersions(store.statsId, id)", "meter.take(most + page)", "meter.take(bytes - most)"] },
+      { file: "app/api/store/page-versions/route.ts", names: ["new PageReadMeter(store)", "versionSizes(store.statsId, id)", "Math.max(size, MAX_VERSION_BYTES)", "meter.take(most + page)", "meter.take(bytes - most)"] },
     ],
     basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
   },

@@ -787,7 +787,8 @@ const releasedOwner={...store,handle:'harbor-new',stripeCustomerId:'cus_Test0000
 
 test('a renamed store still owns its funded plan bought under its earlier address',async()=>{
  const old=globalThis.fetch,plan=fundedPlan('harbor');
- let reads=0,writes=0;globalThis.fetch=async(input,init)=>{reads++;if(init?.method!=='GET')writes++;return new URL(String(input)).pathname==='/v1/subscriptions/sub_Test000001'?Response.json(plan):Response.json({object:'search_result',data:[plan],has_more:false});};
+ // Like Stripe: the search answers by the addresses it was asked about, the list by the customer.
+ let reads=0,writes=0;globalThis.fetch=async(input,init)=>{reads++;if(init?.method!=='GET')writes++;const url=new URL(String(input));if(url.pathname==='/v1/subscriptions/sub_Test000001')return Response.json(plan);const asked=url.pathname==='/v1/subscriptions/search'?String(url.searchParams.get('query')).includes(`'${plan.metadata.store}'`):url.searchParams.get('customer')==='cus_Test000001';return Response.json({object:url.pathname.endsWith('/search')?'search_result':'list',data:asked?[plan]:[],has_more:false});};
  activationObservations.accept=true;
  try{
   for(const owner of [renamedOwner,releasedOwner]){

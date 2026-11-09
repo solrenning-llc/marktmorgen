@@ -577,6 +577,14 @@ export const ORDERS_METERED_MOVES = COMMAND + MOVES_PER_MGET * (MOVE_BYTES + MOV
 export const LOCKED_UNTIL_STAR_COMMANDS = 3;
 /** What those commands add to a studio request, as UNIT_COST.studio takes them (the same sum, so no rounding is lost). */
 export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) - request("studio", 20 + TAKE_COMMANDS, 50_000);
+/**
+ * lib/webhooks.ts erasedSincePaid (R38): before a Stripe-read event names its buyer (refund.issued, sale.completed,
+ * membership.started, an offer's sale.completed, membership.canceled), one HGET of that address's print in the store's
+ * deletion hash (lib/suppression.ts), so a person deleted at or after the payment is sent with no address. One a
+ * Stripe event that names a buyer, and every such event the store's endpoints hear is sent at least once (a try, this
+ * unit), so it is counted in every try (held in tests/webhook-stripe-erased.test.ts).
+ */
+export const WEBHOOK_ERASED_READ_COMMANDS = 1;
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
@@ -598,8 +606,9 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // database and on to the browser, and a door's file of up to 10 MB kept
   // for as long as an unused door may be.
   buyer: request("wait", 100 + TAKE_COMMANDS, 60_000) + 60_000 * ORIGIN_PER_BYTE + (MAX_TASK_FILE_BYTES / GB) * STORAGE_PER_GB * DOOR_KEPT_MONTHS,
-  // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
-  webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
+  // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds,
+  // and the deletion print read before a Stripe-read event names its buyer (WEBHOOK_ERASED_READ_COMMANDS).
+  webhook: request("wait", 20 + TAKE_COMMANDS + WEBHOOK_ERASED_READ_COMMANDS, 40_000),
 };
 
 /** Checkout-refusal panel, inside the existing studio unit (not added again):

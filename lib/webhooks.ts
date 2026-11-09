@@ -83,6 +83,7 @@ import { keyStates } from "@/lib/api-keys";
 import { SITE_URL } from "@/lib/site-url";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { DELIVERY_MAX_BYTES, DELIVERY_UPDATE_ROOM_BYTES, DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX, shortAddress } from "@/lib/webhook-limits";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 export const WEBHOOK_EVENTS = [
   "sale.completed",
@@ -1268,6 +1269,28 @@ const str = (value: unknown) => (typeof value === "string" && value ? value : nu
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
 /**
+ * Whether the person a Stripe-read event would name was deleted from the store at or after the payment (R38): the
+ * store's deletion print (lib/suppression.ts), which every deletion writes first, the team's or the person's own
+ * (lib/person-erasure.ts), and which only their own yes given again lifts (lib/contacts.ts). Then the event still goes
+ * out, with no address and no name. One HGET, read in its exact shape (CX-123 rule 24): nothing, or a time in seconds;
+ * any other reply, or none, counts as deleted, so an address is never sent on a read that is not known. A payment whose
+ * time does not read counts any print. A store with no list has deleted nobody (suppressedCommand). The PayPal sibling
+ * is lib/paypal-delivery.ts.
+ */
+async function erasedSincePaid(store: Store, email: string | null, paidAt: unknown): Promise<boolean> {
+  const listId = store.listId;
+  if (!email || !listId) return false;
+  const replies = await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, email)]]).then((r) => repliesFor(r, 1), () => null);
+  const mark = replies ? replies[0] : undefined;
+  if (mark === null) return false;
+  if (typeof mark !== "string" || !/^[0-9]{1,12}$/.test(mark)) {
+    console.error("a person's deletion mark could not be read; the Stripe event goes out with no address and no name", store.handle);
+    return true;
+  }
+  return !(typeof paidAt === "number" && Number.isSafeInteger(paidAt) && paidAt > 0) || Number(mark) >= paidAt;
+}
+
+/**
  * Calls to the creator's Stripe account one store's run of the five-minute
  * job may make to tell whose a refunded charge is and to read a canceled
  * member's address (`left`), and, a budget of their own, whose a disputed
@@ -1409,7 +1432,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const session = str(object.id);
     if (!session) return true;
     const details = (object.customer_details ?? {}) as { email?: unknown; name?: unknown };
-    const buyer = { email: str(details.email) ?? str(object.customer_email), name: str(details.name) };
+    const named = { email: str(details.email) ?? str(object.customer_email), name: str(details.name) };
+    const buyer = (await erasedSincePaid(store, named.email, object.created)) ? { email: null, name: null } : named;
     const membership = object.mode === "subscription" && meta.kind !== "plan";
     const kind = meta.kind === "call" ? "call" : meta.kind === "plan" ? "payment_plan" : membership ? "membership" : "one_time";
     const totals = (object.total_details ?? {}) as { amount_discount?: unknown };
@@ -1476,7 +1500,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       amount_cents: num(object.amount),
       discount_cents: 0,
       currency: str(object.currency) ?? "usd",
-      buyer: { email: str(object.receipt_email), name: null },
+      buyer: { email: (await erasedSincePaid(store, str(object.receipt_email), object.created)) ? null : str(object.receipt_email), name: null },
       paid_at: iso(event.created),
     }, created);
     return true;
@@ -1536,7 +1560,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       status: ended ? "ended" : "ending",
       ends_at: ended ? iso(object.ended_at) ?? iso(event.created) : iso(endsAt),
       reason: ended && meta.ends_after ? "completed" : str(details.reason) ?? "cancellation_requested",
-      buyer: { email, customer },
+      buyer: { email: (await erasedSincePaid(store, email, object.start_date ?? object.created)) ? null : email, customer },
     }, created);
     return true;
   }
@@ -1561,6 +1585,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const total = num(object.amount_refunded);
     const before = num(previous.amount_refunded);
     const billing = (object.billing_details ?? {}) as { email?: unknown; name?: unknown };
+    const named = { email: str(billing.email) ?? str(object.receipt_email), name: str(billing.name) };
     await emitEvent(store, "refund.issued", `${charge}|${total}`, {
       charge,
       payment_intent: intent,
@@ -1570,7 +1595,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       amount_cents: num(object.amount),
       fully_refunded: object.refunded === true,
       currency: str(object.currency) ?? "usd",
-      buyer: { email: str(billing.email) ?? str(object.receipt_email), name: str(billing.name) },
+      buyer: (await erasedSincePaid(store, named.email, object.created)) ? { email: null, name: null } : named,
       refunded_at: iso(event.created),
     }, created);
     return true;

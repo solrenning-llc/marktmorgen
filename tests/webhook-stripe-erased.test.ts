@@ -12,6 +12,7 @@ import { addEndpoint, recentMessages, setSendHooksForTests, watchStripe } from "
 import { claimHandle, ensureListId, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { suppressCommand, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { paidPeriod } from "./billing-period-fixture";
+import { WEBHOOK_ERASED_READ_COMMANDS } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -181,6 +182,7 @@ async function main() {
   await watchStripe(Date.now() + 10_000);
   redis.pipeline = counting;
   is("one HGET of this address's print, nothing written", reads, [["HGET", suppressedKey(listId), suppressionPrint(listId, "one@example.com")]]);
+  is("as many as the webhook unit counts (tests/plan-cost-registry.ts)", reads.length, WEBHOOK_ERASED_READ_COMMANDS);
 
   console.error = logged;
   done();

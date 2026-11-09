@@ -12,7 +12,7 @@ export const AI_DRAFT_BADGE = "AI draft";
 /** The three things the creator confirms, in plain words: the facts, any picture, the price and numbers. */
 export const AI_DRAFT_CHECKS: readonly { id: "facts" | "picture" | "price"; label: string }[] = [
   { id: "facts", label: "Every fact in it is true, and it says only what you offer." },
-  { id: "picture", label: "Any picture shown with it fits what it says." },
+  { id: "picture", label: "If there is a picture, it fits what it says." },
   { id: "price", label: "The price and every number in it are right." },
 ];
 

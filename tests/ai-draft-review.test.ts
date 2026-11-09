@@ -47,7 +47,16 @@ is("each new draft starts unchecked", assist.includes("setChecks(freshChecks())"
 is("it tells the page whether the draft is checked", assist.includes("onReviewChange?.(reviewDone(next))") && assist.includes("onReviewChange?.(false)"), true);
 const editor = readFileSync("components/product-editor.tsx", "utf8");
 is("the product form holds Save and Add while a draft is unchecked", editor.includes("const held = aiDraftHold(aiChecks);"), true);
-is("and moves the focus to the first one left", editor.includes('querySelector<HTMLInputElement>("[data-ai-review] input:not(:checked)")?.focus()'), true);
+is("and moves the focus to the first one left", editor.includes('querySelector<HTMLInputElement>("[data-ai-review] input:not(:checked)")') && editor.includes("requestAnimationFrame(() => first?.focus())"), true);
+// Review of 63153488 (Claude 6), MEDIUM 1: a failed second draft hid the boxes and kept the hold.
+is("the boxes stay drawn for the draft still in the fields", [assist.includes("{drafted ? ("), assist.includes("{filled ? (\n          <AiDraftReview")], [true, false]);
+is("only a new confirmed draft marks one, and nothing unmarks it", [assist.includes("setDrafted(true)"), assist.includes("setDrafted(false)")], [true, false]);
+// MEDIUM 2: on the edit path, "Yes, save what buyers pay" saved an unchecked AI draft.
+is("the form has an id the price review submits", editor.includes("id={`product-form-${id}`}"), true);
+is("Yes, save what buyers pay submits that form, through the same hold", editor.includes('type="submit" form={`product-form-${product.id}`}'), true);
+is("and no longer saves around it", /onClick=\{save\}>\s*Yes, save what buyers pay/.test(editor.slice(editor.indexOf("product-${product.id}-price-review-title"))), false);
+// LOW 3: a closed AI box took the focus nowhere.
+is("the hold opens the closed AI box before moving the focus", editor.includes('first?.closest("details")') && editor.includes("box.open = true"), true);
 is("the product form follows the box", editor.includes("onReviewChange={(checked) => setAiChecks(checked ? [true, true, true] : freshChecks())}"), true);
 
 done();

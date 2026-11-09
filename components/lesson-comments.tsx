@@ -131,7 +131,13 @@ function One({
                 community's own words, and its "Delete" sends; pressing the first button again closes it and
                 nothing is sent. A plain disclosure, so it works without a script and makes no extra request. */}
             <details>
-              <summary className="st-footer-link cursor-pointer font-semibold">
+              {/* A 44 px row of its own (WCAG 2.5.5): the lesson page is not inside [data-store-layout], so the
+                  store front's summary rule does not reach it. Height and padding, not flex, so it keeps its
+                  disclosure triangle; py-2.5 is for a browser without the lh unit. */}
+              <summary
+                className="st-footer-link min-h-11 cursor-pointer py-2.5 font-semibold"
+                style={{ paddingBlock: "calc((2.75rem - 1lh) / 2)" }}
+              >
                 {answers > 0 ? w.deleteWithAnswers : w.delete}
               </summary>
               <form

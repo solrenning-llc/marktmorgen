@@ -27,7 +27,8 @@ import { readCards, readListing, readListings } from "@/lib/catalog";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { MAX_CONTACT_NAME, changeLabels, importContactRows, leadsKey, parseContact, readTags } from "@/lib/contacts";
 import { enroll } from "@/lib/flows";
-import { grantImported, importedFor, takeGiven } from "@/lib/imported-purchases";
+import { grantUnlessErased, importedFor, takeGiven } from "@/lib/imported-purchases";
+import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { releaseDay, reserveDay } from "@/lib/mail";
 import { pausedFor } from "@/lib/mail-health";
@@ -49,6 +50,7 @@ export type WriteError =
   | "email"
   | "consent"
   | "unsubscribed"
+  | "deleted"
   | "list_full"
   | "not_on_list"
   | "labels"
@@ -206,18 +208,37 @@ export async function giveAccess(
   if (store.period?.funded === true && !store.statsId) return fail("unavailable");
   const statsId = store.statsId ?? (await ensureStatsId(storeRef(store)))?.statsId;
   if (!statsId || !store.sid) return fail("nothing_to_give");
+  // Nobody deleted from the store is given anything again or emailed ("no import or API call puts them back"). Read
+  // whole (CX-123 rule 24): an unknown reply refuses, never taking them as not deleted. A store with no list yet is
+  // given one, as a deletion gives one, so the grant below is checked where it is written.
+  const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId;
+  if (!listId) return fail("unavailable");
+  const notDeleted = async () => {
+    const deleted = await suppressedAmong(listId, [email]).catch(() => null);
+    return deleted ? deleted.size === 0 : null;
+  };
+  const before = await notDeleted();
+  if (before === null) return fail("unavailable");
+  if (!before) return fail("deleted");
   const already = (await importedFor({ ...store, statsId, pastBuyers: true }, email)).some((p) => p.productId === product.id);
   if (already) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return fail("unavailable");
   if (!(await withinLimit("api-give", store.sid, GIVES_PER_DAY, 86_400))) return fail("daily_limit");
   const taken = await takeAllowance(store, "api", API_WRITE_UNITS - 1);
   if (!taken.ok) return refusedFigure(taken);
-  const [isNew] = await grantImported(statsId, `api:${keyId}`, [{ email, productId: product.id, items }], undefined, store.sid, store);
+  // Checked again where it is written, in the same step (GRANT_UNLESS_ERASED): somebody deleted since gets nothing.
+  const answers = await grantUnlessErased(statsId, `api:${keyId}`, [{ email, productId: product.id, items }], { key: suppressedKey(listId), print: (e) => suppressionPrint(listId, e) }, store).catch((error: unknown) => {
+    if (error instanceof DataRoomError) throw error;
+    return null;
+  });
+  if (!answers) return fail("unavailable");
+  if (answers[0] === "erased") return fail("deleted");
   if (!store.pastBuyers) await setPastBuyers(storeRef(store));
-  if (!isNew) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
+  if (answers[0] !== "new") return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
 
   let emailed = false;
-  if (notify && !(await pausedFor(store.sid)) && (await reserveDay(1))) {
+  // And just before the email, as an import's emails are: deleted since, or unknown, nothing is sent.
+  if (notify && !(await pausedFor(store.sid)) && (await notDeleted()) === true && (await reserveDay(1))) {
     if ((await reserveMoved(store, 1)) < 1) await releaseDay(1);
     else {
       const a = accessWords(store.language);
@@ -264,6 +285,7 @@ export const WRITE_ERRORS: Record<WriteError, [number, string]> = {
   email: [400, "Send email: an address."],
   consent: [400, "Send agreed: true, your word that this person agreed to hear from you. Nobody is added without it."],
   unsubscribed: [409, "This person unsubscribed from your list, so they are not added back."],
+  deleted: [409, "This person was deleted from your store, so nothing is given to them and they are not emailed."],
   list_full: [409, "Your list is full."],
   not_on_list: [404, "Nobody with this address is on your list."],
   labels: [400, "Send labels as a list of words: add, remove, or both."],

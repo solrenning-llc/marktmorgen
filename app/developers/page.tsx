@@ -473,6 +473,7 @@ export default function DevelopersPage() {
         <Code>{`{
   "currency": "usd",
   "refunds_checked": true,
+  "invoices_checked": true,
   "data": [
     {
       "id": "0123456789ab",
@@ -497,7 +498,9 @@ export default function DevelopersPage() {
           <code className="font-mono">payable</code> is what can be paid today; <code className="font-mono">waiting</code>{" "}
           is still inside the wait you set before a sale can be paid. When <code className="font-mono">refunds_checked</code>{" "}
           is <code className="font-mono">false</code>, Stripe could not be asked about refunds just now and the amounts may
-          be high: read again before paying anyone from them.
+          be high: read again before paying anyone from them. When <code className="font-mono">invoices_checked</code> is{" "}
+          <code className="font-mono">false</code>, not every membership and plan payment could be read and the amounts may
+          be low: do not pay from them either.
         </p>
       </LegalSection>
 

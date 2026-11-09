@@ -185,6 +185,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           payouts={book?.payouts ?? []}
           refundsChecked={book?.refundsChecked ?? true}
           invoicesChecked={book?.invoicesChecked ?? true}
+          invoicesPastCeiling={book?.invoicesPastCeiling ?? false}
           unlinkedInvoices={book?.unlinkedInvoices ?? 0}
           today={new Date().toISOString().slice(0, 10)}
           currency={store.currency}

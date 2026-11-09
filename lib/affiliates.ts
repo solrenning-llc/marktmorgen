@@ -2709,6 +2709,13 @@ export type Book = {
    * means none (an affiliate's own slice of a kept book).
    */
   unlinkedInvoices?: number;
+  /**
+   * True when the invoices were not all read because the store has more paid membership and plan invoices than the
+   * book can keep between readings (INVOICES_KEPT_MAX_LINES or INVOICES_KEPT_MAX_BYTES): reloading does not help, so
+   * the creator is told so, not "try again in a moment" (review of #3378 by Claude 2, MEDIUM). Only with
+   * invoicesChecked false; absent means false.
+   */
+  invoicesPastCeiling?: boolean;
 };
 
 /** A Stripe reply not in its exact shape: an UnknownReplyError, with Stripe named in what is logged. */
@@ -3179,6 +3186,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
 
   // Each payment of a membership or plan sold through a link, read from its invoice.
   let invoicesChecked = true;
+  let invoicesPastCeiling = false;
   let unlinkedInvoices = 0;
   let recurringLines: Referral[] = [];
   if (store.stripeAccountId && everyone.length) {
@@ -3186,6 +3194,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400, limits.deadline, limits.titles !== false);
       recurringLines = read.lines.filter((r) => mine(r.aff));
       invoicesChecked = read.complete;
+      invoicesPastCeiling = !read.complete && read.pastCeiling;
       unlinkedInvoices = read.unlinked.filter((aff) => !only || aff === only).length;
     } catch (error) {
       console.error("reading invoices for the affiliate book failed", error);
@@ -3319,7 +3328,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     .sort((a, b) => b.owed - a.owed || b.affiliate.appliedAt - a.affiliate.appliedAt);
   const elsewhere =
     lines.filter((l) => l.currency !== store.currency).length + paid.filter((p) => p.currency !== store.currency).length;
-  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, unlinkedInvoices, currency: store.currency, elsewhere };
+  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, invoicesPastCeiling, unlinkedInvoices, currency: store.currency, elsewhere };
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */
@@ -3381,11 +3390,15 @@ export function withinMonths(from: number, paidAt: number, months: number): bool
  * store's handles or a later `since`, is not taken: the reading starts again.
  * A record past INVOICE_KEPT_MAX_BYTES is not kept, and the book then says it
  * did not read every invoice (invoicesChecked false): the declared ceiling,
- * past which nothing is paid by itself (lib/paypal-payouts.ts,
- * lib/affiliate-payday.ts). A store whose invoices fit in one reading keeps
- * nothing and reads as it always did.
+ * past which nothing is paid by itself, nor a batch file handed out or
+ * recorded (lib/paypal-payouts.ts, lib/affiliate-payday.ts, unsettledBook).
+ * What was kept is replaced by a mark of when it went past (`over`), carried
+ * by the readings that begin again until one keeps every invoice whole, so
+ * every reading in between says `pastCeiling` and the creator is told that
+ * reloading will not help (review of #3378 by Claude 2, MEDIUM). A store
+ * whose invoices fit in one reading keeps nothing and reads as it always did.
  */
-async function recurringReferrals(store: Store, everyone: Affiliate[], since: number, deadline?: number, named = true): Promise<{ lines: Referral[]; complete: boolean; unlinked: string[] }> {
+async function recurringReferrals(store: Store, everyone: Affiliate[], since: number, deadline?: number, named = true): Promise<{ lines: Referral[]; complete: boolean; unlinked: string[]; pastCeiling: boolean }> {
   const statsId = store.statsId as string;
   const account = store.stripeAccountId as string;
   const handles = saleHandles(store);
@@ -3398,8 +3411,10 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
   const take = (row: Record<string, unknown>) => takeInvoice(store, row as InvoiceLike, handles, byId, budget, deadline);
   const walk = (range: { gt: number; lte: number }, after: string, into: InvoiceSet) => walkPaid(store, range, after, budget, deadline, take, into);
   const loaded = await readInvoiceKeep(statsId, account, tag, since);
-  // A record with nothing kept and no walk (one dropped after failing) is begun again.
+  // A record with nothing kept and no walk (one dropped after failing, or the mark of a store past the ceiling) is
+  // begun again; the mark is carried by the readings that begin again, until one keeps every invoice whole.
   let keep = loaded && (loaded.kept || loaded.walk) ? loaded : null;
+  let over = loaded?.over ?? null;
   /** The invoices newer than what is kept, read this time. */
   const live = emptySet();
   let complete = false;
@@ -3408,9 +3423,12 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     if (!keep) {
       // Nothing kept: everything since the oldest affiliate joined. Whole within the pages: nothing to keep.
       const read = await walk({ gt: since - 1, lte: start }, "", live);
-      if (read.done) complete = live.whole;
-      else {
-        keep = { v: 1, account, handles: tag, since, kept: null, walk: { ...live, from: since - 1, top: start, at: start, after: read.after, full: true, fails: 0 } };
+      if (read.done) {
+        complete = live.whole;
+        // Read in one go: nothing needs keeping, so the store is not past the ceiling.
+        over = null;
+      } else {
+        keep = { v: 1, account, handles: tag, since, kept: null, walk: { ...live, from: since - 1, top: start, at: start, after: read.after, full: true, fails: 0 }, over };
         changed = true;
       }
     } else if (keep.walk && (!keep.walk.full || !keep.kept)) {
@@ -3456,6 +3474,9 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
             // only if every invoice read whole this time.
             keep.kept = { lines: [...kept.lines, ...w.lines], unlinked: [...kept.unlinked, ...w.unlinked], whole: w.whole, top: w.top, at: w.at };
             keep.walk = null;
+            // An invoice it could not read (an old one paid late with a tax that does not read): this reading is not
+            // whole either (review of #3378 by Claude 2, LOW), not only the next one.
+            complete = complete && w.whole;
           }
         }
       }
@@ -3470,7 +3491,12 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     }
     throw error;
   }
-  if (changed && keep && !(await writeInvoiceKeep(statsId, keep))) complete = false;
+  if (changed && keep) {
+    const wrote = await writeInvoiceKeep(statsId, keep);
+    if (wrote === "ceiling") over = start;
+    else if (wrote === "kept" && keep.kept) over = null;
+    if (wrote !== "kept") complete = false;
+  }
 
   // What the book shows: what is kept, a catch-up walk's part read so far, and the newer invoices read now; each
   // invoice once, and none made before `since`.
@@ -3501,7 +3527,7 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     how: "recurring" as const,
     promotion: promotion ?? undefined,
   }));
-  return { lines, complete, unlinked };
+  return { lines, complete, unlinked, pastCeiling: !complete && over !== null };
 }
 
 /** Where the paid invoices read whole are kept between readings of the book (recurringReferrals). */
@@ -3535,7 +3561,8 @@ type KeptUnlinked = [string, string, number];
 type InvoiceSet = { lines: KeptLine[]; unlinked: KeptUnlinked[]; whole: boolean };
 type KeptSet = InvoiceSet & { top: number; at: number };
 type WalkSet = InvoiceSet & { from: number; top: number; at: number; after: string; full: boolean; fails: number };
-type InvoiceKeep = { v: 1; account: string; handles: string; since: number; kept: KeptSet | null; walk: WalkSet | null };
+/** `over`: when the invoices last went past the ceiling (epoch seconds), until a reading keeps every one whole; null otherwise. */
+type InvoiceKeep = { v: 1; account: string; handles: string; since: number; kept: KeptSet | null; walk: WalkSet | null; over: number | null };
 
 const emptySet = (): InvoiceSet => ({ lines: [], unlinked: [], whole: true });
 const safeInt = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n);
@@ -3596,14 +3623,20 @@ async function readInvoiceKeep(statsId: string, account: string, tag: string, si
       if (!set || !safeInt(from) || !safeInt(top) || !safeInt(at) || !isText(after) || typeof full !== "boolean" || !safeInt(fails) || fails < 0) return null;
       walking = { ...set, from, top, at, after, full, fails };
     }
-    return { v: 1, account, handles: tag, since: v.since, kept, walk: walking };
+    // Absent in a record written before the mark existed: not past the ceiling.
+    const over = v.over === undefined || v.over === null ? null : safeInt(v.over) ? v.over : undefined;
+    if (over === undefined) return null;
+    return { v: 1, account, handles: tag, since: v.since, kept, walk: walking, over };
   } catch {
     return null;
   }
 }
 
-/** Keeps them for the next reading; false when they are past INVOICES_KEPT_MAX_BYTES or Redis does not say it kept them. */
-async function writeInvoiceKeep(statsId: string, keep: InvoiceKeep): Promise<boolean> {
+/**
+ * Keeps them for the next reading: "kept"; "ceiling" when they are past INVOICES_KEPT_MAX_LINES or
+ * INVOICES_KEPT_MAX_BYTES, and only the mark of it is kept; "failed" when Redis does not say it kept them.
+ */
+async function writeInvoiceKeep(statsId: string, keep: InvoiceKeep): Promise<"kept" | "ceiling" | "failed"> {
   const once = (set: InvoiceSet): InvoiceSet => {
     const seen = new Set<string>();
     return {
@@ -3619,14 +3652,18 @@ async function writeInvoiceKeep(statsId: string, keep: InvoiceKeep): Promise<boo
   const walking = keep.walk && { ...keep.walk, ...once(fresh(keep.walk)) };
   const count = (set: InvoiceSet | null) => (set ? set.lines.length + set.unlinked.length : 0);
   const fits = (value: string, sets: (InvoiceSet | null)[]) => Buffer.byteLength(value, "utf8") <= INVOICES_KEPT_MAX_BYTES && sets.reduce((n, set) => n + count(set), 0) <= INVOICES_KEPT_MAX_LINES;
-  const value = JSON.stringify({ ...keep, kept, walk: walking });
+  // Every invoice kept whole once more clears the mark of having gone past the ceiling.
+  const value = JSON.stringify({ ...keep, kept, walk: walking, over: kept ? null : keep.over });
   if (!fits(value, [kept, walking])) {
     console.error("the affiliate book's kept invoices are past their ceiling: nothing kept, the book not whole", statsId);
-    await redisPipeline([["DEL", invoiceKeepKey(statsId)]]).catch(() => undefined);
-    return false;
+    // Only the mark of it, in place of what was kept (one command, as the DEL it replaces): the readings that begin
+    // again carry it, so the creator is told reloading will not help, not "try again in a moment".
+    const mark = JSON.stringify({ v: 1, account: keep.account, handles: keep.handles, since: keep.since, kept: null, walk: null, over: Math.floor(Date.now() / 1000) });
+    await redisPipeline([["SET", invoiceKeepKey(statsId), mark, "EX", INVOICE_KEEP_SECONDS]]).catch(() => undefined);
+    return "ceiling";
   }
   const [set] = await redisPipeline([["SET", invoiceKeepKey(statsId), value, "EX", INVOICE_KEEP_SECONDS]]);
-  return set === "OK";
+  return set === "OK" ? "kept" : "failed";
 }
 
 /** What one invoice listed gives the book. */

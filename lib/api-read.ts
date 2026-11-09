@@ -309,7 +309,7 @@ export async function chargeBook(store: Store, charge: Charge): Promise<Response
 }
 
 /** Every affiliate, with what they have earned, been paid, and are owed. */
-export async function affiliates(store: Store, charge: Charge): Promise<{ data: Record<string, unknown>[]; currency: string; refunds_checked: boolean } | Response> {
+export async function affiliates(store: Store, charge: Charge): Promise<{ data: Record<string, unknown>[]; currency: string; refunds_checked: boolean; invoices_checked: boolean } | Response> {
   const refused = await chargeBook(store, charge);
   if (refused) return refused;
   const book = await readBook(store);
@@ -318,6 +318,9 @@ export async function affiliates(store: Store, charge: Charge): Promise<{ data: 
     // When Stripe could not be asked about refunds, the amounts may be high.
     // Said, so a tool paying from these numbers can wait for a clean read.
     refunds_checked: book.refundsChecked,
+    // Nor every membership and plan payment (audit A1): the amounts may then be low. The same test as the studio's
+    // batch file and its confirmation (unsettledBook), so a tool paying from these numbers waits as they do.
+    invoices_checked: book.invoicesChecked,
     data: book.rows.map((r) => ({
       id: r.affiliate.id,
       email: r.affiliate.email,

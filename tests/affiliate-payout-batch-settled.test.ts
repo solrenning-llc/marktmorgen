@@ -98,6 +98,8 @@ const inv = (id: string, at: number, meta: Record<string, string>, status = "pai
 async function setUp(): Promise<{ product: string; terms: Record<string, string> }> {
   redis.clear();
   shift = 0;
+  // No invoice left from an earlier part: a store's invoices are its own.
+  all = [];
   invoicesUnreadable = false;
   refundsUnreadable = false;
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");

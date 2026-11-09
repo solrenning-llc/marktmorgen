@@ -470,6 +470,8 @@ export async function affiliatesTool(store: Store, charge: Charge) {
       held_because: r.flags,
     })),
     refunds_checked: book.refundsChecked,
+    // Every membership and plan payment read (audit A1); false, the amounts may be low (lib/api-read.ts, affiliates).
+    invoices_checked: book.invoicesChecked,
   };
 }
 

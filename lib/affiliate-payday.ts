@@ -77,6 +77,8 @@ export function paydayEmail(input: {
   refundsChecked: boolean;
   /** False when the membership and plan payments could not all be read (audit A1): the figures may be short. */
   invoicesChecked: boolean;
+  /** And not because of a passing failure: past what the book can keep (Book.invoicesPastCeiling), reloading will not help. */
+  invoicesPastCeiling?: boolean;
   /** Of what is waiting, the leads in hold or waiting for the creator's approval (lib/affiliate-leads.ts). */
   leadsCents?: number;
 }): { subject: string; text: string } {
@@ -91,10 +93,20 @@ export function paydayEmail(input: {
     "",
     `Today is the ${ordinal(input.payday)}, the day you told your affiliates you pay them. ${who} can be paid ${amount}.`,
     "",
-    "Open your affiliate page, download the batch, and upload it to your own PayPal or Wise. The money goes straight from your account to theirs — it never passes through us, so there is nothing to wait for once you have sent it:",
-    studio,
-    "",
-    "When it has gone out, mark the batch as paid on that same page. Each affiliate then sees it on their own page, with the date and your reference.",
+    // Past the ceiling no batch file is made (unsettledBook): never told to download one (review of #3378 by Claude 2).
+    ...(input.invoicesPastCeiling && !input.invoicesChecked
+      ? [
+          "Open your affiliate page and pay each affiliate from your own PayPal, Wise or bank. The money goes straight from your account to theirs — it never passes through us:",
+          studio,
+          "",
+          "When a payment has gone out, write it down with Mark as paid on that same page. The affiliate then sees it on their own page, with the date and your reference.",
+        ]
+      : [
+          "Open your affiliate page, download the batch, and upload it to your own PayPal or Wise. The money goes straight from your account to theirs — it never passes through us, so there is nothing to wait for once you have sent it:",
+          studio,
+          "",
+          "When it has gone out, mark the batch as paid on that same page. Each affiliate then sees it on their own page, with the date and your reference.",
+        ]),
   ];
   const leads = Math.max(0, Math.min(input.leadsCents ?? 0, input.waitingCents));
   if (input.waitingCents - leads > 0) {
@@ -118,7 +130,9 @@ export function paydayEmail(input: {
   if (!input.invoicesChecked) {
     lines.push(
       "",
-      "We could not check all the membership and plan payments on your Stripe account just now, so an affiliate may be owed more than these figures show. Open the page before you pay — it reads them again each time.",
+      input.invoicesPastCeiling
+        ? "Your store has more membership and plan payments from affiliate links than we can keep track of, so an affiliate may be owed more than these figures show. Reloading the page will not change that, and batch files are off: pay each affiliate yourself and write it down with Mark as paid on your affiliate page."
+        : "We could not check all the membership and plan payments on your Stripe account just now, so an affiliate may be owed more than these figures show. Open the page before you pay — it reads them again each time.",
     );
   }
   lines.push("", "— Marktmorgen");
@@ -168,6 +182,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
     busy: "another payment was being sent at the same moment",
     refunds: "we could not check every refund on your Stripe account just now",
     invoices: "we could not check every membership and plan payment on your Stripe account just now, so what your affiliates are owed is not known",
+    invoices_ceiling: "your store has more membership and plan payments from affiliate links than we can keep track of, so what your affiliates are owed is not known",
     nothing: "nobody is owed anything that has cleared",
     error: "PayPal could not be reached",
   };
@@ -178,7 +193,12 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
       "",
       `It is your affiliate payday, and nothing was sent: ${why[paid.reason] ?? why.error}. Nothing left your PayPal.`,
       "",
-      "Open your affiliate page to pay them with one press, or download the batch for PayPal or Wise:",
+      // No batch is offered on a book its confirmation would refuse (unsettledBook, review of #3378 by Claude 2, HIGH).
+      paid.reason === "invoices_ceiling"
+        ? "Reloading the page will not change that, and batch files are off. Open your affiliate page to pay each affiliate yourself and write it down with Mark as paid:"
+        : paid.reason === "refunds" || paid.reason === "invoices"
+          ? "Open your affiliate page: once it has read them, pay with one press or download the batch for PayPal or Wise:"
+          : "Open your affiliate page to pay them with one press, or download the batch for PayPal or Wise:",
       studio,
       "",
       "— Marktmorgen",
@@ -219,6 +239,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     hold: store.affiliates.hold,
     refundsChecked: book.refundsChecked,
     invoicesChecked: book.invoicesChecked,
+    invoicesPastCeiling: book.invoicesPastCeiling ?? false,
     leadsCents: book.lines.filter((l) => l.how === "lead" && l.status !== "approved" && l.currency === book.currency).reduce((sum, l) => sum + l.commission, 0),
   });
   return sendEmail({ meter: { by: "store", store: store, kind: "email" },

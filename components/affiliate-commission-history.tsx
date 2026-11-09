@@ -19,9 +19,17 @@ export function unlinkedInvoicesText(count: number): string {
     ? "1 membership or plan payment could not be linked to a single payment in Stripe, for example because it was paid in parts. It earns no commission and is not listed here."
     : `${count.toLocaleString("en-US")} membership or plan payments could not be linked to a single payment in Stripe, for example because they were paid in parts. They earn no commission and are not listed here.`;
 }
-export function AffiliateCommissionHistory({ lines, total, who, refundsChecked, invoicesChecked, unlinkedInvoices = 0 }: {
+/**
+ * The store has more membership and plan payments than the book can keep between readings (Book.invoicesPastCeiling):
+ * said plainly, with no reload promised, and what still works (review of #3378 by Claude 2, MEDIUM).
+ */
+export const INVOICES_CEILING_TEXT =
+  "Your store has more membership and plan payments from affiliate links than this page can keep track of, so some are not listed and the amounts owed may be short. Reloading will not change that. Batch files and automatic PayPal payouts are off; you can still pay each affiliate yourself and write it down with Mark as paid.";
+export function AffiliateCommissionHistory({ lines, total, who, refundsChecked, invoicesChecked, invoicesPastCeiling = false, unlinkedInvoices = 0 }: {
   lines: readonly AffiliateCommissionLine[]; total?: number | null; who: ReadonlyMap<string, {email: string}>;
   refundsChecked: boolean; invoicesChecked: boolean;
+  /** Not all read because past what the book can keep between readings (Book.invoicesPastCeiling). */
+  invoicesPastCeiling?: boolean;
   /** Paid invoices read whole with no one payment to link them to (Book.unlinkedInvoices). */
   unlinkedInvoices?: number;
 }) {
@@ -32,7 +40,7 @@ export function AffiliateCommissionHistory({ lines, total, who, refundsChecked, 
     <p className="mt-2 text-sm text-ink-soft" role="status">{scope.total === null ? (lines.length ? `Showing ${lines.length} loaded commission records. The full recorded count is unavailable.` : "Commission records could not be loaded. The full recorded count is unavailable.") : `Showing ${lines.length} of ${scope.total} loaded commission entries.`}</p>
     {scope.partial ? <p className="mt-2 text-sm text-ink-soft">Only the newest loaded entries are shown. Use Download everything (CSV) for the existing affiliate export.</p> : null}
     <p className="mt-2 text-xs text-ink-soft">The summary covers positive commission records in this displayed list, separately by currency. Bonuses and second-level commissions are records, not additional purchases. Campaign labels do not prove that a promotion caused a sale.</p>
-    {!invoicesChecked ? <p className="notice notice-warn mt-3 text-sm" role="status">Some membership and plan payments could not be checked. Entries may be missing; reload to try again.</p> : null}
+    {!invoicesChecked ? <p className="notice notice-warn mt-3 text-sm" role="status">{invoicesPastCeiling ? INVOICES_CEILING_TEXT : "Some membership and plan payments could not be checked. Entries may be missing; reload to try again."}</p> : null}
     {unlinkedInvoices > 0 ? <p className="notice mt-3 text-sm" role="status">{unlinkedInvoicesText(unlinkedInvoices)}</p> : null}
     {!refundsChecked ? <p className="notice notice-warn mt-3 text-sm" role="status">Refunds and chargebacks could not all be checked. Commission amounts may still include recently refunded or disputed payments; reload to try again.</p> : null}
     {groups.length ? <ul className="mt-3 flex flex-wrap gap-2 text-xs">{groups.map(group => <li key={JSON.stringify([group.how,group.currency])} className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-paper px-3 ring-1 ring-line"><span className="font-semibold text-ink">{CREDIT_WORDS[group.how]}</span><span className="text-ink-soft">{`${group.records} commission ${group.records === 1 ? "record" : "records"} · ${group.commission === null ? "Amount unavailable" : money(group.commission,group.currency)} (${group.currency.toUpperCase()})`}</span></li>)}</ul> : null}

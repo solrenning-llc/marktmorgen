@@ -22,6 +22,7 @@ const MESSAGES: Record<string, string> = {
   nothing: "Nobody is owed anything that has cleared right now.",
   refunds: "We could not check every refund on your Stripe account just now, so nothing was sent. Try again in a minute.",
   invoices: "We could not check every membership and plan payment on your Stripe account just now, so what is owed is not known and nothing was sent. Try again in a minute.",
+  invoices_ceiling: "Your store has more membership and plan payments from affiliate links than we can keep track of, so what is owed is not known and nothing was sent. Trying again will not change that: pay each affiliate yourself and write it down with Mark as paid.",
   funds: "Your PayPal balance does not cover this batch. Nothing was sent. Add money to your PayPal balance and try again.",
   busy: "A payment is being sent right now. Wait a moment and reload.",
   off: "Switch your affiliate program on first.",

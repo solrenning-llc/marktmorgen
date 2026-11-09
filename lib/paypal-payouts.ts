@@ -229,6 +229,20 @@ export async function onTheirWay(store: Store): Promise<Set<string>> {
   return new Set([...open.values()].flatMap((b) => b.lines.map((l) => l.a)));
 }
 
+/**
+ * Why what the book says is owed cannot be paid from it, or null when it can: "refunds" while refunds and disputes
+ * were not all read from Stripe, "invoices" while the membership and plan payments were not, and "invoices_ceiling"
+ * while those are past what the book can keep between readings (Book.invoicesPastCeiling), which reloading does not
+ * change. The one test every way of paying a batch makes first: the file (GET payout-batch), its confirmation (POST),
+ * the PayPal press and payday (review of #3378 by Claude 2, HIGH: a file handed out that its confirmation would refuse
+ * could be paid twice).
+ */
+export function unsettledBook(book: Pick<Book, "refundsChecked" | "invoicesChecked" | "invoicesPastCeiling">): "refunds" | "invoices" | "invoices_ceiling" | null {
+  if (!book.refundsChecked) return "refunds";
+  if (!book.invoicesChecked) return book.invoicesPastCeiling ? "invoices_ceiling" : "invoices";
+  return null;
+}
+
 /** Who can be paid now: owed, cleared, and not already on their way through PayPal. */
 export function payableLines(book: Book, away: Set<string>): BatchLine[] {
   return owedLines(book).filter((line) => !away.has(line.affiliate.id));
@@ -273,9 +287,10 @@ export type PayResult =
   /** "unknown": the batch was sent and PayPal's answer is not known, so it may have been paid; nobody in it is sent again. */
   /**
    * "refunds": refunds and disputes not all read from Stripe; "invoices": the membership and plan payments not all
-   * read (audit A1): either way what is owed is not known, so nothing is sent.
+   * read (audit A1): either way what is owed is not known, so nothing is sent. "invoices_ceiling": those are past
+   * what the book can keep (unsettledBook), which reloading does not change.
    */
-  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "invoices" | "funds" | "refused" | "busy" | "error" | "unknown" };
+  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "invoices" | "invoices_ceiling" | "funds" | "refused" | "busy" | "error" | "unknown" };
 
 /**
  * Whether PayPal's answer to a batch says it was not made: a 4xx (other than
@@ -381,8 +396,8 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       const book = await readBook(store);
       // What is owed is not known while refunds could not be read from Stripe, nor while the membership and plan
       // payments could not all be read (audit A1): one left out is a commission the affiliate earned and is not paid.
-      if (!book.refundsChecked) return { ok: false, reason: "refunds" };
-      if (!book.invoicesChecked) return { ok: false, reason: "invoices" };
+      const unsettled = unsettledBook(book);
+      if (unsettled) return { ok: false, reason: unsettled };
       const lines = payableLines(book, await onTheirWay(store));
       if (!lines.length) return { ok: false, reason: "nothing" };
       const auth = await bearer(store);

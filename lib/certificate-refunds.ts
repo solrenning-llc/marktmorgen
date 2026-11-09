@@ -4,11 +4,29 @@
  *
  * A buyer refunded in full, or whose bank took the payment back in a dispute Stripe closed as lost, loses the course
  * (lib/refunds.ts, purchaseRefunded). Their certificate of it, with their name, stood at its public address until the
- * creator withdrew it by hand. The checkout sweep now runs this pass every five minutes for a store with courses that
- * issued certificates: it reads the refunds made on the creator's account and the disputes closed as lost since the
- * last pass, finds the checkout each paid for, and for each course that checkout gave, once that course no longer
- * opens for the buyer (lib/learn.ts, courseStandingFor), withdraws the buyer's standing certificate of it
- * (lib/certificate.ts, withdrawForRefund), marked as withdrawn for a refund, so its page no longer shows the name.
+ * creator withdrew it by hand. The checkout sweep now runs this pass every five minutes for a store one of whose
+ * courses issued a certificate: it reads the refunds made on the creator's account and the disputes closed as lost
+ * since the last pass, finds the checkout each paid for, and for each course that checkout gave that issued a
+ * certificate, once that course no longer opens for the buyer (lib/learn.ts, courseStandingFor), withdraws the
+ * buyer's certificates of it (lib/certificate.ts, withdrawForRefund), marked as withdrawn for a refund, so no page of
+ * theirs shows the name.
+ *
+ * Which stores (second review of #3409, Claude 5, ALTO 1): the store's mark (lib/certificate.ts,
+ * certificatesIssuedKey), one GET a run, says whether one of its courses issued a certificate; it is set when one is
+ * issued. A store never looked at (its certificates issued before the mark was kept) is looked at once: its course
+ * listings and one SCARD a course; finding one sets the mark for good, finding none writes "none found" for
+ * CERTIFICATE_SCAN_SECONDS, after which it is looked at again, sooner than the refunds a first pass reads back
+ * (CERTIFICATE_REFUND_LOOKBACK_SECONDS), so a certificate the mark missed still meets its refund. A mark read in any
+ * other shape runs the pass: unknown never skips a store. So a store with no certificate costs one command a run
+ * whatever its courses, and a pass's work is bounded by its refunds, never by its courses: only the courses a
+ * refunded checkout gave are read (their listings and one SCARD each).
+ *
+ * What a store's pass may spend (same review): whether rows were handled already is read with one ZRANGEBYSCORE a
+ * page, by their times, never one command a row; and every course a refunded checkout gave takes one of the store's
+ * CERTIFICATE_REFUND_CHECKS_PER_MONTH before anything is read for it, and every row one more before it is marked
+ * handled. Past them, the pass stops where it is and goes on from that row the next month: nothing is skipped. A row
+ * read again while it waits (a part of its refund still pending) asks Stripe only and takes none. Priced per plan in
+ * tests/plan-cost-registry.ts (COST_LINES, certificate-refund-pass).
  *
  * DONO-18, applied exactly:
  *   - only a refund Stripe says `succeeded`, on a charge every refund of which that gives money back has succeeded and
@@ -44,22 +62,25 @@
  *                                  an unreadable row waits for the next readable one
  *   nl:certrefunds:seen:<stats>    the refunds and closing events already handled, each by its time, trimmed below
  *                                  the place
+ *   nl:certrefunds:has:<stats>     the store's mark (lib/certificate.ts): "1" for good once a certificate was issued,
+ *                                  "0" for CERTIFICATE_SCAN_SECONDS once a look at its courses found none
+ *   nl:certrefunds:n:<stats>:<month>  the rows marked handled and courses checked in a calendar month (UTC), forty days
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReply, exactReplies, replyCount } from "@/lib/redis-exact";
+import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type StripePage, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { type LostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull } from "@/lib/refunds";
-import { KIND, readKindExact } from "@/lib/catalog";
+import { KIND, idsOfKind, readKindExact, readListingsExact } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { type Listing, type Store, saleHandles } from "@/lib/store";
 import { EMAIL_PATTERN } from "@/lib/auth";
-import { allKey, withdrawForRefund } from "@/lib/certificate";
+import { CERTIFICATES_ISSUED, allKey, certificatesIssuedKey, withdrawForRefund } from "@/lib/certificate";
 import { PAID_SECONDS, courseStandingFor } from "@/lib/learn";
 
 /**
  * Pages of the creator's refunds (GET /refunds, up to 100 each, newest first) read in one pass, from where the last
- * one stopped; priced in tests/plan-cost-registry.ts (NOT_A_COST).
+ * one stopped; priced per plan in tests/plan-cost-registry.ts (COST_LINES, certificate-refund-pass).
  */
 export const CERTIFICATE_REFUND_PAGES_PER_STORE = 3;
 /** Refunds and lost disputes looked up in one pass: each asks Stripe for its charge's refunds, its checkout and the buyer's courses. */
@@ -73,6 +94,41 @@ export const CERTIFICATE_REFUND_LOOKBACK_SECONDS = 7 * 86_400;
 export const CERTIFICATE_REFUND_SETTLE_SECONDS = PAID_SECONDS + 300;
 /** The most time one pass takes of the checkout sweep's run, so the stores after it are reached in the same run. */
 export const CERTIFICATE_REFUND_PASS_MS = 4_000;
+/**
+ * How long a look at a store's courses that found no certificate holds: then it is looked at again. Shorter than the
+ * refunds a first pass reads back, less the wait, so a certificate issued without the mark still meets its refund.
+ */
+export const CERTIFICATE_SCAN_SECONDS = 6 * 86_400;
+/** The store's mark while a look at its courses found no certificate. */
+const NONE_FOUND = "0";
+/**
+ * Rows marked handled and courses checked for one store in a calendar month (UTC): each course a refunded checkout gave
+ * takes one before anything is read for it, and each row one before it is marked handled. Past it the pass stops at
+ * that row until the next month. A ceiling of what the pass may spend for a store, priced in COST_LINES; not an
+ * allowance of the plan.
+ */
+export const CERTIFICATE_REFUND_CHECKS_PER_MONTH = 5_000;
+const checksKey = (sid: string, month: string) => `nl:certrefunds:n:${sid}:${month}`;
+/** The month's checks are spent: the pass stops where it is. */
+class ChecksSpent extends Error {}
+
+/** Takes `n` of the store's checks of the month before they are spent, each reply read exactly; throws ChecksSpent past them. */
+async function takeChecks(sid: string, n: number): Promise<void> {
+  const key = checksKey(sid, new Date().toISOString().slice(0, 7));
+  const [count, kept] = exactReplies(await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 40 * 86_400]]), 2, WHAT);
+  if (replyCount(kept, WHAT) !== 1) throw new UnknownReply(WHAT);
+  if (replyCount(count, WHAT) > CERTIFICATE_REFUND_CHECKS_PER_MONTH) throw new ChecksSpent();
+}
+
+/** The ids of these rows already handled, read in one ZRANGEBYSCORE by their times; a reply that is not a list of ids throws. */
+async function handledAmong(sid: string, rows: Record<string, unknown>[]): Promise<Set<string>> {
+  const times = rows.map((row) => row.created).filter(whole);
+  if (!times.length) return new Set();
+  const [reply] = exactReplies(await redisPipeline([["ZRANGEBYSCORE", seenKey(sid), Math.min(...times), Math.max(...times)]]), 1, WHAT);
+  const ids = plainList(reply);
+  if (!ids || !ids.every((id) => typeof id === "string")) throw new UnknownReply(WHAT);
+  return new Set(ids as string[]);
+}
 
 const anchorKey = (sid: string) => `nl:certrefunds:since:${sid}`;
 const seenKey = (sid: string) => `nl:certrefunds:seen:${sid}`;
@@ -81,8 +137,6 @@ const PI_ID = /^pi_[A-Za-z0-9]{6,255}$/;
 const CURSOR_ID = /^[a-z]{2,4}_[A-Za-z0-9]{6,64}$/;
 /** The place: seconds, then, while a reading is under way, the last row dealt with, the time it may move to and whether an unreadable row waits. */
 const PLACE = /^(\d{1,12})(?:\|([a-z]{2,4}_[A-Za-z0-9]{6,64})\|(\d{1,12})\|([01]))?$/;
-/** A row's time as the set of rows handled keeps it. */
-const SCORE = /^\d{1,12}$/;
 const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
 
 const WHAT = "the certificates' refund pass";
@@ -130,8 +184,12 @@ async function refundedForGood(account: string, charge: Record<string, unknown>,
   return amount > 0 && back >= amount ? "yes" : "no";
 }
 
-/** The buyer and the courses with certificates a payment's checkout gave, or null when it was no checkout of this store. Throws when unreadable. */
-async function saleOf(store: Store, account: string, pi: string, courses: Map<string, Listing>, deadline: number): Promise<{ email: string; courses: Listing[] } | null> {
+/**
+ * The buyer and the courses with certificates a payment's checkout gave, or null when it was no checkout of this store
+ * or gave none: only those courses are read, their listings and one SCARD each. Throws when unreadable.
+ */
+async function saleOf(store: Store, account: string, pi: string, deadline: number): Promise<{ email: string; courses: Listing[] } | null> {
+  const sid = store.statsId!;
   const legible = (row: Record<string, unknown>) => plainObject(ownField(row, "metadata"));
   const rows = await wholeList(account, "/checkout/sessions", new URLSearchParams({ payment_intent: pi, limit: "10" }), legible, 1, deadline);
   if (!rows) throw new UnknownReply(WHAT);
@@ -139,9 +197,14 @@ async function saleOf(store: Store, account: string, pi: string, courses: Map<st
   if (!session) return null;
   const meta = ownField(session, "metadata") as Record<string, string>;
   if (!saleHandles(store).has(meta.store ?? "")) return null;
-  const given = deliveredIds(meta)
-    .map((id) => courses.get(id))
-    .filter((p): p is Listing => Boolean(p));
+  const kinds = new Set(idsOfKind(store, "course"));
+  const asked = [...new Set(deliveredIds(meta).filter((id) => kinds.has(id)))];
+  if (!asked.length) return null;
+  await takeChecks(sid, asked.length);
+  const listed = (await readListingsExact(store, asked)).filter((p) => p.course);
+  if (!listed.length) return null;
+  const issued = exactReplies(await redisPipeline(listed.map((p) => ["SCARD", allKey(p.course!.id)])), listed.length, WHAT);
+  const given = listed.filter((_, i) => replyCount(issued[i], WHAT) > 0);
   if (!given.length) return null;
   const details = ownField(session, "customer_details");
   const email = plainObject(details) ? ownField(details, "email") : undefined;
@@ -162,15 +225,16 @@ function rowAt(data: unknown[], i: number): unknown {
 
 /**
  * Keeps the lost disputes' place only when every one read was handled, that is, is in the set of rows handled (one
- * ZSCORE each, read exactly), as lib/refunds.ts confirmLostRead does for a plain set. False when one was not, or a
- * reply cannot be read: the place stays and they are read again.
+ * ZRANGEBYSCORE by their times, read exactly), as lib/refunds.ts confirmLostRead does for a plain set. False when one
+ * was not, or a reply cannot be read: the place stays and they are read again.
  */
 async function keepLostPlace(lost: LostRead, sid: string): Promise<boolean> {
   try {
     const ids = lost.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
     if (ids.length) {
-      const scores = exactReplies(await redisPipeline(ids.map((id) => ["ZSCORE", seenKey(sid), id])), ids.length, WHAT);
-      if (scores.some((score) => typeof score !== "string" || !SCORE.test(score))) return false;
+      if (lost.rows.some((row) => !whole(row.created))) return false;
+      const handled = await handledAmong(sid, lost.rows);
+      if (ids.some((id) => !handled.has(id))) return false;
     }
     await lost.commit();
     return true;
@@ -181,9 +245,29 @@ async function keepLostPlace(lost: LostRead, sid: string): Promise<boolean> {
 }
 
 /**
+ * Whether the pass has anything to do for the store, by its mark, as the header says: false only for a mark that
+ * reads "none found"; true for one set at an issue or read in any other shape. Never looked at: the course listings
+ * and one SCARD a course, read exactly, and the mark written from them.
+ */
+async function issuedAny(store: Store, sid: string): Promise<boolean> {
+  const key = certificatesIssuedKey(sid);
+  const [mark] = exactReplies(await redisPipeline([["GET", key]]), 1, WHAT);
+  if (mark === NONE_FOUND) return false;
+  if (mark !== null) return true;
+  const listed = (await readKindExact(store, "course")).filter((p) => p.course);
+  const counts = listed.length ? exactReplies(await redisPipeline(listed.map((p) => ["SCARD", allKey(p.course!.id)])), listed.length, WHAT) : [];
+  const found = counts.some((raw) => replyCount(raw, WHAT) > 0);
+  // NX for "none found": a mark an issue set meanwhile stays. Not written (an issue set it) or a reply that says
+  // nothing: the pass runs.
+  const write = found ? ["SET", key, CERTIFICATES_ISSUED] : ["SET", key, NONE_FOUND, "NX", "EX", CERTIFICATE_SCAN_SECONDS];
+  const [written] = exactReplies(await redisPipeline([write]), 1, WHAT);
+  return found || written !== "OK";
+}
+
+/**
  * Reads the refunds and lost disputes since the last pass and withdraws each certificate whose course's payment was
- * given back, as the header says. Returns how many it withdrew. Asks Stripe nothing of a store none of whose courses
- * ever issued a certificate.
+ * given back, as the header says. Returns how many it withdrew. Asks Stripe nothing, and costs one command, for a
+ * store none of whose courses issued a certificate.
  */
 export async function withdrawRefundedCertificates(store: Store, deadline: number): Promise<number> {
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return 0;
@@ -191,12 +275,8 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
   const until = Math.min(deadline, Date.now() + CERTIFICATE_REFUND_PASS_MS);
   const account = store.stripeAccountId;
   const sid = store.statsId;
-  const listed = (await readKindExact(store, "course")).filter((p) => p.course);
-  if (!listed.length) return 0;
-  const replies = exactReplies(await redisPipeline([["GET", anchorKey(sid)], ...listed.map((p) => ["SCARD", allKey(p.course!.id)])]), listed.length + 1, WHAT);
-  const [anchorRaw, ...issued] = replies;
-  const courses = new Map(listed.filter((_, i) => replyCount(issued[i], WHAT) > 0).map((p) => [p.id, p]));
-  if (!courses.size) return 0;
+  if (!(await issuedAny(store, sid))) return 0;
+  const [anchorRaw] = exactReplies(await redisPipeline([["GET", anchorKey(sid)]]), 1, WHAT);
   const place = anchorRaw === null ? null : typeof anchorRaw === "string" ? PLACE.exec(anchorRaw) : null;
   if (anchorRaw !== null && !place) throw new UnknownReply(WHAT);
   const now = Math.floor(Date.now() / 1000);
@@ -214,7 +294,7 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
   let withdrawn = 0;
 
   /** One refund or lost dispute: "done" when dealt with, "held" when it must be read again, "stop" when this pass can do no more. */
-  const handle = async (row: Record<string, unknown>, dispute: boolean): Promise<"done" | "held" | "stop"> => {
+  const handle = async (row: Record<string, unknown>, dispute: boolean, handled: Set<string>): Promise<"done" | "held" | "stop"> => {
     if (Date.now() >= until) return "stop";
     const id = typeof row.id === "string" ? row.id : "";
     const created = whole(row.created) ? row.created : 0;
@@ -228,12 +308,8 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
     }
     // Younger than an answer about the buyer's courses may be kept: read again once it is older (review of #3409, L1).
     if (now - created < CERTIFICATE_REFUND_SETTLE_SECONDS) return "held";
+    if (handled.has(id)) return "done";
     try {
-      const [seen] = exactReplies(await redisPipeline([["ZSCORE", seenKey(sid), id]]), 1, WHAT);
-      if (seen !== null) {
-        if (typeof seen !== "string" || !SCORE.test(seen)) throw new UnknownReply(WHAT);
-        return "done";
-      }
       // A lost dispute with no payment to look up: nothing of this store can be told from it, so it is read and never
       // holds the disputes' place back.
       if (dispute && !PI_ID.test(pi)) return await markRead(id, created);
@@ -244,7 +320,7 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
         if (settled === "waiting") return "held";
         if (settled === "no") return "done";
       }
-      const sale = await saleOf(store, account, pi, courses, until);
+      const sale = await saleOf(store, account, pi, until);
       let left = false;
       for (const product of sale?.courses ?? []) {
         const standing = await courseStandingFor(store, sale!.email, product.id);
@@ -258,12 +334,14 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
       // Marked read once handled: a pass that stops halfway leaves it to the next, which does the same again.
       return await markRead(id, created);
     } catch (error) {
+      if (error instanceof ChecksSpent) return "stop";
       console.error("a refund for certificates was left for the next pass", id, error instanceof Error ? error.name : typeof error);
       return "held";
     }
   };
   /** The row marked handled, by its time, each reply read exactly. */
   const markRead = async (id: string, created: number): Promise<"done"> => {
+    await takeChecks(sid, 1);
     exactReplies(
       await redisPipeline([
         ["ZADD", seenKey(sid), created, id],
@@ -282,8 +360,15 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
   // keeps it.
   const lost = await lostDisputesOrRetry(account, since, until, lostCursorKey("cert", sid));
   let stopped = false;
-  for (const row of lost.rows) {
-    if ((await handle(row as unknown as Record<string, unknown>, true)) === "stop") {
+  let lostHandled: Set<string> | null = null;
+  try {
+    lostHandled = await handledAmong(sid, lost.rows as unknown as Record<string, unknown>[]);
+  } catch {
+    // Unknown which were handled: none is acted on this pass, and the place stays.
+    stopped = true;
+  }
+  for (const row of lostHandled ? lost.rows : []) {
+    if ((await handle(row as unknown as Record<string, unknown>, true, lostHandled!)) === "stop") {
       stopped = true;
       break;
     }
@@ -312,6 +397,14 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
     }
     const data = ownField(raw as Record<string, unknown>, "data") as unknown[];
     const legible = new Set<unknown>(read.rows);
+    let handled: Set<string>;
+    try {
+      handled = await handledAmong(sid, read.rows);
+    } catch {
+      // Unknown which of this page were handled: read again from the same row next pass.
+      console.error("the refunds handled for certificates did not read");
+      break;
+    }
     let next = true;
     for (let i = 0; i < data.length; i += 1) {
       const row = rowAt(data, i);
@@ -325,7 +418,7 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
       }
       const refund = row as Record<string, unknown>;
       const created = refund.created as number;
-      const outcome = await handle(refund, false);
+      const outcome = await handle(refund, false, handled);
       if (outcome === "stop") {
         stopped = true;
         break;

@@ -410,6 +410,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cert:@lib/certificate.ts": { what: "Certificates, kept for good", room: ["lib/certificate.ts"] },
   "nl:course:@lib/certificate.ts": { what: "A course's certificates, by student", room: ["lib/certificate.ts"] },
   "nl:certrefunds:seen:@lib/certificate-refunds.ts": { what: "Refunds and lost disputes already handled for certificates, each by its time", parts: [capped(64 * KB, "A sorted set trimmed below the place each time the refunds are read to their end, so it holds only the rows since the place; fifteen days after the last one read.")] },
+  "nl:certrefunds:has:@lib/certificate.ts": { what: "Whether a course of the store issued a certificate, for the certificates' refund pass", parts: [capped(KEY, "One a store: \"1\" kept for good once a certificate was issued, or \"0\" for six days once a look at its courses found none.")] },
+  "nl:certrefunds:n:@lib/certificate-refunds.ts": { what: "The rows looked up and courses checked by the certificates' refund pass in a month", parts: [capped(KEY, "One a store a calendar month, a count; forty days.")] },
   "nl:certrefunds:since:@lib/certificate-refunds.ts": { what: "How far refunds were read for certificates, and where a reading under way stopped", parts: [capped(KEY, "One a store, at most about 100 bytes; fourteen days, written again on every pass.")] },
   "nl:cm:@lib/chat-grant.ts": short("A member's leave from the live room's cooldown", "buyer", 1),
   "nl:chatsum:@lib/chat-summary.ts": { what: "Where a chat summary goes, sealed", parts: [capped(KB, "One a store.")] },

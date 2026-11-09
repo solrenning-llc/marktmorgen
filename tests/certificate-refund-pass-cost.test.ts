@@ -22,6 +22,7 @@
  *     found" mark expires, sooner than the pass's first look back, and its full refund withdraws it;
  *   - a certificate withdrawn by hand, then fully refunded, shows no name; an earlier one replaced since shows no
  *     name either; a hand-withdrawn one with no refund keeps it (control); running again changes nothing;
+ *   - past the month's checks the pass waits at the row and takes it up the next month, never skipping it;
  *   - the pass's ceilings are priced per plan in COST_LINES, not as a company fixed cost.
  *
  * Synthetic only: an in-memory Redis and a stand-in for the creator's Stripe account.
@@ -35,7 +36,7 @@ import { emailKey, storeKey } from "@/lib/learn";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
-import { COMMAND, COST_LINES, NOT_A_COST } from "./plan-cost-registry";
+import { CERTIFICATE_PASS_CHECK_COMMANDS, CERTIFICATE_PASS_RUNS, CERTIFICATE_PASS_RUN_COMMANDS, COMMAND, COST_LINES, NOT_A_COST } from "./plan-cost-registry";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_certificate_refund_pass_cost";
 
@@ -158,7 +159,7 @@ async function main(): Promise<void> {
   const large = await run(many.store);
   is("a run's commands do not grow with the courses (2 courses, 120 courses)", large.commands, small.commands);
   is("at most one command a run, and nothing asked of Stripe", [small.commands <= 1, small.stripe + large.stripe], [true, 0]);
-  is("such a store's worst month of runs (8,640) costs under a cent", small.commands * 8_640 * COMMAND < 0.01, true);
+  is("such a store's worst month of runs costs under two cents", small.commands * CERTIFICATE_PASS_RUNS * COMMAND < 0.02, true);
 
   part("A mark that reads in another shape runs the pass, never skips it");
   replaced.set(`nl:certrefunds:has:${many.store.statsId}`, 7);
@@ -173,6 +174,13 @@ async function main(): Promise<void> {
   refundInFull(ana);
   const after = await run(two.store);
   is("the pass reads the refunds and withdraws Ana's certificate", [after.stripe > 0, ((await record(anaId))?.withdrawnAt ?? 0) > 0], [true, true]);
+  const idle = await run(two.store);
+  is("a run with no row to look up stays within CERTIFICATE_PASS_RUN_COMMANDS", idle.commands <= CERTIFICATE_PASS_RUN_COMMANDS, true);
+  // Ana's lookup took two checks: the one course her checkout gave, and her row once marked handled.
+  is("a lookup that withdraws a certificate stays within CERTIFICATE_PASS_CHECK_COMMANDS a check", after.commands - idle.commands <= 2 * CERTIFICATE_PASS_CHECK_COMMANDS, true);
+  const month = new Date().toISOString().slice(0, 7);
+  is("each course checked and each row marked handled takes one of the month's checks", (await healthy([["GET", `nl:certrefunds:n:${two.store.statsId}:${month}`]]))[0], "2");
+  console.log(`  (measured: a run ${idle.commands} commands, a lookup ${after.commands - idle.commands})`);
 
   part("A certificate issued before the mark was kept is found by the look at the courses");
   const scan = exported.CERTIFICATE_SCAN_SECONDS;
@@ -214,11 +222,26 @@ async function main(): Promise<void> {
   for (let i = 0; i < 2; i += 1) await run(two.store);
   is("running again changes nothing", JSON.stringify(await Promise.all([cleoId, danOld, danNew, eveId].map(record))), again);
 
+  part("Past the month's checks the pass waits at the row, and goes on from it the next month");
+  const ceiling = exported.CERTIFICATE_REFUND_CHECKS_PER_MONTH;
+  is("the month's checks are a named, exported ceiling", typeof ceiling === "number" && ceiling > 0, true);
+  const counter = `nl:certrefunds:n:${two.store.statsId}:${new Date().toISOString().slice(0, 7)}`;
+  await healthy([["SET", counter, String(ceiling), "EX", 3_600]]);
+  const fay = buy("twocourses", "fay@example.com", two.products[0]);
+  const fayId = await issue(two.store, two.products[0], two.courseIds[0], "fay@example.com", "Fay Example");
+  refundInFull(fay);
+  for (let i = 0; i < 2; i += 1) await run(two.store);
+  is("the checks spent: Fay's certificate still stands, nothing read for it", ((await record(fayId))?.withdrawnAt ?? 0) > 0, false);
+  await healthy([["DEL", counter]]);
+  for (let i = 0; i < 2; i += 1) await run(two.store);
+  is("a new month's checks: her full refund withdraws it (the row was not skipped)", publicName((await record(fayId))!), null);
+
   part("What the pass costs a store that issued a certificate is priced per plan");
   const line = COST_LINES.find((one) => one.id === "certificate-refund-pass");
   is("a plan's line prices the pass", Boolean(line), true);
   is("the line names the pass's ceilings", Boolean(line?.sources.some((s) => s.file === "lib/certificate-refunds.ts" && ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE"].every((name) => s.names.includes(name)))), true);
   is("the line has a figure above zero for a paid plan", (line?.monthlyUsd("creator") ?? 0) > 0, true);
+  console.log(`  (the line: $${(line?.monthlyUsd("creator") ?? 0).toFixed(4)} a store a month)`);
   const registry = NOT_A_COST as Record<string, string | undefined>;
   is("the pages and lookups are no longer a company fixed cost", ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE"].some((name) => name in registry), false);
 

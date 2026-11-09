@@ -15,8 +15,8 @@
  *   - L1: a refund younger than the time a kept answer about the buyer's courses lives (plus a margin) is not acted on
  *     yet, so a certificate issued from such a kept answer is withdrawn too; it is acted on once it is older;
  *   - L3: the rows handled are kept by their time and trimmed below the place once the refunds are read to their end;
- *   - M2: the pages, lookups and the always-on reads are priced in tests/plan-cost-registry.ts, and LOST_DISPUTE_PAGES
- *     names six jobs;
+ *   - M2: the pages and lookups are priced in tests/plan-cost-registry.ts (per plan since the second review of #3409,
+ *     line certificate-refund-pass), and LOST_DISPUTE_PAGES names six jobs;
  *   - L2: the privacy policy and the pass say that a course paid through PayPal is not covered;
  *   - L4: the pass has a time slice of its own inside the sweep's deadline.
  *
@@ -31,7 +31,7 @@ import { emailKey, storeKey } from "@/lib/learn";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
-import { NOT_A_COST } from "./plan-cost-registry";
+import { COST_LINES, NOT_A_COST } from "./plan-cost-registry";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_certificate_refunds_paged";
 
@@ -227,12 +227,16 @@ async function main(): Promise<void> {
 
   part("M2: what the pass costs is in the registry");
   const registry = NOT_A_COST as Record<string, string | undefined>;
-  for (const name of ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE", "CERTIFICATE_REFUND_LOOKBACK_SECONDS", "CERTIFICATE_REFUND_SETTLE_SECONDS", "CERTIFICATE_REFUND_PASS_MS"]) {
+  for (const name of ["CERTIFICATE_REFUND_LOOKBACK_SECONDS", "CERTIFICATE_REFUND_SETTLE_SECONDS", "CERTIFICATE_REFUND_PASS_MS"]) {
     is(`${name} is exported by the pass and cited in NOT_A_COST`, [name in exported, typeof registry[name] === "string" && registry[name]!.includes("lib/certificate-refunds.ts")], [true, true]);
   }
-  const pagesLine = registry.CERTIFICATE_REFUND_PAGES_PER_STORE ?? "";
-  is("the always-on reads are priced: the listings and one SCARD a course, every run", /readKindExact/.test(pagesLine) && /SCARD/.test(pagesLine), true);
-  is("each row's commands are priced: ZSCORE, ZADD, EXPIRE, the place's SET", ["ZSCORE", "ZADD", "EXPIRE", "SET"].every((word) => pagesLine.includes(word)), true);
+  // Since the second review of #3409 (Claude 5, ALTO 1) the pages and lookups are priced per plan in COST_LINES
+  // (tests/certificate-refund-pass-cost.test.ts holds that line).
+  const passLine = COST_LINES.find((line) => line.id === "certificate-refund-pass");
+  const names = passLine?.sources.flatMap((source) => source.names) ?? [];
+  is("the pages and lookups are exported by the pass and cited by its plan line", ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE"].map((name) => name in exported && names.includes(name)), [true, true]);
+  const basis = passLine?.basis ?? "";
+  is("each run's and each row's commands are priced: the runs, the month's checks and each check's commands", ["CERTIFICATE_PASS_RUN_COMMANDS", "CERTIFICATE_REFUND_CHECKS_PER_MONTH", "CERTIFICATE_PASS_CHECK_COMMANDS"].every((word) => basis.includes(word)), true);
   is("LOST_DISPUTE_PAGES names six jobs, the certificates' pass among them", /six five-minute jobs/.test(NOT_A_COST.LOST_DISPUTE_PAGES) && /6 x LOST_DISPUTE_PAGES/.test(NOT_A_COST.LOST_DISPUTE_PAGES) && /lib\/certificate-refunds\.ts/.test(NOT_A_COST.LOST_DISPUTE_PAGES), true);
 
   part("L2: a course paid through PayPal is not covered, and the texts say so");

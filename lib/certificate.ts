@@ -22,6 +22,8 @@
  *   nl:cert:<id>                  -> the certificate, as JSON, kept for good
  *   nl:course:<course>:certs      -> hash of student key -> standing certificate id
  *   nl:course:<course>:certs:all  -> set of every certificate id issued, withdrawn ones too
+ *   nl:certrefunds:has:<stats>    -> "1" once a course of the store issued a certificate, kept for good, so the
+ *                                    certificates' refund pass reads the store's refunds (lib/certificate-refunds.ts)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
@@ -226,6 +228,13 @@ export const certKey = (id: string) => `nl:cert:${id}`;
 const CERTS_SLOT = (courseId: string) => `cc:${courseId}`;
 const indexKey = (courseId: string) => `nl:course:${courseId}:certs`;
 export const allKey = (courseId: string) => `nl:course:${courseId}:certs:all`;
+/**
+ * A store's mark that one of its courses issued a certificate (review of #3409, Claude 5, ALTO 1): set before a
+ * certificate is written, so the certificates' refund pass (lib/certificate-refunds.ts) reads the refunds of a store
+ * that has one and of no other. CERTIFICATES_ISSUED is its value; the pass writes another while it finds none.
+ */
+export const certificatesIssuedKey = (statsId: string) => `nl:certrefunds:has:${statsId}`;
+export const CERTIFICATES_ISSUED = "1";
 /** Every certificate one student was ever issued for a course, withdrawn ones too (added 17 October 2026), so deleting them finds each. */
 const byKey = (courseId: string, who: string) => `nl:course:${courseId}:certs:by:${who}`;
 /** How many certificates of a course deleting a person looks through for ones issued before byKey was kept. */
@@ -321,6 +330,13 @@ export async function issueCertificate(input: {
   // a certificate not yet written, and a second press arriving then read it
   // as lost, took the slot and issued a second certificate beside the first.
   // Its room first: the record, kept for good, and its places in the course's lists.
+  // The store's mark first (review of #3409, Claude 5, ALTO 1), by the store id of the room, which is the store
+  // (app/api/store/course/certificate/route.ts): unknown whether it was written, nothing is issued (CX-123 rule 24).
+  // A room with no store id (one made before the store had its id) leaves the mark to the pass's look at the courses.
+  if (input.room.statsId) {
+    const [marked] = exactReplies(await redisPipeline([["SET", certificatesIssuedKey(input.room.statsId), CERTIFICATES_ISSUED]]), 1, "a certificate's issue");
+    if (marked !== "OK") throw new UnknownReply("a certificate's issue");
+  }
   const bytes = dataBytes([JSON.stringify(certificate)], 3);
   await needData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
   await redisPipeline([["SET", certKey(id), JSON.stringify(certificate)]]);
@@ -420,24 +436,53 @@ export async function withdrawCertificate(courseId: string, id: string, why?: "r
 }
 
 /**
- * Withdraws the certificate a student holds for a course because the payment
- * that gave them the course was given back in full and the course no longer
- * opens for them (lib/certificate-refunds.ts; owner decision DONO-18): marked
- * withdrawn for a refund, so its page no longer shows the name. True when one
- * was withdrawn now; false when the student's slot holds none that stands
- * (none issued, or withdrawn already), so running it again changes nothing.
- * Every reply is read exactly: one that is not what was asked for throws
+ * Withdraws the certificates a student was issued for a course because the payment that gave them the course was
+ * given back in full and the course no longer opens for them (lib/certificate-refunds.ts; owner decision DONO-18):
+ * the one standing is marked withdrawn for a refund, and so is every other one of the course the student was issued,
+ * withdrawn already by the creator or replaced since (review of #3409, Claude 5, MÉDIO 1), keeping when it was
+ * withdrawn; so no page of theirs shows the name. Found by the student's slot and their own list (byKey); one issued
+ * before that list was kept (17 October 2026) and no longer in the slot is not reached here, and stays for the
+ * creator to withdraw. True when one was changed now; false when none needed it, so
+ * running it again changes nothing. Every reply is read exactly: one that is not what was asked for throws
  * UnknownReply (CX-123 rule 24), and the caller tries again on its next run.
  */
 export async function withdrawForRefund(courseId: string, email: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const what = "a certificate's withdrawal for a refund";
-  const holder = await slotHolder(courseId, emailKey(email), what);
-  if (!holder?.standing) return false;
-  if (await withdrawCertificate(courseId, holder.id, "refund")) return true;
-  // Nothing withdrawn while the slot still names one that stands: its record read in a shape that says nothing, never "none".
-  if ((await slotHolder(courseId, emailKey(email), what))?.standing) throw new UnknownReply(what);
-  return false;
+  const who = emailKey(email);
+  let changed = false;
+  const holder = await slotHolder(courseId, who, what);
+  if (holder?.standing) {
+    if (await withdrawCertificate(courseId, holder.id, "refund")) changed = true;
+    // Nothing withdrawn while the slot still names one that stands: its record read in a shape that says nothing, never "none".
+    else if ((await slotHolder(courseId, who, what))?.standing) throw new UnknownReply(what);
+  }
+  const [mine] = exactReplies(await redisPipeline([["SMEMBERS", byKey(courseId, who)]]), 1, what);
+  const listed = plainList(mine);
+  if (!listed || !listed.every((id) => typeof id === "string")) throw new UnknownReply(what);
+  const ids = (listed as string[]).filter((id) => CERT_ID_PATTERN.test(id));
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const [rows] = exactReplies(await redisPipeline([["MGET", ...chunk.map(certKey)]]), 1, what);
+    const values = plainList(rows);
+    if (!values || values.length !== chunk.length || !values.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReply(what);
+    for (let j = 0; j < chunk.length; j += 1) {
+      const found = parseCertificate(values[j]);
+      if (!found || found.courseId !== courseId || found.withdrawnFor === "refund") continue;
+      if (!found.withdrawnAt) {
+        // One still standing that the slot does not name: withdrawn for the refund as the standing one is.
+        if (await withdrawCertificate(courseId, chunk[j], "refund")) changed = true;
+        continue;
+      }
+      const marked: Certificate = { ...found, withdrawnFor: "refund" };
+      // XX: only while it is still there, so this never writes back a certificate the person's deletion took.
+      const [written] = exactReplies(await redisPipeline([["SET", certKey(chunk[j]), JSON.stringify(marked), "XX"]]), 1, what);
+      if (written === null) continue;
+      if (written !== "OK") throw new UnknownReply(what);
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /**

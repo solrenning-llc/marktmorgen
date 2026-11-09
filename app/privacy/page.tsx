@@ -1210,7 +1210,9 @@ export default function PrivacyPage() {
           on its own, usually within half an hour (longer when a store has
           many refunds at once), once the course no longer opens for the
           student, and its page then no longer shows the name, the course or
-          the date; a refund still pending, failed or canceled withdraws
+          the date. The same goes for one the creator already withdrew and
+          for the student&apos;s earlier certificates of that course. A
+          refund still pending, failed or canceled withdraws
           nothing. A certificate of a course paid through PayPal, given as a
           gift, pre-ordered, bought for a group, added in one click after
           checkout or paid in installments is withdrawn by the creator.

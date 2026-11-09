@@ -2786,7 +2786,8 @@ async function creditFirstPayment(store: Store, row: SessionLike & { id: string 
     self: await isSelf(store, aff, buyer),
     promotion: affiliatePromotionFrom(meta) ?? undefined,
     how: "recurring",
-  });
+    // With its buyer's mark, as every other writer: the second tier is kept off the inviter's own membership.
+  }, buyer);
 }
 
 /**

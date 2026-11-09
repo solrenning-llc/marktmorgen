@@ -23,6 +23,14 @@ import { NextRequest } from "next/server";
 import { GET } from "@/app/api/store/community/chat/new/route";
 import { roomPass } from "@/lib/chat-pass";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
+import { POST } from "@/app/api/store/community/chat/route";
+import { parseChatSetting } from "@/lib/community-chat";
+import { CREATOR, freshConfig, memberKey, saveConfig } from "@/lib/community";
+import { claimHandle, ensureStatsId, setCommunity, setSubscription, storeForEmail } from "@/lib/store";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { IDLE_LOOKS, LIVE_LOOKS } from "@/lib/chat-pace";
+import { PARTS_PER_VISIT, ROOM_IDLE_PARTS, ROOM_LIVE_PARTS } from "@/lib/traffic-rules";
+import { ORIGIN_PER_BYTE, roomMinutesCost, visitCost } from "./traffic-cost";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -33,7 +41,24 @@ const PRICED_BYTES = 2_000;
 
 type Body = { ok: boolean; error?: string; messages?: { i: number; text: string }[]; cursor?: number };
 
-const message = (i: number, text: string) => JSON.stringify({ i, a: "d".repeat(32), text, at: 1_000 + i, n: "Member" });
+const message = (i: number, text: string, n = "Member") => JSON.stringify({ i, a: "d".repeat(32), text, at: 1_000 + i, n });
+
+/**
+ * The most bytes one message can be sent as, with the answer around it,
+ * worked out here from the room's own limits so the test does not read the
+ * figure it checks: a text of MAX_CHAT_TEXT units, the name cut at the 80
+ * units say() and parse() keep (lib/community-chat.ts), a member key of 32,
+ * the three numbers at their most digits, and every unit of the three texts
+ * at 3 bytes: the most a well-formed UTF-16 unit is sent as once a lone half
+ * of a surrogate pair (6 bytes, escaped) is U+FFFD. An escaped quotation
+ * mark, backslash, tab or line break is 2.
+ */
+const NAME_KEPT = 80;
+const KEY_UNITS = 32;
+const SAFE = Number.MAX_SAFE_INTEGER;
+const ONE_MESSAGE_WORST =
+  JSON.stringify({ ok: true, messages: [{ i: SAFE, a: "k".repeat(KEY_UNITS), text: "t".repeat(MAX_CHAT_TEXT), at: SAFE, n: "n".repeat(NAME_KEPT) }], cursor: SAFE }).length
+  + 2 * (KEY_UNITS + MAX_CHAT_TEXT + NAME_KEPT);
 
 async function fill(id: string, count: number, text: (i: number) => string): Promise<void> {
   const rows: (string | number)[] = [];
@@ -131,6 +156,70 @@ async function main(): Promise<void> {
   is("an empty room answers nothing, with its cursor where it was", [empty.status, empty.body.messages, empty.body.cursor], [200, [], 0]);
   is("a wrong pass is still 403 and asks nothing", [(await look(`c=${ID}&p=${"0".repeat(32)}&s=1`)).status, (await look(`c=${ID}&p=${"0".repeat(32)}&s=1&z=1`)).commands], [403, 0]);
   is("a room that is not one is still 404", (await look(`c=nope&p=${pass}&s=0`)).status, 404);
+
+  part("One message is never sent as more than a look is priced at");
+  const source = readFileSync(join(process.cwd(), "lib/community-chat.ts"), "utf8");
+  is("the name a message keeps is cut at 80 units when said and when read", [/const said = cleanText\(name, 80\);/.test(source), /n: v\.n\.slice\(0, 80\)/.test(source)], [true, true]);
+  is("a member's key is 32 units and the creator's shorter", [memberKey("someone@example.com").length, CREATOR.length <= KEY_UNITS], [KEY_UNITS, true]);
+
+  // Through the real route, as the store's creator: a text of lone halves of
+  // surrogate pairs, each escaped by JSON in 6 bytes (Claude 5's review).
+  const owner = "look-owner@example.com";
+  await claimHandle(owner, "lookbounds", "名".repeat(60), "");
+  await ensureStatsId(owner);
+  await setSubscription(owner, { active: true, tier: "pro", cycle: "month", subscriptionId: null, customerId: null, trialEnds: 0 } as never);
+  await setCommunity(owner, true);
+  const shop = (await storeForEmail(owner))!;
+  const room = shop.community!.id;
+  await saveConfig(room, { ...freshConfig(shop.name), chat: parseChatSetting({ on: true }) });
+  const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
+  const sayIt = async (text: string) => {
+    const response = await POST(new NextRequest("https://marktmorgen.com/api/store/community/chat", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ handle: shop.handle, action: "say", text }) }));
+    return { status: response.status, body: (await response.json()) as { ok: boolean; message?: { i: number; text: string; n?: string } } };
+  };
+  const halves = await sayIt("\ud800".repeat(MAX_CHAT_TEXT));
+  is("a text of lone halves is said through the real route", [halves.status, halves.body.ok], [200, true]);
+  is("and kept with each lone half as U+FFFD", halves.body.message?.text, "\ufffd".repeat(MAX_CHAT_TEXT));
+  const roomPassHere = roomPass(room);
+  const halvesLook = await look(`c=${room}&p=${roomPassHere}&s=0`);
+  is("the look that carries it sends its words as kept", [halvesLook.status, halvesLook.body.messages?.map((m) => m.text)], [200, ["\ufffd".repeat(MAX_CHAT_TEXT)]]);
+  is(`within ${ONE_MESSAGE_WORST} bytes, the most one message can be sent as (it sent ${halvesLook.bytes})`, halvesLook.bytes <= ONE_MESSAGE_WORST, true);
+
+  // A store whose room is in Chinese or Japanese, with no abuse at all
+  // (Claude 2's review): 1,000 letters of 3 bytes under a name of 60.
+  const cjk = await sayIt("一".repeat(MAX_CHAT_TEXT));
+  is("a text of 1,000 CJK letters is said through the real route", [cjk.status, cjk.body.ok, cjk.body.message?.text.length], [200, true, MAX_CHAT_TEXT]);
+  const cjkLook = await look(`c=${room}&p=${roomPassHere}&s=${halves.body.message?.i}`);
+  is(`and its look stays within ${ONE_MESSAGE_WORST} bytes (it sent ${cjkLook.bytes})`, [cjkLook.status, cjkLook.body.messages?.length, cjkLook.bytes <= ONE_MESSAGE_WORST], [200, 1, true]);
+
+  // Messages kept before the route made them whole are read whole as well.
+  const KEPT = "a".repeat(31) + "1";
+  await redis.pipeline([["ZADD", `nl:cm:${KEPT}:ch`,
+    1, message(1, "\ud800".repeat(MAX_CHAT_TEXT), "\udc00".repeat(NAME_KEPT)),
+    2, message(2, "一".repeat(MAX_CHAT_TEXT), "名".repeat(NAME_KEPT)),
+    3, message(3, "😀".repeat(MAX_CHAT_TEXT / 2), "Ana \ud83d"),
+  ]]);
+  const keptPass = roomPass(KEPT);
+  const keptLooks = [await look(`c=${KEPT}&p=${keptPass}&s=0`), await look(`c=${KEPT}&p=${keptPass}&s=1`), await look(`c=${KEPT}&p=${keptPass}&s=2`)];
+  is("each kept message comes with its own look, in order", keptLooks.map((l) => [l.status, l.body.messages?.map((m) => m.i)]), [[200, [1]], [200, [2]], [200, [3]]]);
+  const shown = keptLooks.map((l) => (l.body.messages ?? [])[0] as { text?: string; n?: string } | undefined);
+  is("a kept lone half is sent as U+FFFD, in the text and in the name", [shown[0]?.text, shown[0]?.n], ["\ufffd".repeat(MAX_CHAT_TEXT), "\ufffd".repeat(NAME_KEPT)]);
+  is("whole pairs and every other letter are sent as they were kept", [shown[1]?.text, shown[1]?.n, shown[2]?.text, shown[2]?.n], ["一".repeat(MAX_CHAT_TEXT), "名".repeat(NAME_KEPT), "😀".repeat(MAX_CHAT_TEXT / 2), "Ana \ufffd"]);
+  is(`and no kept message is sent as more than ${ONE_MESSAGE_WORST} bytes (they sent ${keptLooks.map((l) => l.bytes).join(", ")})`, keptLooks.map((l) => l.bytes <= ONE_MESSAGE_WORST), [true, true, true]);
+
+  part("Ten minutes of the room at the most a look sends stay within what they are counted as");
+  // tests/traffic-cost.ts is not edited here (#1496, #2571): the bytes its
+  // roomLookCost types are read, and only the difference is added.
+  const typed = /export function roomLookCost\(\)[\s\S]{0,400}?\+ ([\d_]+) \* ORIGIN_PER_BYTE;/.exec(readFileSync(join(process.cwd(), "tests/traffic-cost.ts"), "utf8"))?.[1];
+  const typedBytes = Number((typed ?? "NaN").replace(/_/g, ""));
+  const measured = [far.bytes, next.bytes, opened.bytes, wide.bytes, wideNext.bytes, halvesLook.bytes, cjkLook.bytes, ...keptLooks.map((l) => l.bytes)];
+  const perLook = Math.max(PRICED_BYTES, ONE_MESSAGE_WORST, ...measured);
+  const part$ = visitCost() / PARTS_PER_VISIT;
+  const minutes = (looks: number) => roomMinutesCost(looks) + looks * Math.max(0, perLook - typedBytes) * ORIGIN_PER_BYTE;
+  const liveParts = minutes(LIVE_LOOKS) / part$;
+  const idleParts = minutes(IDLE_LOOKS) / part$;
+  is(`ten talking minutes, every look at ${perLook} bytes, cost ${liveParts.toFixed(1)} hundredths of a visit, within the ${ROOM_LIVE_PARTS} the Terms print`, liveParts <= ROOM_LIVE_PARTS, true);
+  is(`ten quiet minutes cost ${idleParts.toFixed(1)}, within ${ROOM_IDLE_PARTS}`, idleParts <= ROOM_IDLE_PARTS, true);
   done();
 }
 

@@ -1,4 +1,6 @@
-import { BACKUP_FILES_SOURCES, type BackupFilesSource } from "@/lib/backup-files-contract";
+import { BACKUP_FILES_SOURCES, type BackupDeletionPage, type BackupFilesSource, type BackupStoresPage } from "@/lib/backup-files-contract";
+import { decodeDeletionsCursor, deletionsCursorExpired, deletionsPage } from "@/lib/backup-deletions";
+import { backupStoresPage, decodeStoresCursor } from "@/lib/backup-stores";
 import { BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 import {
   BACKUP_FILES_CUTOFF_MS,
@@ -24,9 +26,14 @@ export const dynamic = "force-dynamic";
  * here: the route lists and signs, and nothing else.
  *
  *   GET /api/backup/files?source=blob&store=<folder>[&cursor=<cursor>]
- *   GET /api/backup/files?page=deletions
- *   GET /api/backup/files?page=stores
+ *   GET /api/backup/files?page=deletions[&cursor=<cursor>]   the deletion records (lib/backup-deletions.ts)
+ *   GET /api/backup/files?page=stores[&cursor=<cursor>]      the stores, each with R (lib/backup-stores.ts)
  *   Authorization: Bearer <BACKUP_FILES_ROUTE_SECRET>
+ *
+ * The deletions page always carries a cursor, the point the next read
+ * resumes from; one the site no longer keeps is a 409 "records_expired",
+ * never an empty page. Each page kind has its own count of the day's reviewed
+ * pages, taken before any database command but that count.
  *
  * A 404, with nothing listed and nothing counted, while its own secret is
  * unset or not the one sent, and while the owner's review of its cost is
@@ -47,16 +54,8 @@ export async function GET(request: Request): Promise<Response> {
   const params = new URL(request.url).searchParams;
   const names = [...params.keys()];
   if (new Set(names).size !== names.length) return refuse(400, "bad_request");
-  if (params.get("page") === "deletions" && names.length === 1) {
-    // No deletion record is kept by the site yet (docs/backup-costs-2026-11-08.md, section 7a, items 2 and 6):
-    // an empty page would read as "nothing was deleted", which is not known.
-    return refuse(503, "deletions_unavailable");
-  }
-  if (params.get("page") === "stores" && names.length === 1) {
-    // The stores to copy, each with the room R of its plan (docs/backup-costs-2026-11-08.md, 5b), are not listed by the
-    // site yet: an empty page would read as "no store to copy", which is not known.
-    return refuse(503, "stores_unavailable");
-  }
+  const kind = params.get("page");
+  if (kind !== null) return answerPage(kind, params, names, review, started);
   if (!names.every((name) => ["source", "store", "cursor"].includes(name))) return refuse(400, "bad_request");
   const source = params.get("source") ?? "";
   const store = params.get("store") ?? "";
@@ -79,5 +78,38 @@ export async function GET(request: Request): Promise<Response> {
   } catch (error) {
     console.error("backup files: a listing could not be read", error instanceof Error ? error.name : "unknown");
     return refuse(503, "listing_unavailable");
+  }
+}
+
+/** The stores page or the deletions page: `page` and an optional `cursor`, nothing else. */
+async function answerPage(kind: string, params: URLSearchParams, names: string[], review: NonNullable<ReturnType<typeof admitFilesReview>>, started: number): Promise<Response> {
+  if ((kind !== "stores" && kind !== "deletions") || !names.every((name) => name === "page" || name === "cursor")) return refuse(400, "bad_request");
+  const text = params.get("cursor");
+  const unavailable = `${kind}_unavailable`;
+  let storesCursor: string | null = null;
+  let recordsCursor: { d: number; i: number } | null = null;
+  if (text !== null) {
+    if (kind === "stores") {
+      storesCursor = decodeStoresCursor(text);
+      if (storesCursor === null) return refuse(400, "bad_request");
+    } else {
+      recordsCursor = decodeDeletionsCursor(text, started);
+      if (recordsCursor === null) return refuse(400, "bad_request");
+      if (deletionsCursorExpired(recordsCursor, started)) return refuse(409, "records_expired");
+    }
+  }
+  if (!isRedisConfigured()) return refuse(503, "unavailable");
+  const taken = await takeDayPage(kind, review, started);
+  if (taken === "over") return refuse(429, "day_ceiling");
+  if (taken !== "ok") return refuse(503, "unavailable");
+  try {
+    const stopAt = started + BACKUP_FILES_CUTOFF_MS;
+    const page = await withCutoff<BackupStoresPage | BackupDeletionPage>(started + BACKUP_FILES_REQUEST_MS, () =>
+      kind === "stores" ? backupStoresPage(storesCursor, { stopAt }) : deletionsPage(recordsCursor, { stopAt }),
+    );
+    return Response.json(page, { headers: NO_STORE });
+  } catch (error) {
+    console.error(`backup files: the ${kind} page could not be read`, error instanceof Error ? error.name : "unknown");
+    return refuse(503, unavailable);
   }
 }

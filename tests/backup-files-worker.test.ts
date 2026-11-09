@@ -443,7 +443,7 @@ async function main(): Promise<void> {
   world.calls = [];
   report = await runAt(2);
   is("the next day asks from the point the last read ended", asks(), ["r1"]);
-  is("no second copy of a record already received, no share counted twice", [files.under(`deletions/${iso(DAY0 + 2 * DAY)}/`).length, has(report, "records_share"), report.heartbeat], [0, false, true]);
+  is("no second copy of a record already received, no share counted twice", [files.under(`deletions/${iso(DAY0 + 2 * DAY)}/`).length, has(report, "records_share"), has(report, "records_share_source")], [0, false, false]);
 
   part("a resume point the site no longer keeps: alarm, then read again from the oldest kept");
   world.recordsKeptFrom = 5;

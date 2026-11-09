@@ -66,7 +66,8 @@
  *     counted before the provider is asked (one SET NX EX and one INCRBY, read
  *     in their exact shape, rule 24): past it 429, unreadable 503.
  *
- *   nl:backup:files:day:<YYYY-MM-DD>:<source>   the day's pages of one source, kept two days
+ *   nl:backup:files:day:<YYYY-MM-DD>:<source>   the day's pages of one source (or of the stores or
+ *                                               deletions page), kept two days
  *
  * Rule 24: a listing or a token that cannot be read in its exact shape throws,
  * and the route answers 503: never an empty or complete page.
@@ -187,8 +188,11 @@ export function decodeFilesCursor(text: string, source: BackupFilesSource, store
 
 // ------------------------------------------------------------- day's ceiling
 
-/** Takes one of the day's reviewed pages for a source before the provider is asked: "ok", "over" past it, "unknown" when the count cannot be read. */
-export async function takeDayPage(source: BackupFilesSource, review: BackupFilesRouteReview, now = Date.now()): Promise<"ok" | "over" | "unknown"> {
+/** What the day's reviewed pages are counted for: each source's listing, and the stores and deletions pages. */
+export type BackupFilesPageKind = BackupFilesSource | "stores" | "deletions";
+
+/** Takes one of the day's reviewed pages for a source (or page) before the provider or the database is asked: "ok", "over" past it, "unknown" when the count cannot be read. */
+export async function takeDayPage(source: BackupFilesPageKind, review: BackupFilesRouteReview, now = Date.now()): Promise<"ok" | "over" | "unknown"> {
   const key = `nl:backup:files:day:${new Date(now).toISOString().slice(0, 10)}:${source}`;
   try {
     // Exactly two replies: the SET's "OK" or null, and the INCRBY's own integer. Anything else is unknown (rule 24).

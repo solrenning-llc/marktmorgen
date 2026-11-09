@@ -253,7 +253,8 @@ export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | 
   if (!isStampable(file)) return;
   try {
     const copies = await listFiles(copyFolder(file));
-    for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000));
+    // The site's own copies: their backup records say so (lib/backup-deletions.ts).
+    for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000), "site_cleanup");
   } catch (error) {
     console.error("could not delete stamped copies", error);
   }

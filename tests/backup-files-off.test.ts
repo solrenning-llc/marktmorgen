@@ -6,6 +6,7 @@
  */
 import { GET } from "@/app/api/backup/files/route";
 import { BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
+import { deletionRecordsOn, recordDeletions } from "@/lib/backup-deletions";
 import { blobWorld, resetBlobWorld } from "./backup-files-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
   const response = await GET(new Request(`https://marktmorgen.test/api/backup/files?source=blob&store=${STORE}`, { headers: { authorization: `Bearer ${SECRET}` } }));
   is("404", response.status, 404);
   is("nothing listed, signed or counted", [blobWorld.listCalls.length, blobWorld.tokenCalls.length, commands], [0, 0, 0]);
+  is("no deletion record is kept either, even with the secret set", [deletionRecordsOn(), await recordDeletions([`stores/${STORE}/a.pdf`], "creator_deleted"), commands], [false, { kept: 0, missed: 0 }, 0]);
   done();
 }
 

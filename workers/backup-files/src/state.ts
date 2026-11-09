@@ -87,6 +87,8 @@ export type WorkerState = {
   /** For each store, the earliest time a forced deletion (90 days) falls due. */
   forcedDue: Record<string, number>;
   heartbeatDay: number | null;
+  /** Where the next read of the deletion records resumes (the route's cursor from the last complete read); null: from the oldest kept. */
+  recordsFrom: string | null;
 };
 
 const STORE = /^[0-9a-f]{32}$/;
@@ -268,6 +270,7 @@ export const freshWorker = (): WorkerState => ({
   totals: { r2: [], blob: [], bunny: [] },
   forcedDue: {},
   heartbeatDay: null,
+  recordsFrom: null,
 });
 
 /** The Worker's state from its JSON text, exactly; fresh only for an absent object. */
@@ -279,7 +282,7 @@ export function parseWorkerState(raw: string | null): WorkerState {
   } catch {
     return fail("the Worker's state is not JSON");
   }
-  const o = exact(value, ["version", "cycle", "inbox", "received", "totals", "forcedDue", "heartbeatDay"], "worker");
+  const o = exact(value, ["version", "cycle", "inbox", "received", "totals", "forcedDue", "heartbeatDay", "recordsFrom"], "worker");
   if (o.version !== 1) fail("worker.version is not 1");
   const forced: Record<string, number> = {};
   const rawForced = o.forcedDue;
@@ -296,5 +299,6 @@ export function parseWorkerState(raw: string | null): WorkerState {
     totals: bySource(o.totals, "worker.totals", dayCounts),
     forcedDue: forced,
     heartbeatDay: orNull(o.heartbeatDay, (d) => whole(d, "worker.heartbeatDay")),
+    recordsFrom: cursor(o.recordsFrom, "worker.recordsFrom"),
   };
 }

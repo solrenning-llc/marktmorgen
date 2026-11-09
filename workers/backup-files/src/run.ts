@@ -12,7 +12,11 @@
  *   1. forced deletions that reached their 90th day, whatever holds them;
  *   2. the deletion records (their own page), each written into the backup
  *      bucket as received (deletions/<day>/...), so a restore can reapply them;
- *   3. the stores to copy, each with R, the room of its plan;
+ *      read from where the last complete read ended (recordsFrom), so each is
+ *      received once; a resume point the site no longer keeps (409) alarms
+ *      (deletions_expired) and the next run reads from the oldest it keeps;
+ *   3. the stores to copy, each with R, the room of its plan (a store named
+ *      on two pages is read once, at the larger R);
  *   4. each store's listing of each source, its guards, then its deletions;
  *   5. only then the copies, in 5 MiB parts that resume across runs.
  *
@@ -264,9 +268,10 @@ const maxSince = (list: DayCount[], from: number) => {
 const shrunk = (earlier: DayCount, now: { objects: number; bytes: number }) =>
   over(earlier.objects - now.objects, earlier.objects) || (earlier.bytes > 0 && over(earlier.bytes - now.bytes, earlier.bytes));
 
-function newCycle(day: number): Cycle {
+function newCycle(day: number, recordsFrom: string | null): Cycle {
   const sum = () => ({ day, objects: 0, bytes: 0, stores: 0 });
-  return { day, records: "pending", recordsCursor: null, recordsPages: 0, stores: "pending", storesCursor: null, storesPages: 0, storeList: [], steps: {}, sums: { r2: sum(), blob: sum(), bunny: sum() }, alarms: [], sent: [], done: false };
+  // The day's read of the records resumes where the last complete one ended: each record is received once.
+  return { day, records: "pending", recordsCursor: recordsFrom, recordsPages: 0, stores: "pending", storesCursor: null, storesPages: 0, storeList: [], steps: {}, sums: { r2: sum(), blob: sum(), bunny: sum() }, alarms: [], sent: [], done: false };
 }
 
 const bucketOf = (ctx: Ctx, source: BackupFilesSource) => (source === "bunny" ? ctx.env.VIDEOS_BUCKET : ctx.env.FILES_BUCKET);
@@ -304,9 +309,10 @@ async function loadStore(ctx: Ctx, store: string): Promise<StoreState> {
     for (const rec of mine) {
       const src = state.sources[rec.source];
       const known = src.pending.find((p) => p.key === rec.key);
-      if (!known) src.pending.push({ key: rec.key, recordedAt: rec.recordedAt, reason: rec.reason });
-      else if (rec.recordedAt < known.recordedAt) known.recordedAt = rec.recordedAt;
-      src.received = addDay(src.received, dayOf(rec.receivedAt), 1, src.objects.get(rec.key)?.size ?? 0);
+      if (!known) {
+        src.pending.push({ key: rec.key, recordedAt: rec.recordedAt, reason: rec.reason });
+        src.received = addDay(src.received, dayOf(rec.receivedAt), 1, src.objects.get(rec.key)?.size ?? 0);
+      } else if (rec.recordedAt < known.recordedAt) known.recordedAt = rec.recordedAt;
     }
     ctx.state.inbox = ctx.state.inbox.filter((r) => r.store !== store);
     ctx.dirty.add(store);
@@ -458,6 +464,15 @@ async function readRecords(ctx: Ctx): Promise<void> {
     }
     ctx.run.boundary(4);
     const reply = await routeGet(ctx, c.recordsCursor === null ? [["page", "deletions"]] : [["page", "deletions"], ["cursor", c.recordsCursor]]);
+    if (!reply.ok && reply.why === "status_409") {
+      // The site no longer keeps the records after that point: some may be lost. Alarm, and read again from the
+      // oldest it keeps; a file whose record was lost goes as an orphan, after 90 days of complete listings.
+      ctx.state.recordsFrom = null;
+      c.recordsCursor = null;
+      c.records = "failed";
+      raise(ctx, "deletions_expired");
+      return;
+    }
     let page;
     try {
       if (!reply.ok) throw new Error(reply.why);
@@ -477,13 +492,18 @@ async function readRecords(ctx: Ctx): Promise<void> {
         unmapped += 1;
         continue;
       }
+      // A record the site named twice (a file deleted twice) counts once.
+      if (ctx.state.inbox.some((r) => r.source === rec.source && r.key === rec.key)) continue;
       ctx.state.inbox.push({ ...rec, store, receivedAt: ctx.now });
       ctx.state.received[rec.source] = addDay(ctx.state.received[rec.source], ctx.day, 1, 0);
     }
     if (unmapped) raise(ctx, "record_unmapped", { count: unmapped });
     c.recordsPages += 1;
     c.recordsCursor = page.cursor;
-    if (page.complete) c.records = "done";
+    if (page.complete) {
+      c.records = "done";
+      ctx.state.recordsFrom = page.cursor;
+    }
   }
 }
 
@@ -503,14 +523,17 @@ async function readStores(ctx: Ctx): Promise<void> {
     try {
       if (!reply.ok) throw new Error(reply.why);
       page = parseStoresPage(reply.text);
-      const known = new Set(c.storeList.map((s) => s.store));
-      if (page.stores.some((s) => known.has(s.store))) throw new Error("a store listed twice");
     } catch {
       c.stores = "failed";
       raise(ctx, "stores_unavailable");
       return;
     }
-    c.storeList.push(...page.stores);
+    // A store the site's walk named on two pages (a SCAN may name a key twice) is read once, at the larger R.
+    for (const named of page.stores) {
+      const known = c.storeList.find((s) => s.store === named.store);
+      if (known) known.roomBytes = Math.max(known.roomBytes, named.roomBytes);
+      else c.storeList.push({ ...named });
+    }
     c.storesPages += 1;
     c.storesCursor = page.cursor;
     if (page.complete) c.stores = "done";
@@ -938,7 +961,7 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
     }
     return { ...report, subrequests: run.used };
   }
-  if (!state.cycle || state.cycle.day !== day) state.cycle = newCycle(day);
+  if (!state.cycle || state.cycle.day !== day) state.cycle = newCycle(day, state.recordsFrom);
   const cycle = state.cycle;
   if (cycle.done && (state.heartbeatDay === day || cycle.alarms.some((a) => a.code !== "heartbeat_failed"))) return reportOf(day, cycle, cycle.alarms, run, false, null);
 

@@ -157,6 +157,10 @@ export const NO_BUYERS_NOTE = "Your store can no longer read its sales (Stripe a
 export const LIST_RETRY_SECONDS = 3_600;
 /** Said when a narrowed email's list could not be made now for a reason that passes: tried again in an hour. */
 const LIST_WAIT_NOTE = "The list of who it goes to could not be prepared just now. Nothing was sent. It is tried again in an hour.";
+/** Said on an email due while its store is switched off after notices about its content (lib/takedown.ts): it waits. */
+const SWITCHED_OFF_NOTE = "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on.";
+/** The same for an email part of the way out: the rest wait. */
+const SWITCHED_OFF_PART_NOTE = "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on.";
 /** Said on an email to the whole list canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
 export const PLAN_OFF_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent and none of your studio requests were used for it. To send it, write it again while your plan is on.";
 /**
@@ -599,6 +603,14 @@ export async function advanceBroadcast(
       await save(b);
       await redisPipeline([["SREM", QUEUE, id], ["DEL", toKey(id)]]);
       if (held?.units) await giveAllowanceIn(store, "studio", held.units, held.window);
+      return b;
+    }
+    // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
+    // nothing is read, listed or sent. It waits in line, saying so, looked at again in an hour, and goes on by itself
+    // once the store is back on; what it holds and what it wrote down are kept.
+    if (store.suspended) {
+      b = { ...b, status: "waiting", note: b.sent > 0 ? SWITCHED_OFF_PART_NOTE : SWITCHED_OFF_NOTE, retryAt: now + LIST_RETRY_SECONDS };
+      await save(b);
       return b;
     }
     if (monthlyAllowance(store) === 0) {

@@ -7,7 +7,9 @@ import { resendPurchase } from "@/lib/purchase-email";
 const PER_SALE_PER_DAY = 3;
 const PER_STORE_PER_HOUR = 30;
 
-const ANSWERS: Record<string, number> = { unknown: 404, call: 400, refunded: 409, failed: 502 };
+// "uncertain": the sender's answer was not known, so the copy may still arrive (lib/purchase-email.ts
+// ResendOutcome); the studio says sending could not be confirmed and to check with the buyer first.
+const ANSWERS: Record<string, number> = { unknown: 404, call: 400, refunded: 409, failed: 502, uncertain: 502 };
 
 /**
  * Sends a buyer their purchase email again: `{ reference: "cs_…" }`, one of

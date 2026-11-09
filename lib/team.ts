@@ -35,7 +35,7 @@ import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access"
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { liveSecondStep } from "@/lib/second-step-gate";
-import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, headerText, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -387,7 +387,8 @@ export async function readLog(sid: string): Promise<LogLine[]> {
 }
 
 export type InviteResult =
-  | { ok: true; invite: Invite }
+  /** `uncertain`: kept, but its email's send is not known (it may have arrived), so the owner is told to ask before sending a new one. */
+  | { ok: true; invite: Invite; uncertain?: true }
   | { ok: false; reason: "shape" | "owner" | "member" | "invited" | "full" | "limited" | "role" | "unsent" };
 
 /**
@@ -441,7 +442,7 @@ export async function inviteMember(
   if (!made.ok) return made;
   const { invite, token } = made;
 
-  const sentOk = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  const sent = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
     to: email,
     replyTo: store.email,
@@ -458,13 +459,15 @@ export async function inviteMember(
       "",
       "If you did not expect this, ignore it and nothing happens.",
     ].join("\n"),
-  }).catch(() => false);
-  if (!sentOk) {
-    // Taken back, so the owner can simply try again rather than wait out the week.
+  }).catch(() => "uncertain" as const);
+  if (sent === "refused") {
+    // Surely not sent: taken back, so the owner can simply try again rather than wait out the week.
     await revokeInvite(store, invite.id);
     return { ok: false, reason: "unsent" };
   }
-  return { ok: true, invite };
+  // Not known (a timeout, a 5xx, a network error after the request may have reached the sender): the email
+  // may have arrived, so its link is kept working and the owner is told it could not be confirmed (rule 30).
+  return sent === "uncertain" ? { ok: true, invite, uncertain: true } : { ok: true, invite };
 }
 
 /** Takes back an invitation that has not been used. */

@@ -29,7 +29,20 @@ const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
-type Answer = { ok?: boolean; error?: string };
+/** `uncertain`: an invitation kept, its email's send not known (lib/team.ts inviteMember). */
+type Answer = { ok?: boolean; error?: string; uncertain?: boolean };
+
+/**
+ * What the studio says once an invitation is made. When its email's send is
+ * not known, the email may still arrive: the invitation is kept, and the
+ * owner is told to ask before taking it back and sending a new one.
+ */
+export function inviteDoneWords(email: string, uncertain: boolean): string {
+  const to = email.trim();
+  return uncertain
+    ? `The invitation to ${to} is saved, but we could not confirm its email was sent. It may still arrive, so ask them before you take it back and send a new one.`
+    : `Invitation sent to ${to}.`;
+}
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -70,18 +83,23 @@ export function TeamManager({
   const [role, setRole] = useState<TeamRole>("editor");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A kept invitation whose email could not be confirmed (inviteDoneWords): stays until the next change.
+  const [note, setNote] = useState<string | null>(null);
   const used = members.length + invites.length;
 
-  async function run(key: string, payload: Record<string, unknown>, done: string): Promise<boolean> {
+  /** `done` is the toast; a function may instead leave a note to keep on the page, and answer null. */
+  async function run(key: string, payload: Record<string, unknown>, done: string | ((answer: Answer) => string | null)): Promise<boolean> {
     setBusy(key);
     setError(null);
+    setNote(null);
     const answer = await call(payload);
     setBusy(null);
     if (!answer.ok) {
       setError(MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error);
       return false;
     }
-    toast(done);
+    const said = typeof done === "string" ? done : done(answer);
+    if (said) toast(said);
     router.refresh();
     return true;
   }
@@ -176,7 +194,12 @@ export function TeamManager({
             className="mt-6 border-t border-line pt-6"
             onSubmit={async (event) => {
               event.preventDefault();
-              const ok = await run("invite", { action: "invite", email, role }, `Invitation sent to ${email.trim()}.`);
+              // Not confirmed: said in a note that stays on the page (a toast is gone in seconds), not as a success.
+              const ok = await run("invite", { action: "invite", email, role }, (answer) => {
+                if (answer.uncertain !== true) return inviteDoneWords(email, false);
+                setNote(inviteDoneWords(email, true));
+                return null;
+              });
               if (ok) setEmail("");
             }}
           >
@@ -227,6 +250,11 @@ export function TeamManager({
         {error ? (
           <p className="notice notice-error mt-4" role="alert">
             {error}
+          </p>
+        ) : null}
+        {note ? (
+          <p className="notice notice-warn mt-4" role="alert">
+            {note}
           </p>
         ) : null}
       </section>

@@ -62,6 +62,8 @@ async function main(): Promise<void> {
   const keyBefore = process.env.NIMBUS_DATA_KEY;
   process.env.NIMBUS_DATA_KEY = "synthetic-rights-queue-key-32-characters!";
   delete process.env.CRON_SECRET;
+  const resendBefore = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   const errors: string[] = [];
   const error = console.error;
   console.error = (...args: unknown[]) => {
@@ -122,6 +124,22 @@ async function main(): Promise<void> {
     is("counted past the company's cap, never hidden", count(`nl:rights:co:${rightsMonth(near)}`) > RIGHTS_COMPANY_UNITS, true);
     is("and said in the log", errors.some((line) => /past the company's rights cap/i.test(line)), true);
 
+    part("(f) A store that cannot be read is unknown: the deletion waits, never done");
+    const lost = await storeFor("rightslost");
+    redis.run(["SET", `nl:rights:s:${lost.sid}:${rightsMonth(asked)}`, SPENT]);
+    const dee = "dee@example.com";
+    await upsertContact(lost.listId!, dee, { agreed: true, explicit: true, source: "free" }, ROOM);
+    is("scheduled", (await erasePerson(lost, dee, { kind: "person" }, { now: asked })).ok, false);
+    const idKey = redis.keys().find((k) => k.startsWith("nl:store:id:") && k.endsWith(lost.sid));
+    const ref = idKey ? redis.run(["GET", idKey]) : null;
+    if (idKey) redis.run(["DEL", idKey]);
+    const blind = await runRightsQueue(next + HOUR);
+    is("not done", [blind.done, contactOf(lost, dee)], [0, true]);
+    is("still waiting", blind.waiting, 1);
+    if (idKey && typeof ref === "string") redis.run(["SET", idKey, ref]);
+    const seen = await runRightsQueue(next + 3 * HOUR);
+    is("once the store reads again, done", [seen.done, contactOf(lost, dee)], [1, false]);
+
     part("(e) The hourly job answers and is scheduled");
     const response = await GET(new NextRequest("https://marktmorgen.com/api/cron/rights"));
     is("it answers", response.status, 200);
@@ -129,6 +147,8 @@ async function main(): Promise<void> {
     is("vercel.json runs it every hour", crons.some((c) => c.path === "/api/cron/rights" && /^\d+ \* \* \* \*$/.test(c.schedule)), true);
   } finally {
     console.error = error;
+    if (resendBefore === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = resendBefore;
     if (keyBefore === undefined) delete process.env.NIMBUS_DATA_KEY;
     else process.env.NIMBUS_DATA_KEY = keyBefore;
   }

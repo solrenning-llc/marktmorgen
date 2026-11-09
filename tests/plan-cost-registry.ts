@@ -46,6 +46,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
+import { RIGHTS_COMPANY_UNITS, RIGHTS_FREE_STORE_UNITS, RIGHTS_PLAN_UNITS } from "@/lib/rights-budget-rules";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
@@ -849,6 +850,23 @@ export function heldCompanyMonthlyExposure(caseCap: number | null, observed: num
 }
 
 
+/**
+ * Owner's decision 9 (9 November 2026): a person's own data requests in a store that pays nothing (a trial, no plan,
+ * a plan that ended), and what a paying store's month could not pay for when its legal deadline is near, are the
+ * company's, from RIGHTS_COMPANY_UNITS a UTC month (at most RIGHTS_FREE_STORE_UNITS of it for one store that pays
+ * nothing), each unit priced as a studio unit, with the hourly job that does what waits (app/api/cron/rights, a
+ * claim and one queue read a run when nothing is due). A fixed company cost, outside the paid-unit COST_LINES.
+ * Past the cap, only a deletion due by law within RIGHTS_DEADLINE_MARGIN_MS is still done, at most
+ * RIGHTS_FORCED_TRIES times each, counted and logged (lib/rights-queue.ts): bounded per deletion by its own
+ * erasureUnits, not by a monthly figure, so that part has no finite monthly ceiling and stays null, never zero.
+ */
+export const RIGHTS_COMPANY_COST = {
+  monthlyUnits: RIGHTS_COMPANY_UNITS,
+  perFreeStoreUnits: RIGHTS_FREE_STORE_UNITS,
+  monthlyUsd: RIGHTS_COMPANY_UNITS * UNIT_COST.studio + 24 * 31 * request("light", 6, 4_096),
+  pastCapMonthlyUsd: null,
+} as const;
+
 /** Historical operating model only: encoded-size assumptions and fetched-ahead factor.
  * This is not a verified bound on provider bytes, replay, invoice rates or taxes. */
 export function hourCost(): number {
@@ -1224,6 +1242,18 @@ export const COST_LINES: CostLine[] = [
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
     ],
     basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
+  },
+  {
+    id: "data-rights",
+    feature: "A person's own requests to delete or copy their data, paid from their own budget, never the studio figure (owner's decision 9, 9 November 2026)",
+    monthlyUsd: (tier) => RIGHTS_PLAN_UNITS[tier] * UNIT_COST.studio,
+    sources: [
+      { file: "lib/rights-budget-rules.ts", names: ["RIGHTS_PLAN_UNITS", "RIGHTS_PERSON_REQUESTS", "rightsMonth"] },
+      { file: "lib/rights-budget.ts", names: ["takeRights", "scheduleRights"] },
+      { file: "lib/person-erasure.ts", names: ["takeRights(store, email, units, now, asking)", "erasureUnits"] },
+      { file: "lib/rights-queue.ts", names: ["runRightsQueue", "takeRights(store, item.e, units, now, false)"] },
+    ],
+    basis: "A paying store's plan carries RIGHTS_PLAN_UNITS a UTC month for its people's own deletions (and copies, once a door gives them), each priced as a studio unit, the unit the erasure counts its commands and bytes in (lib/erasure-rules.ts, erasureUnits; tests/person-erasure.test.ts holds the units to cover what it sends). Taken before anything is read and refused past the cap without a cost: what does not fit is scheduled for the next month, whose budget pays it, and only near its legal deadline does the company's (RIGHTS_COMPANY_COST) take it. One person draws a store's budget at most RIGHTS_PERSON_REQUESTS times a month. Not a published figure: a request is never refused for it.",
   },
   {
     id: "store-readings",

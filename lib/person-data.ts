@@ -160,6 +160,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/buyer-library.ts", how: "expires", days: 1, what: "A link to their library across stores works for 24 hours" },
   { file: "lib/checkout-recovery.ts", how: "expires", days: 7, what: "The mark that they heard about a cart of several products, a one-way hash, for a week" },
   { file: "lib/erasure-request.ts", how: "expires", days: 1, what: "The emailed link with which a person deletes themselves works for an hour, then is deleted" },
+  { file: "lib/rights-budget.ts", how: "expires", days: 92, what: "A deletion that had to wait for the month's budget for these requests keeps the address and the store until it is done, by itself, within a month of asking; deleted as soon as it is done, and after 92 days at the most; and a one-way count of how many times the address drew the store's budget this month, kept to the month's end and a day" },
   { file: "lib/webhooks.ts", how: "expires", days: 7, what: "Events your webhooks already sent, kept for seven days, as your endpoint received them" },
 
   // ---------------------------------------------------------------- not a store's people

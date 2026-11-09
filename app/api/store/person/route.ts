@@ -6,6 +6,11 @@ import { ensureStatsId } from "@/lib/store";
 import { studioPath } from "@/lib/studio-route";
 import { addPersonNote, addressForToken, findToken, forgetFindToken, readAddress, removePersonNote } from "@/lib/buyer-profile";
 import { erasePerson } from "@/lib/person-erasure";
+import { rightsDateWords } from "@/lib/rights-budget-rules";
+
+/** Said in the studio when a deletion is scheduled (lib/person-erasure.ts, "scheduled"). */
+const scheduledWords = (by: number) =>
+  `Your store has used up, for this month, what Marktmorgen sets aside for people's requests to delete or copy their data, so this deletion is scheduled. It is done by itself by ${rightsDateWords(by)}, one month after it was asked, as the law requires. It does not take your plan's studio requests, and there is nothing more for you to do.`;
 
 /** How many addresses one store may look up in an hour: each look reads Stripe. */
 const FINDS_PER_HOUR = 200;
@@ -50,8 +55,12 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: true, records: result.records, notes: result.notes, href: studioPath(guarded.store, `erased=1${left}`, "people") }, noStore);
       }
       if (result.reason === "incomplete") return Response.json({ ok: false, error: "incomplete", failed: result.failed }, { status: 503 });
-      if (result.reason === "limit") return Response.json({ ok: false, error: "limited", message: result.message }, { status: 429 });
-      // No place this month, or not counted: the store's own words, where the erasure gave them.
+      // The month's budget for people's data requests is used up: scheduled, done by itself by its legal deadline
+      // (lib/rights-queue.ts), never refused; the page says by when.
+      if (result.reason === "scheduled") {
+        await forgetFindToken(token);
+        return Response.json({ ok: false, error: "scheduled", message: scheduledWords(result.by) }, { status: 202, ...noStore });
+      }
       const said = "message" in result && typeof result.message === "string" ? { message: result.message } : {};
       return Response.json({ ok: false, error: result.reason, ...said }, { status: result.reason === "email" ? 400 : 503 });
     }

@@ -23,6 +23,8 @@ export function PersonErase({ token, email }: { token: string; email: string }) 
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The month's budget for people's data requests was used up: the deletion is scheduled, with the date it is done by.
+  const [scheduled, setScheduled] = useState("");
 
   async function erase() {
     setBusy(true);
@@ -36,6 +38,10 @@ export function PersonErase({ token, email }: { token: string; email: string }) 
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; href?: string; error?: string; message?: string };
       if (answer.ok && answer.href) {
         window.location.assign(answer.href);
+        return;
+      }
+      if (answer.error === "scheduled" && answer.message) {
+        setScheduled(answer.message);
         return;
       }
       setError(((answer.error === "limited" || answer.error === "unavailable") && answer.message) || ERRORS[answer.error ?? ""] || ERRORS.unavailable);
@@ -60,7 +66,7 @@ export function PersonErase({ token, email }: { token: string; email: string }) 
       ) : (
         <div id="erase-panel" className="mt-4 rounded-2xl border-2 border-pink-brand/30 bg-white p-5" role="region" aria-labelledby="erase-heading">
           <h3 id="erase-heading" className="text-base font-semibold text-ink [overflow-wrap:anywhere]">{`Delete ${email} from your store`}</h3>
-          <p className="mt-2 text-sm text-ink-soft">This cannot be undone. It happens at once, for your whole team.</p>
+          <p className="mt-2 text-sm text-ink-soft">This cannot be undone. It happens at once, for your whole team, or, if your store has used up this month&apos;s budget for people&apos;s data requests, by itself within a month.</p>
 
           <h4 className="mt-4 text-sm font-semibold text-ink">Deleted</h4>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-soft">
@@ -109,8 +115,13 @@ export function PersonErase({ token, email }: { token: string; email: string }) 
               {error}
             </p>
           ) : null}
+          {scheduled ? (
+            <p className="notice notice-info mt-3" role="status">
+              {scheduled}
+            </p>
+          ) : null}
           <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" className="btn btn-danger-solid btn-sm" disabled={busy || typed.trim() !== "DELETE"} aria-busy={busy} onClick={() => void erase()}>
+            <button type="button" className="btn btn-danger-solid btn-sm" disabled={busy || typed.trim() !== "DELETE" || Boolean(scheduled)} aria-busy={busy} onClick={() => void erase()}>
               {busy ? "Deleting…" : "Delete this person"}
             </button>
             <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setOpen(false); setTyped(""); setError(""); }}>

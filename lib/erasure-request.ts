@@ -19,8 +19,10 @@
  * address and for one email address, one email per ask (taken from the
  * figure for such emails of the first of the stores with room, only up to the
  * share a visitor's typed address may take, as the sign-up box's are), and
- * each store's own erasure counted against that store's studio figure
- * (lib/person-erasure.ts). Asked from one store that has no room, the page
+ * each store's own erasure paid for from the budget for people's data rights,
+ * never the store's studio figure (lib/person-erasure.ts, lib/rights-budget.ts):
+ * when the month's has no room, it is scheduled and done by itself within the
+ * month the law gives, and the page says by when. Asked from one store that has no room, the page
  * says from which day it can be asked again and gives the published privacy
  * contact. Asked for every store, the answer is "sent" whatever happened,
  * since anything else would depend on which stores know the address, and the
@@ -279,20 +281,22 @@ export type EraseDone = {
   /** The stores that could not finish now, kept on the link to press again. */
   later: string[];
   /**
-   * How many of `later` refused because their studio allowance is spent or the free stores' places are taken
-   * (lib/person-erasure.ts, "limit" or `pool`): pressing again cannot finish those before their allowance starts
-   * again, so the page says why and where to write instead (VR item 2). Absent when none did.
+   * How many stores' deletions are scheduled because the month's rights budget is used up (lib/person-erasure.ts,
+   * "scheduled"): done by themselves, nothing to press again, by `by` (ms), the latest of their legal deadlines.
+   * Absent when none were.
    */
-  held?: number;
+  scheduled?: number;
+  by?: number;
 };
 
 /**
  * Deletes the address from the link's stores, one after the other, until
  * they are done or PRESS_MS have gone; what is left stays on the link, so
- * pressing again finishes it, except a store whose allowance refused it
- * (`held`), which pressing again cannot finish before that allowance starts
- * again. Each store's owner is told, with the address,
- * so they can delete it from their own tools too (Stripe, an email platform).
+ * pressing again finishes it. A store whose month's rights budget is used up
+ * has it scheduled instead (`scheduled`, `by`), done by itself, and leaves the
+ * link. Each store's owner is told, with the address, once it is done
+ * (here, or by lib/rights-queue.ts), so they can delete it from their own
+ * tools too (Stripe, an email platform).
  */
 export async function confirmErasure(token: string, now = Date.now()): Promise<EraseDone> {
   if (!ERASE_TOKEN.test(token) || !isRedisConfigured()) return { state: "gone", deleted: [], later: [] };
@@ -307,7 +311,8 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
   if (!grant || typeof ttl !== "number" || !Number.isSafeInteger(ttl) || ttl <= 0) return pending;
   const deleted: string[] = [];
   const later: string[] = [];
-  let held = 0;
+  let scheduled = 0;
+  let by = 0;
   for (const sid of grant.s) {
     if (Date.now() - now > PRESS_MS) {
       later.push(sid);
@@ -321,20 +326,30 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
       continue;
     }
     const result = await erasePerson(store, grant.e, { kind: "person" }).catch(() => ({ ok: false as const, reason: "unavailable" as const }));
+    if (!result.ok && result.reason === "scheduled") {
+      scheduled += 1;
+      by = Math.max(by, result.by);
+      continue;
+    }
     if (!result.ok) {
       later.push(sid);
-      if (result.reason === "limit" || ("pool" in result && result.pool)) held += 1;
       continue;
     }
     deleted.push(store.name);
     await tellOwner(store, grant.e).catch((error: unknown) => console.error("telling a store's owner about a deletion failed", error));
   }
+  const waiting = scheduled ? { scheduled, by } : {};
   if (later.length) {
     await redisPipeline([["SET", key, JSON.stringify({ e: grant.e, s: later } satisfies Grant), "EX", Math.max(60, ttl)]]);
-    return { state: "more", deleted, later, ...(held ? { held } : {}) };
+    return { state: "more", deleted, later, ...waiting };
   }
   await redisPipeline([["DEL", key]]);
-  return { state: "done", deleted, later };
+  return { state: "done", deleted, later, ...waiting };
+}
+
+/** The owner's note for a deletion the person asked for, done later by the hourly job (lib/rights-queue.ts). */
+export async function tellOwnerErased(store: Store, email: string): Promise<void> {
+  await tellOwner(store, email);
 }
 
 /** The owner's note: done, not asked. One of the store's own emails (lib/store-allowance-rules.ts, "email"). */

@@ -29,6 +29,7 @@ import { takeAllowance } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceWindow, calendarWindow } from "@/lib/allowance-window";
 import { erasePerson } from "@/lib/person-erasure";
+import { RIGHTS_PERSON_REQUESTS, RIGHTS_PLAN_UNITS } from "@/lib/rights-budget-rules";
 import { COST_LINES } from "./plan-cost-registry";
 import * as registry from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
@@ -174,6 +175,30 @@ async function main(): Promise<void> {
     const studio = await erasePerson(full, eve, { kind: "team", who: full.email, role: "owner" });
     is("from the studio: scheduled, not refused", studio.ok ? "ok" : studio.reason, "scheduled");
     is("with the date it is done by", !studio.ok && "by" in studio ? longDate(new Date(studio.by as number)) : "", by);
+
+    part("(5) One person draws a store's budget at most RIGHTS_PERSON_REQUESTS times a month; past that, theirs waits too");
+    const often = await storeFor("rightsoften", true);
+    const zed = "zed@example.com";
+    const results: string[] = [];
+    for (let i = 0; i <= RIGHTS_PERSON_REQUESTS; i++) {
+      await upsertContact(often.listId!, zed, { agreed: true, explicit: true, source: "free" }, ROOM);
+      const r = await erasePerson(often, zed, { kind: "person" });
+      results.push(r.ok ? "done" : r.reason);
+    }
+    is(`done ${RIGHTS_PERSON_REQUESTS} times, then scheduled, never refused`, results, [...Array(RIGHTS_PERSON_REQUESTS).fill("done"), "scheduled"]);
+    is("and what is scheduled is still kept from the store's emails at once (the fingerprint)", redis.keys().some((k) => k.startsWith("nl:erased:")), true);
+
+    part("(6) A deletion larger than a paying store's whole month is never left waiting: the company pays, now");
+    const big = await storeFor("rightsbig", true);
+    const many = { ...big, tier: "creator" as const, catalog: { ...big.catalog, items: [...big.catalog.items, ...Array.from({ length: 400 }, (_, i) => ({ id: `fakeproduct${String(i).padStart(4, "0")}`, kind: 0, options: [] }))] } };
+    const wide = "wide@example.com";
+    await upsertContact(big.listId!, wide, { agreed: true, explicit: true, source: "free" }, ROOM);
+    const coBefore = Number(redis.run(["GET", `nl:rights:co:${month()}`]) ?? 0);
+    const now = await erasePerson(many, wide, { kind: "person" });
+    is("done now, not scheduled", now.ok ? "done" : now.reason, "done");
+    is("the contact is gone", contactOf(big, wide), false);
+    is("the company's budget paid", Number(redis.run(["GET", `nl:rights:co:${month()}`]) ?? 0) > coBefore, true);
+    is("nothing left counted in the plan's month past its cap", Number(redis.run(["GET", `nl:rights:s:${big.sid}:${month()}`]) ?? 0) <= RIGHTS_PLAN_UNITS.creator, true);
 
     part("(4) The plan's part has its line, the company's a registered cap");
     const line = COST_LINES.find((l) => l.id === "data-rights");

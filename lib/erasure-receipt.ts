@@ -4,23 +4,25 @@ import { ERASE_TOKEN, MAX_ERASE_STORES } from "@/lib/erasure-rules";
 
 /**
  * Display evidence only: never grants permission to erase or contact anyone.
- * `held` and `left`, with "more" only, when some stores refused because their allowance is used up
- * (lib/erasure-request.ts, EraseDone.held): how many, of how many still to do, so the page says why
- * and does not tell the person that pressing again will help (VR item 2). Absent otherwise.
+ * `scheduled` and `by`, when some stores' deletions were scheduled because the month's rights budget is used up
+ * (lib/erasure-request.ts, EraseDone.scheduled): how many, and the date (ms) by which they are done by themselves,
+ * their legal deadline, so the page says the true date and nothing to press (VR item 2). Absent otherwise.
  */
-export type ErasureReceipt = { state: "done" | "more"; count: number; held?: number; left?: number };
+export type ErasureReceipt = { state: "done" | "more"; count: number; scheduled?: number; by?: number };
 const COUNT = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= MAX_ERASE_STORES;
+/** A deadline a receipt may carry: after the press, and within one month of it (lib/rights-budget-rules.ts, legalDeadline). */
+const DEADLINE = (by: unknown, at: number): by is number => Number.isSafeInteger(by) && (by as number) > at && (by as number) <= at + 32 * 86_400_000;
 const LIFE_MS = 10 * 60 * 1000;
 const binding = (token: string) => createHash("sha256").update(token).digest("hex");
 function signature(payload: string): string {
   const key = deriveKey("erasure-result-receipt/v1");
   return key ? createHmac("sha256", key).update(payload).digest("base64url") : "";
 }
-export function makeErasureReceipt(state: "done" | "more", count: number, token: string, now = Date.now(), refused: { held: number; left: number } = { held: 0, left: 0 }): string {
+export function makeErasureReceipt(state: "done" | "more", count: number, token: string, now = Date.now(), waiting: { scheduled: number; by: number } = { scheduled: 0, by: 0 }): string {
   if (!ERASE_TOKEN.test(token) || !Number.isInteger(count) || count < 0 || count > MAX_ERASE_STORES || !Number.isSafeInteger(now) || now < 0) return "";
-  const { held, left } = refused;
-  if (!COUNT(held) || !COUNT(left) || held > left || (held > 0 && state !== "more")) return "";
-  const payload = Buffer.from(JSON.stringify({ state, count, at: now, grant: binding(token), ...(held ? { held, left } : {}) })).toString("base64url");
+  const { scheduled, by } = waiting;
+  if (!COUNT(scheduled) || (scheduled > 0 && !DEADLINE(by, now)) || (scheduled === 0 && by !== 0)) return "";
+  const payload = Buffer.from(JSON.stringify({ state, count, at: now, grant: binding(token), ...(scheduled ? { scheduled, by } : {}) })).toString("base64url");
   const sign = signature(payload);
   return sign ? payload + "." + sign : "";
 }
@@ -36,8 +38,8 @@ export function readErasureReceipt(raw: unknown, token = "", now = Date.now()): 
         !Number.isSafeInteger(value.at) || value.at < 0 || value.at > now || now - value.at >= LIFE_MS ||
         typeof value.grant !== "string" || !/^[0-9a-f]{64}$/.test(value.grant)) return null;
     if (value.state === "more" && (!ERASE_TOKEN.test(token) || value.grant !== binding(token))) return null;
-    const refused = "held" in value || "left" in value;
-    if (refused && (value.state !== "more" || !COUNT(value.held) || !COUNT(value.left) || value.held < 1 || value.held > value.left)) return null;
-    return { state: value.state, count: value.count, ...(refused ? { held: value.held, left: value.left } : {}) };
+    const waiting = "scheduled" in value || "by" in value;
+    if (waiting && (!COUNT(value.scheduled) || value.scheduled < 1 || !DEADLINE(value.by, value.at))) return null;
+    return { state: value.state, count: value.count, ...(waiting ? { scheduled: value.scheduled, by: value.by } : {}) };
   } catch { return null; }
 }

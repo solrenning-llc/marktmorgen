@@ -36,6 +36,8 @@ const ALLOWED: { pattern: RegExp; why: string }[] = [
   { pattern: /^nl:erased:/, why: "the fingerprint of the deleted address (lib/suppression.ts)" },
   { pattern: /^nl:team:log:/, why: "the activity log's line of a deletion from the studio, without the address" },
   { pattern: /^nl:(allow|rl|rlm|traffic|free:pool|fp|pool|usage|studio|spend|ses|mail:day|mail:used):/, why: "counts that pay for the work and limit it" },
+  // Rule 23 (claude5/rights-budget, owner's decision 9): a deletion is now paid from the rights budget, not the studio figure.
+  { pattern: /^nl:rights:(s|f|co|p):/, why: "the rights budget that pays for the deletion, and the one-way count of the person's requests this month (lib/rights-budget.ts)" },
   { pattern: /^nl:mail:flowstats:/, why: "a workflow's counts of how many started, never who" },
   { pattern: /^nl:cm:[0-9a-f]+:pts:b:/, why: "a board worked out again when next read" },
   { pattern: /^nl:rev:(sum|stores):/, why: "a review summary worked out again" },

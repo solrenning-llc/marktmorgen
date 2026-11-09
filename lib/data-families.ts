@@ -93,7 +93,9 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:ref:c:", "nl:ref:code:", "nl:ref:cursor", "nl:ref:list:", "nl:ref:mine:", "nl:ref:mycode:",
   "nl:ref:owed", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:",
   "nl:resend-budget:{", "nl:rev:ask:due", "nl:rev:ask:sent:", "nl:rev:link:", "nl:rev:lock:", "nl:rev:refunds:seen:",
-  "nl:reading:", "nl:reading:day:", "nl:rev:refunds:since:", "nl:rev:stores", "nl:rl:", "nl:rl:address:", "nl:rl:aff:addr:",
+  "nl:reading:", "nl:reading:day:", "nl:rev:refunds:since:", "nl:rev:stores",
+  "nl:rights:co:", "nl:rights:f:", "nl:rights:i:", "nl:rights:lock", "nl:rights:p:", "nl:rights:q", "nl:rights:s:",
+  "nl:rl:", "nl:rl:address:", "nl:rl:aff:addr:",
   "nl:rl:aff:click:", "nl:rl:aff:ip:", "nl:rl:cm:addr:", "nl:rl:cm:ev:", "nl:rl:cm:ip:", "nl:rl:creators:",
   "nl:rl:export:", "nl:rl:free:addr:", "nl:rl:free:ip:", "nl:rl:hooks:test:", "nl:rl:licence:",
   "nl:rl:manage:addr:", "nl:rl:manage:ip:", "nl:rl:orders:addr:", "nl:rl:orders:ip:", "nl:rl:phone:quiet:",
@@ -374,6 +376,10 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:rev:": E, "nl:rev:all:": E, "nl:rev:ask:due": I, "nl:rev:ask:sent:": X(120), "nl:rev:link:": T("nl:erase:ix:", 60), "nl:rev:lock:": E,
   "nl:rev:new:": E, "nl:rev:off:": E, "nl:rev:pay:": E, "nl:rev:refunds:seen:": E, "nl:rev:refunds:since:": E,
   "nl:rev:stop:": T("nl:erase:ix:", 400), "nl:rev:stores": I, "nl:rev:sum:": E, "nl:rev:vis:": E,
+  // The budget for people's own data requests (lib/rights-budget.ts): the company's counts (a store's month, the
+  // company's, a person's one-way count), each gone by itself by the end of its UTC month and a day, within 33 days of
+  // being written; a scheduled deletion is the company's work, done or gone within RIGHTS_ITEM_SECONDS (92 days).
+  "nl:rights:s:": Cr(33), "nl:rights:f:": Cr(33), "nl:rights:co:": Cr(33), "nl:rights:p:": Cr(33), "nl:rights:q": C, "nl:rights:i:": Cr(92), "nl:rights:lock": C,
   "nl:rl:": er(1), "nl:rl:aff:addr:": X(1), "nl:rl:aff:click:": X(1), "nl:rl:aff:ip:": X(1), "nl:rl:cm:addr:": X(1), "nl:rl:cm:ev:": E,
   "nl:rl:cm:ip:": X(1), "nl:rl:creators:": C, "nl:rl:export:": E, "nl:rl:free:addr:": X(1), "nl:rl:free:ip:": X(1), "nl:rl:hooks:test:": E,
   "nl:rl:licence:": X(1), "nl:rl:manage:addr:": X(1), "nl:rl:manage:ip:": X(1), "nl:rl:orders:addr:": X(1), "nl:rl:orders:ip:": X(1),

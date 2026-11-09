@@ -3,16 +3,14 @@
  * lib/erasure-request.ts) is refused or cannot be confirmed (VR item 2:
  * nothing shown to a person may say what is not true today).
  *
- *   (1) Pressing the button on the emailed link, when a store refuses because
- *       its studio allowance is spent ("limit") or the free stores' places
- *       are taken this month (the pool), never says "press the button again
- *       in a while": that cannot help before the store's allowance starts
- *       again, and the link stops working an hour after it was emailed. It
- *       says why, what the person can do now (write to the support address
- *       the Privacy Policy publishes for data requests), and, as GDPR
- *       art. 12(4) asks of a request not acted on, that they may complain to a
- *       data protection authority or go to court (docs/official-texts-eu-2026-11-02.md).
- *       A store that only ran out of time on this press is still told to press again.
+ *   (1) Since the owner's decision 9 (9 November 2026, claude5/rights-budget),
+ *       a store whose studio allowance is spent, or whose free places are
+ *       taken this month, no longer refuses a person's own deletion: it is
+ *       paid from the budget for people's data rights (lib/rights-budget.ts)
+ *       and done, so the page never says an allowance is used up or "press
+ *       the button again in a while" for it. A store that only ran out of time
+ *       on this press is still told to press again. (What a used-up rights
+ *       budget does, scheduled with its date, is tests/rights-budget.test.ts.)
  *   (2) The answer to an ask is given before any email is tried (so the page
  *       never tells who buys where), so it never says a link "is on its way":
  *       it says one may not go out, and what to do then.
@@ -113,16 +111,17 @@ const COMPLAINT = /data protection authority/i;
 const COURT = /\bcourt\b/i;
 const ANSWER_TIME = /within the time the law requires/i;
 
-function refusalTold(label: string, seen: Seen): void {
+/**
+ * Rule 23 (claude5/rights-budget, owner's decision 9): this held the refusal a spent studio or a full free pool
+ * caused ("more", "used up", "will not help until", the support address and GDPR art. 12(4) in an alert). Neither
+ * refuses a person's deletion any longer, so it now holds that the deletion is done and nothing of a refusal is said.
+ */
+function doneNotRefused(label: string, seen: Seen): void {
+  is(`${label}: told it is done`, /You were deleted from 1 store\b/.test(seen.text), true);
   is(`${label}: never told to press again in a while`, PRESS_AGAIN_SOON.test(seen.text), false);
-  is(`${label}: says pressing again will not help until the store's allowance starts again`, /will not help until/i.test(seen.text), true);
-  is(`${label}: says why (the store used up what it may do for now)`, /used up/i.test(seen.text), true);
-  is(`${label}: gives the published support address to write to`, seen.hrefs.includes(SUPPORT), true);
-  is(`${label}: says they may complain to a data protection authority (GDPR art. 12(4))`, COMPLAINT.test(seen.text), true);
-  is(`${label}: and go to court (GDPR art. 12(4))`, COURT.test(seen.text), true);
+  is(`${label}: never told an allowance is used up`, /used up/i.test(seen.text), false);
   is(`${label}: promises no answer time the code does not keep`, ANSWER_TIME.test(seen.text), false);
-  const alert = seen.regions.find((r) => r.role === "alert" && /used up/i.test(r.text));
-  is(`${label}: the reason is in an alert region, read out at once (WCAG 3.3.1, 4.1.3)`, Boolean(alert), true);
+  is(`${label}: no alert region (nothing went wrong)`, seen.regions.some((r) => r.role === "alert"), false);
 }
 
 async function main(): Promise<void> {
@@ -130,21 +129,24 @@ async function main(): Promise<void> {
   const keyBefore = process.env.NIMBUS_DATA_KEY;
   process.env.NIMBUS_DATA_KEY = "synthetic-refusal-truth-key-32-characters";
   try {
-    part("(1a) The store's studio allowance is spent");
+    part("(1a) The store's studio allowance is spent: the deletion is done anyway (owner's decision 9)");
     const spent = await storeFor("refusalspent", true);
     const whole = allowanceFor(spent, "studio");
     is("the store's studio allowance is taken whole first", (await takeAllowance(spent, "studio", whole)).ok, true);
     const limit = await press(spent, "a".repeat(64));
-    is("the press answers more, nothing deleted", limit.status, "more");
-    is("the link is kept", limit.kept, true);
-    refusalTold("studio spent", limit.page);
+    // Rule 23: was "more" (refused, nothing deleted); the rights budget pays, so it is done.
+    is("the press answers done", limit.status, "done");
+    // Rule 23: was true (kept for pressing again); nothing is left to press.
+    is("the link is used up", limit.kept, false);
+    doneNotRefused("studio spent", limit.page);
 
-    part("(1b) The free stores' places are taken this month");
+    part("(1b) The free stores' places are taken this month: done anyway, at the company's cost");
     const free = await storeFor("refusalpool", false);
     redis.run(["SET", `nl:free:n:${calendarWindow().id}`, "1000000"]);
     const pool = await press(free, "b".repeat(64));
-    is("the press answers more, nothing deleted", pool.status, "more");
-    refusalTold("free places taken", pool.page);
+    // Rule 23: was "more" (refused by the free pool); a store that pays nothing is the company's rights budget.
+    is("the press answers done", pool.status, "done");
+    doneNotRefused("free places taken", pool.page);
     redis.run(["DEL", `nl:free:n:${calendarWindow().id}`]);
 
     part("(1c) A store that only has to be pressed again is still told to press again");
@@ -156,17 +158,20 @@ async function main(): Promise<void> {
     is("not told an allowance is used up", /used up/i.test(retry.text), false);
     is("the button is there", retry.confirms, 1);
 
-    part("(1d) The signed receipt carries how many stores were held, and nothing else can be made to");
+    // Rule 23 (claude5/rights-budget): (1d) held the receipt's `held`/`left` (stores refused by an allowance). No store
+    // refuses for an allowance now; the receipt carries how many were scheduled and their date instead (`scheduled`, `by`).
+    part("(1d) The signed receipt carries how many stores were scheduled and by when, and nothing else can be made to");
     const now = Date.now();
-    const heldReceipt = makeErasureReceipt("more", 1, token, now, { held: 2, left: 3 });
-    is("a held receipt reads back", readErasureReceipt(heldReceipt, token, now), { state: "more", count: 1, held: 2, left: 3 });
-    is("a receipt with none held is the old shape", readErasureReceipt(makeErasureReceipt("more", 1, token, now), token, now), { state: "more", count: 1 });
-    is("more held than left is refused", makeErasureReceipt("more", 0, token, now, { held: 2, left: 1 }), "");
-    is("held on a finished deletion is refused", makeErasureReceipt("done", 1, token, now, { held: 1, left: 1 }), "");
-    is("a negative or fractional count is refused", [makeErasureReceipt("more", 0, token, now, { held: -1, left: 1 }), makeErasureReceipt("more", 0, token, now, { held: 0.5, left: 1 })], ["", ""]);
-    const mixed = await show({ token, status: "more", receipt: makeErasureReceipt("more", 0, token, now, { held: 1, left: 2 }) });
-    is("one held of two: says which part pressing again cannot finish", /1 of the 2 stores that are left/.test(mixed.text), true);
-    is("one held of two: and that pressing again goes on with the other", /Press the button again to go on with the others/.test(mixed.text), true);
+    const by = now + 30 * 86_400_000;
+    const waitingReceipt = makeErasureReceipt("more", 1, token, now, { scheduled: 2, by });
+    is("a scheduled receipt reads back", readErasureReceipt(waitingReceipt, token, now), { state: "more", count: 1, scheduled: 2, by });
+    is("a receipt with none scheduled is the old shape", readErasureReceipt(makeErasureReceipt("more", 1, token, now), token, now), { state: "more", count: 1 });
+    is("a scheduled finished deletion reads back too", readErasureReceipt(makeErasureReceipt("done", 0, token, now, { scheduled: 1, by }), token, now), { state: "done", count: 0, scheduled: 1, by });
+    is("a date before the press, or more than a month after it, is refused", [makeErasureReceipt("more", 0, token, now, { scheduled: 1, by: now - 1 }), makeErasureReceipt("more", 0, token, now, { scheduled: 1, by: now + 40 * 86_400_000 })], ["", ""]);
+    is("a negative or fractional count is refused", [makeErasureReceipt("more", 0, token, now, { scheduled: -1, by }), makeErasureReceipt("more", 0, token, now, { scheduled: 0.5, by })], ["", ""]);
+    const mixed = await show({ token, status: "more", receipt: makeErasureReceipt("more", 0, token, now, { scheduled: 1, by }) });
+    is("one scheduled and one left: says the one is scheduled", /scheduled/.test(mixed.text), true);
+    is("one scheduled and one left: and that pressing again goes on with the other", /Press the button again to go on/.test(mixed.text), true);
 
     part("(2) The answer to an ask never says a link is on its way");
     const sent = await show({ status: "sent" });
@@ -188,7 +193,9 @@ async function main(): Promise<void> {
     const words = (answer?.a ?? []).join(" ");
     is("the answer is found", Boolean(answer), true);
     is("never promises the link is always emailed", /If the store knows it, we email you a link/.test(words), false);
-    is("says a store may not be able to do it at once, and where to write", /support@marktmorgen\.com/.test(words) && /says why/i.test(words), true);
+    // Rule 23 (claude5/rights-budget): was /says why/ (a refusal's reason); a store that cannot do it now schedules it,
+    // and the help says the page gives the date ("says by when"), with the address to write to kept.
+    is("says a store may not be able to do it at once, by when it is done, and where to write", /support@marktmorgen\.com/.test(words) && /scheduled/i.test(words) && /says by when/i.test(words), true);
 
     part("(5) The Privacy Policy and the page's own opening say the same");
     const plain = (file: string) => readFileSync(join(process.cwd(), file), "utf8").replace(/\{" "\}/g, " ").replace(/\s+/g, " ");

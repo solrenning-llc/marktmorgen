@@ -62,6 +62,10 @@
       "schedule": "50 * * * *"
     },
     {
+      "path": "/api/cron/rights",
+      "schedule": "10 * * * *"
+    },
+    {
       "path": "/api/cron/monthly",
       "schedule": "25 * 1,2 * *"
     },

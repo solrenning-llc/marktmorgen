@@ -7,6 +7,7 @@ import { storeForHandle } from "@/lib/store";
 import { readErasureLink } from "@/lib/erasure-request";
 import { readErasureReceipt } from "@/lib/erasure-receipt";
 import { ERASE_TOKEN } from "@/lib/erasure-rules";
+import { rightsDateWords } from "@/lib/rights-budget-rules";
 
 export const metadata: Metadata = {
   title: "Delete your data — Marktmorgen",
@@ -59,28 +60,31 @@ const COMPLAIN = "Where a data protection law such as the GDPR applies to you, y
 const stores = (n: number) => `${n} ${n === 1 ? "store" : "stores"}`;
 
 /**
- * After a press that did not finish (lib/erasure-request.ts, confirmErasure). `held` stores refused because
- * their allowance is used up: pressing again cannot finish those before it starts again, and the link stops
- * an hour after it was emailed, so the page says why and where to write, never "press again in a while".
+ * After a press that did not finish (lib/erasure-request.ts, confirmErasure): the stores left ran out of time on
+ * this press or could not be reached, so pressing again goes on with them. A store whose month's budget for these
+ * requests is used up is never among them: its deletion is scheduled (scheduledNotice), not refused.
  */
-function notFinished({ count, held = 0, left = 0, live }: { count: number; held?: number; left?: number; live: boolean }) {
-  const so = count ? `Deleted from ${stores(count)} so far.` : "Nothing was deleted yet.";
-  if (!held) {
-    return (
-      <p className="notice notice-info mb-6" role="status">
-        {`Deleted from ${stores(count)} so far. The rest could not be finished just now.`}
-        {live ? " Press the button again to go on. This link stops working an hour after we emailed it, and you can ask for a new one at any time." : ""}
-      </p>
-    );
-  }
-  const one = held === 1;
-  const who = held === left ? (one ? "The store that is left" : `The ${held} stores that are left`) : `${held} of the ${stores(left)} that are left`;
+function notFinished({ count, live }: { count: number; live: boolean }) {
   return (
-    <p className="notice notice-error mb-6" role="alert">
-      {`${so} ${who} could not delete your data now: ${one ? "it has" : "they have"} used up, for now, what Marktmorgen lets ${one ? "it" : "them"} do. `}
-      {`Pressing the button again will not help until ${one ? "its" : "their"} allowance starts again, and this link stops working an hour after we emailed it. `}
-      {held < left && live ? "Press the button again to go on with the others. " : ""}
-      To have your data deleted without waiting, write to {support} from this address and ask us to delete it from the stores that are left. {WRITTEN} {COMPLAIN}
+    <p className="notice notice-info mb-6" role="status">
+      {`Deleted from ${stores(count)} so far. The rest could not be finished just now.`}
+      {live ? " Press the button again to go on. This link stops working an hour after we emailed it, and you can ask for a new one at any time." : ""}
+    </p>
+  );
+}
+
+/**
+ * The stores whose deletion is scheduled because their month's budget for these requests is used up
+ * (lib/rights-budget.ts): done by themselves by `by`, their legal deadline (GDPR art. 12(3), one month after
+ * asking, as the Privacy Policy says), with nothing for the person to press (lib/rights-queue.ts).
+ */
+function scheduledNotice({ scheduled, by }: { scheduled: number; by: number }) {
+  const one = scheduled === 1;
+  return (
+    <p className="notice notice-info mt-6" role="status">
+      {`${one ? "One store has" : `${scheduled} stores have`} used up, for this month, what Marktmorgen sets aside for requests like this, so deleting your data there is scheduled. `}
+      {`It is done by itself by ${rightsDateWords(by)}, one month after you asked, as the law requires. There is nothing more for you to press. `}
+      If you have a question, write to {support} from this address.
     </p>
   );
 }
@@ -126,9 +130,12 @@ export default async function DeletePage({ searchParams }: Params) {
         <section className="container-page py-12 sm:py-16" data-erase>
           {statusKey === "done" && confirmed ? (
             <div className="max-w-2xl">
-              <p className="notice notice-success" role="status">
-                {n === 1 ? "Done. You were deleted from 1 store." : `Done. You were deleted from ${n} stores.`} Those stores will not email you again.
-              </p>
+              {n || !confirmed.scheduled ? (
+                <p className="notice notice-success" role="status">
+                  {n === 1 ? "Done. You were deleted from 1 store." : `Done. You were deleted from ${n} stores.`} Those stores will not email you again.
+                </p>
+              ) : null}
+              {confirmed.scheduled && confirmed.by ? scheduledNotice({ scheduled: confirmed.scheduled, by: confirmed.by }) : null}
               <p className="mt-6 text-sm text-ink-soft">
                 Their creators keep your payments on their own Stripe accounts, as their sales records. <Link href="/privacy#delete" className="underline underline-offset-4">What is kept, and why</Link>.
               </p>
@@ -136,7 +143,7 @@ export default async function DeletePage({ searchParams }: Params) {
           ) : linkUnavailable ? (
             <div className="max-w-2xl">
               {statusKey === "more" && confirmed ? (
-                notFinished({ count: n, held: confirmed.held, left: confirmed.left, live: false })
+                notFinished({ count: n, live: false })
               ) : (
                 <p className="notice notice-info mb-6" role="status">
                   We could not check every store just now. Your request has not been confirmed as complete.
@@ -152,7 +159,8 @@ export default async function DeletePage({ searchParams }: Params) {
             </div>
           ) : link ? (
             <div className="max-w-2xl">
-              {statusKey === "more" && confirmed ? notFinished({ count: n, held: confirmed.held, left: confirmed.left, live: true }) : null}
+              {statusKey === "more" && confirmed ? notFinished({ count: n, live: true }) : null}
+              {statusKey === "more" && confirmed?.scheduled && confirmed.by ? scheduledNotice({ scheduled: confirmed.scheduled, by: confirmed.by }) : null}
               <h2 className="t-h3 [overflow-wrap:anywhere]">{`Delete ${link.email}`}</h2>
               <p className="mt-2 text-ink-soft">{link.stores.length === 1 ? "From this store:" : "From these stores:"}</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-ink">

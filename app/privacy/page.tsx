@@ -2158,9 +2158,12 @@ export default function PrivacyPage() {
             same from the studio, and the store&apos;s owner is told when you do
             it, with your address, so they can delete you from their own tools
             too. The email may not go out, for example when a store has used up
-            the emails it may send for requests like this, and a store may not
-            be able to delete right away; the page then says why. If no email
-            comes, or you would rather not wait, write to{" "}
+            the emails it may send for requests like this. Deleting never takes
+            a store&apos;s own allowances: requests like this have their own
+            budget each month, paid by the store&apos;s plan or, for a store
+            without one, by us. When a month&apos;s is used up, deleting you
+            there is scheduled and done by itself within one month of your
+            request, and the page says by when. If no email comes, write to{" "}
             <a href="mailto:support@marktmorgen.com" className="text-black underline underline-offset-2 hover:no-underline">
               support@marktmorgen.com
             </a>{" "}

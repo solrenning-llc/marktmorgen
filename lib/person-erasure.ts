@@ -33,11 +33,16 @@
  * that did not answer) is finished by pressing again, and an erasure of
  * somebody already gone deletes nothing more.
  *
- * What it costs is counted before it is incurred, from the store's studio
- * figure (lib/store-allowance-rules.ts), whichever door it came through: the
- * part its record says (products, courses) before anything is read, the rest
- * once the courses are read and a few counts taken (lib/erasure-rules.ts,
- * erasureUnits), sized in tests/person-erasure.test.ts to cover what it sends.
+ * What it costs is counted before it is incurred, from the budget for
+ * people's own data rights (lib/rights-budget.ts; owner's decision 9, 9
+ * November 2026), never from the store's studio figure, whichever door it came
+ * through: the part its record says (products, courses) before anything is
+ * read, the rest once the courses are read and a few counts taken
+ * (lib/erasure-rules.ts, erasureUnits), sized in tests/person-erasure.test.ts
+ * to cover what it sends. A paying store's plan pays for it, the company for
+ * any other store. When the month's budget is used up nothing is refused: the
+ * deletion is scheduled, the fingerprint written at once, and the hourly job
+ * does it within the month the law gives (lib/rights-queue.ts).
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -47,7 +52,7 @@ import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
 import { suppressCommand } from "@/lib/suppression";
-import { takeAllowance, type Taken } from "@/lib/store-allowance";
+import { type RightsBy, giveRightsRequest, rightsCap, scheduleRights, takeRights } from "@/lib/rights-budget";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
 import { deleteFile } from "@/lib/file-store";
@@ -206,10 +211,14 @@ export const ERASERS: Eraser[] = [
 
 export type ErasureResult =
   | { ok: true; parts: ErasedPart[]; records: number; notes: ErasureNote[] }
-  // `pool`: refused because the free stores' places are taken this month (lib/free-pool.ts), which, like
-  // "limit", pressing again cannot change before the store's allowance starts again; the page says so.
-  | { ok: false; reason: "email" | "unavailable" | "limit"; message?: string; pool?: true }
+  | { ok: false; reason: "email" | "unavailable"; message?: string }
+  // The month's rights budget is used up: written down, done by itself by `by` (ms), the legal deadline
+  // (lib/rights-budget-rules.ts, legalDeadline). Never a refusal, and never "done" before it is.
+  | { ok: false; reason: "scheduled"; by: number }
   | { ok: false; reason: "incomplete"; parts: ErasedPart[]; failed: string[] };
+
+/** What paying for a part of an erasure answered: taken, no room this month, or not known. */
+export type ErasureCharge = (units: number, asking: boolean) => Promise<"ok" | "full" | "unknown">;
 
 /** Works out where one person may be found in one store. */
 export async function erasureScope(store: Store, email: string): Promise<ErasureScope | null> {
@@ -266,27 +275,52 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   };
 }
 
-/** A refused take of the studio allowance, said as the erasure's answer: spent is "limit", the free places taken keep `pool`. */
-function refused(taken: Extract<Taken, { ok: false }>): ErasureResult {
-  return { ok: false, reason: taken.reason === "used" ? "limit" : "unavailable", message: taken.message, ...(taken.reason === "pool" ? { pool: true as const } : {}) };
-}
+export type ErasureDoor = { kind: Extract<ErasureBy, "team">; who: string; role: Role } | { kind: Extract<ErasureBy, "person"> };
 
 /**
  * Deletes one person from one store. `by` says which door: the team, with
  * who pressed it and their role for the activity log, or the person.
+ * Paid for from the rights budget of the UTC month `now` is in; when it has
+ * no room, scheduled (reason "scheduled", with the deadline).
  */
-export async function erasePerson(
-  store: Store,
-  rawEmail: string,
-  by: { kind: Extract<ErasureBy, "team">; who: string; role: Role } | { kind: Extract<ErasureBy, "person"> },
-): Promise<ErasureResult> {
+export async function erasePerson(store: Store, rawEmail: string, by: ErasureDoor, options: { now?: number } = {}): Promise<ErasureResult> {
+  const now = options.now ?? Date.now();
+  const email = normaliseEmail(typeof rawEmail === "string" ? rawEmail : "");
+  if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return { ok: false, reason: "email" };
+  if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  let counted = false;
+  let fromStore = 0;
+  const charge: ErasureCharge = async (units, asking) => {
+    let taken = await takeRights(store, email, units, now, asking);
+    if (taken.ok) fromStore += units;
+    // A deletion larger than the store's whole month can never be paid from it, so waiting would only delay it:
+    // the company's budget pays, now (lib/rights-budget-rules.ts). Anything else that has no room is scheduled.
+    else if (taken.reason === "full" && fromStore + units > rightsCap(store, now)) taken = await takeRights(store, email, units, now, asking, "company");
+    if (taken.ok && asking) counted = true;
+    return taken.ok ? "ok" : taken.reason;
+  };
+  const result = await eraseCharged(store, email, by, charge);
+  // Only a finished deletion is one of the person's requests this month: pressing again after anything else is not held to it.
+  if (counted && (result === "full" || !result.ok)) await giveRightsRequest(store, email, now);
+  if (result !== "full") return result;
+  // No room this month: written down with the fingerprint, so the store never writes to them meanwhile.
+  const door: RightsBy = by.kind === "team" ? { kind: "team", who: by.who, role: by.role } : { kind: "person" };
+  const scheduled = await scheduleRights(store, email, door, now, store.listId ? [suppressCommand(store.listId, email)] : []).catch(() => null);
+  return scheduled ? { ok: false, reason: "scheduled", by: scheduled.deadline } : { ok: false, reason: "unavailable" };
+}
+
+/**
+ * The erasure itself, paid for by `charge` before anything costs: "full" when it had no room (nothing deleted,
+ * the first part's reads already paid for), for the caller to schedule or keep waiting (lib/rights-queue.ts).
+ */
+export async function eraseCharged(store: Store, rawEmail: string, by: ErasureDoor, charge: ErasureCharge): Promise<ErasureResult | "full"> {
   const email = normaliseEmail(typeof rawEmail === "string" ? rawEmail : "");
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return { ok: false, reason: "email" };
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
   // What the store's record says, before anything is read.
   const first = erasureUnits({ products: store.catalog.items.length, courses: idsOfKind(store, "course").length });
-  const taken = await takeAllowance(store, "studio", first);
-  if (!taken.ok) return refused(taken);
+  const taken = await charge(first, true).catch(() => "unknown" as const);
+  if (taken !== "ok") return taken === "full" ? "full" : { ok: false, reason: "unavailable" };
   const scope = await erasureScope(store, email).catch(() => null);
   if (!scope) return { ok: false, reason: "unavailable" };
   // Then the rest, once the courses are read and the counts taken.
@@ -294,8 +328,8 @@ export async function erasePerson(
   if (!size) return { ok: false, reason: "unavailable" };
   const rest = erasureUnits(size) - first;
   if (rest > 0) {
-    const more = await takeAllowance(store, "studio", rest);
-    if (!more.ok) return refused(more);
+    const more = await charge(rest, false).catch(() => "unknown" as const);
+    if (more !== "ok") return more === "full" ? "full" : { ok: false, reason: "unavailable" };
   }
 
   // First, and on its own: whatever happens next, they are never written to again.

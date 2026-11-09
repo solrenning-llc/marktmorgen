@@ -89,7 +89,7 @@ import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { BUYER_NOTICE_DAYS, BUYER_NOTICE_FROM, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, afterBuyersTold, buyerNoticeCap, buyersStartOn, paidBefore } from "@/lib/closing-buyers-rules";
 import { forgetCredit, startClosingCredit } from "@/lib/closing-credit";
-import { FINAL_INDEX, HELD_INDEX, forgetHeld, holdCharges, holdCounts, paidPeriods, retryHolds, savePaidPeriod, startCallBudget } from "@/lib/closing-holds";
+import { FINAL_INDEX, HELD_INDEX, finalScoreOf, forgetHeld, holdCharges, holdCounts, paidPeriods, retryHolds, savePaidPeriod, startCallBudget } from "@/lib/closing-holds";
 import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort } from "@/lib/closing-buyers";
 import { giveBackUnused, unusedRows, unusedSummary } from "@/lib/closing-refunds";
 import { stillToGive, unusedOf, type PaidPeriod } from "@/lib/closing-buyers-rules";
@@ -185,19 +185,6 @@ function readState(raw: unknown): State {
   return parseState(raw);
 }
 
-/**
- * A store's score in the final line (ZSCORE): null when it is not in it, the
- * day its plan ended (ms), or UnknownReplyError. A plan end time is a positive
- * number, so 0 or a negative score is unknown too, the same rule as
- * closingScore (lib/closing-holds.ts).
- */
-function finalScoreOf(raw: unknown): number | null {
-  if (raw === null) return null;
-  const value = typeof raw === "number" ? raw : typeof raw === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(raw) ? Number(raw) : Number.NaN;
-  if (!Number.isFinite(value) || value <= 0) throw new UnknownReplyError("a store's place in the final closing line");
-  return value;
-}
-
 /** A pipeline's replies, exactly one for each command sent, or UnknownReplyError. */
 function exactly(replies: unknown, count: number, what: string): unknown[] {
   const list = repliesFor(replies, count);
@@ -238,7 +225,8 @@ export async function closingOf(store: Store, now = Date.now()): Promise<{ ended
   // Its closing day has begun (queue item 307 [EC1]): it closes today, whatever the plan says.
   if (isRedisConfigured()) {
     const [finalScore, rawFinal] = exactly(await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)], ["GET", stateKey(storeRef(store))]]), 2, "a store's closing");
-    const finalEnded = finalScoreOf(finalScore);
+    // Its score, as one ZSCORE's reply, read by the one reader of the final line (lib/closing-holds.ts).
+    const finalEnded = finalScoreOf([finalScore]);
     if (finalEnded !== null) {
       const kept = readState(rawFinal);
       // Removed already, and waiting for the walk that deletes its records.
@@ -761,8 +749,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   // A closing day that has begun (its memberships ended at Stripe) is seen
   // through, whatever happens to the plan since: its buyers have lost what
   // they paid for, so it can no longer "stay open" (queue item 307 [EC1]).
-  const [finalScore] = exactly(await redisPipeline([["ZSCORE", FINAL_INDEX, key]]), 1, "a store's place in the final closing line");
-  const was = finalScoreOf(finalScore);
+  const was = finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, key]]));
   if (was !== null) {
     const [rawFinal] = exactly(await redisPipeline([["GET", stateKey(key)]]), 1, "a store's closing state");
     const kept = readState(rawFinal);

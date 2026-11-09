@@ -1702,6 +1702,7 @@
     "app/api/mcp/route.ts",
     "app/api/numbers-link/route.ts",
     "app/api/operator/search-console/route.ts",
+    "app/api/operator/traffic-reset/route.ts",
     "app/api/outreach/stop/route.ts",
     "app/api/photo/[id]/route.ts",
     "app/api/privacy/erase/route.ts",

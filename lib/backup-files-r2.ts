@@ -39,7 +39,10 @@ export type BackupFilesR2Config = { endpoint: string; bucket: string; key: AwsKe
 
 type Env = Record<string, string | undefined>;
 
-/** The route's read-only R2 settings; null when any is missing or the key is the site's own read-write key. */
+/**
+ * The route's read-only R2 settings; null when any is missing or the key is the site's own read-write key or the
+ * backup bucket's (BACKUP_R2_*: Claude 2's LOW 2, 9 November 2026), as lib/picture-r2.ts refuses both.
+ */
 export function backupFilesR2Config(env: Env = process.env): BackupFilesR2Config | null {
   const account = (env.R2_ACCOUNT_ID ?? "").trim();
   const bucket = (env.R2_BUCKET ?? "").trim();
@@ -47,13 +50,26 @@ export function backupFilesR2Config(env: Env = process.env): BackupFilesR2Config
   const secretAccessKey = (env.BACKUP_FILES_R2_READ_SECRET ?? "").trim();
   if (!/^[0-9a-f]{32}$/.test(account) || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)) return null;
   if (accessKeyId.length < 16 || secretAccessKey.length < 32) return null;
-  if (accessKeyId === (env.R2_ACCESS_KEY_ID ?? "").trim() || secretAccessKey === (env.R2_SECRET_ACCESS_KEY ?? "").trim()) return null;
+  if ([env.R2_ACCESS_KEY_ID, env.BACKUP_R2_ACCESS_KEY_ID].some((id) => (id ?? "").trim() === accessKeyId)) return null;
+  if ([env.R2_SECRET_ACCESS_KEY, env.BACKUP_R2_SECRET_ACCESS_KEY].some((secret) => (secret ?? "").trim() === secretAccessKey)) return null;
   return { endpoint: `https://${account}.r2.cloudflarestorage.com`, bucket, key: { accessKeyId, secretAccessKey } };
 }
 
-/** A presigned GET of one object for `seconds`, made here with no call to R2. */
+/**
+ * A presigned GET of one object for `seconds`, made here with no call to R2. The path is built from the key's
+ * segments, each percent-encoded, so "?", "#", "%" or "\" stay in the name; a "." or ".." segment, which a URL
+ * resolves away, is refused; and the signed address must decode back to exactly this bucket and key, or nothing is
+ * handed out (Claude 2's LOW 1, 9 November 2026: one URL for the listed object, whatever the writers allowed).
+ */
 export function presignR2Get(config: BackupFilesR2Config, key: string, seconds: number, now: Date = new Date()): string {
-  return presignV4({ method: "GET", url: `${config.endpoint}/${config.bucket}/${key}`, expires: seconds, region: "auto", service: "s3", key: config.key, now });
+  const segments = key.split("/");
+  if (!key || segments.some((segment) => segment === "." || segment === "..")) throw new Error("R2 sign: a key with a dot segment");
+  const path = `/${config.bucket}/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
+  const signed = presignV4({ method: "GET", url: `${config.endpoint}${path}`, expires: seconds, region: "auto", service: "s3", key: config.key, now });
+  const url = new URL(signed);
+  const decoded = url.pathname.split("/").map((piece) => decodeURIComponent(piece)).join("/");
+  if (url.pathname !== path || decoded !== `/${config.bucket}/${key}` || url.hash !== "" || url.searchParams.has("x-id")) throw new Error("R2 sign: an address that is not the key's");
+  return signed;
 }
 
 export class R2ListingError extends Error {
@@ -70,6 +86,18 @@ const ESCAPES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">"
 /** The five XML escapes undone; any other `&` (a numeric reference) is not read. */
 function unescape(text: string): string {
   return text.replace(/&[^;]{0,10};|&/g, (found) => ESCAPES[found] ?? fail(`an escape it does not read (${found})`));
+}
+
+/** Every element opened is closed in turn, with nothing but comments, CDATA or declarations of other kinds refused. */
+function balanced(xml: string): void {
+  const open: string[] = [];
+  for (const [tag, closing, name, empty] of xml.matchAll(/<(\/?)([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s[^<>]*?)?(\/?)>|<[^>]*>?/g)) {
+    if (name === undefined) fail(`a tag it cannot read (${tag.slice(0, 20)})`);
+    if (closing) {
+      if (open.pop() !== name) fail(`${name} closed out of turn`);
+    } else if (!empty) open.push(name);
+  }
+  if (open.length !== 0) fail(`${open[open.length - 1]} left open`);
 }
 
 /** The one value of a tag in an XML fragment, exactly once; anything else fails. */
@@ -97,6 +125,10 @@ export async function listR2Page(config: BackupFilesR2Config, prefix: string, cu
   const opened = xml.indexOf("<ListBucketResult");
   const closed = xml.lastIndexOf("</ListBucketResult>");
   if (opened < 0 || closed < opened || xml.slice(closed + "</ListBucketResult>".length).trim() !== "") fail("not one whole ListBucketResult");
+  // Nothing before it but an XML declaration, and every element closed in turn (Codex Z's LOW 2, 9 November 2026):
+  // text around the listing, or an element left open, is not a whole listing, never an empty one.
+  if (!/^\s*(?:<\?xml[^>]*\?>\s*)?$/.test(xml.slice(0, opened))) fail("text before the ListBucketResult");
+  balanced(xml.slice(opened));
   const truncated = once(xml, "IsTruncated");
   if (truncated !== "true" && truncated !== "false") fail("IsTruncated is not true or false");
   const entries = xml.match(/<Contents>[\s\S]*?<\/Contents>/g) ?? [];

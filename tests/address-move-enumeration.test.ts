@@ -8,7 +8,8 @@
  * whether an email is a Marktmorgen creator. The route already keeps the
  * same question about passkeys "slow and limited"; now the store question is
  * asked at the same place. Its sibling (rule 30): inviting a partner answered
- * `waiting: true` only when the address already had a store.
+ * `waiting: true` only when the address already had a store, and "full"
+ * only when that store's studio had twenty offers waiting (pre-review D).
  *
  * Checked through the real routes with the in-memory Redis and a stand-in for
  * the email provider.
@@ -19,6 +20,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription } from "@/lib/store";
 import { POST as addressRoute } from "@/app/api/store/address/route";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
+import { offerPartnership, waitingFor } from "@/lib/partner-invites";
 import { store as redis } from "./redis-stub";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { paidPeriod } from "./billing-period-fixture";
@@ -74,6 +76,17 @@ async function main(): Promise<void> {
   const away = await post({ action: "invite", email: "stranger@move-enum.example", percent: 10, products: [product] });
   is("both invitations answered alike", [here.status, JSON.stringify(here.body)], [away.status, JSON.stringify(away.body)]);
   is("and the answer is a plain yes", here.body, { ok: true });
+
+  part("A studio with twenty offers waiting answers the same as an inbox (pre-review D)");
+  const crowded = "crowded@move-enum.example";
+  await claimHandle(crowded, "move-crowded", "Crowded", "");
+  for (let i = 0; i < 20; i += 1) {
+    await offerPartnership(crowded, { sid: `other${i}`.padEnd(12, "x"), storeName: `Other ${i}`, handle: `other${i}`, share: { percent: 10, products: [product] }, titles: ["x"] });
+  }
+  const full = await post({ action: "invite", email: crowded, percent: 10, products: [product] });
+  const plain = await post({ action: "invite", email: "stranger2@move-enum.example", percent: 10, products: [product] });
+  is("the same answer as an address with no store", [full.status, JSON.stringify(full.body)], [plain.status, JSON.stringify(plain.body)]);
+  is("and no twenty-first offer is left in that studio", (await waitingFor(crowded)).length, 20);
   done();
 }
 

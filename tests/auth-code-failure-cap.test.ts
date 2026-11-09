@@ -15,7 +15,12 @@
  *     pass: only the link does (no CAPTCHA, no test of any kind: AX274 3.3.9);
  *   - the owner is emailed once, in plain words, when the codes stop;
  *   - a login with the link starts the count again, and a code opens again;
- *   - a count that cannot be read refuses and opens nothing.
+ *   - a count that cannot be read refuses and opens nothing;
+ *   - only wrong codes are counted: a right code ends the row even when no
+ *     login follows it here (an account with two-step login is only held at
+ *     its code page), so the notice's "times in a row" is true (pre-review E);
+ *   - the notice goes to whoever typed the address, account or not, so it
+ *     never says "your account" (pre-review F).
  */
 import { NextRequest } from "next/server";
 import { POST as requestRoute } from "@/app/api/auth/request/route";
@@ -105,6 +110,8 @@ async function main(): Promise<void> {
   const told = notices(victim);
   is("one notice to the address, no more", told.length, 1);
   is("it says the codes were wrong, that the link still works, and that nobody got in", [/wrong/i.test(told[0]?.text ?? ""), /link/i.test(told[0]?.text ?? ""), /nobody got in|no one got in/i.test(told[0]?.text ?? "")], [true, true, true]);
+  // The address has no account here: the notice says "this address", never "your account" (F).
+  is("it does not say the address has an account", [/your (Marktmorgen )?account/i.test(`${told[0]?.subject ?? ""}\n${told[0]?.text ?? ""}`), /this (email )?address/i.test(told[0]?.text ?? "")], [false, true]);
 
   part("A login with the link starts the count again");
   const viaLink = await ask(victim);
@@ -128,6 +135,18 @@ async function main(): Promise<void> {
   const more = await guess(owner, 4);
   is("eighty more are judged: the ceiling counts wrong codes in a row, not in all", [more.judged, more.refused], [80, 0]);
   is("no notice", notices(owner).length, 0);
+
+  part("A right code ends the row, even with no login after it (an account held at its code page)");
+  const held = "held@code-cap.example";
+  const forty = await guess(held, 2);
+  is("forty wrong codes judged", forty.judged, 40);
+  const rightOne = await ask(held);
+  // The code alone, as the route does before it holds a two-step account at its code page: no noteSignIn.
+  is("(the right code is taken)", typeof (await auth.takeSignInCode(rightOne.request, rightOne.code)) === "object", true);
+  advance(24 * HOUR);
+  const sixty = await guess(held, 3);
+  is("sixty more wrong codes are all judged: the right one did not count as wrong", [sixty.judged, sixty.refused], [60, 0]);
+  is("and nobody is told of a hundred wrong codes in a row", notices(held).length, 0);
 
   part("A count of wrong codes that cannot be read refuses and opens nothing");
   const gus = "gus@code-cap.example";

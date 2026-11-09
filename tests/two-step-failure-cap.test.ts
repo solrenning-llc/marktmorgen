@@ -14,8 +14,19 @@
  *   - the ways back stay open, with no test of any kind (AX274 3.3.9): a
  *     recovery code still opens, and a login with one (or with a passkey)
  *     lets the app's codes in again;
- *   - wrong codes typed in the studio (turning it off) count the same.
+ *   - wrong codes typed in the studio (turning it off) count the same;
+ *   - Cancel in the studio (cancelReset, "studio") does not let them in
+ *     again: any session may press it, one let in without the second step
+ *     included, so only a recovery code or a passkey does (pre-review A);
+ *   - the notice and the code page say what each way back does: a recovery
+ *     code or a passkey turns the app's codes back on, the link to the
+ *     recovery address turns two-step login off (pre-review B, VR 2);
+ *   - the cost line names every write the count makes, and that Cancel
+ *     makes none (pre-review G).
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { NOT_A_COST } from "./plan-cost-registry";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import * as twoStep from "@/lib/two-step";
 import { store as redis, advance } from "./redis-stub";
@@ -25,7 +36,7 @@ import { done, is, part } from "./check";
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 const mail = installSesMailFixture();
 mail.configure();
-const { cancelReset, finishSetup, finishSignIn, holdSignIn, startSetup, turnOff, twoStepOn } = twoStep;
+const { cancelReset, finishSetup, finishSignIn, holdSignIn, sendRescue, spendRescue, startSetup, turnOff, twoStepOn } = twoStep;
 // Read through the module so this file builds against a lib/two-step.ts without the ceiling (its red commit): 50 there.
 const APP_CODE_FAILS_IN_A_ROW = ((twoStep as Record<string, unknown>).APP_CODE_FAILS_IN_A_ROW as number | undefined) ?? 50;
 const HOUR = 60 * 60 * 1000;
@@ -130,6 +141,40 @@ async function main(): Promise<void> {
   tick(HOUR + 1000);
   const more = await guess(third, t.secret, 4);
   is("forty more are judged: the ceiling counts wrong codes in a row, not in all", [more.wrong ?? 0, more.stopped ?? 0], [40, 0]);
+
+  part("Cancel in the studio does not let the app's codes in again (any session may press it)");
+  const canceling = "cancel@totp-cap.example";
+  const c = await account(canceling, "cancel.backup@totp-cap.example");
+  await guess(canceling, c.secret, 5);
+  is("(the app's codes are off)", ((await finishSignIn(await holdSignIn(canceling), nowCode(c.secret), clock)) as { reason?: string }).reason, "stopped");
+  tick(HOUR + 1000);
+  await cancelReset(canceling, "studio");
+  const afterCancel = await finishSignIn(await holdSignIn(canceling), nowCode(c.secret), clock);
+  is("after Cancel, the app's right code is still refused, as stopped", afterCancel.ok ? "opened" : afterCancel.reason, "stopped");
+  is("turning it off with the app's right code from the studio: stopped too", await turnOff(canceling, nowCode(c.secret)), "stopped");
+  is("a recovery code still opens", (await finishSignIn(await holdSignIn(canceling), c.codes[1], clock)).ok, true);
+
+  part("The notice and the code page say what each way back does");
+  const rescued = "rescued@totp-cap.example";
+  const r = await account(rescued, "rescued.backup@totp-cap.example");
+  const sinceRescue = mail.sent.length;
+  await guess(rescued, r.secret, 5);
+  const notice = told(rescued, sinceRescue)[0]?.text ?? "";
+  const page = /stopped:\s*"([^"]+)"/.exec(readFileSync(join(process.cwd(), "app/signin/code/page.tsx"), "utf8"))?.[1] ?? "";
+  for (const [where, words] of [["the notice", notice], ["the code page", page]] as const) {
+    is(`${where} never says the app's codes work again after the recovery-address link`, /recovery address[^.]*\. After that,? (the|your) app's codes work again/i.test(words), false);
+    is(`${where} says a recovery code or a passkey turns them back on, and the link turns two-step login off`, [/recovery codes? or a passkey[^.]*(turns|work)/i.test(words), /recovery address[^.]*turns two-step login off/i.test(words)], [true, true]);
+  }
+  const hold = await holdSignIn(rescued);
+  const beforeLink = mail.sent.length;
+  is("(a link to the recovery address)", await sendRescue(hold, "https://marktmorgen.com"), "sent");
+  const linkToken = /([0-9a-f]{64})/.exec(mail.sent.slice(beforeLink).map((m) => m.text).join("\n"))?.[1] ?? "";
+  is("(the link logs in)", await spendRescue(linkToken), rescued);
+  is("as the notice now says, the link turned two-step login off", await twoStepOn(rescued), false);
+
+  part("The cost line names each write of the count, and that Cancel makes none");
+  const line = (NOT_A_COST as Record<string, string>).APP_CODE_FAILS_IN_A_ROW ?? "";
+  is("it names the login with a recovery code or a passkey, and Cancel in the studio", [/recovery code/i.test(line), /passkey/i.test(line), /Cancel[^.]*(writes nothing|no write)/i.test(line)], [true, true, true]);
   done();
 }
 

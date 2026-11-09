@@ -16,18 +16,14 @@
  * Fake Stripe: a checkout paid makes an active add-on subscription; a POST with a key already used answers the same
  * session, as Stripe replays it.
  */
-import * as billing from "@/lib/assistant-billing";
-import { applyListedAssistant, createAssistantCheckout, readAssistantReturn, syncAssistant } from "@/lib/assistant-billing";
+import { applyListedAssistant, readAssistantReturn, startAssistant, syncAssistant, type AssistantStart } from "@/lib/assistant-billing";
 import { claimHandle, ensureStatsId, setAssistantPlan, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-type Start = { checkout: string } | { already: Store } | { waiting: true };
-/** The way a creator starts the add-on; before this fix, only createAssistantCheckout existed. */
-const start: (store: Store, origin: string) => Promise<Start> =
-  ((billing as Record<string, unknown>).startAssistant as ((store: Store, origin: string) => Promise<Start>) | undefined) ??
-  (async (store, origin) => ({ checkout: await createAssistantCheckout(store, origin) }));
+/** The way a creator starts the add-on (app/api/billing/assistant/route.ts). */
+const start: (store: Store, origin: string) => Promise<AssistantStart> = startAssistant;
 
 const OWNER = "r23-assistant@example.com";
 const HANDLE = "rtwothree";

@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { away, creatorFrom } from "@/lib/studio-route";
 import { isBillingConfigured } from "@/lib/billing";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
-import { assistantRefusal, createAssistantCheckout, readAssistantReturn, setAssistantStop, syncAssistant } from "@/lib/assistant-billing";
+import { assistantRefusal, readAssistantReturn, setAssistantStop, startAssistant, syncAssistant } from "@/lib/assistant-billing";
 import { setAssistantPlan } from "@/lib/store";
 import { limited } from "@/lib/request-guard";
 
@@ -36,8 +36,13 @@ export async function POST(request: NextRequest) {
       if (!ASSISTANT_ON_SALE) return back("not-open");
       const refused = assistantRefusal(store);
       if (refused) return back(refused);
-      const url = await createAssistantCheckout(store, origin);
-      return new Response(null, { status: 303, headers: { Location: url } });
+      // A live add-on at Stripe is adopted and one still charged opens nothing (lib/assistant-billing.ts): never a
+      // second subscription beside it. A list not known throws, and the creator is told something went wrong.
+      const started = await startAssistant(store, origin);
+      if ("checkout" in started) return new Response(null, { status: 303, headers: { Location: started.checkout } });
+      if ("waiting" in started) return back("pending");
+      const plan = started.already.assistantPlan;
+      return back(plan?.disputedAt ? "disputed" : plan?.active ? "already" : "pending");
     }
     if (action === "stop" || action === "resume") {
       const saved = await setAssistantStop(store, action === "stop");

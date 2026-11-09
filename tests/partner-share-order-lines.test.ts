@@ -4,15 +4,19 @@
  * checkout, or a cart), each partner's base is the part of the order paid for the lines of the products they
  * share in, each line weighed by what it was charged (`<bump>_cents`, the rest of the subtotal for the order's
  * own product), with what the code took off and the shipping shared the same way and the tax left out.
- * A line whose price does not read writes no partner's share at all for that order, never a guessed base.
- * An order of one product is unchanged: the whole amount before tax. Synthetic records, mocked Stripe only.
+ * A line whose price does not read writes no partner's share at all for that order, never a guessed base, and
+ * the order is left for the sweep's next run (noteSession rejects). A refund names no line, so a partner on some
+ * lines of an order keeps only what no reading of the refund can take; a partner on every line, and an order of
+ * one product, keep the share in proportion as before. An order whose every line is free gives a partner on some
+ * lines nothing. An order of one product is unchanged: the whole amount before tax. Synthetic records, mocked
+ * Stripe only.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { createCheckout } from "@/lib/store-checkout";
 import { createCartCheckout } from "@/lib/cart-checkout";
-import { noteSession } from "@/lib/affiliates";
+import { noteSession, readBook } from "@/lib/affiliates";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -20,6 +24,7 @@ import { paidPeriod } from "./billing-period-fixture";
 const OWNER = "owner-partner-lines@example.com";
 const ACCOUNT = "acct_1TestPartnerLines1";
 const checkouts: URLSearchParams[] = [];
+const refunds: { id: string; object: "refund"; status: string; payment_intent: string; amount: number; created: number }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
@@ -28,6 +33,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     checkouts.push(new URLSearchParams(String(init?.body)));
     return new Response(JSON.stringify({ id: `cs_test_${"p".repeat(24)}`, url: "https://checkout.stripe.com/c/pay/test" }));
   }
+  if (path === "/refunds" && method === "GET") return new Response(JSON.stringify({ object: "list", data: refunds, has_more: false }));
   if (method === "GET") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
@@ -120,14 +126,16 @@ async function main(): Promise<void> {
     if (value === undefined) delete odd[key];
     else odd[key] = value;
     const order = paid(odd, { subtotal: 7800, total: 7800 });
-    await noteSession(store, order, new Map(), partners);
+    const outcome = await noteSession(store, order, new Map(), partners).then(() => "resolved", (error: Error) => error.name);
+    is(`${label}: the order is left for the sweep's next run, not dropped`, outcome, "UnknownReplyError");
     is(`${label}: nothing for the Course partner`, await baseOf(order.id, onCourse.id), null);
     is(`${label}: nothing for the Workbook partner`, await baseOf(order.id, onWorkbook.id), null);
     is(`${label}: nothing for the partner in both`, await baseOf(order.id, onBoth.id), null);
   }
   const noSubtotal = paid(bumpMeta, { subtotal: 7800, total: 7800 }) as Record<string, unknown>;
   delete noSubtotal.amount_subtotal;
-  await noteSession(store, noSubtotal as never, new Map(), partners);
+  const noSubtotalOutcome = await noteSession(store, noSubtotal as never, new Map(), partners).then(() => "resolved", (error: Error) => error.name);
+  is("a subtotal that does not read: the order is left for the sweep's next run", noSubtotalOutcome, "UnknownReplyError");
   is("a subtotal that does not read: nothing for the Course partner", await baseOf(noSubtotal.id as string, onCourse.id), null);
 
   part("Controls: an order of one product is unchanged");
@@ -140,6 +148,41 @@ async function main(): Promise<void> {
   is("with shipping, as before: what the buyer paid before tax", await baseOf(shipped.id, onCourse.id), 5400);
   await noteSession(store, { ...bumpOrder, amount_total: 1 }, new Map(), partners);
   is("the same order seen again changes nothing (one record per order per partner)", await baseOf(bumpOrder.id, onWorkbook.id), 2900);
+
+  part("An order whose every line is free, with $5 shipping");
+  const freeMeta = { ...bumpMeta };
+  freeMeta[Object.keys(freeMeta).find((k) => /_cents$/.test(k) && k !== "intro_cents" && k !== "regular_cents")!] = "0";
+  const free = paid(freeMeta, { subtotal: 0, total: 500, shipping: 500 });
+  await noteSession(store, free, new Map(), partners);
+  is("the Workbook partner earns nothing on a free Workbook", await baseOf(free.id, onWorkbook.id), 0);
+  is("the Course partner earns nothing on a free Course", await baseOf(free.id, onCourse.id), 0);
+  is("a partner in every line is read as an order of one product, as before", await baseOf(free.id, onBoth.id), 500);
+
+  part("A refund names no line: Course $49 + Workbook $29, the $29 given back");
+  const commission = async (ref: string, aff: string) => (await readBook(store)).lines.find((l) => l.ref === `${ref}:${aff}`)?.commission ?? null;
+  const refund = (order: { id: string; payment_intent: string }, amount: number) =>
+    refunds.push({ id: `re_${order.id.slice(-12)}`, object: "refund", status: "succeeded", payment_intent: order.payment_intent, amount, created: Math.floor(Date.now() / 1000) });
+  is("before any refund, the Workbook partner earns half of $29", await commission(bumpOrder.id, onWorkbook.id), 1450);
+  is("before any refund, the Course partner earns half of $49", await commission(bumpOrder.id, onCourse.id), 2450);
+  refund(bumpOrder, 2900);
+  is("the Workbook partner is not paid on what may be the refunded line", await commission(bumpOrder.id, onWorkbook.id), 0);
+  is("the Course partner keeps half of what no reading of the refund can take ($49 - $29)", await commission(bumpOrder.id, onCourse.id), 1000);
+  is("a partner on every line keeps half of what was kept, as before", await commission(bumpOrder.id, onBoth.id), 2450);
+  const book = await readBook(store);
+  is("the refunds were read in full", book.refundsChecked, true);
+
+  part("A refund names no line: with a code and tax");
+  refund(coded, 2610 + 209);
+  is("the Workbook partner is not paid on what may be the refunded line", await commission(coded.id, onWorkbook.id), 0);
+  is("the Course partner keeps half of $44.10 less the $26.10 refunded before tax", await commission(coded.id, onCourse.id), 900);
+  is("a partner on every line keeps half of what was kept before tax, as before", await commission(coded.id, onBoth.id), 2205);
+
+  part("A refund of the whole order, and an order of one product");
+  refund(cartOrder, 7800);
+  is("the whole order given back: the Course partner earns nothing", await commission(cartOrder.id, onCourse.id), 0);
+  is("the whole order given back: the Workbook partner earns nothing", await commission(cartOrder.id, onWorkbook.id), 0);
+  refund(solo, 2646);
+  is("one product, half given back: half of what was kept, as before", await commission(solo.id, onCourse.id), 1225);
   done();
 }
 

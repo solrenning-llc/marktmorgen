@@ -162,6 +162,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/forms/export": row("buyers", never(PEOPLE_FILE)),
   "GET store/forms/response-pdf": row("buyers", never(PEOPLE_FILE)),
   "POST store/funnel": row("offers", draft),
+  "POST store/funnel-explain": row("pages", draft, "Explains one problem the funnel's sharing review found: its text comes back to the creator, nothing is saved by it."),
   "GET store/funnel-share": row("pages", read),
   "POST store/funnel-share": row("pages", draft),
   "POST store/goal": row("numbers", draft),

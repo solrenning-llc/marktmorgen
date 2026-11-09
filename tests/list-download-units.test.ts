@@ -22,7 +22,8 @@ import { allowanceUsed, forceAllowance } from "@/lib/store-allowance";
 import { NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import * as closingRules from "@/lib/plan-closing-rules";
 import { personKey } from "@/lib/person-key";
-import { writeFields } from "@/lib/crm";
+import { PERSON_ARG_BYTES, writeFields } from "@/lib/crm";
+import { listAsCsv, listValuesShape } from "@/lib/free";
 import { MAX_CONTACT_NAME, MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 import { MAX_CRM_FIELDS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
 import { DATA_ROOM_BYTES } from "@/lib/store-data-rules";
@@ -289,6 +290,64 @@ async function main(): Promise<void> {
       got.status === 200 ? got.taken * UNIT_COST.studio >= costOf(got.commands, got.bytes, got.sent) : [got.status, /left/.test(got.text), got.text.includes("@example.com")].join(),
       got.status === 200 ? true : "429,true,false",
     );
+  }
+
+  part("A whole export's contacts file reads the fields' values a thousand people at a time, whatever size of page HSCAN answers (third cost review of #3354)");
+  {
+    redis.clear();
+    // COUNT is only a hint: a list of 2,500 people walked in pages of 70, the first person handed back again on a
+    // later page, no longer agreeing to emails. The export prices its values' reads before the walk (listValuesShape).
+    const people = 2_500;
+    const { store } = await storeWith("r31-pages@example.com", "rthirtyonepages", people);
+    const fields = Array.from({ length: 3 }, (_, i) => ({ id: `pgd${String(i).padStart(3, "0")}`, name: `Paged ${i}`, type: "text" as const, options: [] }));
+    await writeFields(store.statsId!, fields);
+    for (let i = 0; i < people; i += 500) {
+      const page = Array.from({ length: 500 }, (_, k) => i + k);
+      await redis.pipeline(fields.map((f, j) => ["HSET", `nl:crm:v:${store.statsId}:${f.id}`, ...page.flatMap((n) => [personKey(store.statsId!, `person${n}@example.com`), `p${n}-f${j}`])]));
+    }
+    const shape = await listValuesShape(store);
+    const size = 70;
+    const pipeline = redis.pipeline;
+    let hmgets = 0;
+    let keysSent = 0;
+    let pages = 0;
+    redis.pipeline = async (list) => {
+      const replies = await pipeline(list);
+      return list.map((c, i) => {
+        if (c[0] === "HMGET") {
+          hmgets += 1;
+          keysSent += c.length - 2;
+        }
+        if (c[0] !== "HSCAN" || c[1] !== leadsKey(store.listId!)) return replies[i];
+        pages += 1;
+        const flat = (replies[i] as [string, string[]])[1];
+        const at = Number(c[2]);
+        const items = flat.slice(at * size * 2, (at + 1) * size * 2);
+        if (at === 5) {
+          const again = JSON.parse(flat[1]) as Record<string, unknown>;
+          items.push(flat[0], JSON.stringify({ ...again, agreed: false, unsub: true, unsubAt: new Date().toISOString() }));
+        }
+        return [(at + 1) * size * 2 >= flat.length ? "0" : String(at + 1), items];
+      });
+    };
+    let whole = "";
+    let agreed = "";
+    try {
+      hmgets = keysSent = pages = 0;
+      whole = await listAsCsv(store, false);
+      const counted = { hmgets, keysSent, pages };
+      hmgets = keysSent = pages = 0;
+      agreed = await listAsCsv(store, true);
+      console.log(`${people} people, ${fields.length} fields, pages of ${size}: ${counted.pages} pages; ${counted.hmgets} HMGET with ${counted.keysSent} keys (agreed-only: ${hmgets} with ${keysSent}); priced ${shape.commands} commands and ${shape.bytes} bytes`);
+      is("the values' reads are never more commands than the export priced", [counted.hmgets <= shape.commands, hmgets <= shape.commands], [true, true]);
+      is("the people's keys sent are never more bytes than the export priced: an address handed back again is not read again", [counted.keysSent * PERSON_ARG_BYTES <= shape.bytes, keysSent * PERSON_ARG_BYTES <= shape.bytes], [true, true]);
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    const lines = (text: string) => text.trim().split("\r\n").slice(1);
+    is("control: every person is in the whole file once, with each of their values", [lines(whole).length, lines(whole).filter((l) => l.startsWith('"person1234@example.com"')).map((l) => fields.every((_, j) => l.includes(`"p1234-f${j}"`)))], [people, [true]]);
+    is("control: the first person's values are in the whole file once", lines(whole).filter((l) => l.startsWith('"person0@example.com"')).map((l) => l.includes('"p0-f2"')), [true]);
+    is("control: a later reading of an address still wins (the agreed-only file leaves out who stopped agreeing)", [lines(agreed).length, agreed.includes('"person0@example.com"'), agreed.includes('"p1-f1"')], [people - 1, false, true]);
   }
 
   part("Control: an empty list still downloads, for a few units");

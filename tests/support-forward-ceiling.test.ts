@@ -7,17 +7,23 @@
  * company's cost (ALTO 1 of Claude 5's email audit). Spending SES's day also
  * stops buyers' receipts and sign-in links.
  *
- * Held here: a sender (however the address is written) is sent on at most
+ * Held here: announcements of mail not written to a store are counted
+ * (SUPPORT_ANNOUNCED_DAILY a UTC day) before the message is read at Resend;
+ * a sender (however the address is written) is sent on at most
  * SUPPORT_SENDER_HOURLY times an hour and SUPPORT_SENDER_DAILY a day; all
- * senders together at most SUPPORT_DAILY a UTC day; files at most
- * SUPPORT_FILE_BYTES_DAILY bytes a UTC day. Each is counted before the send.
- * A message past a ceiling is "held": left in Resend (Emails, Receiving),
- * never retried, and the inbox is told once a day where to find it. A count
- * that cannot be read sends nothing and asks Resend to try again. A retried
- * message is counted once. The store path keeps CREATOR_HOURLY and is not
- * counted against the company's ceiling. docs/funded-exposure-review.md
- * carries the month's ceiling the registry computes.
+ * senders together at most SUPPORT_DAILY a UTC day, of which senders with no
+ * store under the address SUPPORT_PUBLIC_DAILY; files at most
+ * SUPPORT_FILE_BYTES_DAILY bytes a UTC day, each charged once at its listed
+ * size and never read past it. Each is counted before the send. A message
+ * past a ceiling is "held": not sent on, not tried again, readable in Resend,
+ * and the inbox is told once a day. A count that cannot be read sends nothing
+ * and asks Resend to try again; each count a message took is marked, so a
+ * try again never takes it twice. The store path keeps CREATOR_HOURLY.
+ * docs/funded-exposure-review.md carries the month's ceiling the registry
+ * computes, and the commands a forward and a held message can send stay
+ * within the registry's figures (pre-review of 9 November 2026).
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as inbound from "@/lib/inbound-mail";
 import { installSesMailFixture } from "./ses-mail-fixture";
@@ -29,34 +35,41 @@ process.env.RESEND_API_KEY = "re_SYNTHETIC_TEST_ONLY";
 process.env.RESEND_WEBHOOK_SECRET = `whsec_${Buffer.from("a-stand-in-secret-for-tests-only").toString("base64")}`;
 process.env.RESEND_INBOUND_API_KEY = "re_SYNTHETIC_INBOUND_ONLY";
 process.env.SUPPORT_FORWARD_TO = "owner@example.org";
+process.env.MARKETING_FROM_DOMAIN = "mail.marktmorgen.com";
 
 const limits = inbound as unknown as Record<string, number | undefined>;
 const HOURLY = limits.SUPPORT_SENDER_HOURLY ?? 10;
 const SENDER_DAILY = limits.SUPPORT_SENDER_DAILY ?? 30;
 const DAILY = limits.SUPPORT_DAILY ?? 200;
+const PUBLIC_DAILY = limits.SUPPORT_PUBLIC_DAILY ?? 120;
+const ANNOUNCED = limits.SUPPORT_ANNOUNCED_DAILY ?? 1_000;
 const FILE_BYTES = limits.SUPPORT_FILE_BYTES_DAILY ?? 300_000_000;
-type Forward = (id: string, now?: number) => Promise<string>;
+type Forward = (id: string, now?: number, announcedTo?: unknown) => Promise<string>;
 const forward = inbound.forwardInbound as unknown as Forward;
+const costs = registry as unknown as Record<string, number | undefined>;
 
 const NOON = Date.UTC(2026, 10, 9, 12, 0, 0);
 const DAY = 86_400_000;
+/** The route's own commands before forwardInbound: its connection limit (SET NX, INCR) and the seen mark. */
+const ROUTE_COMMANDS = 3;
 const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
 
-/** What each received message looks like: its sender, where it was written, and its files' sizes. */
-const messages = new Map<string, { from: string; to: string; files: number[] }>();
+/** What each received message looks like: its sender, where it was written, its files' listed and real sizes. */
+const messages = new Map<string, { from: string; to: string; listed: number[]; real: number[] }>();
 let fileReads = 0;
-let readFails = false;
+let fileBytesRead = 0;
+let mailReads = 0;
 const fixture = installSesMailFixture({
   onResend: (_m, input) => {
     const url = new URL(String(input));
     const att = /^\/emails\/receiving\/([0-9a-f-]+)\/attachments$/.exec(url.pathname);
     if (att) {
       const m = messages.get(att[1]);
-      return json({ data: (m?.files ?? []).map((size, n) => ({ filename: `f${n}.bin`, size, download_url: `https://files.resend.com/${att[1]}/${n}` })) });
+      return json({ data: (m?.listed ?? []).map((size, n) => ({ filename: `f${n}.bin`, size, download_url: `https://files.resend.com/${att[1]}/${n}` })) });
     }
     const one = /^\/emails\/receiving\/([0-9a-f-]+)$/.exec(url.pathname);
     if (one) {
-      if (readFails) return new Response("down", { status: 503 });
+      mailReads++;
       const m = messages.get(one[1]);
       if (!m) return new Response("no", { status: 404 });
       return json({ object: "email", id: one[1], from: m.from, to: [m.to], subject: "hello", text: "words", headers: {} });
@@ -68,12 +81,33 @@ const fixture = installSesMailFixture({
     const file = /^\/([0-9a-f-]+)\/(\d+)$/.exec(url.pathname);
     if (url.hostname === "files.resend.com" && file) {
       fileReads++;
-      return new Response(Buffer.alloc(messages.get(file[1])?.files[Number(file[2])] ?? 0, 7));
+      const size = messages.get(file[1])?.real[Number(file[2])] ?? 0;
+      // Counts what is actually pulled from the body, chunk by chunk.
+      let sent = 0;
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent >= size) return controller.close();
+          const chunk = Math.min(65_536, size - sent);
+          sent += chunk;
+          fileBytesRead += chunk;
+          controller.enqueue(new Uint8Array(chunk).fill(7));
+        },
+      });
+      return new Response(stream);
     }
     return new Response("no", { status: 404 });
   },
 });
 fixture.configure();
+
+const sesBodies: unknown[] = [];
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const response = await originalFetch(input, init);
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  if (url.pathname === "/v2/email/outbound-emails" && response.ok && typeof init?.body === "string") sesBodies.push(JSON.parse(init.body));
+  return response;
+}) as typeof fetch;
 
 /** Bytes of files in every SES send so far, decoded. */
 function sentFileBytes(): number {
@@ -90,21 +124,29 @@ function sentFileBytes(): number {
   for (const body of sesBodies) walk(body);
   return total;
 }
-const sesBodies: unknown[] = [];
-const originalFetch = globalThis.fetch;
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const response = await originalFetch(input, init);
-  const url = new URL(input instanceof Request ? input.url : String(input));
-  if (url.pathname === "/v2/email/outbound-emails" && response.ok && typeof init?.body === "string") sesBodies.push(JSON.parse(init.body));
-  return response;
-}) as typeof fetch;
+
+type Pipe = (c: (string | number)[][]) => Promise<unknown[]>;
+const handle = redis as unknown as { pipeline: Pipe };
+const realPipeline: Pipe = redis.pipeline.bind(redis);
+let commands = 0;
+let failing: RegExp | null = null;
+handle.pipeline = async (c) => {
+  if (failing && c.some((x) => failing!.test(String(x[1] ?? "")))) throw new Error("synthetic Redis outage");
+  commands += c.length;
+  return realPipeline(c);
+};
 
 let serial = 0;
-function message(from: string, files: number[] = [], to = "support@marktmorgen.com"): string {
+function message(from: string, listed: number[] = [], real: number[] = listed, to = "support@marktmorgen.com"): string {
   serial++;
   const id = `${serial.toString(16).padStart(8, "0")}-02e9-4d39-ad75-9611e0fcc33c`;
-  messages.set(id, { from, to, files });
+  messages.set(id, { from, to, listed, real });
   return id;
+}
+/** A store under an address, as lib/store.ts keys its owner (only the key's presence is read). */
+function makeCreator(email: string) {
+  const key = `nl:store:owner:${createHash("sha256").update(`nimbus-store:${email.toLowerCase()}`).digest("hex").slice(0, 40)}`;
+  redis.run(["SET", key, "{}"]);
 }
 function fresh() {
   redis.clear();
@@ -112,17 +154,20 @@ function fresh() {
   fixture.configure();
   sesBodies.length = 0;
   fileReads = 0;
-  readFails = false;
+  fileBytesRead = 0;
+  mailReads = 0;
+  failing = null;
 }
 const toSupport = () => fixture.ses.filter((m) => m.subject === "hello");
 const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
 
 (async () => {
   part("the ceilings are exported, finite and positive");
-  for (const name of ["SUPPORT_SENDER_HOURLY", "SUPPORT_SENDER_DAILY", "SUPPORT_DAILY", "SUPPORT_FILE_BYTES_DAILY", "SUPPORT_HELD_NOTICES_DAILY"]) {
+  for (const name of ["SUPPORT_SENDER_HOURLY", "SUPPORT_SENDER_DAILY", "SUPPORT_DAILY", "SUPPORT_PUBLIC_DAILY", "SUPPORT_ANNOUNCED_DAILY", "SUPPORT_FILE_BYTES_DAILY", "SUPPORT_HELD_NOTICES_DAILY"]) {
     const value = limits[name];
     is(`${name} is a positive whole number`, Number.isSafeInteger(value) && (value as number) > 0, true);
   }
+  is("the public share is smaller than the day, so creators keep a share", PUBLIC_DAILY < DAILY, true);
 
   part("one sender writes support@ 300 times in an hour (the audit's proof)");
   fresh();
@@ -150,19 +195,51 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   }
   is("forwarded in the day: the sender's daily ceiling", dailySent, Math.min(SENDER_DAILY, 10 * HOURLY));
 
-  part("every sender together: SUPPORT_DAILY a UTC day");
+  part("every sender together: made-up addresses take the public share, creators keep the rest of SUPPORT_DAILY");
   fresh();
-  let allSent = 0;
-  for (let i = 0; i < DAILY + 25; i++) if ((await forward(message(`person${i}@example.com`), NOON)) === "sent") allSent++;
-  is("forwarded: the company's daily ceiling", allSent, DAILY);
+  let publicSent = 0;
+  for (let i = 0; i < DAILY + 25; i++) if ((await forward(message(`person${i}@random${i}.example`), NOON)) === "sent") publicSent++;
+  // Changed 9 November 2026 (pre-review item 4; rule 23): "forwarded: the company's daily ceiling" wanted DAILY from
+  // made-up addresses; they now stop at the public share, so they can no longer hold every creator for the day.
+  is("forwarded from senders with no store: the public share", publicSent, PUBLIC_DAILY);
+  is("a buyer with no store writing afterwards is held too: From is not authenticated, so no sender can be told from a made-up one", await forward(message("buyer@customer.example"), NOON + 60_000), "held");
+  let creatorSent = 0;
+  for (let i = 0; i < DAILY; i++) {
+    const address = `creator${i}@studio${i}.example`;
+    makeCreator(address);
+    if ((await forward(message(address), NOON + 60_000)) === "sent") creatorSent++;
+  }
+  is("creators are still sent on, up to the company's daily ceiling", creatorSent, DAILY - PUBLIC_DAILY);
   is("the next UTC day sends again", await forward(message("tomorrow@example.com"), NOON + DAY), "sent");
 
-  part("held messages: the inbox is told once a day where they are kept");
+  part("held messages: the inbox is told once a day, without promising what no source says");
   is("one notice for the held day, none for the day that sent", notices().length, 1);
   const notice = notices()[0];
   is("the notice goes to the support inbox", notice?.to, ["owner@example.org"]);
-  is("it says where the held messages are: Resend, Emails, Receiving", /Resend/.test(notice?.text ?? "") && /Receiving/.test(notice?.text ?? ""), true);
-  is("it says nothing was deleted", /not deleted|Nothing was deleted/i.test(notice?.text ?? ""), true);
+  is("it says plainly the messages were not sent and will not be, where to read them, and that this site keeps no copy",
+    (notice?.text ?? "").includes("These messages were not sent on and will not be sent later. Read them in Resend (Emails, Receiving); this site keeps no copy. New messages are sent on again as usual."), true);
+  // Changed 9 November 2026 (pre-review item 6; rule 23): "it says nothing was deleted" wanted the notice to promise
+  // that nothing was deleted; no dated source says how long Resend keeps a message, so it no longer promises that.
+  is("it does not promise every message is kept or that sending resumes by itself", /Every message is kept|Nothing was deleted|starts again by itself/.test(notice?.text ?? ""), false);
+
+  part("announcements of support mail are counted before the message is read at Resend");
+  fresh();
+  for (let i = 0; i < ANNOUNCED; i++) await forward(message(`a${i}@q${i}.example`), NOON);
+  const readsBefore = mailReads;
+  commands = 0;
+  const pastAnnounced: string[] = [];
+  for (let i = 0; i < 50; i++) pastAnnounced.push(await forward(message(`b${i}@q${i}.example`), NOON));
+  is("past the day's announcements: held without reading Resend", [mailReads - readsBefore, pastAnnounced.every((r) => r === "held")], [0, true]);
+  is("each costs a few commands only (the counter and the day's notice mark)", (commands + 50 * ROUTE_COMMANDS) / 50 <= ROUTE_COMMANDS + 3, true);
+  const toStore = await forward(message("buyer@example.com", [], [], "nobody-here@mail.marktmorgen.com"), NOON, ["nobody-here@mail.marktmorgen.com"]);
+  is("mail the announcement shows written to a store is not support's: still read, then dropped as no store's", [toStore, mailReads - readsBefore], ["skipped", 1]);
+
+  part("a held message that was read stays within the registry's commands");
+  fresh();
+  for (let i = 0; i < HOURLY; i++) await forward(message("loud@example.com"), NOON);
+  commands = 0;
+  await forward(message("loud@example.com"), NOON);
+  is(`held after its read: ${commands + ROUTE_COMMANDS} commands, at most SUPPORT_HELD_READ_COMMANDS`, commands + ROUTE_COMMANDS <= (costs.SUPPORT_HELD_READ_COMMANDS ?? 0), true);
 
   part("files: SUPPORT_FILE_BYTES_DAILY a UTC day, the rest left out and named");
   fresh();
@@ -176,6 +253,18 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   const last = toSupport().at(-1);
   is("a file left out is named, with where to find it", /Not attached \(see Resend, Emails, Receiving\): f0\.bin/.test(last?.text ?? ""), true);
 
+  part("a file is charged once, at its listed size, and never read past it");
+  fresh();
+  commands = 0;
+  const hundred = Array.from({ length: 100 }, () => 1_000);
+  const larger = Array.from({ length: 100 }, () => 1_001);
+  is("a message whose 100 files are bigger than listed is still sent on", await forward(message("files@example.com", hundred, larger), NOON), "sent");
+  is(`${commands + ROUTE_COMMANDS} commands for the whole forward, at most SUPPORT_FORWARD_COMMANDS`, commands + ROUTE_COMMANDS <= (costs.SUPPORT_FORWARD_COMMANDS ?? 0), true);
+  is("files bigger than listed are left out, none sent", sentFileBytes(), 0);
+  is("and never read much past their listed size (one chunk at most each)", fileBytesRead <= 100 * 65_536, true);
+  fresh();
+  is("a file listed with no size is not read whole", [await forward(message("zero@example.com", [0], [5_000_000]), NOON), fileBytesRead <= 65_536, sentFileBytes()], ["sent", true, 0]);
+
   part("a message tried again is counted once");
   fresh();
   const again = message("retry@example.com", [2_000_000]);
@@ -185,19 +274,30 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   const second = await forward(again, NOON);
   is("the first try asks for a retry", first, "retry");
   is("the retry is sent", second, "sent");
+  is("its files were charged once", Number(redis.run(["GET", `nl:inbound:support:bytes:${new Date(NOON).toISOString().slice(0, 10)}`])), 2_000_000);
   let after = 0;
   for (let i = 0; i < HOURLY; i++) if ((await forward(message("retry@example.com"), NOON)) === "sent") after++;
   is("the retried message took one place of the hour, not two", after, HOURLY - 1);
 
+  part("a company count that cannot be read, tried again, does not take the sender's hour again");
+  fresh();
+  for (let i = 0; i < 6; i++) await forward(message("client@customer.example"), NOON);
+  const seventh = message("client@customer.example");
+  failing = /^nl:rl:support-forward:/;
+  const tries: string[] = [];
+  for (let i = 0; i < 4; i++) { tries.push(await forward(seventh, NOON + i * 60_000)); advance(60_000); }
+  failing = null;
+  tries.push(await forward(seventh, NOON + 5 * 60_000));
+  is("retry while the count is out of reach, sent once it reads again", tries, ["retry", "retry", "retry", "retry", "sent"]);
+  let left = 0;
+  for (let i = 0; i < HOURLY; i++) if ((await forward(message("client@customer.example"), NOON + 6 * 60_000)) === "sent") left++;
+  is("the hour holds the seven messages, not the four tries", left, HOURLY - 7);
+
   part("a count that cannot be read sends nothing and asks again");
   fresh();
-  const realPipeline = redis.pipeline.bind(redis);
-  (redis as unknown as { pipeline: (c: (string | number)[][]) => Promise<unknown[]> }).pipeline = async (commands) => {
-    if (commands.some((c) => String(c[1] ?? "").startsWith("nl:rl:support"))) throw new Error("synthetic Redis outage");
-    return realPipeline(commands);
-  };
+  failing = /^nl:rl:support/;
   const unknown = await forward(message("someone@example.com", [1_000]), NOON);
-  (redis as unknown as { pipeline: typeof realPipeline }).pipeline = realPipeline;
+  failing = null;
   is("retry, so Resend offers it again", unknown, "retry");
   is("nothing went out", fixture.ses.length, 0);
 
@@ -210,7 +310,8 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   is("the registry prices the month at the ceilings", Number.isFinite(figure?.modeledUsd) && (figure?.modeledUsd ?? 0) > 0, true);
   is("the complete figure stays unknown, never zero", figure?.completeUsd, null);
   const doc = readFileSync("docs/funded-exposure-review.md", "utf8");
-  is("the review names the ceiling and its monthly figure", doc.includes("SUPPORT_DAILY") && doc.includes(`$${(figure?.modeledUsd ?? NaN).toFixed(2)}`), true);
+  is("the review names the ceilings and its monthly figure", ["SUPPORT_DAILY", "SUPPORT_PUBLIC_DAILY", "SUPPORT_ANNOUNCED_DAILY"].every((n) => doc.includes(n)) && doc.includes(`$${(figure?.modeledUsd ?? NaN).toFixed(2)}`), true);
+  is("the review does not promise held messages are kept", /Every message is kept|is held, not dropped/.test(doc), false);
 
   globalThis.fetch = originalFetch;
   fixture.restore();

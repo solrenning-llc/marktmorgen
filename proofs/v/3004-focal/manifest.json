@@ -1,0 +1,8 @@
+{
+  "head": "5a477e39887193d3f40d724b7e0b6e9498a4bcc5",
+  "format": "UTF-8 JSON files[].data; base64 -> gzip -> JSON",
+  "files": 27,
+  "decodedJsonBytes": 212203,
+  "sha256": "9512c2f63fc54feacb8e10a804778f6fb07fa019aae2b76fcb963f0a169fd597",
+  "archiveChars": 43100
+}

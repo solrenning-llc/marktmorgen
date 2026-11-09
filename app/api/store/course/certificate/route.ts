@@ -7,7 +7,7 @@ import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, storeKey } from "@/lib/learn";
-import { passedQuizzes } from "@/lib/quiz";
+import { passedForGate } from "@/lib/quiz";
 import { hasFinished, issueCertificate } from "@/lib/certificate";
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
   if (!(await takeBuyerAction(store))) return restingAway(origin, store);
 
   const who = emailKey(access.learner.email);
-  const [done, passed] = await Promise.all([doneLessons(course.id, access.learner.email), passedQuizzes(course.id, who)]);
+  const [done, passed] = await Promise.all([doneLessons(course.id, access.learner.email), passedForGate(course.id, who)]);
   if (!hasFinished(course, done, passed)) return away(`${base}?cert=unfinished#certificate`);
 
   let issued: Awaited<ReturnType<typeof issueCertificate>>;

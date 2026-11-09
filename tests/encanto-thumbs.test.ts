@@ -8,9 +8,11 @@
  *     narrower than the copies above it); a copy that fails is dropped and never written;
  *   - (2) it lives in the store's picture folder, so the storage meter counts it, and it goes with the picture when
  *     the picture is replaced or deleted, or copied to the pictures' own bucket (imagePaths);
- *   - (3) its cost is written down: every thumbnail upload needs its own studio request (studioAccess, counted against
- *     the plan's studio figure, a hard ceiling a month), so the line `picture-thumbnails` in tests/plan-cost-registry.ts
- *     counts its Blob operations at that ceiling, from the official price (vercel.com, read 6 Nov 2026);
+ *   - (3) its cost is written down: every thumbnail upload is its own studio request through the pictures' upload
+ *     route (studioAccess, counted against the plan's studio figure, a hard ceiling a month), which the line
+ *     `picture-uploads` already prices at the dearest upload request; the line `picture-thumbnails` in
+ *     tests/plan-cost-registry.ts counts what it adds to the attaching request, at that ceiling, from the official price
+ *     (vercel.com, read 6 Nov 2026);
  *   - (4) pictures from before have none and are served as they were.
  */
 import { readFileSync } from "node:fs";

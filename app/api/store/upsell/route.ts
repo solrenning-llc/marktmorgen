@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { type DigitalConsent, consentFromForm } from "@/lib/digital-consent";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { canSell } from "@/lib/store-checkout";
 import { UPSELL_COOKIE, takeUpsell } from "@/lib/upsell";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 
@@ -47,6 +48,20 @@ export async function POST(request: NextRequest) {
 
   const store = await storeForHandle(handle);
   if (!store) return new Response("No such store.", { status: 404 });
+  const back = (status: string) =>
+    new Response(null, {
+      status: 303,
+      headers: {
+        Location: `${origin}/@${store.handle}/thanks?session_id=${encodeURIComponent(session)}&upsell=${status}`,
+        "Cache-Control": "no-store",
+      },
+    });
+  // A yes is a new sale on the creator's account: refused, as the store's
+  // other checkouts refuse it (lib/store-checkout.ts, canSell), in a store
+  // switched off after notices (lib/takedown.ts), whose plan is not paid or
+  // whose Stripe account is not cleared — before Stripe is asked anything
+  // and before anything is written. A no is refused the same: nothing to answer.
+  if (!canSell(store)) return back("unavailable");
   if (!(await withinLimit("upsell", `${clientAddress(request)}|${store.handle}`, 30, 600))) {
     return new Response("Too many tries. Wait a few minutes.", { status: 429, headers: { "Cache-Control": "no-store" } });
   }
@@ -60,14 +75,6 @@ export async function POST(request: NextRequest) {
     answer,
     consent: answer === "yes" ? consent : null,
   });
-  const back = (status: string) =>
-    new Response(null, {
-      status: 303,
-      headers: {
-        Location: `${origin}/@${store.handle}/thanks?session_id=${encodeURIComponent(session)}&upsell=${status}`,
-        "Cache-Control": "no-store",
-      },
-    });
   if (result.kind === "confirm") {
     return new Response(null, { status: 303, headers: { Location: result.url, "Cache-Control": "no-store" } });
   }

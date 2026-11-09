@@ -96,5 +96,5 @@ for (const tier of ["creator", "pro", "scale"] as const) {
   const carried = Math.min(studio, PICTURE_DOOR_MAX) * check;
   is(`${tier}: the studio figure at its dearest request kind, and the notes carried in, each read once`, Math.abs((line?.monthlyUsd(tier) ?? 0) - (studio * Math.max(door, page) + carried)) < 1e-9, true);
 }
-is("its source and date are said, and why the read is counted whole", (line?.basis ?? "").includes("vercel.com/docs/vercel-blob/usage-and-pricing") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
+is("its source and date are said, and why the read is counted whole", (line?.basis ?? "").includes("Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
 done();

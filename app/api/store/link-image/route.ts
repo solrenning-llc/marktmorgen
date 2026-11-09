@@ -48,6 +48,14 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
       fresh = await takePictureDoor([path]);
+      // A link that is not there answers "unknown" before any other refusal. Only a picture fresh from the door is
+      // deleted then (dropFresh): one of a product, another link or a page is never touched. A fresh one is not kept for
+      // later: the door's note ends in a day, nothing sweeps such pictures and the studio uploads each under a new
+      // name (Claude 5's correction on #2657, which withdrew the refusal before the door).
+      if (!link) {
+        await dropFresh(path);
+        return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      }
       const side = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n > 0 && n <= LINK_IMAGE_SIDE ? n : 0);
       const width = side(body.width);
       const height = side(body.height);
@@ -57,14 +65,9 @@ export async function POST(request: NextRequest) {
       }
       // A name in the shared folder that is neither fresh from the door nor this link's own may be a product's,
       // another link's, a page's, a buyer's review photo or an email's picture: refused and kept, so taking this
-      // link or its picture off later can never delete it (lib/picture-door.ts). A link that is not there says so.
-      // Both are answered before the file store is asked anything: a read is only ever of a file this request took
-      // from the door (C1-20261107-1550-TODOS-10).
-      if (!link) {
-        // No such link: nothing to put the picture on, so a fresh one is dropped and the answer says so (Claude 4 on #2156).
-        await dropFresh(path);
-        return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-      }
+      // link or its picture off later can never delete it (lib/picture-door.ts). It is answered before the file store is
+      // asked anything, like a missing link above: a read is only ever of a file this request took from the door
+      // (C1-20261107-1550-TODOS-10).
       if (!fresh.has(path) && link.image?.path !== path) {
         return Response.json({ ok: false, error: "in_use" }, { status: 400 });
       }

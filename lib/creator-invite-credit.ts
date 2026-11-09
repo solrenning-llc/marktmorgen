@@ -54,6 +54,7 @@ export const INVITE_STRIPE_VERSION = "2026-08-26.dahlia";
 const CURSOR_KEY = "nl:ref:cursor";
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
+const CURRENCY_PATTERN = /^[a-z]{3}$/;
 
 type Invoice = {
   id?: unknown;
@@ -67,7 +68,36 @@ type Invoice = {
   payments?: { object?: unknown; has_more?: unknown; data?: { payment?: { type?: unknown; payment_intent?: unknown; charge?: unknown } | null }[] } | null;
 };
 
-const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+/**
+ * A paid invoice as `paidInvoices` lets it through: every field that sets money, the "paid before the invite" mark,
+ * or a share's day and currency in its exact shape (Claude 2's money review of #3221).
+ */
+type PaidInvoice = Invoice & {
+  id: string;
+  amount_paid: number;
+  post_payment_credit_notes_amount: number;
+  currency: string;
+  created: number;
+  status_transitions: { paid_at: number };
+  parent: { type?: unknown } | null;
+};
+
+/** A whole number Stripe can send for an amount or a time, at least `min`. */
+const whole = (v: unknown, min: number): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= min;
+
+/** Whether one row of a paid-invoice list reads exactly; anything else is unknown, never 0, "usd" or "no plan". */
+function isPaidInvoice(row: unknown): row is PaidInvoice {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+  const inv = row as Invoice;
+  const transitions = inv.status_transitions as unknown;
+  const parent = inv.parent as unknown;
+  return typeof inv.id === "string" && INVOICE_PATTERN.test(inv.id) && inv.status === "paid"
+    && whole(inv.amount_paid, 0) && whole(inv.post_payment_credit_notes_amount, 0) && whole(inv.created, 1)
+    && !!transitions && typeof transitions === "object" && !Array.isArray(transitions)
+    && whole((transitions as { paid_at?: unknown }).paid_at, 1)
+    && typeof inv.currency === "string" && CURRENCY_PATTERN.test(inv.currency)
+    && (parent === null || (typeof parent === "object" && !Array.isArray(parent)));
+}
 
 export type InviteCounts = { invited: number; earned: number; added: number; failed: number; complete: boolean };
 
@@ -120,10 +150,11 @@ async function refundedOn(invoice: Invoice): Promise<number> {
 /**
  * What one invoice earns: the amount paid, less refunds and credit notes
  * issued after it was paid, of which the share is taken. Exported for the
- * tests, which feed it Stripe-shaped invoices.
+ * tests, which feed it Stripe-shaped invoices. Only an invoice already read
+ * exactly (`isPaidInvoice`) reaches it, so no amount is guessed here.
  */
-export function paidOn(invoice: Invoice, refunded: number): number {
-  return Math.max(0, num(invoice.amount_paid) - num(invoice.post_payment_credit_notes_amount) - refunded);
+export function paidOn(invoice: Pick<PaidInvoice, "amount_paid" | "post_payment_credit_notes_amount">, refunded: number): number {
+  return Math.max(0, invoice.amount_paid - invoice.post_payment_credit_notes_amount - refunded);
 }
 
 /**
@@ -179,6 +210,44 @@ async function relist(ids: string[], sid: string, bonusCents: number): Promise<n
   return made;
 }
 
+/** The most pages of a customer's paid invoices read; a list longer than that is not known whole. */
+const INVOICE_PAGES = 10;
+
+/**
+ * Every paid invoice of a customer, newest first, read exactly (CX-123 rule 24; Claude 6's audit, B1): each page
+ * Stripe's list, `has_more` true or false, at most the hundred asked for, each row an invoice with its own id and
+ * paid, and every field that sets the money in its exact shape (`isPaidInvoice`, Claude 2 on #3221): the amount paid
+ * and the credit notes after it whole and not negative, the creation and payment times whole and positive, the
+ * currency three lowercase letters, `parent` an object or null. The older pages are read to the end, since they hold
+ * the payment that shows a store paid us before it was invited. Anything else, a page that says there is more but has
+ * no rows, or a list still going on after the last page read, is not "these are all": it throws UnknownReplyError, so
+ * the store fails this run, earns nothing, is not marked, and the next run reads again. The bound is accepted (Claude
+ * 2 on #3221): a customer with more than INVOICE_PAGES pages of paid invoices fails the run every day and is never
+ * credited until someone handles it.
+ */
+async function paidInvoices(customer: string): Promise<PaidInvoice[]> {
+  const invoices: PaidInvoice[] = [];
+  let after = "";
+  for (let page = 0; page < INVOICE_PAGES; page += 1) {
+    const query = new URLSearchParams({ customer, status: "paid", limit: "100" });
+    query.append("expand[]", "data.payments");
+    if (after) query.set("starting_after", after);
+    const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/invoices?${query}`);
+    const rows = list && list.object === "list" && typeof list.has_more === "boolean" && Array.isArray(list.data) && list.data.length <= 100
+      ? (list.data as unknown[])
+      : null;
+    if (!rows) throw new UnknownReplyError("invite credits: a customer's paid invoices");
+    for (const row of rows) {
+      if (!isPaidInvoice(row)) throw new UnknownReplyError("invite credits: a paid invoice");
+      invoices.push(row);
+    }
+    if (list.has_more === false) return invoices;
+    if (!rows.length) throw new UnknownReplyError("invite credits: a customer's paid invoices");
+    after = invoices[invoices.length - 1].id;
+  }
+  throw new UnknownReplyError("invite credits: more paid invoices than read");
+}
+
 /** Step 1 for one invited store. Returns how many credits it wrote. */
 async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
   const [rawBy] = await redisPipeline([["GET", byKey(sid)]]);
@@ -191,15 +260,10 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
   const customer = await customerFor(store);
   if (!customer) return 0;
 
-  const query = new URLSearchParams({ customer, status: "paid", limit: "100" });
-  query.append("expand[]", "data.payments");
-  const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/invoices?${query}`);
-  const invoices = ((list.data as Invoice[] | undefined) ?? []).filter(
-    (inv) => typeof inv.id === "string" && INVOICE_PATTERN.test(inv.id) && inv.status === "paid",
-  );
+  const invoices = await paidInvoices(customer);
 
-  // Paid us before the invite: not brought to us by anyone.
-  if (invoices.some((inv) => num(inv.amount_paid) > 0 && num(inv.created) < by.at)) {
+  // Paid us before the invite: not brought to us by anyone. Decided only on every paid invoice, read whole above.
+  if (invoices.some((inv) => inv.amount_paid > 0 && inv.created < by.at)) {
     await redisPipeline([["SET", byKey(sid), JSON.stringify({ ...by, back: true })]]);
     return 0;
   }
@@ -210,28 +274,25 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
   // creator's own credit.
   const ordered = invoices
     .filter((inv) => inv.parent?.type === "subscription_details")
-    .filter((inv) => {
-      const paidAt = num(inv.status_transitions?.paid_at);
-      return paidAt > 0 && paidAt <= ripe;
-    })
-    .sort((a, b) => num(a.status_transitions?.paid_at) - num(b.status_transitions?.paid_at));
+    .filter((inv) => inv.status_transitions.paid_at <= ripe)
+    .sort((a, b) => a.status_transitions.paid_at - b.status_transitions.paid_at);
   if (!ordered.length) return 0;
 
   // Read exactly (CX-123 rule 24, L9): one reply per invoice, each 0 or 1; anything else fails the store this run.
-  const seen = repliesFor(await redisPipeline(ordered.map((inv) => ["EXISTS", creditKey(String(inv.id))])), ordered.length);
+  const seen = repliesFor(await redisPipeline(ordered.map((inv) => ["EXISTS", creditKey(inv.id)])), ordered.length);
   // Not one exact 0 or 1 for each: unknown, so the store fails this run and nothing is relisted or written (Codex N on #2722).
   if (!seen || seen.some((reply) => countOf(reply) !== 0 && countOf(reply) !== 1)) throw new UnknownReplyError("invite credits: EXISTS");
   // Written before: a credit still owed is put back on the lists it is paid from (both idempotent), so one whose
   // listing failed after its record was written is never left unpaid (L9).
-  wrote += await relist(ordered.filter((_, i) => countOf(seen[i]) === 1).map((inv) => String(inv.id)), sid, terms.bonusCents);
+  wrote += await relist(ordered.filter((_, i) => countOf(seen[i]) === 1).map((inv) => inv.id), sid, terms.bonusCents);
   for (let i = 0; i < ordered.length; i += 1) {
     const mark = countOf(seen[i]);
     if (mark !== 0) continue;
     const inv = ordered[i];
-    const id = String(inv.id);
-    const paidAt = num(inv.status_transitions?.paid_at);
-    const cur = typeof inv.currency === "string" ? inv.currency : "usd";
-    const paid = num(inv.amount_paid) > 0 ? paidOn(inv, await refundedOn(inv)) : 0;
+    const id = inv.id;
+    const paidAt = inv.status_transitions.paid_at;
+    const cur = inv.currency;
+    const paid = inv.amount_paid > 0 ? paidOn(inv, await refundedOn(inv)) : 0;
     const cents = inviteShare(paid, terms);
     const share: Credit = { id, kind: "share", to: by.r, from: sid, cents, cur, at: paidAt, state: cents > 0 ? "owed" : "none" };
     // Written once, for good: ours only on OK or this record read back (CX-123 rule 24, L9). Not known (it may have
@@ -397,6 +458,10 @@ export async function creditOnPlan(store: Store): Promise<{ cents: number; curre
   if (!customer) return null;
   const found = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/customers/${customer}`);
   if (found.deleted === true) return null;
-  const balance = num(found.balance);
-  return { cents: balance < 0 ? -balance : 0, currency: typeof found.currency === "string" && found.currency ? found.currency : "usd" };
+  // Read exactly, like the invoices above: a balance that is not a whole number, or a currency that is neither three
+  // lowercase letters nor Stripe's null (a customer with no currency yet), is unknown, so nothing is shown.
+  const { balance, currency } = found as { balance?: unknown; currency?: unknown };
+  if (!whole(balance, Number.MIN_SAFE_INTEGER)) return null;
+  if (currency !== null && (typeof currency !== "string" || !CURRENCY_PATTERN.test(currency))) return null;
+  return { cents: balance < 0 ? -balance : 0, currency: currency ?? "usd" };
 }

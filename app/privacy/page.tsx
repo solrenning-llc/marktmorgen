@@ -661,6 +661,24 @@ export default function PrivacyPage() {
           on a list so the course stays closed to them. To check who bought a
           course, we ask the creator&apos;s own Stripe account by email address.
         </p>
+        <p id="lesson-places">
+          <strong className="text-black">Where you stopped in a lesson video.</strong>{" "}
+          When a student watches a lesson video a store hosts with us, their
+          own browser keeps where they stopped, so the lesson can offer to
+          continue from there: in its storage, under <code>mm:lp:</code>{" "}
+          followed by the course, the lesson and a code made on our server
+          that cannot be worked out from their email address. It holds the
+          second they reached and when, and nothing else, and is never sent to
+          us. The speed they chose is kept the same way, under{" "}
+          <code>mm:lp-speed</code>. A place is removed when the video is
+          watched to its end and when they press Start over. One older than
+          90 days is never used, and is removed the next time that lesson is
+          opened in that browser. Whenever the course page opens in that
+          browser without confirming their access (because it ended, or
+          because it could not be checked at that moment), all their places in
+          that course are removed. Clearing the browser&apos;s site data
+          removes them at any time.
+        </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}
           A student who comments under a lesson chooses a name, and we keep that
@@ -1495,9 +1513,12 @@ export default function PrivacyPage() {
           it, its ID, link, title and time and, on Google, its guest list,
           until 60 days after the meeting. We keep a short log of problems with a
           connection for 30 days, and each consent in progress for ten
-          minutes. When a creator disconnects from the studio, we give the
-          token back to Google or Zoom so that access ends on their side too,
-          and delete the connection and its tokens; meetings already made
+          minutes. When a creator disconnects from the studio, we ask Google
+          or Zoom to cancel the token, so that access ends on their side too,
+          and delete the connection and its tokens. If Google or Zoom does not
+          confirm that our access ended, we say so on the screen and tell the
+          creator how to remove our app in their Google or Zoom account
+          themselves. Meetings already made
           stay on the creator&apos;s calendar or Zoom account. If the creator
           removes our app from their Zoom account, Zoom tells us and we delete
           every connection that user made, with its tokens, at once. If the

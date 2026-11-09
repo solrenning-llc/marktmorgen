@@ -92,7 +92,10 @@ export function MemberFreeDays({ titles }: { titles: Record<string, string> }) {
       {found ? (
         <div className="mt-4" role="status">
           {found.memberships.length === 0 ? (
-            <p className="text-sm text-ink-soft">{`${found.email} has no running membership at this store.`}</p>
+            <p className="text-sm text-ink-soft">
+              {/* Stripe's email filter is exact (lib/address-customers.ts): an empty list is not proof of no membership. */}
+              {`No running membership was found under ${found.email}. Stripe matches capital letters exactly, so type the address the way the member typed it at checkout.`}
+            </p>
           ) : (
             <>
               <label className="block max-w-xs" htmlFor={`${id}-days`}>

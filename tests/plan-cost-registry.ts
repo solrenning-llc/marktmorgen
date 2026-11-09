@@ -1202,6 +1202,8 @@ export const COST_LINES: CostLine[] = [
       // Finding a member for a discount code or free days (settings or payments admission, one studio request) reads the address's customers as
       // typed and in small letters (one read when they are the same; Stripe's filter is case-sensitive), side by side, both within the one
       // MAX_CUSTOMERS: one more Stripe list at most, no API charge, no store command or byte, the request's own cost unchanged (9 November 2026).
+      // Putting the code on (applyMemberDiscount) and giving the free days (giveFreeDays) read the member again the same way (memberSubRows),
+      // with the same one more Stripe list at most and the same cost.
       { file: "lib/address-customers.ts", names: ["return trimmed === lower ? [lower] : [trimmed, lower];", "rows: all.slice(0, max)"] },
       { file: "lib/member-discount.ts", names: ["MAX_CUSTOMERS = 20", "customersOfAddress("] },
       { file: "app/api/store/member-discount/route.ts", names: ["guardStoreWrite(request, \"settings\")", "memberSubs(store, raw)"] },

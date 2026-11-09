@@ -1,7 +1,7 @@
 /**
- * The customers a creator's Stripe account holds under one address, whatever
- * capitals the buyer typed it with (Claude 5, the residue of R43 F1 on #2985
- * and its sibling in the studio's member tools).
+ * The customers a creator's Stripe account holds under one address, read as
+ * typed and in small letters (Claude 5, the residue of R43 F1 on #2985 and its
+ * sibling in the studio's member tools). Not every spelling: see below.
  *
  * Stripe's hosted checkout keeps the address as the buyer typed it on the
  * customer it makes, and the `email` filter of Stripe's customer list is
@@ -10,7 +10,10 @@
  * and in small letters (one read when they are the same), never by sweeping
  * the account's customers. A spelling neither read nor typed
  * ("ANA@example.com" behind "Ana@Example.com") is not found: Stripe has no
- * case-blind exact filter.
+ * case-blind exact filter. So an empty answer is no proof that the address
+ * has no customer: a page never says "no membership", it says none was found
+ * and asks for the address as the member typed it (components/member-discount.tsx,
+ * components/member-free-days.tsx).
  *
  * Identity: a customer counts only when its own address is the one typed,
  * ignoring capitals. Any other row (another address, none, not text) proves

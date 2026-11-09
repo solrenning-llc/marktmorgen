@@ -100,7 +100,8 @@
  *     Past their sum the open is refused with nothing of the record read, the store marked resting a minute where it
  *     had no mark and kept so in this instance's memory, so the opens after it send nothing; except a store in the list
  *     of stores that pay with fewer than the figure's unpaid reads this hour, which pays each read (Claude 2's focal),
- *     each such read counted first in the resting hour and given back once paid (its re-review: a burst read 180 times);
+ *     each such read taking first a place among that store's own paid reads in flight (SHORT_LINK_PAID_FLIGHT_PER_STORE),
+ *     given back once paid, never in a count another store fills (its re-reviews: 180 reads at once; 20 x 302, 40 x 503);
  *   - a store without a paid plan that has rested SHORT_LINK_OFF_AFTER_MS without a gap (its record read at least once
  *     a SHORT_LINK_OFF_KEEP_SECONDS, saying so each time) has its links turned off: a short static page (410, kept by
  *     the CDN CACHE_SECONDS) that promises nothing, its record read again once a day at most, never renewed by the page,
@@ -123,8 +124,8 @@ import {
   SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_KEY_SECONDS, SHORT_LINK_UNPAID_PER_HOUR,
   SHORT_LINK_USED_UP_PAUSE_MS, SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_MISSES_PER_ADDRESS, SHORT_LINK_MISS_WINDOW_MS,
   SHORT_LINK_FLIGHT_MS, SHORT_LINK_OFF_AFTER_MS, SHORT_LINK_OFF_KEEP_SECONDS, SHORT_LINK_PAID_REST_MAX_MS,
-  SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_STORE_READS_PER_HOUR,
-  hourOf, offState, readRestMark, shortLinkRestCheckKey, shortLinkRestHourKey, shortLinkRestKey, shortLinkStoreFlightKey, shortLinkStoreHourKey,
+  SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_RESTING_OWNER_MS, SHORT_LINK_STORE_READS_PER_HOUR,
+  hourOf, offState, readRestMark, shortLinkPaidFlightKey, shortLinkRestCheckKey, shortLinkRestHourKey, shortLinkRestKey, shortLinkStoreFlightKey, shortLinkStoreHourKey,
   shortLinkUnpaidKey,
 } from "@/lib/short-link-open-rules";
 import { CACHE_SECONDS } from "@/lib/short-link-rules";
@@ -421,10 +422,10 @@ async function payOpen(
   // past its opens in flight reserved (set below). A read the store itself could not pay for is added to its hour's
   // unpaid reads first (Claude 2's NIT: INCR before the place goes).
   let back: (string | number)[][] = capBack;
-  // Whether this open is already counted in the resting hour (a paying store's read past its opens in flight): then a
-  // refusal of it keeps that unit as its count there, and is not counted again.
+  // Whether this open is a paying store's read past its opens in flight, counted in that store's own counts: then a
+  // refusal of it is not counted in the resting hour every instance shares, which is only for stores that do not pay.
   let restCounted = false;
-  const kept = (): (string | number)[][] => [["INCR", hourKey], ["EXPIRE", hourKey, SHORT_LINK_UNPAID_KEY_SECONDS], ...capBack];
+  const kept = (): (string | number)[][] => [["INCR", hourKey], ["EXPIRE", hourKey, SHORT_LINK_UNPAID_KEY_SECONDS], ...back];
   // An open the store does not pay for: back in the hour it was counted in, which its refund may have left, after
   // `first` (sent with it).
   const unpaid = async (first: (string | number)[][] = []): Promise<void> => {
@@ -505,20 +506,32 @@ async function payOpen(
       outcome.kept = false;
       return restRefused(link.sid, code, now, mark === null ? "short" : null, capBack);
     }
-    // A paying store past its opens in flight: this read is counted before it is made, in the resting hour every
-    // instance shares (SHORT_LINK_REST_UNPAID_PER_HOUR, priced site-wide), and given back once the store pays for it.
-    // Past that hour's figure this open alone is refused, nothing read. So a burst on a paying store that has just
-    // run out of its own requests reads its record at most its own count and that hour's room (Claude 2's focal
-    // re-review on #3330: 180 reads at once, none counted before it).
-    const restKey = keyOf("rest", now);
-    const seen = now < pausedUntil.rest ? null : await count("rest", restKey, now);
-    if (seen === null || seen > LIMIT.rest) {
+    // A paying store past its opens in flight: this read takes a place among the store's own paid reads in flight
+    // before it is made (shortLinkPaidFlightKey, at most SHORT_LINK_PAID_FLIGHT_PER_STORE, each lapsing by itself
+    // SHORT_LINK_FLIGHT_MS later), given back once the store pays for it. Past that figure this open alone is refused,
+    // nothing read. A count of the store's own: no other store's refusals fill it, so no store limits another (Claude
+    // 2's focal re-review on #3330 @125a390e49), and a burst on a paying store that has just run out of its own
+    // requests reads its record at most its own counts (180 reads at once, none counted, before c6fec684f5's review).
+    const paidKey = shortLinkPaidFlightKey(link.sid);
+    let paidInFlight: number | null = null;
+    try {
+      const reply = await redisPipeline([
+        ["ZREMRANGEBYSCORE", paidKey, 0, now - SHORT_LINK_FLIGHT_MS], ["ZADD", paidKey, now, place], ["ZCARD", paidKey],
+        ["EXPIRE", paidKey, 2 * SHORT_LINK_FLIGHT_MS / 1000],
+      ]);
+      paidInFlight = Array.isArray(reply) && reply.length === 4 && reply[1] === 1 && Number.isSafeInteger(reply[2]) && (reply[2] as number) >= 1 && reply[3] === 1
+        ? reply[2] as number : null;
+    } catch {
+      paidInFlight = null;
+    }
+    const paidBack: (string | number)[][] = [...capBack, ["ZREM", paidKey, place]];
+    if (paidInFlight === null || paidInFlight > SHORT_LINK_PAID_FLIGHT_PER_STORE) {
       outcome.kept = false;
       known.delete(code);
-      await redisPipeline(capBack).catch(() => {});
+      await redisPipeline(paidBack).catch(() => {});
       return shortLinkRefusal({ state: "tired", now, until: now + SHORT_LINK_TIRED_MS });
     }
-    back = [...capBack, ["DECR", restKey], ["EXPIRE", restKey, SHORT_LINK_UNPAID_KEY_SECONDS]];
+    back = paidBack;
     restCounted = true;
   }
   let checking = false;
@@ -533,7 +546,7 @@ async function payOpen(
     // Another open is asking, or the check could not be taken: still resting, nothing read.
     if (took !== "OK") {
       outcome.kept = false;
-      return restRefused(link.sid, code, now, null, capBack, restCounted);
+      return restRefused(link.sid, code, now, null, back, restCounted);
     }
     checking = true;
   }

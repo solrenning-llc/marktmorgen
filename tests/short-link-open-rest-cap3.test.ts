@@ -10,7 +10,7 @@ import { addLink } from "@/lib/short-links";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, storeFolder } from "@/lib/store";
 import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
-import { SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_STORE_READS_PER_HOUR } from "@/lib/short-link-open-rules";
+import { SHORT_LINK_PAID_FLIGHT_PER_STORE, SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_STORE_READS_PER_HOUR } from "@/lib/short-link-open-rules";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -70,15 +70,20 @@ async function main() {
   const restUsed = await restHour();
   console.log(`  MEDIUM 200 at once: ${recordReads} record reads, resting hour ${restUsed}`);
   is("MEDIUM: every open is refused, sent nowhere", burst.every((r) => r.status === 503 && r.to === null), true);
-  is("MEDIUM: past its own count, every read was counted in the resting hour first: at most 20 + the resting hour's figure", recordReads <= SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_REST_UNPAID_PER_HOUR, true);
+  // Rule 23 (Claude 2's focal re-review @125a390e49): was "counted in the resting hour first: at most 20 + the resting hour's
+  // figure" and "the resting hour holds every read past the store's own count"; that hour is shared, so a paying store's
+  // reads past its opens in flight are now counted in a count of its own, SHORT_LINK_PAID_FLIGHT_PER_STORE at once, and the
+  // resting hour every instance shares is left to stores that do not pay.
+  is("MEDIUM: past its own count, every read was counted first in the store's own counts: at most 20 + SHORT_LINK_PAID_FLIGHT_PER_STORE", recordReads <= SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_PAID_FLIGHT_PER_STORE, true);
   // Added with the fix: the resting hour keeps every read past the store's own count, and a second burst in the hour reads nothing more.
-  is("the resting hour holds every read past the store's own count", restUsed >= recordReads - SHORT_LINK_STORE_READS_PER_HOUR, true);
+  is("the store's hour holds every read it did not pay for", Number((await redis.pipeline([["GET", `nl:slink:rest:${out.s.sid}:cap:${Math.floor(Date.now() / HOUR)}`]]))[0]) >= recordReads, true);
+  is("and the resting hour every instance shares holds no more than its own count's refusals", restUsed <= SHORT_LINK_STORE_READS_PER_HOUR, true);
   forgetShortLinkOpenMemory();
   const before = recordReads;
   await Promise.all(out.codes.map((c) => open(c)));
   is("a second burst in the same hour reads the record no more", recordReads - before, 0);
 
-  part("MEDIUM: the same burst with the resting hour used reads the record at most the store's own count");
+  part("MEDIUM: the same burst with the resting hour used reads the record at most the store's own counts");
   reset();
   const used = await payingStore("paidburst2@example.com", "paidbursttwo", "PaidBurst0002");
   tiredFolders.add(used.folder);
@@ -86,14 +91,19 @@ async function main() {
   recordReads = 0;
   await Promise.all([...used.codes, ...used.codes].map((c) => open(c)));
   console.log(`  MEDIUM with the resting hour used: ${recordReads} record reads`);
-  is("MEDIUM: at most SHORT_LINK_STORE_READS_PER_HOUR record reads", recordReads <= SHORT_LINK_STORE_READS_PER_HOUR, true);
+  // Rule 23 (Claude 2's focal re-review @125a390e49): was "at most SHORT_LINK_STORE_READS_PER_HOUR record reads", the shared
+  // resting hour holding the rest; the bound is now the store's own, whatever that hour holds.
+  is("MEDIUM: at most SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_PAID_FLIGHT_PER_STORE record reads, the resting hour used or not", recordReads <= SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_PAID_FLIGHT_PER_STORE, true);
 
   part("A paying store with room still opens a burst past its opens in flight");
   reset();
   const busy = await payingStore("paidroom@example.com", "paidroom", "PaidRoom00001");
   const together = await Promise.all(busy.codes.slice(0, 60).map((c) => open(c)));
   is("60 opens at once all open", together.every((r) => r.status === 302), true);
-  is("and the resting hour is given back what they reserved", await restHour(), 0);
+  // Rule 23 (Claude 2's focal re-review @125a390e49): was "and the resting hour is given back what they reserved"; they
+  // reserve in the store's own count now, given back the same way.
+  is("and the resting hour is never used by them", await restHour(), 0);
+  is("and the store's own paid reads in flight are given back", Number((await redis.pipeline([["ZCARD", `nl:slink:rest:${busy.s.sid}:paidflight`]]))[0]), 0);
   done();
 }
 main();

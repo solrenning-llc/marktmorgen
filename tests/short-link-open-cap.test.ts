@@ -35,7 +35,7 @@ import { MAX_STORE_BYTES } from "@/lib/store";
 import {
   SHORT_LINK_UNPAID_READ_UNITS, SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_REST_COMMANDS,
   SHORT_LINK_REST_UNPAID_PER_HOUR, SHORT_LINK_UNKNOWN_PAUSE_MS, SHORT_LINK_UNPAID_PER_HOUR, SHORT_LINK_USED_UP_PAUSE_MS,
-  SHORT_LINK_STORE_COUNT_COMMANDS, SHORT_LINK_STORE_REFUND_COMMANDS, SHORT_LINK_FLIGHT_MS,
+  SHORT_LINK_STORE_COUNT_COMMANDS, SHORT_LINK_STORE_REFUND_COMMANDS, SHORT_LINK_FLIGHT_MS, SHORT_LINK_PAID_BURST_COMMANDS,
 } from "@/lib/short-link-open-rules";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
 import { CURRENT_COMMERCIAL_TERMS } from "@/lib/commercial-margin";
@@ -324,6 +324,8 @@ async function main(): Promise<void> {
   is("a place in flight lasts longer than the heaviest open can take", SHORT_LINK_FLIGHT_MS > SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits * REDIS_TIMEOUT_MS, true);
   // Added with Claude 2's focal on #3330: with the store's own counts (five) and its place given back (one), a paid open sends 14.
   is("a paid open's own commands with its store's counts, held in SHORT_LINK_OPEN_READ", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REST_COMMANDS + SHORT_LINK_REFUND_COMMANDS + SHORT_LINK_STORE_COUNT_COMMANDS + SHORT_LINK_STORE_REFUND_COMMANDS, 14);
+  // Added with Claude 2's NIT on @125a390e49: a paying store's open past its opens in flight sends the paid burst's too.
+  is("a paid open's worst, past its opens in flight, held in SHORT_LINK_OPEN_READ", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REST_COMMANDS + SHORT_LINK_REFUND_COMMANDS + SHORT_LINK_STORE_COUNT_COMMANDS + SHORT_LINK_STORE_REFUND_COMMANDS + SHORT_LINK_PAID_BURST_COMMANDS, 20);
   // The company's cost is held in the test registry, unreviewed: priced above zero, its ceiling unknown, never zero.
   is("the company's cost is held, priced above zero, its reviewed ceiling unknown and not approved", [
     SHORT_LINK_UNPAID_COMPANY_COST.perHour,
@@ -364,6 +366,10 @@ async function main(): Promise<void> {
   // "under $18 a month" ($17.09, MAX_LINKS an hour); not approved. Now SHORT_LINK_STORE_READS_PER_HOUR reads an hour, and each
   // link looked up once a SHORT_LINK_RESTING_OWNER_MS on an instance: held under the registry's figures, awaiting the owner.
   is("one resting store's record reads stay under the registry's month (cents)", Math.ceil(restingStoreMonth * 100) <= resting.monthCeilingUsdCents, true);
+  // Added with Claude 2's focal re-review on #3330 @125a390e49: a paying store out of its own requests, its own counts.
+  const paidRestingStoreMonth = resting.paidStoreReadsPerHour * MONTH_HOURS * unpaid;
+  console.log(`  cost  per paying store out of its own requests: its record $${paidRestingStoreMonth.toFixed(4)} a month at most`);
+  is("a paying store out of its own requests: its record reads stay under the registry's month (cents)", Math.ceil(paidRestingStoreMonth * 100) <= resting.paidMonthCeilingUsdCents, true);
   is("one resting store's lookups on one instance stay under the registry's month (cents)", Math.ceil(restingStoreInstanceMonth * 100) <= resting.instanceMonthCeilingUsdCents, true);
   is("those figures wait for the owner's approval", resting.approvedByOwner, false);
   is("their number is held unknown, never zero", [SHORT_LINK_UNPAID_COMPANY_COST.restingStores, SHORT_LINK_UNPAID_COMPANY_COST.instances, restingStoreMonth > 0, restingStoreInstanceMonth > 0], [null, null, true, true]);

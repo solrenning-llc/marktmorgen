@@ -141,11 +141,22 @@ export const SHORT_LINK_STORE_COUNT_COMMANDS = 5;
 /** Commands an open sends to give its place among the opens in flight back: one ZREM. */
 export const SHORT_LINK_STORE_REFUND_COMMANDS = 1;
 /**
- * Commands a paying store's open past its opens in flight sends more (Claude 2's focal re-review on #3330): one
- * SISMEMBER of the list of stores that pay, its read reserved in the resting hour (INCR and EXPIRE) and given back once
- * the store pays (DECR and EXPIRE, with its place).
+ * Commands a paying store's open past its opens in flight sends more (Claude 2's focal re-reviews on #3330): one
+ * SISMEMBER of the list of stores that pay, a place among the store's paid reads in flight (ZREMRANGEBYSCORE, ZADD,
+ * ZCARD, EXPIRE) and that place given back (ZREM, with its other place).
  */
-export const SHORT_LINK_PAID_BURST_COMMANDS = 5;
+export const SHORT_LINK_PAID_BURST_COMMANDS = 6;
+/**
+ * A paying store's reads past its opens in flight that may be in flight at once, in a count of that store's own
+ * (shortLinkPaidFlightKey), each place lapsing by itself SHORT_LINK_FLIGHT_MS later and given back once the store pays:
+ * so a paying store with room opens SHORT_LINK_STORE_READS_PER_HOUR + this many at once, whatever other stores do
+ * (Claude 2's focal re-review on #3330 @125a390e49), and one that has just run out of its own requests reads its record,
+ * in the hour, at most these and its own SHORT_LINK_STORE_READS_PER_HOUR (its reads admitted only while its hour's
+ * unpaid reads are fewer than that).
+ */
+export const SHORT_LINK_PAID_FLIGHT_PER_STORE = 40;
+/** A paying store's reads past its opens in flight, in flight: a sorted set scored by when each took its place, kept two times SHORT_LINK_FLIGHT_MS. */
+export const shortLinkPaidFlightKey = (sid: string) => `nl:slink:rest:${sid}:paidflight`;
 /** How long a store without a paid plan rests, without a gap, before its links are turned off (the owner's decision 14). */
 export const SHORT_LINK_OFF_AFTER_MS = 30 * 86_400_000;
 /**

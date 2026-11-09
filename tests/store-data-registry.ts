@@ -766,7 +766,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:reversed:@lib/paypal-sales.ts": short("Of those, the orders PayPal took back by another way than a refund (reversed, failed, declined)", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
-  "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window", "order", 180, MARK, KIND("paypal")),
+  "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window, and past it until the paid record ends those whose capture is in a status not known here", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:handover:@lib/paypal-sales.ts": short("Paid orders still owed their hand-over, from being written down until handed over (lib/paypal-delivery.ts)", "order", 400, MARK, KIND("paypal")),
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),

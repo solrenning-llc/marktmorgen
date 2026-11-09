@@ -671,7 +671,15 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
     await watchLater(order, opened);
     return { ok: false, reason: "pending" };
   }
-  if (capture.status !== "COMPLETED") return { ok: false, reason: "declined" };
+  // Paid (completed, or since refunded in part, which keeps the purchase: CAPTURE_KEEPS) is written down. Declined,
+  // failed, refunded or otherwise taken back is declined. A status not known here is not "declined": the order is kept
+  // for the sweep to ask about again, as the sweep itself does (Claude 6's second money review of #3392, LEVE 2; rule 30).
+  if (typeof capture.status !== "string" || !CAPTURE_PAID.has(capture.status)) {
+    if (typeof capture.status === "string" && CAPTURE_TAKEN_BACK.has(capture.status)) return { ok: false, reason: "declined" };
+    console.error("a PayPal capture is in a status not known here; asked again by the sweep", order, capture.status);
+    await watchLater(order, opened);
+    return { ok: false, reason: "pending" };
+  }
   const { paid, fresh } = await settle(order, opened, capture.id, email);
   return { ok: true, paid, fresh };
 }
@@ -744,18 +752,24 @@ export function nextLook(paidAt: number, now: number): number | null {
  * REVERSED (a chargeback), FAILED and DECLINED are the whole payment taken back. Any other status is not known here:
  * it takes nothing back and gives nothing again, is logged, and stays watched (CX-123 rule 24).
  *
- * Not checked against PayPal's published description in this change: COMPLETED, PENDING, PARTIALLY_REFUNDED and
- * REFUNDED are the capture statuses tests/paypal-sales.test.ts already uses; REVERSED, FAILED and DECLINED are taken
- * as losses so that a capture PayPal reports in any of them never keeps a purchase, whether or not PayPal sends them
- * on a capture once paid. A chargeback PayPal does not show on the capture's status is not seen here: PayPal's
- * disputes are not read anywhere in the product (docs/bx2-earnings-design.md).
+ * PayPal's published capture statuses (Orders v2, capture_status), as Claude 6's second money review of #3392 read them
+ * on 9 November 2026 in PayPal's reference and official SDKs (not opened from this change: developer.paypal.com does
+ * not resolve here): COMPLETED, DECLINED, PARTIALLY_REFUNDED, PENDING, REFUNDED and FAILED. REVERSED is not among them;
+ * it stays in the taken-back set only so that a capture ever reported so never keeps a purchase. A chargeback comes as
+ * PayPal's webhook event PAYMENT.CAPTURE.REVERSED or as a dispute, and nothing in the product receives PayPal webhooks
+ * or reads its disputes (docs/bx2-earnings-design.md): a chargeback is not seen here, and nothing the creator or the
+ * buyer reads may say it is (the studio's PayPal box, components/kept-by-currency.tsx; VR 2).
  */
 const CAPTURE_KEEPS: ReadonlySet<string> = new Set(["COMPLETED", "PENDING", "PARTIALLY_REFUNDED"]);
+/** Of those, the statuses of a payment taken: written down and handed over when the order is still waiting on it. */
+const CAPTURE_PAID: ReadonlySet<string> = new Set(["COMPLETED", "PARTIALLY_REFUNDED"]);
 const CAPTURE_TAKEN_BACK: ReadonlySet<string> = new Set(["REFUNDED", "REVERSED", "FAILED", "DECLINED"]);
 /** How often a paid order whose capture is in a status not known here is looked at once PayPal's 180 days are over. */
 const UNKNOWN_STATUS_LOOK_SECONDS = 86_400;
 /** How many due paid orders one run of the refund watch looks at for a store (PAYPAL_REFUND_WATCH and NOT_A_COST.REFUND_WATCH_BATCH in tests/plan-cost-registry.ts). */
 export const REFUND_WATCH_BATCH = 25;
+/** How many pending orders one run of the sweep asks PayPal about for a store (PAYPAL_PENDING_SWEEP and NOT_A_COST.PENDING_SWEEP_BATCH in tests/plan-cost-registry.ts). */
+export const PENDING_SWEEP_BATCH = 25;
 
 /**
  * What the sweep asks of PayPal for one store, a few orders at a time:
@@ -781,9 +795,14 @@ export async function watchPayPal(
   const statsId = store.statsId;
   const now = Math.floor(Date.now() / 1000);
 
-  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", "+inf", "LIMIT", "0", "25"]]);
+  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", "+inf", "LIMIT", "0", String(PENDING_SWEEP_BATCH)]]);
   for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
     if (Date.now() >= deadline) return result;
+    // An order asked about and still waiting goes to the back of the list (its score is only an order), so orders PayPal
+    // never settles cannot keep a newer, paid one out of the batch until their records end (Claude 2's first and
+    // Claude 6's second money reviews of #3392, LEVE 1). XX: never put back an order a capture or another sweep has
+    // just taken off.
+    const later = () => redisPipeline([["ZADD", pendingKey(statsId), "XX", String(now), order]]);
     const opened = await readOpened(order);
     // Thirty days without PayPal settling it: no longer asked about.
     if (!opened || (await readPaid(order))) {
@@ -795,6 +814,7 @@ export async function watchPayPal(
       done = await call("GET", `/v2/checkout/orders/${encodeURIComponent(order)}`, { merchant: opened.m });
     } catch (error) {
       console.error("reading a PayPal order failed", error);
+      await later();
       continue;
     }
     const { capture, payee, email } = captureIn(done);
@@ -802,13 +822,21 @@ export async function watchPayPal(
     // other answer (approved, created, saved, completed without its captures, no status) is kept and asked again
     // (CX-123 rule 24; review of Codex G on #2681). A kept order is let go when its record ends (30 days).
     if (!capture) {
-      if (done.status === "VOIDED") await redisPipeline([["ZREM", pendingKey(statsId), order]]);
+      await (done.status === "VOIDED" ? redisPipeline([["ZREM", pendingKey(statsId), order]]) : later());
       continue;
     }
-    if (capture.status === "PENDING" || typeof capture.status !== "string") continue;
-    // Completed and what was asked, but without the buyer's address or the capture's id: paid, not yet readable.
-    if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) continue;
-    if (capture.status === "COMPLETED" && matches(opened, capture, payee) && email && typeof capture.id === "string") {
+    if (capture.status === "PENDING" || typeof capture.status !== "string") {
+      await later();
+      continue;
+    }
+    // Paid (completed, or since refunded in part, which keeps the purchase: LEVE 3 of the same review) and what was
+    // asked, but without the buyer's address or the capture's id: paid, not yet readable.
+    const paidStatus = CAPTURE_PAID.has(capture.status);
+    if (paidStatus && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) {
+      await later();
+      continue;
+    }
+    if (paidStatus && matches(opened, capture, payee) && email && typeof capture.id === "string") {
       const { paid, fresh } = await settle(order, opened, capture.id, email);
       if (fresh) {
         await on.handOver(paid);
@@ -820,6 +848,7 @@ export async function watchPayPal(
     // record ends (30 days), never dropped on a word this file does not know (rule 30 of CX-123, with the watch below).
     if (!CAPTURE_KEEPS.has(capture.status) && !CAPTURE_TAKEN_BACK.has(capture.status)) {
       console.error("a pending PayPal order's capture is in a status not known here; asked again", order, capture.status);
+      await later();
       continue;
     }
     // Declined, failed, or not what was asked: nothing is handed over.

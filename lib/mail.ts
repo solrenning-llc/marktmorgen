@@ -18,7 +18,7 @@ import { lookColours } from "@/lib/store-look";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
 import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
 import { tokensFor } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
@@ -85,6 +85,20 @@ export function monthlyAllowance(store: Store, nowSeconds = Date.now() / 1000): 
 /** Whether the store is still in its free trial, when the smaller allowance applies. */
 export function inTrial(store: Store, nowSeconds = Date.now() / 1000): boolean {
   return store.trialEnds > nowSeconds;
+}
+
+/**
+ * The emails the month has used, read exactly, for what decides whether an email may go (lib/broadcasts.ts): GET
+ * answers the counter's text, which a give-back can take below zero, or nil before the first one is counted. Any
+ * other answer throws (CX-123 rule 24), never an untouched month.
+ */
+export async function usedThisMonthExact(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
+  if (!listId || !window || !isRedisConfigured()) return 0;
+  const replies = repliesFor(await redisPipeline([["GET", usedKey(listId, window)]]), 1);
+  const raw = replies?.[0];
+  if (replies && raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|-?[1-9][0-9]{0,14})$/.test(raw)) throw new UnknownReplyError("the month's emails used");
+  return Number(raw);
 }
 
 export async function usedThisMonth(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {

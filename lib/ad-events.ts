@@ -30,7 +30,11 @@
  * Control (components/store-pixels.tsx, lib/ad-consent.ts). That yes is now
  * carried by the checkout itself, so it no longer depends on the buyer coming
  * back. A buyer who said no, or was never asked where asking is the law, is
- * never sent from here.
+ * never sent from here. The thanks page's relay is checked on the server too
+ * (refusedBy): a request with Global Privacy Control or the store's cookie
+ * holding the no is never sent, whatever its handle. One without either
+ * cookie or signal still is, because that is how a browser that keeps no
+ * cookies and said yes is sent.
  *
  * Only to a platform whose pixel is on the store and whose access token the
  * creator pasted, made in their own ad account; the token is sealed before it
@@ -550,6 +554,21 @@ function cookiesOf(request: { cookies: { get(name: string): { value: string } | 
 export function allowedBy(request: { cookies: { get(name: string): { value: string } | undefined }; headers?: Pick<Headers,"get"> }, store: Pick<Store,"handle">, nowSeconds = Date.now() / 1000): boolean {
   if (request.headers?.get("sec-gpc") === "1") return false;
   return readAdsCookie(request.cookies.get(adsCookieName(store.handle))?.value, nowSeconds) !== null;
+}
+
+/**
+ * Whether this request says no to ad measurement on this store in a way the
+ * server can read: Global Privacy Control, or this store's cookie holding
+ * anything but the yes (the no a browser writes, ADS_COOKIE_NO, or anything
+ * else). Then the thanks page seals no relay handle and the ads-event route
+ * sends nothing, whatever the checkout carried. A request with neither is not
+ * refused here: a browser that keeps no cookies is sent only from the thanks
+ * page's relay (components/store-pixels.tsx writeAdsCookie).
+ */
+export function refusedBy(request: { cookies: { get(name: string): { value: string } | undefined }; headers?: Pick<Headers,"get"> }, store: Pick<Store,"handle">, nowSeconds = Date.now() / 1000): boolean {
+  if (request.headers?.get("sec-gpc") === "1") return true;
+  const value = request.cookies.get(adsCookieName(store.handle))?.value;
+  return value !== undefined && value !== "" && readAdsCookie(value, nowSeconds) === null;
 }
 
 type Requested = { headers: Headers; cookies: { get(name: string): { value: string } | undefined } };

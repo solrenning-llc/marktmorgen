@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { pixelChoiceState, type Pixels } from "@/lib/pixels";
 import { X_SCRIPT, xConfigCall, xEventCall } from "@/lib/x-pixel";
 import { type Place, redditInitCall, redditScript, redditTrackCall } from "@/lib/reddit-pixel";
-import { ADS_COOKIE_SECONDS, adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
+import { ADS_COOKIE_NO, ADS_COOKIE_SECONDS, adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
 
 /**
  * The creator's own ad pixels, on their store's pages.
@@ -76,16 +76,17 @@ function writeChoice(handle: string, value: "yes" | "no" | null) {
 }
 
 /**
- * The same yes, where the server can read it (lib/ad-consent.ts): kept while
- * the pixels may run, with the ad click this visit came from, and deleted the
- * moment they may not.
+ * The same choice, where the server can read it (lib/ad-consent.ts): the yes
+ * while the pixels may run, with the ad click this visit came from, and the
+ * no alone, in its place, the moment they may not, so our server sends
+ * nothing for this browser even when asked (lib/ad-events.ts refusedBy).
  */
 function writeAdsCookie(handle: string, on: boolean) {
   try {
     const name = adsCookieName(handle);
     const secure = location.protocol === "https:" ? "; Secure" : "";
     if (!on) {
-      document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+      document.cookie = `${name}=${ADS_COOKIE_NO}; Path=/; Max-Age=${ADS_COOKIE_SECONDS}; SameSite=Lax${secure}`;
       return;
     }
     const existing = document.cookie.split("; ").find((c) => c.startsWith(`${name}=`))?.slice(name.length + 1);

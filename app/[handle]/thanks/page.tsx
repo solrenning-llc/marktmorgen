@@ -81,7 +81,7 @@ import { HeardAsk } from "@/components/heard-ask";
 import { heardOff } from "@/lib/heard";
 import { listedReturn, listedSite, purchaseReturn } from "@/lib/embed-sites";
 import { eventIdFor } from "@/lib/webhooks";
-import { adEventId, adEventRelay } from "@/lib/ad-events";
+import { adEventId, adEventRelay, refusedBy } from "@/lib/ad-events";
 import { Suspense } from "react";
 import { NextOfferCard } from "@/components/next-offer-card";
 import { NewTab } from "@/components/new-tab";
@@ -164,6 +164,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
     ? await withinStore("thanks-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store, "buyer")
     : true;
   const order: Order | { state: "slow" } = allowed ? await readOrder(store, sessionId) : { state: "slow" };
+  // The handle the buyer's browser asks our server to send the purchase with:
+  // none where this request already says no (Global Privacy Control, or the
+  // store's cookie holding the no), so no page carries one for that browser.
+  const [askedCookies, askedHeaders] = [await cookies(), await headers()];
+  const relayFor = (id: string) => (refusedBy({ cookies: askedCookies, headers: askedHeaders }, store) ? undefined : adEventRelay(id, store.handle));
 
   // A member moved from another platform kept their membership: the studio's count says so (lib/move-members.ts).
   if (order.state === "paid" && order.product.recurring && (order.record.metadata as Record<string, string> | null)?.moved === "yes") {
@@ -204,7 +209,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <p className="st-muted mt-5 text-sm">{t.packageSameLink(order.email ?? t.theAddressYouPaidWith)}</p>
             <StoreTracking
               store={store}
-              event={{ type: "purchase", id: adEventId(sessionId), relay: adEventRelay(sessionId, store.handle), value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
+              event={{ type: "purchase", id: adEventId(sessionId), relay: relayFor(sessionId), value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
             />
           </div>
         </main>
@@ -258,7 +263,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 event={{
                   type: "purchase",
                   id: adEventId(sessionId),
-                  relay: adEventRelay(sessionId, store.handle),
+                  relay: relayFor(sessionId),
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -326,7 +331,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 event={{
                   type: "purchase",
                   id: adEventId(sessionId),
-                  relay: adEventRelay(sessionId, store.handle),
+                  relay: relayFor(sessionId),
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -403,7 +408,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 event={{
                   type: "purchase",
                   id: adEventId(sessionId),
-                  relay: adEventRelay(sessionId, store.handle),
+                  relay: relayFor(sessionId),
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -1340,7 +1345,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   ? {
                       type: "purchase",
                       id: adEventId(sessionId),
-                      relay: adEventRelay(sessionId, store.handle),
+                      relay: relayFor(sessionId),
                       value: toMajor(order.amount, order.currency),
                       currency: order.currency,
                       productId: order.product.id,

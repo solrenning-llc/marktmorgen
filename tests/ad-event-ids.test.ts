@@ -334,7 +334,9 @@ async function main(): Promise<void> {
     purchases.map((p) => /id: adEventId\((sessionId|order)\),$/.test(p)),
     [true, true, true, true, true, true],
   );
-  is("and the checkout's own id never, only a relay handle sealed for this site's own server", [(thanks.match(/order: sessionId,/g) ?? []).length, (thanks.match(/relay: adEventRelay\(sessionId, store\.handle\),/g) ?? []).length], [0, 5]);
+  // Altered 9 Nov 2026 (C5 audit LEVE 3, rule 23): the handle is sealed through relayFor, which gives none where the
+  // request says no (tests/ads-event-consent.test.ts); was the literal adEventRelay(sessionId, store.handle) five times.
+  is("and the checkout's own id never, only a relay handle sealed for this site's own server", [(thanks.match(/order: sessionId,/g) ?? []).length, (thanks.match(/relay: relayFor\(sessionId\),/g) ?? []).length], [0, 5]);
 
   part("The pixels in a browser: a Stripe thanks page");
   const onStripe = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}&upsell=no#top`);

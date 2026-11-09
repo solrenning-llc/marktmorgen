@@ -10,8 +10,10 @@
  * written in a cookie of this store's, which every checkout route reads
  * (lib/ad-events.ts adsCheckout): the checkout then carries it, and the
  * purchase is sent from the server when Stripe says it is paid, whether or
- * not the buyer comes back. A no, or Global Privacy Control, deletes the
- * cookie; with no cookie nothing is ever sent from here.
+ * not the buyer comes back. A no, or Global Privacy Control, puts the no in
+ * its place (ADS_COOKIE_NO), so the server can tell a browser that said no
+ * from one that keeps no cookies: with the no, nothing is sent from here, not
+ * even when the thanks page's browser asks (lib/ad-events.ts refusedBy).
  *
  * With the yes, the cookie keeps the click id the visitor last arrived with
  * from an ad — Meta's fbclid, TikTok's ttclid, Pinterest's epik — for thirty
@@ -35,6 +37,9 @@ export type Clicks = Partial<Record<ClickParam, string>> & { at?: number };
 
 /** Click ids are letters, digits and a few marks; anything else is not one. */
 const CLICK_ID = /^[A-Za-z0-9._\-~]{4,300}$/;
+
+/** What the cookie holds after a no: the no alone, never a click or anything else. */
+export const ADS_COOKIE_NO = "n";
 
 export function adsCookieName(handle: string): string {
   return `nl_ads_${handle.replace(/[^a-z0-9._-]/g, "")}`;

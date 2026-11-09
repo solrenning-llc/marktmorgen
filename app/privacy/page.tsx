@@ -277,8 +277,10 @@ export default function PrivacyPage() {
           at the bottom of its pages changes it. While ad measurement is
           allowed, that store also keeps a cookie of its own saying so, with the
           ad click id the visitor last arrived with (Meta&apos;s fbclid,
-          TikTok&apos;s ttclid or Pinterest&apos;s epik), for 30 days; it is
-          deleted the moment the choice is no. X is told about purchases and
+          TikTok&apos;s ttclid or Pinterest&apos;s epik), for 30 days. The
+          moment the choice is no, that cookie is replaced by one that holds
+          only the no, for 30 days, so our server sends nothing for that
+          browser. X is told about purchases and
           requests for free products only when the creator set up those
           events with X, and never about checkouts started; where a visitor
           has not said yes (because their country does not ask first), X is

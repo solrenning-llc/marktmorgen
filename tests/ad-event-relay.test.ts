@@ -161,7 +161,9 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
   const pixels = readFileSync("components/store-pixels.tsx", "utf8");
   is("no event on the thanks page names the checkout's own id", (page.match(/\border:\s*sessionId\b/g) ?? []).length, 0);
-  is("each Stripe purchase gives the pixels the sealed handle", (page.match(/relay: adEventRelay\(sessionId, store\.handle\),/g) ?? []).length, 5);
+  // Altered 9 Nov 2026 (C5 audit LEVE 3, rule 23): the handle is sealed through relayFor, which gives none where the
+  // request says no (tests/ads-event-consent.test.ts); was the literal adEventRelay(sessionId, store.handle) five times.
+  is("each Stripe purchase gives the pixels the sealed handle", (page.match(/relay: relayFor\(sessionId\),/g) ?? []).length, 5);
   is("the pixels' event has no order field", /\border\?:\s*string/.test(pixels), false);
   is("and post only the handle", [pixels.includes("JSON.stringify({ h: handle, t: event.relay })"), /\bs: event\./.test(pixels)], [true, false]);
   done();

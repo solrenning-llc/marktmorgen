@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { clientIp } from "@/lib/visit";
-import { openAdEventRelay, sendServerPurchase } from "@/lib/ad-events";
+import { openAdEventRelay, refusedBy, sendServerPurchase } from "@/lib/ad-events";
 import { hasPixels } from "@/lib/pixels";
 
 /** The store's handle and a relay handle at its longest (lib/ad-events.ts AD_EVENT_RELAY_MAX), with room. */
@@ -16,7 +16,10 @@ const done = () => new Response(null, { status: 204, headers: { "Cache-Control":
  * the store and the relay handle the thanks page sealed for it
  * (adEventRelay). Never the checkout's own id: that is a key to the order and
  * the browser is not given it (review of #2557), so one sent here, under any
- * name, is ignored. Asked only by a browser whose pixels were allowed to run.
+ * name, is ignored. Asked only by a browser whose pixels were allowed to run,
+ * and checked here too: a request that sends Global Privacy Control, or whose
+ * store cookie holds the no, is sent nothing (lib/ad-events.ts refusedBy),
+ * before the creator's Stripe account is asked.
  * The answer is always empty: nothing in it is the caller's business.
  */
 export async function POST(request: NextRequest) {
@@ -42,6 +45,8 @@ export async function POST(request: NextRequest) {
   } catch {
     url = "";
   }
+  // The buyer's no, as this request carries it: nothing is sent, and the creator's Stripe account is not asked.
+  if (refusedBy(request, store)) return done();
   const cookie = (name: string) => request.cookies.get(name)?.value?.slice(0, 300) ?? "";
   const cookies: Record<string, string> = {};
   for (const name of ["_fbp", "_fbc", "_ttp", "ttclid", "_epik", "_ga"]) if (cookie(name)) cookies[name] = cookie(name);

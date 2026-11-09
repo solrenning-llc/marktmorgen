@@ -25,11 +25,16 @@
  *       try took meanwhile, or a move whose reply is not exact sends nothing more;
  *   I:  Resend blocked, as in production today (CURRENT_RESEND_FALLBACK_REVIEW and CURRENT_RESEND_CREDENTIAL_BINDING
  *       null): a refusal Amazon gave (busy three times, or an account hold that clears) keeps the key for Amazon, so a
- *       later try sends it through Amazon (review 6739914424, probes P1 and P2).
+ *       later try sends it through Amazon (review 6739914424, probes P1 and P2);
+ *   J:  Resend's first answer is a 503, then the product is renamed: every later try sends the receipt as it was first
+ *       made, the same bytes under the same key, so the guarded transport sees one attempt and makes no second
+ *       request (second money review of #3387); kept words that do not read send nothing, and words deleted with the
+ *       person are never made again for a key a request was already made under.
  */
 import { createHash } from "node:crypto";
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
+import { claimHandle, ensureStatsId, addProduct, editProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
+import { forgetNoted } from "@/lib/erasure-index";
 import { type Listing, readListing } from "@/lib/catalog";
 import { openOrder } from "@/lib/paypal-sales";
 import * as delivery from "@/lib/paypal-delivery";
@@ -53,8 +58,8 @@ const orderId = (n: number) => `6P290127TN36471${String(n).padStart(2, "0")}`;
 let resendMode: "up" | "503" | "422" | "429" = "up";
 /** Called on each Resend request before it is answered (probe D). */
 let onResendPost: (() => void) | null = null;
-/** Every Resend request: its idempotency key and body text. */
-const resendPosts: { key: string; to: string; text: string }[] = [];
+/** Every Resend request: its idempotency key, subject, body text and the exact bytes it posted. */
+const resendPosts: { key: string; to: string; subject: string; text: string; body: string }[] = [];
 /** How many of the next Amazon requests are answered 429, too many a second ("busy", a definite no) (probe P1). */
 let sesBusy = 0;
 
@@ -101,7 +106,7 @@ const mail = installSesMailFixture({
   },
   onResend: (messages, _input, init) => {
     const key = new Headers(init?.headers).get("idempotency-key") ?? "";
-    for (const m of messages) resendPosts.push({ key, to: m.to[0] ?? "", text: m.text });
+    for (const m of messages) resendPosts.push({ key, to: m.to[0] ?? "", subject: m.subject, text: m.text, body: typeof init?.body === "string" ? init.body : "" });
     onResendPost?.();
     if (resendMode === "503") return json({ name: "service_unavailable", message: "synthetic outage" }, 503);
     if (resendMode === "422") return json({ name: "validation_error", message: "synthetic refusal" }, 422);
@@ -467,6 +472,76 @@ async function main(): Promise<void> {
     if (reviewedKey === undefined) delete process.env.RESEND_API_KEY;
     else process.env.RESEND_API_KEY = reviewedKey;
   }
+
+  part("J: Resend's first answer is a 503, then the product is renamed: every try sends the receipt as first made");
+  startOfNextDay();
+  mail.disableSes();
+  /** The guarded transport's attempt identity (lib/resend-fallback-transport.ts): its path, its exact body and its key. */
+  const attemptOf = (p: { body: string; key: string }) => createHash("sha256").update(JSON.stringify(["/emails", p.body, p.key])).digest("hex");
+  const postsTo = (buyer: string) => resendPosts.filter((p) => p.to === buyer);
+  const mailKeyOf = (order: string) => `nl:ppsell:mail:${order}`;
+  const title = product.title;
+  const rename = async (to: string) => {
+    const edited = await editProduct("owner@example.com", product.id, to, "", "49");
+    if (!edited.ok) throw new Error("the product was not renamed");
+  };
+  resendMode = "503";
+  const buyerJ = "renamed-later@example.com";
+  const j = await pay(12, buyerJ);
+  is("the return route's try: one request to Resend, answered 503", postsTo(buyerJ).length, 1);
+  await sweep(6 / 60);
+  is("control: a sweep 6 minutes later, nothing edited, makes no second request", postsTo(buyerJ).length, 1);
+  await rename(`${title}, Second Edition`);
+  await sweep(6 / 60);
+  is("the sweep after the product was renamed makes no second request", postsTo(buyerJ).length, 1);
+  for (let run = 0; run < (23 * 3600) / 300; run += 1) await sweep(300 / 3600);
+  const toJ = postsTo(buyerJ);
+  is("in its whole window, one request to Resend", toJ.length, 1);
+  is("every request: the same subject, the same text, the same bytes", [new Set(toJ.map((p) => p.subject)).size, new Set(toJ.map((p) => p.text)).size, new Set(toJ.map((p) => p.body)).size], [1, 1, 1]);
+  is("under the order's idempotency key", [...new Set(toJ.map((p) => p.key))], [`nimbus-paypal:${j}`]);
+  is("one attempt identity for the guarded transport, not one per body", new Set(toJ.map(attemptOf)).size, 1);
+  is("the receipt names the product as it was when paid", (toJ[0]?.subject ?? "").includes("Second Edition"), false);
+  is("then off the list", (await listed()).includes(j), false);
+  await rename(title);
+
+  part("J: kept words that do not read send nothing, and the words kept are the ones sent once they read again");
+  startOfNextDay();
+  resendMode = "422";
+  const buyerJ2 = "kept-words@example.com";
+  const j2 = await pay(13, buyerJ2);
+  is("the return route's try: refused by Resend (422)", postsTo(buyerJ2).length, 1);
+  const kept = redis.run(["GET", mailKeyOf(j2)]);
+  is("the receipt as first made is kept for its order", typeof kept === "string" && String(kept).includes(buyerJ2), true);
+  const ttl = Number(redis.run(["TTL", mailKeyOf(j2)]));
+  is("for a day at most", ttl > 0 && ttl <= delivery.RECEIPT_MAIL_SECONDS, true);
+  is("within the bytes the store-data registry prices", Buffer.byteLength(String(kept)) <= delivery.RECEIPT_MAIL_BYTES, true);
+  await rename(`${title}, Third Edition`);
+  resendMode = "up";
+  redis.run(["SET", mailKeyOf(j2), "{\"subject\":", "EX", String(ttl)]);
+  await sweep(6 / 60);
+  is("kept words that do not read: no request, and nothing made again", postsTo(buyerJ2).length, 1);
+  is("the order is still owed its receipt", (await listed()).includes(j2), true);
+  redis.run(["SET", mailKeyOf(j2), String(kept), "EX", String(ttl)]);
+  await sweep(12 / 60);
+  const toJ2 = postsTo(buyerJ2);
+  is("read again: the next sweep sends it once more, under the same key", [toJ2.length, toJ2[1]?.key], [2, `nimbus-paypal:${j2}`]);
+  is("with the very bytes of the first request", toJ2[1]?.body === toJ2[0]?.body, true);
+  is("then off the list", (await listed()).includes(j2), false);
+  await rename(title);
+
+  part("J: the kept words are deleted with the person, and never made again for a key a request was made under");
+  startOfNextDay();
+  resendMode = "422";
+  const buyerJ3 = "erased-meanwhile@example.com";
+  const j3 = await pay(14, buyerJ3);
+  is("the return route's try: refused by Resend (422)", postsTo(buyerJ3).length, 1);
+  await forgetNoted(statsId, buyerJ3);
+  is("deleting the person deletes the receipt's kept words", redis.run(["GET", mailKeyOf(j3)]), null);
+  resendMode = "up";
+  await sweeps(3);
+  is("no request with words made again", postsTo(buyerJ3).length, 1);
+  is("and none are kept again", redis.run(["GET", mailKeyOf(j3)]), null);
+  resendMode = "up";
 
   done();
 }

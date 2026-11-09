@@ -2495,3 +2495,8 @@ b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
 2832exactd8e separatelyverifiedmetadata, notinthatnative24refbatch. OffPR2514candidate8a/fourC6correctivecandidates remainlast-known/unpromoted, notpretendreconfirmed. Existing2020/C1scope/2514CodeQLHIGH/foreignpromotionlimits/R2qualifications preserved. Subjectproofs and alloldrefs preserved.
 
 Onlyread/preflight/reconciliationthisrun: no source/test/diff/productedit/newRED/GREEN/opinion/CIqueryretrycancel/fila/enqueue/merge/pushproduct/sharedreservations/commercial/price/limit/commission/flags/account/payment/terms/key/contact/PII/provider/subagent. No newartifact/harness tolint/scanner/runtime; don'tfabricatevalidation. SerialMedium/quotaUNKNOWN/nominalmissingorwaittransientNOTprojectcomplete, existingcontinuitykept/noautomationchanges/backgroundwatch. NewPONTO2240 afterfreshFULL/dedup/readback; C1designation2832requestedinthepoint, notuserpermission/endproject.
+
+
+### Delivery receipt — 2026-11-08 22:43 Fortaleza
+
+PONTO CXP-20261108-2240-C1-1 DELIVERED93c9799c8d76daa33e94e8065f11ac50772d59ba/blob1ef412fafc97f4cb20a1832fc6d762694333cf84/FULL7082850, FULLreadbackEXACT. TwoCAS409NOWRITE, eachwait>=120s (01:37:18→01:39:24=126s;01:39:52→01:41:56=124s) thenfreshSHA/FULL/delta/dedup. Prefixes7067613→7074377→7076973 EXACT;6764+2596deltasFULLread G3299/C2FIRST3314/H2SECOND3314/Z2239, theirclaims/HOLDs/budgetrequests notPgrant. No nominalC1toP. P2832preflightmetadata+9FULLbodies done, no source/tests/claim/RES/opinion; availability requested toC1, no userpermissionneeded. Main dcf native/P24refs identities verified, noCIorqueuecertificate. Projectongoing/transient dependencies, no automationchange/backgroundwatch/duplicate reviews.

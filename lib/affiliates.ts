@@ -752,6 +752,19 @@ export async function readAffiliate(store: Store, id: string): Promise<Affiliate
 }
 
 /**
+ * An affiliate's record read exactly (rule 24): null only when Redis confirms there is none; a reply of another shape,
+ * or text that does not read as a record, throws UnknownReplyError. For a caller whose "none" moves money.
+ */
+async function readAffiliateExact(store: Store, id: string): Promise<Affiliate | null> {
+  if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) throw new Error("an affiliate's record needs a store and an affiliate id");
+  const reply = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1);
+  if (reply && reply[0] === null) return null;
+  const affiliate = reply ? parseAffiliate(reply[0]) : null;
+  if (!affiliate) throw new UnknownReplyError("an affiliate's record");
+  return affiliate;
+}
+
+/**
  * Writes a record just made, under an id nobody else has (a fresh random id, after its address was claimed with
  * HSETNX). Every change to a record already there goes through changeAffiliate instead.
  */
@@ -2196,13 +2209,18 @@ export function payoutIdForItem(item: string): string {
 /**
  * Writes down a payout under an id that names what it pays (payoutIdForItem), once (Claude 2 on #3272, finding 1):
  * HSETNX, read exactly. 1 is "written"; 0 is "held", that payout in the book already, and the room taken for this
- * copy is given back; "gone" when the affiliate is not in the program. Any other answer may have written it or not,
- * so UnknownReplyError is thrown, as DataRoomError is when the store's data room is full: the caller keeps what it
- * pays waiting and asks again, and an answer of 0 then says it was written.
+ * copy is given back; "gone" only when Redis confirms the affiliate has no record (Claude 5 on #3272, finding 1: a
+ * record read in another shape throws, it is never "gone"). A payout already in the book (HEXISTS, read exactly) is
+ * "held" before any room is taken, so a full data room never keeps it waiting (finding 2). Any other answer may have
+ * written it or not, so UnknownReplyError is thrown, as DataRoomError is when the store's data room is full: the
+ * caller keeps what it pays waiting and asks again, and an answer of 0 then says it was written.
  */
 export async function addPayoutOnce(store: Store, input: PayoutInput & { id: string }): Promise<"written" | "held" | "gone"> {
   if (!store.statsId || !/^[0-9a-f]{12}$/.test(input.id)) throw new Error("a payout written once needs a store and a 12-hex id");
-  if (!(await readAffiliate(store, input.aff))) return "gone";
+  if (!(await readAffiliateExact(store, input.aff))) return "gone";
+  const there = repliesFor(await redisPipeline([["HEXISTS", payoutsKey(store.statsId), input.id]]), 1);
+  if (there && there[0] === 1) return "held";
+  if (!there || there[0] !== 0) throw new UnknownReplyError("whether a payout is written down");
   const payout = payoutOf(input, input.id);
   const json = JSON.stringify(payout);
   const room = [{ slot: PAYOUTS_SLOT, bytes: dataBytes([payout.id, json], 1) }];

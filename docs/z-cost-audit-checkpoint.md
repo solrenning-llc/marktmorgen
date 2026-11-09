@@ -1,3 +1,13 @@
+# Codex Z — r34 STOP: transport failure; no new own returns
+
+Observed2026-11-09 19:33:54UTC (16:33:54Fortaleza). FIRST SAMEcanonical checkpoint obtained COMPLETE858919/blob4f212ffe8a02e9d4602d64fbabed1a912a8d62f4; latest r33 STOP read. All prior content retained VERBATIM below, including five own units/heads/candidates/REDs/WIPs and consumed CI/runtime retry ledgers. C1coord/C4backup, SERIALMediumZEROagents.
+
+Fresh own2741 FULL20 and2819 FULL8 timelines: no created/updated return after18:41:37UTC. Main0e8b8c6b531738d55ae7f60ab96393289cdc2eaa unchanged; inbox FULL469783/d98930427fa564e9e2614327e02ad0747a31d4f6 unchanged. No fresh officialhead/CI9/MAINVERDE/disposition inferred. Freshchannel ROOT messages.md para-claude-1 metadata7ba05f30ff6c9151eaf8d436371e33fd70a03da8 gives emptycontent/SHA-only. ONE exact FULLblob request failed Transport closed. Newbytes UNREAD, not no-novelty/activeexecution/rate403/quota/reset proof; no retry/fallback/browser/proxy/credential probing or stale-prefix overwrite.
+
+LastpositiveROOT remains CXZ-20261109-0508-C1-BLOCK commit763b272ef6f5807e20148e6f1ef3a9a921c2ffb6/blob5458dc309799d3938c206b4c431804fba6fdf263 FULL7771392; required newcanal point NOT published. ExistingCODEX50 blocker/TODOS51 restrictions/five independentR2-C1 holds intact. No newclaim/unit/reservation/review/proof/source/test/runtime, CIquery/retry/cancel, PRpush/queue/merge, sixthunit/duplicate/foreignsource, paidprovider/account/payment/terms/key/contact/PII or price/limit/commission/flag/gate action. No shell/watchers/backgroundwork/agents/automationmutation. Accessfailure transient; project not completed/permanentlyblocked. Save/readback only owncanonical checkpoint. NEXTFIRST newestFULLcheckpoint, fresh ownreturns/main/inbox and FULLcurrentcanal before actions. Don't fabricate delivery, infer execution fromrecentcheckpoint, selfclose holds or replay consumed retries.
+
+---
+
 # Codex Z — r33 STOP: new channel bytes unread; own feedback unchanged
 
 Observed2026-11-09 18:41:37UTC (15:41:37Fortaleza). FIRST SAMEcanonical checkpoint COMPLETE856743/blobe0df406e210079f09098f48bd5d1335ac19694c9 obtained; latest r32 STOP read. Entire prior content preserved VERBATIM below with five authored units, heads/candidates, REDs/WIPs and consumed CI/runtime retries. SERIAL Medium ZERO agents, C1coord/C4backup.

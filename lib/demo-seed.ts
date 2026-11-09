@@ -47,6 +47,7 @@ import { readAbout, writeAbout } from "@/lib/product-about";
 import { type ProductFile, fileFolder } from "@/lib/product-file";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES, SMALL_LONG_SIDE, type ProductImage, imagePath, imagePaths } from "@/lib/product-image";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type CallSetup, type Range } from "@/lib/call-setup";
 import { putMember, readTeam } from "@/lib/team";
 import { SITE_URL } from "@/lib/site-url";
@@ -985,9 +986,17 @@ export async function ensureDemoStore(deps: SeedDeps = REAL): Promise<SeedResult
   // Something failed a moment ago: left alone for a while, not tried on every visit.
   if (current && now - mark.at < RETRY_SECONDS) return { ok: mark.store, pending: mark.pending, ran: false };
 
-  const [got] = await redisPipeline([["SET", LOCK, "1", "NX", "EX", LOCK_SECONDS]]);
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an unknown
+  // answer builds nothing this time and is named, and the lock is let go at the end only while it still holds this
+  // run's own value, so a run never deletes another run's lock.
+  const lock = claimValue();
+  const got = await claimMark(LOCK, LOCK_SECONDS, lock);
   // Somebody else is doing it right now. The store, if there was one, is still there.
-  if (got === null) return { ok: mark?.store ?? false, pending: mark?.pending ?? ["busy"], ran: false };
+  if (got === "taken") return { ok: mark?.store ?? false, pending: mark?.pending ?? ["busy"], ran: false };
+  if (got !== "ours") {
+    console.error("the demo store's lock answered in an unknown shape; nothing is built this time");
+    return { ok: mark?.store ?? false, pending: [refused("lock", "unknown")], ran: false };
+  }
   try {
     const next = await build(mark, deps);
     await redisPipeline([["SET", MARK, JSON.stringify(next)]]);
@@ -999,6 +1008,6 @@ export async function ensureDemoStore(deps: SeedDeps = REAL): Promise<SeedResult
     await redisPipeline([["SET", MARK, JSON.stringify(failed)]]).catch(() => {});
     return { ok: failed.store, pending: failed.pending, ran: true };
   } finally {
-    await redisPipeline([["DEL", LOCK]]).catch(() => {});
+    await releaseMark(LOCK, lock);
   }
 }

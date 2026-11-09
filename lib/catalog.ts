@@ -53,6 +53,7 @@ import { type Intro, parseIntro } from "@/lib/intro-price";
 import { type Yearly, parseYearly } from "@/lib/yearly-price";
 import { type CallSetup, parseSetup } from "@/lib/call-setup";
 import { COURSE_ID_PATTERN } from "@/lib/course";
+import { offerableTargets } from "@/lib/child-safety-holds";
 import { type Bump, type Plan, bumpTargets, canBeBumped, isOneOff, parseBump, parseBumps, parsePlan, parseStock } from "@/lib/product-extras";
 import { type Funnel, funnelFromUpsell, parseFunnel } from "@/lib/funnel";
 import { type PayWhatYouWant, parsePwyw } from "@/lib/pay-what-you-want";
@@ -920,7 +921,8 @@ export async function readPage(
   const listings = await readListings(store, ids);
   const onPage = new Set(ids);
   const targets = [...new Set(listings.flatMap((l) => bumpTargets(l).filter((id) => !onPage.has(id))))];
-  const related = targets.length ? await readListings(store, targets) : [];
+  // A box never offers a product kept for a child-safety report, nor a bundle holding one (lib/child-safety-holds.ts).
+  const related = targets.length ? await offerableTargets(store, await readListings(store, targets)) : [];
   return { listings, related, page: at, pages };
 }
 
@@ -959,7 +961,8 @@ export async function searchStore(store: Store, query: string): Promise<{ listin
   const listings = found.slice(0, STORE_SEARCH_LIMIT);
   const shown = new Set(listings.map((l) => l.id));
   const targets = [...new Set(listings.flatMap((l) => bumpTargets(l).filter((id) => !shown.has(id))))];
-  const related = targets.length ? await readListings(store, targets) : [];
+  // A box never offers a product kept for a child-safety report, nor a bundle holding one (lib/child-safety-holds.ts).
+  const related = targets.length ? await offerableTargets(store, await readListings(store, targets)) : [];
   return { listings, related, total: found.length };
 }
 

@@ -107,6 +107,38 @@ async function main(): Promise<void> {
   is("and emails nobody again", [owner(), member()], [1, 1]);
   is("the week is claimed now", held("nl:weekly:sent:"), true);
 
+  part("Weekly: a post whose outcome is unknown (timeout, abort, thrown, 5xx) is never posted again by a later run");
+  reset();
+  chooseMember();
+  retry.chat = "channel";
+  retry.sendOk = () => false;
+  retry.postUnknown = true;
+  body = await run(weekly, "/api/cron/weekly");
+  is("one post tried, the owner's email refused, the miss counted", [retry.posts.length, body.sent, body.failed], [1, 0, 1]);
+  retry.sendOk = () => true;
+  retry.postUnknown = false;
+  commands.length = 0;
+  body = await run(weekly, "/api/cron/weekly");
+  is("the next run, with a healthy channel, emails the owner and the member", [body.sent, body.failed, owner(), member()], [1, 0, 2, 1]);
+  is("and still exactly one post", retry.posts.length, 1);
+  commands.length = 0;
+  await run(weekly, "/api/cron/weekly");
+  is("a further run posts nothing more", retry.posts.length, 1);
+
+  part("Weekly: emails stopped, a post whose outcome is unknown is not posted again");
+  reset();
+  redis.run(["SADD", "nl:weekly:off", "fixture-store"]);
+  retry.chat = "channel";
+  retry.postUnknown = true;
+  body = await run(weekly, "/api/cron/weekly");
+  is("one post tried, counted as a miss", [retry.posts.length, body.failed, owner()], [1, 1, 0]);
+  retry.postUnknown = false;
+  for (let i = 1; i <= TRIES; i += 1) {
+    commands.length = 0;
+    await run(weekly, "/api/cron/weekly");
+  }
+  is("later runs with a healthy channel: still exactly one post, no email", [retry.posts.length, owner()], [1, 0]);
+
   part("Weekly: emails stopped, the post refused, is tried again by a later run");
   reset();
   redis.run(["SADD", "nl:weekly:off", "fixture-store"]);
@@ -190,6 +222,19 @@ async function main(): Promise<void> {
   commands.length = 0;
   body = await run(monthly, "/api/cron/monthly");
   is("the next run posts and emails nobody again", [body.posted, owner(), retry.posts.length], [1, 1, 2]);
+
+  part("Monthly: a post whose outcome is unknown is never posted again by a later run");
+  reset();
+  retry.chat = "channel";
+  retry.sendOk = () => false;
+  retry.postUnknown = true;
+  body = await run(monthly, "/api/cron/monthly");
+  is("one post tried, not counted as posted; the miss counted", [retry.posts.length, body.posted, body.sent, body.failed], [1, 0, 0, 1]);
+  retry.sendOk = () => true;
+  retry.postUnknown = false;
+  commands.length = 0;
+  body = await run(monthly, "/api/cron/monthly");
+  is("the next run, with a healthy channel, emails and does not post again", [body.sent, body.posted, body.failed, owner(), retry.posts.length], [1, 0, 0, 2, 1]);
 
   part("Monthly control: emailed and posted once, the month stays claimed");
   reset();

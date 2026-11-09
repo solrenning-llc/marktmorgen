@@ -11,6 +11,8 @@ export const retry = {
   keys: [] as (string | undefined)[],
   chat: "none" as "none" | "channel" | "throws",
   postOk: true,
+  /** A post whose outcome the chat did not say (a timeout, an abort, a thrown error, a 5xx): it may have been shown. */
+  postUnknown: false,
   posts: [] as string[],
   spends: "none" as "none" | "throws",
   team: "members" as "members" | "throws",
@@ -22,6 +24,7 @@ export function resetRetry(): void {
   retry.keys.length = 0;
   retry.chat = "none";
   retry.postOk = true;
+  retry.postUnknown = false;
   retry.posts.length = 0;
   retry.spends = "none";
   retry.team = "members";
@@ -43,9 +46,9 @@ export async function chatAddress(): Promise<string | null> {
   return retry.chat === "channel" ? "https://hooks.slack.test/services/fixture" : null;
 }
 export const forChat = (text: string) => text;
-export async function postToChat(url: string): Promise<boolean> {
+export async function postToChat(url: string): Promise<boolean | "unknown"> {
   retry.posts.push(url);
-  return retry.postOk;
+  return retry.postUnknown ? "unknown" : retry.postOk;
 }
 
 // lib/ad-spend.ts

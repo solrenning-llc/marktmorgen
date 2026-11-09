@@ -236,6 +236,46 @@ async function main(): Promise<void> {
   is("control: a payout from before the currency was written reads as US dollars", (await readBook(store)).payouts.map((p) => [p.cents, p.currency]), [[3000, "usd"]]);
   is("and nothing more is sent", [await payWithPayPal(store), created.length], [{ ok: false, reason: "nothing" }, 1]);
 
+  // Codex G on #3051 (review 5813598834): a payout's affiliate was read as any non-empty text, so `aff: " "` took
+  // the payout off the real affiliate's paid total and payWithPayPal sent a second batch of USD 30.00. Its only
+  // writer, addPayout, takes an affiliate that readAffiliate found, and readAffiliate needs AFFILIATE_ID_PATTERN:
+  // a payout naming anything else is a record that does not read, and nothing is paid on that book.
+  part("A payout whose affiliate is not an affiliate id is never read as one");
+  for (const [what, aff] of [
+    ["one space", " "],
+    ["only spaces", "            "],
+    ["the id padded with a space", ` ${AFF}`],
+    ["the id with a newline after it", `${AFF}\n`],
+    ["the id in capitals", AFF.toUpperCase()],
+    ["one character short", AFF.slice(1)],
+    ["one character long", `${AFF}a`],
+    ["twelve letters that are not hex", "zzzzzzzzzzzz"],
+    ["not text", 7],
+  ] as const) {
+    await payoutAs({ aff });
+    is(`affiliate ${what}: readBook throws UnknownReplyError`, await thrown(() => readBook(store)), "UnknownReplyError");
+    is(`affiliate ${what}: payWithPayPal refuses with nothing sent`, await payWithPayPal(store), { ok: false, reason: "error" });
+    is(`affiliate ${what}: never a second PayPal batch`, created.length, 1);
+  }
+  // Codex G's own proof: only the HGETALL reply is changed, the stored record stays healthy.
+  await settledOnce(store);
+  const onlyInReply = async (c: Commands) => {
+    const r = await real(c);
+    const list = (r[3] as string[]).slice();
+    list[1] = JSON.stringify({ ...(JSON.parse(list[1]) as object), aff: " " });
+    r[3] = list;
+    return r;
+  };
+  is("affiliate one space, in the reply only: readBook throws UnknownReplyError", await intercepted(bookPipe, onlyInReply, () => thrown(() => readBook(store))), "UnknownReplyError");
+  is("in the reply only: payWithPayPal refuses with nothing sent", await intercepted(bookPipe, onlyInReply, () => payWithPayPal(store)), { ok: false, reason: "error" });
+  is("in the reply only: never a second PayPal batch", created.length, 1);
+  idle = await idleWorld();
+  await real([["HSET", `nl:aff:${idle.statsId}:payouts`, "0123456789ab", JSON.stringify({ id: "0123456789ab", aff: " ", cents: 3000, currency: "usd", date: "2026-11-01", reference: "x", at: 1 })]]);
+  is("the same payout to one space in idleSweep: throws", await thrown(() => idleSweep(idle, ms(400))), "UnknownReplyError");
+  await payoutAs({ aff: AFF });
+  is("control: the payout to the real affiliate id still reads as paid", (await readBook(store)).rows.map((r) => [r.affiliate.id, r.paid, r.payable]), [[AFF, 3000, 0]]);
+  is("control: and nothing more is sent", [await payWithPayPal(store), created.length], [{ ok: false, reason: "nothing" }, 1]);
+
   part("The payouts' HGETALL in an unknown shape is not an empty book");
   for (const [what, value] of [
     ["missing (undefined)", undefined],

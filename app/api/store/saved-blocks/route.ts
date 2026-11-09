@@ -2,10 +2,12 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
 import { can } from "@/lib/team-roles";
-import { readCards } from "@/lib/catalog";
+import { idsOfKind, readCards } from "@/lib/catalog";
 import { SAVED_BLOCK_ID } from "@/lib/sales-page";
 import { readPage, writePage } from "@/lib/sales-page-store";
-import { SITE_KINDS, isSiteKey } from "@/lib/site-page-rules";
+import { SITE_KINDS, isSiteKey, outFrom } from "@/lib/site-page-rules";
+import { pageWords } from "@/lib/page-translate";
+import { fastMoneyMessage, fastMoneyOnPage } from "@/lib/terms-check-rules";
 import { BLOCK_KINDS, type BlockKind } from "@/lib/sales-page";
 import { type SavedSection, SECTION_WHY, newSectionId, readSectionInput, updateProblem, withSection } from "@/lib/saved-blocks";
 import { dropSection, readSection, readSections, sectionUses, writeSection } from "@/lib/saved-block-store";
@@ -145,6 +147,7 @@ export async function POST(request: NextRequest) {
       // is written, so an unknown read writes nothing; the try it counted is said in the answer (page_unread_counted).
       if (!(await countUse(storeMonthKey(statsId, "apply", month), limits.appliesPerMonth, MONTH_USE_SECONDS))) return refuse("applies_full", 429, { limit: limits.appliesPerMonth });
       const titles = new Map([...(await readCards(store)).values()].map((card) => [card.id, card.title]));
+      const drafts = new Set(idsOfKind(store, "hidden"));
       const planned: { key: string; next: NonNullable<ReturnType<typeof withSection>> }[] = [];
       const skipped: { key: string; why: string }[] = [];
       for (const key of asked) {
@@ -163,6 +166,14 @@ export async function POST(request: NextRequest) {
         const next = problem ? null : withSection(held, section, kindsFor(key));
         if (!next) {
           skipped.push({ key, why: problem ? SECTION_WHY[problem] : "The section no longer fits on this page." });
+          continue;
+        }
+        // What the Terms forbid is not put on a page the public can see (567 [GD1] (d)): a published product's page
+        // or a store page that is shown or scheduled. A draft's page is checked when it is published or shown.
+        const shown = isSiteKey(key) ? outFrom(next) !== -1 : !drafts.has(key);
+        const refused = shown ? fastMoneyOnPage(pageWords(next)) : null;
+        if (refused) {
+          skipped.push({ key, why: fastMoneyMessage(refused, "save") });
           continue;
         }
         planned.push({ key, next });

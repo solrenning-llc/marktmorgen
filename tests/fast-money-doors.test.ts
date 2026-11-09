@@ -40,6 +40,7 @@ async function main(): Promise<void> {
   const draft = await addProduct(OWNER, "Draft guide", "", "29", null);
   if (!published.ok || !draft.ok) throw new Error("no product");
   await setProductHidden(OWNER, published.product.id, false);
+  await setProductHidden(OWNER, draft.product.id, true);
   const session = await openSession(OWNER);
   const headers = { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` };
   const post = async (fn: (r: NextRequest) => Promise<Response>, path: string, body: unknown) => {

@@ -47,7 +47,7 @@ import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
 import { suppressCommand } from "@/lib/suppression";
-import { takeAllowance } from "@/lib/store-allowance";
+import { takeAllowance, type Taken } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
 import { deleteFile } from "@/lib/file-store";
@@ -206,7 +206,9 @@ export const ERASERS: Eraser[] = [
 
 export type ErasureResult =
   | { ok: true; parts: ErasedPart[]; records: number; notes: ErasureNote[] }
-  | { ok: false; reason: "email" | "unavailable" | "limit"; message?: string }
+  // `pool`: refused because the free stores' places are taken this month (lib/free-pool.ts), which, like
+  // "limit", pressing again cannot change before the store's allowance starts again; the page says so.
+  | { ok: false; reason: "email" | "unavailable" | "limit"; message?: string; pool?: true }
   | { ok: false; reason: "incomplete"; parts: ErasedPart[]; failed: string[] };
 
 /** Works out where one person may be found in one store. */
@@ -264,6 +266,11 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   };
 }
 
+/** A refused take of the studio allowance, said as the erasure's answer: spent is "limit", the free places taken keep `pool`. */
+function refused(taken: Extract<Taken, { ok: false }>): ErasureResult {
+  return { ok: false, reason: taken.reason === "used" ? "limit" : "unavailable", message: taken.message, ...(taken.reason === "pool" ? { pool: true as const } : {}) };
+}
+
 /**
  * Deletes one person from one store. `by` says which door: the team, with
  * who pressed it and their role for the activity log, or the person.
@@ -279,7 +286,7 @@ export async function erasePerson(
   // What the store's record says, before anything is read.
   const first = erasureUnits({ products: store.catalog.items.length, courses: idsOfKind(store, "course").length });
   const taken = await takeAllowance(store, "studio", first);
-  if (!taken.ok) return { ok: false, reason: taken.reason === "used" ? "limit" : "unavailable", message: taken.message };
+  if (!taken.ok) return refused(taken);
   const scope = await erasureScope(store, email).catch(() => null);
   if (!scope) return { ok: false, reason: "unavailable" };
   // Then the rest, once the courses are read and the counts taken.
@@ -288,7 +295,7 @@ export async function erasePerson(
   const rest = erasureUnits(size) - first;
   if (rest > 0) {
     const more = await takeAllowance(store, "studio", rest);
-    if (!more.ok) return { ok: false, reason: more.reason === "used" ? "limit" : "unavailable", message: more.message };
+    if (!more.ok) return refused(more);
   }
 
   // First, and on its own: whatever happens next, they are never written to again.

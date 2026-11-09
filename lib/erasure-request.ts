@@ -278,12 +278,20 @@ export type EraseDone = {
   deleted: string[];
   /** The stores that could not finish now, kept on the link to press again. */
   later: string[];
+  /**
+   * How many of `later` refused because their studio allowance is spent or the free stores' places are taken
+   * (lib/person-erasure.ts, "limit" or `pool`): pressing again cannot finish those before their allowance starts
+   * again, so the page says why and where to write instead (VR item 2). Absent when none did.
+   */
+  held?: number;
 };
 
 /**
  * Deletes the address from the link's stores, one after the other, until
  * they are done or PRESS_MS have gone; what is left stays on the link, so
- * pressing again finishes it. Each store's owner is told, with the address,
+ * pressing again finishes it, except a store whose allowance refused it
+ * (`held`), which pressing again cannot finish before that allowance starts
+ * again. Each store's owner is told, with the address,
  * so they can delete it from their own tools too (Stripe, an email platform).
  */
 export async function confirmErasure(token: string, now = Date.now()): Promise<EraseDone> {
@@ -299,6 +307,7 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
   if (!grant || typeof ttl !== "number" || !Number.isSafeInteger(ttl) || ttl <= 0) return pending;
   const deleted: string[] = [];
   const later: string[] = [];
+  let held = 0;
   for (const sid of grant.s) {
     if (Date.now() - now > PRESS_MS) {
       later.push(sid);
@@ -314,6 +323,7 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
     const result = await erasePerson(store, grant.e, { kind: "person" }).catch(() => ({ ok: false as const, reason: "unavailable" as const }));
     if (!result.ok) {
       later.push(sid);
+      if (result.reason === "limit" || ("pool" in result && result.pool)) held += 1;
       continue;
     }
     deleted.push(store.name);
@@ -321,7 +331,7 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
   }
   if (later.length) {
     await redisPipeline([["SET", key, JSON.stringify({ e: grant.e, s: later } satisfies Grant), "EX", Math.max(60, ttl)]]);
-    return { state: "more", deleted, later };
+    return { state: "more", deleted, later, ...(held ? { held } : {}) };
   }
   await redisPipeline([["DEL", key]]);
   return { state: "done", deleted, later };

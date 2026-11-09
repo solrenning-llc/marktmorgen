@@ -17,7 +17,8 @@ export const metadata: Metadata = {
 type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
 const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
-  sent: { tone: "ok", text: "If that address is known there, a link to delete it is on its way to it. It works for an hour, and nothing is deleted until you press the button on the page it opens." },
+  // Given before any email is tried, so the page never tells who buys where (lib/erasure-request.ts): it cannot say a link went out (VR item 2).
+  sent: { tone: "ok", text: "If that address is known there, we try to email it a link to delete it. The email may not go out, for example when a store has used up the emails it may send for requests like this. This page cannot say which, so that nobody can use it to learn who buys where. The link works for an hour, and nothing is deleted until you press the button on the page it opens." },
   email: { tone: "error", text: "That does not look like an email address. Type the one the store has." },
   limited: { tone: "error", text: "Too many tries for now. Wait an hour and ask again." },
   error: { tone: "error", text: "That could not be done just now. Nothing was deleted. Try again in a moment." },
@@ -44,6 +45,45 @@ const KEPT = [
 ];
 
 const NOT_YET = "Posts and comments you wrote in a store's community stay, shown without your name. Delete them in the community first if you want them gone, or ask the creator.";
+
+/** The published address for data requests (Privacy Policy). A person's email to it is their written request; no answer time is promised here. */
+const support = (
+  <a href="mailto:support@marktmorgen.com" className="underline underline-offset-4">
+    support@marktmorgen.com
+  </a>
+);
+const WRITTEN = "Your email to us is your written request, with its date.";
+/** GDPR art. 12(4) (docs/official-texts-eu-2026-11-02.md): a request not acted on is told why, and about the right to complain and to go to court. */
+const COMPLAIN = "Where a data protection law such as the GDPR applies to you, you can also complain to your data protection authority or go to court.";
+
+const stores = (n: number) => `${n} ${n === 1 ? "store" : "stores"}`;
+
+/**
+ * After a press that did not finish (lib/erasure-request.ts, confirmErasure). `held` stores refused because
+ * their allowance is used up: pressing again cannot finish those before it starts again, and the link stops
+ * an hour after it was emailed, so the page says why and where to write, never "press again in a while".
+ */
+function notFinished({ count, held = 0, left = 0, live }: { count: number; held?: number; left?: number; live: boolean }) {
+  const so = count ? `Deleted from ${stores(count)} so far.` : "Nothing was deleted yet.";
+  if (!held) {
+    return (
+      <p className="notice notice-info mb-6" role="status">
+        {`Deleted from ${stores(count)} so far. The rest could not be finished just now.`}
+        {live ? " Press the button again to go on. This link stops working an hour after we emailed it, and you can ask for a new one at any time." : ""}
+      </p>
+    );
+  }
+  const one = held === 1;
+  const who = held === left ? (one ? "The store that is left" : `The ${held} stores that are left`) : `${held} of the ${stores(left)} that are left`;
+  return (
+    <p className="notice notice-error mb-6" role="alert">
+      {`${so} ${who} could not delete your data now: ${one ? "it has" : "they have"} used up, for now, what Marktmorgen lets ${one ? "it" : "them"} do. `}
+      {`Pressing the button again will not help until ${one ? "its" : "their"} allowance starts again, and this link stops working an hour after we emailed it. `}
+      {held < left && live ? "Press the button again to go on with the others. " : ""}
+      To have your data deleted without waiting, write to {support} from this address and ask us to delete it from the stores that are left. {WRITTEN} {COMPLAIN}
+    </p>
+  );
+}
 
 /**
  * Deleting what a store keeps about you, yourself (lib/erasure-request.ts):
@@ -95,26 +135,24 @@ export default async function DeletePage({ searchParams }: Params) {
             </div>
           ) : linkUnavailable ? (
             <div className="max-w-2xl">
-              <p className="notice notice-info mb-6" role="status">
-                {statusKey === "more" && confirmed
-                  ? `Deleted from ${n} ${n === 1 ? "store" : "stores"} so far. The rest could not be finished just now.`
-                  : "We could not check every store just now. Your request has not been confirmed as complete."}
-              </p>
+              {statusKey === "more" && confirmed ? (
+                notFinished({ count: n, held: confirmed.held, left: confirmed.left, live: false })
+              ) : (
+                <p className="notice notice-info mb-6" role="status">
+                  We could not check every store just now. Your request has not been confirmed as complete.
+                </p>
+              )}
               <p className="text-ink-soft">Keep this page open and try checking again. This does not delete anything until the stores can be shown and you confirm.</p>
               <a className="btn btn-secondary mt-6" href={`/privacy/delete?${new URLSearchParams({ token, ...(statusKey === "more" && confirmed && typeof query.receipt === "string" ? { status: "more", receipt: query.receipt } : {}) }).toString()}`}>
                 Try checking again
               </a>
               <p className="mt-6 text-sm text-ink-soft">
-                If you still cannot continue, write to <a className="underline underline-offset-4" href="mailto:support@marktmorgen.com">support@marktmorgen.com</a> from this address and ask us to delete your data.
+                If you still cannot continue, write to {support} from this address and ask us to delete your data. {WRITTEN}
               </p>
             </div>
           ) : link ? (
             <div className="max-w-2xl">
-              {statusKey === "more" && confirmed ? (
-                <p className="notice notice-info mb-6" role="status">
-                  {`Deleted from ${n} ${n === 1 ? "store" : "stores"} so far. The rest could not be finished just now. Press the button again in a while; this link works for an hour, and you can ask for a new one at any time.`}
-                </p>
-              ) : null}
+              {statusKey === "more" && confirmed ? notFinished({ count: n, held: confirmed.held, left: confirmed.left, live: true }) : null}
               <h2 className="t-h3 [overflow-wrap:anywhere]">{`Delete ${link.email}`}</h2>
               <p className="mt-2 text-ink-soft">{link.stores.length === 1 ? "From this store:" : "From these stores:"}</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-ink">
@@ -165,20 +203,16 @@ export default async function DeletePage({ searchParams }: Params) {
                   {status.text}
                   {statusKey === "sent" ? (
                     <>
-                      {" "}No email after an hour? Check your spam folder, then write to{" "}
-                      <a href="mailto:support@marktmorgen.com" className="underline underline-offset-4">support@marktmorgen.com</a>{" "}
-                      from this address and ask us to delete your data. We answer within the time the law requires.
+                      {" "}No email after an hour? Check your spam folder, then write to {support} from this address and ask us to delete your data. {WRITTEN}
                     </>
                   ) : null}
                 </p>
               ) : null}
               {statusKey === "full" ? (
                 <p className="notice notice-error mb-6" role="alert">
-                  Your link can&apos;t be emailed right now: the emails for requests like this are used up for now. Nothing was deleted.{" "}
+                  Your link can&apos;t be emailed right now: this store has used up, for now, the emails it may send for requests like this. Nothing was deleted.{" "}
                   {opensOn ? `You can ask for it here again from ${opensOn} (UTC). ` : ""}
-                  You don&apos;t have to wait: write to{" "}
-                  <a href="mailto:support@marktmorgen.com" className="underline underline-offset-4">support@marktmorgen.com</a>{" "}
-                  from this address and ask us to delete your data. We answer within the time the law requires.
+                  You don&apos;t have to wait: write to {support} from this address and ask us to delete your data. {WRITTEN} {COMPLAIN}
                 </p>
               ) : null}
               <form action="/api/privacy/erase" method="post" className="card p-6 sm:p-8">

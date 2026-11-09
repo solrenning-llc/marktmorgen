@@ -46,7 +46,8 @@ export async function POST(request: NextRequest) {
       const token = String(form.get("token") ?? "").slice(0, 80);
       const done = await confirmErasure(token);
       if (done.state === "gone") return away("status=expired");
-      const receipt = makeErasureReceipt(done.state, done.deleted.length, token);
+      // How many stores refused for a spent allowance, so the page says why instead of "press again" (lib/erasure-receipt.ts).
+      const receipt = makeErasureReceipt(done.state, done.deleted.length, token, Date.now(), { held: done.held ?? 0, left: done.later.length });
       const result = receipt ? `&receipt=${encodeURIComponent(receipt)}` : "";
       if (done.state === "more") return away(`status=more&token=${encodeURIComponent(token)}${result}`);
       return away(`status=done${result}`);

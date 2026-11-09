@@ -32,7 +32,7 @@ import { upsertContact } from "@/lib/contacts";
 import { takeAllowance } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { calendarWindow } from "@/lib/allowance-window";
-import { makeErasureReceipt } from "@/lib/erasure-receipt";
+import { makeErasureReceipt, readErasureReceipt } from "@/lib/erasure-receipt";
 import { HELP_SECTIONS } from "@/lib/help-content";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -151,6 +151,18 @@ async function main(): Promise<void> {
     is("told to press the button again", /Press the button again/i.test(retry.text), true);
     is("not told an allowance is used up", /used up/i.test(retry.text), false);
     is("the button is there", retry.confirms, 1);
+
+    part("(1d) The signed receipt carries how many stores were held, and nothing else can be made to");
+    const now = Date.now();
+    const heldReceipt = makeErasureReceipt("more", 1, token, now, { held: 2, left: 3 });
+    is("a held receipt reads back", readErasureReceipt(heldReceipt, token, now), { state: "more", count: 1, held: 2, left: 3 });
+    is("a receipt with none held is the old shape", readErasureReceipt(makeErasureReceipt("more", 1, token, now), token, now), { state: "more", count: 1 });
+    is("more held than left is refused", makeErasureReceipt("more", 0, token, now, { held: 2, left: 1 }), "");
+    is("held on a finished deletion is refused", makeErasureReceipt("done", 1, token, now, { held: 1, left: 1 }), "");
+    is("a negative or fractional count is refused", [makeErasureReceipt("more", 0, token, now, { held: -1, left: 1 }), makeErasureReceipt("more", 0, token, now, { held: 0.5, left: 1 })], ["", ""]);
+    const mixed = await show({ token, status: "more", receipt: makeErasureReceipt("more", 0, token, now, { held: 1, left: 2 }) });
+    is("one held of two: says which part pressing again cannot finish", /1 of the 2 stores that are left/.test(mixed.text), true);
+    is("one held of two: and that pressing again goes on with the other", /Press the button again to go on with the others/.test(mixed.text), true);
 
     part("(2) The answer to an ask never says a link is on its way");
     const sent = await show({ status: "sent" });

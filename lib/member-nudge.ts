@@ -56,7 +56,7 @@ export function nudgeEmail(input: { storeName: string; title: string; courseUrl:
  */
 export async function nudgeStore(store: Store, deadline: number, now = Date.now(), read?: { complete: boolean }): Promise<number> {
   if (!store.nudge.on || !store.stripeAccountId || !store.statsId || !store.listId) return 0;
-  const { rows, complete } = await runningMembers(store);
+  const { rows, complete } = await runningMembers(store, deadline);
   if (!complete) {
     if (read) read.complete = false;
     console.error("come-back emails: the store's running memberships did not fit one reading; the oldest were not read", store.handle);

@@ -91,7 +91,7 @@ type Row = { sub: string; customer: string; email: string; product: Listing; cho
  */
 export async function askStore(store: Store, deadline: number, now = Date.now(), read?: { complete: boolean }): Promise<number> {
   if (!store.yearlyAsk.on || !store.stripeAccountId || !store.statsId || !store.listId) return 0;
-  const { rows, complete } = await runningMembers(store);
+  const { rows, complete } = await runningMembers(store, deadline);
   if (!complete) {
     if (read) read.complete = false;
     console.error("yearly offer: the store's running memberships did not fit one reading; the oldest were not read", store.handle);

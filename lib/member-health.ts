@@ -115,9 +115,10 @@ export function monthlyOf(amount: number, interval: string, count: number): numb
 
 /**
  * The store's running memberships, as Stripe holds them, with the member's address: each live status read on its own,
- * MAX_PAGES pages each. Not complete when a status had more than that; the rows read are still returned.
+ * MAX_PAGES pages each. Not complete when a status had more than that, or when `deadline` (a daily run's, in ms) came
+ * before the reading finished: no page is asked for once it has passed. The rows read are still returned.
  */
-export async function runningMembers(store: Store): Promise<{ rows: Raw[]; complete: boolean }> {
+export async function runningMembers(store: Store, deadline = Infinity): Promise<{ rows: Raw[]; complete: boolean }> {
   const account = store.stripeAccountId;
   if (!account) return { rows: [], complete: true };
   const handles = saleHandles(store);
@@ -129,6 +130,7 @@ export async function runningMembers(store: Store): Promise<{ rows: Raw[]; compl
     let after = "";
     let listDone = false;
     for (let page = 0; page < MAX_PAGES; page += 1) {
+      if (Date.now() >= deadline) break;
       const query = new URLSearchParams({ status, limit: "100" });
       query.append("expand[]", "data.customer");
       if (after) query.set("starting_after", after);

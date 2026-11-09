@@ -33,7 +33,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { orderWrite } from "@/lib/order-data";
@@ -191,13 +191,15 @@ export async function forgetPaid(store: Store, email: string): Promise<void> {
  * Takes a course off an address's ledger: a gift, pre-order, group place or PayPal sale taken back by a refund. Both
  * replies are read exactly (CX-123 rule 24; Codex G on #2781): the HDEL and the DEL each answer 0 or 1, or this
  * throws UnknownReplyError, so the caller keeps the refund to be tried again and never reads "taken away" from a
- * reply it could not read. Running it again is harmless.
+ * reply it could not read. Running it again is harmless. With `startedAt`, only the course written down as begun then
+ * (recordEnrollment's whole seconds) is taken off, so one a later purchase wrote with its own start is kept.
  */
-export async function dropEnrollment(store: Store, email: string, productId: string): Promise<void> {
+export async function dropEnrollment(store: Store, email: string, productId: string, startedAt?: number): Promise<void> {
   if (!isRedisConfigured()) return;
+  const ledger = ledgerKey(store, email);
   const replies = repliesFor(
     await redisPipeline([
-      ["HDEL", ledgerKey(store, email), productId],
+      startedAt === undefined ? ["HDEL", ledger, productId] : ["EVAL", HDEL_IF_EQUAL, 1, ledger, productId, String(Math.floor(startedAt))],
       ["DEL", paidCacheKey(store, email)],
     ]),
     2,

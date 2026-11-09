@@ -271,9 +271,20 @@ function grantJob(raw: string): string | null {
  * `paypal:<order>`), so a purchase they made after their deletion, and what goes with it, is kept: the courses of the
  * order taken off their ledger (dropEnrollment), the store out of the stores they bought from when this was their
  * only purchase here, the bond to the order's affiliate, and the purchase itself last, so a try stopped part way finds
- * it and takes back the rest. Every reply read exactly (CX-123 rule 24): otherwise UnknownReplyError, and the order
- * stays owed, tried again at the next sweep, which takes back what is left. The link's grant is not: it expires in a
- * day (ORDERS_LINK_SECONDS), as one the deletion found does.
+ * it and takes back the rest.
+ *
+ * The purchase already gone (review of #3449, MEDIUM 1): the deletion's erasers run one after another, and one that ran
+ * before a write of this order left that write; the purchases' eraser runs after the courses' and the bonds', so a
+ * deletion that took the purchase can leave the course and the bond written after it. They are taken back all the
+ * same, each only as this order wrote it: the course only while it began at this payment (recordEnrollment's start),
+ * the bond only while it names this order's affiliate, so one a later sale wrote with another affiliate, or a course a
+ * later order began, is kept. The store in their library is written before the purchase and deleted after it, so it is
+ * not touched then, nor is a purchase. A bond holds only the affiliate: one a later sale wrote to this same affiliate
+ * reads as this order's and is taken back too; the person's next sale credited to them writes it again.
+ *
+ * Every reply read exactly (CX-123 rule 24): otherwise UnknownReplyError, and the order stays owed, tried again at the
+ * next sweep, which takes back what is left. The link's grant is not: it expires in a day (ORDERS_LINK_SECONDS), as
+ * one the deletion found does.
  */
 async function takeBack(store: Store, paid: Paid, product: Listing, bundled: Map<string, Listing>): Promise<void> {
   const statsId = store.statsId as string;
@@ -283,19 +294,23 @@ async function takeBack(store: Store, paid: Paid, product: Listing, bundled: Map
   if (!read || (raw !== null && typeof raw !== "string") || typeof count !== "number" || !Number.isSafeInteger(count) || count < (raw === null ? 0 : 1)) {
     throw new UnknownReplyError("a deleted person's purchase, to take back what a PayPal hand-over wrote");
   }
-  if (raw === null) return;
-  const job = grantJob(raw);
-  if (job === null) throw new UnknownReplyError("a deleted person's purchase, to take back what a PayPal hand-over wrote");
-  if (job !== `paypal:${paid.order}`) return;
-  for (const id of [product.id, ...(product.bundle ?? [])]) {
-    if ((id === product.id ? product : bundled.get(id))?.course) await dropEnrollment(store, paid.email, id);
+  if (raw !== null) {
+    const job = grantJob(raw);
+    if (job === null) throw new UnknownReplyError("a deleted person's purchase, to take back what a PayPal hand-over wrote");
+    if (job !== `paypal:${paid.order}`) return;
   }
-  const rest = [...(count === 1 ? forgetBoughtCommands(store.sid, paid.email) : []), ...(paid.via ? [forgetBondCommand(statsId, paid.email)] : [])];
+  for (const id of [product.id, ...(product.bundle ?? [])]) {
+    if ((id === product.id ? product : bundled.get(id))?.course) await dropEnrollment(store, paid.email, id, paid.at);
+  }
+  const rest = [
+    ...(raw !== null && count === 1 ? forgetBoughtCommands(store.sid, paid.email) : []),
+    ...(paid.via ? [forgetBondCommand(statsId, paid.email, paid.via.aff)] : []),
+  ];
   const zeroOrOne = (replies: unknown[] | null) => replies !== null && replies.every((reply) => reply === 0 || reply === 1);
   if (rest.length && !zeroOrOne(repliesFor(await redisPipeline(rest), rest.length))) {
     throw new UnknownReplyError("taking back what a PayPal hand-over wrote of a deleted person");
   }
-  if (!zeroOrOne(repliesFor(await redisPipeline([["HDEL", key, product.id]]), 1))) {
+  if (raw !== null && !zeroOrOne(repliesFor(await redisPipeline([["HDEL", key, product.id]]), 1))) {
     throw new UnknownReplyError("taking back what a PayPal hand-over wrote of a deleted person");
   }
 }

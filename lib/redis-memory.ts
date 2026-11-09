@@ -211,6 +211,12 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
+        // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
+        if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, hash, field, value] = args;
+          if (this.run(["HGET", hash, field]) !== value) return 0;
+          return this.run(["HDEL", hash, field]);
+        }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
           const [, imported, own, field, job, ...known] = args;

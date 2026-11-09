@@ -38,6 +38,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { AttributionRule } from "@/lib/affiliate-setting";
 import { orderWrite } from "@/lib/order-data";
+import { HDEL_IF_EQUAL } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 
 /**
@@ -145,8 +146,12 @@ export async function forgetBondPerson(statsId: string | null, email: string): P
   return Number(gone) || 0;
 }
 
-/** The command that forgets one buyer's bond (HDEL: 0 or 1), for a caller that reads its reply itself (lib/paypal-delivery.ts). */
-export function forgetBondCommand(statsId: string, email: string): (string | number)[] {
+/**
+ * The command that forgets one buyer's bond (0 or 1), for a caller that reads its reply itself (lib/paypal-delivery.ts).
+ * With `affiliateId`, only a bond to that affiliate, so a bond a later sale made to another one is kept.
+ */
+export function forgetBondCommand(statsId: string, email: string, affiliateId?: string): (string | number)[] {
+  if (affiliateId !== undefined) return ["EVAL", HDEL_IF_EQUAL, 1, bondKey(statsId), buyerHash(statsId, email), affiliateId];
   return ["HDEL", bondKey(statsId), buyerHash(statsId, email)];
 }
 

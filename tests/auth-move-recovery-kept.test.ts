@@ -45,6 +45,8 @@ const real = redis.pipeline.bind(redis);
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const addressKey = (email: string) => `nl:auth:rec:${sha(`nimbus-rec:${email}`).slice(0, 40)}`;
 const SUBJECT = "Your recovery address did not move with your account";
+// The old sign-in address's notice at the end of every move (review of claude5/move-keeps-recovery, finding 2).
+const FINISHED = "The email your Marktmorgen account logs in with changed";
 const post = (url: string, fields: Record<string, string>) =>
   new NextRequest(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields) });
 
@@ -93,7 +95,10 @@ async function move(recovery: string | null, faults: (from: string, to: string) 
     console.error = quiet;
     sending = true;
   }
-  const told = mails.filter((m) => m.subject === SUBJECT);
+  // Changed (rule 23, review of claude5/move-keeps-recovery, finding 2): the old address's notice is now the one it
+  // gets at the end of every move, under its own subject, so both subjects are read; the new address still gets
+  // SUBJECT only when the recovery address did not come along.
+  const told = mails.filter((m) => m.subject === SUBJECT || (m.subject === FINISHED && m.to === from));
   return {
     location,
     moved: Boolean(await storeForEmail(to)) && !(await storeForEmail(from)),
@@ -111,9 +116,12 @@ const RECOVERY = "backup-inbox@example.org";
 async function main() {
   part("healthy controls");
   const kept = await move(RECOVERY);
-  is("the recovery address goes with the account, said as moved, nobody told it did not", [kept.location, kept.moved, kept.atTo, kept.told], ["https://marktmorgen.com/studio?address=moved", true, RECOVERY, []]);
+  // Changed (rule 23, review of claude5/move-keeps-recovery, finding 2): the old address is told the move finished,
+  // every time; what is still checked is that nobody is told the recovery address did not come along.
+  is("the recovery address goes with the account, said as moved, nobody told it did not", [kept.location, kept.moved, kept.atTo, kept.told, kept.toldFrom.includes("recovery address")], ["https://marktmorgen.com/studio?address=moved", true, RECOVERY, [kept.from], false]);
   const none = await move(null);
-  is("an account without one moves as before", [none.location, none.moved, none.atTo, none.told], ["https://marktmorgen.com/studio?address=moved", true, null, []]);
+  // Changed (rule 23, same finding): as above, the old address hears only that the move finished.
+  is("an account without one moves as before", [none.location, none.moved, none.atTo, none.told, none.toldFrom.includes("recovery address")], ["https://marktmorgen.com/studio?address=moved", true, null, [none.from], false]);
 
   part("the recovery address could not be carried: the move stands, and it is never silent");
   for (const [label, fault] of [

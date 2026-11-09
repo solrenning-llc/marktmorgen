@@ -171,9 +171,8 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
     // teams they are on, the browsers they sign in from, the recovery address.
     // The recovery address is carried on its own (review of #2883): a carry that failed, or whose answer is not
     // known, never passes as moved. The move itself stands, as the store and its ways in are already at `to` and
-    // undoing them is more writes that can fail and leave the account split; instead both sign-in addresses are told
-    // now, before anything else can stop the move, and the studio says it too, so it is never only an email that may
-    // not arrive.
+    // undoing them is more writes that can fail and leave the account split; instead the new address is told too,
+    // and the studio says it, so it is never only an email that may not arrive.
     [carried] = await Promise.all([
       moveRecoveryAddress(from, to).then(
         () => true,
@@ -181,7 +180,10 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
       ),
       Promise.all([moveMemberships(from, to), moveDevices(from, to)]).catch((error) => console.error("moving what belongs to the account failed", error)),
     ]);
-    if (!carried) await tellRecoveryNotMoved(from, to, link);
+    // The old address is told the move finished every time, now, before anything else can stop it: the notice when
+    // the move was asked for (lib/auth.ts sendMoveLink) says only that it may happen, and a move nobody there made is
+    // learned of while there is still somebody to ask for help.
+    await tellMoved(from, to, link, { recovery: !carried });
     // Phones follow once the memberships have: an owner's stay the owner's,
     // a team member's become the new address's (lib/phone-alerts.ts).
     await movePhoneDevices(from, to).catch((error) => console.error("moving phone devices failed", error));
@@ -212,32 +214,46 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
   return response;
 }
 
+/** What did not come along with a move, said in its notices and on the page it lands on. */
+type LeftBehind = { recovery: boolean };
+
 /**
- * Tells both sign-in addresses that the recovery address did not come along with the move, so the account may have
- * none now, and what to do. Best effort, like every account notice: the studio says the same on the page the move
- * lands on (`-no-recovery` in app/studio/page.tsx), which is the notice that cannot be lost.
+ * The notices at the end of a move. The old sign-in address is always told that the account now logs in with the new
+ * one, with what did not come along; the new address is told only when something did not, with what to do. At most
+ * two emails a move (tests/plan-cost-registry.ts, EMAIL_SITES). Neither ever names the recovery address. Best
+ * effort, like every account notice: the studio says what did not come along on the page the move lands on
+ * (app/studio/page.tsx), which is the notice that cannot be lost.
  */
-async function tellRecoveryNotMoved(from: string, to: string, link: string): Promise<void> {
-  const when = new Date().toISOString().replace("T", " ").slice(0, 16);
-  const send = (address: string, lines: string[]) =>
-    sendEmail({
-      meter: { by: "company" },
-      from: NIMBUS_FROM,
-      to: address,
-      replyTo: "support@marktmorgen.com",
-      subject: "Your recovery address did not move with your account",
-      text: [...lines, "", `When: ${when} UTC`, "", "If you did not move your account, reply to this email so we can help."].join("\n"),
-    }).catch(() => false);
+async function tellMoved(from: string, to: string, link: string, left: LeftBehind): Promise<void> {
+  const when = `When: ${new Date().toISOString().replace("T", " ").slice(0, 16)} UTC`;
+  const send = (address: string, subject: string, lines: string[]) =>
+    sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: address, replyTo: "support@marktmorgen.com", subject, text: lines.join("\n") }).catch(() => false);
+  const lost = left.recovery ? ["We could not carry its recovery address over, so the account may have no recovery address now."] : [];
+  const todo = left.recovery ? ", open your studio and add a recovery address again" : "";
   await Promise.all([
-    send(to, [
-      "Your Marktmorgen account now logs in with this address, but we could not carry its recovery address over. Your account may have no recovery address now.",
+    send(from, "The email your Marktmorgen account logs in with changed", [
+      `The Marktmorgen account that logged in with this address now logs in with ${to}. This address no longer logs in to it.`,
+      ...(lost.length ? ["", ...lost] : []),
       "",
-      `Log in at ${link}/signin, open your studio and add a recovery address again.`,
-    ]),
-    send(from, [
-      `The Marktmorgen account that logged in with this address now logs in with ${to}. We could not carry its recovery address over, so the account may have no recovery address now.`,
+      when,
       "",
-      `Log in with ${to} at ${link}/signin, open your studio and add a recovery address again.`,
+      // Said before the way in: somebody else holding the account is what this notice is for.
+      "If you did not make this change, reply to this email right away so we can help, and change the password of this inbox: somebody may be able to read it.",
+      "",
+      `Log in with ${to} at ${link}/signin${todo}.`,
     ]),
+    ...(lost.length
+      ? [
+          send(to, "Your recovery address did not move with your account", [
+            "Your Marktmorgen account now logs in with this address, but we could not carry its recovery address over. Your account may have no recovery address now.",
+            "",
+            when,
+            "",
+            "If you did not move your account, reply to this email so we can help.",
+            "",
+            `Log in at ${link}/signin${todo}.`,
+          ]),
+        ]
+      : []),
   ]);
 }

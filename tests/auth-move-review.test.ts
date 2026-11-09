@@ -41,6 +41,7 @@ const real = redis.pipeline.bind(redis);
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const addressKey = (email: string) => `nl:auth:rec:${sha(`nimbus-rec:${email}`).slice(0, 40)}`;
 const SUBJECT = "Your recovery address did not move with your account";
+const FINISHED = "The email your Marktmorgen account logs in with changed";
 const post = (url: string, fields: Record<string, string>) =>
   new NextRequest(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields) });
 
@@ -89,7 +90,8 @@ async function move(recovery: string | null, faults: (from: string, to: string) 
     console.error = quiet;
     sending = true;
   }
-  const told = mails.filter((m) => m.subject === SUBJECT);
+  // Changed (rule 23, finding 2): the old address's notice has its own subject now; both are read.
+  const told = mails.filter((m) => m.subject === SUBJECT || (m.subject === FINISHED && m.to === from));
   const all = mails.map((m) => m.to);
   const fromKey = (await real([["GET", addressKey(from)]]))[0];
   return {
@@ -113,6 +115,20 @@ async function main() {
   part("the old address is told the move finished, also when nothing failed");
   const ok = await move(RECOVERY);
   is("the old address hears that the move finished", ok.all.includes(ok.from), true);
+  is(
+    "it says so in its subject and first line, says what to do if it was not them before the way in, and never names the recovery address",
+    [
+      ok.toldFrom.startsWith(`The Marktmorgen account that logged in with this address now logs in with ${ok.to}.`),
+      ok.toldFrom.indexOf("If you did not make this change") >= 0 && ok.toldFrom.indexOf("If you did not make this change") < ok.toldFrom.indexOf(`Log in with ${ok.to}`),
+      ok.toldFrom.includes("reply to this email"),
+      ok.toldFrom.includes(RECOVERY) || ok.toldTo.includes(RECOVERY),
+      ok.all.filter((to) => to === ok.from).length,
+      ok.all.filter((to) => to === ok.to).length,
+    ],
+    [true, true, true, false, 1, 0],
+  );
+  is("the notices never name the recovery address when it did not come along either", viaDomain.toldFrom.includes(RECOVERY) || viaDomain.toldTo.includes(RECOVERY), false);
+  is("and the link they give is this site's own", viaDomain.toldFrom.includes("https://marktmorgen.com/signin"), true);
   part("the carry failed on the read: nothing is left keyed by the old sign-in address");
   const stale = await move(RECOVERY, (from) => [unreadOld(from)]);
   is("no recovery address is left behind under the old sign-in address", stale.fromKey, null);

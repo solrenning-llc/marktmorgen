@@ -126,6 +126,16 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/community-dm.ts DECLINED_MOVE: refusals kept as a plain set moved into the sorted set as the oldest, the plain set deleted.
+        if (key.startsWith("-- marktmorgen:dm-declined-move:v1\n") && args[0] === "2" && args.length === 3) {
+          const [, plain, ordered] = args;
+          const held = this.data.get(plain) instanceof Set ? [...(this.data.get(plain) as Set<string>)] : [];
+          if (held.length) {
+            this.run(["ZADD", ordered, "NX", ...held.flatMap((member) => ["0", member])]);
+            this.run(["DEL", plain]);
+          }
+          return held.length;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;

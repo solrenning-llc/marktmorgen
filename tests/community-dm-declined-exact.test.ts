@@ -28,7 +28,13 @@ type Command = (string | number)[];
 let odd: unknown = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: Command[]) => {
-  if (odd !== null && commands[0]?.[0] === "SISMEMBER") return odd;
+  // Since the refusals moved to a sorted set (tests/community-dm-declined-order.test.ts), the
+  // check reads its ZSCORE first; that one is answered as Redis answers it, the three after it
+  // (the old plain set's SISMEMBER, EXISTS, ZCARD) are `odd`.
+  if (odd !== null && commands[0]?.[0] === "ZSCORE" && commands[1]?.[0] === "SISMEMBER") {
+    const [score] = await pipeline([commands[0]]);
+    return Array.isArray(odd) ? [score, ...odd] : odd;
+  }
   return pipeline(commands);
 }) as typeof redis.pipeline;
 

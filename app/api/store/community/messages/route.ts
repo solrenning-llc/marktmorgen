@@ -17,6 +17,7 @@ import {
 } from "@/lib/community-dm";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { communityWords } from "@/lib/buyer-words/community";
 
 /** How far a request got before something failed: the store's language once read, and whether a write had begun. */
@@ -105,6 +106,8 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).
       if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");
+      // send() throws this only on its first read, before it writes anything: nothing changed, and it is said so.
+      if (error instanceof UnknownReplyError) progress.writing = false;
       throw error;
     }
     if (!sent.ok) {

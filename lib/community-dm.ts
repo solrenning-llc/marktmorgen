@@ -42,7 +42,11 @@
  *   nl:cm:<id>:dm:<pair>        the messages, newest last (list, capped)
  *   nl:cm:<id>:dm:i:<who>       their conversations, by when each last moved
  *   nl:cm:<id>:dm:q:<who>       requests waiting on them, newest first
- *   nl:cm:<id>:dm:x:<who>       who they have declined, and so will not hear from again
+ *   nl:cm:<id>:dm:xo:<who>      who they have declined, and so will not hear from again,
+ *                               each by when (a sorted set, so the oldest can go first)
+ *   nl:cm:<id>:dm:x:<who>       refusals kept before 7 November 2026, as a plain set:
+ *                               still read everywhere, moved into the one above on the
+ *                               person's next refusal, never written to again
  *   nl:cm:<id>:dm:r:<pair>      how much of it each of the two has read
  *
  * A pair names itself: the two member keys, sorted, joined by a dot. Sorting
@@ -72,7 +76,10 @@ const base = (id: string) => `nl:cm:${id}`;
 const chatKey = (id: string, pair: string) => `${base(id)}:dm:${pair}`;
 const inboxKey = (id: string, who: string) => `${base(id)}:dm:i:${who}`;
 const askedKey = (id: string, who: string) => `${base(id)}:dm:q:${who}`;
+/** Refusals as they were kept before 7 November 2026: a plain set, read and moved, never added to. */
 const shutKey = (id: string, who: string) => `${base(id)}:dm:x:${who}`;
+/** Refusals as they are kept: a sorted set, each scored by the second it was made. */
+const declinedKey = (id: string, who: string) => `${base(id)}:dm:xo:${who}`;
 const readKey = (id: string, pair: string) => `${base(id)}:dm:r:${pair}`;
 
 export const MAX_MESSAGE_TEXT = 2_000;
@@ -148,6 +155,43 @@ export function otherIn(pair: string, who: string): string {
 
 const now = () => Math.floor(Date.now() / 1000);
 
+/**
+ * KEYS[1] the plain set of refusals kept before 7 November 2026, KEYS[2] the
+ * sorted set they are kept in now: every member of the first put in the
+ * second as the oldest (score 0; one already there keeps its own), and the
+ * first deleted, in one step; answers how many it held. lib/redis-memory.ts
+ * runs the same for the tests.
+ */
+export const DECLINED_MOVE = `-- marktmorgen:dm-declined-move:v1
+local held = redis.call("SMEMBERS", KEYS[1])
+for i = 1, #held, 500 do
+  local batch = {}
+  for j = i, math.min(i + 499, #held) do
+    batch[#batch + 1] = 0
+    batch[#batch + 1] = held[j]
+  end
+  redis.call("ZADD", KEYS[2], "NX", unpack(batch))
+end
+if #held > 0 then redis.call("DEL", KEYS[1]) end
+return #held`;
+
+/**
+ * A ZSCORE reply read exactly: 1 when the member is there (Redis answers its
+ * score, as a number or its text), 0 when it answered none, and null for
+ * anything else, which is unknown and never "not there".
+ */
+function scored(reply: unknown): 0 | 1 | null {
+  if (reply === null) return 0;
+  if (typeof reply === "number") return Number.isFinite(reply) ? 1 : null;
+  return typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply)) ? 1 : null;
+}
+
+/** An exact 0 or 1 (SISMEMBER, SREM or ZREM of one member, ZADD of one), or null. */
+function bit(reply: unknown): 0 | 1 | null {
+  const n = replyCount(reply);
+  return n === 0 || n === 1 ? n : null;
+}
+
 function parseMessage(raw: unknown): Message | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -202,27 +246,30 @@ export async function send(
   if (!words) return { ok: false, reason: "empty" };
   const pair = pairOf(from, to);
 
-  // Each reply in its exact shape (CX-123 rule 24): SISMEMBER and EXISTS 0 or 1,
-  // ZCARD a whole count. A hole, null, text or a short pipeline is not "not
-  // declined", "under the cap" or "already talking": nothing is written and
-  // the route answers 503.
+  // Each reply in its exact shape (CX-123 rule 24): ZSCORE a score or none,
+  // SISMEMBER and EXISTS 0 or 1, ZCARD a whole count. A hole, null, text or a
+  // short pipeline is not "not declined", "under the cap" or "already
+  // talking": nothing is written and the route answers 503.
   const checks = repliesFor(
     await redisPipeline([
+      ["ZSCORE", declinedKey(id, to), from],
+      // A refusal kept before 7 November 2026 refuses just the same.
       ["SISMEMBER", shutKey(id, to), from],
       ["EXISTS", chatKey(id, pair)],
       ["ZCARD", inboxKey(id, to)],
     ]),
-    3,
+    4,
   );
-  const declined = replyCount(checks?.[0]);
-  const already = replyCount(checks?.[1]);
-  const size = replyCount(checks?.[2]);
-  if (declined === null || declined > 1 || already === null || already > 1 || size === null) {
+  const declined = checks ? scored(checks[0]) : null;
+  const declinedBefore = bit(checks?.[1]);
+  const already = bit(checks?.[2]);
+  const size = replyCount(checks?.[3]);
+  if (declined === null || declinedBefore === null || already === null || size === null) {
     throw new UnknownReplyError("a private message's declined, conversation or count check");
   }
   // Declined once is declined for good, and the sender is told nothing that
   // would let them work out they were declined rather than ignored.
-  if (declined === 1) return { ok: false, reason: "declined" };
+  if (declined === 1 || declinedBefore === 1) return { ok: false, reason: "declined" };
   if (size >= MAX_CONVERSATIONS && !already) return { ok: false, reason: "full" };
 
   const message: Message = { a: from, text: words, at: now() };
@@ -277,37 +324,76 @@ export async function decline(id: string, who: string, pair: string, room: DataS
   if (!other) return false;
   const [held] = await redisPipeline([["ZSCORE", askedKey(id, who), pair]]);
   if (held === null || held === undefined) return false;
-  await redisPipeline([
-    ["ZREM", askedKey(id, who), pair],
-    ["ZREM", inboxKey(id, other), pair],
-    ["DEL", chatKey(id, pair), readKey(id, pair)],
-    ["SADD", shutKey(id, who), other],
-  ]);
+  // The refusal first, before the request is taken away, and every reply read
+  // exactly (CX-123 rule 24): anything unknown throws, so the page says it
+  // could not confirm, the request still waits, and a second try finishes it
+  // (each step below is safe to run twice).
+  //
+  // Refusals kept before 7 November 2026, in a plain set, are moved into the
+  // sorted set as the oldest there (score 0) and the plain set deleted, in one
+  // step inside Redis (DECLINED_MOVE): nothing is read out and sent back, and
+  // no refusal can be written to the plain set between the two and lost.
+  // Bounded, so one person's refusals cannot grow without end: the oldest go
+  // first (somebody who declined five hundred people is far likelier to meet
+  // a new stranger than the first one again), cut before the new one is
+  // written, so the one just declined is never the one let go, and with no
+  // size to read first.
+  const written = repliesFor(
+    await redisPipeline([
+      ["EVAL", DECLINED_MOVE, 2, shutKey(id, who), declinedKey(id, who)],
+      ["ZREMRANGEBYRANK", declinedKey(id, who), 0, -MAX_DECLINED],
+      ["ZADD", declinedKey(id, who), now(), other],
+    ]),
+    3,
+  );
+  const moved = replyCount(written?.[0]);
+  const trimmed = replyCount(written?.[1]);
+  const shut = bit(written?.[2]);
+  if (moved === null || trimmed === null || shut === null) {
+    throw new UnknownReplyError("whether a private message request was declined");
+  }
+  // Then the request and its messages go; each reply is a count, or what was
+  // said gone is not known to be.
+  const removed = repliesFor(
+    await redisPipeline([
+      ["ZREM", askedKey(id, who), pair],
+      ["ZREM", inboxKey(id, other), pair],
+      ["DEL", chatKey(id, pair), readKey(id, pair)],
+    ]),
+    3,
+  );
+  if (!removed || removed.some((reply) => replyCount(reply) === null)) {
+    throw new UnknownReplyError("whether a declined request was taken away");
+  }
   // The conversation's room comes back; the person declined takes a little,
-  // never refused: saying no must always work.
+  // never refused: saying no must always work. Those cut by the bound give
+  // theirs back.
   await giveData(room, [{ slot: PAIR_SLOT(pair), bytes: 0, set: true }]);
   await noteData(room, [{ slot: DECLINED_SLOT, bytes: DECLINED_BYTES }]);
-  // Bounded, so one person's refusals cannot grow without end. Dropping the
-  // oldest is the right way round: somebody who declined five hundred people
-  // is far likelier to meet a new stranger than the first one again.
-  const [count] = await redisPipeline([["SCARD", shutKey(id, who)]]);
-  if (Number(count) > MAX_DECLINED) {
-    await redisPipeline([["SPOP", shutKey(id, who)]]);
-    await giveData(room, [{ slot: DECLINED_SLOT, bytes: DECLINED_BYTES }]);
-  }
+  if (trimmed > 0) await giveData(room, [{ slot: DECLINED_SLOT, bytes: trimmed * DECLINED_BYTES }]);
   return true;
 }
 
 /** Lets somebody previously declined write again. */
 export async function unblock(id: string, who: string, other: string, room: DataStore): Promise<void> {
-  const [removed] = await redisPipeline([["SREM", shutKey(id, who), other]]);
-  if (Number(removed) === 1) await giveData(room, [{ slot: DECLINED_SLOT, bytes: DECLINED_BYTES }]);
+  // Read exactly (CX-123 rule 24): 0 or 1 from each place a refusal is kept
+  // (the sorted set and the plain set of before 7 November 2026), and anything
+  // else is unknown, never "they can write to you again". Removing twice
+  // changes nothing, so a second try is safe.
+  const replies = repliesFor(await redisPipeline([["ZREM", declinedKey(id, who), other], ["SREM", shutKey(id, who), other]]), 2);
+  const removed = bit(replies?.[0]);
+  const removedBefore = bit(replies?.[1]);
+  if (removed === null || removedBefore === null) throw new UnknownReplyError("whether a declined person may write again");
+  if (removed === 1 || removedBefore === 1) await giveData(room, [{ slot: DECLINED_SLOT, bytes: DECLINED_BYTES }]);
 }
 
-/** Everyone this person has declined. */
+/** Everyone this person has declined, wherever the refusal is kept; an unknown reply throws, never "nobody". */
 export async function declinedBy(id: string, who: string): Promise<string[]> {
-  const [raw] = await redisPipeline([["SMEMBERS", shutKey(id, who)]]);
-  return Array.isArray(raw) ? raw.map(String) : [];
+  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", declinedKey(id, who), "-inf", "+inf"], ["SMEMBERS", shutKey(id, who)]]), 2);
+  const ordered = stringList(replies?.[0]);
+  const before = stringList(replies?.[1]);
+  if (!ordered || !before) throw new UnknownReplyError("who a person has declined");
+  return [...new Set([...ordered, ...before])];
 }
 
 /** One page of a person's conversations, the ones that moved last on top. */
@@ -369,7 +455,7 @@ export async function thread(id: string, who: string, pair: string): Promise<Thr
 
 /** Everything a conversation leaves behind, for when a member is removed. */
 export function dmKeys(id: string, who: string): string[] {
-  return [inboxKey(id, who), askedKey(id, who), shutKey(id, who)];
+  return [inboxKey(id, who), askedKey(id, who), declinedKey(id, who), shutKey(id, who)];
 }
 
 /** How many of a person's conversations one search reads, the most recent first. */
@@ -467,6 +553,9 @@ export async function forgetDmPerson(id: string, who: string): Promise<number> {
     const replies = repliesFor(await redisPipeline(commands), commands.length);
     if (!replies || replies.some((reply) => replyCount(reply) === null)) throw new UnknownReplyError(what);
   }
+  // dmKeys names both places a refusal is kept (the sorted set ":dm:xo:" and the
+  // plain set ":dm:x:" of before 7 November 2026): whatever deletes or counts a
+  // person's refusals here deletes and counts both, never only the plain set.
   const gone = repliesFor(await redisPipeline([["DEL", ...dmKeys(id, who)]]), 1);
   if (replyCount(gone?.[0]) === null) throw new UnknownReplyError(what);
   return pairs.length;

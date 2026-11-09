@@ -125,6 +125,26 @@ No company postal address exists yet (`lib/company-postal.ts`, empty): until it 
 
 **A plan paid for a store already closing (queue item 307 [EC1], with item 569 [NC1]).** From the start of its closing day a store refuses a plan checkout, but one opened before can still be finished on it. That plan is ended at once and its payment refunded in full from Marktmorgen's own Stripe account (`lib/closing-plan-guard.ts`): it is the money the creator paid us, given back, so the refund itself is not a cost, but the receiving cost of that one payment (`lib/receiving-costs.ts`, the dearer provider's fee on the amount charged) is not given back by Stripe on a refund and is the company's. It is a full-refund occurrence of this review, never offset by another scope. **Bounded by the owner's decision of 30/10/2026, 18h16 ("faça o correto"; "Depende do dono" (d) of item 307 resolved):** starting a plan again during the closing period stays open, because it saves the store, but from the plan's end every plan checkout of the store lasts `CLOSING_CHECKOUT_SECONDS` (31 minutes: Stripe's minimum of 30, docs.stripe.com/api/checkout/sessions/create, and one for clocks), and none is opened from `lastPlanMoment` (the closing day less 32 minutes; the studio shows the exact moment, in UTC). So no plan checkout of the store is open when its closing day begins; the open ones are expired then anyway (`expirePlanCheckouts`), and a new one is refused until the store's records are gone. What is left is a payment submitted on a checkout before it expired that Stripe confirms only after the day began (a delayed payment method), or one that Stripe completes later than its own expiry. Each is at most one occurrence per closing: the contract funding allows one pending checkout grant per store (`pending: 'one-grant-per-store'`, lib/contract-funding-rules.ts) and a store whose plan is paid is refused a second checkout (`billing=already`). Its ceiling is the receiving cost of the dearest plan payment a store can make (Scale yearly, from `lib/receiving-costs.ts`), and the refund guard (`lib/closing-plan-guard.ts`) ends it and returns the money. Like every scope here, the exposure review stays null and release stays closed.
 
+## Support mail sent on through SES: a company fixed cost with a ceiling (9 November 2026)
+
+ALTO 1 of Claude 5's email audit (9 November 2026): every message written to our own support addresses was sent on through SES as a company email (`lib/inbound-mail.ts`, `forwardInbound`), with nothing bounding it but the webhook's per-connection limit, and the connection is Resend's, not the sender's. One sender writing 300 times with 1 MB each had all 300 messages and 300 MB sent on; the only real bound was SES's 24-hour quota (about $120 a day at 15 MB a message), and spending that quota also stops buyers' receipts and sign-in links.
+
+Each forward is now counted before anything is fetched or sent, and a count that cannot be read sends nothing (Resend tries again); a message tried again is counted once:
+
+| Ceiling | Value | Where |
+|---|---|---|
+| One sender, however the address is written (`canonicalEmail`), an hour | `SUPPORT_SENDER_HOURLY` = 10 | `lib/inbound-mail.ts` |
+| One sender, a day | `SUPPORT_SENDER_DAILY` = 30 | `lib/inbound-mail.ts` |
+| Every sender together, a UTC day | `SUPPORT_DAILY` = 200 | `lib/inbound-mail.ts` |
+| Files sent on, a UTC day, before base64 | `SUPPORT_FILE_BYTES_DAILY` = 300,000,000 | `lib/inbound-mail.ts` |
+| Notice to the inbox that messages are held, a UTC day | `SUPPORT_HELD_NOTICES_DAILY` = 1 | `lib/inbound-mail.ts` |
+
+A message past a ceiling is held, not dropped: it stays in Resend (Emails, Receiving), is not tried again, and the inbox is told once a day where to find it. A file past the day's bytes is left out and named in the message ("Not attached (see Resend, Emails, Receiving)"). The store path keeps its own `CREATOR_HOURLY` and is one of the store's emails, not this cost.
+
+**The month at the ceilings: $29.72 at the most** (`supportForwardMonthlyUsd` in tests/plan-cost-registry.ts, held by tests/support-forward-ceiling.test.ts): 31 UTC days of 201 emails, each at `PER_EMAIL` ($0.0009, Resend's overage, dearer than SES), the route's whole 60 seconds of CPU and memory and `SUPPORT_FORWARD_COMMANDS` database commands ($0.0045 a forward), plus 31 days of files at 4/3 for base64 at SES's $0.12 a GB (read 18 October 2026 in docs/pack-cost-decomposition-2026-10-18.md; not read again on 9 November 2026, aws.amazon.com being blocked in that session). It belongs 100% to Marktmorgen among the LLC's fixed costs (FX275) and is covered from the minimum paid base under MR item 2.
+
+Not in that figure, so the complete month stays unknown, never zero: announcements of held messages (a function call, a read at Resend and a few commands each, bounded only by the webhook's per-connection limit and Resend's own receiving quota), transfer out of the function to SES, and Resend's count of received mail against its plan.
+
 ## LE448 — exposição própria da lista de pré-abertura (em implementação)
 
 Pedido do dono26/10/2026 00h19Fortaleza. A lista da plataforma não é uma loja

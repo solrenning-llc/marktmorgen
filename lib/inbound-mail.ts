@@ -51,11 +51,25 @@
  * whoever wrote. Mail to a name on that domain that is no store's is
  * dropped, and a store is sent on no more than CREATOR_HOURLY an hour, so
  * that the address cannot be used to pour mail on a creator through us.
+ *
+ * Mail to our own support is the company's to pay for, and so is held to
+ * ceilings of its own, each counted before anything is fetched or sent
+ * (ALTO 1 of Claude 5's email audit, 9 November 2026; the month's figure is
+ * in docs/funded-exposure-review.md): one sender, however the address is
+ * written, SUPPORT_SENDER_HOURLY an hour and SUPPORT_SENDER_DAILY a day;
+ * every sender together SUPPORT_DAILY a UTC day; and files
+ * SUPPORT_FILE_BYTES_DAILY bytes a UTC day, a file past it left out and
+ * named. A message past a ceiling is held: it stays in Resend's dashboard,
+ * is not tried again, and the inbox is told so once a day
+ * (SUPPORT_HELD_NOTICES_DAILY). A count that cannot be read sends nothing
+ * and asks Resend to try again; a message tried again is counted once.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { canonicalEmail } from "@/lib/affiliates";
 import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmail } from "@/lib/email";
 import { creatorDomain } from "@/lib/mail-from";
-import { withinLimit } from "@/lib/request-guard";
+import { redisPipeline } from "@/lib/redis";
+import { essentialLimitState, withinLimit } from "@/lib/request-guard";
 import { HANDLE_PATTERN, storeForHandle } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { SITE_URL } from "@/lib/site-url";
@@ -68,6 +82,17 @@ const MAX_FILES_BYTES = 15_000_000;
 const MAX_BODY_CHARS = 400_000;
 /** Messages sent on to one store in an hour, at the most. */
 export const CREATOR_HOURLY = 40;
+/** Messages from one sender sent on to our own support, at the most, in an hour and in a day. */
+export const SUPPORT_SENDER_HOURLY = 10;
+export const SUPPORT_SENDER_DAILY = 30;
+/** Messages sent on to our own support in a UTC day, every sender together: a company cost. */
+export const SUPPORT_DAILY = 200;
+/** Bytes of files sent on with them in a UTC day, together, before base64. */
+export const SUPPORT_FILE_BYTES_DAILY = 300_000_000;
+/** Notices a UTC day telling the support inbox that messages are held. */
+export const SUPPORT_HELD_NOTICES_DAILY = 1;
+/** How long a message's own marks (counted once, its files' bytes) are kept: longer than Resend tries again. */
+const SUPPORT_MARK_SECONDS = 2 * 86_400;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const platformDomain = () => new URL(SITE_URL).hostname;
@@ -196,8 +221,43 @@ function fileUrl(value: unknown): string | null {
   }
 }
 
+/**
+ * Takes the bytes of a support message's files, `want` of them together so
+ * far, from the company's day, before they are sent: only what is more than
+ * the message was already charged, so a message tried again is charged once.
+ * No when the day has no room or the count cannot be read; a charge that
+ * finds no room is given back.
+ */
+async function chargeSupportBytes(id: string, want: number, now: number): Promise<boolean> {
+  const mine = `nl:inbound:support:bytes:${id}`;
+  const day = `nl:inbound:support:bytes:${new Date(now).toISOString().slice(0, 10)}`;
+  try {
+    const [had] = await redisPipeline([["GET", mine]]);
+    const before = had === null ? 0 : typeof had === "string" || typeof had === "number" ? Number(had) : NaN;
+    if (!Number.isSafeInteger(before) || before < 0) return false;
+    if (want <= before) return true;
+    const extra = want - before;
+    const reply = await redisPipeline([["SET", day, "0", "EX", SUPPORT_MARK_SECONDS, "NX"], ["INCRBY", day, extra]]);
+    const total = Array.isArray(reply) ? reply[1] : undefined;
+    // Not known: what may have been added stays spent, and the file is left out.
+    if (typeof total !== "number" || !Number.isSafeInteger(total)) return false;
+    if (total > SUPPORT_FILE_BYTES_DAILY) {
+      // Given back with the day's own expiry set again, so a key the give-back makes is never kept for ever.
+      await redisPipeline([["DECRBY", day, extra], ["EXPIRE", day, SUPPORT_MARK_SECONDS]]).catch(() => {});
+      return false;
+    }
+    await redisPipeline([["SET", mine, String(want), "EX", SUPPORT_MARK_SECONDS]]).catch(() => {});
+    return true;
+  } catch (error) {
+    console.error("the support files' daily count could not be read", error);
+    return false;
+  }
+}
+
+type Charge = (want: number) => Promise<boolean>;
+
 /** The files of a received message, as the sender's API takes them, and the names of the ones left out. */
-async function files(id: string): Promise<{ sent: { filename: string; content: string }[]; left: string[] }> {
+async function files(id: string, charge?: Charge): Promise<{ sent: { filename: string; content: string }[]; left: string[] }> {
   const sent: { filename: string; content: string }[] = [];
   const left: string[] = [];
   const listed = await read(`/emails/receiving/${id}/attachments?limit=100`);
@@ -207,7 +267,7 @@ async function files(id: string): Promise<{ sent: { filename: string; content: s
     const name = headerText(typeof entry.filename === "string" && entry.filename ? entry.filename : "file", 150);
     const size = typeof entry.size === "number" && entry.size >= 0 ? entry.size : 0;
     const url = fileUrl(entry.download_url);
-    if (!url || total + size > MAX_FILES_BYTES) {
+    if (!url || total + size > MAX_FILES_BYTES || (charge && !(await charge(total + size)))) {
       left.push(name);
       continue;
     }
@@ -215,7 +275,8 @@ async function files(id: string): Promise<{ sent: { filename: string; content: s
       const response = await timed(RESEND_TIMEOUT_MS, (signal) => fetch(url, { cache: "no-store", signal }));
       if (!response.ok) throw new Error(`file answered ${response.status}`);
       const bytes = Buffer.from(await response.arrayBuffer());
-      if (total + bytes.length > MAX_FILES_BYTES) {
+      // A file bigger than it was listed is charged for what it really is.
+      if (total + bytes.length > MAX_FILES_BYTES || (charge && bytes.length > size && !(await charge(total + bytes.length)))) {
         left.push(name);
         continue;
       }
@@ -230,14 +291,72 @@ async function files(id: string): Promise<{ sent: { filename: string; content: s
 }
 
 /**
+ * Whether a message to our own support may be sent on: "within" counts it,
+ * once, against its sender's hour and day and the company's UTC day, before
+ * anything is fetched or sent; "held" when one of them has no room;
+ * "unknown" when a count could not be read, so nothing is sent and Resend
+ * tries again. A message already counted (tried again) is not counted twice.
+ */
+async function admitSupport(id: string, from: string | null, now: number): Promise<"within" | "held" | "unknown"> {
+  const mark = `nl:inbound:support:counted:${id}`;
+  let had: unknown;
+  try {
+    [had] = await redisPipeline([["EXISTS", mark]]);
+  } catch {
+    return "unknown";
+  }
+  if (had === 1) return "within";
+  if (had !== 0) return "unknown";
+  const who = from ? canonicalEmail(from) : "(no sender)";
+  const hour = await essentialLimitState("support-sender-hour", who, SUPPORT_SENDER_HOURLY, 3_600);
+  if (hour !== "within") return hour === "exceeded" ? "held" : "unknown";
+  const day = await essentialLimitState("support-sender-day", who, SUPPORT_SENDER_DAILY, 86_400);
+  if (day !== "within") return day === "exceeded" ? "held" : "unknown";
+  const all = await essentialLimitState("support-forward", new Date(now).toISOString().slice(0, 10), SUPPORT_DAILY, 2 * 86_400);
+  if (all !== "within") return all === "exceeded" ? "held" : "unknown";
+  // Not kept: a retry is counted again, never less than was spent.
+  await redisPipeline([["SET", mark, "1", "EX", SUPPORT_MARK_SECONDS]]).catch(() => {});
+  return "within";
+}
+
+/** Tells the support inbox, once a UTC day, that messages are held and where they are. */
+async function tellHeld(target: string, now: number): Promise<void> {
+  const day = new Date(now).toISOString().slice(0, 10);
+  const key = `nl:inbound:support:held:${day}`;
+  try {
+    const [taken] = await redisPipeline([["SET", key, "1", "EX", SUPPORT_MARK_SECONDS, "NX"]]);
+    if (taken !== "OK") return;
+  } catch {
+    return;
+  }
+  const ok = await sendEmail({ meter: { by: "company" },
+    from: `"Marktmorgen support" <support@${platformDomain()}>`,
+    to: target,
+    subject: "Some support email was not sent on today",
+    text: [
+      `Some email written to support@${platformDomain()} today was not sent on to this inbox.`,
+      `This happens when one sender writes more than ${SUPPORT_SENDER_HOURLY} times in an hour or ${SUPPORT_SENDER_DAILY} times in a day, or when more than ${SUPPORT_DAILY} messages come in on one day (UTC).`,
+      "Nothing was deleted. Every message is kept in Resend: open Emails, then Receiving.",
+      "Sending on starts again by itself. You get this note at most once a day.",
+    ].join("\n\n"),
+    headers: { [FORWARD_HEADER]: "1" },
+    idempotencyKey: `inbound-held-${day}`,
+  });
+  // Not sent: the next held message tries again.
+  if (!ok) await redisPipeline([["DEL", key]]).catch(() => {});
+}
+
+/**
  * Sends one received message on.
  *
  *   "sent"     it went on to the inbox
  *   "skipped"  there was nothing to send on: no such message, or one of ours
  *   "retry"    it could not be read or sent just now; the announcement should
  *              be answered with a failure, so Resend makes it again
+ *   "held"     to our own support, past a ceiling: kept in Resend, not tried
+ *              again, and the inbox told once a day
  */
-export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "retry"> {
+export async function forwardInbound(id: string, now = Date.now()): Promise<"sent" | "skipped" | "retry" | "held"> {
   const target = forwardTarget();
   if (!target || !ID.test(id)) return "skipped";
 
@@ -290,9 +409,20 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
   const html = typeof mail.html === "string" ? mail.html.slice(0, MAX_BODY_CHARS) : "";
   const text = (typeof mail.text === "string" && mail.text.trim() ? mail.text : pageToText(html)).slice(0, MAX_BODY_CHARS);
 
+  // Our own support: counted before its files are fetched or it is sent.
+  if (!store) {
+    const admitted = await admitSupport(id, sender.address, now);
+    if (admitted === "unknown") return "retry";
+    if (admitted === "held") {
+      console.warn("a support message was held in Resend: past a sending ceiling");
+      await tellHeld(target, now);
+      return "held";
+    }
+  }
+
   let attached: Awaited<ReturnType<typeof files>> = { sent: [], left: [] };
   try {
-    attached = await files(id);
+    attached = await files(id, store ? undefined : (want) => chargeSupportBytes(id, want, now));
   } catch (error) {
     console.error("the files of an inbound message could not be listed", error);
     return "retry";

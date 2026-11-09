@@ -45,7 +45,6 @@ const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, head
 /** What each received message looks like: its sender, where it was written, and its files' sizes. */
 const messages = new Map<string, { from: string; to: string; files: number[] }>();
 let fileReads = 0;
-let receivingReads = 0;
 let readFails = false;
 const fixture = installSesMailFixture({
   onResend: (_m, input) => {
@@ -57,7 +56,6 @@ const fixture = installSesMailFixture({
     }
     const one = /^\/emails\/receiving\/([0-9a-f-]+)$/.exec(url.pathname);
     if (one) {
-      receivingReads++;
       if (readFails) return new Response("down", { status: 503 });
       const m = messages.get(one[1]);
       if (!m) return new Response("no", { status: 404 });
@@ -114,7 +112,6 @@ function fresh() {
   fixture.configure();
   sesBodies.length = 0;
   fileReads = 0;
-  receivingReads = 0;
   readFails = false;
 }
 const toSupport = () => fixture.ses.filter((m) => m.subject === "hello");

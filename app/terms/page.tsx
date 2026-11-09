@@ -176,7 +176,8 @@ export default function TermsPage() {
           keep the course with no end too. You can move the date later or
           remove it, but not earlier, and doing either reaches everyone it
           applied to. A course sold as a membership has no end date: members
-          keep it while they pay.
+          keep it while they pay. People who pay in a payment plan
+          keep the course with no end too.
         </p>
         <p id="instant-access" className="scroll-mt-24">
           <strong className="text-black">Starting before the 14 days end.</strong>{" "}

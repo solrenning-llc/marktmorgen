@@ -1604,7 +1604,20 @@ export function CourseStart({ productId, startsAt }: { productId: string; starts
  * reaches them too, including people whose access already ended; it never moves earlier (lib/course.ts). A membership
  * course never takes one: members keep it while they pay.
  */
-export function CourseAccessEnd({ productId, endsAt, passed, membership = false }: { productId: string; endsAt: number | null; passed: boolean; membership?: boolean }) {
+export function CourseAccessEnd({
+  productId,
+  endsAt,
+  passed,
+  membership = false,
+  planOffered = false,
+}: {
+  productId: string;
+  endsAt: number | null;
+  passed: boolean;
+  membership?: boolean;
+  /** The course offers its payment plan (lib/product-extras.ts): buyers who take it are never held to the date. */
+  planOffered?: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1666,6 +1679,7 @@ export function CourseAccessEnd({ productId, endsAt, passed, membership = false 
         pre-order, keep the course with no end. In the last 24 hours before the date, it is no longer shown, and people
         who buy then keep the course with no end too. You can move the date later or remove it, but not earlier. Moving
         it later or removing it also gives access back to students whose access already ended.
+        {planOffered ? " People who pay in a payment plan keep the course with no end, as members do." : null}
       </p>
       {endsAt !== null ? (
         <p className="mt-2 text-sm" role="status">

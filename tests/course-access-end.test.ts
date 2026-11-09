@@ -96,7 +96,7 @@ async function main(): Promise<void> {
     [/readCourseForSale\(product\.course\.id\)/.test(salesPage), /accessEndFact\(course, store\.language\)/.test(salesPage), (salesPage.match(/accessEndLine=\{accessEndLine\}/g) ?? []).length, /unread=\{courseUnread\} accessEnd=\{courseFacts\?\.shownEnd \?\? null\}/.test(salesPage)],
     [true, true, 2, true]);
   const studio = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
-  is("the studio draws the field beside the start date, told whether the course is a membership", /<CourseAccessEnd productId=\{product\.id\} endsAt=\{course\.accessEndsAt \?\? null\} passed=\{[^}]+\} membership=\{product\.recurring !== null\} \/>/.test(studio), true);
+  is("the studio draws the field beside the start date, told whether the course is a membership or offers a payment plan", /<CourseAccessEnd productId=\{product\.id\} endsAt=\{course\.accessEndsAt \?\? null\} passed=\{[^}]+\} membership=\{product\.recurring !== null\} planOffered=\{activePlan\(product\) !== null\} \/>/.test(studio), true);
 
   part("the learner's gate, with the real ledger");
   redis.clear();

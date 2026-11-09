@@ -298,14 +298,15 @@ async function main(): Promise<void> {
   is("the gate's stamp for a learner who bought again with no end: none", stampOf ? await stampOf(a.store, "lb-again@example.test", a.product.id) : "missing", null);
   listed = [session(a.store, { product: a.product.id, access_end: String(END) }, SET_AT + DAY)];
   is("and for a stamped learner: the stamp", stampOf ? await stampOf(a.store, "lb-stamped@example.test", a.product.id) : "missing", END);
-  const note = (learn as Record<string, unknown>).noteStudentStamp as ((courseId: string, email: string, stamp: number | null, room: Store) => Promise<void>) | undefined;
+  // The stamp is asked only once a row is found (C2's L-1): handed in as a function.
+  const note = (learn as Record<string, unknown>).noteStudentStamp as ((courseId: string, email: string, stamp: () => Promise<number | null | "unknown">, room: Store) => Promise<void>) | undefined;
   await touchStudent(d.courseId, "lb-row@example.test", SET_AT + DAY, d.store, SET_AT + 10 * DAY);
-  if (note) await note(d.courseId, "lb-row@example.test", null, d.store);
-  if (note) await note(d.courseId, "lb-none@example.test", SET_AT + 10 * DAY, d.store);
+  if (note) await note(d.courseId, "lb-row@example.test", async () => null, d.store);
+  if (note) await note(d.courseId, "lb-none@example.test", async () => SET_AT + 10 * DAY, d.store);
   const rows = await redis.pipeline([["HGET", `nl:course:${d.courseId}:students`, emailKey("lb-row@example.test")], ["HGET", `nl:course:${d.courseId}:students`, emailKey("lb-none@example.test")]]);
   is("bought again with no end: the row's end goes, the row stays; no row is made for a learner who never came", [typeof rows[0] === "string" && !("x" in JSON.parse(rows[0] as string)), rows[1]], [true, null]);
   const start = readFileSync("app/api/store/course/start/route.ts", "utf8");
-  is("the start route keeps it on the student row", /purchaseStamp\(store, order\.email, product\.id\)/.test(start) && /noteStudentStamp\(/.test(start), true);
+  is("the start route keeps it on the student row", /purchaseStamp\(store, (?:order\.)?email, product\.id\)/.test(start) && /noteStudentStamp\(/.test(start), true);
 
   part("M-P (C6 focal): a course paid through its payment plan has no end, as a membership has none");
   const plan = await shop("stampplan");
@@ -337,6 +338,7 @@ async function main(): Promise<void> {
   await touchStudent(d.courseId, "l1-row@example.test", SET_AT + DAY, d.store, null);
   await noteLazy(d.courseId, "l1-row@example.test", lazy, d.store);
   const l1row = await redis.pipeline([["HGET", `nl:course:${d.courseId}:students`, emailKey("l1-row@example.test")]]);
+  is("the start button's reading of a row that exists is paid first as one more public request", /paidStampNow = async \(\) => \(\(await takePublicRequest\(store, "buyer"\)/.test(readFileSync("app/api/store/course/start/route.ts", "utf8")), true);
   is("no row: nothing asked; a row: asked once, and its end kept", [askedWithoutRow, asked, typeof l1row[0] === "string" ? (JSON.parse(l1row[0] as string) as { x?: number }).x : null], [0, 1, SET_AT + 40 * DAY]);
 
   globalThis.fetch = realFetch;

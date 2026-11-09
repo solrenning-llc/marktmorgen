@@ -1129,10 +1129,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
-      // The course's start button (a "course-start" public request) reads the learner's courses once to keep their end on
-      // their student row (24 [E7], 9 November 2026): the reading the course page makes right after, which then finds it
-      // cached, so no Stripe call is added; at most one HGET and one HSET more on the student row.
-      { file: "app/api/store/course/start/route.ts", names: ["purchaseStamp(store, order.email, product.id)", "noteStudentStamp("] },
+      // The course's start button (a "course-start" public request) keeps the learner's end on their student row (24 [E7]).
+      // Measured on 9 November 2026 (synthetic Redis and Stripe, a store with one course): reading a learner's courses
+      // right after recordEnrollment emptied their cache is GET, HGETALL, SET and one SISMEMBER for each course they
+      // have, and one Stripe list (two when the typed address differs from its normal form); the import read (HGETALL)
+      // and the community read (GET, ZSCORE, HGET, HGETALL) are added where the store has them. It is the reading the
+      // course page makes on every visit. In the paying browser it only comes before the course page's, which then
+      // finds it cached: GET, HGETALL and the SISMEMBERs more (and those two reads), no Stripe call more. On the
+      // emailed-link branch the student row is read first (HGET), and a learner with no row adds that HGET alone; for a
+      // row that exists the reading, the row's HSET and, for a new end, its room are paid first as one more public
+      // request (takePublicRequest), a later page of its own, refused past the store's window (C2's L-1 on #3445).
+      { file: "app/api/store/course/start/route.ts", names: ["purchaseStamp(store, email, product.id)", "noteStudentStamp(", "takePublicRequest(store, \"buyer\")"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },

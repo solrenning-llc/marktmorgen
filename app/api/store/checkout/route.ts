@@ -205,9 +205,11 @@ export async function POST(request: NextRequest) {
   // A course's end date (24 [E7]): only a buyer who was shown it is held to it. A form that drew the date sends the
   // end it showed; the course is read again, exactly, and a sale whose end is no longer the one shown is refused, back
   // to the page, before anything is written down or held. The one shown is stamped on the Stripe session, which the
-  // learner's gate reads (lib/learn.ts courseAccess). A gift, a group, a pre-order and a membership carry none.
+  // learner's gate reads (lib/learn.ts courseAccess). A gift, a group, a pre-order, a membership and a purchase paid
+  // through the payment plan carry none: like a membership, a plan is open while it is paid (C6's M-P on #3445).
   let accessEnd: number | null = null;
-  if (shownEnd !== undefined && product.course && !product.recurring && !giftTo.trim() && !people.trim() && !preorder) {
+  const payingInPlan = plan && activePlan(product) !== null;
+  if (shownEnd !== undefined && product.course && !product.recurring && !payingInPlan && !giftTo.trim() && !people.trim() && !preorder) {
     const read = await readCourseForSale(product.course.id);
     if (read.unread) return away(`/@${store.handle}?status=error`);
     accessEnd = read.course ? accessEndForSale(read.course) : null;

@@ -300,7 +300,9 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
         // With several purchases the most generous counts: one with no end means no end.
         // A checkout stays open up to 24 hours: a stamp counts only on a session made at least that long before it, so
         // one paid after the end it was opened under has none (C2's M-A on #3445); an unreadable creation time, none.
-        const shown = product.id === meta.product && !product.recurring ? accessEndStamp(meta) : null;
+        // Never on a membership or a purchase paid through the payment plan (C6's M-P on #3445): each is open while it
+        // is paid, so a stamp on one, written before the checkout stopped writing it, is no end.
+        const shown = product.id === meta.product && !product.recurring && meta.kind !== "plan" ? accessEndStamp(meta) : null;
         const stamp = shown !== null && stampHolds(shown, typeof session.created === "number" ? session.created : null) ? shown : null;
         const had = ends.get(product.id);
         ends.set(product.id, had === undefined ? stamp : had === null || stamp === null ? null : Math.max(had, stamp));
@@ -607,7 +609,16 @@ export async function touchStudent(courseId: string, email: string, startSeconds
  * learner who bought again with no end is emailed again before they next open the course. No row, nothing written: the
  * course page writes it on their first visit. A stamp new to the row takes its bytes first, as touchStudent does.
  */
-export async function noteStudentStamp(courseId: string, email: string, stamp: number | null, room: DataStore): Promise<void> {
+export async function noteStudentStamp(
+  courseId: string,
+  email: string,
+  /**
+   * The end the gate holds now, asked only once a row is found (C2's L-1 on #3445): the learner's courses are read,
+   * Stripe included, only for a student who already has a row; "unknown" leaves the row as it is.
+   */
+  readStamp: () => Promise<number | null | "unknown">,
+  room: DataStore,
+): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = studentsKey(courseId);
   const field = emailKey(email);
@@ -619,6 +630,8 @@ export async function noteStudentStamp(courseId: string, email: string, stamp: n
   } catch {
     return;
   }
+  const stamp = await readStamp();
+  if (stamp === "unknown") return;
   const had = stampOf(row.x);
   const next = stamp === null ? null : stampOf(stamp);
   if (had === next) return;

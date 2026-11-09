@@ -12,6 +12,7 @@ import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StudioEmptyState } from "@/components/empty-state";
 import { productSegment } from "@/lib/product-slug";
+import { activePlan } from "@/lib/product-extras";
 import { accessEndAhead, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
@@ -246,7 +247,7 @@ export default async function StudioCoursePage({
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
             <CourseStart productId={product.id} startsAt={course.startsAt} />
-            <CourseAccessEnd productId={product.id} endsAt={course.accessEndsAt ?? null} passed={course.accessEndsAt !== undefined && accessEndAhead(course) === null} membership={product.recurring !== null} />
+            <CourseAccessEnd productId={product.id} endsAt={course.accessEndsAt ?? null} passed={course.accessEndsAt !== undefined && accessEndAhead(course) === null} membership={product.recurring !== null} planOffered={activePlan(product) !== null} />
             <CertificateSwitch productId={product.id} on={course.certificate} />
             {course.certificate ? <CertificateValidity productId={product.id} months={course.certificateMonths ?? null} /> : null}
             {course.certificate ? (

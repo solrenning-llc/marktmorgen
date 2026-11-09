@@ -1,15 +1,25 @@
 import { answerText, type FormDef, type FormResponse } from "@/lib/forms";
 import { CRM_ID, MAX_DEAL_NOTE, MAX_DEAL_TITLE } from "@/lib/crm-rules";
-import { emailQuestionIds, respondentOf } from "@/lib/form-respondent";
+import { emailQuestionIds, foldAddress, isAddress, respondentOf } from "@/lib/form-respondent";
 
-/** Reviewable CRM copy, not a marketing subscription or a message. */
+/**
+ * Reviewable CRM copy, not a marketing subscription or a message. The note
+ * never copies an answer that is an address other than the sender's (a
+ * friend's, a referrer's, or any when the sender cannot be told), by the rule
+ * the erasure of a person's form answers reads (lib/form-respondent.ts): a
+ * person is deleted from the CRM by the deals that name them as the contact
+ * (lib/crm.ts, forgetCrmPerson), so their address in somebody else's note would
+ * stay. The sender's own address is the deal's contact and goes with the deal.
+ */
 export function formDealDraft(form: FormDef, response: FormResponse) {
   // Who sent it, by the one rule the copy and the erasure of a person's data read (lib/form-respondent.ts).
   const email = respondentOf(emailQuestionIds(form), response.answers) ?? "";
   const date = new Date(response.at * 1000);
   const source = "Form: " + form.name + (Number.isFinite(date.getTime()) ? "\nSubmitted: " + date.toISOString() : "");
   const details = form.fields.flatMap(field => {
-    const answer = answerText(field, response.answers[field.id]);
+    const given = response.answers[field.id];
+    if (typeof given === "string" && isAddress(foldAddress(given)) && foldAddress(given) !== email) return [];
+    const answer = answerText(field, given);
     return answer ? [field.label + ": " + answer] : [];
   });
   const fullNote = [source, ...details].join("\n");

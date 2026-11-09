@@ -1184,7 +1184,10 @@ export default function PrivacyPage() {
           address, or two hold different ones) is deleted whole. When the
           person checks the box to hear from the creator, the email that asks
           them to confirm goes only to the address that sent the response, and
-          to nobody when the sender cannot be told. The result
+          to nobody when the sender cannot be told. When the creator&apos;s team
+          turns a response into a deal, the deal&apos;s note copies the answers
+          but never an email address other than the sender&apos;s, and a deal is
+          deleted with the person it names as its contact. The result
           page&apos;s web address names the result and the score, never the
           person&apos;s answers or email address. The creator is the controller of
           these answers.

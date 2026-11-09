@@ -10,6 +10,7 @@
  * the copy shows only the answers that are the address, and the erasure deletes the whole response, because
  * taking it for somebody else's would leave the person's other answers behind if it is theirs.
  */
+import { readFileSync } from "node:fs";
 import { parseForm, type FormResponse } from "@/lib/forms";
 import { addResponse, forgetFormsPerson, readResponses, writeForm } from "@/lib/form-store";
 import { COPIERS, COPY_PLAN } from "@/lib/person-copy";
@@ -150,6 +151,8 @@ async function main(): Promise<void> {
   is("an address in another question is left out, the sender's kept", [friend.includes("Your email: " + OLLY), friend.includes(TESS), friend.includes("Note:")], [true, false, false]);
   const unknownNote = note({ email1: "Ana@Example.com", email2: OLLY, refby1: "Bring your laptop" });
   is("the sender not known: no address at all, the other answers kept", [unknownNote.toLowerCase().includes("ana@example.com"), unknownNote.includes(OLLY), unknownNote.includes("Note: Bring your laptop")], [false, false, true]);
+  const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
+  is("the privacy policy says so", privacy.includes("the deal&apos;s note copies the answers but never an email address other than the sender&apos;s, and a deal is deleted with the person it names as its contact."), true);
   is("a text that is not only an address is the person's words, kept as typed", note({ email2: OLLY, refby1: "Ask tess@example.com too" }).includes("Note: Ask tess@example.com too"), true);
 
   part("A response that does not read and holds her address is deleted, never taken for somebody else's");

@@ -30,7 +30,7 @@ import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { fileUrl } from "@/lib/file-store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
+import { NIMBUS_FROM, sendEmailOutcome, serviceMailKnownUnavailable, type SendOutcome } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -817,7 +817,12 @@ async function within(key: string, limit: number): Promise<boolean> {
   return count !== null && count <= limit;
 }
 
-export type LinkRequest = "sent" | "email" | "limited" | "error";
+/**
+ * "unsure": the sender's answer is not known (a timeout, a server error), so
+ * the email may have gone; it is never said as not sent, and the link
+ * written for it stays open (VR 2).
+ */
+export type LinkRequest = "sent" | "unsure" | "email" | "limited" | "error";
 
 /**
  * Emails a way into the course, when the address bought it. "sent" either
@@ -842,19 +847,25 @@ export async function requestCourseLink(input: {
 
   const paid = await paidCourses(store, raw);
   if (!paid.has(product.id)) return "sent";
-  return (await sendCourseLink(store, product, raw, origin)) ? "sent" : "error";
+  const outcome = await sendCourseLinkOutcome(store, product, raw, origin);
+  return outcome === "sent" ? "sent" : outcome === "uncertain" ? "unsure" : "error";
 }
 
-/** Sends the link itself. Also used when a buyer pays in another browser. */
+/** Sends the link itself. Also used when a buyer pays in another browser. True only when a sender took it. */
 export async function sendCourseLink(store: Store, product: Listing, email: string, origin: string): Promise<boolean> {
-  if (serviceMailKnownUnavailable()) return false;
+  return (await sendCourseLinkOutcome(store, product, email, origin)) === "sent";
+}
+
+/** sendCourseLink, telling a certain refusal from an answer that is not known (SendOutcome); the link stays written either way. */
+export async function sendCourseLinkOutcome(store: Store, product: Listing, email: string, origin: string): Promise<SendOutcome> {
+  if (serviceMailKnownUnavailable()) return "refused";
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { e: normaliseEmail(email), k: storeKey(store), h: store.handle, p: product.id };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]);
   const link = `${origin}/api/store/course/open?token=${token}`;
   // In the store's language (lib/buyer-words/courses.ts).
   const w = coursesWords(store.language);
-  return sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
+  return sendEmailOutcome({ meter: { by: "store", store: store, kind: "transactional" },
     from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
     to: email,
     subject: w.courseSubject(product.title).slice(0, 200),
@@ -936,20 +947,21 @@ export async function sendDripEmails(
         if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;
         const [claimed] = await redisPipeline([["SET", dripMailKey(course.id, student.email, unit.id), "1", "NX", "EX", 400 * 86_400]]);
         if (claimed === null) continue;
-        const ok = await sendDripEmail(store, product, unit, student.email, origin);
-        if (ok) counts.sent += 1;
-        else await redisPipeline([["DEL", dripMailKey(course.id, student.email, unit.id)]]);
+        // Only a certain refusal lets the mark go: an answer that is not known may have delivered it (rule 30).
+        const outcome = await sendDripEmail(store, product, unit, student.email, origin);
+        if (outcome === "sent") counts.sent += 1;
+        else if (outcome === "refused") await redisPipeline([["DEL", dripMailKey(course.id, student.email, unit.id)]]);
       }
     }
   }
   return counts;
 }
 
-async function sendDripEmail(store: Store, product: Listing, unit: CourseModule, email: string, origin: string): Promise<boolean> {
+async function sendDripEmail(store: Store, product: Listing, unit: CourseModule, email: string, origin: string): Promise<SendOutcome> {
   // In the store's language (lib/buyer-words/courses.ts); the button it
   // names is the course page's own.
   const w = coursesWords(store.language);
-  return sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  return sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
     from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
     to: email,
     subject: w.dripSubject(product.title, unit.title).slice(0, 200),

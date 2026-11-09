@@ -42,6 +42,13 @@
  * five-minute job walks (settlePendingOffers), so its confirmation email and
  * the affiliate's credit follow Stripe's answer within minutes, whether or
  * not the buyer ever comes back to the thanks page.
+ *
+ * A paid offer whose affiliate's share could not be written (noteCharge threw:
+ * a share that does not read, or a write of the book that failed) stays on
+ * that list too, marked `owed`, and the job writes the share once it can,
+ * inside the window a checkout's share has in the sweep (OWED_SHARE_MS,
+ * CONFIRM_WITHIN_SECONDS): never lost, never set down at 0%, never written
+ * twice (HSETNX), and nothing charged or sent again (Claude 5's LEVE 1 on #3366).
  */
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
@@ -55,7 +62,7 @@ import {
   stepSlot,
 } from "@/lib/funnel";
 import { funnelRate, noteCharge } from "@/lib/affiliates";
-import { confirmOffer } from "@/lib/purchase-email";
+import { CONFIRM_WITHIN_SECONDS, confirmOffer } from "@/lib/purchase-email";
 import { noteOfferSale } from "@/lib/sale-events";
 import { givenBack } from "@/lib/refunds";
 import { methodId, reusableMethod } from "@/lib/instant-pay";
@@ -93,6 +100,14 @@ type UpsellRecord = {
    * offer was taken, which is what this buyer gets (lib/bundle-rules.ts).
    */
   items?: string[];
+  /**
+   * Paid, and its affiliate's and partners' share not written yet: when that
+   * was first found, in milliseconds. The offer stays on the job's list until
+   * the share is written (shareAgain) or OWED_SHARE_MS after this, counted from
+   * here and not from `at`, which for an offer the bank held is when it began.
+   * Absent once written, and on every other record.
+   */
+  owed?: number;
 };
 
 /**
@@ -110,6 +125,12 @@ const PENDING_KEY = "nl:upsell:pending";
 /** How long an offer waiting on the bank is looked at before the job lets it be. */
 const PENDING_WATCH_MS = 2 * 24 * 60 * 60 * 1000;
 const pendingMember = (handle: string, session: string, slot: string) => `${handle}|${session}|${slot}`;
+/**
+ * How long the job tries again to write the share of a paid offer whose share was not written, from when that was
+ * first found (UpsellRecord.owed): the same window a checkout's share has, which the five-minute sweep reads again until the order is
+ * CONFIRM_WITHIN_SECONDS old (lib/checkout-sweep.ts). Past it the offer leaves the list, said in the log.
+ */
+const OWED_SHARE_MS = CONFIRM_WITHIN_SECONDS * 1000;
 
 /**
  * Adds an offer to the job's list, and takes it off. Best effort: the list
@@ -452,7 +473,11 @@ export async function takeUpsell(input: {
  * the payment, so none failing is passed on.
  */
 async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<void> {
-  await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
+  // A share not written now is kept for the job (owe), never only logged: the slot is the offer's own, on its payment.
+  if (!(await noteShare(store, pi))) {
+    const step = (pi.metadata as Record<string, unknown> | null)?.step;
+    await owe(store, session, typeof step === "string" ? step : "");
+  }
   const reference = typeof pi.id === "string" ? pi.id : "";
   const amountCents = typeof pi.amount === "number" ? pi.amount : 0;
   const currency = typeof pi.currency === "string" && pi.currency ? pi.currency : store.currency;
@@ -464,6 +489,75 @@ async function afterPaid(store: Store, session: string, target: Listing, pi: Rec
     console.error("sending an offer's confirmation failed", error),
   );
   await noteOfferSale(store, target, pi).catch((error) => console.error("telling about an offer's sale failed", error));
+}
+
+/** When a record's share was first found unwritten, or null when it owes none (`owed` absent, or not a time). */
+function owedSince(record: UpsellRecord): number | null {
+  return typeof record.owed === "number" && Number.isSafeInteger(record.owed) && record.owed > 0 ? record.owed : null;
+}
+
+/**
+ * Writes the affiliate's and partners' share of a paid offer (noteCharge): true once it ran through, false when it
+ * threw (a share that does not read, a write of the book that failed), which nothing here passes on: the payment stands.
+ */
+async function noteShare(store: Store, pi: Record<string, unknown>): Promise<boolean> {
+  try {
+    await noteCharge(store, pi);
+    return true;
+  } catch (error) {
+    console.error("noting an affiliate sale failed; the five-minute job tries again", error);
+    return false;
+  }
+}
+
+/**
+ * Keeps a paid offer whose share was not written for the job: marked `owed` on its record and put back on the job's
+ * list (watchPending). Two commands and a read, only when the share failed. Never throws: the buyer's answer stands.
+ */
+async function owe(store: Store, session: string, slot: string): Promise<void> {
+  try {
+    const record = await readUpsell(session, slot);
+    if (record?.state !== "paid") {
+      console.error("an offer's affiliate share was not written, and its paid record could not be read to keep it", session, slot);
+      return;
+    }
+    await writeUpsell(session, slot, { ...record, owed: owedSince(record) ?? Date.now() });
+    await watchPending(store, session, slot);
+  } catch (error) {
+    console.error("keeping an offer's affiliate share for the job failed", session, slot, error);
+  }
+}
+
+/**
+ * Tries once more to write the share of a paid offer marked `owed`. Nothing is charged or sent: one read of that
+ * payment on the creator's Stripe account, then noteCharge, whose writes are HSETNX, so however many tries it takes
+ * the share is written once. True when the offer leaves the job's list: written, its window over (OWED_SHARE_MS), or
+ * the payment read is not this offer's or has no id to write under. False (it waits for the next run) when the store,
+ * its account or the payment's state is not known, or the share threw again; a request that fails throws.
+ */
+async function shareAgain(store: Store | null, session: string, slot: string, record: UpsellRecord, since: number): Promise<boolean> {
+  if (Date.now() - since > OWED_SHARE_MS) {
+    console.error("an affiliate's share of an offer after paying was not written inside its window", session, slot);
+    return true;
+  }
+  if (!record.pi) {
+    console.error("an offer after paying owed a share and has no payment to write it under", session, slot);
+    return true;
+  }
+  if (!store?.stripeAccountId) return false;
+  const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}`);
+  const meta = pi.metadata;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
+  const step = (meta as Record<string, unknown>).step;
+  if ((meta as Record<string, unknown>).parent !== session || (step === undefined ? "" : step) !== slot || pi.id !== record.pi) {
+    console.error("an offer's owed share points at a payment that is not its own; nothing written", session, slot);
+    return true;
+  }
+  if (pi.status !== "succeeded" || !(await noteShare(store, pi))) return false;
+  const written: UpsellRecord = { ...record };
+  delete written.owed;
+  await writeUpsell(session, slot, written);
+  return true;
 }
 
 /**
@@ -551,7 +645,7 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
       const target = await readListing(store, record.product);
       const email = typeof pi.receipt_email === "string" ? pi.receipt_email : "";
       if (target) await afterPaid(store, session, target, pi, email);
-      else await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
+      else if (!(await noteShare(store, pi))) await owe(store, session, slot);
     } else if (pi.status === "requires_payment_method" || pi.status === "canceled") {
       await writeUpsell(session, slot, { ...record, pi: id, state: "failed" });
     } else if (id !== record.pi) {
@@ -604,6 +698,14 @@ export async function settlePendingOffers(
     counts.checked += 1;
     try {
       const record = await readUpsell(session, slot);
+      // A paid offer whose share was not written: tried again, and sent to the back of the list while it waits, so
+      // offers still waiting on Stripe are never held behind it (one ZADD a try that waits).
+      const since = record?.state === "paid" ? owedSince(record) : null;
+      if (record && since !== null) {
+        if (await shareAgain(await storeFor(handle), session, slot, record, since)) await drop();
+        else await redisPipeline([["ZADD", PENDING_KEY, Date.now(), member]]);
+        continue;
+      }
       if (!record || record.state !== "pending") {
         await drop();
         continue;
@@ -617,7 +719,8 @@ export async function settlePendingOffers(
       const after = await readUpsell(session, slot);
       if (!after || after.state !== "pending") {
         counts.settled += 1;
-        await drop();
+        // Paid, its share not written: owe put it back on the list for the next run.
+        if (!after || owedSince(after) === null) await drop();
       } else if (Date.now() - after.at > PENDING_WATCH_MS) {
         await drop();
       }

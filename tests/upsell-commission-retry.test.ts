@@ -226,8 +226,23 @@ async function main(): Promise<void> {
   await job();
   is("the job finds it paid; the write fails, nothing on the book", [(await readUpsell(settled))?.state, failed, await sale(settledPi)], ["paid", 2, null]);
   is("and it stays on the list", await listed(settled), true);
-  await job();
+  // Put back on the list as the run found it paid, so it is the next run's, five minutes on (each run leaves a minute's grace).
+  await job(8 * 60_000);
   is("the next run writes the share once", [(await sale(settledPi))?.rate, await listed(settled)], [20, false]);
+
+  part("An offer the bank held for 30 hours: its window counts from when its share was found unwritten, not from when it began");
+  const held = "cs_test_retryheld0000001";
+  const heldPi = "pi_test_held000000001";
+  charges[heldPi] = { ...charges[settledPi], id: heldPi, metadata: { ...(charges[settledPi].metadata as Record<string, string>), parent: held } };
+  await pipeline([
+    ["SET", `nl:upsell:${held}`, JSON.stringify({ state: "pending", product: offer, pi: heldPi, customer: "cus_TestRetryBuyer", at: Date.now() - 30 * 60 * 60_000 })],
+    ["ZADD", PENDING, Date.now() - 30 * 60 * 60_000, `${HANDLE}|${held}|`],
+  ]);
+  failSales = 1;
+  await job();
+  is("found paid, the write failing: nothing on the book, still on the list", [(await readUpsell(held))?.state, await sale(heldPi), await listed(held)], ["paid", null, true]);
+  await job(8 * 60_000);
+  is("the next run writes it, though the offer began more than a day ago", [(await sale(heldPi))?.rate, await listed(held)], [20, false]);
 
   part("A share that does not read waits inside the window, then leaves the list, never set down at 0%");
   const garbled = "cs_test_retrygarbled0001";
@@ -241,7 +256,8 @@ async function main(): Promise<void> {
   is("paid, nothing on the book, still on the list", [(await readUpsell(garbled))?.state, await sale(garbledPi), await listed(garbled)], ["paid", null, true]);
   await job(60 * 60_000);
   is("an hour on: still waiting, still nothing at 0%", [await sale(garbledPi), await listed(garbled)], [null, true]);
-  await job((CONFIRM_WITHIN_SECONDS + 60) * 1000);
+  // The window counts from the run that found the share unwritten (three minutes on): ten minutes past it.
+  await job((CONFIRM_WITHIN_SECONDS + 10 * 60) * 1000);
   is("past the window a checkout has: off the list, and still never at 0%", [await sale(garbledPi), await listed(garbled)], [null, false]);
 
   done();

@@ -36,7 +36,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
-import { readStripePage } from "@/lib/stripe-list";
+import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
 import { isLiveSub, soldAMembership } from "@/lib/membership-access";
@@ -65,6 +65,7 @@ import {
   ORDERS_ROOM_COMMANDS,
   ORDERS_UNIT_COMMANDS,
   ORDERS_BUNDLE_UNITS,
+  ORDERS_CHECKOUT_PAGES,
   ORDERS_KEY_COMMANDS,
   ORDERS_OLDER_UNITS,
   ORDERS_OLDER_MOST,
@@ -114,6 +115,7 @@ export {
   ORDERS_ONE_CLICK_LISTS,
   ORDERS_STRIPE_CALLS,
   ORDERS_STRIPE_LISTS,
+  ORDERS_CHECKOUT_PAGES,
   LINK_SHOWN,
   HOST_SHOWN,
   PLAN_REFUND_CALLS,
@@ -580,27 +582,60 @@ function waitsForCheck(store: Store, session: Row): boolean {
   return saleHandles(store).has(meta.store ?? "") && isSettled(session) && meta.kind !== "call" && !meta.gift && !meta.group;
 }
 
-/** The address's checkouts on the creator's Stripe account under both spellings of it, each once, newest first. */
-async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Promise<Row[]> {
+const createdAt = (row: Row) => (typeof row.created === "number" ? row.created : 0);
+
+/**
+ * The address's checkouts read so far, newest first, and from when they may be missing: `cut` is null when every
+ * spelling was read to its end; otherwise a checkout created at or before `cut` may not be among them (its page was
+ * past ORDERS_CHECKOUT_PAGES or past the meter's calls), so a reader that needs one that old says it could not read.
+ */
+type Checkouts = { rows: Row[]; cut: number | null };
+
+/** Thrown where the list would need a checkout past what was read: the page says it could not be read. */
+const pastWhatWasRead = () => new StripeListUnreadable("more checkouts than are read");
+
+/**
+ * The address's checkouts on the creator's Stripe account under both spellings of it, each once, newest first: every
+ * page from the last row read (Claude 5's LEVE 2 on #3366: one page was read and has_more ignored), up to
+ * ORDERS_CHECKOUT_PAGES a spelling, each page past the first taken from the meter's calls to Stripe before it is asked.
+ */
+async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Promise<Checkouts> {
   const account = store.stripeAccountId;
-  if (!account) return [];
+  if (!account) return { rows: [], cut: null };
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   const checkouts = new Map<string, Row>();
+  let cut: number | null = null;
   for (const variant of variants) {
-    const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-    query.append("expand[]", "data.subscription");
-    query.append("expand[]", "data.payment_intent.latest_charge");
-    meter?.alive();
-    const listed: unknown = await onAccount("GET", account, `/checkout/sessions?${query}`);
-    for (const session of rows(listed)) {
-      const id = typeof session.id === "string" ? session.id : "";
-      if (!checkouts.has(id)) checkouts.set(id, session);
+    let after = "";
+    let oldest = Infinity;
+    for (let page = 0; ; page += 1) {
+      const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
+      if (after) query.set("starting_after", after);
+      query.append("expand[]", "data.subscription");
+      query.append("expand[]", "data.payment_intent.latest_charge");
+      meter?.alive();
+      const read = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`));
+      for (const session of read.rows) {
+        oldest = Math.min(oldest, createdAt(session));
+        if (!checkouts.has(session.id)) checkouts.set(session.id, session);
+      }
+      if (!read.hasMore) break;
+      // More to read and no readable last row, past the ceiling, or no call left: what is older than the oldest read
+      // under this spelling may be missing (with no row read, every checkout may be).
+      if (!read.lastId || page + 1 >= ORDERS_CHECKOUT_PAGES || (meter && !meter.stripe(1))) {
+        const from = Number.isFinite(oldest) ? oldest : Infinity;
+        cut = cut === null ? from : Math.max(cut, from);
+        break;
+      }
+      after = read.lastId;
     }
   }
-  const createdAt = (row: Row) => (typeof row.created === "number" ? row.created : 0);
-  return [...checkouts.values()].sort((a, b) => createdAt(b) - createdAt(a));
+  return { rows: [...checkouts.values()].sort((a, b) => createdAt(b) - createdAt(a)), cut };
 }
+
+/** Whether a checkout of the list is one that may have others missing beside it (Checkouts.cut). */
+const pastCut = (cut: number | null, session: Row) => cut !== null && createdAt(session) <= cut;
 
 /** Looks a product up by id, each read once, and, with a meter, taken from it the first time it is asked for. */
 type Finder = (id: string | undefined) => Promise<Listing | null>;
@@ -950,7 +985,14 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   // (anything but an ended membership) are found, every other older checkout is past the newest MAX_LISTED the list
   // shows, so none is read any further.
   let shown = 0;
-  for (const session of await checkoutsOf(store, email, meter)) {
+  const { rows: checkouts, cut } = await checkoutsOf(store, email, meter);
+  for (const session of checkouts) {
+    // Past what was read, checkouts may be missing: needed only while the list is still looking (fewer than MAX_LISTED
+    // shown, or older ones being noted for a batch), and then it is not read, never short of a purchase without a word.
+    if (pastCut(cut, session)) {
+      if (shown >= MAX_LISTED && !meter?.older.length) break;
+      throw pastWhatWasRead();
+    }
     if (meter?.older.length && refundCalls(session) > 0) {
       if (waitsForCheck(store, session)) meter.defer(session);
       continue;
@@ -1355,11 +1397,14 @@ export async function olderFor<T>(
   const meter = new OrdersMeter(store);
   const done = await withinOpening(
     (async () => {
-      const checkouts = await checkoutsOf(store, email, meter);
+      const { rows: checkouts, cut } = await checkoutsOf(store, email, meter);
       let waiting: Row[] = [];
       if (cursor.from) {
         const at = checkouts.findIndex((session) => session.id === cursor.from);
+        // Not among what was read, or followed by checkouts that may be missing: not checked, never said to be none.
+        if (at < 0 && cut !== null) throw pastWhatWasRead();
         if (at < 0) return null;
+        if (checkouts.slice(at).some((session) => pastCut(cut, session))) throw pastWhatWasRead();
         waiting = checkouts.slice(at).filter((session) => waitsForCheck(store, session));
       }
       // Only a customer one of the address's own checkouts made is read.
@@ -1374,7 +1419,11 @@ export async function olderFor<T>(
           break;
         }
         const [customer, shown] = entry.split(":");
-        if (!theirs.has(customer)) continue;
+        // A customer none of the checkouts read made: past what was read it may still be theirs, so not checked, never dropped.
+        if (!theirs.has(customer)) {
+          if (cut !== null) throw pastWhatWasRead();
+          continue;
+        }
         const read = await oneClickOf(store, customer, find, meter, { skip: later, room: ORDERS_OLDER_MOST - purchases.length, from: Number(shown ?? 0) });
         purchases.push(...read.purchases);
         if (read.next) paid.push(read.next);

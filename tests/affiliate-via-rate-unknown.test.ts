@@ -6,8 +6,9 @@
  * their share and the book said nothing was earned. Now nothing is written,
  * neither paid nor zeroed: noteSession and noteCharge throw. A checkout is kept
  * by the sweep for its next run (failOrder) while it is inside the sweep's window;
- * a one-click offer's charge is only logged (lib/upsell.ts catches it), so its
- * commission is not written at all rather than written at 0%.
+ * a one-click offer's charge is kept on the five-minute job's list, marked owed,
+ * and written once it reads, inside the same window (lib/upsell.ts, shareAgain;
+ * tests/upsell-commission-retry.test.ts), never written at 0%.
  *
  * Every writer of `via_rate` writes `String(rate)` beside `via` (lib/store-checkout.ts,
  * lib/cart-checkout.ts, lib/calls.ts, lib/upsell.ts, lib/stats.ts), "0" included, so

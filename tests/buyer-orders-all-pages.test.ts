@@ -14,6 +14,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { MAX_LISTED, purchasesFor } from "@/lib/buyer-orders";
+import { ORDERS_CHECKOUT_PAGES } from "@/lib/buyer-orders-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -21,7 +22,7 @@ import { paidPeriod } from "./billing-period-fixture";
 const OWNER = "owner-pages@example.com";
 const HANDLE = "pagesproof";
 const NOW = Math.floor(Date.now() / 1000);
-/** The ceiling the fix declares (ORDERS_CHECKOUT_PAGES in lib/buyer-orders-rules.ts), held to it below once it exists. */
+/** The ceiling the fix declares (ORDERS_CHECKOUT_PAGES in lib/buyer-orders-rules.ts), held to it below. */
 const CEILING = 5;
 
 /** Every page of checkouts, in order; `starting_after` names the last row of the page before. */
@@ -96,7 +97,7 @@ async function main(): Promise<void> {
   pages = Array.from({ length: CEILING + 3 }, () => elsewhere(100));
   asked = [];
   is("the list is said not read", await outcome(), "not read");
-  is(`no more than ${CEILING} pages are asked`, asked.length <= CEILING, true);
+  is(`exactly ${CEILING} pages are asked, the ceiling the code declares`, [asked.length, ORDERS_CHECKOUT_PAGES], [CEILING, CEILING]);
 
   part("Past the ceiling, the newest purchases all read: the list is shown");
   pages = Array.from({ length: CEILING + 3 }, () => Array.from({ length: 100 }, () => checkout(HANDLE, guide.product.id)));

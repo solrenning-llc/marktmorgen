@@ -140,6 +140,20 @@ export const ORDERS_STRIPE_CALLS = 200;
  */
 export const ORDERS_STRIPE_LISTS = 2 + 10 + 5;
 /**
+ * Pages of a hundred checkouts read for each spelling of the buyer's address
+ * (lib/buyer-orders.ts, checkoutsOf; Claude 5's LEVE 2 on #3366: one page was
+ * read and `has_more` ignored, so a purchase past the first hundred was left
+ * off the list without a word). The first page of each spelling is one of
+ * ORDERS_STRIPE_LISTS; each later one is a call taken from the rest of
+ * ORDERS_STRIPE_CALLS before it is made, so an opening never asks Stripe more
+ * than before, and a page with no room is not read. Past what is read, the
+ * list is shown only when the newest purchases it shows were all read;
+ * otherwise the page says the purchases could not be read, never that the
+ * address bought nothing. Five pages are five hundred checkouts of one
+ * address in one store, while the list shows the newest MAX_LISTED.
+ */
+export const ORDERS_CHECKOUT_PAGES = 5;
+/**
  * Calls lib/refunds.ts makes at the most to read whether a purchase paid in
  * installments was given back: its first invoice, that invoice's payments
  * (ten at the most, its list's limit), each of those payments and, for each

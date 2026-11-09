@@ -501,6 +501,16 @@ export async function withoutErasedBookers(store: Pick<Store, "listId">, calls: 
 }
 
 /**
+ * What the calendar file says when Stripe had more checkouts than one reading
+ * of the bookings holds (lib/calls.ts, paidCallsRead): older checkouts, which
+ * may hold a booking still to come, were not read, so the file may be missing
+ * some (VR 2). Said as the calendar's description and as a note on today that
+ * blocks no time.
+ */
+export const PARTIAL_FEED_NOTE =
+  "Some older bookings could not be read just now, so this calendar may not show every booking. It tries again within a few hours.";
+
+/**
  * Every booked call and dated session still to come (and those of the last
  * week), as a calendar file. A one-to-one call is one event named after its
  * buyer; a group call or a session is one event with everybody booked into it
@@ -515,6 +525,8 @@ export function bookedCalendar(
   listings: Listing[] = recordListings(store),
   /** The room of each booked time (slotRooms), by "<product>|<start>". */
   rooms: Map<string, string | null> = new Map(),
+  /** Whether the reading of the bookings stopped at its pages with more left (paidCallsRead): the file then says so. */
+  partial = false,
 ): string {
   const since = now - 7 * 86_400_000;
   const slots = new Map<string, { product: string; start: number; end: number; people: BookedCall[] }>();
@@ -544,7 +556,23 @@ export function bookedCalendar(
     `X-WR-CALNAME:${icsText(`${store.name} bookings`)}`,
     "REFRESH-INTERVAL;VALUE=DURATION:PT30M",
     "X-PUBLISHED-TTL:PT30M",
+    ...(partial ? [`X-WR-CALDESC:${icsText(PARTIAL_FEED_NOTE)}`] : []),
   ];
+  if (partial) {
+    // An all-day note on today, free time, so the creator sees it where the bookings are and nothing reads it as busy.
+    const day = (ms: number) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, "");
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:bookings-not-all-read-${store.handle}@marktmorgen.com`,
+      `DTSTAMP:${icsTime(now)}`,
+      `DTSTART;VALUE=DATE:${day(now)}`,
+      `DTEND;VALUE=DATE:${day(now + 86_400_000)}`,
+      `SUMMARY:${icsText("Some bookings may be missing here")}`,
+      `DESCRIPTION:${icsText(`${PARTIAL_FEED_NOTE}\n\nFrom your Marktmorgen studio.`)}`,
+      "TRANSP:TRANSPARENT",
+      "END:VEVENT",
+    );
+  }
   for (const slot of keptSlots([...slots.values()], now)) {
     const product = listings.find((p) => p.id === slot.product);
     const title = product?.title ?? "A call that is no longer listed";

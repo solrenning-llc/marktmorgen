@@ -525,8 +525,14 @@ export default function DevelopersPage() {
       "currency": "usd",
       "answers": [{ "label": "What should we cover?", "value": "Pricing my first course" }]
     }
-  ]
+  ],
+  "complete": true
 }`}</Code>
+        <p>
+          When <code className="font-mono">complete</code> is <code className="font-mono">false</code>, your Stripe account
+          had more checkouts than one reading holds, so some older bookings may be missing from the list. Read it again
+          later before you rely on it being whole.
+        </p>
       </LegalSection>
 
       <LegalSection title="Writing: your list">

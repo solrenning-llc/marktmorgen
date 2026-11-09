@@ -12,7 +12,7 @@ import { notFound } from "next/navigation";
 import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
+import { type BookedCall, type Purchase, OrdersBusy, callsForRead, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
 import { windowOf, withConfirmations } from "@/lib/withdrawal";
 import { withdrawalWords } from "@/lib/buyer-words/withdrawal";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
@@ -169,6 +169,8 @@ export default async function OrdersPage({ params, searchParams }: Params) {
 
   let purchases: Purchase[] | null = null;
   let calls: BookedCall[] = [];
+  // The store's bookings stopped at their pages with more left: one of this buyer's may be missing, and the page says so.
+  let callsPartial = false;
   let waiting: Waiting = { requests: [], agreements: [], requestsTotal: 0, agreementsTotal: 0, unread: false };
   let failed = false;
   // Older purchases whose refund did not fit in the opening's calls to Stripe (ORDERS_STRIPE_CALLS), and what was added to
@@ -185,7 +187,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
       const reading = (async () => {
         // A request is read and shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen);
         // a failure nobody expected is said as "could not be read", never as nothing waiting.
-        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter).then((listed) => withConfirmations(listed, meter)), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
+        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter).then((listed) => withConfirmations(listed, meter)), callsForRead(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
 
         // A purchase that gives roles in the creator's Discord server: one way in for all of them (lib/discord-rules.ts).
         const discord = isDiscordConfigured() ? await discordFor(store).catch(() => null) : null;
@@ -195,7 +197,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
       })();
       const outcome = await withinOpening(reading, meter);
       if (outcome === "late") failed = true;
-      else ({ listed: purchases, booked: calls, waits: waiting, discord: discordProducts, more: extras, older } = outcome);
+      else ({ listed: purchases, booked: { calls, partial: callsPartial }, waits: waiting, discord: discordProducts, more: extras, older } = outcome);
     } catch (error) {
       purchases = null;
       calls = [];
@@ -255,6 +257,11 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                   {words.waitingUnread}
                 </p>
               ) : null}
+              {callsPartial ? (
+                <p role="status" className="st-muted mt-4">
+                  {words.callsUnlisted}
+                </p>
+              ) : null}
               {calls.length > 0 ? (
                 <section aria-labelledby="calls-title" className="mt-6">
                   <h2 id="calls-title" className="font-display text-xl font-semibold">
@@ -267,7 +274,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                   </ul>
                 </section>
               ) : null}
-              {purchases.length === 0 && !older.cursor && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread) ? null : purchases.length === 0 && !older.cursor ? (
+              {purchases.length === 0 && !older.cursor && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread || callsPartial) ? null : purchases.length === 0 && !older.cursor ? (
                 <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
               ) : (
                 <>

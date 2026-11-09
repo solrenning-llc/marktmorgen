@@ -1,6 +1,6 @@
 import { storeForHandle } from "@/lib/store";
 import { listForNaming } from "@/lib/store-readings";
-import { paidCalls } from "@/lib/calls";
+import { paidCallsRead } from "@/lib/calls";
 import { FeedGone, bookedCalendar, bookedCalendarFeed, ensureFeedToken, slotRooms, storeIdForToken, withoutErasedBookers } from "@/lib/calendar-sync";
 import { readKind } from "@/lib/catalog";
 
@@ -39,7 +39,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
       // Renamed, or settings from before they named the store's calls: written again, so its changes are read from now on.
       await ensureFeedToken(store).catch(() => {});
       // Who deleted their details from the store is not named, though Stripe keeps the booking (review of #2111).
-      const paid = store.stripeAccountId ? await paidCalls(store) : [];
+      // A reading that stopped at its pages with more left is said in the file, never shown as every booking (VR 2).
+      const { paid, partial } = store.stripeAccountId ? await paidCallsRead(store) : { paid: [], partial: false };
       // A store from before lists has none to keep deleted people's prints in: tried once a day before anyone is
       // named (lib/store-readings.ts, listForNaming; review of fe4cb5e56). With none, nobody is named: the times stay,
       // each booker "A buyer" (review of 2c1af02e0). Safe: an erasure always gives the store a list first.
@@ -49,7 +50,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
       }
       const calls = store.listId ? await withoutErasedBookers(store, paid) : paid.map((c) => (c.email || c.name ? { ...c, email: null, name: null, unnamed: true } : c));
       const listings = await readKind(store, "call");
-      const ics = bookedCalendar(store, calls, Date.now(), listings, await slotRooms(store, calls, listings));
+      const ics = bookedCalendar(store, calls, Date.now(), listings, await slotRooms(store, calls, listings), partial);
       // Who the file may name, checked again where its copy is kept: a deletion meanwhile is not undone by it.
       return { ics, listId: store.listId, named: calls.map((c) => c.email).filter((e): e is string => Boolean(e)) };
     });

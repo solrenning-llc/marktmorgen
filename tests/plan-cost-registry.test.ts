@@ -606,7 +606,7 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/learn.ts", "if (!(await allow(rows.length, blockedAll))) return null;", '["SMEMBERS", doneKey(course.id, row.e)]');
   before("lib/api-read.ts", "said.refused = await charge(apiReadUnits(studentsPageWork(rows, blocked)));", "data: page.students.map");
   before("lib/api-read.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store);");
-  before("lib/api-read.ts", "const refused = await charge(apiReadUnits(bookingsWork(Boolean(store.stripeAccountId))));", "const rows = await paidCalls(store);");
+  before("lib/api-read.ts", "const refused = await charge(apiReadUnits(bookingsWork(Boolean(store.stripeAccountId))));", "const { paid: rows, partial } = await paidCallsRead(store);"); // sales-reads-complete: the reading now carries `partial` (rule 23: same order, new text)
   before("lib/mcp-tools.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store);");
   before("lib/api-read.ts", "const refused = await charge(apiReadUnits(productsPageWork(", "const slice = await readListings(store, page);");
   before("lib/mcp-tools.ts", "const refused = charge ? await charge(apiReadUnits(listingsWork(", "const listings = await readListings(store, named)");

@@ -744,7 +744,7 @@ test("a link request answers sent before it reads anything for the address, writ
 
 test("a link request reads for ORDERS_LINK_READ_MS at the most, so its grant and email fit in the route's time", () => {
   assert.ok(ORDERS_LINK_READ_MS + REDIS_TIMEOUT_MS + RESEND_TIMEOUT_MS < ORDERS_OPEN_SECONDS * 1000, String(ORDERS_LINK_READ_MS));
-  assert.ok(readFileSync("lib/buyer-orders.ts", "utf8").includes("callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS);"));
+  assert.ok(readFileSync("lib/buyer-orders.ts", "utf8").includes("callsForRead(store, raw, meter)]), meter, ORDERS_LINK_READ_MS);")); // sales-reads-complete: callsForRead also says whether the bookings were all read (rule 23)
 });
 
 test("the orders page sends nobody to reply to an email unless every email about a purchase answers to the creator", () => {

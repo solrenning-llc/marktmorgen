@@ -1179,7 +1179,9 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     }
   };
   // The two lists are read side by side, so a whole store's sales wait on the longer of them, not both (lib/store-export.ts).
-  const checkouts = walk("/checkout/sessions?limit=100", (raw) => {
+  // Only completed checkouts are asked for (as lib/checkout-sweep.ts and lib/calls.ts ask): open and expired ones would
+  // use up the pages before the paid sales are reached, and the reading would be partial sooner than it has to be.
+  const checkouts = walk("/checkout/sessions?limit=100&status=complete", (raw) => {
     const row = raw as Row;
     const meta = row.metadata ?? {};
     if (!handles.has(meta.store ?? "")) return;

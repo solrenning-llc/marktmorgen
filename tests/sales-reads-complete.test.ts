@@ -10,8 +10,8 @@
  * 2. The bookings (lib/calls.ts, paidCalls, which stops after its pages): the
  *    readers that show them say when the list may be missing some — the API
  *    (`complete`), the calendar feed (a note in the file) and the buyer's
- *    orders page and link (lib/buyer-orders.ts, callsForRead). Nothing is
- *    refused for it.
+ *    orders page and its link's email (lib/buyer-orders.ts, callsForRead).
+ *    Nothing is refused for it.
  *
  * Synthetic stores and a stand-in for Stripe only.
  */
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
   const ics = await answer.text();
   is("the real route, Stripe with more than its pages: the file is answered, with the note", [answer.status, ics.includes("X-WR-CALDESC:")], [200, true]);
 
-  part("The buyer's orders: a booking list that may be missing some is said, and the link is still sent");
+  part("The buyer's orders: a booking list that may be missing some is said on the page and in the link's email");
   const buyer = await stripeStore("orders-partial");
   const base = await buyer.store();
   const selling = { ...base, catalog: { ...base.catalog, items: [...base.catalog.items, { ...(base.catalog.items[0] ?? {}), id: "call1", kind: KIND.call | KIND.paid }] } } as Store;
@@ -156,7 +156,9 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
   is("the orders page reads callsForRead and shows the sentence", [page.includes("callsForRead(store, email, meter)"), page.includes("{words.callsUnlisted}")], [true, true]);
   const orders = readFileSync("lib/buyer-orders.ts", "utf8");
-  is("the link is sent when the bookings were not all read, and its email says so", [orders.includes("calls.partial"), orders.includes("words.callsUnlisted")], [true, true]);
+  // Changed after RED (rule 23): the first version asked for the link to be sent on a partial booking list alone, which
+  // would email any address typed at a busy store; the link still goes only with something read, and its email says so.
+  is("the link still goes only with something read (a partial list alone emails nobody), and its email says some bookings could not be listed", [orders.includes("if (purchases.length === 0 && calls.length === 0 && unchecked === 0) return;"), orders.includes("callsPartial ? words.ordersIntroSome(name)"), orders.includes("...(callsPartial ? [words.callsUnlisted, \"\"] : [])")], [true, true, true]);
   done();
 }
 

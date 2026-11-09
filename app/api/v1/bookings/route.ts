@@ -15,7 +15,8 @@ export async function GET(request: Request) {
   try {
     const found = await bookings(store, (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
-    return apiOkFields(request, { data: found });
+    // `complete` false: the reading stopped at its pages with more left, so some bookings may be missing.
+    return apiOkFields(request, { data: found.rows, complete: found.complete });
   } catch (error) {
     console.error("api: bookings failed", error);
     return apiError(502, "unavailable", "Bookings could not be read just now. Try again in a moment.");

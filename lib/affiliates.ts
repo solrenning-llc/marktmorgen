@@ -3048,7 +3048,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const asked = orders.flatMap((order) => [order, partlyRefundedMember(order)]);
       if (pis.length) {
         const slices = <T,>(list: T[]) => Array.from({ length: Math.ceil(list.length / BOOK_KEPT_SLICE) }, (_, i) => list.slice(i * BOOK_KEPT_SLICE, (i + 1) * BOOK_KEPT_SLICE));
-        const kept = slices(pis).map((names) => ["HMGET", paypalBackKey(statsId), ...names]);
+        // Each payment is asked twice of the refunds kept for good: in full (the payment) and in part (partlyRefundedField).
+        const fields = pis.flatMap((pi) => [pi, `part:${pi}`]);
+        const kept = slices(fields).map((names) => ["HMGET", paypalBackKey(statsId), ...names]);
         const marked = slices(asked).map((names) => ["ZMSCORE", paypalRefundedKey(statsId), ...names]);
         const replies = repliesFor(await redisPipeline([...kept, ...marked]), kept.length + marked.length);
         const answers = (from: number, commands: (string | number)[][]) => {
@@ -3063,9 +3065,18 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         const back = answers(0, kept);
         const seen = answers(kept.length, marked);
         const answer = (v: unknown) => v === null || typeof v === "string";
-        if (!replies || back.length !== pis.length || seen.length !== asked.length || !back.every(answer) || !seen.every(answer)) refundsChecked = false;
+        if (!replies || back.length !== fields.length || seen.length !== asked.length || !back.every(answer) || !seen.every(answer)) refundsChecked = false;
         else {
-          for (const [i, pi] of pis.entries()) if (back[i] !== null) refundedInFull(pi);
+          // With each payment, its partial refund kept for good (partlyRefundedField, its value when first seen): its
+          // sale stays held, or paid if it was paid before (paidBeforeHold), once the set and the record expire (P3 and
+          // P4 for partial refunds); a time that is not a whole positive number of seconds is unknown.
+          for (const [i, pi] of pis.entries()) {
+            if (back[2 * i] !== null) refundedInFull(pi);
+            const part = back[2 * i + 1];
+            if (part === null) continue;
+            if (typeof part !== "string" || !/^[1-9]\d{0,11}$/.test(part)) refundsChecked = false;
+            else partlyHeld.set(pi, Math.min(Number(part), partlyHeld.get(pi) ?? Number(part)));
+          }
           // A sale on this book PayPal refunded in part (audit R13, MEDIUM 2): how much came back is not read, so what
           // it earns is unknown, never its whole commission and never a refund of nothing (rule 24). It is held by itself
           // (holdLine): out of every payment, the rest of the book checked and payable as usual (the coordinator's

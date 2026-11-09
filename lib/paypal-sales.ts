@@ -11,6 +11,7 @@
  *   nl:ppsell:sales:<stats>     every paid order, scored by when it was paid (400 days): the store's numbers read it
  *   nl:ppsell:refunded:<stats>  paid orders PayPal says were refunded in full, scored by when that was seen
  *   nl:ppsell:back:<stats>      the same refunds by payment, kept for good, for the affiliate book's lines
+ *                               (and, as "part:<payment>", the ones refunded in part: partlyRefundedField)
  *
  *   The same set holds, as "part:<order>", the paid orders PayPal says were refunded in part (partlyRefundedMember).
  *
@@ -839,7 +840,7 @@ export async function watchPayPal(
       // pays the whole commission on it and the numbers never call their refunds whole without it (markPartlyRefunded).
       // How much was given back is not read here, so its amount is unknown, never zero. Not known written: nothing
       // else is done, and it is looked at again in an hour. The purchase is kept, as for any partial refund.
-      if (status === "PARTIALLY_REFUNDED" && !(await markPartlyRefunded(statsId, order, now))) {
+      if (status === "PARTIALLY_REFUNDED" && !(await markPartlyRefunded(store, order, paid.capture, now))) {
         console.error("a PayPal partial refund could not be marked; looked at again in an hour", order);
         await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
         continue;
@@ -1106,20 +1107,34 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
  * at a paid record's weight, and read by the same range as them (readPayPalRefundsWithCoverage).
  */
 export const partlyRefundedMember = (order: string) => `part:${order}`;
+/**
+ * And its field in backKey, kept for good like a refund in full's (the payment as the affiliate book names it, after
+ * "part:"; its value when the partial refund was first seen): the book's lines are kept for good, so a sale refunded in
+ * part must stay held, and a commission paid before it stay paid, once the set and the paid record expire (P3 and P4
+ * for partial refunds, the coordinator on claude5/paypal-partial-refund-v2, 9 November 2026).
+ */
+export const partlyRefundedField = (capture: string) => `part:${paypalPaymentId(capture)}`;
 
 /**
- * Writes down that PayPal refunded part of a paid order, once: the mark is read first (one ZSCORE, read exactly),
- * and only when it is not there is it written (ZADD NX, so a race keeps the first time seen, and the key's expiry),
- * so a later look costs one read and writes nothing (pre-review of 3b4b8ac4e1, LEVE 4). True only when the mark is
- * read there, or both writes' replies read exactly, each 0 or 1; anything else, or a call that failed, is not known
+ * Writes down that PayPal refunded part of a paid order, once: the set's mark is read first (one ZSCORE, read
+ * exactly), and only when it is not there is anything written, so a later look costs one read and writes nothing
+ * (pre-review of 3b4b8ac4e1, LEVE 4). Then, in this order: the mark kept for good (HSETNX of partlyRefundedField in
+ * backKey, charged to the store's room as an order's record, lib/order-data.ts, as a refund in full's is), and only
+ * once its reply reads exactly 0 or 1, the set's mark (ZADD NX, so a race keeps the first time seen, and the key's
+ * expiry). So the set's mark is never there without the lasting one, and reading it there means both are. True only
+ * when the mark is read there, or every write's reply reads exactly; anything else, or a call that failed, is not known
  * written. How much was refunded is not written: nothing in this file reads it from PayPal, so it is unknown.
  */
-async function markPartlyRefunded(statsId: string, order: string, now: number): Promise<boolean> {
+async function markPartlyRefunded(store: Store, order: string, capture: string, now: number): Promise<boolean> {
+  const statsId = store.statsId;
+  if (!statsId) return false;
   try {
     const seen = repliesFor(await redisPipeline([["ZSCORE", refundedKey(statsId), partlyRefundedMember(order)]]), 1);
     if (!seen) return false;
     if (typeof seen[0] === "string" && REDIS_SCORE.test(seen[0])) return true;
     if (seen[0] !== null) return false;
+    const lasting = await orderWrite(store, [["HSETNX", backKey(statsId), partlyRefundedField(capture), String(now)]]);
+    if (lasting.length !== 1 || !(lasting[0] === 0 || lasting[0] === 1)) return false;
     const marked = repliesFor(
       await redisPipeline([
         ["ZADD", refundedKey(statsId), "NX", String(now), partlyRefundedMember(order)],

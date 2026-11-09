@@ -247,7 +247,11 @@ async function main(): Promise<void> {
   part("A partial refund's member (part:<order>, the partial refund's unit) is not a cut of the numbers' reading");
   await setup();
   await redis.pipeline([["ZADD", `nl:ppsell:refunded:${SID}`, String(NOW), `part:${OTHER_ORDER}`]]);
-  is("not partial", (await readPayPalRefundsWithCoverage(SID, 0)).partial, false);
+  // Rule 23 (the partial refund's unit, audit R13, MEDIUM 2): the reading says apart whether it was cut (`uncovered`)
+  // and whether a sale of an unknown amount refunded is on it (`partly`); `partial` is either, so the numbers never call
+  // their refunds whole beside it. Was: `partial` false.
+  const numbers = await readPayPalRefundsWithCoverage(SID, 0);
+  is("not a cut, but a partial refund of an unknown amount", [numbers.uncovered, numbers.partly, numbers.partial], [false, true, true]);
   is("and the book stays checked", (await offered()).checked, true);
 
   part("The book's questions are cut in slices, never one command past BOOK_KEPT_SLICE fields");

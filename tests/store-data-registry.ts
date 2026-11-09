@@ -770,8 +770,9 @@ export const FAMILIES: Record<string, Family> = {
   // it (PAYPAL_NEVER_REACHES leaves out only what a recurring product or license keys keep): the parts of no kind, those
   // membership parts and this one stay within ITEM_DATA_BYTES (tests/store-data-registry.test.ts, paypalItemBytes).
   // A field of "paypal:" and a capture id of up to 64 characters, a time of up to 12 digits, ORDER_ENTRY_BYTES and a
-  // quarter more, rounded up (lib/order-data.ts): 192 bytes; 256 with the key's own share.
-  "nl:ppsell:back:@lib/paypal-sales.ts": { what: "PayPal payments refunded in full, kept for good for the affiliate book's lines (9 November 2026)", parts: [item(256, "One field per refunded PayPal order, written through lib/order-data.ts.", "paypal")] },
+  // quarter more, rounded up (lib/order-data.ts): 192 bytes; 256 with the key's own share. Two fields an order at the
+  // most: refunded in part ("part:" before the payment, 5 bytes more, still inside the rounding), then in full.
+  "nl:ppsell:back:@lib/paypal-sales.ts": { what: "PayPal payments refunded in part and in full, kept for good for the affiliate book's lines (9 November 2026)", parts: [item(512, "Two fields at the most per refunded PayPal order (in part, then in full), written through lib/order-data.ts.", "paypal")] },
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window", "order", 180, MARK, KIND("paypal")),
   "nl:ppsell:handover:@lib/paypal-sales.ts": short("Paid orders still owed their hand-over, from being written down until handed over (lib/paypal-delivery.ts)", "order", 400, MARK, KIND("paypal")),

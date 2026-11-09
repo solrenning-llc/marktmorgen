@@ -432,8 +432,8 @@ export function affiliatePageRead(size: AffiliatePageSize): number {
   // And the book's two questions about its PayPal payments (lib/affiliates.ts, readBook: an HMGET of the refunds kept
   // for good and a ZMSCORE of the set, in slices of BOOK_KEPT_SLICE), each field a ceiling of the payments: their
   // names sent and their answers, BOOK_KEPT_REFUND_BYTES a field, and the commands of its slices (pre-review C): an
-  // HMGET a slice, and a ZMSCORE a slice of two names an order, in full and in part (audit R13, MEDIUM 2).
-  const asks = Math.ceil(size.fields / BOOK_KEPT_SLICE) + Math.ceil((2 * size.fields) / BOOK_KEPT_SLICE);
+  // HMGET and a ZMSCORE a slice, each of two names a field, in full and in part (audit R13, MEDIUM 2).
+  const asks = 2 * Math.ceil((2 * size.fields) / BOOK_KEPT_SLICE);
   const bytes = AFFILIATE_PAGE_BYTES + size.fields * (AFFILIATE_FIELD_BYTES + BOOK_KEPT_REFUND_BYTES) + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
   // Every field could be an affiliate with a part of their own; every part its lines.
   const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES + size.fields * BOOK_PART_BYTES);

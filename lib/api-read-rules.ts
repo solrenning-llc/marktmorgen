@@ -180,11 +180,13 @@ export const BOOK_PAYPAL_REFUNDS = 500;
  * answer (null, or a time of up to 12 digits), and the order it sends to the set (up to 36 characters) and its score
  * (up to 24), each a bulk string with at most 8 bytes of framing ("$NN\r\n" and "\r\n"): 175. And the same order asked
  * of the set as refunded in part (lib/paypal-sales.ts, partlyRefundedMember: "part:" and the order, 41) and its score:
- * 81 more, 256 in all. Counted for every entry, a ceiling of the payments.
+ * 81 more; and the payment's partial refund kept for good asked of backKey (partlyRefundedField: "part:paypal:" and the
+ * capture, 84 with its framing) and its answer (20): 104 more, 360 in all, rounded up. Counted for every entry, a
+ * ceiling of the payments.
  */
-export const BOOK_KEPT_REFUND_BYTES = 256;
-/** Commands the book's questions about `entries` PayPal payments take at the most: one HMGET a slice, and a ZMSCORE a slice of two names an order (in full and in part). */
-export const bookKeptCommands = (entries: number) => Math.ceil(entries / BOOK_KEPT_SLICE) + Math.ceil((2 * entries) / BOOK_KEPT_SLICE);
+export const BOOK_KEPT_REFUND_BYTES = 384;
+/** Commands the book's questions about `entries` PayPal payments take at the most: an HMGET and a ZMSCORE a slice, each of two names an entry (in full and in part). */
+export const bookKeptCommands = (entries: number) => 2 * Math.ceil((2 * entries) / BOOK_KEPT_SLICE);
 /** A PayPal sale's record, read for its refund: the order, the payment, the buyer, what the visit carried. */
 export const PAYPAL_PAID_BYTES = 4_096;
 /** Open bookings whose moves readBook reads at the most, a hundred at a command (lib/call-moves-read.ts). */

@@ -37,16 +37,8 @@
  * Synthetic Stripe only: no real account, no real money.
  */
 import { disputeLost, lostDisputesSince, refundedInFull, rowGivesBack } from "@/lib/refunds";
-import * as statuses from "@/lib/dispute-statuses";
+import { DISPUTE_APPEAL_STAGES, DISPUTE_STATUSES, disputeMoney, disputeMoneyFields, disputeNetWithdrawnCents } from "@/lib/dispute-statuses";
 import { done, is, part } from "./check";
-
-// Read through the namespace, so that before lib/dispute-statuses.ts has them the run counts each check as failing
-// instead of failing to build.
-const { disputeMoney, disputeMoneyFields, disputeNetWithdrawnCents } = statuses as unknown as {
-  disputeMoney: (dispute: unknown) => string;
-  disputeMoneyFields: (dispute: Record<string, unknown>) => Record<string, unknown>;
-  disputeNetWithdrawnCents: (dispute: unknown) => number | null;
-};
 
 process.env.STRIPE_SECRET_KEY = "sk_test_c5_prevented_siblings";
 
@@ -133,6 +125,7 @@ function table() {
   for (const s of RETURNED) is(`${s.label}: returned`, settledSync(() => disputeMoney(fields(s))), "returned");
   for (const s of NOT_RETURNED) is(`${s.label}: not returned`, settledSync(() => disputeMoney(fields(s))), "not_returned");
   for (const s of UNKNOWN) is(`${s.label}: unknown`, settledSync(() => disputeMoney(fields(s))), "unknown");
+  is("the appeal stages are statuses Stripe gives", [...DISPUTE_APPEAL_STAGES].every((status) => DISPUTE_STATUSES.has(status)), true);
   is("disputeNetWithdrawnCents: one withdrawal", settledSync(() => disputeNetWithdrawnCents({ balance_transactions: [txn(-5000)] })), 5000);
   is("disputeNetWithdrawnCents: withdrawn and reinstated", settledSync(() => disputeNetWithdrawnCents({ balance_transactions: [txn(-5000), txn(5000)] })), 0);
   is("disputeNetWithdrawnCents: nothing moved", settledSync(() => disputeNetWithdrawnCents({ balance_transactions: [] })), 0);

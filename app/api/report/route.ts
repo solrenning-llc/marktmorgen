@@ -1,13 +1,18 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
-import { readReport } from "@/lib/takedown-rules";
+import { handleIn, readReport } from "@/lib/takedown-rules";
 import { fileReport } from "@/lib/takedown";
+import { alertOwner, holdReported } from "@/lib/child-safety";
+import { storeForHandle } from "@/lib/store";
 
 /**
  * A notice about content on a store (app/report, lib/takedown.ts): the
  * form's fields as JSON. What is missing is said by name; a notice that is
  * whole is kept and sent to the support inbox. The sender is emailed nothing.
+ * A child-safety report also takes the product it points at off the store at
+ * once, and that and a request to remove an intimate image each send the
+ * owner an urgent email with no content in it (lib/child-safety.ts).
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -24,6 +29,12 @@ export async function POST(request: NextRequest) {
   if (!read.ok) return Response.json({ ok: false, error: "problem", problem: read.problem }, { status: 400 });
   try {
     const result = await fileReport(read.report, clientAddress(request), originFrom(request));
+    if (result !== "limited" && (read.report.kind === "child_safety" || read.report.kind === "intimate_image")) {
+      const handle = handleIn(read.report.url);
+      const store = handle ? await storeForHandle(handle).catch(() => null) : null;
+      const outcome = store ? await holdReported(read.report, store) : read.report.kind === "child_safety" ? "no_product" : "not_held";
+      await alertOwner(read.report, outcome);
+    }
     if (result === "sent") return Response.json({ ok: true });
     return Response.json({ ok: false, error: result }, { status: result === "limited" ? 429 : 503 });
   } catch (error) {

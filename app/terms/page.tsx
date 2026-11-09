@@ -397,6 +397,19 @@ export default function TermsPage() {
           write to. The studio refuses what it can tell is not allowed, but it
           is not legal advice, and what you send is yours to answer for.
         </p>
+        <p id="child-safety" className="scroll-mt-24">
+          <strong className="text-black">Children and intimate images.</strong>{" "}
+          You may never upload, sell, share or link to any material that
+          sexually exploits a child, or any intimate image of a person shared
+          without their consent. When we learn of material that appears to be
+          child sexual abuse material, we take it down at once, keep it as the
+          law requires, and report it, with the account behind it, to the
+          National Center for Missing &amp; Exploited Children (NCMEC), as
+          United States law requires (18 U.S.C. § 2258A). The account is closed.
+          We remove an intimate image shared without consent within 48 hours of
+          a complete request at <Link href="/report" className="text-black underline underline-offset-2 hover:no-underline">/report</Link>,
+          along with any copies of it we find.
+        </p>
         <p>
           We may investigate suspected violations and take action, including
           pausing a send, switching off email for a store, or suspending or

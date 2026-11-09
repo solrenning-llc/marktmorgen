@@ -72,6 +72,16 @@ export default async function TransparencyPage() {
                     <td>{n(y.notices.other)}</td>
                     <td>{n(y.acted.other)}</td>
                   </tr>
+                  <tr>
+                    <th scope="row">Child sexual exploitation</th>
+                    <td>{n(y.notices.child_safety)}</td>
+                    <td>{n(y.acted.child_safety)}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Intimate images shared without consent</th>
+                    <td>{n(y.notices.intimate_image)}</td>
+                    <td>{n(y.acted.intimate_image)}</td>
+                  </tr>
                 </tbody>
               </table>
               <p>

@@ -62,8 +62,8 @@ async function main(): Promise<void> {
   await countStep({ id: "a".repeat(16), kind: "copyright" }, "product", NOV);
   const counts = await transparencyCounts(NOV);
   is("the start day", counts.since, "2026-11-03");
-  is("the counts", [counts.years[0].notices, counts.years[0].acted, counts.years[0].steps], [{ copyright: 1, other: 0 }, { copyright: 1, other: 0 }, { link: 0, product: 1, kit: 0, store: 0 }]);
-  is("a year with nothing in it yet is zeros (its hash is not there)", (await transparencyCounts(Date.UTC(2027, 1, 1))).years[0].notices, { copyright: 0, other: 0 });
+  is("the counts", [counts.years[0].notices, counts.years[0].acted, counts.years[0].steps], [{ copyright: 1, other: 0, child_safety: 0, intimate_image: 0 }, { copyright: 1, other: 0, child_safety: 0, intimate_image: 0 }, { link: 0, product: 1, kit: 0, store: 0 }]);
+  is("a year with nothing in it yet is zeros (its hash is not there)", (await transparencyCounts(Date.UTC(2027, 1, 1))).years[0].notices, { copyright: 0, other: 0, child_safety: 0, intimate_image: 0 });
 
   part("An unknown start-day reply is never 'nothing counted'");
   for (const [name, reply] of [["a number", 5], ["an object", {}], ["not a day", "soon"], ["no reply at all", undefined]] as const) {

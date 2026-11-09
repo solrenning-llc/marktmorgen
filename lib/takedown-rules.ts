@@ -4,10 +4,17 @@
  * what a notice of other illegal content has to say, as the EU's Digital
  * Services Act (Art. 16) lists it — read from the form at /report, which is
  * open to anybody, so every field is held to a length and checked here.
+ *
+ * Two more kinds since 9 November 2026 (lib/child-safety.ts): a report of
+ * child sexual exploitation (18 U.S.C. § 2258A), which asks for no name,
+ * signature or sworn statement, only where it is and an address to reply to,
+ * so nobody is put off reporting; and a request to remove an intimate image
+ * shared without consent (TAKE IT DOWN Act), which is signed by the person
+ * with the statement that it is shared without their consent.
  * Browser-safe; lib/takedown.ts keeps them and acts on them.
  */
 
-export const REPORT_KINDS = ["copyright", "other"] as const;
+export const REPORT_KINDS = ["copyright", "other", "child_safety", "intimate_image"] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];
 
 export const MAX_REPORT_URL = 500;
@@ -69,8 +76,10 @@ export function readReport(raw: Record<string, unknown>): { ok: true; report: Re
   if (typeof raw.url === "string" && raw.url.trim().length > MAX_REPORT_URL) return { ok: false, problem: "url" };
   if (!/^https?:\/\/\S+$/i.test(report.url)) return { ok: false, problem: "url" };
   if (report.work.length < 20) return { ok: false, problem: "work" };
-  if (report.name.length < 2) return { ok: false, problem: "name" };
   if (!EMAIL.test(report.email)) return { ok: false, problem: "email" };
+  // A child-safety report is never held back for a name, a signature or a sworn statement.
+  if (kind === "child_safety") return { ok: true, report: { ...report, accurate: false } };
+  if (report.name.length < 2) return { ok: false, problem: "name" };
   // A copyright notice needs a way to reach its sender beyond email, and a signature (§ 512(c)(3)(A), (D)).
   if (kind === "copyright" && report.contact.length < 6) return { ok: false, problem: "contact" };
   if (report.signature.length < 2) return { ok: false, problem: "signature" };
@@ -82,7 +91,7 @@ export function readReport(raw: Record<string, unknown>): { ok: true; report: Re
 export const REPORT_PROBLEMS: Record<ReportProblem, string> = {
   kind: "Choose what the notice is about.",
   url: "Paste the full address of the page on Marktmorgen, starting with https://.",
-  work: "Describe the work, or what is illegal about the content, in at least a sentence.",
+  work: "Describe the work, or what is wrong with the content, in at least a sentence. Never describe or attach the images themselves.",
   name: "Give your full name.",
   email: "Give an email address we can reply to.",
   contact: "A copyright notice needs a postal address or a telephone number as well.",

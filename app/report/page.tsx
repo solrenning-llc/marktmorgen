@@ -27,6 +27,15 @@ export default async function ReportPage({ searchParams }: Params) {
         may be passed on with a counter-notice, as the law requires.
       </p>
       <p>
+        To report a child being sexually exploited, or an intimate image of you shared without your consent, choose it below:
+        we act on those at once, and you never need to send or describe the images. You can also report child sexual abuse
+        material to the National Center for Missing &amp; Exploited Children at{" "}
+        <a href="https://report.cybertip.org" className="text-black underline underline-offset-2 hover:no-underline">
+          report.cybertip.org
+        </a>
+        .
+      </p>
+      <p>
         How many notices we received and acted on, year by year:{" "}
         <Link href="/transparency" className="text-black underline underline-offset-2 hover:no-underline">
           Notices about content

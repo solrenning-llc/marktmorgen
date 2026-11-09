@@ -24,6 +24,9 @@ export function ReportForm({ url: given }: { url: string }) {
   const [error, setError] = useState("");
   const set = (name: keyof typeof fields) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setFields({ ...fields, [name]: event.target.value });
   const copyright = kind === "copyright";
+  // A child-safety report asks only where it is and how to reply: no name, signature or sworn statement (lib/takedown-rules.ts).
+  const child = kind === "child_safety";
+  const intimate = kind === "intimate_image";
 
   async function send(event: React.FormEvent) {
     event.preventDefault();
@@ -79,7 +82,12 @@ export function ReportForm({ url: given }: { url: string }) {
       <fieldset>
         <legend className="field-label">What is the notice about?</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {([["copyright", "Copyright infringement"], ["other", "Other illegal content"]] as const).map(([value, label]) => (
+          {([
+            ["copyright", "Copyright infringement"],
+            ["other", "Other illegal content"],
+            ["child_safety", "A child being sexually exploited"],
+            ["intimate_image", "An intimate image of me shared without my consent"],
+          ] as const).map(([value, label]) => (
             <label key={value} className="flex items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3 text-ink">
               <input type="radio" name="kind" value={value} checked={kind === value} onChange={() => setKind(value)} className="size-5 accent-violet-brand" />
               <span className="font-semibold">{label}</span>
@@ -87,13 +95,27 @@ export function ReportForm({ url: given }: { url: string }) {
           ))}
         </div>
       </fieldset>
+      {child || intimate ? (
+        <div role="note" className="rounded-2xl border-2 border-ink bg-paper px-4 py-3 text-sm text-ink">
+          <p className="font-semibold">Do not upload, attach or describe the images. Tell us only where they are.</p>
+          {child ? (
+            <p className="mt-2">
+              We take the product off the store at once, keep what we need to report it, and report child sexual abuse material to the National Center
+              for Missing &amp; Exploited Children (NCMEC). You can also report it to NCMEC yourself at{" "}
+              <a href="https://report.cybertip.org" className="underline underline-offset-2">report.cybertip.org</a>.
+            </p>
+          ) : (
+            <p className="mt-2">We remove an intimate image shared without consent within 48 hours of a complete request, and any copies of it we find.</p>
+          )}
+        </div>
+      ) : null}
       <div>
         <label htmlFor="report-url" className="field-label">The page on Marktmorgen</label>
         <UrlField id="report-url" value={fields.url} onChange={(url) => setFields({ ...fields, url })} check={REPORT_URL_CHECK} describedBy="report-url-help" placeholder="https://marktmorgen.com/@store/p/…" className={field} />
         <p id="report-url-help" className="mt-1 text-sm text-ink-soft">The store page or the product page, and in what you write below, which part of it.</p>
       </div>
       <div>
-        <label htmlFor="report-work" className="field-label">{copyright ? "The work that was copied, and what on the page copies it" : "What the content is, and why it is illegal"}</label>
+        <label htmlFor="report-work" className="field-label">{copyright ? "The work that was copied, and what on the page copies it" : child ? "Where on the page it is, in a few words (never describe the images)" : intimate ? "Which image it is, and that it is of you and shared without your consent" : "What the content is, and why it is illegal"}</label>
         <textarea id="report-work" required rows={5} maxLength={MAX_REPORT_TEXT} value={fields.work} onChange={set("work")} className={field} />
       </div>
       {copyright ? (
@@ -104,14 +126,16 @@ export function ReportForm({ url: given }: { url: string }) {
       ) : null}
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
-          <label htmlFor="report-name" className="field-label">Your full name</label>
-          <input id="report-name" required maxLength={MAX_REPORT_NAME} autoComplete="name" value={fields.name} onChange={set("name")} className={field} />
+          <label htmlFor="report-name" className="field-label">{child ? "Your name (optional)" : "Your full name"}</label>
+          <input id="report-name" required={!child} maxLength={MAX_REPORT_NAME} autoComplete="name" value={fields.name} onChange={set("name")} className={field} />
         </div>
         <div>
           <label htmlFor="report-email" className="field-label">Your email</label>
           <input id="report-email" type="email" required maxLength={MAX_REPORT_CONTACT} autoComplete="email" value={fields.email} onChange={set("email")} className={field} />
         </div>
       </div>
+      {child ? null : (
+      <>
       <div>
         <label htmlFor="report-contact" className="field-label">{copyright ? "Your postal address or telephone number" : "Your postal address or telephone number (optional)"}</label>
         <input id="report-contact" maxLength={MAX_REPORT_CONTACT} value={fields.contact} onChange={set("contact")} className={field} />
@@ -123,7 +147,9 @@ export function ReportForm({ url: given }: { url: string }) {
           <span>
             {copyright
               ? "I believe in good faith that the use described above is not authorized by the copyright owner, its agent or the law."
-              : "I believe in good faith that the content described above is illegal, for the reasons I gave."}
+              : intimate
+                ? "I believe in good faith that this intimate image of me was published without my consent."
+                : "I believe in good faith that the content described above is illegal, for the reasons I gave."}
           </span>
         </label>
         <label className="flex items-start gap-3 text-sm text-ink">
@@ -131,7 +157,9 @@ export function ReportForm({ url: given }: { url: string }) {
           <span>
             {copyright
               ? "The information in this notice is accurate, and, under penalty of perjury, I am the owner of the copyright or authorized to act on the owner's behalf."
-              : "The information in this notice is accurate and complete to the best of my knowledge."}
+              : intimate
+                ? "The information in this request is accurate, and I am the person shown or authorized to act for them."
+                : "The information in this notice is accurate and complete to the best of my knowledge."}
           </span>
         </label>
       </fieldset>
@@ -139,6 +167,8 @@ export function ReportForm({ url: given }: { url: string }) {
         <label htmlFor="report-signature" className="field-label">Your signature: type your full name</label>
         <input id="report-signature" required maxLength={MAX_REPORT_NAME} value={fields.signature} onChange={set("signature")} className={field} />
       </div>
+      </>
+      )}
       {error ? (
         <p role="alert" className="rounded-2xl bg-danger-soft px-4 py-3 text-sm font-semibold text-ink">{error}</p>
       ) : null}

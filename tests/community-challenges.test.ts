@@ -35,8 +35,10 @@ import {
   checkInBytes,
   keptChallenges,
   memberProgress,
+  readChallenge,
   readChallengeInput,
 } from "@/lib/community-challenges";
+import { readFileSync } from "node:fs";
 import { CHALLENGE_KEEP_DAYS, MAX_CHALLENGE_DAYS, MAX_KEPT_CHALLENGES, MAX_OPEN_CHALLENGES } from "@/lib/community-text";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -202,6 +204,76 @@ async function main(): Promise<void> {
   is("a join", await failed(() => joinChallenge(cid, fresh2.challenge, bob, again, inside)), "unknown");
   is("what a member sees", await failed(() => memberProgress(cid, [fresh2.challenge], bob, inside)), "unknown");
   redis.pipeline = real;
+
+  part("A record that cannot be read never hides a person's part (Claude 6's review of #3452, M1)");
+  const ch2 = fresh2.challenge;
+  const recordKey = `nl:cm:${cid}:ch:${ch2.id}`;
+  const goodRecord = redis.run(["GET", recordKey]) as string;
+  const slot2 = `cm:ch:${ch2.id}`;
+  const room2 = () => Number(redis.run(["HGET", dataKey(again)!, slot2])) || 0;
+  is("Bob checks in on its second day", await checkIn(cid, ch2, bob, again, inside), "checked");
+  redis.run(["SET", recordKey, "{damaged"]);
+  const copied = await challengesOf(cid, bob).then((xs) => xs.map((x) => [x.challenge, x.checkIns.length]), (e: unknown) => String(e));
+  is("his copy still holds the challenge and his day", copied, [[ch2.id, 1]]);
+  const roomBefore = room2();
+  await forgetCommunityPerson(cid, bob, "bob@example.com", [], again);
+  is("erasure takes his place out", redis.run(["HEXISTS", `${recordKey}:in`, bob]), 0);
+  is("and his check-in", redis.run(["HEXISTS", `${recordKey}:k`, `${bob}|1`]), 0);
+  is("and gives his room back", roomBefore - room2(), joinBytes(bob) + checkInBytes(bob, 1));
+  is("the counts no longer hold him", redis.run(["HGET", `${recordKey}:n`, "all"]), "0");
+  redis.run(["SET", recordKey, goodRecord]);
+  is("Carl checks in", await checkIn(cid, ch2, "carlkey0000000000000000000000003", again, inside), "checked");
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await real(commands);
+    return commands.map((cmd, i) => (cmd[0] === "GET" && String(cmd[1]) === recordKey ? 42 : replies[i]));
+  }) as typeof redis.pipeline;
+  is("a record read of an unknown shape: unknown, not gone", await failed(() => readChallenge(cid, ch2.id)), "unknown");
+  is("his copy: unknown, never left out", await failed(() => challengesOf(cid, "carlkey0000000000000000000000003")), "unknown");
+  is("erasure does not need the record", await failed(() => forgetCommunityPerson(cid, "carlkey0000000000000000000000003", "carl@example.com", [], again)), "answered");
+  redis.pipeline = real;
+  is("his check-in went", redis.run(["HEXISTS", `${recordKey}:k`, "carlkey0000000000000000000000003|1"]), 0);
+
+  part("A delete that lands mid-write leaves nothing behind (Claude 6's review of #3452, L2)");
+  const dan = "dankey00000000000000000000000004";
+  let armed = "";
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (armed && commands.some((cmd) => cmd[0] === "HSETNX" && String(cmd[1]) === armed)) {
+      armed = "";
+      await deleteChallenge(again, ch2.id);
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  is("Dan joins", await joinChallenge(cid, ch2, dan, again, inside), "joined");
+  armed = `${recordKey}:k`;
+  is("a check-in the delete overtook: gone", await checkIn(cid, ch2, dan, again, inside), "gone");
+  redis.pipeline = real;
+  is("no check-in left behind", redis.run(["EXISTS", `${recordKey}:k`]), 0);
+  is("no count left behind", redis.run(["EXISTS", `${recordKey}:n`]), 0);
+  is("its slot stays empty", room2(), 0);
+  const ch3 = await createChallenge(again, { ...ok, start: first, end: first + 7 * DAY }, t);
+  if (!ch3.ok) throw new Error("not made for the join race");
+  const key3 = `nl:cm:${cid}:ch:${ch3.challenge.id}`;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (armed && commands.some((cmd) => cmd[0] === "HSETNX" && String(cmd[1]) === armed)) {
+      armed = "";
+      await deleteChallenge(again, ch3.challenge.id);
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  armed = `${key3}:in`;
+  is("a join the delete overtook: gone", await joinChallenge(cid, ch3.challenge, dan, again, inside), "gone");
+  redis.pipeline = real;
+  is("no place left behind", redis.run(["EXISTS", `${key3}:in`]), 0);
+  is("its slot stays empty too", Number(redis.run(["HGET", dataKey(again)!, `cm:ch:${ch3.challenge.id}`])) || 0, 0);
+
+  part("The studio and the members' page (Claude 6's review of #3452, L3 to L5)");
+  const studioPage = readFileSync("app/studio/community/page.tsx", "utf8");
+  is("an unreadable list is never read as no challenges", /keptChallenges\(id, now\)\.catch\(\(\) => \[\]\)/.test(studioPage), false);
+  const studioPart = readFileSync("components/community-challenges-studio.tsx", "utf8");
+  is("the studio says so", studioPart.includes("The challenges could not be read just now. Reload the page."), true);
+  is("focus goes back to the Delete button when the question closes", /deleteRefs|focusDelete/.test(studioPart), true);
+  const memberPart = readFileSync("components/community-challenges.tsx", "utf8");
+  is("the days' summary is a 44 px target", /<summary className="[^"]*min-h-11[^"]*"/.test(memberPart), true);
 
   done();
 }

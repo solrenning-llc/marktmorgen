@@ -1,0 +1,11 @@
+{
+  "file": "tests/list-limits-unreadable-member.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "6c3077cdaefaac049ca0e12e836be68691bfd875",
+  "stdout": "✔ control: with every member read, the full list refuses group 21 and the same name keeps its id (7.893987ms)\n✔ a kept member that does not read is unknown: listSegments throws rather than answering fewer groups (0.770863ms)\n✔ a kept member that does not read never lets group 21 be written (0.366854ms)\n✔ the member of the same name that does not read never lets a second group of that name be written (0.529139ms)\n✔ confirmed absence: a list with no saved group answers none (0.260714ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 17.765903\nS_VOLUME {\"runs\":85,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

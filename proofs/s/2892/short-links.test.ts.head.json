@@ -1,0 +1,11 @@
+{
+  "file": "tests/short-links.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "6c3077cdaefaac049ca0e12e836be68691bfd875",
+  "stdout": "\nNames, places and where a link goes\n  ok    a post's name as a utm_campaign is counted\n  ok    a place from the list, or somewhere else\n  ok    a product only when the store has it\n  ok    it opens the page tagged with where it was posted and the post's name\n\nMaking links\n  ok    six letters nobody misreads\n  ok    one link to a name\n  ok    a product of another store is refused\n  ok    the store's links, the newest first\n\nOpening a link\n  ok    sent to the store, tagged, kept by the CDN for five minutes\n  ok    typed in capitals it still opens\n  ok    a code that never was opens the page that says so\n\nChanging where it goes, and ending it\n  ok    the same link now opens the product\n  ok    another store cannot change it\n  ok    nor end it\n  ok    ended, it opens the page that says so and leaves the list\n\nA hundred links at most\n  ok    the hundred and first is refused\n\n16 checks, all passing.\nS_VOLUME {\"runs\":438,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

@@ -1,0 +1,21 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/short-links.ts",
+    "../../../lib/segments.ts",
+    "../../../app/api/store/short-links/route.ts",
+    "../../../app/api/store/mail/route.ts",
+    "../../../components/short-links.tsx",
+    "../../../components/email-studio.tsx",
+    "../../../tests/list-limits-exact.test.ts",
+    "../../../tests/list-limits-unreadable-member.test.ts",
+    "../../../proofs/s/2892/cross-store.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

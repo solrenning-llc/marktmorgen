@@ -1,0 +1,11 @@
+{
+  "file": "proofs/s/2892/cross-store.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "6c3077cdaefaac049ca0e12e836be68691bfd875",
+  "stdout": "✔ another store's readable link cannot decide the read boundary (4.965913ms)\n✔ another store's readable link cannot decide the add boundary (1.388866ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 12.684519\nS_VOLUME {\"runs\":16,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

@@ -1,0 +1,18 @@
+{
+  "command": [
+    "git",
+    "merge-tree",
+    "--write-tree",
+    "a434fc468f258e6d406204800901e4a5628858dc",
+    "44f4e252cf787afca1152a703ab82b59a104162e"
+  ],
+  "status": 1,
+  "stdout": "342aa29b839d717b8bb391178b9aa53e06e1da95\n100644 b2a795dcd09a22f5b61c3e66556b0a89771d2ace 1\tlib/short-links.ts\n100644 7059e7b2b93834c956e93affe8dbdc01cdbb6c6d 2\tlib/short-links.ts\n100644 d9cbf7811b8ece14510ee5c8f6b2e340505d636c 3\tlib/short-links.ts\n\nAuto-merging app/api/store/mail/route.ts\nAuto-merging components/email-studio.tsx\nAuto-merging lib/short-links.ts\nCONFLICT (content): Merge conflict in lib/short-links.ts\n",
+  "stderr": "",
+  "conflict": "<<<<<<< a434fc468f258e6d406204800901e4a5628858dc\nimport { UnknownReplyError, countOf, repliesFor, stringList } from \"@/lib/redis-reply\";\n=======\nimport { UnknownReplyError, countOf, repliesFor } from \"@/lib/redis-reply\";\n>>>>>>> 44f4e252cf787afca1152a703ab82b59a104162e\n",
+  "replacement": "import { UnknownReplyError, countOf, repliesFor, stringList } from \"@/lib/redis-reply\";\n",
+  "onlyDifferentPaths": [
+    "lib/short-links.ts"
+  ],
+  "resolvedExact": true
+}

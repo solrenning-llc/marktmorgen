@@ -1,0 +1,11 @@
+{
+  "file": "tests/short-link-cart.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "6c3077cdaefaac049ca0e12e836be68691bfd875",
+  "stdout": "\nA cart as where a link goes\n  ok    two of the store's products, and a code in capitals\n  ok    no code is fine\n  ok    refused: one product, the same twice, too many, another store's, or a code of the wrong shape\n  ok    it opens the store with the cart and the code, tagged with the post\n\nThrough the real redirect\n  ok    sent to the store with the cart and the code\n\nThe studio\n  ok    the list says where it goes and keeps it as its own choice\n  ok    the builder offers a short link with a labeled name and place\n  ok    and says the result in a status, or why not in an alert\n\n8 checks, all passing.\nS_VOLUME {\"runs\":13,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

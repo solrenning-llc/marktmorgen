@@ -79,6 +79,16 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "The move did not finish",
     body: "Nothing was changed. Log in and try again.",
   },
+  // A store moves its sign-in address at most MOVES_PER_STORE_PER_MONTH times a calendar month (lib/auth.ts takeMoveRoom; #2271).
+  "move-month": {
+    title: "This store has changed its address too many times this month",
+    body: "Your account was not moved, and it stays at its old address. You can move it again from the first day of next month.",
+  },
+  // The company handles at most MOVES_PER_MONTH address changes a calendar month, all stores together (#2271).
+  "move-paused": {
+    title: "Address changes are paused until next month",
+    body: "We handle a set number of address changes each month, and this month's are used up. Your account was not moved, and it stays at its old address. Try again from the first day of next month.",
+  },
   "invite-expired": {
     title: "That invitation no longer works",
     body: "An invitation works once and lasts 7 days, and the store's owner can take it back. Ask them for a new one.",

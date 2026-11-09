@@ -31,6 +31,8 @@ const ORIGIN = "https://marktmorgen.com";
 const form = (fields: Record<string, string>) =>
   new NextRequest(`${ORIGIN}/api/auth/move`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields) });
 const noteSent = () => sent.some((command) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:move-copy-note:v1"));
+/** What one tap of a store with no other stores sends, measured here: 76 commands, 12 of them EVALs, about 13 KB. */
+const MOVE_TAP_COMMANDS = 80;
 const where = (location: string) => location.replace(/^.*[?&](status|address)=/, "");
 
 /**
@@ -55,13 +57,18 @@ async function main(): Promise<void> {
   const B = "room-b@example.com";
   await claimHandle(A, "room-store", "Room", "");
   const landed: string[] = [];
+  const commands: number[] = [];
   let at = A;
   for (let i = 0; i < MOVES_PER_STORE_PER_MONTH; i += 1) {
     const next = at === A ? B : A;
     landed.push(await move(at, next));
+    commands.push(sent.length);
     at = next;
   }
   is("every move within the month's room lands", landed.every((place) => place === "moved"), true);
+  // The figure the registry prices a move at (tests/plan-cost-registry.ts, MOVES_PER_MONTH): a store with no other
+  // stores, its two counts included, sends at most MOVE_TAP_COMMANDS commands in its pipelines a tap.
+  is(`a tap sends at most ${MOVE_TAP_COMMANDS} pipelined commands`, Math.max(...commands) <= MOVE_TAP_COMMANDS, true);
   const other = at === A ? B : A;
   is("the next one is refused as the month's count", await move(at, other), "move-month");
   is("nothing moved: the store is where it was", [Boolean(await storeForEmail(at)), Boolean(await storeForEmail(other))], [true, false]);

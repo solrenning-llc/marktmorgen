@@ -274,6 +274,44 @@ export const MOVES_PER_STORE_PER_MONTH = 10;
  * its EVAL (NOTE_MOVE_COPY) and the commands around it, taken before any of it (Claude 1's decision on #2271).
  */
 export const MOVES_PER_MONTH = 2_000;
+/** Kept past the end of any calendar month, so a count lapses only once its month is over. */
+const MOVE_ROOM_SECONDS = 32 * 86_400;
+
+/** What the month's counts say about one more move: room, the store's month is over, the company's is, or not known. */
+export type MoveRoom = "within" | "store" | "company" | "unknown";
+
+/**
+ * Takes one move of the month, before anything moves (the move route, before markMoving): first the store's own
+ * count, then, only within it, the company's, so a store past its count never spends the company's. Each is one
+ * SET NX EX and one INCR, read in their exact shape; a reply in any other shape, or Redis not answering, is
+ * "unknown" and refuses the move (SG2 rule 24): a count is never guessed as room. A unit taken by a move that then
+ * fails stays taken, on the safe side. `store` is the store's own id, or null when the address holds none, which
+ * takes only the company's count: such a move finds nothing to carry and writes no copy.
+ */
+export async function takeMoveRoom(store: string | null, now = Date.now()): Promise<MoveRoom> {
+  if (!isRedisConfigured()) return "unknown";
+  const month = new Date(now).toISOString().slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month)) return "unknown";
+  if (store !== null) {
+    const own = await countMove(`nl:auth:move-room:${month}:${(await sha256Hex(`nimbus-move-room:${store}`)).slice(0, 32)}`, MOVES_PER_STORE_PER_MONTH);
+    if (own !== "within") return own === "over" ? "store" : "unknown";
+  }
+  const all = await countMove(`nl:auth:move-room:${month}`, MOVES_PER_MONTH);
+  return all === "within" ? "within" : all === "over" ? "company" : "unknown";
+}
+
+async function countMove(key: string, limit: number): Promise<"within" | "over" | "unknown"> {
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(await redisPipeline([["SET", key, "0", "EX", MOVE_ROOM_SECONDS, "NX"], ["INCR", key]]), 2);
+  } catch {
+    return "unknown";
+  }
+  if (!replies) return "unknown";
+  const [set, count] = replies;
+  if ((set !== null && set !== "OK") || typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
+  return count <= limit ? "within" : "over";
+}
 
 /**
  * Notes, with a running move's record, the fingerprint of the store record it

@@ -2245,6 +2245,12 @@ export async function moveAccount(
       // record only where there is none: a store made there in the meantime
       // is never written over. A write refused here leaves the old records
       // as they were, still the account, at its old address.
+      // What will be written at the new address is noted with the move's record first (lib/auth.ts noteMoveCopy),
+      // so a repair can tell the copy left behind from the store edited since, and the call to note it is never in
+      // the window between the last lock renewal and the writes (Claude 5 on #2271, LOW 1). Noted before the record
+      // exists there, it is harmless: the repair compares only when both records are there. Best effort: without
+      // it the repair compares the two records whole.
+      if (onCopy) await onCopy(await copyPrint(next)).catch((error) => console.error("noting a move's copy failed", error));
       for (const lock of [held, ...moved.map((one) => one.lock)]) {
         if (!(await holdLock(lock))) throw new StoreBusyError();
       }
@@ -2264,10 +2270,11 @@ export async function moveAccount(
         }
         written.push(one);
       }
-      // The record is now on both addresses until the next step: what was written is noted with the move's record
-      // (lib/auth.ts noteMoveCopy), so a repair can tell the copy left behind from the store edited since. Best
-      // effort: without it the repair compares the two records whole.
-      if (onCopy) await onCopy(await copyPrint(next)).catch((error) => console.error("noting a move's copy failed", error));
+      // The last step deletes the old record unfenced: the old address's lock is made to last again right before it,
+      // after the other stores' writes, which hold their own locks, not this one. A lock that ran out meanwhile, and
+      // a write that may have landed on the old address with it, stops the move here as busy, the old record kept,
+      // so the route keeps the move marked for a repair (Claude 5 on #2271, LOW 1 and its rule 30 sibling).
+      if (!(await holdLock(held))) throw new StoreBusyError();
       const handles = [store.handle, ...store.previousHandles];
       await redisPipeline([
         ...handles.map((handle) => ["SET", handleKey(handle), to]),

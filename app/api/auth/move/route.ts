@@ -14,6 +14,7 @@ import {
   openSession,
   sessionCookie,
   spendMoveLink,
+  takeMoveRoom,
 } from "@/lib/auth";
 import { moveAccount, storeForEmail } from "@/lib/store";
 import { moveMemberships } from "@/lib/team";
@@ -67,6 +68,16 @@ export async function POST(request: NextRequest) {
   const { from, to } = moved;
   // A move left broken earlier is repaired first (lib/move-repair.ts); while it cannot be, nothing moves.
   if (!(await repairMove(from)) || !(await repairMove(to))) return away("/signin?status=move-error");
+  // One move of the month is taken before anything moves (lib/auth.ts takeMoveRoom): the store's own count, by its
+  // id, so moving from address to address finds no fresh one, then the company's. Past either, or a count or store
+  // that does not read, nothing moves and the move's own work, its EVAL included, is never done (#2271: Codex G2's
+  // MEDIUM, Claude 1's decision).
+  const moving = await storeForEmail(from).catch(() => undefined);
+  if (moving === undefined) return away("/signin?status=move-error");
+  const room = await takeMoveRoom(moving ? moving.sid : null);
+  if (room === "store") return away("/signin?status=move-month");
+  if (room === "company") return away("/signin?status=move-paused");
+  if (room !== "within") return away("/signin?status=move-error");
   // Both addresses are marked as moving for the whole move (lib/auth.ts markMoving): the ways in leave
   // `from` before the store does, and in that gap `from` counts as having a second step, so a session opened
   // only by the emailed link adds no passkey and no app to it (lib/second-step-gate.ts; review of 8b4ddf6ee).

@@ -9,6 +9,7 @@ import {
 import { storeCookie } from "@/lib/studio-route";
 import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { isAutomated } from "@/lib/bot-check";
 import { recordInvite } from "@/lib/creator-invites";
 import { INVITE_COOKIE, INVITE_CODE_PATTERN } from "@/lib/creator-invite-rules";
 
@@ -58,6 +59,10 @@ export async function POST(request: NextRequest) {
   if (!isRedisConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
+
+  // Made only for a request the host does not call a program's (TODOS-51 C, lib/bot-check.ts): before anything is
+  // written. A host that is slow, down or unclear refuses nobody; the five stores an account may run still bound it.
+  if (await isAutomated()) return Response.json({ ok: false, error: "unconfirmed" }, { status: 403 });
 
   try {
     const result =

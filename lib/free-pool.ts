@@ -75,9 +75,33 @@ export async function poolPlace(store: PoolStore, now = Date.now()): Promise<"in
   }
 }
 
-/** Whether this store may do something that costs us now: always when it pays, and with a place this month when it does not. */
+/**
+ * This store's place this month, only read, never taken (TODOS-51 C): "in" when it pays or holds one, "full" when it
+ * was turned away this hour, "none" when it holds none yet, "unknown" when that could not be read. What the public
+ * side answers, a buyer's actions, emails and orders ask this: a place is taken only by the creator's own work
+ * (poolPlace, through takeAllowance's CREATOR_KINDS), so nothing the public can send hands out the month's places.
+ */
+export async function heldPlace(store: PoolStore, now = Date.now()): Promise<"in" | "full" | "none" | "unknown"> {
+  if (standingOf(store, now / 1000) === "paid") return "in";
+  const id = idOf(store);
+  if (!id || !isRedisConfigured()) return "unknown";
+  try {
+    // Read exactly (CX-123 rule 24): one reply, "1", "0" or nil; anything else is not known, never a place.
+    const read = repliesFor(await redisPipeline([["GET", inKey(calendarWindow(now).id, id)]]), 1);
+    if (!read) return "unknown";
+    const [held] = read;
+    return held === "1" ? "in" : held === "0" ? "full" : held === null ? "none" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Whether this store may do something that costs us now: always when it pays, and when it does not, only while it
+ * already holds one of the month's places. Never takes one (heldPlace): the creator's own work does.
+ */
 export async function admitNonPaying(store: PoolStore, now = Date.now()): Promise<boolean> {
-  return (await poolPlace(store, now)) === "in";
+  return (await heldPlace(store, now)) === "in";
 }
 
 /** Places handed out this month, and how many there are, for the owner's own checks. */

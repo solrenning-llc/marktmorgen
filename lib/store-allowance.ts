@@ -14,11 +14,11 @@
 import { createHash } from "node:crypto";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { LONGEST_WINDOW_DAYS, WINDOW_ID, type WindowFields, allowanceWindow, keepSecondsFor, opensAgainWords, resetWords, windowAt } from "@/lib/allowance-window";
-import { poolPlace } from "@/lib/free-pool";
+import { heldPlace, poolPlace } from "@/lib/free-pool";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { standingOf } from "@/lib/plan-standing";
 import { planAboveSold } from "@/lib/larger-plan";
-import { poolFullWords } from "@/lib/free-pool-rules";
+import { POOL_UNTAKEN_WORDS, poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type AllowanceKind, KIND_WORDS, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
@@ -52,6 +52,9 @@ export function serviceAllowanceWords(store: AllowanceStore, code: string, now =
   return usedWords("integration", allowanceFor(store, "integration", now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended.integration === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
+/** The uses that are the creator's own signed-in work: the studio, their API key, an integration they connected. */
+export const CREATOR_KINDS: ReadonlySet<AllowanceKind> = new Set<AllowanceKind>(["studio", "api", "integration"]);
+
 /**
  * Takes `n` of a kind from the store's window, or refuses with the sentence to
  * show. `asked`: a confirmation to an address a visitor typed, which may take
@@ -77,7 +80,10 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
     return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   }
   // No place this month, or none could be counted: each is said as it is.
-  const place = await poolPlace(store, now);
+  // Only the creator's own work takes one of the month's places (TODOS-51 C); every other use only reads whether the
+  // store holds one, so nothing a buyer or a stranger sends hands a place out.
+  const place = CREATOR_KINDS.has(kind) ? await poolPlace(store, now) : await heldPlace(store, now);
+  if (place === "none") return refuse("pool", POOL_UNTAKEN_WORDS);
   if (place === "full") return refuse("pool", poolFullWords(PLANS_ON_SALE));
   if (place === "unknown") return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   try {

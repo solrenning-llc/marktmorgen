@@ -48,6 +48,12 @@ export function freePoolSize(paying: number): number {
 export const POOL_FULL_WORDS =
   "Stores without a paid plan are full for this month, so this can't run right now. It opens again on the 1st (UTC).";
 
+/**
+ * Said when a store that pays nothing holds no place yet this month: one is taken only by its creator's own work in
+ * the studio (TODOS-51 C), so until they are back the store rests and nothing it would do costs us.
+ */
+export const POOL_UNTAKEN_WORDS = "This store is resting until its creator opens their studio again.";
+
 /** The same, with the way out a paid plan gives, said only while a plan can be bought (PLANS_ON_SALE, passed in so this file stays browser-safe). */
 export function poolFullWords(plansOnSale: boolean): string {
   return plansOnSale ? `${POOL_FULL_WORDS} A paid plan opens it at once.` : POOL_FULL_WORDS;

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { initBotId } from "botid/client/core";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 type State =
@@ -20,7 +21,23 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "We could not confirm whether your store was created. Check the studio before trying again.",
+  unconfirmed:
+    "We could not confirm this browser, so no store was made. Reload the page and try again. If it keeps happening, write to support@marktmorgen.com.",
 };
+
+/**
+ * A store is made only for a request the host does not call a program's (app/api/store/claim, lib/bot-check.ts):
+ * this wraps fetch so the one request to /api/store/claim carries the host's challenge, loaded once the form is
+ * shown. If the challenge cannot load, the request goes out unwrapped and the server says what happened, as the
+ * login form does (components/signin-form.tsx).
+ */
+let plainFetch: typeof fetch | null = null;
+
+function startChallenge() {
+  if (plainFetch || process.env.NODE_ENV !== "production") return;
+  plainFetch = window.fetch.bind(window);
+  initBotId({ protect: [{ path: "/api/store/claim", method: "POST" }] });
+}
 
 /**
  * Taking an address and making a store under it: the account's first, or,
@@ -38,6 +55,7 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
   const [state, setState] = useState<State>({ kind: "idle" });
 
   const preview = handle.trim().replace(/^@+/, "").toLowerCase();
+  useEffect(startChallenge, []);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -45,10 +63,15 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
     setState({ kind: "saving" });
 
     try {
-      const response = await fetch("/api/store/claim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handle, name, bio, another }),
+      const ask = (how: typeof fetch) =>
+        how("/api/store/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ handle, name, bio, another }),
+        });
+      const response = await ask(fetch).catch((error: unknown) => {
+        if (!plainFetch) throw error;
+        return ask(plainFetch);
       });
       const raw: unknown = await response.json().catch(() => null);
       const data = raw && typeof raw === "object" && !Array.isArray(raw)

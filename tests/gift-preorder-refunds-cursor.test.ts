@@ -17,10 +17,17 @@
  *     moves the anchor and lets the pass go;
  *   - a run that resumes reads the newest page first, so a refund made
  *     meanwhile does not wait for the pass;
- *   - a page whose row could not be handled keeps the pass on that page, read
- *     again next run, never passed over;
+ *   - a row that cannot be handled, or that is not readable at all, never
+ *     holds the older pages: the pass goes on in the same run, the row is
+ *     never marked read, and the anchor waits at it (or, for a row not
+ *     readable, where it was), so the next pass reads it again; a page whose
+ *     last row is not readable goes on from its last readable one (reviews of
+ *     #3301, Claude 2 M1 and Claude 5);
+ *   - a pass kept from the store's earlier Stripe account starts over on the
+ *     account the store has now, never sends the old cursor (Claude 2 M2);
  *   - a kept pass in an unknown shape (not text, not the pass's JSON, another
- *     anchor's window) starts the pass over from the anchor, never skips;
+ *     anchor's window, figures outside its window: Claude 2 L1) starts the
+ *     pass over from the anchor, never skips;
  *   - a refund not final yet (pending, its charge not refunded in full) read
  *     on an early page of a pass holds the anchor at its time when the pass
  *     ends in a later run, so the next pass reads it again and takes it back
@@ -37,9 +44,13 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const NOW = Math.floor(Date.now() / 1000);
+const ACCOUNT = "acct_1TestPassRef001";
+const OTHER_ACCOUNT = "acct_1TestPassRef002";
 
 /** The store's refunds, newest first, as Stripe lists them. */
 let refunds: Record<string, unknown>[] = [];
+/** The refunds of another connected account, by account (the one above is ACCOUNT's). */
+const byAccount: Record<string, Record<string, unknown>[]> = {};
 const refundCalls: URLSearchParams[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -49,11 +60,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (path === "/refunds") {
     refundCalls.push(url.searchParams);
+    const rows = byAccount[new Headers(init?.headers).get("Stripe-Account") ?? ""] ?? refunds;
     const limit = Number(url.searchParams.get("limit") ?? "10");
     const after = url.searchParams.get("starting_after");
-    const from = after ? refunds.findIndex((row) => row.id === after) + 1 : 0;
-    const data = refunds.slice(from, from + limit);
-    return answer({ object: "list", data, has_more: from + limit < refunds.length });
+    const at = after ? rows.findIndex((row) => row.id === after) : -1;
+    // As Stripe answers a cursor it does not know on this account.
+    if (after && at < 0) return answer({ error: { type: "invalid_request_error", code: "resource_missing", message: `No such refund: '${after}'` } }, 404);
+    const from = at + 1;
+    const data = rows.slice(from, from + limit);
+    return answer({ object: "list", data, has_more: from + limit < rows.length });
   }
   if (path === "/events") return answer({ object: "list", data: [], has_more: false });
   if (path.startsWith("/payment_intents/")) return answer({ id: path.split("/")[2], object: "payment_intent", latest_charge: { object: "charge", refunded: false, amount: 2500, amount_refunded: 0 } });
@@ -77,8 +92,10 @@ type Job = {
   anchor: string;
   pass: string;
   run: (dropStart?: (email: string, product: string) => Promise<void>) => Promise<number>;
-  /** Makes one paid item (a gift given, or a pre-order handed over) and returns its payment and whether it is still held. */
-  make: (n: number) => Promise<{ pi: string; holds: () => Promise<boolean> }>;
+  /** Makes one paid item (a gift given, or a pre-order handed over) and returns its payment, who holds it and whether it is still held. */
+  make: (n: number) => Promise<{ pi: string; who: string; holds: () => Promise<boolean> }>;
+  /** Connects the store to another Stripe account (or back). */
+  connect: (account: string) => Promise<void>;
 };
 
 const afters = () => refundCalls.map((q) => q.get("starting_after"));
@@ -102,21 +119,25 @@ async function check(job: Job, base: number): Promise<void> {
   is(`${job.name}: read to its end, the anchor moves to the newest refund`, await read(job.anchor), String(base));
   is(`${job.name}: and the pass is let go`, await read(job.pass), null);
 
-  part(`${job.name}: a page whose row could not be handled keeps the pass on that page`);
+  part(`${job.name}: a row that cannot be handled never holds the pages behind it`);
   const stuck = await job.make(2);
-  refunds = list(`${job.name}b`, 450, base + 900, 350, stuck.pi);
-  await job.run();
-  refundCalls.length = 0;
-  const failing = async () => {
-    throw new Error("the ledger did not answer");
+  const behind = await job.make(4);
+  refunds = list(`${job.name}b`, 450, base + 900, 10, stuck.pi);
+  refunds[150] = { ...refunds[150], payment_intent: behind.pi };
+  const failing = async (email: string) => {
+    if (email === stuck.who) throw new Error("the ledger did not answer");
   };
-  is(`${job.name}: run 2, the course removal fails: nothing taken back`, await job.run(failing), 0);
-  is(`${job.name}: still held`, await stuck.holds(), true);
-  is(`${job.name}: the anchor stays`, await read(job.anchor), String(base));
   refundCalls.length = 0;
-  is(`${job.name}: run 3 reads that page again and takes it back`, await job.run(), 1);
-  is(`${job.name}: run 3 went on from the page that was not handled`, afters(), [null, id("b", 299), id("b", 399)]);
-  is(`${job.name}: no longer held after run 3`, await stuck.holds(), false);
+  is(`${job.name}: run 1, one row's course removal fails: the refund on the next page is still taken back`, await job.run(failing), 1);
+  is(`${job.name}: the one behind it is no longer held`, await behind.holds(), false);
+  is(`${job.name}: the row not handled is still held, never taken as done`, await stuck.holds(), true);
+  is(`${job.name}: run 1 went on past the page with the row not handled`, afters(), [null, id("b", 99), id("b", 199)]);
+  is(`${job.name}: run 2 ends the pass, the row still not handled`, await job.run(failing), 0);
+  is(`${job.name}: the anchor waits at the row not handled, never past it`, await read(job.anchor), String(base + 900 - 10));
+  is(`${job.name}: and the pass is let go`, await read(job.pass), null);
+  is(`${job.name}: once it can be handled, the next pass takes it back`, await job.run(), 1);
+  is(`${job.name}: no longer held`, await stuck.holds(), false);
+  await job.run();
   is(`${job.name}: the anchor moves once the pass ends`, await read(job.anchor), String(base + 900));
 
   part(`${job.name}: a refund made while a pass is under way does not wait for it`);
@@ -132,6 +153,10 @@ async function check(job: Job, base: number): Promise<void> {
     ["not JSON", "not a pass"],
     ["another anchor's window", JSON.stringify({ since: base - 5_000, after: id("d1", 299), newest: base + 3000 })],
     ["a cursor that is not an id", JSON.stringify({ since: base + 1800 - 300, after: "re_ bad", newest: base + 3000 })],
+    // The anchor's window, but figures a pass never keeps (Claude 2 L1): each would move the anchor wrongly.
+    ["a newest refund in the future", JSON.stringify({ since: base + 1800 - 300, after: id("d3", 299), newest: NOW + 100_000, account: ACCOUNT })],
+    ["a newest refund before its window", JSON.stringify({ since: base + 1800 - 300, after: id("d4", 299), newest: base + 1000, account: ACCOUNT })],
+    ["a refund waiting from before its window", JSON.stringify({ since: base + 1800 - 300, after: id("d5", 299), newest: base + 3000, waiting: base + 1000, account: ACCOUNT })],
   ] as const;
   for (const [k, [label, kept]] of kinds.entries()) {
     const tag = `d${k}`;
@@ -184,6 +209,53 @@ async function check(job: Job, base: number): Promise<void> {
   await job.run();
   is(`${job.name}: then the anchor moves to the newest refund`, await read(job.anchor), String(base + 4000));
 
+  part(`${job.name}: a row not readable never holds the pages behind it, and is never taken as done`);
+  const anchorBefore = await read(job.anchor);
+  const unread = await job.make(50);
+  const later = await job.make(51);
+  refunds = list(`${job.name}g`, 450, base + 5000, 10, unread.pi);
+  // Not readable: a status Stripe does not list (lib/refunds.ts refundRowKnown), on row 10 and on the last row of the first page.
+  refunds[10] = { ...refunds[10], status: "weird_new_status" };
+  refunds[99] = { ...refunds[99], status: "weird_new_status" };
+  refunds[250] = { ...refunds[250], payment_intent: later.pi };
+  refundCalls.length = 0;
+  is(`${job.name}: run 1 takes back the refund behind the rows not readable`, await job.run(), 1);
+  is(`${job.name}: the one behind is no longer held`, await later.holds(), false);
+  is(`${job.name}: the row not readable is never taken as a refund`, await unread.holds(), true);
+  is(`${job.name}: a page whose last row is not readable goes on from its last readable one`, afters(), [null, id("g", 98), id("g", 198)]);
+  is(`${job.name}: run 2 ends the pass`, await job.run(), 0);
+  is(`${job.name}: the anchor stays where it was: the row not readable is read again`, await read(job.anchor), anchorBefore);
+  is(`${job.name}: and the pass is let go`, await read(job.pass), null);
+  is(`${job.name}: still held while its row is not readable`, await unread.holds(), true);
+  refunds[10] = { ...refunds[10], status: "succeeded" };
+  refunds[99] = { ...refunds[99], status: "succeeded" };
+  is(`${job.name}: once readable, the next pass takes it back`, await job.run(), 1);
+  is(`${job.name}: no longer held`, await unread.holds(), false);
+  await job.run();
+  is(`${job.name}: then the anchor moves to the newest refund`, await read(job.anchor), String(base + 5000));
+
+  part(`${job.name}: a pass kept from the store's earlier Stripe account starts over on the one it has now`);
+  const moved = await job.make(60);
+  refunds = list(`${job.name}h`, 450, base + 6000, -1, "pi_unused");
+  await job.run();
+  is(`${job.name}: a pass is kept on the first account`, JSON.parse(String(await read(job.pass))).after, id("h", 299));
+  byAccount[OTHER_ACCOUNT] = list(`${job.name}i`, 200, base + 6000, 150, moved.pi);
+  await job.connect(OTHER_ACCOUNT);
+  refundCalls.length = 0;
+  let threw = "";
+  let taken = -1;
+  try {
+    taken = await job.run();
+  } catch (error) {
+    threw = String(error);
+  }
+  is(`${job.name}: the run on the new account does not fail`, threw, "");
+  is(`${job.name}: it never sends the old account's cursor, and reads the new account from its newest refund`, afters(), [null, id("i", 99)]);
+  is(`${job.name}: and takes back the new account's full refund`, taken, 1);
+  is(`${job.name}: no longer held`, await moved.holds(), false);
+  await job.connect(ACCOUNT);
+  delete byAccount[OTHER_ACCOUNT];
+
   part(`${job.name}: the first reads in another shape do nothing`);
   redis.pipeline = async (commands) => (commands.length === 3 && commands[2][1] === job.pass ? [1, null] : original.call(redis, commands));
   refundCalls.length = 0;
@@ -202,13 +274,17 @@ async function main(): Promise<void> {
 
   await claimHandle("owner@pass.example", "passshop", "Pass Shop", "");
   await ensureStatsId("owner@pass.example");
-  await setStripeAccount("owner@pass.example", "acct_1TestPassRef001", true);
+  await setStripeAccount("owner@pass.example", ACCOUNT, true);
   await setSubscription("owner@pass.example", { customerId: "cus_PassOwner001", subscriptionId: "sub_PassOwner001", active: true, period: paidPeriod() });
   const made = await addProduct("owner@pass.example", "Bread Course", "", "25", null);
   if (!made.ok) throw new Error("no product");
   await setProductLink("owner@pass.example", made.product.id, "https://example.com/course");
-  const store = (await storeForEmail("owner@pass.example"))!;
+  let store = (await storeForEmail("owner@pass.example"))!;
   const product = (await readListing(store, made.product.id))!;
+  const connect = async (account: string) => {
+    await setStripeAccount("owner@pass.example", account, true);
+    store = (await storeForEmail("owner@pass.example"))!;
+  };
   const deps = {
     base: "https://marktmorgen.com/@passshop",
     from: '"Pass Shop" <hello@marktmorgen.com>',
@@ -223,6 +299,7 @@ async function main(): Promise<void> {
     anchor: `nl:gift:${store.statsId}:refunds`,
     pass: `nl:gift:${store.statsId}:refunds:pass`,
     run: (dropStart = fine) => revokeRefundedGifts(store, Date.now() + 60_000, dropStart),
+    connect,
     make: async (n) => {
       const to = `friend${n}@pass.example`;
       const started = await startGift(store, product as Listing, { to, from: "Ana", message: "" });
@@ -238,7 +315,7 @@ async function main(): Promise<void> {
         ordersLink: async () => null,
       });
       if (given !== "given") throw new Error(`gift ${n} not given: ${given}`);
-      return { pi, holds: () => holds(to) };
+      return { pi, who: to, holds: () => holds(to) };
     },
   }, NOW - 10_000);
 
@@ -247,6 +324,7 @@ async function main(): Promise<void> {
     anchor: `nl:pre:${store.statsId}:refunds`,
     pass: `nl:pre:${store.statsId}:refunds:pass`,
     run: (dropStart = fine) => revokeRefundedPreorders(store, Date.now() + 60_000, dropStart),
+    connect,
     make: async (n) => {
       const email = `buyer${n}@pass.example`;
       const pi = `pi_passpre${String(n).padStart(8, "0")}`;
@@ -263,7 +341,7 @@ async function main(): Promise<void> {
       };
       const given = await confirmPreorder(store, session as never, product, deps);
       if (given !== "given") throw new Error(`pre-order ${n} not given: ${given}`);
-      return { pi, holds: () => holds(email) };
+      return { pi, who: email, holds: () => holds(email) };
     },
   }, NOW - 5_000);
 

@@ -14,7 +14,7 @@
  *   - a PayPal order decided at its hand-over.
  */
 import { NO_AFFILIATES, parseAffiliateSetting, viaCookieValue } from "@/lib/affiliate-setting";
-import { VIA_PENDING_META, attributionOrPending, buyerMark, creditPayPalSale, notePendingLinks, pendingChannel, readBook } from "@/lib/affiliates";
+import { VIA_PENDING_META, attributionOrPending, creditPayPalSale, notePendingLinks, pendingChannel, readBook } from "@/lib/affiliates";
 import type { SendOutcome } from "@/lib/email";
 import { claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -97,9 +97,10 @@ const tierOf = async (store: Awaited<ReturnType<typeof setup>>["store"], ref: st
   const lines = (await readBook(store)).lines;
   return { tier: lines.find((l) => l.ref === `tier2:${ref}`)?.commission ?? 0, own: lines.find((l) => l.ref === ref)?.commission ?? null };
 };
-const keptMark = async (statsId: string, ref: string) => {
+// Regra 23 (tier-self-v3, 9 November 2026): no buyer's mark is kept any more; the sale keeps tierOff, decided when written.
+const keptTier = async (statsId: string, ref: string) => {
   const [raw] = (await redis.pipeline([["HGET", `nl:aff:${statsId}:sales`, ref]])) as [string | null];
-  return raw ? ((JSON.parse(raw) as { buyerMark?: string }).buyerMark ?? "") : null;
+  return raw ? ((JSON.parse(raw) as { tierOff?: number }).tierOff ?? 0) : null;
 };
 
 async function main(): Promise<void> {
@@ -111,7 +112,7 @@ async function main(): Promise<void> {
     const { tier, own } = await tierOf(store, "in_1TierPendA1");
     is("Bea is credited the first payment, as before", own, 1_500);
     is("Ana earns no second tier on her own membership", tier, 0);
-    is("the first payment keeps its buyer's mark", await keptMark(statsId, "in_1TierPendA1"), buyerMark(statsId, "ana@example.com"));
+    is("the first payment is written with tierOff", await keptTier(statsId, "in_1TierPendA1"), 1);
   }
   {
     const { store, pend } = await setup();
@@ -127,7 +128,7 @@ async function main(): Promise<void> {
     await notePendingLinks(store, [order("cs_oneA", "ana@example.com", pend, { customer: "cus_O" })], NOW, undefined, undefined, send);
     is("the order, by Ana: no second tier", (await tierOf(store, "cs_oneA")).tier, 0);
     is("its offer, by Ana: no second tier", (await tierOf(store, "pi_offerAna1")).tier, 0);
-    is("both keep their buyer's mark", [await keptMark(statsId, "cs_oneA"), await keptMark(statsId, "pi_offerAna1")], [buyerMark(statsId, "ana@example.com"), buyerMark(statsId, "ana@example.com")]);
+    is("both are written with tierOff", [await keptTier(statsId, "cs_oneA"), await keptTier(statsId, "pi_offerAna1")], [1, 1]);
   }
   {
     const { store, pend } = await setup();

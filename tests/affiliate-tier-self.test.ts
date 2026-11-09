@@ -19,7 +19,7 @@
  *     second tier is read as it always was (never 0 by guess, never more).
  */
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
-import { buyerMark, creditPayPalSale, noteCharge, noteSession, readBook } from "@/lib/affiliates";
+import { creditPayPalSale, noteCharge, noteSession, readBook } from "@/lib/affiliates";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -146,23 +146,22 @@ async function main(): Promise<void> {
     is("and one paid by anybody else: the tier, as before", (await tierOf(store, "in_TierOther001")).tier, 500);
   }
 
-  part("What is kept: a one-way mark for this store, never the address");
+  // Regra 23 (tier-self-v3, 9 November 2026): the buyer's mark is no longer kept; what is kept is tierOff, decided
+  // when the sale is written, and never the address nor any mark of it.
+  part("What is kept: the decision, never the address nor a mark of it");
   {
     const { store, statsId } = await setup();
-    await noteSession(store, order("cs_ana3", "ana@example.com"));
+    await noteSession(store, order("cs_ana3", "Ana+x@Example.com."));
     const [raw] = (await redis.pipeline([["HGET", `nl:aff:${statsId}:sales`, "cs_ana3"]])) as [string];
     const kept = JSON.parse(raw) as Record<string, unknown>;
-    is("the sale keeps its buyer's mark", kept.buyerMark, buyerMark(statsId, "ana@example.com"));
-    is("32 hexadecimal characters", /^[0-9a-f]{32}$/.test(String(kept.buyerMark)), true);
-    is("never the address or its name", [raw.includes("ana@example.com"), raw.toLowerCase().includes("\"ana")], [false, false]);
-    is("one inbox however it is written", buyerMark(statsId, "Ana+x@Example.com."), buyerMark(statsId, "ana@example.com"));
-    is("another store's mark of the same address is another", buyerMark("zzzzzzzzzzzz", "ana@example.com") === buyerMark(statsId, "ana@example.com"), false);
-    is("no address, no mark", buyerMark(statsId, ""), "");
-    const lines = (await readBook(store)).lines;
-    is("the book's lines never carry it out (pages, kept copies, exports)", lines.filter((l) => "buyerMark" in l).length, 0);
+    is("the sale keeps tierOff, one inbox however it is written", [kept.tierOff, "buyerMark" in kept], [1, false]);
+    is("never the address or its name", [raw.toLowerCase().includes("ana@example.com"), raw.toLowerCase().includes("\"ana")], [false, false]);
+    await noteSession(store, order("cs_kai3", "kai@example.com"));
+    const [other] = (await redis.pipeline([["HGET", `nl:aff:${statsId}:sales`, "cs_kai3"]])) as [string];
+    is("somebody else's purchase keeps nothing about its buyer", ["tierOff" in JSON.parse(other), "buyerUnknown" in JSON.parse(other)], [false, false]);
   }
 
-  part("A sale written down before the mark was kept");
+  part("A sale written down before the decision was kept");
   {
     const { store, statsId } = await setup();
     await redis.pipeline([
@@ -171,9 +170,10 @@ async function main(): Promise<void> {
     // Its buyer is not known: the second tier stays as it was read, neither guessed away nor raised.
     is("its second tier is read as before", (await tierOf(store, "cs_old1")).tier, 500);
     await redis.pipeline([
-      ["HSET", `nl:aff:${statsId}:sales`, "cs_old2", JSON.stringify({ ref: "cs_old2", pi: "pi_cs_old2", aff: BEA, at: NOW - 3_600, product: "prod01", title: "Bread course", base: 5_000, total: 5_000, currency: "usd", rate: 30, self: false, how: "click", buyerMark: "not a mark" })],
+      ["HSET", `nl:aff:${statsId}:sales`, "cs_old2", JSON.stringify({ ref: "cs_old2", pi: "pi_cs_old2", aff: BEA, at: NOW - 3_600, product: "prod01", title: "Bread course", base: 5_000, total: 5_000, currency: "usd", rate: 30, self: false, how: "click", tierOff: "yes" })],
     ]);
-    is("a mark that does not read is not known either", (await tierOf(store, "cs_old2")).tier, 500);
+    // Regra 23: was a buyerMark that did not read; now a tierOff that is not 1.
+    is("a decision that does not read is not taken either", (await tierOf(store, "cs_old2")).tier, 500);
   }
 
   done();

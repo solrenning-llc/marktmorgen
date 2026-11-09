@@ -948,10 +948,12 @@ export const COST_LINES: CostLine[] = [
       // CART_STOCK_COMMANDS_MOST, half of ORDER_COMPUTE at most. An opening whose answer is unknown asks nothing more: its holds lapse.
       { file: "lib/stock.ts", names: ["withCartStockHolds", "PENDING_MS", "releaseCartStockHolds", "STOCK_ADMIT", "STOCK_BIND", "stripeRefusedOpening", "LOCK_WAIT_MS = 500", "countStock(store, product, now, false)"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
-      // Each affiliate's sale keeps its buyer's one-way mark (9 November 2026): 47 bytes more on the one HSETNX it was
-      // already written with, no command, taken from the store's data room before it is written (orderWrite); a
-      // membership's invoice reads its mark with the invoice and writes nothing. Well inside AFFILIATE_FIELD_BYTES.
-      { file: "lib/affiliates.ts", names: ["buyerMark", "orderWrite(store, [[\"HSETNX\", salesKey(store.statsId), referral.ref, JSON.stringify(mark ? { ...referral, buyerMark: mark } : referral)]])"] },
+      // Each affiliate's sale keeps its second tier decided when written (9 November 2026): tierOff or buyerUnknown,
+      // 14 or 18 bytes more on the one HSETNX it was already written with, taken from the store's data room before it is
+      // written (orderWrite), and at most two reads of affiliates' records (HGET) before it, inside the order's
+      // ORDER_COMPUTE; no mark of the buyer. A membership's invoice decides it as it is read and writes nothing. A sale
+      // whose buyer was not confirmed is re-read by nothing yet: it waits for the creator (tierFor, TIER_BUYER_FROM).
+      { file: "lib/affiliates.ts", names: ["tierFor", "TIER_BUYER_FROM", "JSON.stringify({ ...referral, ...tier })"] },
     ],
     basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE.",
   },

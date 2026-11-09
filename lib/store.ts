@@ -1266,6 +1266,22 @@ export async function storeForIdRef(sid: string, ref: unknown): Promise<Store | 
 }
 
 /**
+ * storeForIdRef, telling a store that is not there (null: its id or its record answered nothing, or the record is
+ * another store's) from a reply that could not be read ("unknown": not one answer, or a record that does not parse),
+ * which is never taken for a store gone (lib/short-link-open.ts). The same one read.
+ */
+export async function storeForIdRefRead(sid: string, ref: unknown): Promise<Store | null | "unknown"> {
+  if (!STORE_ID_PATTERN.test(sid) || ref === null) return null;
+  if (typeof ref !== "string" || !ref) return "unknown";
+  let reply: unknown;
+  const store = await storeForEmailSeen(ref, (_commands, seen) => { reply = seen; });
+  if (store) return store.sid === sid ? store : null;
+  if (!Array.isArray(reply) || reply.length !== 1) return "unknown";
+  if (reply[0] === null) return null;
+  return parseStore(reply[0]) ? null : "unknown";
+}
+
+/**
  * Every store an account owns, its first store first and the others in the
  * order they were made. A store whose record says it belongs to someone
  * else — which only a half-finished move could leave — is not listed.

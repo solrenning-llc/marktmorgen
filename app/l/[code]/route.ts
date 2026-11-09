@@ -15,7 +15,8 @@ type Params = { params: Promise<{ code: string }> };
  * the visit is counted by that page, like any other, and its results are
  * the post's row in the numbers. Kept by the CDN for five minutes, so a link
  * opened a great many times is mostly answered without reaching the server.
- * A link that was ended, or never was, opens the page that says so.
+ * A link that was ended, or never was, opens the page that says so; the
+ * instance remembers it for a while and says so again without reading it.
  * What reaches the function has a ceiling (lib/short-link-open.ts): a pace
  * per address and an hour's count, before anything is read; the store pays
  * for its link's open, after it is found. A refusal sends nobody anywhere,
@@ -28,17 +29,18 @@ export async function GET(request: NextRequest, { params }: Params) {
   const ended = () => new Response(null, { status: 302, headers: { Location: `${SITE_URL}/l/ended`, "Cache-Control": cache } });
   if (!CODE.test(code)) return ended();
   const admission = await admitShortLinkOpen(code, { address: paceAddress(clientAddress(request)) });
+  if (admission.state === "ended") return ended();
   if (admission.state !== "open") return shortLinkRefusal(admission);
   let link;
   try {
     link = await findLink(code);
   } catch {
     // A link that cannot be read is not a link that ended (PR #2527): refused, kept by nobody.
-    await shortLinkNotPaid(code, admission);
+    shortLinkNotPaid(code, "unreadable");
     return shortLinkRefusal({ state: "unknown", now: Date.now() });
   }
   if (!link) {
-    await shortLinkNotPaid(code, admission);
+    shortLinkNotPaid(code, "missing");
     return ended();
   }
   const store = await payShortLinkOpen(code, link, admission);

@@ -91,6 +91,9 @@ async function main(): Promise<void> {
   // Added with the fix (9 November 2026): only the store's own refusal marks it resting, for a minute.
   const alpha = (await storeForEmail("a@example.com"))!;
   inject = (batch) => (batch.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:")) ? batch.map((c) => (c[0] === "INCRBY" ? 1_000_000_000 : "OK")) : null);
+  // Rule 23 (9 November 2026, second pre-review): this instance now keeps the store resting from memory, longer each time,
+  // so its link would be refused with nothing sent; the mark is held on a fresh instance that finds the store itself.
+  forgetShortLinkOpenMemory();
   await open(tiredCode);
   inject = null;
   is("the store's own refusal writes its resting mark", (await redis.pipeline([["GET", `nl:slink:rest:${alpha.sid}`]]))[0], "1");

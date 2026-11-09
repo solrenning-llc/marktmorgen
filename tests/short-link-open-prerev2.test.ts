@@ -14,6 +14,8 @@ import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { CODE_LETTERS } from "@/lib/short-link-rules";
 import { GET } from "@/app/l/[code]/route";
 import { forgetShortLinkOpenMemory } from "@/lib/short-link-open";
+import { SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_REST_REFUNDS_PER_MINUTE, SHORT_LINK_TIRED_MAX_MS, SHORT_LINK_TIRED_MS, SHORT_LINK_UNPAID_PER_HOUR } from "@/lib/short-link-open-rules";
+import { SHORT_LINK_UNPAID_COMPANY_COST } from "./plan-cost-registry";
 import { calendarWindow } from "@/lib/allowance-window";
 import { answering } from "./security/next-headers";
 import { advance, store as redis } from "./redis-stub";
@@ -42,7 +44,7 @@ const open = async (code: string, address = fresh(), query = `?q=${n}`) => {
   answering(request);
   try {
     const r = await GET(request as never, { params: Promise.resolve({ code }) });
-    return { status: r.status, to: r.headers.get("location") };
+    return { status: r.status, to: r.headers.get("location"), text: r.status === 302 ? "" : await r.text() };
   } finally {
     answering(null);
   }
@@ -89,7 +91,9 @@ async function main(): Promise<void> {
   const heavy = await open(free.code);
   console.log(`  P2 measured: status ${heavy.status}, ${pipelines} pipelines, ${commands.length} commands: ${commands.map((c) => c[0]).join(" ")}`);
   is("P2: refused 503", heavy.status, 503);
-  is("P2: at most 9 waits and 16 commands", [pipelines <= 9, commands.length <= 16], [true, true]);
+  // Rule 23 (9 November 2026, with the fix): was "at most 9 waits and 16 commands", the figure it was priced at then; the
+  // price is now the registry's heaviestUnpaid (11 waits, 21 commands), which holds the heaviest measured with room.
+  is("P2: within the waits and commands it is priced at", [pipelines <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.waits, commands.length <= SHORT_LINK_UNPAID_COMPANY_COST.heaviestUnpaid.commands], [true, true]);
 
   part("P3 links paid here a moment ago and gone while the hour is used are read beyond every figure");
   reset();
@@ -103,7 +107,108 @@ async function main(): Promise<void> {
   for (const c of codes) await open(c);
   const reads = commands.filter((c) => c[0] === "GET" && /^nl:slink:[a-z0-9]{6}$/i.test(c[1])).length;
   console.log(`  P3 link reads while the hour was used: ${reads}`);
-  is("P3: no link is read while the hour is used, beyond what the registry holds", reads, 0);
+  // Rule 23 (9 November 2026, with the fix): was 0, what the registry held then; such reads are now counted in the shared
+  // hour and allowed only up to SHORT_LINK_KNOWN_UNPAID_PER_HOUR past its figure (registered as knownPerHour).
+  is("P3: links read while the hour is used stay within the registered figure", [reads <= SHORT_LINK_KNOWN_UNPAID_PER_HOUR, SHORT_LINK_UNPAID_COMPANY_COST.knownPerHour], [true, SHORT_LINK_KNOWN_UNPAID_PER_HOUR]);
+  // Added with the fix: every one of them was counted, and the shared count never passed the two figures together.
+  const hourCount = Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0]);
+  is("P3: the reads that ended unpaid are counted, and admitted only within the hour's two figures", reads > 0 && hourCount >= SHORT_LINK_UNPAID_PER_HOUR + reads, true);
+
+  // Everything below was added with the fix (9 November 2026).
+  part("A resting store's other links are refused from memory, nothing sent; asked again on the instance's minute, later each time");
+  reset();
+  topOfHour();
+  const golf = await make("g@example.com", "golf", "reel");
+  const golf2 = await make("g@example.com", "golf", "story");
+  commands = [];
+  inject = overLimit;
+  is("the store is found resting", (await open(golf.code)).status, 503);
+  is("its other link, read once to learn its store, is refused without the store read again", [(await open(golf2.code)).status, commands.filter((c) => c[0] === "GET" && c[1] === `nl:store:id:${golf.sid}`).length], [503, 1]);
+  commands = [];
+  const quiet = [await open(golf.code), await open(golf2.code)];
+  is("both links again: refused with nothing sent to the database", [quiet.map((r) => r.status), commands.length], [[503, 503], 0]);
+  later(SHORT_LINK_TIRED_MS + 1);
+  commands = [];
+  await open(golf.code);
+  is("past its time it is asked again on this instance's minute, off the hour", [commands.some((c) => c[0] === "INCR" && c[1].startsWith("nl:slink:open:")), commands.some((c) => c[0] === "INCRBY")], [false, true]);
+  later(SHORT_LINK_TIRED_MS + 1);
+  commands = [];
+  is("still resting, it is kept twice as long: a minute later nothing is sent", [(await open(golf2.code)).status, commands.length], [503, 0]);
+  later(SHORT_LINK_TIRED_MAX_MS);
+  inject = null;
+  const back = await open(golf.code);
+  is("once it can answer again, asked again, it opens", [back.status, back.to?.includes("/@golf")], [302, true]);
+  is("the hour's shared count holds only the first open of its second link, read once to learn its store", Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0]), 1);
+
+  part("A store due to be asked again past the instance's minute stays resting until the next minute, nothing sent");
+  reset();
+  topOfHour();
+  const hotel = await make("h@example.com", "hotel");
+  const india = await make("i@example.com", "india");
+  inject = overLimit;
+  await open(hotel.code);
+  await open(india.code);
+  later(SHORT_LINK_TIRED_MS + 1);
+  const minuteStart = Date.now() - (Date.now() % 60_000);
+  if (Date.now() - minuteStart > 50_000) later(60_000 - (Date.now() - minuteStart) + 1);
+  for (let i = 0; i < SHORT_LINK_REST_REFUNDS_PER_MINUTE; i += 1) await open(hotel.code);
+  commands = [];
+  is("the other store, due too, is refused with nothing sent", [(await open(india.code)).status, commands.length], [503, 0]);
+  inject = null;
+  is("neither went into the shared hour beyond its first open", Number((await redis.pipeline([["GET", `nl:slink:open:${Math.floor(Date.now() / HOUR)}`]]))[0]) <= 1, true);
+
+  part("A code found ended is answered as ended again from memory, nothing sent");
+  reset();
+  topOfHour();
+  is("a code nobody has is told it ended", (await open("yyyyyy")).to?.endsWith("/l/ended"), true);
+  commands = [];
+  const again = await open("yyyyyy");
+  is("asked again, from another network, it is told so with nothing sent", [again.to?.endsWith("/l/ended"), commands.length], [true, 0]);
+
+  part("A connection over its share is refused the store's other links too, until the day ends, and told the hour in UTC");
+  reset();
+  topOfHour();
+  const juliet = await make("j@example.com", "juliet", "reel");
+  const juliet2 = await make("j@example.com", "juliet", "story");
+  const greedy = fresh();
+  inject = (batch) => (batch.some((c) => c[0] === "HINCRBY" && String(c[1]).startsWith("nl:traffic:c:")) ? [1_000_000_000, 1] : null);
+  let told = "";
+  for (let i = 0; i < 6 && !told; i += 1) { const r = await open(juliet.code, greedy, `?g=${i}`); if (r.status === 429) told = r.text; }
+  inject = null;
+  await open(juliet2.code, greedy, "?learn");
+  commands = [];
+  const sameNet = await open(juliet2.code, greedy, "?other");
+  is("the store's other link, for that connection: 429 with nothing sent", [sameNet.status, commands.length], [429, 0]);
+  is("it says the exact hour to try again, in UTC, in plain words", [/UTC/.test(told), /tomorrow/i.test(told), /Try again after/.test(told)], [true, false, true]);
+  is("somebody else still opens it", (await open(juliet2.code)).status, 302);
+
+  part("A paused hour says when to try again, without promising more");
+  reset();
+  topOfHour();
+  for (let i = 0; i < SHORT_LINK_UNPAID_PER_HOUR + 1; i += 1) await open(missing(1_000 + i));
+  const paused = await open(missing(5_000));
+  is("503 with the time to try again, and no promise of when it opens", [paused.status, /Try this link again after .* UTC/.test(paused.text), /opens again by/i.test(paused.text)], [503, true, false]);
+
+  part("A store's record that cannot be read is refused, never called ended");
+  for (const [name, reply] of [["an answer of the wrong length", [] as unknown[]], ["a record that does not parse", ["{not json"]]] as const) {
+    reset();
+    topOfHour();
+    const kilo = await make("k@example.com", "kilo");
+    let next = false;
+    inject = (batch) => {
+      if (next && batch.length === 1 && batch[0][0] === "GET") { next = false; return [...reply]; }
+      if (batch.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:slink:rest:"))) next = true;
+      return null;
+    };
+    const unread = await open(kilo.code);
+    inject = null;
+    is(`${name}: 503, sent nowhere`, [unread.status, unread.to], [503, null]);
+  }
+  reset();
+  topOfHour();
+  const lima = await make("l@example.com", "lima");
+  await redis.pipeline([["DEL", `nl:store:id:${lima.sid}`]]);
+  is("a store whose id answers nothing is gone: the link ended", (await open(lima.code)).to?.endsWith("/l/ended"), true);
   done();
 }
 main();

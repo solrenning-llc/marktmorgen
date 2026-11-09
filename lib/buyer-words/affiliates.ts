@@ -159,6 +159,7 @@ const en = {
     "own purchase": "own purchase",
     refunded: "refunded",
     "partly refunded": "partly refunded",
+    "buyer not confirmed": "waiting: the buyer is not confirmed yet",
   } as Record<string, string>,
   paidByHead: (store: string) => `Paid to you by ${store}`,
 

@@ -953,8 +953,11 @@ export const COST_LINES: CostLine[] = [
       // written (orderWrite), and at most two reads of affiliates' records (HGET) before it, inside the order's
       // ORDER_COMPUTE; no mark of the buyer. A membership's invoice decides it as it is read and writes nothing. A sale
       // whose buyer was not confirmed also takes one ZADD in that same write (its place on the list settleUnconfirmed reads) and
-      // is read again by the five-minute job, outside any plan's allowance (UNCONFIRMED_BATCH below), or approved by the creator.
-      { file: "lib/affiliates.ts", names: ["tierFor", "TIER_BUYER_FROM", "JSON.stringify({ ...referral, ...tier })", "unconfirmedKey(store.statsId), Math.floor(Date.now() / 1000), referral.ref"] },
+      // is read again by the five-minute job, outside any plan's allowance (UNCONFIRMED_BATCH below), or approved by the creator in
+      // person (approveUnconfirmed: one HGET, one HSET, one ZREM, inside the studio press that sends it, like releasing a hold).
+      // The month's counts of this path (countUnconfirmed: one HINCRBY a name and an EXPIRE, company-wide, numbers only) are the
+      // record of how many real orders fall here and how many requests it takes, for the owner's monthly report.
+      { file: "lib/affiliates.ts", names: ["tierFor", "TIER_BUYER_FROM", "JSON.stringify({ ...referral, ...tier })", "unconfirmedKey(store.statsId), Math.floor(Date.now() / 1000), referral.ref", "approveUnconfirmed", "countUnconfirmed"] },
     ],
     basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE.",
   },

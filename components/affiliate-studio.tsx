@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
+import { AffiliateUnconfirmed, type WaitingLine } from "@/components/affiliate-unconfirmed";
 import type { AffiliateCommissionLine as LineView } from "@/lib/affiliate-commission-view";
 
 import { useState } from "react";
@@ -206,6 +207,9 @@ export function AffiliateStudio({
   payPanel = null,
   leads = [],
   leadsTotal = 0,
+  unconfirmed = [],
+  unconfirmedTotal = 0,
+  unconfirmedDays = 14,
 }: {
   handle: string;
   setting: AffiliateSetting;
@@ -235,6 +239,10 @@ export function AffiliateStudio({
   /** Confirmed leads, newest first (lib/affiliate-leads.ts), and how many there are in all. */
   leads?: LeadRow[];
   leadsTotal?: number;
+  /** Second-level lines waiting as "buyer not confirmed" (newest first, some), how many in all, and the days the job keeps looking. */
+  unconfirmed?: WaitingLine[];
+  unconfirmedTotal?: number;
+  unconfirmedDays?: number;
 }) {
   const router = useRouter();
   const pending = rows.filter((r) => r.affiliate.status === "pending");
@@ -623,6 +631,8 @@ export function AffiliateStudio({
         </section>
 
         {leadsTotal > 0 ? <LeadReview leads={leads} total={leadsTotal} who={Object.fromEntries(rows.map((r) => [r.affiliate.id, r.affiliate.email]))} /> : null}
+
+        <AffiliateUnconfirmed lines={unconfirmed} total={unconfirmedTotal} days={unconfirmedDays} who={Object.fromEntries(rows.map((r) => [r.affiliate.id, r.affiliate.email]))} />
 
         <AffiliateCommissionHistory lines={lines} total={linesTotal} who={who} refundsChecked={refundsChecked} invoicesChecked={invoicesChecked} />
 

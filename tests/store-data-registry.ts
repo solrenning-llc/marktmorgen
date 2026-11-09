@@ -263,7 +263,7 @@ export const FAMILIES: Record<string, Family> = {
     room: ["lib/affiliates.ts"],
     parts: [
       capped(MAX_AFFILIATES * (1_536 + 4 * ENTRY_BYTES), "MAX_AFFILIATES records (an address, a note of MAX_NOTE_LENGTH in any script, the rest), each with its address, code and click counts.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"), src("lib/affiliates.ts", "MAX_NOTE_LENGTH")),
-      kept(512, "A sale credited and up to two partners' shares of it."),
+      kept(512, "A sale credited and up to two partners' shares of it; while its buyer is not confirmed, also its place on the store's list the five-minute job reads again (a reference and a time), taken from the same room in the same write."),
     ],
   },
   // Confirmed leads (18 October 2026): each counted in the store's data room before it is written, with room for its decision, and refused past it.
@@ -275,6 +275,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:aff:pend:@lib/affiliates.ts": short("A pending affiliate link's mark, once an order, two days", "order", 2, KEY),
   // The PayPal orders among them still due a read or a notice: one member an order, the list kept two days from its last write.
   "nl:aff:pend:due@lib/affiliates.ts": company("Every store's pending Stripe orders not decided yet, read by the sweep by itself", "One list for the company: a member a pending order (its store's id and its checkout, under 120 bytes), taken out once the order is decided or its two-day mark has expired, the list itself expiring two days after its last write; only an order whose affiliate read did not answer at checkout is on it."),
+  "nl:aff:unc:month:@lib/affiliates.ts": company("Monthly counts of the sales whose second tier waited for their buyer", "Five counts a month (waited, decided, approved, failed, reads), no store or person; at most 14 monthly keys alive for 400 days."),
   "nl:aff:pend:pp:@lib/affiliates.ts": short("A PayPal order whose affiliate link is still pending, two days", "order", 2, KEY),
   "nl:aff:seen:@lib/affiliates.ts": short("A click counted once per visitor a day", "request", 2, KEY, REQ("affiliate")),
   "nl:aff:session:@lib/affiliates.ts": short("An affiliate signed in on one browser, thirty days, from an emailed link", "store", 30, KEY, MAIL("affiliate")),

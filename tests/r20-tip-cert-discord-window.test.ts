@@ -194,10 +194,23 @@ async function main(): Promise<void> {
   for (const [name, run] of pages) {
     stripeReads = [];
     const out = await run(DRAWS + 1);
-    is(`${name}: rests with the store`, out.includes(resting) && !out.includes("Ada Student") && !out.includes("discord.com"), true);
+    is(`${name}: rests with the store`, out.includes(resting) && !out.includes("Ada Student") && !linksToDiscord(out), true);
     if (name === "tip page") is("tip page: resting, no Stripe call", stripeReads, []);
   }
   done();
+}
+
+/** Whether the page links to Discord: each href's host is read as a URL, never matched as a substring. */
+function linksToDiscord(html: string): boolean {
+  return [...html.matchAll(/href="([^"]*)"/g)].some(([, href]) => {
+    let host = "";
+    try {
+      host = new URL(href.replaceAll("&amp;", "&"), "https://marktmorgen.com").hostname;
+    } catch {
+      return false;
+    }
+    return host === "discord.com" || host.endsWith(".discord.com") || host === "discord.gg";
+  });
 }
 
 main().catch((error) => {

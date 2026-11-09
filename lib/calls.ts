@@ -61,7 +61,7 @@ import { HOLD_SECONDS, checkoutClosesAt, onAccount } from "@/lib/stripe-account"
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { askForCallReminder, recoveryOn, refusedRecovery, withoutCallReminder } from "@/lib/recovery-setting";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
-import { type RefundChecks, confirmedBack, keptUnlessLost, refundChecks, refundedInFull } from "@/lib/refunds";
+import { type MoneyBack, type RefundChecks, keptUnlessLost, moneyBack, refundChecks, refundedInFull } from "@/lib/refunds";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import type { Listing, Product, Store } from "@/lib/store";
 import { idsOfKind, listingFinder, readListing, readListings, sellsAny } from "@/lib/catalog";
@@ -285,6 +285,13 @@ export async function paidCalls(store: Store): Promise<
     due: DueInPerson | null;
     /** The cancellation deadline the buyer was promised when paying (lib/call-setup.ts, readCancelPromise). */
     cancel: CancelPromise | null;
+    /**
+     * Its charge reads refunded in full, and whether the refund succeeded could not be told on this reading (past its
+     * reads, or Stripe's answer did not read): the booking keeps its time, as the buyer may not have the money back
+     * (decision 18), but is never taken for paid: no reminder and no new link go to it (lib/call-reminders.ts,
+     * lib/call-meetings.ts). False for every booking whose payment stands, or whose full refund is still on its way.
+     */
+    unconfirmed: boolean;
   }[]
 > {
   return (await readCallSessions(store)).paid;
@@ -330,7 +337,19 @@ async function callOrLost(store: Store, row: SessionRow, handles: Set<string>, r
   // A charge that reads refunded in full frees the time only once the refund is confirmed (decision 18, lib/refunds.ts
   // confirmedBack, its reads inside `checks`): a full refund still on its way, or one past this reading's reads, keeps
   // the booking's time, as the buyer has not had the money back yet.
-  if (refundedInFull(row.payment_intent)) return (await confirmedBack(store.stripeAccountId, row.payment_intent, checks)) ? "refunded" : call;
+  // Decided from the refunds read with the booking (expand[]=…latest_charge.refunds) when they came whole, with no
+  // read; otherwise one read from `checks`. Unknown is never "paid": the booking keeps its time, marked unconfirmed.
+  if (refundedInFull(row.payment_intent)) {
+    let money: MoneyBack | "unknown";
+    try {
+      money = await moneyBack(store.stripeAccountId, row.payment_intent, checks);
+    } catch (error) {
+      console.error("a booking refunded in full could not be confirmed on this reading; it keeps its time, unconfirmed", store.handle, call.session, error);
+      money = "unknown";
+    }
+    if (money === "back") return "refunded";
+    return money === "unknown" ? { ...call, unconfirmed: true } : call;
+  }
   if (!disputedCharge(row)) return call;
   if (reads.left <= 0) {
     console.warn("a disputed booking keeps its time: this reading asked Stripe about as many disputes as it may", store.handle, call.session);
@@ -373,6 +392,7 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | null {
     pi: paymentOf(row.payment_intent),
     due: readDue(meta),
     cancel: readCancelPromise(meta),
+    unconfirmed: false,
   };
 }
 
@@ -426,7 +446,7 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
       await onAccount(
         "GET",
         store.stripeAccountId,
-        `/checkout/sessions?limit=100&status=complete&created[gte]=${since}&expand[]=data.payment_intent.latest_charge${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+        `/checkout/sessions?limit=100&status=complete&created[gte]=${since}&expand[]=data.payment_intent.latest_charge.refunds${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
       ),
       sessionRowKnown,
     );
@@ -456,7 +476,7 @@ export async function paidCall(store: Store, session: string): Promise<CallRow |
   const row = (await onAccount(
     "GET",
     store.stripeAccountId,
-    `/checkout/sessions/${encodeURIComponent(session)}?expand[]=payment_intent.latest_charge`,
+    `/checkout/sessions/${encodeURIComponent(session)}?expand[]=payment_intent.latest_charge.refunds`,
   )) as SessionRow;
   const call = await callOrLost(store, row, saleHandles(store), { left: 1 }, refundChecks(2));
   if (!call || call === "refunded") return null;

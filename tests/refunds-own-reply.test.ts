@@ -60,7 +60,7 @@ const whole = (...data: unknown[]) => ({ object: "list", data, has_more: false }
 async function judged(next: World): Promise<{ refunded: boolean; calls: string[] }> {
   world = next;
   calls = [];
-  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each case starts with none.
+  // Each case starts with an empty store (the alert marks of lib/refunds.ts).
   redis.clear();
   const refunded = await purchaseRefunded(ACCOUNT, plan);
   return { refunded, calls };

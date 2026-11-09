@@ -97,9 +97,14 @@ async function main(): Promise<void> {
   is("givenBack: succeeded in full is given back", await givenBack(ACCOUNT, payment(2500)), true);
   is("purchaseRefunded: succeeded in full closes the door", await purchaseRefunded(ACCOUNT, session(2500)), true);
   calls = [];
-  is("read back for good once, the same day it is not asked again", [await givenBack(ACCOUNT, payment(2500)), calls.filter((call) => call.startsWith("/refunds")).length], [true, 0]);
+  // Rule 23 (pre-review of 89b127cfbd, LEVE 5): nothing is kept between readings any more, so a refund that failed
+  // after it succeeded counts at once; before, a day-long mark answered with no read ([true, 0]).
+  is("asked again on the next reading, nothing kept from the last", [await givenBack(ACCOUNT, payment(2500)), calls.filter((call) => call.startsWith("/refunds")).length], [true, 1]);
+  calls = [];
+  const expanded = { ...payment(2500), latest_charge: { ...(payment(2500).latest_charge as object), refunds: { object: "list", data: [refund("re_refundd18pend01", "succeeded", 2500)], has_more: false } } };
+  is("refunds expanded on the charge decide with no read", [await givenBack(ACCOUNT, expanded), calls.filter((call) => call.startsWith("/refunds")).length], [true, 0]);
 
-  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each scenario starts with none.
+  // Each scenario starts with an empty store (the alert marks of lib/refunds.ts).
   redis.clear();
   part("A refund in parts");
   chargeRefunds = { object: "list", data: [refund("re_refundd18part02", "pending", 1500), refund("re_refundd18part01", "succeeded", 1000, NOW - 120)], has_more: false };
@@ -110,7 +115,7 @@ async function main(): Promise<void> {
   chargeRefunds = { object: "list", data: [refund("re_refundd18part03", "failed", 1500), refund("re_refundd18part02", "succeeded", 1500), refund("re_refundd18part01", "succeeded", 1000, NOW - 120)], has_more: false };
   is("a failed part beside succeeded parts that add up still gives back", await givenBack(ACCOUNT, payment(2500)), true);
 
-  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each scenario starts with none.
+  // Each scenario starts with an empty store (the alert marks of lib/refunds.ts).
   redis.clear();
   part("Unknown never takes access away and is never a no");
   chargeRefunds = { object: "list", data: [refund("re_refundd18pend01", "succeeded", 2500)], has_more: true };
@@ -127,7 +132,7 @@ async function main(): Promise<void> {
   chargeRefunds = null;
   is("purchaseRefunded: an answer in another shape keeps the purchase", await purchaseRefunded(ACCOUNT, session(2500)), false);
 
-  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each scenario starts with none.
+  // Each scenario starts with an empty store (the alert marks of lib/refunds.ts).
   redis.clear();
   part("A booked call keeps its time while its full refund is on its way (lib/calls.ts)");
   const start = Date.now() + 3 * 86_400_000;
@@ -137,7 +142,7 @@ async function main(): Promise<void> {
   chargeRefunds = { object: "list", data: [refund("re_refundd18call01", "succeeded", 2500)], has_more: false };
   is("once the refund succeeded, the time is free", await paidCall(callStore, BOOKING), null);
 
-  // A charge read back for good is kept a day (lib/refunds.ts refundBackKey): each scenario starts with none.
+  // Each scenario starts with an empty store (the alert marks of lib/refunds.ts).
   redis.clear();
   part("Controls: a refund failed or canceled keeps access, and an unrefunded payment needs no extra read");
   calls = [];

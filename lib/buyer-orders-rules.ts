@@ -128,8 +128,15 @@ export const ORDERS_CALL_MOVES = ordersMovesCommands(5 * 100);
  * plans, PLAN_REFUND_CALLS each, taken before each check is made. A purchase
  * whose check has no room left is not shown, and the page says some
  * purchases could not be checked: never that they were not bought.
+ * 278 = ORDERS_STRIPE_LISTS (22) + 8 x PLAN_REFUND_CALLS (32), so an opening
+ * still checks ORDERS_OLDER_MOST (8) purchases paid in installments since each
+ * installment's own refunds are read too (the owner's decision 18, 9 November
+ * 2026; 200 before). Stripe bills no API call; the opening's time stays
+ * bounded by ORDERS_READ_MS inside the page's maxDuration, past which nothing
+ * more is asked and the rest is said as not checked yet
+ * (tests/orders-page-bounds.test.ts holds the 278 to the formula).
  */
-export const ORDERS_STRIPE_CALLS = 200;
+export const ORDERS_STRIPE_CALLS = 278;
 /**
  * The lists every opening may read from Stripe, whatever the buyer has: the
  * buyer's checkouts under both spellings of the address (two), the payments
@@ -262,12 +269,8 @@ export const ORDERS_OLDER_PER_HOUR = 60;
  * disputed) would otherwise let a batch show as many as the ceiling of calls
  * holds. A checkout and what was added to it in one click after paying count
  * one each; what does not fit waits for the next batch, said as not checked yet.
- * As many as one opening checks of the purchases paid in installments
- * ((ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS) / PLAN_REFUND_CALLS): 8 until
- * each installment's own refunds were read too (the owner's decision 18,
- * 9 November 2026), 5 since; ORDERS_OLDER_BYTES, measured at 8, still holds it.
  */
-export const ORDERS_OLDER_MOST = 5;
+export const ORDERS_OLDER_MOST = 8;
 /** The lists of payments taken in one click every opening and every batch may read inside ORDERS_STRIPE_LISTS; each one past them is a call from the ceiling. */
 export const ORDERS_ONE_CLICK_LISTS = 10;
 /** The most customers whose payments taken in one click wait for a batch, named in the batch's address (lib/buyer-orders.ts, readOlderCursor). */

@@ -490,6 +490,9 @@ test("a batch of older purchases at every limit stays under ORDERS_OLDER_BYTES, 
   const text = await answer.text();
   const body = JSON.parse(text) as OlderAnswer;
   assert.equal(ORDERS_OLDER_MOST, checks, "a whole batch of the longest purchases is as many as an opening checks");
+  // Decision 18: each installment's own refunds are read too (PLAN_REFUND_CALLS 32), and the ceiling grew with it so a
+  // batch keeps its eight (ORDERS_STRIPE_CALLS 278, lib/buyer-orders-rules.ts).
+  assert.equal(ORDERS_STRIPE_CALLS, ORDERS_STRIPE_LISTS + ORDERS_OLDER_MOST * PLAN_REFUND_CALLS, "the ceiling holds a whole batch of installment checks");
   assert.ok(body.ok && body.cards.length === ORDERS_OLDER_MOST && body.older === null, "a whole batch, the last one");
   assert.ok(body.ok && body.cards.every((card) => card.keys.length === 4 && card.bundles.length === 4 && card.main?.href === link(Number(card.title.replace(/\D+$/, "")))));
   assert.ok(Buffer.byteLength(text) <= ORDERS_OLDER_BYTES, `${Buffer.byteLength(text)} bytes`);

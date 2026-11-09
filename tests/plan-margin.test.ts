@@ -471,6 +471,8 @@ test("the one exposure is the first payment refunded in full: bounded, once per 
     // Bounded, and once per account; since the prices of 18 October 2026 a refunded first year is dearer, because
     // the card fee Stripe keeps grows with the charge: it is a funded exposure (docs/funded-exposure-review.md).
     assert.ok(month < 15, `${schedule}: a first month given back can cost $${month.toFixed(2)} on one account`);
+    // Printed so the room left under the $65 bound can be read from a run, not only from a failure.
+    console.log(`${schedule}: a first year given back costs at most $${year.toFixed(4)} on one account (bound $65)`);
     assert.ok(year < 65, `${schedule}: a first year given back can cost $${year.toFixed(2)} on one account`);
   }
   const policy = readFileSync(join(process.cwd(), "app/refunds/page.tsx"), "utf8");

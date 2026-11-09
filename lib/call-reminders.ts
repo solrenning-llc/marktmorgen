@@ -206,6 +206,12 @@ export async function sendCallReminders(
         counts.dropped += 1;
         continue;
       }
+      // Refunded in full, and whether the refund succeeded could not be told on this reading (lib/calls.ts,
+      // unconfirmed; the owner's decision 18): no reminder is sent to someone who may have had the money back.
+      if (call.unconfirmed) {
+        counts.dropped += 1;
+        continue;
+      }
       try {
         if (item.mark === "c") {
           if (call.end > Date.now() && !(await isConfirmed(call.session))) {

@@ -123,8 +123,9 @@ export async function syncMeetings(
       if (event) continue;
       const list = (await paidFor(store)) ?? [];
       const product = await readListing(store, record.product);
+      // A booking whose full refund could not be confirmed (lib/calls.ts, unconfirmed; decision 18) is sent no new link.
       const booked = list.filter((c) =>
-        outcome.record.group ? c.product === outcome.record.product && c.start === outcome.record.start : c.session === outcome.record.session,
+        !c.unconfirmed && (outcome.record.group ? c.product === outcome.record.product && c.start === outcome.record.start : c.session === outcome.record.session),
       );
       // In person now (lib/call-place.ts): no link is sent to anybody.
       if (product && isCallProduct(product) && whereOf(product.call).kind !== "place" && booked.length) {

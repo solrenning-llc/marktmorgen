@@ -20,7 +20,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf as replyCount, repliesFor, stringList } from "@/lib/redis-reply";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
@@ -637,16 +637,30 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     ...fields.map((f) => ["EVAL", TAKE_CRM_VALUE, 1, valuesKey(statsId, f.id), person]),
     ...theirs.map((id) => ["HDEL", dealsKey(statsId), id]),
   ];
-  const replies = commands.length ? await redisPipeline(commands) : [];
+  // Each reply read exactly (CX-123 rules 24 and 30): a value's script answers the value it deleted or nil, a deal's
+  // HDEL 1 or 0. Any other reply, or a reply list of another length, is unknown, never "nothing was there": what did
+  // read is given back below, and the deletion then throws UnknownReplyError, so the erasure says it did not finish
+  // and is pressed again, never confirmed with the person's answers or deals possibly kept.
+  const replies = commands.length ? repliesFor(await redisPipeline(commands), commands.length) : [];
+  if (!replies) throw new UnknownReplyError("a person's CRM deletion");
+  let unknown = false;
   let records = 0;
   let valuesFreed = 0;
   fields.forEach((_, i) => {
     const taken = replies[i];
-    if (typeof taken !== "string") return;
+    if (taken === null) return;
+    if (typeof taken !== "string") {
+      unknown = true;
+      return;
+    }
     records += 1;
     if (taken) valuesFreed += dataBytes([person, taken], 1);
   });
-  const dealsGone = theirs.filter((_, i) => replies[fields.length + i] === 1);
+  const dealsGone = theirs.filter((_, i) => {
+    const gone = replyCount(replies[fields.length + i]);
+    if (gone === null || gone > 1) unknown = true;
+    return gone === 1;
+  });
   records += dealsGone.length;
   if (room && (valuesFreed > 0 || dealsGone.length)) {
     await giveData(room, [
@@ -672,6 +686,8 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     if (freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
     return taken[0] ? 1 : 0;
   });
+  // Their tasks went above all the same; a reply of the values or deals that did not read leaves the deletion unconfirmed.
+  if (unknown) throw new UnknownReplyError("a person's CRM deletion");
   return records;
 }
 

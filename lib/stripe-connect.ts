@@ -319,12 +319,13 @@ function unknownShape(what: string): never {
  * CARD_STATUSES. A 200 that says less (the include ignored, a change of shape, a body
  * that is not JSON) is unknown, never "card payments off" (CX-123 rule 24).
  */
-// The statuses read as known. Stripe's v2 capability statuses are active, pending, restricted and unsupported;
-// "inactive" is kept as an "off" answer the earlier code and tests already took as Stripe's. Anything else (another
-// value, another letter case, blank) is unknown and throws, so nothing is written on it (Codex Z on #3311): a value
-// Stripe adds later reads as "not checked" until it is added here, never as "card payments off".
-const CARD_STATUSES = new Set(["active", "inactive", "pending", "restricted", "unsupported"]);
-// The statuses of a requirements deadline: currently_due, eventually_due and past_due.
+// The statuses read as known, from Stripe's own generated v2 types for the pinned API version (stripe-node v22.6.0,
+// API 2026-08-26.dahlia, src/resources/V2/Core/Accounts.ts): card_payments is active | pending | restricted |
+// unsupported. Anything else (another value such as v1's "inactive", another letter case, blank) is unknown and
+// throws, so nothing is written on it (Codex Z and Codex U on #3311): a value Stripe adds later reads as "not
+// checked" until it is added here, never as "card payments off".
+const CARD_STATUSES = new Set(["active", "pending", "restricted", "unsupported"]);
+// The statuses of a requirements deadline (same source): currently_due | eventually_due | past_due.
 const DEADLINE_STATUSES = new Set(["currently_due", "eventually_due", "past_due"]);
 
 function cardPaymentsStatus(account: unknown): string {

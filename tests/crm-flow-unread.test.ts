@@ -82,7 +82,9 @@ async function main(): Promise<void> {
   const ana = await readRun(fieldFlowId, personOf("ana@example.com"));
   is("the unknown read was hit", fieldHits, 1);
   is("the run waits to be tried again, not held", ana?.run.status, "waiting");
-  is("the step waits at step 0, once, saying why", [ana?.run.step, ana?.run.waits, ana?.run.note], [0, 1, "Your store's fields could not be read; tried again in a few minutes."]);
+  // Altered 2026-11-09 (rule 23, merge of #2901 with main): main's field step (#2981, readFieldsWhole) says "Your
+  // fields could not be read"; the same wait, step and count, only the wording is main's.
+  is("the step waits at step 0, once, saying why", [ana?.run.step, ana?.run.waits, ana?.run.note], [0, 1, "Your fields could not be read; tried again in a few minutes."]);
   is("nothing is logged as uncertain or failed", ana?.events.filter((e) => e.state === "uncertain" || e.state === "failed").length, 0);
   is("nothing was written", (await readValues(statsId, personKey(statsId, "ana@example.com"), fields)).lvl001 ?? "", "");
 

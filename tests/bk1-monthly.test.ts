@@ -259,8 +259,9 @@ async function main(): Promise<void> {
 
   part("The last good copy lost, a month's copy sealed under a key the run no longer holds: kept by name, never a stop");
   {
-    // After a rotation past BACKUP_KEY_PREVIOUS_DAYS (60) a month's copy (up to 120 days) may be sealed under a key the
-    // run does not read with. It is kept by name, so the run need not open it, and it must not stop the run.
+    // After a rotation because the key leaked, the old key is removed from the deployment at once (docs/backup.md), so a
+    // month's copy (up to 120 days) may be sealed under a key the run does not read with. It is kept by name, so the
+    // run need not open it, and it must not stop the run.
     reset();
     wipe();
     seed(5);
@@ -276,6 +277,43 @@ async function main(): Promise<void> {
     const result = await runBackup({ now: clock, review, store, key, previousKeys: [] });
     is("room made from the leftovers, the copy written, said as last good copy lost", [result.ok, result.ok && result.note], [true, "last_good_copy_lost"]);
     is("December's copy, under the old key, whole", inFolder(december).length, 3);
+  }
+
+  part("A copy sealed under the previous key, 60 to 120 days old, still opens on the lost path (C1-20261109-0025-C4-47 item 1)");
+  {
+    // Claude 2's probe A on #3293 (MEDIUM, 2nd review): the bucket rule keeps any object up to 120 days, so the run must
+    // read the previous key as long. Here the keyring comes from the deployment's settings, as in production.
+    is("the previous key is read for the 120-day cap, the same constant", constants.BACKUP_KEY_PREVIOUS_DAYS, CAP_DAYS);
+    const env = process.env as Record<string, string | undefined>;
+    const saved = [env.BACKUP_ENCRYPTION_KEY, env.BACKUP_ENCRYPTION_KEY_PREVIOUS, env.BACKUP_ENCRYPTION_KEY_ROTATED_AT];
+    reset();
+    wipe();
+    seed(5);
+    const before = Buffer.alloc(32, 9);
+    at(Date.parse("2026-12-01T03:00:00Z"));
+    await runBackup({ now: clock, review, store, key: before });
+    const december = marked()[0]?.folder ?? "none";
+    at(Date.parse("2026-12-02T03:00:00Z"));
+    const daily = await runBackup({ now: clock, review, store, key: before });
+    const dailyId = daily.ok ? daily.id : "none";
+    is("a daily copy sealed under the old key, outside the month's folder", [daily.ok, dailyId.startsWith("monthly/")], [true, false]);
+    // The key is rotated the next day; the mark then names a copy the bucket's rule took, and the bucket fills.
+    env.BACKUP_ENCRYPTION_KEY = key.toString("base64");
+    env.BACKUP_ENCRYPTION_KEY_PREVIOUS = before.toString("base64");
+    env.BACKUP_ENCRYPTION_KEY_ROTATED_AT = "2026-12-03";
+    redis.run(["SET", "nl:backup:last-ok", JSON.stringify({ at: clock, set: "dddddddd-dddd-4ddd-8ddd-000000000000", base: { keys: 0, bytes: 0 } })]);
+    for (let i = 0; i < 34; i += 1) filler(i, clock + 1_000 + i);
+    lockMs = BACKUP_BUCKET_LOCK_DAYS * DAY;
+    // 20 February 2027: 79 days after the rotation, the daily copy 80 days old, inside the 120-day bucket rule.
+    at(Date.parse("2027-02-20T03:00:00Z"));
+    const result = await runBackup({ now: clock, review, store, key });
+    is("room made, the copy written, said as last good copy lost (not room_unverified)", [result.ok, result.ok ? result.note : !result.ok && result.reason], [true, "last_good_copy_lost"]);
+    // The daily copy opened under the previous key, so step 1 kept it as a verified set; the prune then takes it, past
+    // the 30-day retention, only after the new copy was verified.
+    is("the prune done after the new copy; the 80-day daily copy gone past the retention", [result.ok && result.prune, objects.has(dailyId)], ["done", false]);
+    is("December's copy, under the old key, whole", inFolder(december).length, 3);
+    [env.BACKUP_ENCRYPTION_KEY, env.BACKUP_ENCRYPTION_KEY_PREVIOUS, env.BACKUP_ENCRYPTION_KEY_ROTATED_AT] = saved;
+    for (const [name, value] of [["BACKUP_ENCRYPTION_KEY", saved[0]], ["BACKUP_ENCRYPTION_KEY_PREVIOUS", saved[1]], ["BACKUP_ENCRYPTION_KEY_ROTATED_AT", saved[2]]] as const) if (value === undefined) delete env[name];
   }
 
   part("The R2 store: monthly names, and a create-only write on a locked name (409)");

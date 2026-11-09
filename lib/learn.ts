@@ -31,6 +31,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { fileUrl } from "@/lib/file-store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendEmailOutcome, serviceMailKnownUnavailable, type SendOutcome } from "@/lib/email";
+import { REFUSED_MAX_SECONDS, countRefusal } from "@/lib/refused-tries";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -947,10 +948,16 @@ export async function sendDripEmails(
         if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;
         const [claimed] = await redisPipeline([["SET", dripMailKey(course.id, student.email, unit.id), "1", "NX", "EX", 400 * 86_400]]);
         if (claimed === null) continue;
-        // Only a certain refusal lets the mark go: an answer that is not known may have delivered it (rule 30).
+        // Only a certain refusal lets the mark go: an answer that is not known may have delivered it (rule 30). A
+        // refusal can come after the store's figure was taken (a stop before the request, a 4xx after it), so it is
+        // counted (lib/refused-tries.ts): at REFUSED_TRIES the mark is kept and no later run takes the figure again.
         const outcome = await sendDripEmail(store, product, unit, student.email, origin);
         if (outcome === "sent") counts.sent += 1;
-        else if (outcome === "refused") await redisPipeline([["DEL", dripMailKey(course.id, student.email, unit.id)]]);
+        else if (outcome === "refused") {
+          const key = dripMailKey(course.id, student.email, unit.id);
+          if (await countRefusal(key, REFUSED_MAX_SECONDS)) await redisPipeline([["DEL", key]]);
+          else console.error("a module-opens email was refused for certain too many times; its mark is kept", course.id, unit.id);
+        }
       }
     }
   }

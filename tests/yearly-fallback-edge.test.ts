@@ -111,7 +111,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (invoiceReadCount === failInvoiceReadAt) return err(500, "api_error");
     return json(invoiceReadCount === yearReplyAt ? replyAs(yearJson(), yearReplyId, yearReplyStatus) : yearJson());
   }
-  // Rule 30 (claude5/switch-price-checked): Stripe answers the price just written, as it does; a bare id is no longer used.
+  // Rule 23 (claude5/switch-price-checked): Stripe answers the price just written, as it does; a bare id is no longer used.
   if (method === "POST" && path === "/prices") return json(priceEcho("price_Month00001", body));
   if (method === "POST" && path === `/invoices/${YEAR}`) {
     if (st.year.status === "void") return err(400, "invalid_request_error");
@@ -375,7 +375,7 @@ async function main(): Promise<void> {
 
   // E. Lock shorter than the calls it covers.
   await reset();
-  // Rule 30 (claude5/switch-price-checked): a checked price is kept under the `:checked` ending, so this is the key emptied.
+  // Rule 23 (claude5/switch-price-checked): a checked price is kept under the `:checked` ending, so this is the key emptied.
   await redisPipeline([["DEL", `nl:tier:price:${ACCOUNT}:${product}:2000:usd:month:checked`]]);
   updateMode = "declined";
   await move();
@@ -386,7 +386,7 @@ async function main(): Promise<void> {
     [stripeCalls, true],
   );
   await reset();
-  // Rule 30 (claude5/switch-price-checked): a checked price is kept under the `:checked` ending, so this is the key emptied.
+  // Rule 23 (claude5/switch-price-checked): a checked price is kept under the `:checked` ending, so this is the key emptied.
   await redisPipeline([["DEL", `nl:tier:price:${ACCOUNT}:${product}:2000:usd:month:checked`]]);
   yearVoidFails = true;
   failInvoiceReadAt = 3;
@@ -412,7 +412,7 @@ async function main(): Promise<void> {
   await reset();
   updateMode = "price-inactive";
   await move();
-  // Rule 30 (claude5/switch-price-checked): a checked price is kept under the `:checked` ending, so this is the key read.
+  // Rule 23 (claude5/switch-price-checked): a checked price is kept under the `:checked` ending, so this is the key read.
   const [cached] = await redisPipeline([["GET", `nl:tier:price:${ACCOUNT}:${product}:2000:usd:month:checked`]]);
   is("G. a monthly price Stripe refuses (archived/deleted) is dropped from the cache so the next try makes a new one", cached, null);
 

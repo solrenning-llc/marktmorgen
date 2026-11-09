@@ -3,7 +3,7 @@
  * same amount, currency, frequency (a recurring price with no count sent is
  * every 1 interval, Stripe's default), tax treatment and metadata, read back
  * from the form. A test's Stripe answers with this so a price made by the code
- * is the price written (rule 30: lib/tier-switch.ts, isTierPrice; lib/yearly-switch.ts;
+ * is the price written (rule 30: lib/tier-switch.ts, isPriceWritten; lib/yearly-switch.ts;
  * lib/pay-what-you-want.ts, isPwywPrice); a test about a wrong reply answers
  * with something else.
  */

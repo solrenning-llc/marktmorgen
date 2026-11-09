@@ -61,7 +61,8 @@ async function main(): Promise<void> {
 
   part("The editor says what to add, in plain words");
   const editor = readFileSync("components/product-editor.tsx", "utf8");
-  is("the refusal has its own sentence", /nothing_to_hand_over: "This has nothing to hand over yet\. Add its file, link or lessons, then publish it\."/.test(editor), true);
+  // Claude 3 on #3432, LOW 1: the sentence fits every kind handsOver refuses (podcast, bundle, call, options).
+is("the refusal has its own sentence, for every kind of product", editor.includes('nothing_to_hand_over: "This has nothing to hand over yet. Add what buyers get (a file or link, its lessons, episodes or products), give each price option one, or sell a call at one price, then publish it."'), true);
 
   done();
 }

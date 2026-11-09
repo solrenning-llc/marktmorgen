@@ -6,6 +6,7 @@ import { launch, setSoon, waitlistViews } from "@/lib/waitlist";
 import { queueRelease, runPreorderReleases, waitingCount } from "@/lib/preorders";
 import { preorderDeps } from "@/lib/purchase-email";
 import { hasContent } from "@/lib/preorder-rules";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * The studio's waitlist switches.
@@ -36,6 +37,10 @@ export async function POST(request: NextRequest) {
   const product = id ? await readListing(store, id) : null;
   if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   if (!store.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  // A product held for a child-safety report (lib/child-safety.ts) is neither marked nor taken off "coming soon"
+  // nor launched: nothing of it goes on sale, no pre-order is handed over, nobody on the list is emailed.
+  const held = await heldRefusal(store, product.id);
+  if (held) return held;
 
   try {
     // Going on sale hands over every pre-order still waiting (lib/preorders.ts),

@@ -23,7 +23,9 @@
  * Unit 2: the hold also marks the product for KEEP_SECONDS, before it is
  * taken off, and while the mark is there no studio route removes, edits,
  * publishes it or changes or deletes any of its files, options, picture,
- * page, episodes or lessons (heldRefusal): the law asks for what was reported to
+ * page, episodes, lessons, lesson captions, license keys, bundle list,
+ * waitlist or buyers' reviews, and no bundle takes it in (heldRefusal,
+ * heldRefusalAmong): the law asks for what was reported to
  * be kept for a year from the report (18 U.S.C. § 2258A(h), as the REPORT Act
  * amended it), and a creator could otherwise delete it from the studio.
  *
@@ -125,6 +127,29 @@ export async function heldRefusal(store: Store, id: string): Promise<Response | 
 }
 
 /**
+ * The same answer for a change that names several products at once, such as
+ * the list of a bundle: 409 `on_hold` when any of them is held, 503 when any
+ * hold cannot be read, null to go on. One read for all of them.
+ */
+export async function heldRefusalAmong(store: Store, ids: readonly string[]): Promise<Response | null> {
+  const productIds = [...new Set(ids.map((id) => productIdFor(store, id)).filter((id): id is string => id !== null))];
+  if (productIds.length === 0) return null;
+  try {
+    const replies = repliesFor(await redisPipeline(productIds.map((id) => ["GET", keepKey(store, id)])), productIds.length);
+    if (!replies) throw new Error("A preservation hold could not be read");
+    let held = false;
+    for (const value of replies) {
+      if (value === "1") held = true;
+      else if (value !== null) throw new Error("A preservation hold could not be read");
+    }
+    return held ? Response.json({ ok: false, error: "on_hold" }, { status: 409 }) : null;
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  }
+}
+
+/**
  * Takes the product a child-safety report points at off the store, without
  * deleting anything. Never throws: an outcome that cannot be confirmed is
  * said as such, and the owner's urgent email asks them to act by hand.
@@ -164,7 +189,7 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
-  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes or course lessons, from the studio. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. People who bought it before may still reach its files through download links: switching that off is not automatic yet.",
+  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist or buyers' reviews, from the studio, and it goes into no bundle. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. People who bought it before may still reach its files through download links: switching that off is not automatic yet.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 8 says.`,

@@ -14,6 +14,7 @@ import { MAX_BUNDLE_ITEMS, bundleOwnerProblem, itemsProblem, parsePick, pickProb
 import { jsonAccess } from "@/lib/studio-route";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { withinLimit } from "@/lib/request-guard";
+import { heldRefusal, heldRefusalAmong } from "@/lib/child-safety";
 
 /** Products one page of the picker shows. */
 const PICKER_PAGE = 20;
@@ -106,6 +107,12 @@ export async function POST(request: NextRequest) {
   const refuse = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
 
   try {
+    // A bundle held for a child-safety report (lib/child-safety.ts) keeps its list, and a held product goes into
+    // no bundle, new or old, so nobody is handed it through one. A hold that cannot be read is not a yes.
+    if (action === "clear" || action === "save") {
+      const held = await heldRefusal(store, text(body.id, 64));
+      if (held) return held;
+    }
     if (action === "clear") {
       const done = await setProductBundle(ref, text(body.id, 64), null);
       return done.ok ? Response.json({ ok: true }) : refuse(done.reason);
@@ -116,6 +123,8 @@ export async function POST(request: NextRequest) {
     const pick = body.pick === null || body.pick === undefined || body.pick === 0 ? null : parsePick(body.pick);
     if (body.pick && pick === null) return refuse("pick");
     if (pickProblem(pick, items.length)) return refuse("pick");
+    const heldItem = await heldRefusalAmong(store, items);
+    if (heldItem) return heldItem;
 
     if (action === "save") {
       const done = await setProductBundle(ref, text(body.id, 64), items, pick);

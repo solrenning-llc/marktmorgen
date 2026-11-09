@@ -156,7 +156,7 @@ async function main(): Promise<void> {
   const now = await current();
   is("its keys, set up and in the pool", [(await listing(keyed)).keys?.source, (await keyCounts(now, await listing(keyed))).left], ["pool", 2]);
   is("the bundle's list", (await listing(bundle)).bundle, [partB, partC]);
-  is("no bundle holds the held product", [(await listing(freeBundle)).bundle ?? null, now.catalog.items.length], [null, 8]);
+  is("no bundle holds the held product", [(await listing(freeBundle)).bundle ?? null, now.catalog.items.length], [null, 9]);
   is("still coming soon", (await waitlistViews(now, [soon]))[soon]?.soon, true);
   const review = await readReview(statsId, reviewed, reviewId);
   is("the review, its photo, shown, no answer", [review?.photo?.path, review?.hidden ?? false, review?.reply ?? null], [photo.path, false, null]);

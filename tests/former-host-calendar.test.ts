@@ -26,6 +26,21 @@
  *     host who has left;
  *   - a host still on the team: written, moved and kept on their calendar as
  *     before.
+ *
+ * Added after the pre-review of 7d5c0179f9 (the commit before said more than
+ * it did: nothing was deleted when the host left and the booking did not
+ * move, and a move the job still had to make was given up with the event
+ * left there):
+ *
+ *   - removed, with no move at all: the five-minute job finds the booking
+ *     (once an hour a store), deletes the event from her calendar, gives the
+ *     booking the store's own meeting or the call's room, and emails the
+ *     buyer the new link; a team that cannot be read changes nothing;
+ *   - a move the job still had to make on her calendar: the event is
+ *     deleted there instead, and the buyer is emailed the new link;
+ *   - a move that leaves the booking with no link at all: the owner's
+ *     "Moved" email asks them to send one, as the confirmation does;
+ *   - a collective call's other hosts are checked with one read of the team.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import type { Product, Store } from "@/lib/store";
@@ -40,6 +55,7 @@ import { beginConsent, finishConsent, takeConsent } from "@/lib/meet-connect";
 import { GOOGLE_HOST_SCOPES } from "@/lib/meet-providers";
 import { hostSync, setHostCalendars, setHostSource } from "@/lib/host-calendar";
 import { retryRecord } from "@/lib/meet-links";
+import { syncMeetings } from "@/lib/call-meetings";
 import { type MeetRecord, callScope, readRecord, writeRecord } from "@/lib/meet-records";
 import { roomOf } from "@/lib/call-rooms";
 import { store as redis } from "./redis-stub";
@@ -63,6 +79,9 @@ const STORE_LINK = linkFor("store");
 const google: { method: string; path: string; token: string; body: string }[] = [];
 const sent: { to: string; subject: string; text: string }[] = [];
 let sessions = 0;
+/** Each checkout's metadata, and the ones paid, by their buyer's address (Stripe lists them as paid). */
+const checkouts = new Map<string, Record<string, string>>();
+const paidBy = new Map<string, string>();
 /** Google answers every write with a server error while this is on. */
 let googleDown = false;
 
@@ -112,21 +131,35 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "POST" && path === "/checkout/sessions") {
     sessions += 1;
     const id = `cs_test_hostcal${String(sessions).padStart(11, "0")}`;
+    const form = new URLSearchParams(String(init?.body ?? ""));
+    const metadata: Record<string, string> = {};
+    for (const [key, value] of form) {
+      const m = /^metadata\[(.+)\]$/.exec(key);
+      if (m) metadata[m[1]] = value;
+    }
+    checkouts.set(id, metadata);
     return answer({ id, url: `https://checkout.stripe.com/c/pay/${id}` });
+  }
+  if (method === "GET" && path === "/checkout/sessions") {
+    const data = [...paidBy].map(([id, email]) => ({ id, status: "complete", payment_status: "paid", metadata: checkouts.get(id), customer_details: { email }, created: 1 }));
+    return answer({ object: "list", data, has_more: false });
   }
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
 // The store's team record (lib/team.ts readTeam) cannot be read while `failTeam` is on; every other command runs as it does.
 let failTeam = false;
+let teamReads = 0;
 const run = redis.pipeline;
 redis.pipeline = async (commands) => {
-  if (failTeam && commands.some((c) => c[0] === "GET" && /^nl:team:[^:]+$/.test(String(c[1])))) throw new Error("Redis request failed with status 503");
+  const team = commands.filter((c) => c[0] === "GET" && /^nl:team:[^:]+$/.test(String(c[1]))).length;
+  teamReads += team;
+  if (failTeam && team) throw new Error("Redis request failed with status 503");
   return run(commands);
 };
 
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
-const weeklyCall = (meet: "google" | null) =>
+const weeklyCall = (meet: "google" | null, room = "https://example.com/room") =>
   ({
     kind: "weekly",
     minutes: 60,
@@ -135,7 +168,7 @@ const weeklyCall = (meet: "google" | null) =>
     noticeHours: 1,
     horizonDays: 30,
     bufferMinutes: 0,
-    room: "https://example.com/room",
+    room,
     video: false,
     meet,
     seats: 1,
@@ -187,14 +220,14 @@ async function connectGoogle(store: Store, email: string, asHost: boolean): Prom
  * Google Calendar for it and writes to her team calendar. With `meet`
  * "google" the store's owner connected the store's own Google too.
  */
-async function teamStore(owner: string, handle: string, account: string, meet: "google" | null): Promise<{ store: Store; call: CallListing }> {
+async function teamStore(owner: string, handle: string, account: string, meet: "google" | null, room?: string): Promise<{ store: Store; call: CallListing }> {
   await claimHandle(owner, handle, `${handle} studio`, "");
   await ensureStatsId(owner);
   await setStripeAccount(owner, account, true);
   await setSubscription(owner, { customerId: `cus_${handle}00001`, subscriptionId: `sub_${handle}00001`, active: true, tier: "pro", period: paidPeriod() });
   const made = await addProduct(owner, "Strategy call", "", "120", null);
   if (!made.ok) throw new Error("no product");
-  await setProductCall(owner, made.product.id, weeklyCall(meet));
+  await setProductCall(owner, made.product.id, weeklyCall(meet, room));
   const store = (await storeForEmail(owner)) as Store;
   if (!(await putMember(store, MAYA, "support"))) throw new Error("no member");
   const call = (await readListing(store, made.product.id)) as CallListing;
@@ -204,7 +237,23 @@ async function teamStore(owner: string, handle: string, account: string, meet: "
   if ((await setHostCalendars(store, MAYA, [MAYA, HOST_CALENDAR], HOST_CALENDAR)) !== null) throw new Error("no calendars");
   if ((await hostSync(store, MAYA, NY, { refresh: true })).state !== "ok") throw new Error("her calendar was not read");
   if (meet === "google" && !(await connectGoogle(store, owner, false))) throw new Error("the owner could not connect");
+  stores.set(handle, store);
   return { store, call };
+}
+
+const stores = new Map<string, Store>();
+/** Every five-minute run of the next hour, so each store's hourly look comes once. */
+async function jobHour(): Promise<void> {
+  const real = Date.now;
+  try {
+    for (let k = 0; k < 12; k += 1) {
+      const at = real() + k * 300_000;
+      Date.now = () => at;
+      await syncMeetings(async (handle) => stores.get(handle) ?? null, at + 60_000, ORIGIN);
+    }
+  } finally {
+    Date.now = real;
+  }
 }
 
 async function booking(store: Store, call: CallListing, start: number, buyer: string) {
@@ -216,7 +265,10 @@ async function booking(store: Store, call: CallListing, start: number, buyer: st
   return {
     session,
     scope,
-    confirm: () => confirmBooking({ store, product: call, session, start, end: start + HOUR, buyerEmail: buyer, buyerTz: NY, cancel: null, origin: ORIGIN }),
+    confirm: () => {
+      paidBy.set(session, buyer);
+      return confirmBooking({ store, product: call, session, start, end: start + HOUR, buyerEmail: buyer, buyerTz: NY, cancel: null, origin: ORIGIN });
+    },
     move: () => moveBooking({ store, product: call, session, booked: { start, end: start + HOUR, email: buyer, buyerTz: NY }, start: start + 2 * HOUR, origin: ORIGIN }),
     link: (at: number) => roomOf(store.callsId, { product: call.id, setup: call.call, session, start: at, end: at + HOUR }),
   };
@@ -231,6 +283,8 @@ const onMaya = (from: number) =>
 /** Writes on any connection but Maya's since `from`. */
 const onStore = (from: number) =>
   google.slice(from).filter((g) => g.token && g.token !== MAYA_TOKEN && g.method !== "GET" && g.path.includes("/calendar/v3/calendars/")).map((g) => g.method);
+const newLink = (from: number, to: string) => sent.slice(from).filter((m) => m.to === to && m.subject.startsWith("New link")).map((m) => m.text);
+const ownerMail = (from: number, owner: string) => sent.slice(from).filter((m) => m.to === owner).map((m) => `${m.subject}\n${m.text}`);
 const buyerMoved = (from: number, buyer: string) => sent.slice(from).find((m) => m.to === buyer && m.subject.startsWith("Moved"))?.text ?? "";
 const due = async (scope: string) => {
   const record = (await readRecord(scope)) as MeetRecord;
@@ -374,10 +428,85 @@ async function main(): Promise<void> {
   await due(i1.scope);
   mark = google.length;
   await retryRecord(isle.store, i1.scope, async () => 1);
-  await retryRecord(isle.store, i2.scope, async () => 1);
-  is("the job makes nothing on her calendar and moves nothing there", onMaya(mark).filter((w) => !w.startsWith("DELETE")), []);
-  is("neither record waits on her any more", [(await readRecord(i1.scope))?.todo, (await readRecord(i2.scope))?.todo], ["", ""]);
+  // Rule 23: the check below was "the job makes nothing on her calendar and moves nothing there", with her DELETEs
+  // filtered out of it, over both records; the job's pending move (i2) is checked on its own after it now.
+  is("the job makes nothing on her calendar for a meeting it could not make", onMaya(mark), []);
+  // Rule 23: was "neither record waits on her any more" over i1 and i2; i2 is checked below.
+  is("and that record waits on her no more", (await readRecord(i1.scope))?.todo, "");
   is("the buyer still has the room given at the confirmation", await i1.link(I1), "https://example.com/room");
+  mark = google.length;
+  sentMark = sent.length;
+  await jobHour();
+  is("a move the job had to make on her calendar: her event is deleted there instead", onMaya(mark), [`DELETE ${HOST_CALENDAR}`]);
+  is("and the booking waits on her no more", [(await readRecord(i2.scope))?.host, (await readRecord(i2.scope))?.todo], ["", ""]);
+  is("the buyer is given the call's room", await i2.link(I2), "https://example.com/room");
+  is(
+    "and is emailed it, told the link they had is no longer the one",
+    newLink(sentMark, "sky@example.com").map((t) => [t.includes("https://example.com/room"), t.includes(HOST_LINK)]),
+    [[true, true]],
+  );
+
+  part("Removed with no move at all: the five-minute job");
+  const fjord = await teamStore("fjord@example.com", "fjord", "acct_1TestFjord0001", "google");
+  const F = weekdayAt(10);
+  const f = await booking(fjord.store, fjord.call, F, "una@example.com");
+  await f.confirm();
+  is("made on her calendar while she was on the team", (await readRecord(f.scope))?.host, hostId(MAYA));
+  await removeMember(fjord.store, MAYA);
+  mark = google.length;
+  sentMark = sent.length;
+  failTeam = true;
+  try {
+    await jobHour();
+  } finally {
+    failTeam = false;
+  }
+  is("a team that cannot be read: nothing is changed", [onMaya(mark), onStore(mark), newLink(sentMark, "una@example.com")], [[], [], []]);
+  mark = google.length;
+  sentMark = sent.length;
+  await jobHour();
+  is("her event is deleted from her calendar", onMaya(mark), [`DELETE ${HOST_CALENDAR}`]);
+  is("the store's own meeting takes its place", [onStore(mark), (await readRecord(f.scope))?.host, await f.link(F)], [["POST"], "", STORE_LINK]);
+  is(
+    "the buyer is emailed the new link, and told the old one is no longer the one",
+    newLink(sentMark, "una@example.com").map((t) => [t.includes(STORE_LINK), t.includes(HOST_LINK)]),
+    [[true, true]],
+  );
+  is("the owner is told why", ownerMail(sentMark, "fjord@example.com").some((t) => t.includes("no longer on your team") && t.includes(STORE_LINK)), true);
+  is("nothing reaches the host who left", sent.slice(sentMark).some((m) => m.to === MAYA), false);
+  mark = google.length;
+  sentMark = sent.length;
+  await jobHour();
+  is("done once: the next hour changes nothing and emails nobody", [onMaya(mark), onStore(mark), sent.length - sentMark], [[], [], 0]);
+
+  part("A move that leaves the booking with no link at all");
+  const mere = await teamStore("mere@example.com", "mere", "acct_1TestMere00001", null, "");
+  const M = weekdayAt(11);
+  const m = await booking(mere.store, mere.call, M, "jo@example.com");
+  await m.confirm();
+  await removeMember(mere.store, MAYA);
+  sentMark = sent.length;
+  is("the move goes through", (await m.move()).ok, true);
+  is("the owner's Moved email asks them to send a link", ownerMail(sentMark, "mere@example.com").some((t) => t.startsWith("Moved") && t.includes("You have not set a meeting link, so send them one")), true);
+
+  part("A collective call's hosts are checked with one read of the team");
+  const reads = async (collective: boolean, n: number) => {
+    const owner = `${collective ? "col" : "rr"}${n}@example.com`;
+    const handle = `${collective ? "col" : "rr"}team${n}`;
+    const { store, call } = await teamStore(owner, handle, `acct_1Test${handle.padEnd(10, "0").slice(0, 10)}`, null);
+    if (collective) {
+      for (const other of ["pat@example.com", "rio@example.com"]) await putMember(store, other, "support");
+      await writeTeam(store, call.id, { mode: "collective", hosts: [host(MAYA), host("pat@example.com"), host("rio@example.com")], createdAt: "2026-10-06T00:00:00.000Z" });
+    }
+    const b = await booking(store, call, weekdayAt(12 + n), `buyer${n}@example.com`);
+    const before = teamReads;
+    await b.confirm();
+    return { reads: teamReads - before, host: (await readRecord(b.scope))?.host };
+  };
+  const one = await reads(false, 0);
+  const three = await reads(true, 1);
+  is("both made on her calendar", [one.host, three.host], [hostId(MAYA), hostId(MAYA)]);
+  is("three hosts read the team as often as one", three.reads, one.reads);
 
   done();
 }

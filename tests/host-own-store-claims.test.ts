@@ -207,6 +207,25 @@ async function main(): Promise<void> {
   } finally {
     Date.now = realNow;
   }
+
+  // Claude 6's money review of #3490 (LOW 1): a group call whose seats were all refunded kept its shared claim on her
+  // until the call was over, and her own store read it as another store's: that time was not offered there again.
+  part("A group time whose every seat was refunded is offered again in her own store");
+  const X = weekdayAt(9, 960);
+  const only = await hold(lanternNow, group, X);
+  if (!only.ok) throw new Error("no hold");
+  listed.push(paidRow(only.session, lanternNow, group, X, false));
+  await confirmBooking({ store: lanternNow, product: group, session: only.session, start: X, end: X + HOUR, buyerEmail: "buyer@example.com", buyerTz: NY, due: null, cancel: null, origin: "https://marktmorgen.com" });
+  is("paid: the group's claim on her is kept for good", (await mayaClaims()).filter((c) => c.start === X), [{ start: X, held: false }]);
+  listed.length = 0;
+  listed.push(paidRow(only.session, lanternNow, group, X, true));
+  is("refunded in full, no seat left: her own store offers that group time again", await offered(lanternNow, group, X), true);
+  is("her other call still does not take that hour", await offered(lanternNow, lantern.product, X), false);
+  is("Harbor's team still does not offer her then (the shared claim stays, failing closed)", await offered(harbor.store, harbor.product, X), false);
+  const resold = await hold(lanternNow, group, X);
+  is("a new buyer holds a seat", resold.ok, true);
+  is("still one claim on her for that hour", (await mayaClaims()).filter((c) => c.start === X).length, 1);
+  listed.length = 0;
   done();
 }
 

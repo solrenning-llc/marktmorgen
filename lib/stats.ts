@@ -28,6 +28,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
  */
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
 import { DISPUTE_TAKES, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
+import { disputeStatusKnown } from "@/lib/dispute-statuses";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
 import { type DiscountRow, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
@@ -1446,6 +1447,15 @@ const DISPUTE_PAGES = 3;
  * The disputes opened on the creator's account since `since` (seconds) that
  * the bank is holding or the buyer won. At most DISPUTE_PAGES pages of a
  * hundred; `partial` when there were more.
+ *
+ * A dispute whose status is not one Stripe gives (DISPUTE_STATUSES,
+ * lib/dispute-statuses.ts, the table #3323 adds for the doors), or one that
+ * takes the money with an amount that is not a whole number of cents, cannot
+ * be placed: it is never skipped as if it took nothing, it makes the reading
+ * `partial`, so the page shows disputes as not read and what was kept has no
+ * figure (CX-123 rule 24: unknown is never zero). Which known statuses take
+ * the money is DISPUTE_TAKES (lib/retained-revenue.ts; `prevented` joins it
+ * in #3321).
  */
 async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES): Promise<{ rows: DisputeRow[]; partial: boolean }> {
   const out: DisputeRow[] = [];
@@ -1460,10 +1470,14 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (typeof row.status !== "string" || !DISPUTE_TAKES.has(row.status)) continue;
+      // A status Stripe does not give: the dispute may hold money, so the reading is incomplete, never short of it.
+      if (!disputeStatusKnown(row.status)) { partial = true; continue; }
+      if (!DISPUTE_TAKES.has(row.status)) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
+      // A taking dispute's amount is a whole number of cents; anything else is an amount nobody knows, never zero.
+      if (!Number.isSafeInteger(row.amount) || (row.amount as number) < 0) { partial = true; continue; }
+      const cents = row.amount as number;
       if (!cents) continue;
       const currency = currencyOf(row);
       if (!currency) partial = true;

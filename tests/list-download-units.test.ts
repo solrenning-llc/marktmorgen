@@ -229,6 +229,59 @@ async function main(): Promise<void> {
     }
   }
 
+  part("A list download reads the fields' values of the people on the list only, and pays for every byte it reads (second cost review of #3354)");
+  {
+    redis.clear();
+    // No contact on the list, and the store's MAX_CRM_FIELDS fields each holding a value at its cap for 6,000 people
+    // who are not on it: values outlive a contact's removal, so these are bounded only by the store's data room.
+    const { store, session } = await storeWith("r31-values@example.com", "rthirtyonevalues", 0);
+    const fields = Array.from({ length: MAX_CRM_FIELDS }, (_, i) => ({ id: `val${String(i).padStart(3, "0")}`, name: `Value ${i}`, type: "text" as const, options: [] }));
+    await writeFields(store.statsId!, fields);
+    for (let i = 0; i < 6_000; i += 500) {
+      const page = Array.from({ length: 500 }, (_, k) => i + k);
+      await redis.pipeline(fields.map((f) => ["HSET", `nl:crm:v:${store.statsId}:${f.id}`, ...page.flatMap((n) => [personKey(store.statsId!, `gone${n}@example.com`), "v".repeat(MAX_FIELD_VALUE)])]));
+    }
+    const got = await download(leadsGet, "/api/store/leads", store, session);
+    console.log(`0 contacts, ${MAX_CRM_FIELDS} fields x 6,000 people off the list: status ${got.status}; commands ${got.commands}; bytes read ${got.bytes}; units ${got.taken} ($${(got.taken * UNIT_COST.studio).toFixed(6)}) for $${costOf(got.commands, got.bytes, got.sent).toFixed(6)}`);
+    is("(setup) answered with the file", got.status, 200);
+    is("the values of people who are not on the list are never read", got.bytes < 100_000, true);
+    is("the studio units it takes pay for every byte it read and sent", got.taken * UNIT_COST.studio >= costOf(got.commands, got.bytes, got.sent), true);
+
+    // Control: a person on the list still has their values in the file.
+    await importContactRows(store.listId!, [{ email: "kept@example.com", name: "Kept Person", tags: [], consent: "agreed" as const }], store);
+    await redis.pipeline([["HSET", `nl:crm:v:${store.statsId}:${fields[3].id}`, personKey(store.statsId!, "kept@example.com"), "kept-value-3"]]);
+    const kept = await download(leadsGet, "/api/store/leads", store, session);
+    is("control: a person on the list keeps their value in the file", [kept.status, kept.text.includes("kept@example.com"), kept.text.includes("kept-value-3")], [200, true, true]);
+
+    // Rule 24: the values or the fields read in a shape Redis does not give are unknown, never a file with them left out.
+    const oddValues = await download(leadsGet, "/api/store/leads", store, session, (c) => (String(c[1]).startsWith(`nl:crm:v:${store.statsId}:`) ? "odd" : undefined));
+    is("the fields' values read in an odd shape: refused, never a file with the values left empty", [oddValues.status, oddValues.text.includes("kept@example.com")], [502, false]);
+    const oddFields = await download(leadsGet, "/api/store/leads", store, session, (c) => (c[0] === "GET" && c[1] === `nl:crm:fields:${store.statsId}` ? 42 : undefined));
+    is("the fields read in an odd shape: refused, never a file without their columns", [oddFields.status, oddFields.text.includes("kept@example.com")], [502, false]);
+  }
+
+  part("A download never takes past the studio figure: each read is held before it is made (second cost review of #3354)");
+  for (const [name, route, path, handle] of [
+    ["agreed-only file", leadsGet, "/api/store/leads?who=agreed", "rthirtyoneexacta"],
+    ["buyers audience", audienceGet, "/api/store/audience", "rthirtyoneexactb"],
+    ["whole file", leadsGet, "/api/store/leads", "rthirtyoneexactc"],
+  ] as const) {
+    redis.clear();
+    // A list at every cap, with exactly what is held first left in the studio figure.
+    const capped = await storeAtCaps(`${handle}@example.com`, handle, N);
+    const limit = STORE_ALLOWANCES.creator.studio;
+    await forceAllowance(capped.store, "studio", limit - listDownloadHeld(N));
+    const got = await download(route, path, capped.store, capped.session);
+    const after = await allowanceUsed(capped.store, "studio");
+    console.log(`${name}, ${listDownloadHeld(N)} left: status ${got.status}; bytes read ${got.bytes}; taken ${got.taken}; used ${after} of ${limit}; ${got.status === 200 ? "(a file)" : got.text}`);
+    is(`${name}: never past the studio figure`, after <= limit, true);
+    is(
+      `${name}: a file only when its units pay for every byte read and sent; otherwise refused as too many, saying what is left, with nothing of the list sent`,
+      got.status === 200 ? got.taken * UNIT_COST.studio >= costOf(got.commands, got.bytes, got.sent) : [got.status, /left/.test(got.text), got.text.includes("@example.com")].join(),
+      got.status === 200 ? true : "429,true,false",
+    );
+  }
+
   part("Control: an empty list still downloads, for a unit or two");
   redis.clear();
   const empty = await storeWith("r31-empty@example.com", "rthirtyoneempty", 0);

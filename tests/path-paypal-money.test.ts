@@ -13,7 +13,10 @@
  *     L3): such a sale is taken off whole, since the amount kept is not read.
  * Refunds PayPal confirmed in full are taken off, matched by the capture; a
  * refund of a sale the Path did not count is never taken off another sale
- * (L2). A reply off its shape is unknown: the money is null, never "no
+ * (L2). A sale the refund watch could not read at its last look (PayPal
+ * refused it, 403 or 401, because the seller took the permission back inside
+ * PayPal; PayPal down; an answer without a status) leaves the count until the
+ * watch reads PayPal's answer again (Claude 5's N1b). A reply off its shape is unknown: the money is null, never "no
  * refunds" (M1), and a sales read off its shape is partial (L1).
  * Synthetic store, orders, Stripe and PayPal stand-ins, in-memory Redis.
  */
@@ -41,6 +44,8 @@ const now = Math.floor(Date.now() / 1000);
 
 /** PayPal's word on each capture (GET /v2/payments/captures/:id), and what a capture POST answers. */
 const captureStatus = new Map<string, string>();
+/** Captures PayPal refuses to show, by the HTTP status it answers (403 or 401: the seller took the permission back). */
+const captureRefused = new Map<string, number>();
 let sessions: Record<string, unknown>[] = [];
 const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -64,6 +69,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     });
   }
   const cap = /^\/v2\/payments\/captures\/([A-Za-z0-9-]+)$/.exec(url.pathname)?.[1];
+  if (cap && method === "GET" && captureRefused.has(cap)) {
+    const code = captureRefused.get(cap)!;
+    return answer(code === 200 ? { id: cap } : { name: code === 401 ? "AUTHENTICATION_FAILURE" : code === 403 ? "NOT_AUTHORIZED" : "INTERNAL_SERVER_ERROR" }, code);
+  }
   if (cap && method === "GET") return answer({ id: cap, status: captureStatus.get(cap) ?? "COMPLETED" });
   return answer({ name: "RESOURCE_NOT_FOUND" }, 404);
 }) as typeof fetch;
@@ -92,6 +101,7 @@ async function setup(): Promise<{ store: Store; statsId: string }> {
   redis.clear();
   partnerOn();
   captureStatus.clear();
+  captureRefused.clear();
   sessions = [];
   bend = null;
   await claimHandle(OWNER, "paypalpath", "PayPal Path", "");
@@ -123,6 +133,7 @@ async function main(): Promise<void> {
     is("a record from before the API was written on it: not counted", soldOf(payPalSale(paid("stats", 1, 2900, now, { live: undefined })), SELLER).live, null);
     is("PayPal said it was refunded in part: not counted", soldOf(payPalSale(paid("stats", 1, 2900, now, { takenOff: "PARTIALLY_REFUNDED" })), SELLER).live, null);
     is("PayPal said it was reversed: not counted", soldOf(payPalSale(paid("stats", 1, 2900, now, { takenOff: "REVERSED" })), SELLER).live, null);
+    is("the refund watch could not read it at its last look: not counted", soldOf(payPalSale(paid("stats", 1, 2900, now, { blind: now })), SELLER).live, null);
     is("a Stripe sale keeps its own livemode", soldOf({ cents: 1000, currency: "usd", paymentIntent: "pi_1", row: { livemode: false } }, SELLER).live, false);
   }
 
@@ -207,6 +218,56 @@ async function main(): Promise<void> {
     is("the platform's PayPal credentials taken away: only the Stripe sale", await money(store), [1, 1000]);
     partnerOn();
     is("all back: counted again", await money(store), [3, 5400]);
+  }
+
+  part("N1b: the refund watch on but refused by PayPal: the sale it cannot see leaves the count");
+  {
+    let { store, statsId } = await setup();
+    sessions = [{ id: "cs_live_pp000003", object: "checkout.session", status: "complete", payment_status: "paid", amount_total: 1000, currency: "usd", created: now - 400, livemode: true, payment_intent: "pi_pp00000003", metadata: { store: "paypalpath", product: "p1" } }];
+    const look = async (...ns: number[]) => {
+      for (const n of ns) redis.run(["ZADD", `nl:ppsell:watch:${statsId}`, "1", order(n)]);
+      await watchPayPal(store, Date.now() + 60_000, { handOver: async () => undefined, dropStart: async () => undefined });
+    };
+    is("before: the Stripe sale and two PayPal sales", await money(store), [3, 5400]);
+    // The seller takes Marktmorgen's permission back inside PayPal, then refunds the 2900 sale there.
+    captureRefused.set("CAPTURE1", 403);
+    captureStatus.set("CAPTURE1", "REFUNDED");
+    for (let i = 0; i < 3; i += 1) await look(1);
+    is("403 from PayPal: the 2900 sale leaves the count, the Stripe sale and the 1500 one stay", await money(store), [2, 2500]);
+    is("no refund written for it, and it stays watched", [redis.run(["ZSCORE", `nl:ppsell:refunded:${statsId}`, order(1)]), redis.run(["ZSCORE", `nl:ppsell:watch:${statsId}`, order(1)]) !== null], [null, true]);
+    captureRefused.set("CAPTURE3", 401);
+    await look(3);
+    is("401 from PayPal: the 1500 sale leaves too, only the Stripe sale", await money(store), [1, 1000]);
+    // The permission given back: PayPal answers again, the refund in full is seen, the 1500 sale counts again.
+    captureRefused.clear();
+    await look(1, 3);
+    is("PayPal answers again: the refunded sale stays off, the other is counted again", await money(store), [2, 2500]);
+    is("the refund in full is written down", redis.run(["ZSCORE", `nl:ppsell:refunded:${statsId}`, order(1)]) !== null, true);
+    const third = JSON.parse(String(redis.run(["GET", `nl:ppsell:paid:${order(3)}`]))) as Record<string, unknown>;
+    is("the record of the one seen again carries no mark", third.blind, undefined);
+
+    ({ store, statsId } = await setup());
+    sessions = [];
+    captureRefused.set("CAPTURE1", 500);
+    await look(1);
+    is("PayPal down: the sale it cannot see is not counted", await money(store), [1, 1500]);
+    captureRefused.set("CAPTURE1", 200);
+    await look(1);
+    is("an answer without a status: still not counted", await money(store), [1, 1500]);
+    captureRefused.clear();
+    await look(1);
+    is("completed again: counted", await money(store), [2, 4400]);
+
+    // The write that would count it again answers off its shape: the sale stays out, looked at again in an hour.
+    ({ store, statsId } = await setup());
+    captureRefused.set("CAPTURE1", 403);
+    await look(1);
+    captureRefused.clear();
+    bend = bendFirst("nl:ppsell:paid:", "SET", () => ["x"]);
+    await look(1);
+    bend = null;
+    const score = Number(redis.run(["ZSCORE", `nl:ppsell:watch:${statsId}`, order(1)]));
+    is("the clearing write unknown: still not counted, asked again within the hour", [await money(store), score > now && score <= now + 3700], [[1, 1500], true]);
   }
 
   part("L2: a PayPal refund of a sale the Path did not count is never taken off another sale");

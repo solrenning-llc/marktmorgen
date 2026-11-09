@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { settlePlans } from "@/lib/plans";
+import { PLANS_PER_RUN, settlePlans } from "@/lib/plans";
 import { isBillingConfigured } from "@/lib/billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
 import { syncPlanDisputes } from "@/lib/plan-disputes";
@@ -18,6 +18,13 @@ import { sendWinBacks } from "@/lib/winback-send";
 import { ensureDemoStore } from "@/lib/demo-seed";
 
 export const maxDuration = 60;
+
+/**
+ * The plans' own share of a run (PLAN_SETTLE_RUN.runMs in tests/plan-cost-registry.ts): first, as they are money a
+ * buyer agreed to, and never all of it, so the disputes and the stores' subscriptions after them still run. Plans
+ * not reached wait in their lines for the next run.
+ */
+const PLANS_MS = 25_000;
 
 /**
  * Run on a schedule by Vercel, once a day, for the jobs that keep money
@@ -74,7 +81,7 @@ async function run(request: NextRequest): Promise<Response> {
   try {
     let plans = null;
     try {
-      plans = await settlePlans();
+      plans = await settlePlans(PLANS_PER_RUN, Math.min(deadline, Date.now() + PLANS_MS));
     } catch (error) {
       console.error("settling payment plans failed", error);
     }

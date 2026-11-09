@@ -790,7 +790,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pause:last:@lib/plan-pause.ts": { what: "When a break was last taken", parts: [capped(KEY, "One a store.")] },
   "nl:plan:ended@lib/plan-standing.ts": company("Stores whose plan ended, by the day", "One sorted set for every store."),
   "nl:plans:pending@lib/plans.ts": company("Plans being started", "One set, minutes."),
-  "nl:plans:retry@lib/plans.ts": company("Plans tried and not settled yet", "One sorted set; a plan leaves it once given its end, or two days after an unpaid checkout."),
+  // Review of claude5/plans-stuck-entries: a plan stuck at 403 never left, and one ending sooner left at once; the text now says how each leaves (rule 23).
+  "nl:plans:retry@lib/plans.ts": company("Plans tried and not settled yet", "One sorted set, scored by when each is due; a plan leaves it once given its end, two days after an unpaid checkout, once Stripe has canceled a plan the buyer stopped sooner (or its own end has come with that end in place), or after PLAN_GIVE_UP_DAYS (30) with no good answer, then marked in nl:plans:given-up."),
+  "nl:plans:given-up@lib/plans.ts": company("Plans let go after 30 days with no good answer from Stripe", "One sorted set, at most GIVEN_UP_KEPT (1,000) plans, the oldest dropped as each is added."),
   "nl:share:stores@lib/platform-share.ts": company("Stores whose sales pay a share", "One set for every store."),
   "nl:pod:by:@lib/podcast-access.ts": { what: "A listener's access to a private podcast", parts: [item(MARK, "One a buyer.", "membership")] },
   "nl:pod:n:@lib/podcast-access.ts": short("A feed's reads a day", "request", 2, 128, REQ("page")),

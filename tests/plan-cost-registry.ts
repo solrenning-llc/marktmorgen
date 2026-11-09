@@ -708,6 +708,19 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  * Why the retry is the five-minute job's, not a plan's: NOT_A_COST.HAND_OVER_BATCH.
  */
 export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4 } as const;
+/**
+ * The daily plans job (lib/plans.ts, settlePlans, from app/api/cron/plans/route.ts), per run, at the most:
+ * - readCommandsPerRun: one pipeline reads both lines (SRANDMEMBER of the new plans, ZRANGEBYSCORE ... LIMIT of
+ *   the plans tried and due), each bounded by plansPerRun;
+ * - plansPerRun: PLANS_PER_RUN plans tried, none started after the run's deadline;
+ * - ownCommandsPerPlanTried: settled or gone, SREM and ZREM; kept, ZADD and then SREM; watched for an earlier end,
+ *   ZADD, SREM and ZREM; let go, ZADD and ZREMRANGEBYRANK of the mark (GIVEN_UP_KEPT), then SREM and ZREM;
+ * - stripeCallsPerPlanTried: the checkout, the subscription and at most one update;
+ * - runMs: the share of the run the route gives the plans (PLANS_MS), every request given up by then.
+ * A plan with no good answer is tried at growing intervals for PLAN_GIVE_UP_DAYS, so a stuck one costs about ten
+ * tries in all, not one a day. Why this is the company's, not a plan's: NOT_A_COST.PLANS_PER_RUN.
+ */
+export const PLAN_SETTLE_RUN = { readCommandsPerRun: 2, plansPerRun: 200, ownCommandsPerPlanTried: 4, stripeCallsPerPlanTried: 3, runMs: 25_000 } as const;
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**
  * A narrowed email's reading of the store's buyers made by the scheduled job
@@ -1626,6 +1639,7 @@ export const NOT_A_COST: Record<string, string> = {
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   MAX_PAGES_PER_STORE: "Pages of Stripe sessions the five-minute job reads per store per run: a scheduled job, bounded by its schedule (a company fixed cost).",
+  PLANS_PER_RUN: "Payment plans the daily plans job tries in one run (lib/plans.ts, settlePlans; app/api/cron/plans/route.ts): two read commands a run and, for each plan tried, at most four Redis commands of its own and three calls to the creator's Stripe account, inside a 25-second share of the run (PLAN_SETTLE_RUN, held by tests/payment-plan-stuck.test.ts). A plan with no good answer is tried at growing intervals and let go after PLAN_GIVE_UP_DAYS, its mark kept among the newest GIVEN_UP_KEPT. A scheduled job that keeps buyers from being charged past their last payment, bounded by its schedule and the limit: a company fixed cost, not a plan's allowance; Stripe bills no API call, and its Redis commands are not yet a line of lib/llc-fixed-costs.ts, so they are not certified, never zero.",
   HAND_OVER_BATCH: "PayPal orders still owed their hand-over that the five-minute job's sweep of a store tries again in one run (lib/paypal-delivery.ts, handOverAgain; #2909): one ZRANGEBYSCORE of the list a store with PayPal a run, then for each order tried at most four commands of its own (GET of the paid record, ZSCORE of the refund mark, at most two ZREM or ZADD of the list) besides the hand-over's own work, which is the order's (line orders): at most 1 + HAND_OVER_BATCH x 4 commands of its own a store a run, and at most HAND_OVER_BATCH hand-overs tried, each order at most once a run (PAYPAL_HAND_OVER_RETRY, held by tests/paypal-handover-cost.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   STRIPE_LOOKUPS_PER_STORE: "Calls to the creator's Stripe account the five-minute job makes per store per run to tell whose a refunded charge is and to read a canceled member's address (lib/webhooks.ts, watchStore): a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call, and a membership's charge (three calls) is taken from the same ten, so no run asks more than before.",
   DEMO_SESSIONS_PER_DAY: "Sessions the whole site may open in a day, the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",

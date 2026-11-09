@@ -83,7 +83,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
   "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-withdraw:", "nl:plan:closing:",
-  "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:lock", "nl:plans:pending", "nl:plans:retry",
+  "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:given-up", "nl:plans:lock", "nl:plans:pending", "nl:plans:retry",
   "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
   "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:sales:",
   "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
@@ -352,7 +352,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // Deleted stores whose webhooks, keys and assistant notes are tried again (lib/store-forget-retry.ts): the line, and each month's counts.
   "nl:forget:q": C, "nl:forget:kept": C, "nl:forget:month:": Cr(400),
   "nl:plan-disputes:seen": C, "nl:plan-refund:": C, "nl:plan-refund:ending": C, "nl:plan-withdraw:": Cr(400), "nl:plan:closing:": Cr(400), "nl:plan:closing:after": C, "nl:plan:ended": I, "nl:plan:paying": I,
-  "nl:plans:lock": C, "nl:plans:pending": I, "nl:plans:retry": I,
+  "nl:plans:given-up": C, "nl:plans:lock": C, "nl:plans:pending": I, "nl:plans:retry": I,
   "nl:pod:": E, "nl:pod:by:": E, "nl:pod:n:": X(2), "nl:pod:ok:": E, "nl:pod:t:": T("nl:pod:by:"),
   "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,

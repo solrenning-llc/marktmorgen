@@ -13,8 +13,9 @@
  *   - a checkout still open waits; one never paid, or that is neither a plan
  *     nor a membership with an end, is let go without any change;
  *   - the job settles each pending plan once and keeps an open one for two days;
- *   - an end already set counts only when it comes no later than the plan's own:
- *     a later one (set by hand, or left from before) is brought back to it;
+ *   - an end already set counts only when it is the plan's own: a later one (set
+ *     by hand, or left from before) is brought back to it; an earlier one (the
+ *     buyer stopped it) is kept and watched (tests/payment-plan-stuck.test.ts);
  *   - plans the job cannot settle (an account that answers 403) never keep a
  *     new plan from its end: they wait in a line of their own, taken in turn,
  *     and no run reads Stripe for more than its limit.
@@ -125,6 +126,8 @@ async function main(): Promise<void> {
   // The buyer stopped it after the second payment: ending sooner never charges more, so it is left as it is.
   subscriptions.sub_soon00000001 = { id: "sub_soon00000001", status: "active", billing_cycle_anchor: ANCHOR, cancel_at: addPeriods(ANCHOR, "month", 2) };
   const before9 = updates.length;
+  // On this clock the plan's own end (April 2026) has come with the earlier end in place, so it is settled; before
+  // its own end an earlier one is "early" and watched (tests/payment-plan-stuck.test.ts, P2).
   is("the plan's own end, and an earlier one, are kept", [await finishPlan(ACCOUNT, "cs_test_same00000001"), await finishPlan(ACCOUNT, "cs_test_soon00000001"), updates.length - before9], ["done", "done", 0]);
 
   part("Plans that cannot be settled never keep a new one from its end");
@@ -159,6 +162,9 @@ async function main(): Promise<void> {
   nextDay();
   await settlePlans();
   is("taken in turn: over two more runs every stuck plan is tried again", stuck.filter((id) => !reads[id]).length, 0);
+  // Review of claude5/plans-stuck-entries (rule 23): stuck plans now wait longer each time, so one more day passes
+  // first and every one of the 250 is due again; the share asserted below is unchanged.
+  nextDay();
   const fresh = Array.from({ length: 300 }, (_, i) => `cs_test_open${String(i).padStart(9, "0")}`);
   for (const id of fresh) {
     sessions[id] = checkout(id, { kind: "plan", plan_payments: "3", plan_interval: "month" }, { status: "open", subscription: null });

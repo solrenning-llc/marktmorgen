@@ -856,6 +856,16 @@ export function hourCost(): number {
   return gigabytes * STREAM_DELIVERY_PER_GB;
 }
 
+/**
+ * What holding a lesson token's playback (lib/watch.ts, holdPlayback; 9 November 2026) adds to a lesson page with a
+ * video, at its dearest path, over what it sent before: the measured figure, now read with the hold (GET, as before),
+ * the units added and counted (ZADD, ZCARD), the line joined (ZADD NX, as the opened mark's step did) and an excess
+ * given back (ZREM), with the opened mark no longer written (SET): six commands against four, in the same three round
+ * trips (the video's record, the hold, the give-back; before: the figure, the record, the mark). A lesson page is a
+ * buyer's later page, at most PAGES_PER_VISIT - 1 a visit.
+ */
+export const VIDEO_HOLD_COMMANDS = 2;
+
 export type Source = { file: string; names: string[] };
 export type CostLine = {
   id: string;
@@ -905,12 +915,15 @@ export const COST_LINES: CostLine[] = [
   {
     id: "video",
     feature: "Lesson video watched",
-    monthlyUsd: (tier) => PAID_VIDEO_HOURS[tier] * hourCost(),
+    monthlyUsd: (tier) => PAID_VIDEO_HOURS[tier] * hourCost() + VISITS_INCLUDED[tier] * (PAGES_PER_VISIT - 1) * VIDEO_HOLD_COMMANDS * COMMAND,
     sources: [
       { file: "lib/video-admission-rules.ts", names: ["PAID_VIDEO_HOURS"] },
-      { file: "lib/watch-rules.ts", names: ["VIDEO_HOURS_INCLUDED", "VIDEO_SECONDS_INCLUDED", "VIDEO_CENTS_PER_HOUR_OVER"] },
+      { file: "lib/watch-rules.ts", names: ["VIDEO_HOURS_INCLUDED", "VIDEO_SECONDS_INCLUDED", "VIDEO_CENTS_PER_HOUR_OVER", "HOLD_UNIT_SECONDS", "HOLD_MIN_SECONDS", "HOLD_SETTLE_MS"] },
+      { file: "lib/watch.ts", names: ["holdPlayback", "ZREMRANGEBYSCORE", "ZCARD"] },
+      { file: "lib/learn.ts", names: ["holdPlayback(folder, window, limit, lessonTokenSeconds(record.seconds))"] },
+      { file: "lib/stream.ts", names: ["life ? await life(record) : PLAYER_SECONDS"] },
     ],
-    basis: "Every admitted hour watched. The legacy invoice line past 400 hours is never reached: admission stops at the plan's hours (tests/plan-cost-registry.test.ts holds it below).",
+    basis: "Every hour of the plan watched, and no more: since 9 November 2026 (audit of spending ceilings, finding 1) a lesson's player token, which nothing takes back, is signed only for the playback held for it against the window's room (the plan's seconds less those measured less every unit still held, read and held in one step), and the hourly reading gives back what a token held once it ran out an interval before (lib/watch.ts, holdPlayback; tests/video-hours-ceiling.test.ts). Before, a token of four hours was signed whenever the hourly figure was under the plan: 200 opens with one second left were 800 hours. So the legacy invoice line past 400 hours is never reached (tests/plan-cost-registry.test.ts holds it below). The hold's own commands, VIDEO_HOLD_COMMANDS more than a lesson page sent before at its dearest path, are priced on each later page a visit may have. Not verified, and open: whether the service stops a video already playing when its token runs out (either way the token is held for its whole life), how late its watched count can be (a unit goes back an interval after its token ran out, HOLD_SETTLE_MS), and one token's link shared with others watching at once, which only the service could refuse; a student's day is one visit however many lessons are opened (the visits line's convention).",
   },
   {
     id: "visits",

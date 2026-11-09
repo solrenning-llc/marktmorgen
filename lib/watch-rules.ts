@@ -75,3 +75,14 @@ export const SMALLEST_LINE_CENTS = 100;
 /** How often a store whose video is being watched is measured, and how soon after a lesson is opened. */
 export const MEASURE_EVERY_MS = 60 * 60 * 1000;
 export const MEASURE_SOON_MS = 10 * 60 * 1000;
+
+/**
+ * The playback held for a lesson's player token before it is signed (lib/watch.ts, holdPlayback): in units of
+ * HOLD_UNIT_SECONDS; never a token under HOLD_MIN_SECONDS (less left than that, the video is paused); a unit goes
+ * back at the first reading made HOLD_SETTLE_MS or more after its token ran out, one reading's interval.
+ */
+export const HOLD_UNIT_SECONDS = 5 * 60;
+export const HOLD_MIN_SECONDS = 60;
+export const HOLD_SETTLE_MS = MEASURE_EVERY_MS;
+/** The longest token a hold is asked for (lib/stream.ts PLAYER_SECONDS, four hours), in units: one opening's most. */
+export const HOLD_UNITS_MOST = (4 * 60 * 60) / HOLD_UNIT_SECONDS;

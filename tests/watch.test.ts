@@ -35,7 +35,7 @@ import { lessonVideo } from "@/lib/learn";
 import { claimHandle, setSubscription, storeFolder } from "@/lib/store";
 import { PLAYER_SECONDS, streamWatched } from "@/lib/stream";
 import { STREAM_API_ORIGIN, streamPath } from "@/lib/stream-rules";
-import { measure, measureDue, opened, watchedFolders, watchedIn } from "@/lib/watch";
+import { HOLD_MIN_SECONDS, measure, measureDue, opened, watchedFolders, watchedIn } from "@/lib/watch";
 import { firstWord, settle, settleAll } from "@/lib/watch-billing";
 import {
   MEASURE_EVERY_MS,
@@ -291,7 +291,9 @@ async function main(): Promise<void> {
   ]);
   const file = { pathname: lessonPath, name: "lesson.mp4", bytes: 1000, contentType: "video/mp4", addedAt: new Date(0).toISOString() };
   const thisMonth = monthKey();
-  await watched(dee.folder, thisMonth, VIDEO_SECONDS_INCLUDED - 1);
+  // Rule 23 (9 November 2026): was VIDEO_SECONDS_INCLUDED - 1. A token is good only for the time held for it
+  // (lib/watch.ts, holdPlayback), at least HOLD_MIN_SECONDS: a minute inside the hours plays.
+  await watched(dee.folder, thisMonth, VIDEO_SECONDS_INCLUDED - HOLD_MIN_SECONDS);
   is("inside the hours its video plays", (await lessonVideo(file, VIDEO_SECONDS_INCLUDED))?.kind, "stream");
   is("and the store is put in line to be read", typeof (await redis.pipeline([["ZSCORE", "nl:watch:due", dee.folder]]))[0], "string");
   await watched(dee.folder, thisMonth, VIDEO_SECONDS_INCLUDED);

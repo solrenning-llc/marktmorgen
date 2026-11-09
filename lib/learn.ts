@@ -43,9 +43,9 @@ import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
 import { folderFromPathname, recordDelivery } from "@/lib/delivery";
-import { playerFor } from "@/lib/stream";
+import { PLAYER_SECONDS, playerFor } from "@/lib/stream";
 import { isStreamPath } from "@/lib/stream-rules";
-import { opened, watchedForAdmission } from "@/lib/watch";
+import { holdPlayback } from "@/lib/watch";
 import { calendarWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
@@ -734,15 +734,34 @@ export type LessonVideo =
   | { kind: "failed" }
   | { kind: "paused" };
 
+/** What a lesson's token allows beside the video's own length: pauses, a step back. */
+const LESSON_PAUSE_SECONDS = 15 * 60;
+/** A token for a video whose length the service has not given yet. */
+const UNKNOWN_LENGTH_TOKEN_SECONDS = 30 * 60;
+
+/**
+ * How long a lesson's player token is asked to be good for: the video's length
+ * and LESSON_PAUSE_SECONDS, at most PLAYER_SECONDS; UNKNOWN_LENGTH_TOKEN_SECONDS
+ * when the length is not known. What is held, and so the token, may be less
+ * (lib/watch.ts, holdPlayback); a token that runs out mid-lesson is a refresh
+ * of the page, which the player resumes where it was (rememberPosition).
+ */
+export function lessonTokenSeconds(videoSeconds: number): number {
+  const known = Number.isSafeInteger(videoSeconds) && videoSeconds > 0;
+  return Math.min(PLAYER_SECONDS, known ? videoSeconds + LESSON_PAUSE_SECONDS : UNKNOWN_LENGTH_TOKEN_SECONDS);
+}
+
 /**
  * The video of a lesson, for somebody who may watch it; null when it cannot
  * be reached just now.
  *
- * One kept by the video service (lib/stream.ts) is framed with a token for
- * a few hours, and its store is put in line to have its watching measured
- * (lib/watch.ts): what a plan covers of video is the time it was watched,
- * by the service's own count, and never how often a page was opened. Any
- * other is the signed link it has always been.
+ * One kept by the video service (lib/stream.ts) is framed with a token good
+ * for the playback held for it in the store's window (lib/watch.ts,
+ * holdPlayback), and its store is put in line to have its watching measured:
+ * what a plan covers of video is the time it was watched, by the service's
+ * own count, and never how often a page was opened; what a token held and
+ * nobody watched goes back at the reading after it ran out. Any other is the
+ * signed link it has always been.
  *
  * Stream playback requires a finite explicit monthly watched-time threshold,
  * including for paid plans. Missing, invalid or unreadable limits never mint
@@ -759,14 +778,20 @@ export async function lessonVideo(file: ProductFile, limit: number | null = null
     const folder = folderFromPathname(file.pathname);
     // Counted in the store's window (lib/allowance-window.ts): none known, no player.
     if (limit === null || !Number.isSafeInteger(limit) || limit < 0 || !folder || !window) return null;
-    const watched = await watchedForAdmission(folder, window);
-    if (watched === null) return null;
-    if (watched >= limit) return { kind: "paused" };
-    const player = await playerFor(file.pathname);
+    // The plan's hours are a ceiling (lib/watch.ts, holdPlayback): the time the
+    // token lets anyone watch is held against the window's room, read with
+    // the hold in one step, before it is signed, and the token is good for no
+    // longer than that.
+    let paused = false;
+    const player = await playerFor(file.pathname, Date.now(), async (record) => {
+      const held = await holdPlayback(folder, window, limit, lessonTokenSeconds(record.seconds));
+      if (held === "paused") paused = true;
+      return typeof held === "number" ? held : null;
+    });
+    if (paused) return { kind: "paused" };
     if (!player) return null;
     if (player.state === "failed") return { kind: "failed" };
     if (!player.src) return { kind: "preparing" };
-    if (folder) await opened(folder);
     return { kind: "stream", src: player.src, width: player.width, height: player.height };
   } catch (error) {
     console.error("reading a lesson's video failed", error);

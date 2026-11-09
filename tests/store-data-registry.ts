@@ -72,6 +72,10 @@ import { MAX_SEGMENTS } from "@/lib/segments-rules";
 import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
+import { HOLD_UNITS_MOST, HOLD_UNIT_SECONDS } from "@/lib/watch-rules";
+import { paidVideoSeconds } from "@/lib/video-admission-rules";
+/** A held unit as Redis keeps it: its member (a 12-hex mark and its index), its score and the set's own overhead, rounded up. */
+const HOLD_MEMBER_BYTES = 64;
 import { MAX_TEAM, LOG_LINES } from "@/lib/team";
 import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, SKIPPED_LINES_PER_DAY, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
@@ -996,6 +1000,15 @@ export const FAMILIES: Record<string, Family> = {
   "nl:watch:due@lib/watch.ts": company("Stores whose video watching to read", "One sorted set for every store."),
   "nl:watch:folders:@lib/watch.ts": company("Stores that had any watching, a month", "One set a month for every store."),
   "nl:watch:last:@lib/watch.ts": { what: "Each video's total when last read", room: ["app/api/store/stream/route.ts"] },
+  "nl:watch:hold:@lib/watch.ts": {
+    what: "Playback held for lesson player tokens still out",
+    parts: [capped(
+      (tier) => (paidVideoSeconds(tier) / HOLD_UNIT_SECONDS + HOLD_UNITS_MOST) * HOLD_MEMBER_BYTES,
+      "One sorted set a store: a member a unit held, at most the plan's hours in units and one opening's units over them while it gives its excess back (more only while a give-back's answer is lost, until the next reading); units go at the first reading an interval after their token ran out, and the set with the store's other records at its closing.",
+      src("lib/watch-rules.ts", "HOLD_UNIT_SECONDS", "HOLD_UNITS_MOST", "HOLD_SETTLE_MS"),
+      src("lib/video-admission-rules.ts", "paidVideoSeconds"),
+    )],
+  },
   "nl:watch:opened:@lib/watch.ts": { what: "When a lesson video last opened", parts: [capped(KEY, "One a store, seven days.")] },
   "nl:watch:sec:@lib/watch.ts": { what: "Seconds watched in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:hooks:anchor:@lib/webhooks.ts": { what: "The last Stripe event read", parts: [capped(KEY, "One a store.")] },

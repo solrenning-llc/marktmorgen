@@ -19,7 +19,7 @@
 import { lessonVideo } from "@/lib/learn";
 import { STREAM_API_ORIGIN, streamPath } from "@/lib/stream-rules";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
-import { measure } from "@/lib/watch";
+import { measure, measureDue } from "@/lib/watch";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -142,6 +142,73 @@ async function main(): Promise<void> {
     redis.pipeline = pipeline;
     is("a count of the reservations that cannot be read signs no token", unread?.kind ?? null, null);
     is("a database that cannot be reached signs no token", down?.kind ?? null, null);
+    // Only the hold's own step fails, the video's record having been read.
+    const only = (fails: (commands: (string | number)[][]) => boolean, reply: (commands: (string | number)[][], replies: unknown[]) => unknown[] | never) => {
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        const replies = await pipeline(commands);
+        return fails(commands) ? reply(commands, replies) : replies;
+      }) as typeof redis.pipeline;
+    };
+    const holding = (commands: (string | number)[][]) => commands.some((c) => c[0] === "ZADD" && c[1] === HOLDS);
+    only(holding, () => { throw new Error("The operation was aborted due to timeout"); });
+    const lost = await lessonVideo(file as never, STORE_LIMIT, WINDOW);
+    only(holding, (commands, replies) => commands.map((c, i) => (c[0] === "GET" ? "12.5" : replies[i])));
+    const measuredUnread = await lessonVideo(file as never, STORE_LIMIT, WINDOW);
+    redis.pipeline = pipeline;
+    is("a hold whose answer was lost signs no token", lost?.kind ?? null, null);
+    is("a measured figure that is not a whole number signs no token", measuredUnread?.kind ?? null, null);
+    only((commands) => commands.some((c) => c[0] === "ZADD" && c[1] === "nl:watch:due"), () => { throw new Error("The operation was aborted due to timeout"); });
+    const notInLine = await lessonVideo(file as never, STORE_LIMIT, WINDOW);
+    redis.pipeline = pipeline;
+    is("a hold whose store was not put in line for certain signs no token", notInLine?.kind ?? null, null);
+    const held = (await redis.pipeline([["ZCARD", HOLDS]]))[0] as number;
+    is("what may have been written stays held until a reading (never given back on an unknown)", held > 0, true);
+    // Room left but the hold's give-back answer is lost: the excess stays held, and no token on it.
+    // 2,000 seconds: the first token holds 1,500, the second fits 500 of its 1,500 and gives the rest back.
+    await fresh(600, STORE_LIMIT - 2000);
+    is("a first token takes the room", (await lessonVideo(file as never, STORE_LIMIT, WINDOW))?.kind, "stream");
+    only((commands) => commands.some((c) => c[0] === "ZREM" && c[1] === HOLDS), (commands) => commands.map(() => "OK"));
+    const giveBackLost = await lessonVideo(file as never, STORE_LIMIT, WINDOW);
+    redis.pipeline = pipeline;
+    is("an excess whose give-back answer cannot be read signs no token", giveBackLost?.kind ?? null, null);
+    await fresh(600, STORE_LIMIT - 2000);
+    await lessonVideo(file as never, STORE_LIMIT, WINDOW);
+    is("control: with the give-back answered, the second token is the 500 seconds left", (await openings(1, STORE_LIMIT)).lives[0] <= 500 && (await redis.pipeline([["ZCARD", HOLDS]]))[0] === 7, true);
+  }
+
+  part("a reading made before a token ran out gives nothing back");
+  {
+    await fresh(600, STORE_LIMIT - 3600);
+    const first = await openings(5, STORE_LIMIT);
+    is("the room is held", first.kinds.at(-1), null);
+    is("ten minutes on, nothing watched yet", await measure(FOLDER, Date.now() + 10 * 60 * 1000), 0);
+    is("the tokens still out keep their room", (await openings(1, STORE_LIMIT)).kinds, [null]);
+  }
+
+  part("a store with playback held stays in line to be read until it is given back");
+  {
+    await fresh(600, STORE_LIMIT - 3600);
+    await openings(1, STORE_LIMIT);
+    const due = async () => typeof (await redis.pipeline([["ZSCORE", "nl:watch:due", FOLDER]]))[0] === "string";
+    is("an opening puts the store in line, right after its hold", await due(), true);
+    const start = Date.now();
+    await measureDue(Date.now() + 60_000, start + 11 * 60 * 1000);
+    is("read before its token ran out: still in line, the hold kept", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [true, 5]);
+    await measureDue(Date.now() + 60_000, start + 3 * 3600 * 1000);
+    is("read an interval after it ran out: given back, and out of line", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [false, 0]);
+  }
+
+  part("a lesson's token: its length and the pauses, never past four hours");
+  {
+    await fresh(600, 0);
+    is("a ten-minute lesson: 25 minutes", (await openings(1, STORE_LIMIT)).lives[0] <= 25 * 60, true);
+    await fresh(3 * 3600, 0);
+    const long = (await openings(1, STORE_LIMIT)).lives[0];
+    is("a three-hour lesson: three hours and a quarter", long > 3 * 3600 && long <= 3 * 3600 + 15 * 60, true);
+    await fresh(0, 0);
+    is("a length not known yet: half an hour", (await openings(1, STORE_LIMIT)).lives[0] <= 30 * 60, true);
+    await fresh(600, STORE_LIMIT - 90);
+    is("a minute and a half left: a token of that much, and no more", (await openings(1, STORE_LIMIT)).lives[0] <= 90, true);
   }
 
   part("controls: a store with room plays; one with its hours measured is paused");
@@ -150,6 +217,8 @@ async function main(): Promise<void> {
     is("plenty of room: the lesson plays", (await lessonVideo(file as never, STORE_LIMIT, WINDOW))?.kind, "stream");
     await fresh(600, STORE_LIMIT);
     is("all hours measured: paused", (await lessonVideo(file as never, STORE_LIMIT, WINDOW))?.kind, "paused");
+    const after = await redis.pipeline([["ZCARD", HOLDS], ["ZSCORE", "nl:watch:due", FOLDER]]);
+    is("and nothing is left held, nor the store put in line to be read for it", after, [0, null]);
   }
   done();
 }

@@ -108,7 +108,11 @@ import {
 const API = STREAM_API_ORIGIN;
 /** Where the browser sends a video's pieces. */
 export const UPLOAD_ENDPOINT = `${API}/tusupload`;
-/** How long a player's token is good for: a long lesson, watched with breaks. */
+/**
+ * The longest a player's token is ever good for: a long lesson, watched with
+ * breaks. A lesson page's token is good for no longer than the playback held
+ * for it (lib/watch.ts, holdPlayback), which is shorter for a short lesson.
+ */
 export const PLAYER_SECONDS = 4 * 60 * 60;
 
 type Config = { library: string; key: string; tokenKey: string; readKey: string };
@@ -641,8 +645,14 @@ export type Player = {
  * is not the one who has to wait for the five-minute job. So is one that
  * plays and has not been measured yet, so it is not shown in a shape that is
  * not its own for longer than that.
+ *
+ * `life`, when given, is asked how long the token may be good for, once the
+ * video is ready and before the token is signed, with the video's record (its
+ * length): whole seconds, at most PLAYER_SECONDS. Anything else, null
+ * included, signs no token and answers null (lib/watch.ts, holdPlayback: the
+ * time a token allows is held before it is signed).
  */
-export async function playerFor(pathname: string, now = Date.now()): Promise<Player | null> {
+export async function playerFor(pathname: string, now = Date.now(), life?: (record: StreamRecord) => Promise<number | null>): Promise<Player | null> {
   const config = streamConfig();
   if (!config) return null;
   let record = await streamRecord(pathname);
@@ -657,7 +667,9 @@ export async function playerFor(pathname: string, now = Date.now()): Promise<Pla
   }
   const shape = shapeOf(record.width, record.height, null);
   if (record.state !== "ready") return { state: record.state, src: null, ...shape, record };
-  const expires = Math.floor(now / 1000) + PLAYER_SECONDS;
+  const seconds = life ? await life(record) : PLAYER_SECONDS;
+  if (typeof seconds !== "number" || !Number.isSafeInteger(seconds) || seconds < 1 || seconds > PLAYER_SECONDS) return null;
+  const expires = Math.floor(now / 1000) + seconds;
   const token = createHash("sha256").update(`${config.tokenKey}${record.id}${expires}`).digest("hex");
   const query = new URLSearchParams({
     token,

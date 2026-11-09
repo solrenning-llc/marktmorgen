@@ -15,6 +15,7 @@
  *   nl:watch:folders:<month>        the stores that had any, that month
  *   nl:watch:due                    which stores to read, and when
  *   nl:watch:opened:<folder>        when a lesson video of theirs last opened
+ *   nl:watch:hold:<folder>          the time player tokens still out may be watched for
  *
  * Read by the hour, and only where somebody is watching. A lesson page that
  * frames a video says so (opened), which puts the store in line to be read
@@ -47,12 +48,14 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { PLAYER_SECONDS, isStreamConfigured, streamWatched } from "@/lib/stream";
-import { MEASURE_EVERY_MS, MEASURE_SOON_MS } from "@/lib/watch-rules";
+import { HOLD_MIN_SECONDS, HOLD_SETTLE_MS, HOLD_UNITS_MOST, HOLD_UNIT_SECONDS, MEASURE_EVERY_MS, MEASURE_SOON_MS } from "@/lib/watch-rules";
+import { randomBytes } from "node:crypto";
 
 const lastKey = (folder: string) => `nl:watch:last:${folder}`;
 const secondsKey = (folder: string, month: string) => `nl:watch:sec:${folder}:${month}`;
 const foldersKey = (month: string) => `nl:watch:folders:${month}`;
 const openedKey = (folder: string) => `nl:watch:opened:${folder}`;
+const holdKey = (folder: string) => `nl:watch:hold:${folder}`;
 const DUE = "nl:watch:due";
 
 /** A month's figures are kept long enough to be billed, asked about and answered for. */
@@ -118,6 +121,102 @@ export async function watchedForAdmission(folder: string, month = calendarWindow
     const seconds = Number(raw);
     return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : null;
   } catch { return null; }
+}
+
+/**
+ * The plan's hours are a ceiling, not a figure read after the fact (owner's
+ * margin rule MR, 27 October 2026; audit of spending ceilings, 9 November
+ * 2026). The meter above is read by the hour, after the watching, and a
+ * player token cannot be taken back once signed (lib/stream.ts): so before a
+ * token is signed, the time it lets anyone watch is held against the window's
+ * room, and the token is good for exactly that long.
+ *
+ * Held in units of HOLD_UNIT_SECONDS, one sorted-set member a unit, scored
+ * with the moment its token runs out, so the room is the plan's seconds less
+ * those measured less every unit still held (counted at the unit, whatever was
+ * watched of it: what was watched is also in the measured figure until the
+ * hold goes, never less). An opening adds its units and then counts all of
+ * them; past the room it takes back its own excess, so two openings at once
+ * can only both fall short, never both get in. The hourly reading lets a unit
+ * go only once it ran out at least HOLD_SETTLE_MS before the reading was made
+ * (measure, below): what its token let somebody watch is in the service's
+ * total by then, and the rest goes back to the store, so a student who opened
+ * a lesson and left costs the creator no hour.
+ *
+ * What is not known about the service, and is held to here: whether a token
+ * that runs out stops a video already playing. Either way, a token is held
+ * for its whole life; one link shared with many people at once is the
+ * service's to refuse, and stays an open item of the cost registry
+ * (tests/plan-cost-registry.ts, line "video").
+ */
+export { HOLD_MIN_SECONDS, HOLD_SETTLE_MS, HOLD_UNIT_SECONDS } from "@/lib/watch-rules";
+
+/**
+ * Holds up to `wanted` seconds of playback for a token about to be signed, in
+ * the store's window `month`, against `limit` seconds. Answers the seconds
+ * the token may be good for (whole units are held for them, a last part unit
+ * counted whole); "paused" when what was measured leaves less than
+ * HOLD_MIN_SECONDS; null when the room
+ * is held by tokens still out (it comes back at a reading) or when anything
+ * could not be read, and then no token is signed (CX-123 rule 24: unknown is
+ * never room; what may have been written stays held, and goes at a reading).
+ *
+ * Also puts the store in line to be read whenever a unit may stay held (the
+ * step after the units, with any give-back), and the hourly reading goes on
+ * while any unit is held (measureDue), so held units are always read back: a
+ * hold nobody reads would keep the room forever. A unit whose line was not
+ * joined for certain signs no token, and the next opening with room joins it.
+ */
+export async function holdPlayback(folder: string, month: string, limit: number, wanted: number, now = Date.now()): Promise<number | "paused" | null> {
+  if (!isRedisConfigured() || !FOLDER_PATTERN.test(folder) || !WINDOW_ID.test(month)) return null;
+  if (!Number.isSafeInteger(limit) || limit < 0 || !Number.isSafeInteger(wanted) || wanted < 1) return null;
+  const units = Math.min(Math.ceil(wanted / HOLD_UNIT_SECONDS), Math.floor(PLAYER_SECONDS / HOLD_UNIT_SECONDS), HOLD_UNITS_MOST);
+  const runsOut = now + units * HOLD_UNIT_SECONDS * 1000;
+  const mark = randomBytes(6).toString("hex");
+  const members = Array.from({ length: units }, (_, i) => `${mark}:${i}`);
+  let replies: unknown[];
+  try {
+    replies = await redisPipeline([
+      ["GET", secondsKey(folder, month)],
+      ["ZADD", holdKey(folder), ...members.flatMap((member) => [runsOut, member])],
+      ["ZCARD", holdKey(folder)],
+    ]);
+  } catch (error) {
+    console.error("could not hold a lesson video's playback; no player", error);
+    return null;
+  }
+  if (!Array.isArray(replies) || replies.length !== 3) return null;
+  const measured = textCountOf(replies[0]);
+  const added = replies[1];
+  const count = replies[2];
+  if (measured === null || added !== units || typeof count !== "number" || !Number.isSafeInteger(count) || count < units) return null;
+  const used = measured === "absent" ? 0 : measured;
+  // The seconds this window has left by what was measured, and those other tokens still out leave of them:
+  // their units counted whole, so this errs toward holding more, never less.
+  const left = limit - used;
+  const free = left - (count - units) * HOLD_UNIT_SECONDS;
+  const granted = free >= HOLD_MIN_SECONDS ? Math.min(units * HOLD_UNIT_SECONDS, free) : 0;
+  const keep = Math.ceil(granted / HOLD_UNIT_SECONDS);
+  const back = members.slice(keep);
+  const writes: (string | number)[][] = [];
+  if (back.length) writes.push(["ZREM", holdKey(folder), ...back]);
+  // In line to be read whenever a unit may be held past this step: always but when the hours measured are used,
+  // where nothing is kept and the store has nothing to be read for. NX: a store already in line keeps its place.
+  if (left >= HOLD_MIN_SECONDS) writes.push(["ZADD", DUE, "NX", now + MEASURE_SOON_MS, folder]);
+  if (writes.length) {
+    try {
+      const done = await redisPipeline(writes);
+      // Units not taken back for certain stay held, and no token is signed on them; nor on a line not joined
+      // for certain (the next opening joins it, and the reading gives them back).
+      if (!Array.isArray(done) || done.length !== writes.length || (back.length && done[0] !== back.length)) return null;
+    } catch (error) {
+      console.error("could not give back a lesson video's held playback, or put its store in line; held until a reading", error);
+      return null;
+    }
+  }
+  if (keep > 0) return granted;
+  // Nothing taken: the hours measured are used, or tokens still out hold the rest for now.
+  return left < HOLD_MIN_SECONDS ? "paused" : null;
 }
 
 /** The stores whose video was watched at all in a month. */
@@ -200,6 +299,9 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
   const gone = [...last.keys(), ...resync].filter((id) => !there.has(id));
   if (gone.length) writes.push(["HDEL", lastKey(folder), ...gone]);
 
+  // Units held for tokens that ran out a reading's interval before this one are in the service's total now:
+  // given back to the store, in the same step as what was watched (holdPlayback).
+  writes.push(["ZREMRANGEBYSCORE", holdKey(folder), "-inf", now - HOLD_SETTLE_MS]);
   if (added > 0) {
     // Added to the store's window (lib/allowance-window.ts), where its video
     // stops; the line of stores is kept by the calendar month.
@@ -240,9 +342,15 @@ export async function measureDue(deadline: number, now = Date.now()): Promise<{ 
     counts.seconds += added;
     // No key: no lesson of theirs opened for a week. A reply of any other
     // shape is unknown, and keeps the store in line rather than letting
-    // its watching go unread (audit SG2, CX-123 rule 24).
-    const openedAt = textCountOf(repliesFor(await redisPipeline([["GET", openedKey(folder)]]), 1)?.[0]);
-    const still = openedAt === null || (openedAt !== "absent" && now - openedAt < WATCHING_FOR_MS);
+    // its watching go unread (audit SG2, CX-123 rule 24). Since 9 November
+    // 2026 a lesson's token is held for (holdPlayback): the store is read
+    // while any of it is held, which a reading an interval after the last
+    // token ran out gives back; the opened mark stays for the tokens signed
+    // before, and is read the same way.
+    const [openedReply, heldReply] = repliesFor(await redisPipeline([["GET", openedKey(folder)], ["ZCARD", holdKey(folder)]]), 2) ?? [];
+    const openedAt = textCountOf(openedReply);
+    const held = textCountOf(heldReply);
+    const still = openedAt === null || (openedAt !== "absent" && now - openedAt < WATCHING_FOR_MS) || held === null || (held !== "absent" && held > 0);
     // Read once more after the last token has run out, and then left alone
     // until a lesson is opened again.
     await redisPipeline([still ? ["ZADD", DUE, now + MEASURE_EVERY_MS, folder] : ["ZREM", DUE, folder]]);

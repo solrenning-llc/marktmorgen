@@ -20,7 +20,10 @@
  *       6739456860, probe D);
  *   G:  Amazon refuses it every time while ready: Resend sends it in the same try, Amazon is not asked again (probe D2);
  *   H:  sendEmailPinned alone: a refusal moves the key to Resend in the same call; a lost answer, a once-mark another
- *       try took meanwhile, or a move whose reply is not exact sends nothing more.
+ *       try took meanwhile, or a move whose reply is not exact sends nothing more;
+ *   I:  Resend blocked, as in production today (CURRENT_RESEND_FALLBACK_REVIEW and CURRENT_RESEND_CREDENTIAL_BINDING
+ *       null): a refusal Amazon gave (busy three times, or an account hold that clears) keeps the key for Amazon, so a
+ *       later try sends it through Amazon (review 6739914424, probes P1 and P2).
  */
 import { createHash } from "node:crypto";
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -50,6 +53,8 @@ let resendMode: "up" | "503" | "422" = "up";
 let onResendPost: (() => void) | null = null;
 /** Every Resend request: its idempotency key and body text. */
 const resendPosts: { key: string; to: string; text: string }[] = [];
+/** How many of the next Amazon requests are answered 429, too many a second ("busy", a definite no) (probe P1). */
+let sesBusy = 0;
 
 function completed(order: string, value: string, email: string): Record<string, unknown> {
   return {
@@ -87,6 +92,11 @@ async function paypal(input: string | URL | Request, init?: RequestInit): Promis
 
 const mail = installSesMailFixture({
   fallback: paypal,
+  onSes: () => {
+    if (sesBusy <= 0) return undefined;
+    sesBusy -= 1;
+    return json({ message: "synthetic Maximum sending rate exceeded" }, 429);
+  },
   onResend: (messages, _input, init) => {
     const key = new Headers(init?.headers).get("idempotency-key") ?? "";
     for (const m of messages) resendPosts.push({ key, to: m.to[0] ?? "", text: m.text });
@@ -356,6 +366,65 @@ async function main(): Promise<void> {
   mail.setSesOutcome(["account"]);
   is("an account refusal: Resend sends it in the same call", [await sendEmailPinned(message("h-account@example.com", "h:account")), resendDelivered("h-account@example.com")], [true, 1]);
   mail.setSesOutcome("ok");
+
+  part("I: Resend blocked, as today (no review, no credential binding): Amazon's refusal keeps the key for Amazon (probes P1, P2)");
+  // The real guard with today's state: no reviewed Resend account and no credential binding, so it answers "blocked"
+  // before any reservation or request.
+  const blocked = { review: null, binding: null };
+  startOfNextDay();
+  mail.configure();
+  await mail.setReady(true);
+  mail.setSesOutcome("ok");
+
+  sesBusy = 3;
+  is("P1: Amazon busy three times and Resend blocked: nothing sent", [await sendEmailPinned(message("i-busy@example.com", "i:busy"), blocked), sesTo("i-busy@example.com"), resendTo("i-busy@example.com")], [false, 3, 0]);
+  is("P1: the key stays kept for Amazon, and its once-mark is let go of", [redis.run(["GET", pinOf("i:busy")]), redis.run(["GET", onceOf("i:busy")])], ["ses", null]);
+  is("P1: a later try sends it through Amazon: one copy delivered", [await sendEmailPinned(message("i-busy@example.com", "i:busy"), blocked), delivered("i-busy@example.com").length, resendTo("i-busy@example.com")], [true, 1, 0]);
+
+  mail.setSesOutcome(["account"]);
+  is("P2: an account refusal and Resend blocked: nothing sent", [await sendEmailPinned(message("i-hold@example.com", "i:hold"), blocked), sesTo("i-hold@example.com"), resendTo("i-hold@example.com")], [false, 1, 0]);
+  is("P2: the key stays kept for Amazon", redis.run(["GET", pinOf("i:hold")]), "ses");
+  is("P2: while Amazon's hold lasts, a try sends nothing", [await sendEmailPinned(message("i-hold@example.com", "i:hold"), blocked), copies("i-hold@example.com").length], [false, 1]);
+  ahead += 11 * 60_000;
+  await mail.setReady(true);
+  is("P2: once the hold clears, a later try sends it through Amazon: one copy delivered", [await sendEmailPinned(message("i-hold@example.com", "i:hold"), blocked), delivered("i-hold@example.com").length, resendTo("i-hold@example.com")], [true, 1, 0]);
+
+  mail.setSesOutcome("refused");
+  is("a message refusal and Resend blocked: nothing sent, the key stays kept for Amazon", [await sendEmailPinned(message("i-refused@example.com", "i:refused"), blocked), redis.run(["GET", pinOf("i:refused")]), resendTo("i-refused@example.com")], [false, "ses", 0]);
+  mail.setSesOutcome("ok");
+
+  // The same through the real return route and sweep: a sending key no reviewed account binds, so the guard answers
+  // "blocked" before any reservation, as with today's null review.
+  const reviewedKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = "re_unreviewed_paypal_probe_only";
+  try {
+    startOfNextDay();
+    mail.configure();
+    await mail.setReady(true);
+    sesBusy = 3;
+    const buyerI1 = "busy-then-ok@example.com";
+    const i1 = await pay(9, buyerI1);
+    is("P1 end to end: the return route's try sends nothing", [sesTo(buyerI1), resendTo(buyerI1), delivered(buyerI1).length], [3, 0, 0]);
+    is("P1 end to end: the order is still owed its receipt", (await listed()).includes(i1), true);
+    await sweep();
+    is("P1 end to end: the next sweep sends it through Amazon: one copy", [delivered(buyerI1).length, resendTo(buyerI1)], [1, 0]);
+    is("P1 end to end: the order left the list", (await listed()).includes(i1), false);
+
+    startOfNextDay();
+    mail.configure();
+    await mail.setReady(true);
+    mail.setSesOutcome(["account"]);
+    const buyerI2 = "hold-then-ok@example.com";
+    const i2 = await pay(10, buyerI2);
+    is("P2 end to end: the return route's try sends nothing", [sesTo(buyerI2), resendTo(buyerI2), delivered(buyerI2).length], [1, 0, 0]);
+    await mail.setReady(true);
+    await sweeps(2);
+    is("P2 end to end: a sweep after the hold sends it through Amazon: one copy", [delivered(buyerI2).length, resendTo(buyerI2), copies(buyerI2).length], [1, 0, 2]);
+    is("P2 end to end: the order left the list", (await listed()).includes(i2), false);
+  } finally {
+    if (reviewedKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = reviewedKey;
+  }
 
   done();
 }

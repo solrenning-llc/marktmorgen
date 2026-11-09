@@ -5,6 +5,7 @@ import { MAX_OPTIONS } from "@/lib/product-option";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError } from "@/lib/store";
 import { currencyRule, readMoney } from "@/lib/money";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * Sets or clears a product's limited quantity or its order bump.
@@ -24,6 +25,8 @@ export async function POST(request: NextRequest) {
   const body = guarded.body;
   const id = text(body.id, 40);
   if (!id) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+  const onHold = await heldRefusal(guarded.store, id);
+  if (onHold) return onHold;
 
   // Prices are typed in the store's currency; the smallest charge is its own.
   const currency = guarded.store.currency;

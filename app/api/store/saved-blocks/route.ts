@@ -12,6 +12,7 @@ import { dropSection, readSection, readSections, sectionUses, writeSection } fro
 import { MONTH_USE_SECONDS, countUse, storeMonthKey } from "@/lib/funnel-share-store";
 import { MAX_APPLY_PAGES, shareLimitsFor, monthOfUse } from "@/lib/funnel-share-rules";
 import type { Store } from "@/lib/store";
+import { heldRefusalAmong } from "@/lib/child-safety";
 
 const refuse = (error: string, status = 400, extra: Record<string, unknown> = {}) => Response.json({ ok: false, error, ...extra }, { status });
 
@@ -138,6 +139,9 @@ export async function POST(request: NextRequest) {
       const listed = new Set(await sectionUses(statsId, id));
       if (asked.some((key) => !listed.has(key))) return refuse("pages");
       if (asked.some((key) => !mayChange(role, key))) return refuse("forbidden", 403);
+      // A product kept for a child-safety report keeps its page as it was (lib/child-safety.ts), before the try is counted.
+      const onHold = await heldRefusalAmong(store, asked);
+      if (onHold) return onHold;
       const month = monthOfUse(store);
       if (!month) return refuse("unavailable", 503);
       // The month's count is taken first, as before, so a request past the figure reads no page at all (Codex Z on

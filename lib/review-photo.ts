@@ -47,6 +47,6 @@ export async function keepReviewPhoto(ref: string, raw: string): Promise<ReviewP
 }
 
 /** Deletes a photo no review points at any more. Best effort. */
-export async function dropReviewPhoto(photo: ReviewPhoto | null | undefined): Promise<void> {
+export async function dropReviewPhoto(photo: Pick<ReviewPhoto, "path"> | null | undefined): Promise<void> {
   if (photo) await del(photo.path).catch((error: unknown) => console.error("could not delete a review's photo", error));
 }

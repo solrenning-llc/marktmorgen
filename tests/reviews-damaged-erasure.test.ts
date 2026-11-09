@@ -52,7 +52,6 @@ const idA1 = reviewId(STATS, P1, A);
 const idA2 = reviewId(STATS, P2, A);
 const idB1 = reviewId(STATS, P1, B);
 const idB2 = reviewId(STATS, P2, B);
-const idC1 = reviewId(STATS, P1, C);
 
 const stored = (p: string, id: string) => redis.run(["HGET", productKey(p), id]);
 const pay = (pi: string) => redis.run(["HGET", payKey, pi]);

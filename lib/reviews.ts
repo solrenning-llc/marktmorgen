@@ -522,33 +522,105 @@ function exactWriteReplies(replies: unknown, commands: (string | number)[][]): u
   return list;
 }
 
+/** A photo's path as a review keeps it (lib/product-image.ts), and a payment's id as a review keeps it. */
+const PHOTO_PATH_PATTERN = /^images\/[0-9a-f]{24}\/[0-9a-f]{32}\.(webp|jpg)$/;
+const PAYMENT_ID_PATTERN = /^[A-Za-z0-9_]{1,220}$/;
+
+/**
+ * What a review's record answered for its own buyer's deletion or erasure, read under the field the buyer's own id
+ * names (reviewId: the field is the proof the record is theirs). Null only when confirmed absent. A reply that is not
+ * text throws UnknownReplyError (rule 24: a lost or off-shape reply is unknown, the record kept for the retry).
+ *
+ * Text that does not read as this review (damaged, or another review's under this field) is not unknown: waiting never
+ * changes it, and deleting the buyer's own field is always the safe side of their erasure. Its photo and its payment
+ * are looked for where a record keeps them, only when the record still says it is this review: its JSON's own fields,
+ * or, in text cut short, the fields after its own id and product (written first, lib/reviews.ts saveReview). `photo`
+ * and `pi` are undefined when they cannot be found (never another review's: a record under this field that reads as
+ * another review may be a copy of that review, whose photo is that buyer's).
+ */
+type OwnRecord = { review: Review | null; photo: string | null | undefined; pi: string | null | undefined };
+
+function ownRecord(raw: unknown, productId: string, id: string, what: string): OwnRecord | null {
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError(what);
+  const review = parseReview(raw);
+  if (review && review.id === id && review.productId === productId) {
+    return { review, photo: review.photo?.path ?? null, pi: review.pi || null };
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    value = undefined;
+  }
+  if (value !== undefined) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return { review: null, photo: undefined, pi: undefined };
+    const fields = value as Record<string, unknown>;
+    if (fields.id !== id || fields.productId !== productId) return { review: null, photo: undefined, pi: undefined };
+    const photo = fields.photo === null || fields.photo === undefined ? null : parseReviewPhoto(fields.photo)?.path ?? undefined;
+    const pi = fields.pi === undefined || fields.pi === "" ? null : typeof fields.pi === "string" && fields.pi.length <= 220 ? fields.pi : undefined;
+    return { review: null, photo, pi };
+  }
+  // Text cut short or broken: read on only when it begins as this review's own record.
+  if (!raw.startsWith(`{"id":${JSON.stringify(id)},"productId":${JSON.stringify(productId)},`)) return { review: null, photo: undefined, pi: undefined };
+  // A field's name never follows a backslash: inside the buyer's words, every quote is escaped. Exactly one, or none.
+  const one = (pattern: RegExp): string | undefined => {
+    const found = [...raw.matchAll(pattern)].map((match) => match[1]);
+    return found.length === 1 ? found[0] : undefined;
+  };
+  const photoField = one(/(?<!\\)"photo":(null|\{"path":"[^"\\]*")/g);
+  const photo = photoField === undefined ? undefined : photoField === "null" ? null : (() => {
+    const path = photoField.slice('{"path":"'.length, -1);
+    return PHOTO_PATH_PATTERN.test(path) ? path : undefined;
+  })();
+  const piField = one(/(?<!\\)"pi":"([^"\\]*)"/g);
+  const pi = piField === undefined ? undefined : piField === "" ? null : PAYMENT_ID_PATTERN.test(piField) ? piField : undefined;
+  return { review: null, photo, pi };
+}
+
+/** A buyer's own deletion, done: the photo it found ("photoFound" false when it could not be found), and whether the numbers were counted again. */
+export type OwnDeletion = { state: "deleted"; photo: string | null; photoFound: boolean; damaged: boolean; recounted: boolean };
+
 /** Deletes a buyer's own review. Its stars leave the average with it. */
 export async function deleteReview(statsId: string, productId: string, id: string, room: DataStore): Promise<"deleted" | "missing" | "busy"> {
+  const done = await deleteOwnReview(statsId, productId, id, room);
+  return typeof done === "string" ? done : "deleted";
+}
+
+/**
+ * Deletes a buyer's own review, by the id their own address makes (the review route and a person's erasure), and says
+ * what became of it: the photo to drop, and whether the product's numbers were counted again (when not, the page does
+ * not say its stars left the average). A damaged record under that id is deleted too (ownRecord): its index entries
+ * with it, the AI summary that may have counted it, its room left counted (its size is unknown: more than used, never
+ * less), and the log names its id, never anything personal.
+ */
+export async function deleteOwnReview(statsId: string, productId: string, id: string, room: DataStore): Promise<OwnDeletion | "missing" | "busy"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
   const what = "a buyer's review (its deletion)";
   const result = await locked(statsId, productId, async () => {
-    // Read exactly (CX-123 rule 24): only a confirmed absent field is "missing". A reply in another shape, or a stored
-    // review that does not read, throws, so the review is kept and its deletion is never said as done.
+    // Read exactly (CX-123 rule 24): only a confirmed absent field is "missing". A reply in another shape throws, so the
+    // review is kept and its deletion is never said as done. A damaged record is deleted (ownRecord).
     const read = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
     if (!read) throw new UnknownReplyError(what);
-    const gone = storedReview(read[0], what);
-    if (!gone) return "missing" as const;
+    const own = ownRecord(read[0], productId, id, what);
+    if (!own) return "missing" as const;
+    const gone = own.review;
     const deletion: (string | number)[][] = [
       ["HDEL", productKey(statsId, productId), id],
       ["ZREM", visibleKey(statsId, productId), id],
       ["ZREM", allKey(statsId), `${productId}|${id}`],
       ["ZREM", newKey(statsId), `${productId}|${id}`],
       // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it. One hidden or
-      // refunded was never counted, and takes none away.
-      ...(counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
+      // refunded was never counted, and takes none away. A damaged one may have been: the summary goes (no date known).
+      ...(!gone ? summaryGone(statsId, productId, 0) : counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
     ];
     // Every reply in its exact shape, or the deletion is unknown: no room given back, and the field is read again
     // (below) before it is said as deleted or thrown.
     const replies = exactWriteReplies(await redisPipeline(deletion), deletion);
     // Its room given back only once its own HDEL answered that it removed the review: never twice for two
     // deletions racing. A request that failed may still have run the HDEL (an error on another command); the room
-    // then stays counted, more than is used, never less.
-    if (replies?.[0] === 1) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
+    // then stays counted, more than is used, never less. A damaged record's size is unknown: it stays counted.
+    if (gone && replies?.[0] === 1) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
     // Replies in an unknown shape: the field is read again, exactly. Confirmed absent means its HDEL ran, so the review
     // is deleted (the caller drops or hands over its photo; its room stays counted, as above). Still there, or read
     // again in another shape, throws.
@@ -557,9 +629,12 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       const again = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
       removed = again !== null && again[0] === null;
     }
-    await recount(statsId, productId);
+    const recounted = (await recount(statsId, productId)) !== "unsure";
     if (!removed) throw new UnknownReplyError(what);
-    return "deleted" as const;
+    if (!gone) {
+      console.error(`reviews: a damaged review record (${productId}|${id}) was deleted for its buyer; its room stays counted${own.photo === undefined ? "; its photo could not be found" : ""}`);
+    }
+    return { state: "deleted" as const, photo: own.photo ?? null, photoFound: own.photo !== undefined, damaged: !gone, recounted };
   });
   return result;
 }
@@ -888,35 +963,38 @@ export async function forgetReviewsPerson(
   const ids = wanted.map((p) => reviewId(statsId, p, email));
   const what = "a person's reviews (their erasure)";
   // Read exactly (CX-123 rule 24), every one before anything is deleted: only a confirmed absent field is "no review".
-  // A reply in another shape, or a stored review that does not read, throws, so the erasure is never said as done
-  // while the review (name, words, photo) is still there.
+  // A reply in another shape throws, so the erasure is never said as done while the review (name, words, photo) is
+  // still there. A damaged record under the person's own id is theirs (the field is their id): it is erased too,
+  // its photo and payment looked for where a record keeps them (ownRecord); another person's record is never read.
   const raws = wanted.length ? repliesFor(await redisPipeline(wanted.map((p, i) => ["HGET", productKey(statsId, p), ids[i]])), wanted.length) : [];
   if (!raws) throw new UnknownReplyError(what);
-  const reviews = raws.map((raw) => storedReview(raw, what));
+  const found = raws.map((raw, i) => ownRecord(raw, wanted[i], ids[i], what));
   let records = 0;
   const photos: string[] = [];
   for (let i = 0; i < wanted.length; i += 1) {
-    const review = reviews[i];
-    if (!review) continue;
+    const own = found[i];
+    if (!own) continue;
     // Its payment's list first and the review itself last: whatever fails on the way, a retry finds the review again
     // and does every step once more (each is the same the second time).
-    if (review.pi) {
+    if (own.pi) {
       const member = `${wanted[i]}|${ids[i]}`;
-      const read = repliesFor(await redisPipeline([["HGET", payKey(statsId), review.pi]]), 1);
+      const read = repliesFor(await redisPipeline([["HGET", payKey(statsId), own.pi]]), 1);
       const raw = read?.[0];
       // An unknown read is never an empty list: that would delete the other reviews this payment paid for.
       if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError(`${what} (its payment's list)`);
       const rest = (raw === null ? [] : raw.split(";")).filter((m) => m && m !== member);
-      const change: (string | number)[][] = [rest.length ? ["HSET", payKey(statsId), review.pi, rest.join(";")] : ["HDEL", payKey(statsId), review.pi]];
+      const change: (string | number)[][] = [rest.length ? ["HSET", payKey(statsId), own.pi, rest.join(";")] : ["HDEL", payKey(statsId), own.pi]];
       if (!exactWriteReplies(await redisPipeline(change), change)) throw new UnknownReplyError(`${what} (its payment's list)`);
+    } else if (own.pi === undefined) {
+      console.error(`reviews: a damaged review record (${wanted[i]}|${ids[i]}) is erased; its payment's list could not be found, so its id may stay there`);
     }
     // Its photo is handed to the eraser's files before the delete is tried: the review is being erased anyway, and a
     // delete that ran but answered in an unknown shape leaves nothing for the retry to find the photo by.
-    if (review.photo?.path) {
-      photos.push(review.photo.path);
-      files?.push(review.photo.path);
+    if (own.photo) {
+      photos.push(own.photo);
+      files?.push(own.photo);
     }
-    if ((await deleteReview(statsId, wanted[i], ids[i], room)) !== "deleted") throw new Error("a review could not be deleted just now");
+    if (typeof (await deleteOwnReview(statsId, wanted[i], ids[i], room)) === "string") throw new Error("a review could not be deleted just now");
     records += 1;
   }
   return { records, photos };

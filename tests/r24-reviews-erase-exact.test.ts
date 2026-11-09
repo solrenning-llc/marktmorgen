@@ -2,9 +2,9 @@
  * CX-123 rule 24 (Claude 6 audit, round 2): a person's erasure of their reviews (forgetReviewsPerson, registered in
  * lib/person-erasure.ts) and the buyer's own delete (deleteReview) read every Redis reply in its exact shape.
  *
- * Only a confirmed absent field (null) means "no review". A reply in another shape, or a stored review that does not
- * read, throws UnknownReplyError: the review (name, words, photo) is kept for the retry and the erasure is never
- * reported as done. Each deletion reply is checked exactly (an integer in range, "OK" for the summary's version), and
+ * Only a confirmed absent field (null) means "no review". A reply in another shape throws UnknownReplyError: the
+ * review (name, words, photo) is kept for the retry and the erasure is never reported as done. A stored review under
+ * the person's own id that does not read is damaged and is deleted (tests/reviews-damaged-erasure.test.ts). Each deletion reply is checked exactly (an integer in range, "OK" for the summary's version), and
  * a payment's list of reviews is never wiped on an unknown read. The healthy and confirmed-empty paths are unchanged.
  */
 import assert from "node:assert/strict";
@@ -124,13 +124,23 @@ for (const [name, shape] of [
   });
 }
 
-test("a stored review that does not read is unknown, never 'no review': kept for the retry", async () => {
+// Changed 9 Nov 2026 (rule 23; coordinator's decision): a stored review under the person's own id that does not read
+// is damaged, not unknown. Waiting never changes it, and deleting the person's own field is the safe side of their
+// erasure: it is deleted, never kept for a retry that can never finish (tests/reviews-damaged-erasure.test.ts).
+test("a stored review under the person's own id that does not read is damaged: erased and deleted, never 'no review'", async () => {
   const { id1 } = await setup();
   redis.run(["HSET", productKey(P1), id1, "{not json"]);
-  await assert.rejects(forgetReviewsPerson(STATS, [P1], BUYER, ROOM), unknown);
-  assert.equal(stored(P1, id1), "{not json");
-  await assert.rejects(deleteReview(STATS, P1, id1, ROOM), unknown);
-  assert.equal(stored(P1, id1), "{not json");
+  const quiet = console.error;
+  console.error = () => undefined;
+  try {
+    assert.deepEqual(await forgetReviewsPerson(STATS, [P1], BUYER, ROOM), { records: 1, photos: [] });
+    assert.equal(stored(P1, id1), null);
+    redis.run(["HSET", productKey(P1), id1, "{not json"]);
+    assert.equal(await deleteReview(STATS, P1, id1, ROOM), "deleted");
+    assert.equal(stored(P1, id1), null);
+  } finally {
+    console.error = quiet;
+  }
 });
 
 for (const [name, mangle] of [

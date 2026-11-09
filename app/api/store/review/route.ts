@@ -5,7 +5,7 @@ import { refreshStoreQuotes } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { type Door, doorFields, openDoor, readDoor } from "@/lib/review-proof";
-import { MAX_REVIEW_PHOTO_BYTES, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
+import { MAX_REVIEW_PHOTO_BYTES, deleteOwnReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { dropReviewPhoto, keepReviewPhoto } from "@/lib/review-photo";
 import { costsPaused } from "@/lib/plan-standing";
 
@@ -86,11 +86,15 @@ export async function POST(request: NextRequest) {
 
   try {
     if (action === "delete") {
-      const before = await readReview(statsId, productId, id);
-      const done = await deleteReview(statsId, productId, id, store);
-      if (done === "deleted") {
+      // The photo dropped is the one the deletion found on the record it deleted, under the product's lock. A damaged
+      // record is deleted too (lib/reviews.ts, deleteOwnReview); when its photo could not be found, nothing here says
+      // it was deleted. When the product's numbers could not be counted again, the page does not say its stars left
+      // the average.
+      const done = await deleteOwnReview(statsId, productId, id, store);
+      if (typeof done === "object") {
         after(() => refreshStoreQuotes(store));
-        await dropReviewPhoto(before?.photo);
+        await dropReviewPhoto(done.photo ? { path: done.photo } : null);
+        return answer(done.recounted ? "deleted" : "deletedUncounted");
       }
       return answer(done === "busy" ? "busy" : "deleted");
     }

@@ -338,6 +338,9 @@ async function rest(store: Store): Promise<void> {
   // Rule 23: new assertion, red on main: a batch never sent, or refused, can be in that count too.
   is("it no longer says PayPal's answer did not reach us", panel.includes("its answer to the payment did not reach us"), false);
   is("the creator's check asks what PayPal shows, with a confirmation", ["What does your PayPal activity show?", "Yes, save this"].every((t) => panel.includes(t)), true);
+  // Pre-review (9 November 2026): a batch whose request never reached PayPal shows nothing in the activity, and nothing
+  // sends it again; the warning must let the creator answer "did not pay" then, or the affiliate is never paid.
+  is("the warning names a payment PayPal does not show at all as not paid", panel.includes("or does not show a payment to them at all"), true);
 }
 
 main().catch((error) => {

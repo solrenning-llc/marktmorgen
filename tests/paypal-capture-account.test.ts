@@ -182,8 +182,12 @@ async function main(): Promise<void> {
   part("A paid record whose account is not an account id is unknown: asked about as nobody, looked at again in an hour");
   const odd = "6O190127TN3647199";
   const oddAt = Math.floor(Date.now() / 1000) - 3600;
+  // Rule 23 (9 November 2026, claude5/paypal-capture-account): the record is now written as settle writes every paid
+  // record, with its 400-day expiry (here what is left of it an hour after the sale), because the watch reads an
+  // unreadable record's age from that expiry (lookAfterUnreadable). Written without one, as before, it has no age and
+  // is looked at once a week (tests/paypal-watch-unreadable-cost.test.ts); the assertion below is unchanged.
   await redis.pipeline([
-    ["SET", `nl:ppsell:paid:${odd}`, JSON.stringify({ store: statsId, order: odd, capture: "3C679366HH908799", email: "odd@example.com", product: id, cents: 4900, currency: "usd", at: oddAt, merchant: "not an account" })],
+    ["SET", `nl:ppsell:paid:${odd}`, JSON.stringify({ store: statsId, order: odd, capture: "3C679366HH908799", email: "odd@example.com", product: id, cents: 4900, currency: "usd", at: oddAt, merchant: "not an account" }), "EX", String(400 * 86_400 - 3600)],
     ["ZADD", `nl:ppsell:watch:${statsId}`, String(oddAt), odd],
   ]);
   const oddBefore = captureReads.length;

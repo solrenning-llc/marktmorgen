@@ -743,8 +743,44 @@ export const PAYPAL_WATCH_LOOKS = {
 export const PAYPAL_WATCH_LOOK_REDIS_USD = PAYPAL_WATCH_LOOKS.commandsPerLook * COMMAND + PAYPAL_WATCH_LOOKS.bytesPerLookMost * DB_BYTE;
 /** And for one sale's whole life, every look failing: what a sale costs the company's five-minute job at the most, besides its PayPal calls. */
 export const PAYPAL_WATCH_SALE_REDIS_USD = (PAYPAL_WATCH_LOOKS.inWindowPerSaleMost + PAYPAL_WATCH_LOOKS.pastWindowPerSaleMost) * PAYPAL_WATCH_LOOK_REDIS_USD;
-/** And for one store in a month at the most, whatever it sold: every run's read full, on every UTC day the month touches. */
-export const paypalWatchStoreMonthRedisUsd = (): number => PAYPAL_WATCH_LOOKS.ordersPerStoreRunMost * PAYPAL_WATCH_LOOKS.runsPerDay * DAY_WINDOWS * PAYPAL_WATCH_LOOK_REDIS_USD;
+/**
+ * The refund watch's looks at a sale whose paid record does not read (lib/paypal-sales.ts, watchPayPal: readPaidExact
+ * answers "unknown", text that is not JSON or a field out of its format), held to what the real sweep makes by
+ * tests/paypal-watch-unreadable-cost.test.ts, the record unreadable for the sale's whole life. Before 9 November 2026
+ * (branch claude5/paypal-capture-account) such an order went back on the watch an hour later every time until the record
+ * ended at 400 days, up to 9,600 looks a sale with no line here. Now lookAfterUnreadable reads the sale's age from what
+ * is left of the record's life (its TTL; settle's SET NX EX PAID_KEPT_SECONDS is the record's only write) and spaces
+ * the looks as lookAfterFailure does a capture whose read fails, so:
+ * - inWindowPerSaleMost, pastWindowPerSaleMost: PAYPAL_WATCH_LOOKS's figures, the same schedule (hourly the first
+ *   week, then less, daily for UNANSWERED_DAILY_SECONDS past the 180-day window, then weekly to the record's last day);
+ *   a sale whose record reads at some looks and not at others is looked at on that one schedule, never twice;
+ * - commandsPerLook: the record's GET, its TTL and the watch's ZADD (or the GET and the ZREM of the look that finds the
+ *   record gone), at most bytesPerLookMost moved: the record at its heaviest, the only weight settle writes;
+ * - paypalCallsPerLook: none, the capture is not known, so PayPal is never asked;
+ * - a record whose life does not read (no expiry, which no code writes, or a reply that does not read) is looked at
+ *   once every UNANSWERED_WEEKLY_SECONDS while it lasts; each store's month is bounded by the job's batch either way
+ *   (paypalWatchStoreMonthRedisUsd);
+ * - approvedCeiling: false. Why it is the company's, not a plan's: NOT_A_COST.UNANSWERED_WEEKLY_SECONDS.
+ */
+export const PAYPAL_WATCH_UNREADABLE_LOOKS = {
+  inWindowPerSaleMost: PAYPAL_WATCH_LOOKS.inWindowPerSaleMost,
+  pastWindowPerSaleMost: PAYPAL_WATCH_LOOKS.pastWindowPerSaleMost,
+  commandsPerLook: 3,
+  bytesPerLookMost: MAX_PAID_BYTES,
+  paypalCallsPerLook: 0,
+  approvedCeiling: false,
+} as const;
+/** The watch's Redis for one look at an unreadable record, at the most. */
+export const PAYPAL_WATCH_UNREADABLE_LOOK_REDIS_USD = PAYPAL_WATCH_UNREADABLE_LOOKS.commandsPerLook * COMMAND + PAYPAL_WATCH_UNREADABLE_LOOKS.bytesPerLookMost * DB_BYTE;
+/** And for one sale's whole life with its record never reading: what such a sale costs the five-minute job at the most. */
+export const PAYPAL_WATCH_UNREADABLE_SALE_REDIS_USD =
+  (PAYPAL_WATCH_UNREADABLE_LOOKS.inWindowPerSaleMost + PAYPAL_WATCH_UNREADABLE_LOOKS.pastWindowPerSaleMost) * PAYPAL_WATCH_UNREADABLE_LOOK_REDIS_USD;
+/**
+ * And for one store in a month at the most, whatever it sold: every run's read full, on every UTC day the month
+ * touches, each look at the dearer of a look that reads its record and one that does not.
+ */
+export const paypalWatchStoreMonthRedisUsd = (): number =>
+  PAYPAL_WATCH_LOOKS.ordersPerStoreRunMost * PAYPAL_WATCH_LOOKS.runsPerDay * DAY_WINDOWS * Math.max(PAYPAL_WATCH_LOOK_REDIS_USD, PAYPAL_WATCH_UNREADABLE_LOOK_REDIS_USD);
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**
  * A narrowed email's reading of the store's buyers made by the scheduled job
@@ -1666,7 +1702,7 @@ export const NOT_A_COST: Record<string, string> = {
   HAND_OVER_BATCH: "PayPal orders still owed their hand-over that the five-minute job's sweep of a store tries again in one run (lib/paypal-delivery.ts, handOverAgain; #2909): one ZRANGEBYSCORE of the list a store with PayPal a run, then for each order tried at most four commands of its own (GET of the paid record, ZSCORE of the refund mark, at most two ZREM or ZADD of the list) besides the hand-over's own work, which is the order's (line orders): at most 1 + HAND_OVER_BATCH x 4 commands of its own a store a run, and at most HAND_OVER_BATCH hand-overs tried, each order at most once a run (PAYPAL_HAND_OVER_RETRY, held by tests/paypal-handover-cost.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   STRIPE_LOOKUPS_PER_STORE: "Calls to the creator's Stripe account the five-minute job makes per store per run to tell whose a refunded charge is and to read a canceled member's address (lib/webhooks.ts, watchStore): a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call, and a membership's charge (three calls) is taken from the same ten, so no run asks more than before.",
   UNANSWERED_DAILY_SECONDS: "How long after PayPal's 180-day refund window the refund watch still asks once a day about a sale whose capture read fails (lib/paypal-sales.ts, lookAfterFailure; claude5/paypal-capture-account, 9 November 2026): its looks are counted in PAYPAL_WATCH_LOOKS.pastWindowPerSaleMost, the five-minute job's, a company cost (NOT_A_COST.UNANSWERED_WEEKLY_SECONDS).",
-  UNANSWERED_WEEKLY_SECONDS: "How often the refund watch asks about a sale whose capture reads have failed for UNANSWERED_DAILY_SECONDS past PayPal's refund window without the account refusing them, until its paid record ends at 400 days (lib/paypal-sales.ts, lookAfterFailure): every look is a PayPal call and the watch's Redis (PAYPAL_WATCH_LOOKS, held by tests/paypal-watch-looks-cost.test.ts: at most 410 looks inside the window and 58 after it a sale, 2 commands and MAX_PAID_BYTES each, PAYPAL_WATCH_SALE_REDIS_USD). A company cost of the five-minute job, not a plan's: a sale is watched for 400 days, past the month and the plan it was made on (a store that moves to a smaller plan, or whose plan ends, still has its earlier sales watched), so no plan's own figure bounds it, and the Store plan's refunded first year (tests/plan-margin.test.ts) has three cents of room. Each store's month is bounded instead by the job: at most PAYPAL_WATCH_LOOKS.ordersPerStoreRunMost looks a run, runsPerDay runs a day, DAY_WINDOWS days (paypalWatchStoreMonthRedisUsd). PayPal's price for a call is unknown (paypalCallUsd null) and the waits are the job's duration, not yet a line of lib/llc-fixed-costs.ts (approvedCeiling false), so it is not certified, never zero.",
+  UNANSWERED_WEEKLY_SECONDS: "How often the refund watch asks about a sale whose capture reads have failed for UNANSWERED_DAILY_SECONDS past PayPal's refund window without the account refusing them, until its paid record ends at 400 days (lib/paypal-sales.ts, lookAfterFailure): every look is a PayPal call and the watch's Redis (PAYPAL_WATCH_LOOKS, held by tests/paypal-watch-looks-cost.test.ts: at most 410 looks inside the window and 58 after it a sale, 2 commands and MAX_PAID_BYTES each, PAYPAL_WATCH_SALE_REDIS_USD). A sale whose paid record does not read is looked at on the same schedule by its age read from the record's TTL (lookAfterUnreadable), and once a week when that does not read either: no PayPal call, 3 commands a look (PAYPAL_WATCH_UNREADABLE_LOOKS, held by tests/paypal-watch-unreadable-cost.test.ts, PAYPAL_WATCH_UNREADABLE_SALE_REDIS_USD). A company cost of the five-minute job, not a plan's: a sale is watched for 400 days, past the month and the plan it was made on (a store that moves to a smaller plan, or whose plan ends, still has its earlier sales watched), so no plan's own figure bounds it, and the Store plan's refunded first year (tests/plan-margin.test.ts) has three cents of room. Each store's month is bounded instead by the job: at most PAYPAL_WATCH_LOOKS.ordersPerStoreRunMost looks a run, runsPerDay runs a day, DAY_WINDOWS days (paypalWatchStoreMonthRedisUsd). PayPal's price for a call is unknown (paypalCallUsd null) and the waits are the job's duration, not yet a line of lib/llc-fixed-costs.ts (approvedCeiling false), so it is not certified, never zero.",
   DEMO_SESSIONS_PER_DAY: "Sessions the whole site may open in a day, the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_COMMANDS_PER_DAY: "Database commands the demo's accepted openings and actions together may send in a day (refusals are priced apart, DEMO_REFUSALS_PER_DAY), reserved at the worst before a session opens: the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_SESSIONS_PER_ADDRESS_PER_DAY: "Demo sessions one address or network may open in a day: a pace that only refuses, inside the day's caps of the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",

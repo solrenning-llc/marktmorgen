@@ -81,9 +81,8 @@ let ahead = 0;
 Date.now = () => realNow() + ahead;
 type Commands = (string | number)[][];
 
-/** The registry's line for these looks, read by name so that its absence fails here rather than in the build. */
-type UnreadableLooks = { inWindowPerSaleMost: number; pastWindowPerSaleMost: number; commandsPerLook: number; bytesPerLookMost: number; paypalCallsPerLook: number; approvedCeiling: boolean };
-const LOOKS = (registry as unknown as Record<string, unknown>).PAYPAL_WATCH_UNREADABLE_LOOKS as UnreadableLooks | undefined;
+/** The registry's line for these looks (optional chaining below kept from the RED, when it was not there yet). */
+const LOOKS: typeof registry.PAYPAL_WATCH_UNREADABLE_LOOKS | undefined = registry.PAYPAL_WATCH_UNREADABLE_LOOKS;
 
 async function buy(store: Store, productId: string, buyer: string): Promise<string> {
   const product = (await readListing(store, productId))!;
@@ -205,7 +204,7 @@ async function main(): Promise<void> {
   is("its ceiling is not approved", LOOKS?.approvedCeiling, false);
   const why = registry.NOT_A_COST.UNANSWERED_WEEKLY_SECONDS ?? "";
   is("NOT_A_COST says why these looks are the company's, with the function that spaces them", [why.includes("lookAfterUnreadable"), why.includes("PAYPAL_WATCH_UNREADABLE_LOOKS")], [true, true]);
-  const saleUsd = (registry as unknown as Record<string, unknown>).PAYPAL_WATCH_UNREADABLE_SALE_REDIS_USD;
+  const saleUsd: unknown = registry.PAYPAL_WATCH_UNREADABLE_SALE_REDIS_USD;
   is("a sale's Redis for its whole life, every record unreadable, is counted and not zero", typeof saleUsd === "number" && saleUsd > 0, true);
   console.log(`PayPal watch, unreadable records: ${sweeps} sweeps; a sale's life ${typeof saleUsd === "number" ? `$${saleUsd.toFixed(5)}` : "no line"} of Redis.`);
   done();

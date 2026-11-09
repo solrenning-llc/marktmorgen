@@ -781,6 +781,37 @@ export function lookAfterFailure(paidAt: number, now: number, refused: boolean):
 }
 
 /**
+ * When an order whose paid record does not read (readPaidExact: "unknown") is looked at next. Its age is read from what
+ * is left of the record's life (`lifeLeft`, its TTL in seconds: settle writes the record once, SET NX EX
+ * PAID_KEPT_SECONDS), and the looks are lookAfterFailure's for that age, as if every read of its capture failed without
+ * the account refusing it: hourly the first week and then less inside PayPal's refund window, once a day for
+ * UNANSWERED_DAILY_SECONDS past it, then once a week with a last look on the record's last day, after which the record
+ * has ended and the order leaves the watch. A life that does not read (`lifeLeft` null: no expiry, no key any more, or a
+ * reply that is not a whole number of seconds inside PAID_KEPT_SECONDS) gives no age: looked at once a week. The looks
+ * are counted in PAYPAL_WATCH_UNREADABLE_LOOKS (tests/plan-cost-registry.ts).
+ */
+export function lookAfterUnreadable(lifeLeft: number | null, now: number): number {
+  const weekLater = now + UNANSWERED_WEEKLY_SECONDS;
+  if (lifeLeft === null) return weekLater;
+  return lookAfterFailure(now - (PAID_KEPT_SECONDS - lifeLeft), now, false) ?? weekLater;
+}
+
+/**
+ * What is left of a paid record's life, in seconds, read exactly (CX-123 rules 24 and 30): one reply, a whole number
+ * of seconds above zero and no more than PAID_KEPT_SECONDS. Anything else, a failed request included, is null, never a
+ * guess at the sale's age.
+ */
+async function paidLifeLeft(order: string): Promise<number | null> {
+  try {
+    const read = repliesFor(await redisPipeline([["TTL", paidKey(order)]]), 1);
+    const ttl = read?.[0];
+    return typeof ttl === "number" && Number.isSafeInteger(ttl) && ttl > 0 && ttl <= PAID_KEPT_SECONDS ? ttl : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * When a paid order is next asked about: often while refunds are likely, then
  * less and less, until PayPal's refund window closes.
  */
@@ -860,9 +891,14 @@ export async function watchPayPal(
   for (const order of Array.isArray(due) ? (due as string[]) : []) {
     if (Date.now() >= deadline) break;
     const paid = await readPaidExact(order);
-    // Unknown is looked at again in an hour, never dropped from the watch (Codex G on #2791).
+    // Unknown is never dropped from the watch (Codex G on #2791), never taken for "refunded" and never takes the
+    // purchase back: it is looked at again on the schedule of a capture whose read fails, by the sale's age read from
+    // the record's own life (lookAfterUnreadable), not every hour until the record ends at 400 days (up to 9,600 looks
+    // a sale before 9 November 2026). Each look is the record's GET, its TTL and the watch's ZADD, with no PayPal call
+    // (PAYPAL_WATCH_UNREADABLE_LOOKS in tests/plan-cost-registry.ts, held by tests/paypal-watch-unreadable-cost.test.ts).
     if (paid === "unknown") {
-      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      const next = lookAfterUnreadable(await paidLifeLeft(order), now);
+      await redisPipeline([["ZADD", watchKey(statsId), String(next), order]]);
       continue;
     }
     if (!paid || !paid.capture) {

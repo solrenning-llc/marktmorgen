@@ -132,3 +132,71 @@ test("a counter that answers in an unknown shape refuses with 503 and reads noth
   assert.equal((await call(token, "203.0.113.40", "add")).status, 200, "control: a known count lets the add through");
   assert.equal(state.adds, 1);
 });
+
+/**
+ * Claude 2's review of #3341 (MEDIUM): the connection counter was keyed by the
+ * raw address, so each address of one IPv6 network and each spelling of one
+ * old-kind address got a counter of its own. One connection is what
+ * lib/traffic-rules.ts shareAddress folds them to: the new kind by its /48,
+ * "::ffff:" and upper case to the old address.
+ */
+async function threeStoresFrom(prefix: string, addresses: string[]): Promise<{ statuses: number[][] }> {
+  const tokens = [
+    await signedIn(`${prefix}-f@example.com`, `${prefix}f`),
+    await signedIn(`${prefix}-g@example.com`, `${prefix}g`),
+    await signedIn(`${prefix}-h@example.com`, `${prefix}h`),
+  ];
+  const statuses: number[][] = [];
+  let next = 0;
+  for (const token of tokens) {
+    const mine: number[] = [];
+    for (let i = 0; i < PER_STORE; i += 1) {
+      mine.push((await call(token, addresses[next % addresses.length], "add")).status);
+      next += 1;
+    }
+    statuses.push(mine);
+  }
+  return { statuses };
+}
+
+test("addresses rotated inside one IPv6 /64 share one connection's limit", async () => {
+  redis.clear();
+  state.adds = 0;
+  const addresses = Array.from({ length: 3 * PER_STORE }, (_, i) => `2001:db8:1:2::${(i + 1).toString(16)}`);
+  const { statuses } = await threeStoresFrom("calsixfour", addresses);
+  assert.equal(state.adds, PER_CONNECTION, `three stores rotating inside one /64 read ${state.adds} calendars`);
+  assert.deepEqual(statuses[2], Array(PER_STORE).fill(429));
+});
+
+test("addresses rotated across the /64s of one IPv6 /48 share one connection's limit", async () => {
+  redis.clear();
+  state.adds = 0;
+  const addresses = Array.from({ length: 3 * PER_STORE }, (_, i) => `2001:DB8:7:${(i + 1).toString(16)}::1`);
+  const { statuses } = await threeStoresFrom("calfortyeight", addresses);
+  assert.equal(state.adds, PER_CONNECTION, `three stores rotating inside one /48 read ${state.adds} calendars`);
+  assert.deepEqual(statuses[2], Array(PER_STORE).fill(429));
+});
+
+test("one old-kind address in its other spellings shares one connection's limit", async () => {
+  redis.clear();
+  state.adds = 0;
+  const addresses = ["203.0.113.50", "::ffff:203.0.113.50", "::FFFF:203.0.113.50"];
+  const { statuses } = await threeStoresFrom("calspelled", addresses);
+  assert.equal(state.adds, PER_CONNECTION, `three stores on one address, spelled three ways, read ${state.adds} calendars`);
+  assert.deepEqual(statuses[2], Array(PER_STORE).fill(429));
+});
+
+test("a spent IPv6 /48 refuses its other addresses; another /48 and an old-kind address are other connections", async () => {
+  redis.clear();
+  state.adds = 0;
+  const token = await signedIn("calendar-limit-i@example.com", "calendarlimiti");
+  const other = await signedIn("calendar-limit-j@example.com", "calendarlimitj");
+  assert.deepEqual((await adds(token, "2001:db8:1:2::1", PER_STORE)).statuses, Array(PER_STORE).fill(200));
+  assert.deepEqual((await adds(other, "2001:db8:1:2::2", PER_STORE)).statuses, Array(PER_STORE).fill(200));
+  const third = await signedIn("calendar-limit-k@example.com", "calendarlimitk");
+  // The /48 is spent; another /48 and an old-kind address are not.
+  assert.equal((await call(third, "2001:db8:1:2::3", "add")).status, 429);
+  assert.equal((await call(third, "2001:db8:2:2::3", "add")).status, 200);
+  assert.equal((await call(third, "198.51.100.7", "add")).status, 200);
+  assert.equal(state.adds, 2 * PER_STORE + 2);
+});

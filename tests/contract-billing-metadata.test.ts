@@ -860,3 +860,26 @@ test('the way back from a funded checkout is kept when the store changed its add
   assert.equal(activationObservations.calls.length,0);
  }finally{globalThis.fetch=old;activationObservations.accept=false;}
 });
+
+/*
+ * The way back from a checkout opened under the store's current address is
+ * never refused for its customer (pre-review of the change above): an address
+ * this store let go of and later took back stays on its released list
+ * (renameHandle never prunes it), and a first plan's checkout makes a new
+ * Stripe customer. Before the change the current address alone sufficed; the
+ * released rule (own customer only) is for an address this store no longer has.
+ */
+test('the way back keeps a first plan bought under an address the store took back',async()=>{
+ const old=globalThis.fetch,plan=fundedPlan('harbor','cus_New00000001');
+ const reclaimed={...store,handle:'harbor',stripeCustomerId:null,previousHandles:[],releasedHandles:['harbor']} as Store;
+ const session={mode:'subscription',customer:'cus_New00000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
+ let current:Record<string,unknown>=session,subscription:Record<string,unknown>=plan;
+ globalThis.fetch=async(input)=>Response.json(new URL(String(input)).pathname.includes('/checkout/sessions/')?current:subscription);
+ activationObservations.calls.length=0;activationObservations.accept=true;
+ try{
+  assert.equal((await readStartedSubscription(reclaimed,'cs_test_Activation001'))?.active,true,'funded return under the current address');
+  assert.equal(activationObservations.calls.length,1);
+  current={...session,metadata:{store:'harbor'}};subscription={...plan,metadata:{store:'harbor'}};
+  assert.equal((await readStartedSubscription(reclaimed,'cs_test_Activation001'))?.active,true,'unfunded return under the current address');
+ }finally{globalThis.fetch=old;activationObservations.accept=false;}
+});

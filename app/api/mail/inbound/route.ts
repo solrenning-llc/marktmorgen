@@ -120,7 +120,8 @@ export async function POST(request: NextRequest) {
 
   const emailId = typeof notice.data?.email_id === "string" ? notice.data.email_id : "";
 
-  const result = await forwardInbound(emailId);
+  // The addresses the announcement names, so support's daily count is taken before the message is read.
+  const result = await forwardInbound(emailId, Date.now(), notice.data?.to);
   if (result === "retry") {
     await redisPipeline([["DEL", seenKey]]).catch(() => {});
     return Response.json({ ok: false }, { status: 500 });

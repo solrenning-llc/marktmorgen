@@ -1113,6 +1113,21 @@ export async function storeForEmailSeen(
   return store;
 }
 
+/**
+ * Whether an address has a store under it, by one EXISTS of its owner key and
+ * nothing read: true, false, or null when the answer could not be read
+ * (lib/inbound-mail.ts, support's reserved share of the day).
+ */
+export async function ownsAStore(email: string): Promise<boolean | null> {
+  if (!email || !isRedisConfigured()) return null;
+  try {
+    const [found] = await redisPipeline([["EXISTS", await ownerKey(email)]]);
+    return found === 1 ? true : found === 0 ? false : null;
+  } catch {
+    return null;
+  }
+}
+
 /** One bounded read for the funded restart's final source check.
  * It cannot migrate, save, infer absence from an oversized/partial answer,
  * or turn a current-source observation into permission for another POST. */

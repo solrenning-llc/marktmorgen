@@ -129,21 +129,25 @@ No company postal address exists yet (`lib/company-postal.ts`, empty): until it 
 
 ALTO 1 of Claude 5's email audit (9 November 2026): every message written to our own support addresses was sent on through SES as a company email (`lib/inbound-mail.ts`, `forwardInbound`), with nothing bounding it but the webhook's per-connection limit, and the connection is Resend's, not the sender's. One sender writing 300 times with 1 MB each had all 300 messages and 300 MB sent on; the only real bound was SES's 24-hour quota (about $120 a day at 15 MB a message), and spending that quota also stops buyers' receipts and sign-in links.
 
-Each forward is now counted before anything is fetched or sent, and a count that cannot be read sends nothing (Resend tries again); a message tried again is counted once:
+Each count below is taken before anything is read, fetched or sent. A count that cannot be read sends nothing and Resend tries again; each count a message has taken is marked on it (`nl:inbound:support:counted:`), so a try again takes only the ones still missing and its files are paid once.
 
 | Ceiling | Value | Where |
 |---|---|---|
+| Announcements of mail not written to a store, read at Resend, a UTC day | `SUPPORT_ANNOUNCED_DAILY` = 1,000 | `lib/inbound-mail.ts` |
 | One sender, however the address is written (`canonicalEmail`), an hour | `SUPPORT_SENDER_HOURLY` = 10 | `lib/inbound-mail.ts` |
 | One sender, a day | `SUPPORT_SENDER_DAILY` = 30 | `lib/inbound-mail.ts` |
 | Every sender together, a UTC day | `SUPPORT_DAILY` = 200 | `lib/inbound-mail.ts` |
-| Files sent on, a UTC day, before base64 | `SUPPORT_FILE_BYTES_DAILY` = 300,000,000 | `lib/inbound-mail.ts` |
+| Of those, senders with no store under the address | `SUPPORT_PUBLIC_DAILY` = 120 | `lib/inbound-mail.ts` |
+| Files sent on, a UTC day, before base64; each charged once at its listed size and never read past it | `SUPPORT_FILE_BYTES_DAILY` = 300,000,000 | `lib/inbound-mail.ts` |
 | Notice to the inbox that messages are held, a UTC day | `SUPPORT_HELD_NOTICES_DAILY` = 1 | `lib/inbound-mail.ts` |
 
-A message past a ceiling is held, not dropped: it stays in Resend (Emails, Receiving), is not tried again, and the inbox is told once a day where to find it. A file past the day's bytes is left out and named in the message ("Not attached (see Resend, Emails, Receiving)"). The store path keeps its own `CREATOR_HOURLY` and is one of the store's emails, not this cost.
+A message past a ceiling is held: it is not sent on and will not be sent later; it can be read in Resend (Emails, Receiving), and this site keeps no copy. How long Resend keeps it has no dated source here. The inbox is told so once a day. A file past the day's bytes, or bigger than it was listed, is left out and named in the message ("Not attached (see Resend, Emails, Receiving)"). The store path keeps its own `CREATOR_HOURLY` and is one of the store's emails, not this cost.
 
-**The month at the ceilings: $29.72 at the most** (`supportForwardMonthlyUsd` in tests/plan-cost-registry.ts, held by tests/support-forward-ceiling.test.ts): 31 UTC days of 201 emails, each at `PER_EMAIL` ($0.0009, Resend's overage, dearer than SES), the route's whole 60 seconds of CPU and memory and `SUPPORT_FORWARD_COMMANDS` database commands ($0.0045 a forward), plus 31 days of files at 4/3 for base64 at SES's $0.12 a GB (read 18 October 2026 in docs/pack-cost-decomposition-2026-10-18.md; not read again on 9 November 2026, aws.amazon.com being blocked in that session). It belongs 100% to Marktmorgen among the LLC's fixed costs (FX275) and is covered from the minimum paid base under MR item 2.
+**What the ceilings do not prove.** The sender is the message's From, which nothing in the code authenticates (no DMARC or SPF result is read). Anyone can spend one person's own hour by writing in their name, and anyone who knows creators' addresses can spend the 80 a day kept for them; made-up addresses can no longer take that share, but a buyer with no store is held with them once the public share is spent. Should Redis stay out of reach for longer than Resend keeps trying, support mail is not sent on and nobody is told: it is only in Resend.
 
-Not in that figure, so the complete month stays unknown, never zero: announcements of held messages (a function call, a read at Resend and a few commands each, bounded only by the webhook's per-connection limit and Resend's own receiving quota), transfer out of the function to SES, and Resend's count of received mail against its plan.
+**The month at the ceilings: $44.20 at the most** (`supportForwardMonthlyUsd` in tests/plan-cost-registry.ts, held by tests/support-forward-ceiling.test.ts): 31 UTC days of 1,000 announcements read, each at `SUPPORT_HELD_READ_COMMANDS` commands and a call waited on for the read's 10 seconds and one more ($0.0005 each); of them 201 emails a day, each at `PER_EMAIL` ($0.0009, Resend's overage, dearer than SES), the route's whole 60 seconds of CPU and memory and `SUPPORT_FORWARD_COMMANDS` database commands ($0.0044 a forward); plus 31 days of files at 4/3 for base64 at SES's $0.12 a GB (read 18 October 2026 in docs/pack-cost-decomposition-2026-10-18.md; not read again on 9 November 2026, aws.amazon.com being blocked in that session). Both command figures are checked against what the code sends. It belongs 100% to Marktmorgen among the LLC's fixed costs (FX275) and is covered from the minimum paid base under MR item 2.
+
+Not in that figure, so the complete month stays unknown, never zero: announcements past `SUPPORT_ANNOUNCED_DAILY` (a function call and about six commands each, no read at Resend, bounded only by the webhook's per-connection limit and Resend's own receiving quota), transfer out of the function to SES, and Resend's count of received mail against its plan. Mail the announcement shows written to a store is not counted here: its read is the store path's, and a name on that domain that is no store's is still read before it is dropped.
 
 ## LE448 — exposição própria da lista de pré-abertura (em implementação)
 

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
-import type { MeetProvider } from "@/lib/call-setup";
+import { MEET_ACCESS_UNCONFIRMED, type MeetProvider } from "@/lib/call-setup";
 import type { MeetView } from "@/lib/meet-connect";
 import type { TestMeeting } from "@/lib/meet-test";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -60,6 +60,38 @@ function when(ms: number): string {
 }
 
 /**
+ * Said after a disconnect the provider did not confirm (lib/meet-connect.ts,
+ * `providerAccessRemoved: false`): it was disconnected here, the provider's
+ * access may still be on, and how to remove it there. A live region that is
+ * always on the page, so the words are announced when they appear; the notice
+ * takes the focus then, since the Disconnect button that had it is gone.
+ * Empty, and silent, when the provider confirmed.
+ */
+export function ProviderAccessNotice({ provider }: { provider: MeetProvider | null }) {
+  const words = provider ? MEET_ACCESS_UNCONFIRMED[provider] : null;
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (provider) ref.current?.focus();
+  }, [provider]);
+  return (
+    <div role="status" aria-live="polite" data-provider-access={provider ?? undefined}>
+      {words ? (
+        <p ref={ref} tabIndex={-1} className="notice notice-warn text-sm">
+          <strong className="font-semibold">{words.lead}</strong> {words.before}
+          {words.link ? (
+            <a href={words.link.href} target="_blank" rel="noopener noreferrer" className="link">
+              {words.link.text}
+              <NewTab />
+            </a>
+          ) : null}
+          {words.after}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * The store's Google Calendar and Zoom connections (lib/meet-connect.ts):
  * connect (a form that leaves for the provider's consent page), connect a
  * different account, or disconnect, with what each one does said plainly.
@@ -79,13 +111,17 @@ export function MeetingConnections({
   review?: boolean;
   /** Settings-only retained connections; never offer new provider operations. */
   disabledProviders?: readonly MeetProvider[];
-  /** The test meeting each connected account has, where it has one (lib/meet-test.ts). */
-  tests?: Partial<Record<MeetProvider, TestMeeting>>;
+  /** The test meeting each connected account has, where it has one (lib/meet-test.ts); null when it could not be read. */
+  tests?: Partial<Record<MeetProvider, TestMeeting>> | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<MeetProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tests, setTests] = useState(firstTests);
+  /** The provider whose last disconnect it did not confirm taking our access back, if any. */
+  const [unconfirmed, setUnconfirmed] = useState<MeetProvider | null>(null);
+  const [tests, setTests] = useState(firstTests ?? {});
+  /** The test meetings could not be read: nothing about them is offered, so none is made over one that is there. */
+  const unread = firstTests === null;
   const [testing, setTesting] = useState<MeetProvider | null>(null);
   /** Which of the test meeting's steps is running, so only its button says so. */
   const [doing, setDoing] = useState<"test" | "movetest" | "untest" | null>(null);
@@ -127,15 +163,17 @@ export function MeetingConnections({
   async function disconnect(provider: MeetProvider) {
     setBusy(provider);
     setError(null);
+    setUnconfirmed(null);
     try {
       const response = await fetch("/api/integrations/meetings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "disconnect", provider }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; providerAccessRemoved?: boolean };
       if (data.ok) {
         toast(`${ACCOUNTS[provider].name} disconnected.`);
+        if (data.providerAccessRemoved === false) setUnconfirmed(provider);
         router.refresh();
         return;
       }
@@ -239,7 +277,11 @@ export function MeetingConnections({
               {connection && !connection.broken && !disabled ? (
                 <div className="mt-5 border-t border-line pt-5" data-meet-test={provider}>
                   <h3 className="text-sm font-semibold text-ink">Check that it works</h3>
-                  {tests[provider] ? (
+                  {unread ? (
+                    <p className="mt-1 text-sm text-ink-soft" role="status">
+                      We could not read your test meeting just now. Nothing was changed. Reload this page in a moment.
+                    </p>
+                  ) : tests[provider] ? (
                     <>
                       <p className="mt-1 text-sm text-ink-soft">
                         {`A test meeting is on your ${info.name} account, set for ${when(tests[provider].start)}, with nobody invited. Open it to see it. Move it an hour later to check what a buyer's move does, then delete it.`}
@@ -294,6 +336,7 @@ export function MeetingConnections({
             </section>
           );
         })}
+        <ProviderAccessNotice provider={unconfirmed} />
         {error ? (
           <p className="notice notice-error" role="alert">
             {error}

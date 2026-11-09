@@ -473,6 +473,47 @@ async function main(): Promise<void> {
     clock = Date.UTC(2027, 1, 11, 12);
     await setSubscription(owner, plan("month", per(Date.UTC(2027, 1, 10, 12), 1)));
     is("10d: a renewal written in its grace keeps the anchor", (await read()).allowanceAnchor, { subscriptionId: SUB, start: START, end: Date.UTC(2027, 0, 1, 12) });
+    // 10e (focal review of #3396, LEVE): the 10 February renewal is paid but never written (the record stays on 10
+    // January to 10 February); on 20 February, past its grace, the plan is switched to yearly and that is written. The
+    // new period begins off the renewals' chain: a switch, not a skipped renewal, so February's window of the anchor,
+    // already used, goes on; it never opens a whole window nineteen days after it.
+    await switchedOn10December();
+    clock = Date.UTC(2027, 1, 5, 12);
+    store = await read();
+    is("10e: early February counts in the anchor's month", [windowId(store, clock), await drain(store)], ["2027-02-01", 8]);
+    clock = Date.UTC(2027, 1, 20, 15, 37);
+    await setSubscription(owner, plan("year", per(clock, 12)));
+    store = await read();
+    is("10e: a switch written over a record stale past its grace keeps the window used, nothing whole again", [windowId(store, clock), await drain(store)], ["2027-02-01", 0]);
+    is("10e: the anchor is kept", store.allowanceAnchor ?? null, { subscriptionId: SUB, start: START, end: Date.UTC(2027, 0, 1, 12) });
+    clock = Date.UTC(2027, 2, 5, 12);
+    store = await read();
+    is("10e: the anchor's next month is whole", [windowId(store, clock), await drain(store)], ["2027-03-01", 8]);
+    // 10f: every day of the month, switch time, how stale the record is and how late the switch is written: a switch made
+    // after a renewal that was paid but not written names the window a record that had caught up names.
+    let staleSwept = 0;
+    const staleOpened: string[] = [];
+    for (const startDay of [1, 10, 15, 28, 29, 30, 31]) for (const afterHours of [1, 100, 300, 600]) for (const staleDays of [3, 10, 19, 27])
+      for (const lateHours of [0, 13, 49]) {
+        const begun = Date.UTC(2027, 0, startDay, 9);
+        const yearlyRecord = { subscriptionActive: true, subscriptionId: SUB, trialEnds: 0, planEndedAt: "", cycle: "year" as const, period: per(begun, 12) };
+        const switchedAt = begun + afterHours * 3_600_000;
+        const chain = (k: number) => addMonthsMs(switchedAt, k);
+        const monthlyRecord = { ...yearlyRecord, cycle: "month" as const, period: { start: switchedAt / 1000, end: chain(1) / 1000, renews: true } };
+        const first = { ...monthlyRecord, allowanceAnchor: anchorAfter(yearlyRecord, monthlyRecord, switchedAt) };
+        // The first renewal written on its day, as Stripe sends it (cut from the switch's own day); the second paid, not written.
+        const renewed = { ...first, period: { start: chain(1) / 1000, end: chain(2) / 1000, renews: true } };
+        const rec = { ...renewed, allowanceAnchor: anchorAfter(first, renewed, chain(1)) };
+        const caughtUp = { ...rec, period: { start: chain(2) / 1000, end: chain(3) / 1000, renews: true } };
+        const movedAt = chain(2) + staleDays * DAY + 7 * 3_600_000 + 13 * 60_000;
+        const writtenAt = movedAt + lateHours * 3_600_000;
+        const moved = { ...rec, cycle: "year" as const, period: per(movedAt, 12) };
+        const expected = windowId(caughtUp, writtenAt);
+        const got = windowId({ ...moved, allowanceAnchor: anchorAfter(rec, moved, writtenAt) }, writtenAt);
+        staleSwept += 1;
+        if (!expected || got !== expected) staleOpened.push(`${startDay} +${afterHours}h stale ${staleDays}d late ${lateHours}h: ${expected} -> ${got}`);
+      }
+    is("10f: 336 switches written over a stale record, none opens a window the caught-up record does not name", [staleSwept, staleOpened.length, staleOpened.slice(0, 3)], [336, 0, []]);
 
     part("11. The worst month this keeps: one window per paid month, every limit used (the figures in the PR body)");
     // The repository's own model: a month's receipts after every fee and reserve (netOf, lib/receiving-costs.ts), less

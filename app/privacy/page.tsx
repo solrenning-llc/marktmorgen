@@ -759,11 +759,10 @@ export default function PrivacyPage() {
           list already holds about you — what you got or bought from them, and
           any labels their import brought or their automatic emails gave you
           (a step can give a label, take one off, or start another of their
-          automatic emails) — and never by whether you open an email. When a
-          creator narrows an email to some of their buyers, we read their
-          sales once and keep that copy of who bought what for one hour, so
-          the count they see says when it was read; it is then deleted, and
-          deleted at once if you ask us to delete your data.
+          automatic emails) — and never by whether you open an email.
+          When a creator narrows an email to some of their buyers, opens their task agenda or looks a buyer up, we read their sales once and keep that copy of who bought what for one hour,
+          so the count they see says when it was read; it is then deleted,
+          and deleted at once if you ask us to delete your data.
         </p>
         <p id="links">
           <strong className="text-black">Which links you use, only if you allow it.</strong>{" "}

@@ -1154,6 +1154,21 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/community-files.ts TAKE_PICTURE: the member's note becomes TAKEN and the path leaves the doors' list, together.
+        if (key.startsWith("-- marktmorgen:community-picture-take:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, note, doors, author, taken, seconds, path] = args;
+          this.live(note);
+          const held = this.data.get(note);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          if (held !== author) return 0;
+          this.data.set(note, taken);
+          this.until.set(note, this.now() + Number(seconds) * 1000);
+          this.live(doors);
+          const z = this.zset(doors);
+          const at = z.findIndex((entry) => entry.member === path);
+          if (at >= 0) z.splice(at, 1);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
         if (key.startsWith("-- marktmorgen:studio-demo-door:v2\n")) return this.studioDemo("door", args);

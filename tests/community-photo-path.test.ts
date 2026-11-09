@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   is("the posted picture is still not on the sweep's list", await listed(victim), false);
   // A day and an hour on, for the file store's clock and the database's (whose notes expire by it).
   advance(DAY_MS + 3_600_000);
-  const swept = await sweepCommunityUploads(Date.now() + DAY_MS + 3_600_000);
+  const swept = await sweepCommunityUploads(Date.now() + DAY_MS + 2 * 3_600_000);
   is("the daily sweep leaves the posted picture alone", files.has(victim) && !deleted.includes(victim), true);
   is("nothing of the victim's swept", swept, 0);
   if (!files.has(victim)) upload(victim);
@@ -108,20 +108,21 @@ async function main(): Promise<void> {
   is("and does not put it back on the sweep's list", await listed(late), false);
   is("nobody can take it again", await takeCommunityUpload(late, "owner-of-late"), false);
 
-  part("A note written between the take's two steps is wiped by the take");
+  part("A note written right after the take, in one script, finds the picture taken");
+  // Rule 23 (pre-review of 9 November 2026): the take was two steps and this part wrote a note between them; it is
+  // one script now (TAKE_PICTURE), so the note is written right after it, and must still open nothing.
   const between = fresh();
   asViewer("racer");
   is("the door opens", (await ask(between)).status, 200);
   upload(between);
   const original = redis.pipeline.bind(redis);
-  let injected = false;
+  let injected: boolean | null = null;
   redis.pipeline = (async (batch: (string | number)[][]) => {
     const reply = await original(batch);
-    if (!injected && batch[0]?.[0] === "GETDEL") {
-      injected = true;
+    if (injected === null && batch[0]?.[0] === "EVAL") {
       redis.pipeline = original;
-      // A second door for the same name, its note written right after the take read the first one.
-      await noteCommunityUpload(between, "racer");
+      // A second door for the same name, its note written right after the take.
+      injected = await noteCommunityUpload(between, "racer");
     }
     return reply;
   }) as typeof redis.pipeline;
@@ -130,7 +131,7 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = original;
   }
-  is("the late note was really written in between", injected, true);
+  is("the late note was tried and refused", injected, false);
   is("the picture is off the sweep's list", await listed(between), false);
   is("and nobody can take it into a second post", await takeCommunityUpload(between, "racer"), false);
 
@@ -148,7 +149,7 @@ async function main(): Promise<void> {
   upload(unused);
   const placesWithIt = await kept();
   advance(DAY_MS + 3_600_000);
-  await sweepCommunityUploads(Date.now() + 2 * (DAY_MS + 3_600_000));
+  await sweepCommunityUploads(Date.now() + 2 * (DAY_MS + 3_600_000) + 3_600_000);
   is("the unused picture is deleted", files.has(unused), false);
   is("its place is given back", await kept(), placesWithIt - 1);
 

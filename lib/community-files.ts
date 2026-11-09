@@ -73,6 +73,8 @@ const TAKEN = "\ttaken\t";
  * the daily sweep to see the mark on a name listed again a day after its door (sweepCommunityUploads).
  */
 const TAKEN_TTL_SECONDS = 3 * 24 * 60 * 60;
+/** How much longer than a door's day the sweep waits before it deletes the door's picture. */
+const SWEEP_MARGIN_SECONDS = 60 * 60;
 
 const countKey = (folder: string) => `nl:cimg:n:${folder}`;
 const DOORS_KEY = "nl:cimg:doors";
@@ -172,33 +174,37 @@ export async function noteCommunityUpload(path: string, author: string, now = Da
 }
 
 /**
+ * The take, in one step (pre-review of 9 November 2026: done in two, a sweep reading the note between them found it
+ * gone and deleted the picture the post was taking). Only the member whose note it is takes it: the note becomes
+ * TAKEN for TAKEN_TTL_SECONDS and the path comes off the sweep's list, together; 1. Any other note, none, or TAKEN
+ * already: nothing changes; 0.
+ *
+ * KEYS[1] the picture's note, KEYS[2] the doors' list; ARGV[1] the member, ARGV[2] TAKEN and the member,
+ * ARGV[3] TAKEN_TTL_SECONDS, ARGV[4] the path. Modelled in lib/redis-memory.ts; not yet run on a real Redis.
+ */
+export const TAKE_PICTURE = `-- marktmorgen:community-picture-take:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', tonumber(ARGV[3]))
+redis.call('ZREM', KEYS[2], ARGV[4])
+return 1`;
+
+/**
  * Whether this picture was sent by this member and not used yet; it is then
  * theirs for this one post only. Somebody else's picture, or one already in
  * a post, is refused and left alone.
  *
- * Taken, its note becomes TAKEN (which also wipes a note another door wrote after the first step) before the path
- * comes off the sweep's list, both confirmed: an answer in another shape throws UnknownReplyError, and the post is
- * not made (its picture may still be listed, and the sweep keeps a picture whose note says TAKEN).
+ * One script (TAKE_PICTURE): its note becomes TAKEN (no later door can be noted for the name, and the sweep keeps the
+ * picture) and the path comes off the sweep's list at once, read exactly: an answer in another shape throws
+ * UnknownReplyError, and the post is not made.
  */
 export async function takeCommunityUpload(path: string, author: string): Promise<boolean> {
-  const [held] = await redisPipeline([["GETDEL", uploadKey(path)]]);
-  if (held === author) {
-    // In a post now: marked, and no longer a door to sweep.
-    const replies = repliesFor(
-      await redisPipeline([
-        ["SET", uploadKey(path), `${TAKEN}${author}`, "EX", TAKEN_TTL_SECONDS],
-        ["ZREM", DOORS_KEY, path],
-      ]),
-      2,
-    );
-    const removed = replies ? countOf(replies[1]) : null;
-    if (!replies || replies[0] !== "OK" || (removed !== 0 && removed !== 1)) throw new UnknownReplyError("a community picture taken into a post");
-    return true;
-  }
-  if (typeof held === "string" && held) {
-    await redisPipeline([["SET", uploadKey(path), held, "NX", "EX", UPLOAD_TTL_SECONDS]]).catch(() => null);
-  }
-  return false;
+  const replies = repliesFor(
+    await redisPipeline([["EVAL", TAKE_PICTURE, 2, uploadKey(path), DOORS_KEY, author, `${TAKEN}${author}`, TAKEN_TTL_SECONDS, path]]),
+    1,
+  );
+  const took = replies ? countOf(replies[0]) : null;
+  if (took !== 0 && took !== 1) throw new UnknownReplyError("a community picture taken into a post");
+  return took === 1;
 }
 
 /**
@@ -238,7 +244,9 @@ export async function dropCommunityImage(path: string | undefined | null): Promi
  */
 export async function sweepCommunityUploads(now = Date.now(), limit = 300): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const before = Math.floor(now / 1000) - UPLOAD_TTL_SECONDS;
+  // A day and an hour after its door (pre-review of 9 November 2026): its note, which lives a day by the database's
+  // clock, is gone by then whatever the skew between the app's clock and the database's.
+  const before = Math.floor(now / 1000) - UPLOAD_TTL_SECONDS - SWEEP_MARGIN_SECONDS;
   // Read exactly (CX-123 rule 24): a list in another shape is unknown, never "none to sweep".
   const found = repliesFor(await redisPipeline([["ZRANGEBYSCORE", DOORS_KEY, 0, before, "LIMIT", 0, limit]]), 1);
   const paths = found ? stringList(found[0]) : null;

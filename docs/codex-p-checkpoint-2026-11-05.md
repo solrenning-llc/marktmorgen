@@ -2452,3 +2452,46 @@ Projectongoing/serialMedium0agents/quotaUNKNOWN/noActionsloop/CIqueryretrycancel
 ### Delivery receipt — 2026-11-08 21:39 Fortaleza
 
 PONTO CXP-20261108-2138-C1-1 DELIVEREDc0e6d6ba6ee981d3fc091a35ac54f257201f2b37/blobe025ea6cd3aefbb73ef30945311dce7ea28fa8a1/FULL7003993 EXACTreadback. NoCASconflict on finalstop (oneearlierRES409 handled>=123s). FreshFULL6998049 preservedRES6990654 exact, delta7395FULLread: M3312focal/G3300PARTIAL+budget/C6auditoria12. C6reportedALTOad-events including3054 explicitly acknowledged, notPcausalproof or closure; P3054 was testintegrationfocal notglobalprivacycert. No PPII/foreignedit. S2892/2999done skip;3135P5820457110delivered+bothproofpartsreadback;3263priorclosurepreserved. Projectongoing, noautomationchange/backgroundwatch, do not repost stop.
+
+
+## 2026-11-08 22:40 Fortaleza — directed reconciliation; #2832 integration focal needs designation
+
+FIRST latest canonical8208a45459d34458a109e7ef14ed626e556d837c/blob8dcb19787d40a77c7adce3a52051c8d8682be0c5/FULL452307 read; priorPONTO2138c0e6d6ba6ee981d3fc091a35ac54f257201f2b37/FULL7003993 read FULL in fetchedchannel7067613/blob2ae1ebd4e367e265a62ee57f6f1d99c2ccad9da4. All29headers indexed, directed P/N2137+2232/C2receipt3135/C6queue1824/V2209/T2211/M2235 originals read FULL. Notallpeerpayloadsclaimedread. No newnominalC1toP found; C1-C4-46remains3199C4, notPpromotion. C2reports3135queue exact1b38 afterP5820457110; C6reports3263queueexactb161 afterP5820210559. Acknowledgeauthorreceipts, NOreplay/secondfocal/queue/mergecertificate.
+
+Main freshnative advanced787c→dcf91e9191a1084d6a015eed3811ec6d64cc3d51, all24knownpullrefs unchanged vspriorrun (below). M2235 independentlyreports sameadvance and onlyC3reservationsnormdelta; this is Mread, notPnormaudit. C6-2208#1824duplicate readListingsExact/MGbuild blockage is C6diagnosis at older787c, notnewPcausalexecution/currentqueueassertion. No dequeue/foreignbranchrepair/oldmain-redrevival. 3107same1a00 conditionalMED/R2unclosed; no source/focal/qualificationtransferred byunchangedidentity. OldPfourproducts/3218mergedhistory untouched/norecreation.
+
+NEW boundedpreflight #2832: directmetadata OPEN/unmerged/head d8e871ad3ce54cd3dc708dacf7bf2bbfb0100341/base88dedad3b5c19202d595c6d049210859680ce4ef. FULLdiscussion9bodies read; no finalfocal oncurrenthead. U5806676079 old892904 exactfirst andC66695016417 oldsecondcredited. C6LOWclosure6709356349alsofoundscannerMED, candidatesC6dfe/C29f274/7efac alreadyexisting. Mmaintainer6726817709/6726962181integrated existingC2candidate+main preservinghistory. Request6726962181 explicitly to U OR anotherCodex assignedbyC1; P notnominallydesignated inread originals, so NOclaim/RES/diff/source/test/parecer/foreignrefedit. Do not pretend earliercandidatefocal coverscurrentintegration. C1canassignP ifdesired; useful nextscope is scanIDfix+maincomposition guarding productnav/thanksnote/noemptyeditor+unchangedmainnotice/sidecars. M35/604observations/types1294/archives6fe5df24 are AUTHOR evidence, notPexecution. Thanks-note neighbor#2880separate. No globalfinancialreviewmissingclaimed; oldtwofinancialopinions exist, integrationfocalmissing.
+
+Otherclaims S2892+2999done/Z3024MEDstalesnapshots/M3312done/H23265partial/G3300partial/S3309MED+C6correctivecontinuation/U3311sources/T2596unchangedMEDs/N2261preflight remainTHEIRS. C6R13/3314price+discountmoney request is outsideuserPprohibition, notclaimedP. C6R12ALTOprivacy/ad-events/PDFreportedpreviousrun notPproof/closure; noPIIfilechange/research. C6proposedglobalmodelRedisfidelity notPgrant/nativeLuaqualification. C6budgetappeals NOTC1grants, no caprerun/reset/raise or borrowing.
+
+Fresh directednativeidentity:
+```
+dcf91e9191a1084d6a015eed3811ec6d64cc3d51	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+daaf5306187d4aa43c9f47590d429dcb10656519	refs/pull/2843/head
+66dfd8a571a734d6b787b4552b7b53759d239a48	refs/pull/2868/head
+6c3077cdaefaac049ca0e12e836be68691bfd875	refs/pull/2892/head
+aae8fcf5f8ce7118007f58d371c2b6c722dd2d18	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+c5db63a1fffc5c79a5866831d54ddff01b3825fa	refs/pull/2999/head
+b5dd4dc3791ed83c60cdc59bd1a38e95f9420b1d	refs/pull/3014/head
+0cdb49725fbb78d341e648ae4758a5f0ab88f0f4	refs/pull/3034/head
+9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+442a057113c87b8728e1a23711510fa852bd0e6d	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+1b38fa1cf19813764fc9256c9b81808db7fc0c0d	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
+```
+2832exactd8e separatelyverifiedmetadata, notinthatnative24refbatch. OffPR2514candidate8a/fourC6correctivecandidates remainlast-known/unpromoted, notpretendreconfirmed. Existing2020/C1scope/2514CodeQLHIGH/foreignpromotionlimits/R2qualifications preserved. Subjectproofs and alloldrefs preserved.
+
+Onlyread/preflight/reconciliationthisrun: no source/test/diff/productedit/newRED/GREEN/opinion/CIqueryretrycancel/fila/enqueue/merge/pushproduct/sharedreservations/commercial/price/limit/commission/flags/account/payment/terms/key/contact/PII/provider/subagent. No newartifact/harness tolint/scanner/runtime; don'tfabricatevalidation. SerialMedium/quotaUNKNOWN/nominalmissingorwaittransientNOTprojectcomplete, existingcontinuitykept/noautomationchanges/backgroundwatch. NewPONTO2240 afterfreshFULL/dedup/readback; C1designation2832requestedinthepoint, notuserpermission/endproject.

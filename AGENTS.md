@@ -44,6 +44,24 @@ Autorização do dono, nas palavras dele: "se não faz a construção andar mais
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## CV — "CI verde" só com prova (dono, 09/11/2026, por volta das 13h20 Fortaleza)
+
+Autorização do dono, nas palavras dele: "faça o correto. e tambem quero mais cuidados para que episodios assim e outros nao ocorram mais". Vale para todo agente deste repositório (Claude 1 a 6, cada Codex e qualquer agente novo), em toda sessão. Motivo: em 09/11/2026 um PR foi dado como verde sem nunca ter rodado GitHub Actions, depois de um incidente do próprio GitHub, porque o estado geral do commit aparecia como SUCCESS só com a verificação da Vercel; o PR ficou parado por quase 3 horas. Na mesma semana, um limite de tempo do CodeQL derrubou a fila por dias, relatado PR a PR, sem que ninguém o tratasse como causa comum.
+
+(a) **O que é "CI verde".** Só as 9 verificações `All checks (...)` com SUCCESS no head exato do PR. Não valem o estado geral do commit (`statusCheckRollup.state`), o `mergeStateStatus`, a bolinha verde, a verificação da Vercel nem um resultado de head anterior. Para conferir, troque N pelo número do PR:
+
+`gh pr view N -R solrenning-llc/marktmorgen --json headRefOid,statusCheckRollup --jq '{head:.headRefOid,verdes:([.statusCheckRollup[]|select((.name//"")|startswith("All checks"))|select(.conclusion=="SUCCESS")]|length)}'`
+
+(b) **Afirmação de estado.** "Verde", "na fila", "incorporado", "corrigido" e "revisado" só se escrevem com o número do PR e o head, depois de ler o estado na hora. Quem não conferiu agora escreve "não conferi agora".
+
+(c) **Pedido de fila.** Sempre no formato exato `fila #N @sha`, depois de conferir (a).
+
+(d) **Head sem nenhuma execução de Actions 30 minutos depois do envio.** Primeiro confira se há conflito: o GitHub não roda CI em PR com conflito. Sem conflito, feche e reabra o PR uma vez, o que dispara a CI sem commit novo. Não faça push para isso: a regra MV (c) continua valendo. Se continuar sem execução, avise no canal `para-claude-1`.
+
+(e) **Falha fora do PR que se repete.** Quando a mesma verificação obrigatória falhar ou for cancelada em 3 ou mais PRs sem relação entre si, avise o coordenador no canal como causa comum, com o nome da verificação e os números dos PRs, em vez de pedir para reenfileirar um a um.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## TX — Política tributária vigente (dono,27/10/2026 12h34 Fortaleza)
 
 Esta decisão substitui a regra19 e toda instrução anterior conflitante, inclusive MR/SR, Hazelsong, AX274,FX275,VR e Pedidos repetidos. Texto antigo permanece histórico. Usar a interpretação juridicamente mais correta, fundamentada em lei, regulamentação e decisões oficiais, conferidas e citadas com artigo/data; não escolher automaticamente a hipótese que dá mais imposto nem somar regimes/países inaplicáveis. ISS5% não é fato certificado.

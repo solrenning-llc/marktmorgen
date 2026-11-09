@@ -17,7 +17,8 @@ part("A key that is not a notice");
 for (const key of ["constructor", "toString", "hasOwnProperty", "__proto__", "valueOf"]) {
   is(`gift ${key}`, alert(renderToStaticMarkup(createElement(GiftBox, { store, product, problem: key }))), false);
   is(`group ${key}`, alert(renderToStaticMarkup(createElement(GroupBox, { store, product, problem: key }))), false);
-  is(`remind ${key}`, alert(renderToStaticMarkup(createElement(RemindBox, { store, product, asked: key }))), false);
+  // An unknown key says the general error; a prototype name says the same, never an empty alert (rule 23: new assertion form).
+  is(`remind ${key}`, renderToStaticMarkup(createElement(RemindBox, { store, product, asked: key })), renderToStaticMarkup(createElement(RemindBox, { store, product, asked: "zzz" })));
 }
 
 part("A real key");

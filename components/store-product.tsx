@@ -316,7 +316,7 @@ export function GiftBox({ store, product, problem = "", consentAgain = false }: 
       <form action="/api/store/checkout" method="post" target="_top" className="mt-2 space-y-3 pb-1" data-checkout="">
         <input type="hidden" name="handle" value={store.handle} />
         <input type="hidden" name="product" value={product.id} />
-        {problem && problems[problem] ? (
+        {problem && Object.hasOwn(problems, problem) && problems[problem] ? (
           <p className="st-note text-sm" role="alert">{problems[problem]}</p>
         ) : null}
         <GivenOptionPicker store={store} product={product} />
@@ -362,7 +362,7 @@ export function RemindBox({ store, product, asked = "", when = "hour" }: { store
   const { w } = speech(store);
   const m = membershipWords(store.language);
   const said = isAskWhen(when) ? when : "hour";
-  const notice = asked && asked !== "asked" ? m.leftNotices[asked] ?? m.leftNotices.error : null;
+  const notice = asked && asked !== "asked" ? (Object.hasOwn(m.leftNotices, asked) ? m.leftNotices[asked] : m.leftNotices.error) : null;
   return (
     <details id="remind" className="mt-4 scroll-mt-24 rounded-2xl px-4 py-3" style={{ border: "1px solid var(--st-line)" }} open={Boolean(asked)}>
       <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold" style={{ color: "var(--st-text)" }}>
@@ -428,7 +428,7 @@ export function GroupBox({ store, product, problem = "", consentAgain = false }:
       <form action="/api/store/checkout" method="post" target="_top" className="mt-2 space-y-3 pb-1" data-checkout="">
         <input type="hidden" name="handle" value={store.handle} />
         <input type="hidden" name="product" value={product.id} />
-        {problem && problems[problem] ? (
+        {problem && Object.hasOwn(problems, problem) && problems[problem] ? (
           <p className="st-note text-sm" role="alert">{problems[problem]}</p>
         ) : null}
         <GivenOptionPicker store={store} product={product} each />

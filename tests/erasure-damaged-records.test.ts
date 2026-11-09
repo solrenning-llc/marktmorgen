@@ -14,6 +14,13 @@
  *    One whose address cannot be read is never deleted (it may be another person's): what is certainly theirs is
  *    deleted, and the erasure is said incomplete (SyncJobUnreadError, as lib/assignment.ts forgetTasksPerson),
  *    never done. The person's copy (syncJobsOf) skips a damaged record that is known to be another person's.
+ * 3. Pre-review of claude5/erasure-damaged-records: (a) their own job record cut right after the closing quote of
+ *    their address, and (b) their own job record that is whole JSON, with its own id and store, whose address is of
+ *    another type (a list), were kept up to a week with the address and first name in them, and every erasure in
+ *    the store was said incomplete. Now both are theirs and deleted; an address of another type that names anyone
+ *    but exactly one person, or a record of another id or store, still keeps the erasure incomplete. And a lead with
+ *    an address of another type plus another damaged field was written back as a lead the person's copy could never
+ *    read again (leadOf threw for good); now it reads as nothing of theirs, and only that case does.
  */
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { leadsKey } from "@/lib/affiliate-lead-rules";
@@ -105,6 +112,19 @@ async function leads(): Promise<void> {
   const read = async () => outcome(async () => (await readLeads(store)).map((l) => [l.id, l.email, l.cents, l.state]));
   is("only the address comes off: every money field is kept as it was, and the lead reads again", await read(), [[theirs, "", 500, "approved"]]);
 
+  // Pre-review (b of the leads): an address of another type and another field damaged as well.
+  await put(JSON.stringify({ ...lead, cents: "500", email: [email] }));
+  is("an address of another type plus another damaged field: the erasure finishes", await outcome(() => forgetLeadPerson(store, email)), 1);
+  const left = await raw();
+  is("an address of another type plus another damaged field: the address is gone", typeof left === "string" && !left.includes(email) && !left.includes("erase.lead"), true);
+  is("an address of another type plus another damaged field: the person's copy finds nothing of theirs, never fails for good", await outcome(() => leadOf(store, email)), null);
+  is("an address of another type plus another damaged field: a retry finds nothing left to forget", await outcome(() => forgetLeadPerson(store, email)), 0);
+  is("an address of another type plus another damaged field: decisions still fail closed on its unknown amount", await outcome(() => readLeads(store)), "UnknownReplyError");
+  await put(JSON.stringify({ ...lead, cents: "500", email }));
+  is("control: a damaged lead that still holds an address is never read as nothing of theirs (copy fails whole)", await outcome(() => leadOf(store, email)), "UnknownReplyError");
+  await put(JSON.stringify({ ...lead, id: leadId(statsId, "someone.else@example.com"), cents: "500", email: "" }));
+  is("control: an emptied damaged lead of another id under their field is never read as nothing of theirs", await outcome(() => leadOf(store, email)), "UnknownReplyError");
+
   await put(JSON.stringify({ ...lead, email }));
   is("control: a healthy lead loses its address", [await outcome(() => forgetLeadPerson(store, email)), await read()], [1, [[theirs, "", 500, "approved"]]]);
   await put(`{"id":"${theirs}","email":"${email}",`);
@@ -151,6 +171,13 @@ async function sync(): Promise<void> {
     ["JSON that is not a job", "5"],
     ["a job without its address", JSON.stringify({ id: other, state: "queued" })],
     ["a record cut short before its address", `{"id":"${other}","statsId":"${statsId}","ema`],
+    ["a record cut inside an escaped quote of its address", `{"id":"${other}","statsId":"${statsId}","email":"buyer@example.test\\"`],
+    ["an address list naming two people", JSON.stringify({ id: other, statsId, email: ["buyer@example.test", "someone@example.test"] })],
+    ["an address list in a record of another store", JSON.stringify({ id: other, statsId: "anotherstore000000000000000001", email: ["buyer@example.test"] })],
+    ["an address list in a record of another id", JSON.stringify({ id: third, statsId, email: ["buyer@example.test"] })],
+    ["an address as an object", JSON.stringify({ id: other, statsId, email: { address: "buyer@example.test" } })],
+    ["an address as a number", JSON.stringify({ id: other, statsId, email: 5 })],
+    ["an empty address list", JSON.stringify({ id: other, statsId, email: [] })],
   ];
   for (const [what, value] of unknownOwner) {
     seed({ ...healthy(), [other]: value });
@@ -166,6 +193,8 @@ async function sync(): Promise<void> {
   const knownOther: [string, string][] = [
     ["a record cut short after another person's address", `{"id":"${other}","statsId":"${statsId}","email":"someone@example.test","firstName":nu`],
     ["another person's address in a record that is not a job", JSON.stringify({ email: "someone@example.test" })],
+    ["a record cut right after another person's address", `{"id":"${other}","statsId":"${statsId}","email":"someone@example.test"`],
+    ["another person's address as a list in a whole record", JSON.stringify({ id: other, statsId, email: ["someone@example.test"], firstName: "Someone" })],
   ];
   for (const [what, value] of knownOther) {
     seed({ ...healthy(), [other]: value });
@@ -178,6 +207,9 @@ async function sync(): Promise<void> {
   const theirsDamaged: [string, string][] = [
     ["their own record cut short after their address", `{"id":"${theirs}","statsId":"${statsId}","email":"buyer@example.test","firstName":nu`],
     ["their own address in a record that is not a job", JSON.stringify({ email: "buyer@example.test", products: "x" })],
+    ["their own record cut right after their address' closing quote", `{"id":"${theirs}","statsId":"${statsId}","email":"buyer@example.test"`],
+    ["their own whole record with their address as a list", JSON.stringify({ id: theirs, statsId, email: ["Buyer@Example.test"], firstName: "Buyer", state: 5 })],
+    ["their own whole record with their address nested twice", JSON.stringify({ id: theirs, statsId, email: [["buyer@example.test"], "BUYER@example.test"] })],
   ];
   for (const [what, value] of theirsDamaged) {
     seed({ [theirs]: value, [other]: job(other, "someone@example.test"), [third]: job(third, "third@example.test") });

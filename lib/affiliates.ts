@@ -2486,7 +2486,12 @@ function saleShare(pending: Pending, productId: string, own: number | null): num
   return kept === "x" ? 0 : own ?? kept;
 }
 
-type PendingOutcome = { kind: "credit"; affiliate: Affiliate; pending: Pending } | { kind: "share"; affiliate: Affiliate } | { kind: "none" } | { kind: "unknown" };
+type PendingOutcome =
+  | { kind: "credit"; affiliate: Affiliate; pending: Pending }
+  | { kind: "share"; affiliate: Affiliate }
+  | { kind: "own"; affiliate: Affiliate }
+  | { kind: "none" }
+  | { kind: "unknown" };
 
 /**
  * Whether the affiliate's own share may have changed since the sale at `atSeconds` (withRate): changed after it, or
@@ -2505,11 +2510,14 @@ async function decidePending(store: Store, raw: unknown, atSeconds: number): Pro
   if (!pending) return { kind: "unknown" };
   try {
     const affiliate = await creditedByClicks(store, pending.via, atSeconds);
+    // Who is approved is read now, at the confirmation, not at the sale: an affiliate approved in between is
+    // credited, one declined or removed in between is not (at most PENDING_SWEEP_SECONDS after the checkout opened).
     if (!affiliate || pending.own === affiliate.id) return { kind: "none" };
-    // Their own browser could not be told apart at checkout: never credited automatically, the creator decides.
-    if (pending.own === "?") return { kind: "unknown" };
     // Every product of the order taken out of the program earns nothing, whatever the affiliate's own share.
     if (pending.shares.size && [...pending.shares.values()].every((kept) => kept === "x")) return { kind: "none" };
+    // Their own browser could not be told apart at checkout, and never will be: not credited automatically, and the
+    // creator is told at once (never read again for nothing).
+    if (pending.own === "?") return { kind: "own", affiliate };
     if (ownShareChangedSince(affiliate, atSeconds)) return { kind: "share", affiliate };
     return { kind: "credit", affiliate, pending };
   } catch (error) {
@@ -2531,7 +2539,7 @@ async function decidePending(store: Store, raw: unknown, atSeconds: number): Pro
  *   untold            refused REFUSED_TRIES times, said in the sweep's log.
  * From the moment a notice is due, nothing about the sale is credited automatically, whatever a later read says.
  */
-type TellWhy = "unread" | "membership" | "unsure" | "lead" | "share" | "first";
+type TellWhy = "unread" | "membership" | "unsure" | "lead" | "share" | "first" | "own" | "offers";
 type PendingMark =
   | `seen:${number}`
   | `offers:${string}:${number}`
@@ -2542,7 +2550,7 @@ type PendingMark =
   | "told"
   | "uncertain"
   | "untold";
-const TELL_WHYS: readonly TellWhy[] = ["unread", "membership", "unsure", "lead", "share", "first"];
+const TELL_WHYS: readonly TellWhy[] = ["unread", "membership", "unsure", "lead", "share", "first", "own", "offers"];
 
 /** A pending link's mark, read exactly: null when nothing was decided, UnknownReplyError for an answer of another shape. */
 async function readPendingMark(statsId: string, ref: string): Promise<string | null> {
@@ -2582,6 +2590,8 @@ export function pendingNotice(
     unread: `An order on ${store.name} came through an affiliate's link that could not be read when the buyer paid, and it still could not be read when it was checked again later. The code on the link was ${code}.`,
     share: `An order on ${store.name} came through the link of the affiliate with the code ${code}. The link was read afterwards, but the share it was sold at is not known now: the program's share for it was not kept, or the affiliate has a share of their own that is not known to date from before the sale (it may have been set or moved after it, or its date was not kept). So it was not credited automatically.`,
     first: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. The affiliate is on its subscription, so its renewals are credited to them, but the payment its first invoice was paid by could not be read, so that first payment is not counted.`,
+    own: `An order on ${store.name} came through the link of the affiliate with the code ${code}. The link was read afterwards, but we could not tell whether the buyer was the affiliate themselves, whose own purchases never earn, so it was not credited automatically.`,
+    offers: `An order on ${store.name} came through the link of the affiliate with the code ${code} and was credited to them, but the offers the buyer took after paying could not all be read, so those offers are not counted.`,
     membership: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. The link could not be read when the buyer paid, or could not be put on the subscription afterwards, so its payments are not credited to them.`,
     unsure: `A membership or payment plan on ${store.name} came through the link of the affiliate with the code ${code}. We could not confirm whether the affiliate was put on its subscription: Stripe did not answer.`,
     lead: `A call booked on ${store.name} came through the link of the affiliate with the code ${code}. The sale was credited to them, but its lead could not be written down, so the lead is not counted.`,
@@ -2593,6 +2603,8 @@ export function pendingNotice(
     unsure: "Before paying anything for it, look in your affiliates' book: if its payments appear there under the affiliate, they are counted already.",
     lead: "No lead payment is counted for it.",
     first: "No commission is counted for the first payment; the ones after it are counted as usual.",
+    own: "No commission is counted for it, nor for an offer the buyer took after paying. The buyer was charged as usual and has their purchase.",
+    offers: "The order itself is counted as usual; no commission is counted for its offers.",
   }[why];
   return {
     to: store.email,
@@ -2622,13 +2634,16 @@ export function pendingNotice(
  */
 async function tellPending(store: Store, ref: string, raw: unknown, why: TellWhy, send: PendingSend): Promise<Told> {
   const statsId = store.statsId as string;
-  if (why === "unread" || why === "share") {
-    const credited = repliesFor(await redisPipeline([["HEXISTS", salesKey(statsId), ref]]), 1)?.[0];
-    if (credited === 1) {
-      await writePendingMark(statsId, ref, "none");
+  if (why === "unread" || why === "share" || why === "own") {
+    // Credited already (a pass whose mark did not write): marked credited to its affiliate, so its offers follow it.
+    const written = repliesFor(await redisPipeline([["HGET", salesKey(statsId), ref]]), 1)?.[0];
+    if (typeof written === "string") {
+      const aff = parseReferral(written)?.aff ?? "";
+      if (!AFFILIATE_ID_PATTERN.test(aff)) throw new UnknownReplyError("a sale already credited");
+      await writePendingMark(statsId, ref, `credited:${aff}`);
       return "credited";
     }
-    if (credited !== 0) throw new UnknownReplyError("whether a sale was credited");
+    if (written !== null) throw new UnknownReplyError("whether a sale was credited");
   }
   const name = `aff-pending:${statsId}:${ref}`;
   if (await refusedTooOften(name)) {
@@ -2771,7 +2786,13 @@ async function subscriptionVia(store: Store, subscription: string, deadline?: nu
  */
 async function creditFirstPayment(store: Store, row: SessionLike & { id: string }, aff: string, rate: number, deadline?: number): Promise<void> {
   const meta = row.metadata ?? {};
-  const total = typeof row.amount_total === "number" ? row.amount_total : 0;
+  // A total or a tax that is not a number is not known (rule 24): never 0, which would mark the order credited with
+  // nothing written, or work the commission out on the buyer's tax. The order waits for the next pass. A real 0 (a
+  // trial) has nothing to credit; a session with no total_details at all is read as no tax, as noteSession reads it.
+  if (typeof row.amount_total !== "number" || !Number.isSafeInteger(row.amount_total)) throw new StripeUnknownError("a membership's first payment's total");
+  const taxRead = row.total_details ? row.total_details.amount_tax : 0;
+  if (typeof taxRead !== "number" || !Number.isSafeInteger(taxRead) || taxRead < 0) throw new StripeUnknownError("a membership's first payment's tax");
+  const total = row.amount_total;
   if (total <= 0) return;
   const invoice = typeof row.invoice === "string" ? row.invoice : "";
   if (!/^in_[A-Za-z0-9]{3,250}$/.test(invoice)) throw new StripeUnknownError("a membership's first invoice");
@@ -2781,7 +2802,7 @@ async function creditFirstPayment(store: Store, row: SessionLike & { id: string 
   };
   const pi = read.id === invoice ? (read.payments?.data ?? []).filter((p) => p.status === undefined || p.status === "paid").map((p) => p.payment?.payment_intent).find((x): x is string => typeof x === "string" && /^pi_/.test(x)) : undefined;
   if (!pi) throw new StripeUnknownError("a membership's first payment");
-  const tax = typeof row.total_details?.amount_tax === "number" ? row.total_details.amount_tax : 0;
+  const tax = taxRead;
   const buyer = typeof row.customer_details?.email === "string" ? row.customer_details.email : "";
   await writeReferral(store, {
     ref: invoice,
@@ -2980,7 +3001,22 @@ async function notePendingOne(
   if (step) {
     // Credited already: its offers or its lead are what is left.
     const aff = step[2];
-    const doneNow = step[1] === "offers" ? await creditOffersOf(store, row, aff, deadline).then(() => pendingLead(store, row, aff)) : await pendingLead(store, row, aff);
+    if (step[1] === "offers") {
+      // Offers that still cannot be read past the deadline: the creator is told, the sale itself staying credited;
+      // never retried for ever. Before it, or with the pass's time spent, read again at the next pass.
+      const read = await creditOffersOf(store, row, aff, deadline).then(
+        () => true,
+        (error: unknown) => {
+          if (error instanceof PassTimeSpent || now < due) throw error;
+          return false;
+        },
+      );
+      if (!read) {
+        countTold(counts, await tellPending(store, row.id, raw, "offers", send));
+        return finalNow();
+      }
+    }
+    const doneNow = await pendingLead(store, row, aff);
     if (doneNow) {
       await writePendingMark(statsId, row.id, `credited:${aff}`);
       counts.credited += 1;
@@ -3010,9 +3046,10 @@ async function notePendingOne(
     counts.waiting += 1;
     return false;
   }
-  if (outcome.kind === "share") {
-    // Read, but sold at a share not known now: it will not become known, so the creator is told at once.
-    countTold(counts, await tellPending(store, row.id, raw, "share", send));
+  if (outcome.kind === "share" || outcome.kind === "own") {
+    // Read, but sold at a share not known now, or to a buyer who may be the affiliate: it will not become known, so
+    // the creator is told at once.
+    countTold(counts, await tellPending(store, row.id, raw, outcome.kind, send));
     return finalNow();
   }
   const rest = Object.fromEntries(Object.entries(meta).filter(([key]) => key !== VIA_PENDING_META));
@@ -3178,7 +3215,7 @@ async function settlePayPalPending(store: Store, paid: Paid, title: string, now:
     const told = await tellPending(store, ref, raw, why, send);
     if (told !== "refused") await paypalDone(statsId, paid.order);
   };
-  if (mark?.startsWith("tell:")) return tell(mark === "tell:share" ? "share" : "unread");
+  if (mark?.startsWith("tell:")) return tell(mark === "tell:share" ? "share" : mark === "tell:own" ? "own" : "unread");
   // Read at its hand-over first (seen:0 marks that it was), then told past the deadline.
   if (mark === "seen:0" && now - paid.at >= PENDING_LINK_SECONDS) return tell("unread");
   const outcome = await decidePending(store, raw, paid.at);
@@ -3186,7 +3223,7 @@ async function settlePayPalPending(store: Store, paid: Paid, title: string, now:
     if (mark === null) await writePendingMark(statsId, ref, "seen:0");
     return;
   }
-  if (outcome.kind === "share") return tell("share");
+  if (outcome.kind === "share" || outcome.kind === "own") return tell(outcome.kind);
   const share = outcome.kind === "credit" ? saleShare(outcome.pending, paid.product, outcome.affiliate.rate) : 0;
   if (share === null) return tell("share");
   const rate = share;

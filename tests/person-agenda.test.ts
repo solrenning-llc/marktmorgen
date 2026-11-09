@@ -107,7 +107,8 @@ async function main() {
   const notCounted = await buyerLedger(shop, refusedCount).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
   is("a reading from Stripe counts BUYER_LEDGER_UNITS and the imported buyers by how many, and reads nothing when not counted", [notCounted, asked], ["not counted", [BUYER_LEDGER_UNITS + ledgerUnits(5_000 * IMPORTED_BUYER_BYTES)]]);
   is("5,000 imported buyers are 4 studio requests more", ledgerUnits(5_000 * IMPORTED_BUYER_BYTES), 4);
-  const bigCopy = JSON.stringify({ c: "usd", p: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: 9_000 }, (_, i) => [`b${i}@example.com`, 0, 0, "direct", 0])], v: 6 });
+  // Rule 23: the kept copy's shape is 7 since it says why it is partial (m, q; lib/segments.ts LEDGER_SHAPE), was 6.
+  const bigCopy = JSON.stringify({ c: "usd", p: false, m: false, q: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: 9_000 }, (_, i) => [`b${i}@example.com`, 0, 0, "direct", 0])], v: 7 });
   await redisPipeline([["SET", "nl:stats:ledgerstats:ledger", bigCopy, "EX", 600]]);
   asked.length = 0;
   const copyRefused = await buyerLedger(shop, refusedCount).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
@@ -206,7 +207,8 @@ async function main() {
   const tasksHash = `nl:crm:tasks:${shared.statsId}`;
   await redisPipeline([["DEL", tasksHash]]);
   for (const who of ["ann", "ben"]) await redisPipeline([["HSET", tasksHash, personKey(shared.statsId!, `${who}@example.com`), JSON.stringify([{ id: "abcdefghij", text: `Call ${who}`, due: "", assignee: "", done: false, createdAt: 1, doneAt: 0 }])]]);
-  const copyOf = (rows: number) => JSON.stringify({ c: shared.currency, p: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: rows }, (_, i) => [`f${String(i).padStart(5, "0")}@example.com`, 0, 0, "direct", 0])], v: 6 });
+  // Rule 23: shape 7 since the copy says why it is partial (m, q), was 6.
+  const copyOf = (rows: number) => JSON.stringify({ c: shared.currency, p: false, m: false, q: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: rows }, (_, i) => [`f${String(i).padStart(5, "0")}@example.com`, 0, 0, "direct", 0])], v: 7 });
   let filler = 0;
   while (copyOf(filler).length < 30_000) filler += 1;
   const sharedCopy = copyOf(filler);

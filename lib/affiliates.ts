@@ -2613,9 +2613,12 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
 /**
  * "held": a PayPal sale PayPal reports refunded in part, whose amount is not read anywhere (audit R13, MEDIUM 2;
  * lib/paypal-sales.ts, partlyRefundedMember). It earns nothing payable (commission 0, refunded 0 as a count, never
- * shown as an amount) and stays out of every payment until PayPal refunds the rest.
+ * shown as an amount) and stays out of every payment, unless PayPal refunds the rest.
+ * "paid, partly refunded": such a sale whose commission had already been paid when the partial refund was seen
+ * (paidBeforeHold): what was paid stands, and nothing is taken back from later commissions (the coordinator's
+ * decision on the pre-review of 3b4b8ac4e1); the creator sees the line and decides outside the book.
  */
-export type LineStatus = "earned" | "partly refunded" | "refunded" | "own purchase" | "held" | LeadStatus;
+export type LineStatus = "earned" | "partly refunded" | "refunded" | "own purchase" | "held" | "paid, partly refunded" | LeadStatus;
 
 export type Line = Referral & {
   /** Given back to the buyer, in cents, as Stripe says today. */
@@ -2625,6 +2628,8 @@ export type Line = Referral & {
   status: LineStatus;
   /** For a lead (how "lead"): which, what kind, whose address, and when it can be approved. */
   lead?: LeadView;
+  /** For a held sale (holdLine): what it would earn on the whole sale, the most of it that can have been paid. */
+  whole?: number;
 };
 
 /** A lead as the book shows it (lib/affiliate-lead-rules.ts). The address is masked on an affiliate's own page. */
@@ -2781,7 +2786,40 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
 
 /** A sale held because PayPal refunded part of it and how much is not known: nothing of it is payable. */
 export function holdLine(referral: Referral): Line {
-  return { ...referral, refunded: 0, commission: 0, status: "held" };
+  // A buyer's own purchase never earns, held or not.
+  if (referral.self) return settleLine(referral, 0);
+  return { ...referral, refunded: 0, commission: 0, status: "held", whole: settleLine(referral, 0).commission };
+}
+
+/**
+ * A held sale whose commission was already paid when PayPal's partial refund was first seen (`since`, by payment):
+ * what was paid stands, as "paid, partly refunded", so nothing is taken back from later commissions. The amount
+ * refunded is unknown, so no part of it is clawed back automatically (the coordinator's decision on the pre-review
+ * of 3b4b8ac4e1). Payouts are written as totals, not by sale, so "already paid" is read the way that takes the
+ * least of it as paid: an affiliate's payouts written down up to that moment, less the commissions of their other
+ * lines from before it (and of held sales already counted as paid), paid this sale's whole commission at the most.
+ * A payout written after the partial refund was seen never counts for it. The line counts at most what it earned
+ * before the partial refund, so nothing becomes payable that was not payable before it.
+ */
+export function paidBeforeHold(lines: Line[], payouts: Payout[], since: Map<string, number>, currency: string): Line[] {
+  const held = lines.filter((l) => l.status === "held" && l.currency === currency && since.has(l.pi));
+  if (!held.length) return lines;
+  const out = new Map<Line, Line>();
+  for (const aff of new Set(held.map((l) => l.aff))) {
+    const own = lines.filter((l) => l.aff === aff && l.currency === currency);
+    const mine = held.filter((l) => l.aff === aff).sort((a, b) => (since.get(a.pi) ?? 0) - (since.get(b.pi) ?? 0) || a.at - b.at);
+    let counted = 0;
+    for (const line of mine) {
+      const at = since.get(line.pi) ?? 0;
+      const paidBy = payouts.filter((p) => p.aff === aff && p.currency === currency && Math.floor(p.at / 1000) <= at).reduce((sum, p) => sum + p.cents, 0);
+      const before = own.filter((l) => l.status !== "held" && l.at <= at).reduce((sum, l) => sum + l.commission, 0);
+      const covered = Math.min(line.whole ?? 0, Math.max(0, paidBy - before - counted));
+      if (covered <= 0) continue;
+      counted += covered;
+      out.set(line, { ...line, commission: covered, status: "paid, partly refunded" });
+    }
+  }
+  return lines.map((l) => out.get(l) ?? l);
 }
 
 /** A sale as it stands today, after any refund. */
@@ -2968,7 +3006,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   let refunds = new Map<string, number>();
   let refundsChecked = true;
   // PayPal payments refunded in part, by the payment as the book names it: their sales are held (holdLine).
-  const partlyHeld = new Set<string>();
+  const partlyHeld = new Map<string, number>();
   if (everything.length || bookings.length) {
     const since = Math.min(...[...everything, ...bookings].map((r) => r.at));
     try {
@@ -2995,7 +3033,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       // 2026). One whose payment cannot be named might be any sale here, so the whole book is unknown then.
       for (const p of paypal.partly) {
         if (typeof p.capture !== "string" || p.capture === "") refundsChecked = false;
-        else partlyHeld.add(paypalPaymentId(p.capture));
+        else partlyHeld.set(paypalPaymentId(p.capture), Math.min(p.at, partlyHeld.get(paypalPaymentId(p.capture)) ?? p.at));
       }
       for (const r of paypal.rows) {
         const named = typeof r.capture === "string" && r.capture !== "";
@@ -3046,7 +3084,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // A goal reached in a month adds its bonus, and a sale by somebody an
   // affiliate brought adds their second tier, both worked out from the sales
   // as they stand after refunds. Then only the one affiliate's, when it is one.
-  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf), ...leadLines]
+  // A held sale whose commission was already paid stays paid, never taken back from later sales (paidBeforeHold).
+  const lines = paidBeforeHold([...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf), ...leadLines], paid, partlyHeld, store.currency)
     .filter((l) => !only || l.aff === only)
     .sort((a, b) => b.at - a.at);
 
@@ -3358,10 +3397,10 @@ export function bookCsv(book: Book, all: Affiliate[]): string {
       l.how === "lead" ? `${LEAD_KIND_WORDS[l.lead?.kind ?? "signup"]}${l.title ? `: ${l.title}` : ""}` : l.title,
       plainAmount(l.base, l.currency),
       // A held sale's refund and commission are not known: said so, never 0.00 (holdLine).
-      l.status === "held" ? "unknown" : plainAmount(l.refunded, l.currency),
+      l.status === "held" || l.status === "paid, partly refunded" ? "unknown" : plainAmount(l.refunded, l.currency),
       l.rate,
       l.status === "held" ? "unknown" : plainAmount(l.commission, l.currency),
-      l.status === "held" ? "held: partly refunded, amount unknown" : l.status,
+      l.status === "held" ? "held: partly refunded, amount unknown" : l.status === "paid, partly refunded" ? "paid, partly refunded, amount unknown" : l.status,
       "",
       "",
       l.currency.toUpperCase(),

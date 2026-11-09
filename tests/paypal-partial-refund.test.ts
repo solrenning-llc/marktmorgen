@@ -111,6 +111,17 @@ async function offered(): Promise<{ checked: boolean; through: number }> {
 }
 
 const watchScore = async (order: string) => (await redis.pipeline([["ZSCORE", `nl:ppsell:watch:${SID}`, order]]))[0];
+/** Moves the payouts written (to `payoutsAt`, seconds) and the partial-refund mark (to `markAt`) back in time. */
+async function backdate(payoutsAt: number | null, markAt: number): Promise<void> {
+  if (payoutsAt !== null) {
+    const [flat] = await redis.pipeline([["HGETALL", `nl:aff:${SID}:payouts`]]);
+    const list = Array.isArray(flat) ? (flat as string[]) : [];
+    for (let i = 0; i + 1 < list.length; i += 2) {
+      await redis.pipeline([["HSET", `nl:aff:${SID}:payouts`, list[i], JSON.stringify({ ...JSON.parse(list[i + 1]), at: payoutsAt * 1000 })]]);
+    }
+  }
+  await redis.pipeline([["ZADD", `nl:ppsell:refunded:${SID}`, "XX", String(markAt), `part:${ORDER}`]]);
+}
 const marks = async () => Number((await redis.pipeline([["ZCARD", `nl:ppsell:refunded:${SID}`]]))[0]);
 
 async function main(): Promise<void> {
@@ -192,8 +203,8 @@ async function main(): Promise<void> {
   const heldSale: Line = { ref: "paypal:x", pi: `paypal:${CAPTURE}`, aff: recruit.id, at: NOW, product: "", title: "", base: 4900, total: 4900, currency: "usd", rate: 30, self: false, how: "click", refunded: 0, commission: 0, status: "held" };
   // Called with a fourth argument (the store's statsId) through a wider type, so this line works with today's three
   // parameters and with claude5/affiliate-tier-self's four (pre-review LEVE 5): an extra argument is ignored by JS.
-  const tiersOf = tierLines as unknown as (everyone: Affiliate[], lines: Line[], flags: Map<string, never>, statsId: string) => Line[];
-  const tier = tiersOf([inviter, recruit], [heldSale], new Map(), SID);
+  const tiersOf = tierLines as unknown as (everyone: Affiliate[], lines: Line[], flags: Map<string, string[]>, statsId: string) => Line[];
+  const tier = tiersOf([inviter, recruit], [heldSale], new Map<string, string[]>(), SID);
   is("one second-tier line, held, earning nothing payable", tier.map((l) => [l.how, l.status, l.commission]), [["tier2", "held", 0]]);
   part("A partial refund keeps the purchase");
   is("nothing taken back", watched.revoked, 0);
@@ -248,6 +259,8 @@ async function main(): Promise<void> {
   captures.set(CAPTURE, "PARTIALLY_REFUNDED");
   await redis.pipeline([["ZADD", `nl:ppsell:watch:${SID}`, "0", ORDER]]);
   await watch();
+  // The payout written twenty minutes ago, the partial refund seen ten minutes ago: apart, not in the same second.
+  await backdate(NOW - 1200, NOW - 600);
   const paidThenPartly = await readBook(store);
   const paidLine = paidThenPartly.lines.find((l) => l.ref === `paypal:${ORDER}`);
   is("the affiliate owes nothing back: no automatic deduction", paidThenPartly.rows[0]?.owed, 0);
@@ -258,7 +271,7 @@ async function main(): Promise<void> {
   is("the spreadsheet says so, its refund unknown", [paidCsv.includes("paid, partly refunded, amount unknown"), paidCsv.includes("unknown,30,14.70")], [true, true]);
   const paidStudio = renderToStaticMarkup(createElement(AffiliateCommissionHistory, { who: new Map([[AFF, { email: "affiliate@example.com" }]]), refundsChecked: true, invoicesChecked: true, lines: paidThenPartly.lines, total: paidThenPartly.lines.length }));
   is("the creator's list says paid, partly refunded, and that nothing is taken back", [paidStudio.includes("Paid, partly refunded, amount unknown"), paidStudio.includes("nothing is taken back from later commissions")], [true, true]);
-  const later: Paid = { ...paid, order: "9O190127TN3647109", capture: "9C679366HH908709", email: "later@example.com", at: NOW + 120 } as Paid;
+  const later: Paid = { ...paid, order: "9O190127TN3647109", capture: "9C679366HH908709", email: "later@example.com", at: NOW - 60 } as Paid;
   await creditPayPalSale(store, later, "Synthetic course");
   const afterLater = await readBook(store);
   is("a later sale is owed in full (Mark as paid opens with it alone)", afterLater.rows[0]?.owed, 1470);
@@ -268,6 +281,8 @@ async function main(): Promise<void> {
   await setup();
   captures.set(CAPTURE, "PARTIALLY_REFUNDED");
   await watch();
+  // The partial refund seen ten minutes ago, the payout written now, after it.
+  await backdate(null, NOW - 600);
   await addPayout(store, { aff: AFF, cents: 500, currency: "usd", date: "2026-10-02", reference: "synthetic" });
   const notPaid = await readBook(store);
   is("the sale stays held, earning nothing", notPaid.lines.find((l) => l.ref === `paypal:${ORDER}`)?.status, "held");
@@ -280,8 +295,12 @@ async function main(): Promise<void> {
   const ledger = (await buyerLedger({ ...store, pastBuyers: true } as Store)) as unknown as { partial: boolean; more?: boolean; partlyRefunded?: boolean };
   is("partial, because a PayPal sale was refunded in part, not because there is more to read", [ledger.partial, ledger.more, ledger.partlyRefunded], [true, false, true]);
   const emailStudio = readFileSync(join(process.cwd(), "components/email-studio.tsx"), "utf8");
-  is("the email studio has the true words for it", emailStudio.includes("Some PayPal sales were refunded in part, and the amount refunded can&apos;t be seen here"), true);
-  is("and the 'more to read' words only when there is more to read", emailStudio.includes('{more ? " There is more to read'), true);
+  // Rule 23: the RED commit looked for "can&apos;t", but the words are a JavaScript string inside braces, where an
+  // entity would be shown as typed; a plain apostrophe is what renders.
+  is("the email studio has the true words for it", emailStudio.includes("Some PayPal sales were refunded in part, and the amount refunded can't be seen here"), true);
+  // Rule 23: the RED commit named the studio's flag `more`, a name the composer already uses for its open choices;
+  // it is `readMore`.
+  is("and the 'more to read' words only when there is more to read", emailStudio.includes('{readMore ? " There is more to read'), true);
 
   part("Another sale of the same affiliate, not refunded, is paid as usual beside the held one");
   await setup();

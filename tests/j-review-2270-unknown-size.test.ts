@@ -9,7 +9,8 @@ import { store as redis } from "./redis-stub";
 const statsId = "jreviewledger";
 const key = `nl:stats:${statsId}:ledger`;
 const shop = { statsId, currency: "usd", pastBuyers: true } as Store;
-const cached = JSON.stringify({ c: "usd", p: false, r: [["buyer@example.com", 1200, 1, "direct", 1]], v: 6 });
+// Rule 23: the kept copy's shape is 7 since it says why it is partial (m, q; lib/segments.ts LEDGER_SHAPE), was 6.
+const cached = JSON.stringify({ c: "usd", p: false, m: false, q: false, r: [["buyer@example.com", 1200, 1, "direct", 1]], v: 7 });
 const pipeline = redis.pipeline.bind(redis);
 
 async function readWith(reply: unknown[], empty = false) {

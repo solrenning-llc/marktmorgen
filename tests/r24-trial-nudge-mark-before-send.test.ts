@@ -42,9 +42,9 @@ const mail = installSesMailFixture({
     }
     return new Response("{}", { status: 404 });
   },
-  onSes: async () => {
+  onSes: () => {
     const [id] = trials.map((row) => String(row.id));
-    ttlAtSend.push(Number(await redis.pipeline([["TTL", `nl:nudge:${id}:0`]]).then(([v]) => v)));
+    ttlAtSend.push(Number(redis.run(["TTL", `nl:nudge:${id}:0`])));
     return undefined;
   },
 });

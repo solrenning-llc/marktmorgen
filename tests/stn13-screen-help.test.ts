@@ -34,17 +34,23 @@ function walk(dir: string, keep: (path: string) => boolean): string[] {
 
 const studioPages = walk("app/studio", (path) => path.endsWith("/page.tsx"));
 /** Every studio screen, by the first folder under app/studio ("" is the studio home). */
-const screens = [...new Set(studioPages.map((path) => path.slice("app/studio/".length).split("/").slice(0, -1)[0] ?? ""))].sort();
+const screenFolder = (path: string) => path.slice("app/studio/".length).split("/").slice(0, -1)[0] ?? "";
+const screens = [...new Set(studioPages.map(screenFolder))].sort();
+/** The pages that do not draw the studio's top bar, so never the panel under it (held to exactly two below). */
+const headerless = studioPages.filter((path) => !read(path).includes("<StudioHeader")).sort();
+/** The screens the panel is drawn on: every one with a page that draws the top bar. */
+const drawn = [...new Set(studioPages.filter((path) => !headerless.includes(path)).map(screenFolder))].sort();
 const questions = HELP_SECTIONS.flatMap((section) => section.items.map((item) => item.q));
 const panel = (pathname: string | null, checkup: string | null = null) => renderToStaticMarkup(createElement(ScreenHelpPanel, { pathname, checkup }));
 
 part("Every studio screen has its own short list of answers");
 is("the screens found under app/studio", screens.length > 40 && screens.includes("") && screens.includes("funnels") && screens.includes("course"), true);
-is("each one has an entry, and no entry names a screen that is not there", Object.keys(SCREEN_HELP).sort(), screens);
+is("each screen with the top bar has an entry, and no entry names a screen that is not there or never draws it", Object.keys(SCREEN_HELP).sort(), drawn);
+is("only the screens without the top bar have no entry", screens.filter((screen) => !drawn.includes(screen)), ["new", "paused"]);
 is(`at most ${MOST_SCREEN_ANSWERS} answers a screen, never one twice`, Object.entries(SCREEN_HELP).filter(([, list]) => list.length > MOST_SCREEN_ANSWERS || new Set(list).size !== list.length).map(([screen]) => screen), []);
 is("the most is three", MOST_SCREEN_ANSWERS, 3);
 is("every answer named is a question of the help center today", Object.values(SCREEN_HELP).flat().filter((q) => !questions.includes(q)), []);
-is("most screens have at least one answer", Object.values(SCREEN_HELP).filter((list) => list.length > 0).length >= screens.length - 2, true);
+is("most screens have at least one answer", Object.values(SCREEN_HELP).filter((list) => list.length > 0).length >= drawn.length - 2, true);
 is("the anchor of every help question is the one the help center draws", questions.filter((q) => helpAnchor(q) !== answerId(q)), []);
 
 part("Which screen a path is");
@@ -55,6 +61,7 @@ is(
 );
 is("the answers of a screen, with their anchors", screenAnswers("/studio/bundles"), [{ q: "Can I sell a bundle of products?", id: "can-i-sell-a-bundle-of-products" }]);
 is("no answers outside the screens", [screenAnswers("/studio/nothing-here"), screenAnswers(null)], [[], []]);
+is("a path that only starts with the studio's letters is not the studio", [screenOf("/studiox"), screenOf("/studio-tools/funnels"), screenAnswers("/studiox"), screenOf("/studio?store=s1"), screenOf("/studio/funnels#top")], [null, null, [], "", "funnels"]);
 
 part("The panel");
 const html = panel("/studio/funnels", "/studio/checkup?store=s1");
@@ -105,7 +112,7 @@ const helper = renderToStaticMarkup(
 is("no store check for a role that cannot open it", [helper.includes("Help for this screen"), helper.includes("checkup")], [true, false]);
 is(
   "every studio screen draws that top bar, but the two that come before a store is open or after its requests are used",
-  studioPages.filter((path) => !read(path).includes("<StudioHeader")).sort(),
+  headerless,
   ["app/studio/new/page.tsx", "app/studio/paused/page.tsx"],
 );
 

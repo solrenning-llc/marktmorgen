@@ -156,6 +156,29 @@ export function givenTexts(sent: unknown, key = ""): string[] {
  */
 const DIGITS = /(?<![\p{L}\p{N}_.,])[$€£]?\d+(?:[.,]\d+)*(?:\s?%|[kKmMbB](?![\p{L}\p{N}]))?/gu;
 
+/**
+ * Digits followed by these name an order or a shape, not a figure: "the 2nd
+ * week", "the 1st draft", "3D printing". Ordinals in words ("second") are not
+ * read either.
+ */
+const NOT_A_FIGURE_AFTER = /(?:(?:st|nd|rd|th)(?![\p{L}\p{N}])|D(?![\p{L}\p{N}]))/iuy;
+
+/**
+ * A link, with or without "https://": its digits are part of an address (a
+ * product's id in ".../p/<id>"), never a figure the creator gave or the
+ * draft claims (Claude 6's focal return on #3437). The address must end in a
+ * dot and letters before its slash, so "4.5/5" or "24/7" stay figures. Starts
+ * only after a space or a sign, so a long run of letters and dots is read once.
+ */
+const LINK = /(?:https?:\/\/|www\.)\S+|(?<![\p{L}\p{N}.-])[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}\/\S*/giu;
+
+/**
+ * "Double" and "triple" claim a number only before what they multiply:
+ * "double your sales", "triple the reach". "Double chocolate" and "triple
+ * berry" are flavors, "double-check" asks for a check.
+ */
+const MULTIPLIES = /\s+(?:your|the|their|our|my|his|her|its|it|them|that|this|what|in|up|down)(?![\p{L}\p{N}])/iuy;
+
 /** Number words, by store language, with what each stands for: a number, or "×2" and "½". */
 type Words = readonly (readonly [string, number | string])[];
 
@@ -218,23 +241,27 @@ function wordKey(written: string, code: string): string {
   return word;
 }
 
-/** What digits stand for: "$1,200", "1200" and "1.2K" are one; "19,99" is 19.99; "$19", "19%" and "19" are one. */
+/** What digits stand for: "$1,200", "1200" and "1.2K" are one; "19,99" is 19.99; "$19", "19%" and "19" are one; "10m" is 10, "$10m" ten million. */
 function digitsKey(written: string): string {
   const bare = written.replace(/[$€£%\s]/g, "");
-  const scale = /[kK]$/.test(bare) ? 1e3 : /[mM]$/.test(bare) ? 1e6 : /[bB]$/.test(bare) ? 1e9 : 1;
-  const plain = bare
-    .replace(/[kKmMbB]$/, "")
-    .replace(/[.,](?=\d{3}(?!\d))/g, "")
-    .replace(",", ".");
+  // A lowercase "m" is minutes or meters ("a 10m call") unless it follows a currency sign ("$10m").
+  const million = /M$/.test(bare) || (/m$/.test(bare) && /^[$€£]/.test(written));
+  const scale = /[kK]$/.test(bare) ? 1e3 : million ? 1e6 : /[bB]$/.test(bare) ? 1e9 : 1;
+  const number = bare.replace(/[kKmMbB]$/, "");
+  // "0.125" is a decimal, never 125 with a thousands separator.
+  const plain = (/^0[.,]/.test(number) ? number : number.replace(/[.,](?=\d{3}(?!\d))/g, "")).replace(",", ".");
   const value = Number(plain) * scale;
   return Number.isFinite(value) ? String(value) : plain;
 }
 
 /** Each number in a text, as written and by what it stands for, in the order they appear. */
-function numbersIn(text: string, codes: readonly string[]): { written: string; key: string; at: number }[] {
+function numbersIn(original: string, codes: readonly string[]): { written: string; key: string; at: number }[] {
+  const text = original.replace(LINK, (address) => " ".repeat(address.length));
   const found: { written: string; key: string; at: number }[] = [];
   for (const match of text.matchAll(DIGITS)) {
     const written = match[0].replace(/[.,]+$/, "");
+    NOT_A_FIGURE_AFTER.lastIndex = (match.index ?? 0) + match[0].length;
+    if (NOT_A_FIGURE_AFTER.test(text)) continue;
     found.push({ written, key: digitsKey(written), at: match.index ?? 0 });
   }
   for (const code of codes) {
@@ -242,6 +269,8 @@ function numbersIn(text: string, codes: readonly string[]): { written: string; k
       const at = match.index ?? 0;
       // "Double-check it" asks for a check, it claims no number.
       if (/^double$/i.test(match[0]) && /^-check/i.test(text.slice(at + match[0].length))) continue;
+      MULTIPLIES.lastIndex = at + match[0].length;
+      if (code === "en" && /^(double|triple)$/i.test(match[0]) && !MULTIPLIES.test(text)) continue;
       found.push({ written: match[0], key: wordKey(match[0], code), at });
     }
   }

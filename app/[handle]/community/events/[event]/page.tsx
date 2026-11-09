@@ -73,7 +73,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
   const now = eventClock();
 
   const [allowed, numbers, meetings] = await Promise.all([
-    mayAttend(store, viewer.config, event, { owner: viewer.owner, email: viewer.email }),
+    mayAttend(store, viewer.config, event, { owner: viewer.owner, email: viewer.email, holdings: viewer.holdings }),
     rsvpNumbers(id, [event], viewer.owner ? null : viewer.key),
     // A Google Meet or Zoom event: the link its record says was given — the
     // meeting's own, or the private room when it could not be made.
@@ -84,7 +84,9 @@ export default async function CommunityEventPage({ params, searchParams }: Param
   const mine = numbers.get(event.id)?.mine ?? false;
   const over = isOver(event, now);
   const door = joinWindow(event, now);
-  const way = wayInFor(event, { owner: viewer.owner, mayAttend: allowed, going: mine }, now, meeting?.link || null);
+  // Not known is never a way in, and never "not for you" either (the pre-review of 9 November 2026, P4).
+  const unchecked = allowed === "unknown";
+  const way = wayInFor(event, { owner: viewer.owner, mayAttend: allowed === true, going: mine }, now, meeting?.link || null);
   const place = event.where === "meet" && event.meet && meeting?.made && !meeting.gone ? event.meet : null;
   const whereWords = place ? MEET_NAMES[place] : event.where === "link" ? w.onlineMeeting : w.privateRoom;
   const openWords = roomKind(way) === "meet" ? w.joinMeet : roomKind(way) === "zoom" ? w.joinZoom : w.openMeeting;
@@ -96,7 +98,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
   const full = event.cap > 0 && going >= event.cap;
   const room = way && isVideoRoom(way) ? way : null;
   const doorsOpenAt = clockAt(door.opensAt, event.tz, locale);
-  const forProducts = allowed ? [] : (await readListings(store, event.only.filter((p) => viewer.config.access.includes(p)))).map((p) => ({ id: p.id, title: p.title, kind: ticketKind(store, p) }));
+  const forProducts = allowed !== false ? [] : (await readListings(store, event.only.filter((p) => viewer.config.access.includes(p)))).map((p) => ({ id: p.id, title: p.title, kind: ticketKind(store, p) }));
   const labelId = "event-title";
 
   return (
@@ -131,7 +133,11 @@ export default async function CommunityEventPage({ params, searchParams }: Param
             </div>
           </div>
 
-          {!allowed ? (
+          {unchecked ? (
+            <div className="st-note mt-6" role="status">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.eventUnchecked}</p>
+            </div>
+          ) : !allowed ? (
             <div className="st-note mt-6" role="status">
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.forMembersWho}</p>
               {forProducts.length ? (
@@ -178,7 +184,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
             </div>
           ) : null}
 
-          {allowed && !event.cancelled && !over ? (
+          {allowed === true && !event.cancelled && !over ? (
             <section aria-labelledby="ev-join" className="ev-join mt-6">
               <h2 id="ev-join" className="text-base font-bold">{w.join}</h2>
               {way ? (
@@ -228,12 +234,12 @@ export default async function CommunityEventPage({ params, searchParams }: Param
           {over && !event.cancelled ? (
             <section aria-labelledby="ev-replay" className="mt-6">
               <h2 id="ev-replay" className="text-base font-bold">{w.replay}</h2>
-              {event.replay && allowed ? (
+              {event.replay && allowed === true ? (
                 <div className="mt-3">
                   <VideoEmbed video={event.replay} title={event.title} poster={null} lang={store.language} />
                 </div>
               ) : (
-                <p className="st-muted mt-1 text-sm">{allowed ? w.noReplay(store.name) : w.replayForMembers}</p>
+                <p className="st-muted mt-1 text-sm">{allowed === true ? w.noReplay(store.name) : unchecked ? w.eventUnchecked : w.replayForMembers}</p>
               )}
             </section>
           ) : null}

@@ -27,10 +27,12 @@ export const SEARCH_ROOM_UNITS = 2;
 /** Each of the member's conversations read for a search where messages are on (lib/community-dm.ts, SEARCH_MESSAGES of each). */
 export const SEARCH_UNITS_PER_CONVERSATION = 2;
 /**
- * Each check of who holds a product or an event shown on the lessons' or events' tab, which may ask Stripe
- * (lib/community-access.ts): enough units for the most one check waits on Stripe (TICKET_STRIPE_WAITS), held in
- * tests/plan-cost-registry.test.ts. It was 1 while a check read one page of checkouts and was priced at three calls,
- * fewer than it made (CX-123 rule 24, 9 November 2026).
+ * The one reading of what a member holds that a page of lessons or events may need (lib/community-access.ts,
+ * holdingsOf), taken only when no reading is kept, before Stripe is asked: enough units for the most that one reading
+ * waits on and reads (TICKET_STRIPE_WAITS, the page ceilings below), held in tests/plan-cost-registry.test.ts.
+ * Every lesson, event and space on the page is answered from that one reading, so the page pays it once, however
+ * many checks it shows. It was 16 for each check (320 for a page of twenty, past a Store member's whole day share)
+ * between the paging of 9 November 2026 and the pre-review of that day; 1 for each check before.
  */
 export const SEARCH_UNITS_PER_CHECK = 16;
 
@@ -43,13 +45,27 @@ export const SEARCH_UNITS_PER_CHECK = 16;
 export const TICKET_SESSION_PAGES = 2;
 /** Checkouts on one such page: Stripe's most. */
 export const TICKET_SESSION_PAGE_ROWS = 100;
+/**
+ * The most bytes one page of checkouts is read to (lib/stripe-account.ts, onAccount `maxBytes`): past it the reading
+ * stops and the answer is not known, never "no" and never read whole. The figure is a premise, not a measurement:
+ * 24 KB for one checkout listed with its membership, the membership's latest invoice and the payment's charge
+ * expanded, for TICKET_SESSION_PAGE_ROWS of them; a page heavier than that is refused, so the cost never passes it.
+ */
+export const TICKET_SESSION_PAGE_BYTES = 2_400_000;
 /** Customers the address paid as whose one-click additions are read, side by side. */
 export const TICKET_CUSTOMERS = 10;
 /** Pages of one such customer's payments read, TICKET_PAYMENT_PAGE_ROWS to a page: one, as before 9 November 2026. */
 export const TICKET_PAYMENT_PAGES = 1;
 /** Payments on one such page. */
 export const TICKET_PAYMENT_PAGE_ROWS = 50;
-/** Purchases whose refund or lost dispute is asked of Stripe for one answer (lib/refunds.ts purchaseRefunded, keptUnlessLost). */
+/** The most bytes one such page is read to, as TICKET_SESSION_PAGE_BYTES: a premise of 6 KB a payment with its charge expanded. */
+export const TICKET_PAYMENT_PAGE_BYTES = 300_000;
+/**
+ * Purchases whose refund or lost dispute is asked of Stripe for one answer (lib/refunds.ts purchaseRefunded,
+ * keptUnlessLost). Those answers are read by lib/refunds.ts, shared with every other door, with no ceiling of bytes:
+ * the 64 KB each is priced at in tests/plan-cost-registry.ts is a premise, not enforced, and its true most is not
+ * known.
+ */
 export const TICKET_REFUND_CHECKS = 2;
 /**
  * The calls one such question waits on, one after another, at the most: the dispute, a payment plan's invoice, its
@@ -71,9 +87,9 @@ export function searchUnits(size: SearchSize): number {
   return Math.min(MAX_UNITS, SEARCH_UNITS + (size.room ? SEARCH_ROOM_UNITS : 0) + Math.max(0, Math.floor(size.conversations)) * SEARCH_UNITS_PER_CONVERSATION);
 }
 
-/** The requests the access checks of one page of lessons or events take, before they are made. */
+/** The requests the access checks of one page of lessons or events take, before they are made: one reading, whatever their number. */
 export function checkUnits(checks: number): number {
-  return Math.min(MAX_UNITS, Math.max(0, Math.floor(checks)) * SEARCH_UNITS_PER_CHECK);
+  return Math.max(0, Math.floor(checks)) > 0 ? Math.min(MAX_UNITS, SEARCH_UNITS_PER_CHECK) : 0;
 }
 
 /** The commands of the one walk of a community's archive into its index, per request. */

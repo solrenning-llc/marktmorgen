@@ -210,12 +210,13 @@ async function main(): Promise<void> {
   is("an address that bought nothing that opens it: 'sent', as before", await access.requestCommunityLink({ store: await fresh(), email: "ivy@example.com", ip: "203.0.113.10", origin: "https://marktmorgen.com" }), "sent");
 
   part("A kept space whose answer is not known");
-  sessions["jo@example.com"] = history(0, ticket, other);
+  // Rule 23 (the pre-review of 9 November 2026, P1): the door and the spaces are now answered from one reading of what
+  // jo holds, so a space can no longer be "not known" while the door was read whole a moment before (with Stripe down
+  // the door itself is not known, checked above). The space not known is a reading that found the ticket and could
+  // not read to the end: jo's ticket on the first page, more purchases than are read behind it.
+  sessions["jo@example.com"] = [paid(1, ticket), ...history(pages * 100 + 5, null, other).map((row, i) => ({ ...row, id: `cs_test_cpujo${String(i).padStart(6, "0")}` }))];
   is("jo is let in (control)", (await viewerOf("jo@example.com")).state, "in");
-  // The community's answer is kept for five minutes; the space's own is asked now, with Stripe down.
-  stripeDown = true;
   const roomHtml = await draw("jo@example.com");
-  stripeDown = false;
   const locked = roomHtml.match(/<section[^>]*id="cm-locked"[\s\S]*?<\/section>/)?.[0] ?? "";
   is("the page is drawn", roomHtml.startsWith("PAGE_FAILED"), false);
   is("the space is listed, without 'Unlock with' a product jo may hold", [locked.includes("Inner room"), locked.includes("Unlock with")], [true, false]);

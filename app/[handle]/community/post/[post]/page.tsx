@@ -182,7 +182,7 @@ export default async function CommunityPostPage({ params, searchParams }: Params
   // by its address either.
   const itsSpace = config.spaces.find((s) => s.id === post.sp);
   // Not known is said as not checked, never as a space that is not theirs (CX-123 rule 24).
-  const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email }) : true;
+  const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email, holdings: viewer.holdings }) : true;
   if (may !== true) redirect(`${home}?n=${may === "unknown" ? "spaceunknown" : "spacelocked"}`);
   const query = await searchParams;
   const w = communityWords(store.language);

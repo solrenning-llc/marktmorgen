@@ -139,13 +139,17 @@ async function main(): Promise<void> {
   is("Stripe down: the page is drawn, locked, with nothing from inside", [html.startsWith("PAGE_FAILED"), lockedPart(html).includes("Inner circle"), nothingInside(html)], [false, true, []]);
   stripe = "empty";
   const original = redis.pipeline.bind(redis);
+  // Rule 23 (the pre-review of 9 November 2026, P1): the spaces are answered from the one kept reading of what the
+  // member holds (lib/community-access.ts holdingsOf, nl:cm:<id>:h:...), the same the door reads, no longer from a
+  // kept answer of their own (:sp:ok:). Its reply lost leaves the door itself not known: the page says so, and
+  // nothing from inside, and no locked list, is drawn.
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "GET" && String(c[1]).includes(":sp:ok:"))) throw new Error("synthetic lost reply");
+    if (commands.some((c) => c[0] === "GET" && /:sp:ok:|:h:/.test(String(c[1])))) throw new Error("synthetic lost reply");
     return original(commands);
   }) as typeof redis.pipeline;
   try {
     html = await draw(OUTSIDER);
-    is("the kept answer not read: the page is drawn, locked, with nothing from inside", [html.startsWith("PAGE_FAILED"), lockedPart(html).includes("Inner circle"), nothingInside(html)], [false, true, []]);
+    is("the kept answer not read: the page is drawn, with nothing from inside", [html.startsWith("PAGE_FAILED"), nothingInside(html)], [false, []]);
     html = await draw(INSIDER);
     is("even for a member who holds the product: locked, never the content", [html.startsWith("PAGE_FAILED"), html.includes("PRIVATE-INNER-TEXT")], [false, false]);
   } finally {

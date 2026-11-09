@@ -70,9 +70,13 @@ export default async function CommunityPage({ params, searchParams }: Params) {
             store={store}
             config={viewer.config}
             state={viewer.state}
+            lasting={viewer.state === "unknown" && viewer.lasting}
             email={viewer.state === "out" ? null : viewer.email}
             products={products}
-            link={linkNotices(store.language)[typeof query.link === "string" ? query.link : ""] ?? (word === "out" ? w.sessionEnded : null)}
+            // "Your session here ended" only to somebody whose session did end: a route sends any viewer who is not in
+            // back with ?n=out, and a signed-in member whose access could not be checked is still signed in (the
+            // pre-review of 9 November 2026, P2).
+            link={linkNotices(store.language)[typeof query.link === "string" ? query.link : ""] ?? (word === "out" && viewer.state === "out" ? w.sessionEnded : null)}
           />
         </main>
       </div>
@@ -84,7 +88,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   // anybody else, and neither are their posts: the gate is asked here, once,
   // and everything below reads only what came back.
   // The kept spaces whose answer was not known are not shown, and are said as not checked, never as not theirs.
-  const { spaces, unchecked } = await spaceChecks(store, config, { owner, email: viewer.email });
+  const { spaces, unchecked } = await spaceChecks(store, config, { owner, email: viewer.email, holdings: viewer.holdings });
   const mineIds = new Set(spaces.map((s) => s.id));
   const askedSpace = typeof query.space === "string" && ITEM_ID.test(query.space) ? query.space : "";
   // A space they may not see answers the same as one that is not there.

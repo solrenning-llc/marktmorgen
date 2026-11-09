@@ -30,7 +30,7 @@ import { NewTab } from "@/components/new-tab";
 const WARN = new Set([
   "noemail", "dmoff", "dmbetween", "dmfull", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
   "name", "questions", "image", "creatoronly", "level", "muted", "full", "fullposts", "fullcomments", "pinfull", "gone", "forbidden",
-  "eventfull", "eventcancelled", "eventover", "eventlocked", "host", "nospace", "spacelocked", "spaceunknown", "out", "off", "error", "locked",
+  "eventfull", "eventcancelled", "eventover", "eventlocked", "eventunknown", "host", "nospace", "spacelocked", "spaceunknown", "out", "off", "error", "locked",
 ]);
 
 /** What happened after a button, in the store's language (lib/buyer-words/community.ts). */
@@ -620,6 +620,7 @@ export function Gate({
   store,
   config,
   state,
+  lasting = false,
   email,
   products,
   link,
@@ -627,6 +628,8 @@ export function Gate({
   store: Store;
   config: CommunityConfig;
   state: "out" | "closed" | "removed" | "unknown";
+  /** With "unknown": asking again will tell no more (more purchases than are read), so it says to write to the creator. */
+  lasting?: boolean;
   email: string | null;
   products: { id: string; title: string; kind: string }[];
   link: { title: string; body: string } | null;
@@ -645,27 +648,31 @@ export function Gate({
         </div>
       ) : null}
 
+      {/* Each state's title is a heading under the community's name (WCAG 2.4.10), drawn as the bold line it was. */}
       {state === "removed" ? (
         <div className="st-note mt-6" role="status">
-          <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.removedTitle(store.name)}</p>
+          <h2 className="text-base font-bold" style={{ color: "var(--st-text)" }}>{w.removedTitle(store.name)}</h2>
           <p className="mt-1 text-sm">{w.removedBody(email ?? "")}</p>
         </div>
       ) : state === "closed" ? (
         <div className="st-note mt-6" role="status">
-          <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.closedTitle}</p>
+          <h2 className="text-base font-bold" style={{ color: "var(--st-text)" }}>{w.closedTitle}</h2>
           <p className="mt-1 text-sm">{w.closedBody(email ?? "", store.name)}</p>
         </div>
       ) : state === "unknown" ? (
-        // Stripe could not be read whole just now: neither in nor told they have nothing, nor offered a product
-        // they may hold already; one way on, to check again (CX-123 rule 24).
+        // What they hold could not be read whole: neither in nor told they have nothing, nor offered a product they
+        // may hold already (CX-123 rule 24). For now: a way to check again. For good (more purchases than are read):
+        // write to the creator, never "try again in a minute" (the pre-review of 9 November 2026, P3).
         <div className="st-note mt-6" role="status">
-          <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.unknownTitle}</p>
-          <p className="mt-1 text-sm">{w.unknownBody(email ?? "", store.name)}</p>
-          <p className="mt-2 text-sm">
-            <Link href={`/@${store.handle}/community`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
-              {w.unknownAgain}
-            </Link>
-          </p>
+          <h2 className="text-base font-bold" style={{ color: "var(--st-text)" }}>{w.unknownTitle}</h2>
+          <p className="mt-1 text-sm">{lasting ? w.unknownLastingBody(email ?? "", store.name) : w.unknownBody(email ?? "", store.name)}</p>
+          {lasting ? null : (
+            <p className="mt-2 text-sm">
+              <Link href={`/@${store.handle}/community`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+                {w.unknownAgain}
+              </Link>
+            </p>
+          )}
         </div>
       ) : null}
 
@@ -685,12 +692,13 @@ export function Gate({
         </div>
       ) : null}
 
-      {state !== "removed" && state !== "unknown" ? (
+      {/* Kept while the access is not known, so another address can still be used (the pre-review's P2 and P3). */}
+      {state !== "removed" ? (
         <LinkRequestForm
           action="/api/store/community/link"
           hidden={{ handle: store.handle }}
           id="community-email"
-          label={state === "closed" ? w.tryAnotherAddress : w.alreadyMember}
+          label={state === "closed" || state === "unknown" ? w.tryAnotherAddress : w.alreadyMember}
           explain={w.linkExplain}
           button={w.sendLink}
           placeholder={speech(store).w.emailPlaceholder}

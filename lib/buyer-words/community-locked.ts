@@ -60,8 +60,8 @@ const de: LockedWords = {
   unlockWith: (product) => `Mit ${product} freischalten`,
   forSpace: (space) => `, um ${space} zu öffnen`,
   notYet: "Der Zugang ist noch nicht verfügbar.",
-  unknown: "Wir konnten nicht laden, wie man hineinkommt. Lade die Seite neu, um es noch einmal zu versuchen.",
-  unchecked: "Wir konnten deinen Zugang zu diesem Bereich gerade nicht prüfen. Lade die Seite neu, um es noch einmal zu versuchen.",
+  unknown: "Wir konnten nicht laden, wie man hineinkommt. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
+  unchecked: "Wir konnten Ihren Zugang zu diesem Bereich gerade nicht prüfen. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
 };
 
 const it: LockedWords = {

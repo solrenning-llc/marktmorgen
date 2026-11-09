@@ -57,7 +57,9 @@ export async function POST(request: NextRequest) {
     const id = store.community.id;
     const event = await readEvent(id, eventId);
     if (!event) return back(`${home}/events`, "gone");
-    if (!(await mayAttend(store, viewer.config, event, { owner: false, email: viewer.email }))) return back(page, "eventlocked");
+    // Not known is said as not checked, never as an event that is not theirs (the pre-review of 9 November 2026, P4).
+    const may = await mayAttend(store, viewer.config, event, { owner: false, email: viewer.email, holdings: viewer.holdings });
+    if (may !== true) return back(page, may === "unknown" ? "eventunknown" : "eventlocked");
     if (!(await within(id, viewer.key, "rsvp"))) return back(page, "slow");
 
     if (field("action", 12) === "notgoing") {

@@ -51,19 +51,11 @@ export default async function CommunityEventsPage({ params, searchParams }: Para
   const all = [...upcoming, ...past.events];
   const [numbers, allowed] = await Promise.all([
     rsvpNumbers(id, all, viewer.owner ? null : viewer.key),
-    // Asked once for each set of products events are kept for, not once per event.
-    (async () => {
-      const bySet = new Map<string, Promise<boolean>>();
-      return Promise.all(
-        all.map((e) => {
-          const set = [...e.only].sort().join(",");
-          if (!bySet.has(set)) bySet.set(set, mayAttend(store, viewer.config, e, { owner: viewer.owner, email: viewer.email }));
-          return bySet.get(set) as Promise<boolean>;
-        }),
-      );
-    })(),
+    // Every event answered from the one reading of what this member holds (viewer.holdings), never one per event.
+    Promise.all(all.map((e) => mayAttend(store, viewer.config, e, { owner: viewer.owner, email: viewer.email, holdings: viewer.holdings }))),
   ]);
-  const locked = new Set(all.filter((_, i) => !allowed[i]).map((e) => e.id));
+  // Kept for some members: one this member does not hold, or whose answer was not known (its page says which).
+  const locked = new Set(all.filter((_, i) => allowed[i] !== true).map((e) => e.id));
   const card = (event: CommunityEvent) => (
     <li key={event.id}>
       <EventCard

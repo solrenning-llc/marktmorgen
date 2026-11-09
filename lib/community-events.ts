@@ -65,7 +65,7 @@ import { type MeetProvider, cleanRoom, isMeetProvider, isTimeZone, partsIn, read
 import { isVideoRoom, newVideoRoom } from "@/lib/call-rooms";
 import { type Video, parseVideo, readVideo } from "@/lib/sales-page";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
-import { holdsAnyOf } from "@/lib/community-access";
+import { type Holdings, type Ticket, heldAnswer, holdingsOf, holdsAnyOf } from "@/lib/community-access";
 import { type CommunityConfig, newItemId } from "@/lib/community";
 import { LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { indexEvent, unindexEvent } from "@/lib/community-index";
@@ -604,21 +604,42 @@ export async function deleteEvent(store: Store, eventId: string, now = Date.now(
  * Whether somebody the community let in may come to this event: the creator
  * always; a member when the event is for everyone, or when their address
  * holds one of its products — among those that still open the community.
+ *
+ * "unknown" when what they hold could not be read (CX-123 rule 24; the
+ * pre-review of 9 November 2026, P4): never let in on it, and never told the
+ * event is not for them. Answered from the one reading the community's doors
+ * share (holdingsOf), or the viewer's own, so a page of twenty events asks
+ * Stripe once. `strict`, for deciding who a reminder goes to
+ * (lib/community-event-mail.ts), keeps its own answer: one not had throws.
  */
 export async function mayAttend(
   store: Store,
   config: CommunityConfig,
   event: CommunityEvent,
-  viewer: { owner: boolean; email: string },
-  /** `strict`, for deciding who a reminder goes to (lib/community-event-mail.ts): an answer not had throws, never a no. */
+  viewer: { owner: boolean; email: string; holdings?: Holdings | null },
+  options: { strict: true },
+): Promise<boolean>;
+export async function mayAttend(
+  store: Store,
+  config: CommunityConfig,
+  event: CommunityEvent,
+  viewer: { owner: boolean; email: string; holdings?: Holdings | null },
+  options?: { strict?: false },
+): Promise<Ticket>;
+export async function mayAttend(
+  store: Store,
+  config: CommunityConfig,
+  event: CommunityEvent,
+  viewer: { owner: boolean; email: string; holdings?: Holdings | null },
   options: { strict?: boolean } = {},
-): Promise<boolean> {
+): Promise<Ticket> {
   if (viewer.owner) return true;
   if (!event.only.length) return true;
   const ids = event.only.filter((p) => config.access.includes(p));
   if (!ids.length) return false;
   const id = store.community?.id as string;
-  return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, options);
+  if (options.strict) return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, options);
+  return heldAnswer(viewer.holdings ?? (await holdingsOf(store, config, viewer.email)), ids);
 }
 
 export type JoinWindow = {

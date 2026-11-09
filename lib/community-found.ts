@@ -12,9 +12,15 @@
  * not a looser one written for here:
  *
  *   post    the feed's space gate, and the creator's hidden posts
- *   lesson  holdsAnyOf on the product the course is sold with — the same
- *           question the course page asks, cached under the same key
- *   event   mayAttend, the same call the event's own page makes
+ *   lesson  whether the reader holds the product the course is sold with,
+ *           answered from the one reading of what they hold (holdingsOf)
+ *   event   mayAttend, the same call the event's own page makes, from the
+ *           same reading
+ *
+ * A match whose answer is not known (Stripe could not be read whole) is not
+ * shown and not said to be in something the reader does not have: it is
+ * counted apart (`unchecked`), and the page says so (CX-123 rule 24; the
+ * pre-review of 9 November 2026, P4).
  *   member  the directory's own switch: listed, named, not removed
  *
  * The count of matches the tabs show comes from the index and so counts things
@@ -29,7 +35,7 @@ import { readListings } from "@/lib/catalog";
 import { type Course, findLesson, readCourse } from "@/lib/course";
 import { type CommunityConfig, type Member, readMembers } from "@/lib/community";
 import { type CommunityEvent, isOver, mayAttend, readEvents } from "@/lib/community-events";
-import { holdsAnyOf } from "@/lib/community-access";
+import { type Holdings, heldAnswer, holdingsOf } from "@/lib/community-access";
 import { readLessonRef } from "@/lib/community-index";
 
 export type FoundLesson = {
@@ -40,51 +46,52 @@ export type FoundLesson = {
   unit: string;
 };
 
-export type Viewer = { owner: boolean; email: string; key: string };
+export type Viewer = {
+  owner: boolean;
+  email: string;
+  key: string;
+  /** What the reader holds, read once for the page (holdingsOf, with the lessons' products); read here when absent. */
+  holdings?: Holdings | null;
+};
+
+/** What a reader may be shown of some matches, and how many could not be checked just now. */
+export type Found<T> = { found: T[]; unchecked: number };
 
 /**
  * The lessons among these refs that this reader holds, in the order the index
- * gave them.
+ * gave them, and how many could not be checked.
  *
- * One `holdsAnyOf` per distinct product, not per lesson: five lessons of one
- * course is one question, and the answer is cached under the community's own
- * version exactly as the feed's gate is.
+ * One reading of what the reader holds answers every product, not one
+ * question per product (holdingsOf, kept under the community's own version
+ * exactly as the feed's gate is).
  */
 export async function lessonsFound(
   store: Store,
   config: CommunityConfig,
   refs: string[],
   viewer: Viewer,
-): Promise<FoundLesson[]> {
+): Promise<Found<FoundLesson>> {
+  const none = { found: [], unchecked: 0 };
   const communityId = store.community?.id;
-  if (!communityId || !refs.length) return [];
+  if (!communityId || !refs.length) return none;
   const parsed = refs.map(readLessonRef).filter((r): r is { productId: string; lessonId: string } => r !== null);
-  if (!parsed.length) return [];
+  if (!parsed.length) return none;
 
   const productIds = [...new Set(parsed.map((r) => r.productId))];
   const products = new Map((await readListings(store, productIds)).map((p) => [p.id, p]));
 
   // Which of those products this reader holds. The creator holds all of them.
+  const withCourse = productIds.filter((productId) => products.get(productId)?.course);
+  const holdings = viewer.owner || !withCourse.length ? null : (viewer.holdings ?? (await holdingsOf(store, config, viewer.email, withCourse)));
   const allowed = new Set<string>();
-  await Promise.all(
-    productIds.map(async (productId) => {
-      const product = products.get(productId);
-      if (!product?.course) return;
-      if (viewer.owner) {
-        allowed.add(productId);
-        return;
-      }
-      const ok = await holdsAnyOf(
-        store,
-        [productId],
-        viewer.email,
-        `nl:cm:${communityId}:sg:${productId}:${viewer.key}`,
-        String(config.v),
-      ).catch(() => false);
-      if (ok) allowed.add(productId);
-    }),
-  );
-  if (!allowed.size) return [];
+  const unknown = new Set<string>();
+  for (const productId of withCourse) {
+    const answer = holdings ? heldAnswer(holdings, [productId]) : true;
+    if (answer === true) allowed.add(productId);
+    else if (answer === "unknown") unknown.add(productId);
+  }
+  const unchecked = parsed.filter((r) => unknown.has(r.productId)).length;
+  if (!allowed.size) return { found: [], unchecked };
 
   // The courses behind them, each read once, so a lesson can be named.
   const courseIds = [...allowed].flatMap((id) => {
@@ -111,7 +118,7 @@ export async function lessonsFound(
     if (!found) continue;
     out.push({ product, lessonId, title: found.lesson.title, unit: found.unit.title });
   }
-  return out;
+  return { found: out, unchecked };
 }
 
 /**
@@ -123,26 +130,31 @@ export async function lessonsFound(
  */
 export type FoundEvent = { event: CommunityEvent; state: "upcoming" | "over" | "cancelled" };
 
-/** The events among these ids this reader may attend, in the index's order. */
+/** The events among these ids this reader may attend, in the index's order, and how many could not be checked. */
 export async function eventsFound(
   store: Store,
   config: CommunityConfig,
   ids: string[],
   viewer: Viewer,
   now = Date.now(),
-): Promise<FoundEvent[]> {
+): Promise<Found<FoundEvent>> {
   const communityId = store.community?.id;
-  if (!communityId || !ids.length) return [];
+  if (!communityId || !ids.length) return { found: [], unchecked: 0 };
   const events: CommunityEvent[] = await readEvents(communityId, ids).catch(() => []);
   const byId = new Map(events.map((e) => [e.id, e]));
   const kept: FoundEvent[] = [];
+  let unchecked = 0;
+  // One reading for every event of the page, read here only when the page has none.
+  const holdings = viewer.owner ? null : (viewer.holdings ?? (await holdingsOf(store, config, viewer.email)));
   for (const id of ids) {
     const event = byId.get(id);
     if (!event) continue;
-    if (!(await mayAttend(store, config, event, viewer).catch(() => false))) continue;
+    const answer = await mayAttend(store, config, event, { owner: viewer.owner, email: viewer.email, holdings }).catch((): "unknown" => "unknown");
+    if (answer === "unknown") unchecked += 1;
+    if (answer !== true) continue;
     kept.push({ event, state: event.cancelled ? "cancelled" : isOver(event, now) ? "over" : "upcoming" });
   }
-  return kept;
+  return { found: kept, unchecked };
 }
 
 /** The members among these keys who are still listed, in the index's order. */

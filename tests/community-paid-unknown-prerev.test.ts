@@ -26,7 +26,7 @@ import * as readRules from "@/lib/community-read-rules";
 import * as registry from "./plan-cost-registry";
 import { COMMUNITY_WORDS } from "@/lib/buyer-words/community";
 import * as lockedWordsModule from "@/lib/buyer-words/community-locked";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setCommunity, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { type CommunityConfig, freshConfig, newItemId, saveConfig } from "@/lib/community";
 import { mintPass, passCookieName } from "@/lib/learn";
 import { laterPageCost } from "./traffic-cost";
@@ -99,6 +99,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "paidunknown", "Paid Unknown", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
+  await ensureStoreId(OWNER);
   await setStripeAccount(OWNER, "acct_1TestPaidUnkn01", true);
   await setSubscription(OWNER, { customerId: "cus_PaidUnkn0001", subscriptionId: "sub_PaidUnkn0001", active: true, period: paidPeriod() });
   const made = async (title: string, price: string) => {
@@ -213,8 +214,20 @@ async function main(): Promise<void> {
   const louHtml = await drawWith("lou@example.com", {});
   is("still unknown on every try (control)", [first, second], ["unknown", "unknown"]);
   is("the page never promises a minute will fix it", louHtml.includes("Try again in a minute"), false);
+  // The test world sends no email (no meter for it), so what is checked is that the ask got past the access question to
+  // the link it emails, as a holder's does: a link kept (nl:cm:link:*), and the same answer as a holder's.
+  const links = async () => {
+    const [reply] = (await redis.pipeline([["SCAN", "0", "MATCH", "nl:cm:link:*", "COUNT", "100000"]])) as [[string, string[]]];
+    return reply[1].length;
+  };
+  sessions["holder@example.com"] = history(0, ticket, other);
+  const before = await links();
+  const holderAsk = await access.requestCommunityLink({ store: await fresh(), email: "holder@example.com", ip: "203.0.113.78", origin: "https://marktmorgen.com" });
+  const afterHolder = await links();
   const linkAsk = await access.requestCommunityLink({ store: await fresh(), email: "lou@example.com", ip: "203.0.113.77", origin: "https://marktmorgen.com" });
-  is("and 'Send me the link' never answers 'error / try again in a moment' for good", linkAsk === "error", false);
+  const afterLou = await links();
+  is("control: a holder's ask keeps a link to email", afterHolder - before, 1);
+  is("'Send me the link' for a lasting unknown goes on to the link, as a holder's does (never an 'error' for good before it)", [afterLou - afterHolder, linkAsk], [1, holderAsk]);
   is("it says to write to the creator", typeof en.unknownLastingBody === "function" && louHtml.includes(String(en.unknownLastingBody("lou@example.com", "Paid Unknown")).replace(/'/g, "&#x27;")), true);
   is("and keeps the form to use another address", louHtml.includes('action="/api/store/community/link"'), true);
 
@@ -240,7 +253,7 @@ async function main(): Promise<void> {
   is("the rsvp route says an unknown as such", /eventunknown/.test(read("app/api/store/community/rsvp/route.ts")), true);
 
   part("P5 [LEVE] German: the new space line uses 'du' while the community words use 'Sie'");
-  const de = (lockedWordsModule.lockedWords("de") as Record<string, string>).unchecked;
+  const de = (lockedWordsModule.lockedWords("de") as unknown as Record<string, string>).unchecked;
   is("same register", /\b(dein|deinen|du)\b/.test(de), false);
   sessions["pia@example.com"] = history(0, ticket, other);
   stripeDown = true;

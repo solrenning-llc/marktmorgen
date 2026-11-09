@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
       // A space kept for the buyers of some products: the same gate the feed
       // asks, asked again here, because a form can be sent from anywhere.
       // Not known is said as not checked, never as a space that is not theirs (CX-123 rule 24).
-      const may = await spaceAnswer(store, config, chosen, { owner, email: viewer.email });
+      const may = await spaceAnswer(store, config, chosen, { owner, email: viewer.email, holdings: viewer.holdings });
       if (may !== true) return back(home, may === "unknown" ? "spaceunknown" : "spacelocked");
       // A space that opens for posting at a level (lib/community-points.ts).
       // Reading and commenting stay open to every member.
@@ -258,7 +258,7 @@ export async function POST(request: NextRequest) {
     const post = await readPost(id, postId);
     if (!post || (post.hid && !owner)) return back(home, "gone");
     const itsSpace = config.spaces.find((s) => s.id === post.sp);
-    const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email }) : true;
+    const may = itsSpace ? await spaceAnswer(store, config, itsSpace, { owner, email: viewer.email, holdings: viewer.holdings }) : true;
     if (may !== true) return back(home, may === "unknown" ? "spaceunknown" : "spacelocked");
 
     if (action === "comment") {

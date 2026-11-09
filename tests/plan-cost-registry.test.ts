@@ -250,7 +250,10 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   for (const room of [false, true]) for (let conversations = 0; conversations <= SEARCH_CONVERSATIONS; conversations += 1) {
     assert.ok(searchUnits({ room, conversations }) * laterPageCost() >= searchRead({ room, conversations }), `search ${room} ${conversations}`);
   }
-  for (const checks of [1, 2, 20]) assert.ok(checkUnits(checks) * laterPageCost() >= checks * ACCESS_CHECK_READ, `${checks} checks`);
+  // One reading of what the member holds answers every check of a page (lib/community-access.ts holdingsOf; the
+  // pre-review of 9 November 2026, P1): a page pays for one reading, whatever the number of checks, and none without one.
+  for (const checks of [1, 2, 20]) assert.ok(checkUnits(checks) * laterPageCost() >= ACCESS_CHECK_READ, `${checks} checks`);
+  assert.equal(checkUnits(0), 0);
   // A member's locked spaces read at most one collection page's products, so the collection's figures above hold them (542 [CM1]).
   assert.ok(MAX_UNLOCK_PRODUCTS <= MAX_COLLECTION_PRODUCTS, `${MAX_UNLOCK_PRODUCTS} unlock products > ${MAX_COLLECTION_PRODUCTS}`);
   // The studio's "View as a member" reads the same products, paid in studio requests (542 [CM1]): each covers what a public one does.

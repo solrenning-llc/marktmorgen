@@ -12,7 +12,7 @@ import { takePublicRequest } from "@/lib/traffic";
 import { CREATOR } from "@/lib/community";
 import { searchRoom } from "@/lib/community-chat";
 import { unreadCount } from "@/lib/community-notify";
-import { visibleSpaces } from "@/lib/community-access";
+import { holdingsOf, visibleSpaces } from "@/lib/community-access";
 import { communityVisitor } from "@/lib/community-page";
 import { type SearchKind, MAX_QUERY_LENGTH, queryWords, search, searchEverything } from "@/lib/community-search";
 import { walkCommunity } from "@/lib/community-walk";
@@ -150,23 +150,31 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const first = indexed(tab) ? (pages?.[tab] ?? empty) : empty;
   const page = indexed(tab) && before !== null && pages ? await search(id, asked, before, tab) : first;
 
-  const spaces = await visibleSpaces(store, config, { owner, email });
+  const spaces = await visibleSpaces(store, config, { owner, email, holdings: viewer.holdings });
   const mineIds = new Set(spaces.map((s) => s.id));
   // A space this viewer is gated out of hides its posts here too. A post in a
   // space that no longer exists is not gated, and stays findable.
   const shut = new Set(config.spaces.filter((s) => s.only.length && !mineIds.has(s.id)).map((s) => s.id));
 
   // Only the tab being read is opened: the other three are counted, not built.
-  const gate = { owner, email, key };
   const posts =
     tab === "post" && page.posts.length
       ? (await readPosts(id, page.posts)).filter((p) => (owner || !p.hid) && !shut.has(p.sp))
       : [];
-  // Who holds each product or event shown may be asked of Stripe: each check paid before it is made.
-  const checks = tab === "lesson" ? new Set(page.posts.map((ref) => readLessonRef(ref)?.productId ?? "")).size : tab === "event" ? page.posts.length : 0;
-  if (checks && !(await takePublicRequest(store, "buyer", undefined, checkUnits(checks)))) redirect(`/@${store.handle}/resting`);
-  const lessons = tab === "lesson" ? await lessonsFound(store, config, page.posts, gate) : [];
-  const events = tab === "event" ? await eventsFound(store, config, page.posts, gate) : [];
+  // Who holds the products of the lessons or events shown is answered from one reading of what this member holds
+  // (holdingsOf), kept for the community; read and paid for, once, only when none is kept (the pre-review of
+  // 9 November 2026, P1: it was 16 requests for each check, 320 for a page of twenty).
+  const lessonProducts = tab === "lesson" ? [...new Set(page.posts.map((ref) => readLessonRef(ref)?.productId ?? "").filter(Boolean))] : [];
+  const checks = tab === "lesson" ? lessonProducts.length : tab === "event" ? page.posts.length : 0;
+  const holdings = owner || !checks ? viewer.holdings : await holdingsOf(store, config, email, lessonProducts, () => takePublicRequest(store, "buyer", undefined, checkUnits(checks)));
+  if (holdings === "refused") redirect(`/@${store.handle}/resting`);
+  const gate = { owner, email, key, holdings };
+  const lessonsRead = tab === "lesson" ? await lessonsFound(store, config, page.posts, gate) : { found: [], unchecked: 0 };
+  const eventsRead = tab === "event" ? await eventsFound(store, config, page.posts, gate) : { found: [], unchecked: 0 };
+  const lessons = lessonsRead.found;
+  const events = eventsRead.found;
+  // Matches on this page whose answer was not known: not shown, and said as not checked, never as not theirs.
+  const unchecked = lessonsRead.unchecked + eventsRead.unchecked;
   const people = tab === "member" ? await membersFound(id, page.posts) : [];
 
   const talk = tab === "room" ? (roomHits ?? []).slice(0, SHOWN_TALK) : [];
@@ -206,7 +214,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   // spans every page: "4 more are in something you do not have" under a page
   // of twenty, with sixty more to come, would be a sentence that is simply
   // false.
-  const held = page.posts.length - shown;
+  const held = Math.max(0, page.posts.length - shown - unchecked);
 
   return (
     <div lang={locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -265,6 +273,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
                 {w.found(tab, shown, used.length === 1)}
                 {dropped && used.length ? ` ${w.searchedFor(used.join(", "))}` : ""}
                 {held > 0 ? ` ${w.heldMore(held)}` : ""}
+                {unchecked > 0 ? ` ${w.uncheckedMore(unchecked)}` : ""}
               </p>
             )}
 

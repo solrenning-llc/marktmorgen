@@ -6,7 +6,7 @@
  * fills in, an "AI draft" badge in words and a checklist of three things the
  * creator confirms: the facts, any picture, the price and numbers
  * (components/ai-draft-review.tsx, rules in lib/ai-draft-review.ts). The
- * product form keeps its Save and Add waiting until all three are ticked and
+ * product form keeps its Save and Add waiting until all three are checked and
  * says why, with the focus on the first one left. Nothing here calls a model,
  * reads or writes anything.
  */
@@ -19,7 +19,7 @@ import { done, is, part } from "./check";
 
 part("The rules");
 is("three checks: facts, picture, price", AI_DRAFT_CHECKS.map((check) => check.id), ["facts", "picture", "price"]);
-is("a fresh draft starts with none ticked", freshChecks(), [false, false, false]);
+is("a fresh draft starts with none checked", freshChecks(), [false, false, false]);
 is("two of three is not done", reviewDone([true, true, false]), false);
 is("all three is done", reviewDone([true, true, true]), true);
 is("a list of the wrong length is never done", [reviewDone([true, true]), reviewDone([true, true, true, true])], [false, false]);
@@ -27,18 +27,18 @@ is("the first one left", [firstUnchecked([true, false, false]), firstUnchecked([
 is("no draft waiting: nothing held", aiDraftHold(null), null);
 is("a draft waiting and not checked: held, with the sentence", aiDraftHold([true, false, true]), AI_DRAFT_HOLD);
 is("a draft waiting and checked: not held", aiDraftHold([true, true, true]), null);
-is("the hold says what to do in plain words", AI_DRAFT_HOLD, "This has an AI draft you have not checked yet. Tick the three checks under it, then save.");
+is("the hold says what to do in plain words", AI_DRAFT_HOLD, "This has an AI draft you have not checked yet. Check the three boxes under it, then save.");
 
 part("Drawn under a draft");
 const html = renderToStaticMarkup(createElement(AiDraftReview, { checks: [true, false, false], onToggle: () => {} }));
-is("the badge in words, not by colour alone", html.includes(`>${AI_DRAFT_BADGE}<`), true);
+is("the badge in words, not by color alone", html.includes(`>${AI_DRAFT_BADGE}<`), true);
 is("one group with a legend", [html.includes("<fieldset"), html.includes("<legend")], [true, true]);
 is("a checkbox per check, each with its words", [(html.match(/type="checkbox"/g) ?? []).length, AI_DRAFT_CHECKS.every((check) => html.includes(check.label))], [3, true]);
-is("what is ticked is shown ticked", (html.match(/checked=""/g) ?? []).length, 1);
+is("what is checked is shown checked", (html.match(/checked=""/g) ?? []).length, 1);
 is("a marker the form uses to find the first one left", html.includes("data-ai-review"), true);
 is("each box sits in a 44 px row", (html.match(/min-h-11/g) ?? []).length >= 3, true);
 const all = renderToStaticMarkup(createElement(AiDraftReview, { checks: [true, true, true], onToggle: () => {} }));
-is("all ticked: it says so", all.includes("Checked. You can save it."), true);
+is("all checked: it says so", all.includes("Checked. You can save it."), true);
 
 part("Where it is used");
 const assist = readFileSync("components/ai-assist.tsx", "utf8");

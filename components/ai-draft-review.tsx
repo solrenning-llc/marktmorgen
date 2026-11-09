@@ -5,7 +5,7 @@ import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, reviewDone } from "@/lib/ai-draft-revi
 
 /**
  * The "AI draft" badge and the three checks drawn under every draft the
- * writing help fills in (756 [STN3], unit 1). The badge is words, not a colour;
+ * writing help fills in (756 [STN3], unit 1). The badge is words, not a color;
  * each check is a real checkbox in a 44 px row, grouped under a legend, so it
  * works by keyboard and is read by a screen reader. The form that saves finds
  * the first one left by `data-ai-review`.
@@ -36,7 +36,7 @@ export function AiDraftReview({ checks, onToggle }: { checks: readonly boolean[]
         ))}
       </ul>
       <p className="mt-1 text-sm text-ink-soft" role="status">
-        {done ? "Checked. You can save it." : "Tick each one once you have read the draft."}
+        {done ? "Checked. You can save it." : "Check each box once you have read the draft."}
       </p>
     </fieldset>
   );

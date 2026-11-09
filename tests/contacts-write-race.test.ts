@@ -242,10 +242,14 @@ async function main() {
     const result = await upsertContact(list, email, { agreed: false, explicit: false, source: "buyer", productId: "prod_13", title: "Pack" }, orderRoom(OWNER));
     is("a purchase made after the deletion, without the box, is still noted, as one who may not be written to", [result.gotProduct, JSON.parse(String(row(list, email))).agreed, redis.run(["HLEN", suppressedKey(list)])], [true, false, 1]);
   }
-  for (const [what, mark] of [["a mark that is not a count of seconds", "soon"], ["a deletion in this same second", String(Math.floor(Date.now() / 1000))]] as const) {
+  const second = Math.floor(Date.now() / 1000) - 5;
+  for (const [what, mark, at] of [
+    ["a mark that is not a count of seconds", "soon", undefined],
+    ["a yes timed in the deletion's own second", String(second), new Date(second * 1000 + 500).toISOString()],
+  ] as const) {
     const list = `unknown_mark_${what.length}`, email = "unknown.mark@example.com";
     await redis.pipeline([["HSET", suppressedKey(list), suppressionPrint(list, email), mark]]);
-    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free" }, ROOM);
+    const result = await upsertContact(list, email, { agreed: true, explicit: true, source: "free", at }, ROOM);
     is(`${what}: not known to be older, so nothing is written and nothing lifted`, [row(list, email), result.joined, redis.run(["HLEN", suppressedKey(list)])], [null, false, 1]);
   }
 

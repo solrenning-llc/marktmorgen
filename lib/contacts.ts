@@ -260,10 +260,11 @@ export async function upsertContact(
     // an address that has one. Gone between the two reads: read again.
     const mark = deleted ? await textOrNil(["HGET", suppressedKey(listId), suppressionPrint(listId, email)], "when an address was deleted") : null;
     if (deleted && mark === null) continue;
-    // What this call writes happened when `at` says (the order, the tick), or now. Something from before the
-    // deletion, or from the same second, is never written after it: a thank-you page of an older order reloaded, a
-    // download link opened again. A mark in another shape is not known to be older, so nothing is written either.
-    if (deleted && !afterDeletion(mark, input.at || now)) return none;
+    // What this call writes happened when `at` says (the order, the tick), or, with no `at`, now: after the mark,
+    // which was already there when it was read. Something from before the deletion, or from its same second, is
+    // never written after it: a thank-you page of an older order reloaded, a download link opened again. A mark in
+    // another shape is not known to be older, so nothing is written either.
+    if (deleted && !afterDeletion(mark, input.at)) return none;
     const ownYes = input.agreed && input.explicit;
     const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
     // A yes only undoes an unsubscribe when it was given after it: a thank-you
@@ -323,10 +324,12 @@ const CONTACT_WRITE_TRIES = 3;
 /**
  * Whether something that happened at `at` (an ISO time) is after the deletion whose mark holds `mark`, the second
  * it was written: only from the next whole second on, since the deletion may have been made at any moment of its
- * own. Anything not read exactly (a mark that is not a count of seconds, a time that does not parse) is not after.
+ * own. With no `at` it happens now, after a mark already read. Anything not read exactly (a mark that is not a
+ * count of seconds, a time that does not parse) is not after.
  */
-function afterDeletion(mark: string | null, at: string): boolean {
+function afterDeletion(mark: string | null, at: string | undefined): boolean {
   if (mark === null || !/^(0|[1-9][0-9]{0,15})$/.test(mark)) return false;
+  if (at === undefined || at === "") return true;
   const when = Date.parse(at);
   return Number.isFinite(when) && when >= (Number(mark) + 1) * 1000;
 }

@@ -15,6 +15,7 @@ import { can } from "@/lib/team-roles";
 import { readFields, readPersonTasks, readValues } from "@/lib/crm";
 import { PERSON_KEY, addressForPerson } from "@/lib/person-agenda";
 import { agendaData, countLedger } from "@/lib/person-agenda-read";
+import { IncludedBytes } from "@/lib/sent-bytes";
 import { type PersonTask, taskAssignees } from "@/lib/person-tasks";
 import { TasksAgendaList } from "@/components/tasks-agenda";
 import { readTeam } from "@/lib/team";
@@ -95,6 +96,9 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   let lookupFailed = false;
   // When the reading of the buyers was not counted (the studio's requests are used up), that is what is said (round 4, L1).
   const lookupLedger = countLedger(store);
+  // The fifty kilobytes this request's own price moves, spent once by every part of the page that reads or sends
+  // by size: the lookup below and the tasks agenda (lib/sent-bytes.ts, IncludedBytes; C3-112 (2)).
+  const included = new IncludedBytes();
   if (token) email = await addressForToken(store, token);
   else if (sale) {
     email = await addressForSale(store, sale).catch((error) => {
@@ -103,7 +107,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       return null;
     });
   } else if (who) {
-    email = await addressForPerson(store, who, lookupLedger.count).catch((error) => {
+    email = await addressForPerson(store, who, lookupLedger.count, included).catch((error) => {
       console.error("reading a task's buyer failed", error);
       lookupFailed = true;
       return null;
@@ -154,7 +158,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
               {asked ? (
                 <p className="notice notice-warn mt-6" role="status">
                   {lookupFailed
-                    ? lookupLedger.said.message || "Stripe could not be read just now. Nothing was changed. Try again in a moment."
+                    ? lookupLedger.said.message || "Your sales records could not be read just now. Nothing was changed. Try again in a moment."
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
                       : who
@@ -170,7 +174,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                 </div>
               </section>
               <Suspense fallback={<TasksAgendaWaiting />}>
-                <TasksAgenda store={store} />
+                <TasksAgenda store={store} included={included} />
               </Suspense>
               <LatestBuyers store={store} />
             </>
@@ -197,9 +201,9 @@ function TasksAgendaWaiting() {
  * server knows only its own (UTC) day, so the groups are made for each day
  * the creator's may be and the browser shows its own (components/tasks-agenda.tsx).
  */
-async function TasksAgenda({ store }: { store: Store }) {
+async function TasksAgenda({ store, included }: { store: Store; included: IncludedBytes }) {
   const today = new Date().toISOString().slice(0, 10);
-  const data = await agendaData(store, today);
+  const data = await agendaData(store, today, included);
   const title = <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>;
   if (data.state !== "ok") {
     return (
@@ -219,10 +223,10 @@ async function TasksAgenda({ store }: { store: Store }) {
       {title}
       <p className="mt-2 text-sm text-ink-soft">
         {open
-          ? `${open} open ${open === 1 ? "task" : "tasks"} across your buyers. Open a person to mark one done or remove it.`
+          ? `${open} open ${open === 1 ? "task" : "tasks"} across the people in your store. Open a person to mark one done or remove it.`
           : "No open tasks. Add one on a person's page, under Tasks."}
       </p>
-      {!found && open ? <p className="notice notice-warn mt-4">{data.ledgerMessage ? `${data.ledgerMessage} Who each task is about is not shown until then.` : "Stripe could not be read just now, so who each task is about is not shown. Try again in a moment."}</p> : null}
+      {!found && open ? <p className="notice notice-warn mt-4">{data.ledgerMessage ? `${data.ledgerMessage} Who each task is about is not shown until then.` : "Your sales records could not be read just now, so who each task is about is not shown. Try again in a moment."}</p> : null}
       <TasksAgendaList rows={data.rows} days={data.days} serverDay={today} found={found} />
     </section>
   );

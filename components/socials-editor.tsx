@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { toast } from "@/components/toast";
@@ -31,6 +31,10 @@ const PLACEHOLDER: Partial<Record<SocialNetwork, string>> = {
 };
 
 const UNCONFIRMED = "We could not confirm whether your profiles were saved. Reload this page to check before trying again.";
+
+const subscribeReady = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 
 const MESSAGES: Record<string, string> = {
   too_many: `A store shows up to ${MAX_SOCIALS} profiles.`,
@@ -72,6 +76,7 @@ export function profileKeyboard(network: SocialNetwork, row: number): { type: "e
  */
 export function SocialsEditor({ socials }: { socials: Social[] }) {
   const router = useRouter();
+  const ready = useSyncExternalStore(subscribeReady, clientReady, serverReady);
   const start = (): Row[] => socials.map((s, i) => ({ key: i, network: s.network, typed: typedOf(s) }));
   const [rows, setRows] = useState<Row[]>(start);
   const [next, setNext] = useState(socials.length);
@@ -152,6 +157,7 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
   }
 
   if (!open) {
+    const controlLabel = socials.length ? "Edit your profiles" : "Add your profiles";
     return (
       <div>
         {socials.length ? (
@@ -168,7 +174,9 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
         )}
         <button
           type="button"
+          aria-disabled={ready ? undefined : true}
           onClick={() => {
+            if (!ready) return;
             setRows(start());
             setOpen(true);
             if (socials.length === 0) {
@@ -178,7 +186,7 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
           }}
           className="mt-2 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
         >
-          {socials.length ? "Edit your profiles" : "Add your profiles"}
+          {ready ? controlLabel : "Loading…"}
         </button>
       </div>
     );

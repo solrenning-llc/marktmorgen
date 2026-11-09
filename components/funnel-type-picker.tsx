@@ -6,7 +6,7 @@ import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { FUNNEL_TYPES, type FunnelType, choicesOf, pagesOf, slotProblem } from "@/lib/funnel-types";
+import { FUNNEL_TYPES, type FunnelType, choicesOf, noneYet, pagesOf, slotProblem } from "@/lib/funnel-types";
 import { FunnelFormSetup } from "@/components/funnel-form-setup";
 import { readFunnelFormDrafts, type FunnelFormDraft } from "@/lib/funnel-form-draft";
 import { MAX_FUNNEL_INTRO, type FunnelPageCopy } from "@/lib/funnel-page-copy";
@@ -19,7 +19,7 @@ import { MAX_DRAFTED_BODY, MAX_DRAFTED_SUBJECT } from "@/lib/sequence-draft";
 import { readMailSaveError, sequenceFlowFrom } from "@/lib/funnel-ai-sequence";
 
 /** A product a type can be built with, as the studio knows it. */
-export type TypeProduct = { id: string; title: string; free: boolean; call: boolean; draft: boolean };
+export type TypeProduct = { id: string; title: string; free: boolean; call: boolean; bundle: boolean; draft: boolean };
 
 const MESSAGES: Record<string, string> = {
   type: "That kind of funnel is not offered any more. Reload the page.",
@@ -31,6 +31,7 @@ const MESSAGES: Record<string, string> = {
   slot_free: "That step needs a free product: the one they sign up for.",
   slot_paid: "That step needs a paid product.",
   slot_call: "Choose one of your calls for the booking, and no call for the other steps.",
+  slot_bundle: "That step needs a bundle: one product that holds two or more of your products.",
   slot_twice: "Each product can fill one step.",
   form_draft: "Complete each form question and check its email subscription setting before creating the funnel.",
   form_sensitive: "A form question asks for a password, a card number, a card's security code or an identity number, which a form never may. Change or remove it, then create the funnel. Nothing was made.",
@@ -181,6 +182,7 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
 
   const reviewHref = `/studio/funnels${sid ? `?store=${encodeURIComponent(sid)}` : ""}${made?.funnelId ? `#funnel-review-${encodeURIComponent(made.funnelId)}` : ""}`;
   const productsHref = `/studio${sid ? `?store=${encodeURIComponent(sid)}` : ""}#products`;
+  const bundlesHref = `/studio/bundles${sid ? `?store=${encodeURIComponent(sid)}` : ""}`;
   const pagesHref = (id: string) => `/studio/site?${sid ? `store=${encodeURIComponent(sid)}&` : ""}page=${encodeURIComponent(id)}`;
 
   return (
@@ -232,6 +234,8 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
             const pages = pagesOf(kind).length;
             const tooMany = pages > pagesLeft;
             const blocked = pages > 0 && !canMakePages;
+            // Said on the card, before it is opened: a step none of the store's products can fill yet.
+            const lacking = [...new Set(choicesOf(kind).filter((slot) => !products.some((p) => slotProblem(slot, p) === null)).map((slot) => noneYet(slot).text))];
             return (
               <li key={kind.id} className="flex flex-col rounded-2xl border border-line bg-white p-4">
                 <p className="font-semibold text-ink">{kind.label}</p>
@@ -243,6 +247,7 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
                       <li key={slot.key}>{`${i + 1}. ${slot.kind === "page" ? `Page: ${slot.title}` : slot.label}`}</li>
                     ))}
                 </ol>
+                {lacking.map((line) => <p key={line} className="mt-3 text-xs text-ink-soft">{line}</p>)}
                 {tooMany ? <p className="mt-3 text-xs text-ink-soft">{`Needs room for ${pages} more ${pages === 1 ? "page" : "pages"} under Pages.`}</p> : null}
                 {blocked ? <p className="mt-3 text-xs text-ink-soft">Needs a role that can make the store&apos;s pages.</p> : null}
                 <button type="button" className="btn btn-primary btn-sm mt-4 self-start" onClick={() => choose(kind)} disabled={tooMany || blocked}>
@@ -289,12 +294,12 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
                   </select>
                 ) : (
                   <span className="mt-2 block text-sm text-ink-soft">
-                    {slot.wants === "free"
-                      ? "You have no free product yet. Add one under Products, then come back."
-                      : slot.wants === "call"
-                        ? "You have no call yet. Add one under Products, then come back."
-                        : "You have no paid product yet. Add one under Products, then come back."}
-                    <a className="mt-2 inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4" href={productsHref}>Review products</a>
+                    {noneYet(slot).text}
+                    {noneYet(slot).where === "bundles" ? (
+                      <a className="mt-2 inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4" href={bundlesHref}>Make a bundle</a>
+                    ) : (
+                      <a className="mt-2 inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4" href={productsHref}>Review products</a>
+                    )}
                   </span>
                 )}
               </label>

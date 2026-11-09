@@ -81,7 +81,17 @@ part("Disputes: never a refund on top of what the bank returns");
   }
   is("lost for part of the charge: cannot tell", planRefund(base({}, { disputeStatus: "lost", disputedCents: 1_000 })), { kind: "unknown", reason: "dispute_partial" });
   is("lost: the bank already returned it", planRefund(base({}, { disputeStatus: "lost", disputedCents: 4_900 })), { kind: "none", reason: "dispute_returned" });
-  is("prevented: treated as already returned", planRefund(base({}, { disputeStatus: "prevented" })), { kind: "none", reason: "dispute_returned" });
+  // Rule 23: was "prevented: treated as already returned". Stripe gives `prevented` both to a resolution (refunded to the
+  // buyer) and to a block (the money stays with us), so it is read by the money the dispute itself moved
+  // (disputeMoneyGone, lib/plan-refund.ts; Claude 5's pre-review of claude5/plan-refund-own-dispute, the rule of #3321).
+  is("prevented, money not read: cannot tell", planRefund(base({}, { disputeStatus: "prevented" })), { kind: "unknown", reason: "unreadable" });
+  is("prevented, money unreadable (null): cannot tell", planRefund(base({}, { disputeStatus: "prevented", disputeMoneyGone: null })), { kind: "unknown", reason: "unreadable" });
+  is("prevented, money withdrawn and kept: already returned", planRefund(base({}, { disputeStatus: "prevented", disputedCents: 4_900, disputeMoneyGone: true })), { kind: "none", reason: "dispute_returned" });
+  is("prevented, kept for part of the charge: cannot tell", planRefund(base({}, { disputeStatus: "prevented", disputedCents: 1_000, disputeMoneyGone: true })), { kind: "unknown", reason: "dispute_partial" });
+  is("prevented, nothing kept (a block): the policy applies", planRefund(base({}, { disputeStatus: "prevented", disputedCents: 4_900, disputeMoneyGone: false })), { kind: "guarantee", cents: 4_900 });
+  for (const status of ["appeal_needs_response", "appeal_under_review"]) {
+    is(`appeal stage (${status}): nothing now`, planRefund(base({}, { disputeStatus: status })), { kind: "none", reason: "dispute_open" });
+  }
   is("won: the policy applies again", planRefund(base({}, { disputeStatus: "won" })), { kind: "guarantee", cents: 4_900 });
   is("inquiry closed: the policy applies again", planRefund(base({}, { disputeStatus: "warning_closed" })), { kind: "guarantee", cents: 4_900 });
 }

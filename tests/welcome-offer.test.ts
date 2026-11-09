@@ -47,6 +47,25 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const OWNER = "owner@example.com";
 const HOUR = 3600;
 
+
+/** The reply to the first pipeline that writes a key starting with `prefix`, without the write landing (CX-123 rule 24, L9). */
+async function withOddWrite<T>(prefix: string, reply: unknown, run: () => Promise<T>): Promise<T> {
+  const real = redis.pipeline.bind(redis);
+  let used = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!used && commands[0]?.[0] === "SET" && String(commands[0]?.[1] ?? "").startsWith(prefix)) {
+      used = true;
+      return reply;
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  try {
+    return await run();
+  } finally {
+    redis.pipeline = real;
+  }
+}
+
 async function ask(email: string, productId: string, consent: boolean): Promise<string> {
   const store = (await storeForEmail(OWNER))!;
   const product = (await readListing(store, productId))!;
@@ -118,6 +137,14 @@ async function main(): Promise<void> {
   part("In the numbers");
   is("a checkout and a membership marked as a welcome offer count as one", [discountKindOf({ metadata: { welcome: "yes" } }), entryOf({ discount: "welcome" })], ["welcome", "welcome"]);
 
+  part("The once-only reminder mark, read exactly (CX-123 rule 24, L9)");
+  // CX-123 rule 24, L9: the once-only mark answered oddly, without landing, schedules nothing; a whole answer later does.
+  const odd = await ask("odd@example.com", free.product.id, true);
+  await recordLead(store, (await readClaimFull(odd))!, "Pantry Guide");
+  store = (await storeForEmail(OWNER))!;
+  const oddClaim = (await readClaimFull(odd))!;
+  is("a once-only mark answered oddly that did not land schedules nothing", await withOddWrite("nl:wo:r:", ["QUEUED"], () => scheduleReminder(store, oddClaim, odd, asked + HOUR)), false);
+  is("the next whole answer schedules it, once", [await scheduleReminder(store, oddClaim, odd, asked + HOUR), await scheduleReminder(store, oddClaim, odd, asked + HOUR)], [true, false]);
   done();
 }
 

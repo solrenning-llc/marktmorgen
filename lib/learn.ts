@@ -280,6 +280,12 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   return { paid: found, ended, refunded };
 }
 
+/** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
+function wholeSeconds(value: unknown): number | null {
+  if (typeof value === "number") return countOf(value);
+  return typeof value === "string" && /^\d{1,15}$/.test(value) ? Number(value) : null;
+}
+
 /** The cached answer, in the shape written before ended memberships were kept too. */
 function parseLedger(cached: string): Ledger | null {
   try {
@@ -331,10 +337,19 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   }
   const fromStripe = asked.paid;
   const recorded = new Map<string, number>();
+  // Each course written down with when it began, in whole seconds (CX-123 rule 24): a value of another shape, or
+  // fields and values that do not pair up, is unknown, never 0 (1970, every drip module open) or "not written down".
+  const pairs: [unknown, unknown][] = [];
   if (Array.isArray(ledger)) {
-    for (let i = 0; i + 1 < ledger.length; i += 2) recorded.set(String(ledger[i]), Number(ledger[i + 1]));
+    if (ledger.length % 2 !== 0) throw new UnknownReplyError("the courses written down for an address");
+    for (let i = 0; i + 1 < ledger.length; i += 2) pairs.push([ledger[i], ledger[i + 1]]);
   } else if (ledger && typeof ledger === "object") {
-    for (const [k, v] of Object.entries(ledger as Record<string, string>)) recorded.set(k, Number(v));
+    pairs.push(...Object.entries(ledger as Record<string, unknown>));
+  }
+  for (const [field, value] of pairs) {
+    const began = wholeSeconds(value);
+    if (typeof field !== "string" || began === null) throw new UnknownReplyError("the courses written down for an address");
+    recorded.set(field, began);
   }
 
   // Brought over from another platform: the course itself, or a course in a
@@ -379,9 +394,13 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     .map((id) => courses.find((p) => p.id === id))
     .filter((p): p is Listing => Boolean(p?.course));
   if (withCourse.length) {
-    const flags = await redisPipeline(withCourse.map((p) => ["SISMEMBER", blockedKey(p.course!.id), emailKey(email)]));
+    const flags = repliesFor(await redisPipeline(withCourse.map((p) => ["SISMEMBER", blockedKey(p.course!.id), emailKey(email)])), withCourse.length);
+    // One 0 or 1 for each course asked (CX-123 rule 24): any other reply is unknown, never "not taken off", so a
+    // student the creator removed is never let back in on a reply that could not be read.
+    const taken = flags?.map(countOf);
+    if (!taken || taken.some((n) => n === null || n > 1)) throw new UnknownReplyError("whether a student was taken off a course");
     withCourse.forEach((p, i) => {
-      if (flags[i] === 1 || flags[i] === "1") result.delete(p.id);
+      if (taken[i] === 1) result.delete(p.id);
     });
   }
   return { paid: result, ended: asked.ended, refunded: asked.refunded };
@@ -554,20 +573,32 @@ export type Student = {
   blocked: boolean;
 };
 
-/** Everyone who has opened the course, with how far they got. */
-export async function studentsOf(course: Course, limit = 500): Promise<{ students: Student[]; total: number }> {
+/**
+ * Everyone who has opened the course, with how far they got; null when Redis
+ * answered in a shape that cannot be read (rule 24), so a page never says
+ * "nobody" and the drip schedule never acts on an unknown list of blocked
+ * students. Only Redis's own empty answer is none; a row that is itself not
+ * JSON is skipped, as before.
+ */
+export async function studentsOf(course: Course, limit = 500): Promise<{ students: Student[]; total: number } | null> {
   if (!isRedisConfigured()) return { students: [], total: 0 };
-  const [raw, blockedRaw] = await redisPipeline([
-    ["HGETALL", studentsKey(course.id)],
-    ["SMEMBERS", blockedKey(course.id)],
-  ]);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HGETALL", studentsKey(course.id)],
+      ["SMEMBERS", blockedKey(course.id)],
+    ]),
+    2,
+  );
+  if (!replies) return null;
+  const [raw, blockedRaw] = replies;
   const rows: StudentRow[] = [];
   const pairs: [string, string][] = [];
-  if (Array.isArray(raw)) {
-    for (let i = 0; i + 1 < raw.length; i += 2) pairs.push([String(raw[i]), String(raw[i + 1])]);
-  } else if (raw && typeof raw === "object") {
-    for (const [k, v] of Object.entries(raw as Record<string, string>)) pairs.push([k, v]);
-  }
+  // HGETALL answers a flat list of strings (the REST client and lib/redis-memory.ts alike); anything else is unknown.
+  const flat = stringList(raw);
+  if (!flat || flat.length % 2 !== 0) return null;
+  for (let i = 0; i + 1 < flat.length; i += 2) pairs.push([flat[i], flat[i + 1]]);
+  const blockedList = stringList(blockedRaw);
+  if (!blockedList) return null;
   for (const [, value] of pairs) {
     try {
       rows.push(JSON.parse(value) as StudentRow);
@@ -576,17 +607,18 @@ export async function studentsOf(course: Course, limit = 500): Promise<{ student
   rows.sort((a, b) => b.l - a.l);
   const shown = rows.slice(0, limit);
   const lessonIds = new Set(lessonsInOrder(course).map(({ lesson }) => lesson.id));
-  const done = shown.length
-    ? await redisPipeline(shown.map((row) => ["SMEMBERS", doneKey(course.id, row.e)]))
-    : [];
-  const blocked = new Set(Array.isArray(blockedRaw) ? (blockedRaw as string[]) : []);
+  const done = shown.length ? repliesFor(await redisPipeline(shown.map((row) => ["SMEMBERS", doneKey(course.id, row.e)])), shown.length) : [];
+  if (!done) return null;
+  const doneLists = done.map(stringList);
+  if (doneLists.some((list) => list === null)) return null;
+  const blocked = new Set(blockedList);
   return {
     total: rows.length,
     students: shown.map((row, i) => ({
       email: row.e,
       since: row.s,
       lastSeen: row.l,
-      done: Array.isArray(done[i]) ? (done[i] as string[]).filter((id) => lessonIds.has(id)).length : 0,
+      done: (doneLists[i] as string[]).filter((id) => lessonIds.has(id)).length,
       blocked: blocked.has(emailKey(row.e)),
     })),
   };
@@ -889,8 +921,14 @@ export async function sendDripEmails(
     }
     const dripping = course.modules.filter((m) => m.dripDays > 0 && m.lessons.length > 0);
     if (dripping.length === 0) continue;
+    const read = await studentsOf(course, 5000);
+    if (!read) {
+      // Unknown, not none: this course waits for the next run, which reads it again.
+      console.error("reading a course's students for its drip emails failed", course.id);
+      continue;
+    }
     counts.courses += 1;
-    const { students } = await studentsOf(course, 5000);
+    const { students } = read;
     for (const student of students) {
       if (student.blocked) continue;
       for (const unit of dripping) {

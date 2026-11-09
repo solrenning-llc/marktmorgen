@@ -229,6 +229,17 @@ export function rowGivesBack(row: GivenBackRow): boolean {
 }
 
 /**
+ * A refund row Stripe has not finished (requires_action, or pending) that gives nothing back yet (rowGivesBack false):
+ * it may still go through. A job that reads refunds since an anchor keeps its anchor at this row's time, so a later
+ * refund never moves the read past it and it is read again once it goes through (rule 30; as lib/gifts.ts and
+ * lib/preorders.ts do since #3188). Never a lost dispute's row.
+ */
+export function unfinishedRefund(row: GivenBackRow): boolean {
+  if (row.object === "dispute") return false;
+  return (row.status === "requires_action" || row.status === "pending") && !rowGivesBack(row);
+}
+
+/**
  * The most pages of closing events one job's run reads for one store: each
  * a GET /events of up to 100, every five minutes, by the five jobs that
  * take things back (lib/licence-keys.ts, lib/call-meetings.ts,

@@ -53,6 +53,53 @@ const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,128}$/;
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,128}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,128}$/;
 const CHARGE_STATUSES = new Set(["succeeded", "pending", "failed"]);
+/**
+ * Every status Stripe gives a dispute: anything else is unknown, never open or settled. The appeal stages
+ * (appeal_needs_response, appeal_under_review: stripe-node 23.1.0 Dispute.Status) are open: nothing now.
+ * Junction: this is the table of lib/dispute-statuses.ts in #3323 (claude5/dispute-prevented-siblings), not in main
+ * yet; once it is, this reads DISPUTE_STATUSES from there and this copy goes.
+ */
+const DISPUTE_STATUSES = new Set([
+  "warning_needs_response",
+  "warning_under_review",
+  "warning_closed",
+  "needs_response",
+  "under_review",
+  "appeal_needs_response",
+  "appeal_under_review",
+  "won",
+  "lost",
+  "prevented",
+  "charge_refunded",
+]);
+
+/**
+ * Whether a dispute's own balance transactions took money from the account and did not put it back (rule 30): true
+ * when more was withdrawn than reinstated, false when nothing was withdrawn or all of it was reinstated, null when the
+ * list or any amount is not in Stripe's shape. Stripe's `prevented` is either a resolution, refunded to the buyer, or a
+ * block, stopped by the card network while the money stays with us; case_type, which tells them apart, is not in the
+ * API version read here (2024-06-20; stripe-node added it in 16.5.0 and block/resolution in 18.5.0), and the money is:
+ * `balance_transactions`, "zero, one, or two balance transactions that show funds withdrawn and reinstated" (stripe-node
+ * v12.18.0 and v23.1.0 Disputes.d.ts), embedded in every dispute GET /v1/disputes lists. `amount`, not `net`: the fee
+ * on a withdrawal is Stripe's dispute fee, not money given back.
+ * Junction: the same body as disputeMoneyGone in lib/retained-revenue.ts of #3321 (Claude 6, @31890b10c4), not in main
+ * yet; once it is, this imports that one and this copy goes.
+ */
+export function disputeMoneyGone(dispute: unknown): boolean | null {
+  if (!dispute || typeof dispute !== "object" || Array.isArray(dispute)) return null;
+  const moves = (dispute as { balance_transactions?: unknown }).balance_transactions;
+  if (!Array.isArray(moves) || moves.length > 2) return null;
+  let total = 0;
+  for (const move of moves) {
+    if (!move || typeof move !== "object" || Array.isArray(move)) return null;
+    const { object, amount } = move as { object?: unknown; amount?: unknown };
+    if (object !== "balance_transaction" || typeof amount !== "number" || !Number.isSafeInteger(amount)) return null;
+    total += amount;
+  }
+  // A dispute that put back more than it took is not a shape Stripe documents.
+  if (total > 0) return null;
+  return total < 0;
+}
 
 /** One payment the refund gives back: its charge, the amount for it, and when it was paid (seconds). */
 export type PlanRefundPart = { chargeId: string; paymentIntent: string; invoiceId: string; cents: number; paidAtSeconds: number };
@@ -81,6 +128,12 @@ export type PlanRefundReading =
 type Row = Record<string, unknown>;
 const obj = (v: unknown): Row | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Row) : null);
 const idOf = (v: unknown): string => (typeof v === "string" ? v : typeof obj(v)?.id === "string" ? String(obj(v)!.id) : "");
+/**
+ * Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing.
+ * A reply that is not an object (a JSON null, a string, a number) is not its own either, never a TypeError (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : Number.NaN);
 
 class Spent extends Error {}
@@ -161,13 +214,29 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       if (charge.id !== chargeId || idOf(charge.invoice) !== invoiceId || idOf(charge.customer) !== customer.id) return { refund: { kind: "unknown", reason: "unreadable" } };
       let disputeStatus: string | null = null;
       let disputedCents: number | null = null;
-      if (charge.disputed === true) {
-        const disputes = list(await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`), 10);
-        if (!disputes) return { refund: { kind: "unknown", reason: "unreadable" } };
+      let moneyGone: boolean | null = null;
+      // Whether Stripe says the charge is disputed, in its exact shape: anything but a boolean is unknown, never "no
+      // dispute" (rule 24).
+      if (typeof charge.disputed !== "boolean") return { refund: { kind: "unknown", reason: "unreadable" } };
+      if (charge.disputed) {
+        const disputesPage = await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`);
+        const disputes = list(disputesPage, 10);
+        // A list that says there is more was not read whole: not decided here.
+        if (!disputes || disputesPage.has_more !== false) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
-        disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
-        disputedCents = num(disputes[0].amount);
+        // Only this charge's own dispute decides (rule 30; review of #3133): a row of another charge, or naming none,
+        // says nothing about this one. A won row of another charge made the guarantee payable on a charge whose own
+        // dispute was lost, and lib/plan-refund-write.ts then asked for the money a second time. A status that is not
+        // one of Stripe's is unknown too, never read as open or settled.
+        const [own] = disputes;
+        if (idOf(own.charge) !== chargeId || typeof own.status !== "string" || !DISPUTE_STATUSES.has(own.status)) {
+          return { refund: { kind: "unknown", reason: "unreadable" } };
+        }
+        disputeStatus = own.status;
+        disputedCents = num(own.amount);
+        // A prevented one is decided by the money it moved itself (plan-refund-rules.ts reads it): unread is unknown.
+        if (own.status === "prevented") moneyGone = disputeMoneyGone(own);
       }
       const lines = embedded(invoice.lines);
       if (!lines) return { refund: { kind: "unknown", reason: "unreadable" } };
@@ -190,6 +259,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         paidAtSeconds: Number.isFinite(paidAt) ? paidAt : num(charge.created),
         disputeStatus,
         disputedCents,
+        disputeMoneyGone: moneyGone,
       };
       const refund = planRefund({
         cycle,
@@ -313,6 +383,8 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
           // own earlier plans (started again since) is this store's: not decided here, never a silent no.
           if (!INVOICE_ID.test(invoiceId)) return { refund: { kind: "unknown", reason: "unreadable" } };
           const earlier = await get(`/invoices/${encodeURIComponent(invoiceId)}?expand[]=subscription`);
+          // Another invoice's reply, or one with no id: whose the first payment was is not known, so not decided here.
+          if (!isOwnReply(earlier, invoiceId)) return { refund: { kind: "unknown", reason: "unreadable" } };
           const named = obj(obj(earlier.subscription)?.metadata)?.store;
           const handles = new Set([store.handle, ...store.previousHandles]);
           if (typeof named === "string" && handles.has(named)) return { refund: { kind: "unknown", reason: "not_this_store" } };

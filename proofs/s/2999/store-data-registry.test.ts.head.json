@@ -1,0 +1,11 @@
+{
+  "file": "tests/store-data-registry.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+  "stdout": "creator: room 18 MB; outside it 134.0 MB on average, 295.3 MB at once\npro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once\nscale: room 250 MB; outside it 850.6 MB on average, 2477.6 MB at once\n✔ every key family in the code is in the registry, and every entry is in the code (88.951939ms)\n✔ each family is bounded one way at least, and what it says can be checked (30.917732ms)\n✔ what an order keeps for good is written where it is measured, and charged what it really adds (2.208277ms)\n✔ what an order can keep for good fits what every checkout holds before it opens (1.316516ms)\n✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.518067ms)\n✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (7.675878ms)\n✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.205216ms)\nℹ tests 7\nℹ suites 0\nℹ pass 7\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 139.431094\nS_VOLUME {\"runs\":0,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

@@ -1,0 +1,11 @@
+{
+  "file": "tests/data-recount.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+  "stdout": "\nWhat is measured is what the registry counts in the room\n  ok    the families the room counts\n  ok    and every other one\n  ok    a key is its longest family's\n  ok    ids are long, with a digit or all hex; words are not\n\nA store's keys from before its room counted them\n  ok    one run reads every store, every page and sets every room\n  ok    the slot holds what was measured beyond what the room counted: a rate count and another store's record are not this store's\n  ok    so the room is at least what was measured, and was never made emptier\n  ok    the job's own keys are gone, and it says it is done\n\nIdempotent and resumable\n  ok    a run after it is done changes nothing\n  ok    counted twice, the room is what it was after once\n  ok    a page read from where the job no longer is adds nothing\n  ok    the page from where it is adds once and moves on\n  ok    a run out of time does nothing and loses nothing\n\n13 checks, all passing.\nS_VOLUME {\"runs\":118,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

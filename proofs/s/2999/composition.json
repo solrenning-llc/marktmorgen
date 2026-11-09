@@ -1,0 +1,104 @@
+{
+  "command": [
+    "git",
+    "merge-tree",
+    "--write-tree",
+    "26a8f84c034373a5d8923288f38e737e6f65b5e1",
+    "44f4e252cf787afca1152a703ab82b59a104162e"
+  ],
+  "status": 0,
+  "stdout": "bae157013768d1557ad5b77e510a39a7cdbe1294\n",
+  "stderr": "",
+  "sourceTree": "bae157013768d1557ad5b77e510a39a7cdbe1294",
+  "onlyDifferentPaths": [
+    "docs/reviews/v-2999-integration.md",
+    "proofs/v/2999/blob-identities.json",
+    "proofs/v/2999/ci-log-reference.json",
+    "proofs/v/2999/dependency-versions.json",
+    "proofs/v/2999/logs-manifest.json",
+    "proofs/v/2999/logs.json.gz.b64",
+    "proofs/v/2999/member-family.proof.ts",
+    "proofs/v/2999/preload.mjs",
+    "proofs/v/2999/publication-checks.json",
+    "proofs/v/2999/registry-without-candidate.ts",
+    "proofs/v/2999/run.mjs",
+    "proofs/v/2999/types.mjs",
+    "proofs/v/2999/validate.mjs",
+    "proofs/v/2999/worker.mjs"
+  ],
+  "productCompositionExact": true,
+  "blobComparisons": [
+    {
+      "path": "app/api/store/checkout/route.ts",
+      "candidate": "e6fc57adb0b8cebdffcfd78f5f2369b8ab65280b",
+      "subject": "c5f8a4be822013fc8de0503fd1c32c4712eba5d5",
+      "byteIdentical": false
+    },
+    {
+      "path": "lib/data-families.ts",
+      "candidate": "1f943f827b515ce3a3d460201b7f00dc37036d5d",
+      "subject": "0e1af2a3a30811ee83ca4665228982a3b9080aff",
+      "byteIdentical": false
+    },
+    {
+      "path": "lib/discount-impact.ts",
+      "candidate": "159d2cffff2b3f9835d83624de1d893571a15f6d",
+      "subject": "159d2cffff2b3f9835d83624de1d893571a15f6d",
+      "byteIdentical": true
+    },
+    {
+      "path": "lib/fair-coupon.ts",
+      "candidate": "d34a037f1541c3762e35d231556aef0f29d20ca6",
+      "subject": "d34a037f1541c3762e35d231556aef0f29d20ca6",
+      "byteIdentical": true
+    },
+    {
+      "path": "lib/member-price-rules.ts",
+      "candidate": "057e6f343601fcb85b8671819fd78d482b5149e3",
+      "subject": "057e6f343601fcb85b8671819fd78d482b5149e3",
+      "byteIdentical": true
+    },
+    {
+      "path": "lib/member-price.ts",
+      "candidate": "2144f136d699d7eda99684d4ce16a8212f8cbaf2",
+      "subject": "2144f136d699d7eda99684d4ce16a8212f8cbaf2",
+      "byteIdentical": true
+    },
+    {
+      "path": "lib/store-checkout.ts",
+      "candidate": "47744983218e6da9cb696e3a3b5f06925d6304dd",
+      "subject": "47744983218e6da9cb696e3a3b5f06925d6304dd",
+      "byteIdentical": true
+    },
+    {
+      "path": "lib/store.ts",
+      "candidate": "dff99010bf6afbffd2f1187940d0f37694990641",
+      "subject": "abfb72bc25c548bff15e6da7733987e7f57d1bfd",
+      "byteIdentical": false
+    },
+    {
+      "path": "tests/member-price-proof-gaps.test.ts",
+      "candidate": "ad531e8cc91f73950b1f9d74e53fbbf93a6f229b",
+      "subject": "ad531e8cc91f73950b1f9d74e53fbbf93a6f229b",
+      "byteIdentical": true
+    },
+    {
+      "path": "tests/member-price.test.ts",
+      "candidate": "69ae4cac361eb282e529113550059cffbda978bb",
+      "subject": "69ae4cac361eb282e529113550059cffbda978bb",
+      "byteIdentical": true
+    },
+    {
+      "path": "tests/plan-cost-registry.ts",
+      "candidate": "1f2bcbda31832d0036ea9bdd38ac913bf9b713f9",
+      "subject": "6de65aa3dff616b3754ab78d02fa38c01b4bcdcb",
+      "byteIdentical": false
+    },
+    {
+      "path": "tests/store-data-registry.ts",
+      "candidate": "3c799d5abacf8d8417eb0bc7bfdb7bf3606763f4",
+      "subject": "4f7d66e9e53a5073a0bfe7ab4250bce5e41fd348",
+      "byteIdentical": false
+    }
+  ]
+}

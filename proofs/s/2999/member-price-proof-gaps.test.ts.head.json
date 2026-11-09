@@ -1,0 +1,11 @@
+{
+  "file": "tests/member-price-proof-gaps.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+  "stdout": "\nL1: an unknown reply on the imported purchases\n  ok    control: a club member (20%) who bought the guide elsewhere (30%), read normally: 30%\n  ok    club member, the imported read answers a number: unknown (a larger rule may rest on it), not 20%\n  ok    only the imported purchase, the read answers a number: unknown, not none\n  ok    club member, the imported read answers a missing slot: unknown (a larger rule may rest on it), not 20%\n  ok    only the imported purchase, the read answers a missing slot: unknown, not none\n  ok    club member, the imported read answers a string: unknown (a larger rule may rest on it), not 20%\n  ok    only the imported purchase, the read answers a string: unknown, not none\n  ok    club member, the imported read answers a list with a number in it: unknown (a larger rule may rest on it), not 20%\n  ok    only the imported purchase, the read answers a list with a number in it: unknown, not none\n  ok    club member, the imported read answers a field with no value: unknown (a larger rule may rest on it), not 20%\n  ok    only the imported purchase, the read answers a field with no value: unknown, not none\n  ok    an empty reply is a real nothing imported: none\n  ok    an empty reply, club member: 20%\n  ok    the imported read unknown, but the club's 20% is the most the guide itself can get: still 20%\n\nL2: a proved session behind a pass for some courses only\n  ok    control: signed in with no pass: the member price\n  ok    signed in (inbox proved) and also holding a pass for one course: still the member price\n  ok    a pass for one course and no session: proves nothing, none\n  ok    the creator signed in on their own store, with a pass for one course: none\n\n18 checks, all passing.\nS_VOLUME {\"runs\":212,\"attempts\":16,\"forwarded\":16}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

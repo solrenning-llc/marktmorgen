@@ -1,0 +1,11 @@
+{
+  "file": "tests/closing-families.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+  "stdout": "✔ inactive diagnostic observations retain their existing absolute one-day expiry (2.015111ms)\n✔ every family of the registry says what becomes of it when its store closes, and nothing more is said (1.246797ms)\n✔ what each says fits how the registry bounds it (3.090013ms)\n✔ a key belongs to its longest family, and the walk takes only what names a closing store (0.739191ms)\nℹ tests 4\nℹ suites 0\nℹ pass 4\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 23.967737\nS_VOLUME {\"runs\":0,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

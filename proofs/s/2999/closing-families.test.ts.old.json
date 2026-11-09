@@ -1,0 +1,11 @@
+{
+  "file": "tests/closing-families.test.ts",
+  "oldSource": "final-minus-two-member-family-entries",
+  "mode": "registry-two-entry-counterfactual",
+  "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+  "stdout": "✔ inactive diagnostic observations retain their existing absolute one-day expiry (2.276491ms)\n✖ every family of the registry says what becomes of it when its store closes, and nothing more is said (2.529077ms)\n✔ what each says fits how the registry bounds it (9.43827ms)\n✔ a key belongs to its longest family, and the walk takes only what names a closing store (1.641526ms)\nℹ tests 4\nℹ suites 0\nℹ pass 3\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 35.785536\n\n✖ failing tests:\n\ntest at [stdin]:83062:27\n✖ every family of the registry says what becomes of it when its store closes, and nothing more is said (2.529077ms)\n  AssertionError [ERR_ASSERTION]: say in lib/data-families.ts CLOSING what becomes of each of these when its store closes\n  + actual - expected\n  \n  + [\n  +   'nl:member:c:'\n  + ]\n  - []\n  \n      at TestContext.<anonymous> ([stdin]:83065:25)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1402:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)\n      at Test.postRun (node:internal/test_runner/test:1542:19)\n      at Test.run (node:internal/test_runner/test:1467:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: [Array],\n    expected: [],\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\nS_VOLUME {\"runs\":0,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 1,
+  "signal": null,
+  "error": null
+}

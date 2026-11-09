@@ -1,0 +1,11 @@
+{
+  "file": "tests/limits-proposal.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "c5db63a1fffc5c79a5866831d54ddff01b3825fa",
+  "stdout": "✔ the document is what the numbers render today (run node scripts/limits-proposal.mjs) (5880.341786ms)\n✔ archived proposals never raise a figure and viable proposals meet their historical 60% target (1088.793061ms)\n✔ the current MR unit floor is positive profit, while a loss fails and sales stay closed (5.231123ms)\n✔ the Store assistant's input cap: today's keeps 60% with its room at $69, and the largest cap is where one byte more misses (0.412098ms)\n✔ AI captions: today's price keeps 60% at every length, the lowest that would is listed, and captions are not on sale (6861.497376ms)\nℹ tests 5\nℹ suites 0\nℹ pass 5\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 13845.195367\nS_VOLUME {\"runs\":0,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

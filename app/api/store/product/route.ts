@@ -1,4 +1,5 @@
 import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
+import { handsOver } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -422,6 +423,8 @@ export async function POST(request: NextRequest) {
             if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
             if (exampleTitlesLeft(course) > 0) return Response.json({ ok: false, error: "course_examples" }, { status: 409 });
           }
+          // Published only once it hands something over by the checkout's own rule (754 [STN1]).
+          if (!handsOver(draft)) return Response.json({ ok: false, error: "nothing_to_hand_over", product: draft.title }, { status: 409 });
         }
       }
       const done = await setProductHidden(ref, id, body.hidden);

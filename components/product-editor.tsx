@@ -135,6 +135,7 @@ const MESSAGES: Record<string, string> = {
   title: "Give it a name before saving.",
   // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
   course_examples: 'This course still has example titles. Open the course, replace each with your own, then publish it.',
+  nothing_to_hand_over: "This has nothing to hand over yet. Add its file, link or lessons, then publish it.",
   trial: `Type a free trial of ${MIN_TRIAL_DAYS} to ${MAX_TRIAL_DAYS} days, or leave it empty for none.`,
   payments: `Type ${MIN_MEMBER_PAYMENTS} to ${MAX_MEMBER_PAYMENTS} payments, or leave it empty for a membership that runs until it is canceled.`,
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, to make room.",

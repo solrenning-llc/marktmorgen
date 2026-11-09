@@ -17,6 +17,10 @@
  *   - every write of an import over another writer's goes only over the job it read (review on #3384, second
  *     review, HIGH): a cancel between an upload's read and its write is never undone, what an import held is given
  *     back exactly once, never used after it was given back, and no give-back takes a count below zero;
+ *   - a give-up of an old upload ends it only while it is still receiving: one finished or queued meanwhile is left
+ *     alone, with what it holds (focal review on #3384, L-A);
+ *   - a finish queues an import and puts it on the active set in one step, so a lost round trip never leaves a queued
+ *     import off the set, nor one on the set still receiving (focal review on #3384, L-B);
  *   - a reminder refused by a full month is tried once more when the month opens again, while that is still before
  *     the renewal date, and is never sent twice.
  */
@@ -382,6 +386,95 @@ async function main(): Promise<void> {
   const goneRows = await afterRead(goneId, () => redis.pipeline([["DEL", `nl:import:${goneId}`]]), async () => addRows((await storeForEmail(GONE))!, goneId, [["2", "a@example.com", "", "", ""]]));
   const goneLeft = (await redis.pipeline([["EXISTS", `nl:import:${goneId}`], ["EXISTS", `nl:import:${goneId}:rows`]])) as number[];
   is("an import let go between a batch's read and its write is not written again, and keeps no rows", [gone.ok, goneRows.ok, (goneRows as { reason?: string }).reason, goneLeft], [true, false, "state", [0, 0]]);
+
+  part("A give-up ends an old upload only while it is still receiving (focal review on #3384, L-A)");
+  const onActive = async (id: string) => (await redis.pipeline([["SISMEMBER", "nl:imports:active", id]]))[0];
+  // An upload with no hold, finished between a new start's read of it and its give-up: the give-up's write finds it
+  // changed, reads it again and finds it queued. That import is the creator's, finished: it is left alone.
+  const LA = "r46e-guard-a@example.com";
+  await creatorStore(LA, "r46guarda", { period: paidPeriod() });
+  const laAt = Date.now();
+  const la = await startImport((await storeForEmail(LA))!, LA, "contacts", { expected: 2, file: "list.csv", agreed: true });
+  const laId = la.ok ? la.job.id : "";
+  await addRows((await storeForEmail(LA))!, laId, [["2", "guard-a1@example.com", "", "", ""]]);
+  setClock(laAt + 3 * 60 * 60_000);
+  const laNext = await afterRead(laId, async () => finishUpload((await storeForEmail(LA))!, laId), async () =>
+    startImport((await storeForEmail(LA))!, LA, "contacts", { expected: 1, file: "one.csv", agreed: true }),
+  );
+  is(
+    "L-A: an old upload finished meanwhile is not ended: it stays queued and on the active set, and the new start is told the store is busy",
+    [la.ok, laNext.ok, (laNext as { reason?: string }).reason, await readJobState(laId), await onActive(laId)],
+    [true, false, "busy", "queued", 1],
+  );
+  // The same with a members upload holding the month's emails, its job turned queued by another writer meanwhile:
+  // what it holds is not given back while it is queued, and a cancel afterward gives it back once.
+  const LH = "r46e-guard-h@example.com";
+  await creatorStore(LH, "r46guardh", { period: paidPeriod() });
+  const lhAt = Date.now();
+  const lh = await startImport((await storeForEmail(LH))!, LH, "members", { expected: 20, file: "patrons.csv", stopped: true });
+  const lhId = lh.ok ? lh.job.id : "";
+  await addRows((await storeForEmail(LH))!, lhId, memberRows(20, in10, "guardh"));
+  setClock(lhAt + 3 * 60 * 60_000);
+  const queueIt = async () => {
+    const raw = (await redis.pipeline([["GET", `nl:import:${lhId}`]]))[0] as string;
+    await redis.pipeline([["SET", `nl:import:${lhId}`, JSON.stringify({ ...(JSON.parse(raw) as object), state: "queued" }), "EX", 7 * DAY]]);
+  };
+  const lhNext = await afterRead(lhId, queueIt, async () => startImport((await storeForEmail(LH))!, LH, "members", { expected: 1, file: "one.csv", stopped: true }));
+  is(
+    "L-A: a held upload turned queued meanwhile is not ended, its 20 are not given back, and the new start is told the store is busy",
+    [lh.ok, lhNext.ok, (lhNext as { reason?: string }).reason, await readJobState(lhId), await movedNow(LH)],
+    [true, false, "busy", "queued", "20"],
+  );
+  if (lhNext.ok) await cancelImport((await storeForEmail(LH))!, lhNext.job.id);
+  const lhCancel = await cancelImport((await storeForEmail(LH))!, lhId);
+  is("L-A control: the creator's cancel of that queued import still ends it and gives its 20 back once", [lhCancel?.state, await movedNow(LH), await onActive(lhId)], ["canceled", "0", 0]);
+  Date.now = () => fixedStart + (realNow() - realStart);
+
+  part("A finish queues an import and puts it on the active set together, or does neither (focal review on #3384, L-B)");
+  /** Loses, once, the round trip that puts import `id` on the active set: before it runs, or after it ran (its reply lost). */
+  async function loseActive<T>(id: string, when: "before" | "after", fn: () => Promise<T>): Promise<"answered" | "threw"> {
+    const pipeline = redis.pipeline.bind(redis);
+    let armed = true;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const hit = armed && commands.some((c) => c.map(String).includes("nl:imports:active") && c.map(String).includes(id));
+      if (!hit) return pipeline(commands);
+      armed = false;
+      if (when === "after") await pipeline(commands);
+      throw new Error("Redis request failed with status 503");
+    }) as typeof redis.pipeline;
+    try {
+      await fn();
+      return "answered";
+    } catch {
+      return "threw";
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  }
+  const LB = "r46e-guard-b@example.com";
+  await creatorStore(LB, "r46guardb", { period: paidPeriod() });
+  const lb = await startImport((await storeForEmail(LB))!, LB, "contacts", { expected: 2, file: "list.csv", agreed: true });
+  const lbId = lb.ok ? lb.job.id : "";
+  await addRows((await storeForEmail(LB))!, lbId, [["2", "guard-b1@example.com", "", "", ""]]);
+  const lbLost = await loseActive(lbId, "before", async () => finishUpload((await storeForEmail(LB))!, lbId));
+  is(
+    "L-B: a finish whose round trip is lost before it runs leaves the import receiving and off the active set, never queued outside it",
+    [lb.ok, lbLost, await readJobState(lbId), await onActive(lbId)],
+    [true, "threw", "receiving", 0],
+  );
+  const lbAgain = await finishUpload((await storeForEmail(LB))!, lbId);
+  is("L-B: the page's finish tried again then queues it and puts it on the active set", [lbAgain.ok, await readJobState(lbId), await onActive(lbId)], [true, "queued", 1]);
+  const LB2 = "r46e-guard-b2@example.com";
+  await creatorStore(LB2, "r46guardb2", { period: paidPeriod() });
+  const lb2 = await startImport((await storeForEmail(LB2))!, LB2, "contacts", { expected: 2, file: "list.csv", agreed: true });
+  const lb2Id = lb2.ok ? lb2.job.id : "";
+  await addRows((await storeForEmail(LB2))!, lb2Id, [["2", "guard-b2@example.com", "", "", ""]]);
+  const lb2Lost = await loseActive(lb2Id, "after", async () => finishUpload((await storeForEmail(LB2))!, lb2Id));
+  is(
+    "L-B control: a finish that ran with its reply lost has the import queued and on the active set together",
+    [lb2.ok, lb2Lost, await readJobState(lb2Id), await onActive(lb2Id)],
+    [true, "threw", "queued", 1],
+  );
 
   part("A give-back never takes a count below zero, and reads it exactly");
   const FLOOR = "r46e-floor@example.com";

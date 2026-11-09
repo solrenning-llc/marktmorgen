@@ -27,6 +27,8 @@
  * there is nothing that ends, and the email says no more than that.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { isBillingConfigured, readSubscription } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -37,7 +39,7 @@ import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
 
 /** Kept for good: the day a store first sold does not change. */
-const firstSaleKey = (store: Pick<Store, "sid" | "handle">) => `nl:firstsale:${store.sid || `h:${store.handle}`}`;
+export const firstSaleKey = (store: Pick<Store, "sid" | "handle">) => `nl:firstsale:${store.sid || `h:${store.handle}`}`;
 /** One offer per subscription, ever. */
 const offeredKey = (subscription: string) => `nl:yearly-offer:${subscription}`;
 
@@ -88,7 +90,8 @@ export async function firstSaleAt(store: Pick<Store, "sid" | "handle">): Promise
   if (!isRedisConfigured()) return 0;
   try {
     const [raw] = await redisPipeline([["GET", firstSaleKey(store)]]);
-    const at = Number(raw);
+    // The seconds, then (since Claude 5 on #2722) a point and a random part only this claim writes (noteFirstSale).
+    const at = Math.floor(Number(raw));
     return Number.isFinite(at) && at > 0 ? at : 0;
   } catch {
     return 0;
@@ -105,17 +108,36 @@ export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale 
   const sales = paid.filter(isSale);
   if (!sales.length) return false;
   // Asked of Redis first, so a store that has sold before costs one read a pass.
-  const [known] = await redisPipeline([["EXISTS", firstSaleKey(store)]]);
-  if (Number(known) === 1) return false;
+  // Read exactly (CX-123 rule 24, L9): only an exact 0 goes on; 1 or an unknown answer stops here this pass.
+  const known = repliesFor(await redisPipeline([["EXISTS", firstSaleKey(store)]]), 1);
+  if (!known || countOf(known[0]) !== 0) return false;
   const at = Math.min(...sales.map((row) => (typeof row.created === "number" && row.created > 0 ? row.created : Math.floor(Date.now() / 1000))));
   // The pass only sees the last day. A store that sold before this was built
   // is not making its first sale today, and must not be told it is: its own
   // Stripe account is asked once for anything paid earlier.
   const earlier = await soldBefore(store, at);
   if (earlier === null) return false; // Stripe could not be asked: the next pass asks again.
-  const [set] = await redisPipeline([["SET", firstSaleKey(store), String(earlier || at), "NX"]]);
-  if (set === null || earlier) return false;
-  await offerYearly(store, plansOnSale).catch((error) => console.error("offering the yearly plan failed", store.handle, error));
+  // The first sale's day is noted once, for good: ours only on OK or our own value read back. The value is the day in
+  // seconds and a random part (claimValue), so no other run writes it, and firstSaleAt still reads the day.
+  const value = claimValue(earlier || at);
+  const noted = await claimMark(firstSaleKey(store), null, value);
+  if (noted === "unknown") {
+    // It may have landed, and kept for good it would stop every later pass at its EXISTS before the offer is made
+    // (Claude 5 on #2722). Nothing was sent on it, so it is let go if it is ours, and the next pass notes it again.
+    await releaseMark(firstSaleKey(store), value);
+    return false;
+  }
+  if (noted !== "ours" || earlier) return false;
+  const offered = await offerOnce(store, plansOnSale).catch((error) => {
+    console.error("offering the yearly plan failed", store.handle, error);
+    return "no" as const;
+  });
+  if (offered === "unknown") {
+    // The once-per-subscription mark was not known, so nothing was sent and offerOnce let it go: the first sale is
+    // let go too, so the next pass makes the offer again, once (offeredKey still keeps it to one).
+    await releaseMark(firstSaleKey(store), value);
+    return false;
+  }
   return true;
 }
 
@@ -146,20 +168,36 @@ async function soldBefore(store: Store, at: number): Promise<number | null> {
 
 /** Writes the offer, once per subscription, to a store it fits. */
 export async function offerYearly(store: Store, plansOnSale = PLANS_ON_SALE): Promise<boolean> {
+  return (await offerOnce(store, plansOnSale)) === "sent";
+}
+
+/**
+ * offerYearly, saying why nothing was sent: "unknown" when the once-per-subscription mark could not be known
+ * (nothing was sent, and the mark, if it landed, was let go), "no" for every other reason.
+ */
+async function offerOnce(store: Store, plansOnSale: boolean): Promise<"sent" | "no" | "unknown"> {
   const subscription = store.subscriptionId;
   // While no plan is on sale the studio cannot switch one (app/api/billing/switch), so nothing is offered.
-  if (!plansOnSale || !subscription || !isBillingConfigured() || !isSenderConfigured() || !store.email) return false;
+  if (!plansOnSale || !subscription || !isBillingConfigured() || !isSenderConfigured() || !store.email) return "no";
   const live = await readSubscription(subscription);
-  if (live.state !== "active" || live.cycle !== "month" || live.cancelsAtEnd || live.changePending) return false;
-  const [claimed] = await redisPipeline([["SET", offeredKey(subscription), "1", "NX"]]);
-  if (claimed === null) return false;
+  if (live.state !== "active" || live.cycle !== "month" || live.cancelsAtEnd || live.changePending) return "no";
+  // Once per subscription, for good: ours only on OK or our own value read back (CX-123 rule 24, L9).
+  const offer = claimValue();
+  const claimed = await claimMark(offeredKey(subscription), null, offer);
+  if (claimed === "unknown") {
+    // It may have landed, and kept for good it would stop every later offer (Claude 5 on #2722). Nothing was sent on
+    // it, so it is let go if it still holds our own value (never another run's), and a later pass tries again.
+    await releaseMark(offeredKey(subscription), offer);
+    return "unknown";
+  }
+  if (claimed !== "ours") return "no";
   const { subject, text } = yearlyOfferEmail({ tier: live.tier, trialing: live.trialing });
   const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: store.email, subject, text, replyTo: SUPPORT_EMAIL });
   if (!ok) {
     // Not sent is not offered: the next store pass cannot try again, because
     // the first sale is already noted, so the mark is taken back and the
     // studio keeps showing the offer open, which is the half that matters.
-    await redisPipeline([["DEL", offeredKey(subscription)]]).catch(() => {});
+    await releaseMark(offeredKey(subscription), offer);
   }
-  return ok;
+  return ok ? "sent" : "no";
 }

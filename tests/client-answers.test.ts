@@ -278,8 +278,38 @@ async function communityPush() {
     is("still off, Turn notifications on can be pressed again", [!!button(toggle.tree(), t.turnOn), button(toggle.tree(), t.turnOn)?.props?.["aria-disabled"] ?? false], [true, false]);
   }
 
+  part("Notifications on: a device the server refuses for good is told so, never to try again");
+  {
+    // The server answers "invalid" when this browser's subscription is not one a member's device may be kept with
+    // (lib/community-push.ts rememberDevice): another press makes the same subscription, so "Try again" never works.
+    const { toggle } = await pushToggle([serverOff], [async () => true]);
+    await click(button(toggle.tree(), t.turnOff));
+    await toggle.settle();
+    (globalThis as Record<string, unknown>).Notification = { permission: "granted", requestPermission: async () => "granted" };
+    let undone = 0;
+    (globalThis.navigator as unknown as { serviceWorker: Record<string, unknown> }).serviceWorker.register = async () => ({
+      pushManager: {
+        getSubscription: async () => null,
+        subscribe: async () => ({ endpoint: "https://push.example.test/refused", toJSON: () => ({}), unsubscribe: async () => { undone += 1; return true; } }),
+      },
+    });
+    (globalThis.navigator as unknown as { serviceWorker: Record<string, unknown> }).serviceWorker.ready = Promise.resolve();
+    globalThis.fetch = (async () => new Response(JSON.stringify({ ok: false, error: "invalid" }), { status: 400 })) as typeof fetch;
+    await click(button(toggle.tree(), t.turnOn));
+    await toggle.settle();
+    const refused = (t as Record<string, unknown>).refused;
+    is("the words say it", typeof refused === "string" && refused.trim().length > 0, true);
+    is("the refusal is read out as an alert, in its own words", alerts(toggle.tree()), [refused]);
+    is("not the words that say to try again", alerts(toggle.tree()).some((said) => said === t.failed || /try again/i.test(said)), false);
+    is("the browser is not left listening to nothing", undone, 1);
+    is("control: still off", !!button(toggle.tree(), t.turnOn), true);
+  }
+
   part("Notifications off: every language has the new sentence");
   const languages = ["en", "es", "fr", "de", "it", "nl", "pt"];
+  const refusedOf = (code: string) => (communityWords(code).push as Record<string, unknown>).refused;
+  is("refused in every language, each its own", languages.filter((code) => typeof refusedOf(code) !== "string" || !String(refusedOf(code)).trim() || (code !== "en" && refusedOf(code) === refusedOf("en"))), []);
+  is("refused is never the try-again sentence, in any language", languages.filter((code) => refusedOf(code) === communityWords(code).push.failed), []);
   is("offFailed in every language, each its own", languages.filter((code) => !communityWords(code).push.offFailed?.trim() || (code !== "en" && communityWords(code).push.offFailed === t.offFailed)), []);
 }
 

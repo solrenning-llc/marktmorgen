@@ -112,17 +112,15 @@ async function main(): Promise<void> {
     { ...blank, ...(JSON.parse(person(bea, "bea@example.com", "bea")) as Partial<Affiliate>), by: { id: ANA, percent: 10 } } as Affiliate,
   ];
   const none = new Map();
-  // Regra 23 (9 November 2026): tierLines now takes the store's id, to read each sale's buyer mark; these lines carry
-  // none, so every expectation below is unchanged.
-  is("not on a partner share, a bonus or another second tier", tierLines(everyone, [base({ how: "partner" }), base({ how: "bonus" }), base({ how: "tier2" })], none, statsId), []);
-  is("a membership payment counts", tierLines(everyone, [base({ how: "recurring" })], none, statsId).length, 1);
-  is("never past the cap", tierLines(everyone, [base({ rate: 85, commission: 8_500 })], none, statsId)[0]?.rate, 5);
-  is("partners' shares of the same sale count toward the cap", tierLines(everyone, [base({ ref: "cs_p", rate: 60 }), base({ ref: "cs_p:pppppppppppp", aff: "pppppppppppp", how: "partner", rate: 25, commission: 2_500 })], none, statsId)[0]?.rate, 5);
-  is("nothing at the cap", tierLines(everyone, [base({ rate: 90, commission: 9_000 })], none, statsId), []);
-  is("after a refund, on what was kept", tierLines(everyone, [base({ refunded: 4_000, commission: 1_800, status: "partly refunded" })], none, statsId)[0]?.commission, 600);
-  is("nothing while the recruit is held", tierLines(everyone, [base({})], new Map([[bea, ["same-address"]]]), statsId), []);
+  is("not on a partner share, a bonus or another second tier", tierLines(everyone, [base({ how: "partner" }), base({ how: "bonus" }), base({ how: "tier2" })], none), []);
+  is("a membership payment counts", tierLines(everyone, [base({ how: "recurring" })], none).length, 1);
+  is("never past the cap", tierLines(everyone, [base({ rate: 85, commission: 8_500 })], none)[0]?.rate, 5);
+  is("partners' shares of the same sale count toward the cap", tierLines(everyone, [base({ ref: "cs_p", rate: 60 }), base({ ref: "cs_p:pppppppppppp", aff: "pppppppppppp", how: "partner", rate: 25, commission: 2_500 })], none)[0]?.rate, 5);
+  is("nothing at the cap", tierLines(everyone, [base({ rate: 90, commission: 9_000 })], none), []);
+  is("after a refund, on what was kept", tierLines(everyone, [base({ refunded: 4_000, commission: 1_800, status: "partly refunded" })], none)[0]?.commission, 600);
+  is("nothing while the recruit is held", tierLines(everyone, [base({})], new Map([[bea, ["same-address"]]])), []);
   const removed = everyone.map((a) => (a.id === ANA ? { ...a, status: "removed" as const, decidedAt: (NOW - 100) * 1000 } : a));
-  is("after the inviting affiliate was removed: sales before it still count, later ones not", tierLines(removed, [base({ at: NOW - 200 }), base({ at: NOW })], none, statsId).map((l) => l.at), [NOW - 200]);
+  is("after the inviting affiliate was removed: sales before it still count, later ones not", tierLines(removed, [base({ at: NOW - 200 }), base({ at: NOW })], none).map((l) => l.at), [NOW - 200]);
 
   part("Refunded");
   // The whole of the recruit's sale given back: nothing for either of them.

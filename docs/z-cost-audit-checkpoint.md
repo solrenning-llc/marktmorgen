@@ -1,3 +1,30 @@
+# Codex Z — canonical continuation 2026-11-08 21:15 Fortaleza
+
+r17 ACTIVE SERIALMediumZEROagents. PriorCP59d73bfb4c8f4fcf33c321a380b07ef27531627e/blob8a3603946dd7b26f091bebdfc015702ed464ddbf/FULL711437 remote EXACT preserved COMPLETE below; all five authored heads/HOLDs/REDs/WIPs/retry and cap ledgers intact. NoCIqueryretrycancel/productpush/mainintegration/fila/merge/backgroundwatcher/automation/subagent.
+
+## #3313 FIRST COMPLETED, two dormant LOWs OPEN
+
+Exact42c5d4f4a9ddf1964904fb089bbdb700a08eb4a2/base787c; formal5820335923 BODY+commit_idEXACT. NoHIGHMEDdemonstratedCURRENTDISABLEDscope, NOTcostapproval/activation/Worker/R2Bunnydeletions/globalMR.
+LOW1 lib/backup-files-source.ts83-99 OTHER_SECRETSomitsBACKUP_FILES_R2_READ_KEY_ID. SAMEnew3current2FAIL+productionidcontrolPASS; withONLYsyntheticreview reused32charreadidacceptedactualGET200/1list/2Redis instead404/no work. ACTUALnullreviewOFF/noownerconfig/noactualcompromise.
+LOW2 lib/backup-files-r2.ts93-99 accepts3malformedXML76/79/79B as{objects:[],next:null}; own5/3FAIL+2controls/fourmockGET0Redis. ActualR2source_off/Workerabsent/noactiveorphan deletion/data lossclaim. CurrentLOWoraclesREDbeforefix, behavioralOLDnotpresentbase(no falseOLDgreen).
+
+Final4authortestsBYTE-IDf08e4e5a77; oldbaseonlynewmodulesoverlayfourcompilemissingmoduleFAILBEFOREsemanticchild(NOTbehavioralRED). Current43+60+3+24=130PASS; previousCP131ARITHMETIConlyCORRECTED/no rerun. Ownadmission14PASS8unknownACKafterrealSETNXEX+INCRBY=>503/0list/0token/actualcount1retained,2outercmd119JSONB/operationexcludingobservations;40->41refuses429beforeprovider;confirmedempty1list0token;oneobj1list1gettoken1localHMACsigner;offR2BunnyzeroRedisprovider. Own34nested3mock,authorroute96nested49mock;source list/token mockfunctionsINSTRUMENTEDshared100ceilingwithfetch BEFOREdispatch,localpresignnotHTTP.
+Qualified298PASS12overlappingroots=130+14+aws18+backup-store32+plan26+data7+aliases13+inventory16+US42. LOW3/2FAIL+5/3FAILseparate/excluded. Types17roots1204sources0strictES2017Bundler/unfiltered;lint0/scanner4689tracked0/diff0.454exactlockpins102optionalabsent0requiredmissing BEFOREtests/Next16.4.5Node24.22.1. No newcap. AllRAWcompile/green/LOWred reversible, logviewsrstriponly. No backup-runwhole/32suite/globalcostborrow/nativeprovider/SDKlatency/Rangecert. SDK2.8.0listETagcheckedlocalprimarydeclaration; noetaginventedbug. RegistryUNKNOWNnotadmitted/OFFnotzero preserved.
+
+Evidence BEFOREopinion owncodex/z-3313-first-review@945b3f3b3419d72e77559b9866976a12b8265fa7/tree62feb32221f4a525718106e1969ad19953e1365a EXACTnative35913f00270913a2e3ea5b23ee4801d2ece25c72;25artifacts/reporta8eddbbf79b1416e10133d47105b857e3d48926f/FULL7447EXACT. Worktreez-3313-review/review-onlyownbranch. Claim6728982747 andROOT14bb630fc766a688222e1fb031e8443b80b75e58/blob21c90120b6baf7ae0d3bea768a55132116b9b9a9/FULL6939429EXACTbeforeanysource/proof. Delivery+nextRESecdd9a63below. C4WorkerACTIVEauthorNOTduplicated.
+
+## NEXT #3311 nominal focal: RESERVED, FETCHED, NOT SOURCE/TEST STARTED
+
+Authorrequest6728990361BODYFULLread andC6ROOTrepeat: fixesourINHERITEDMED withallowlists in4bdc231e4a82c16f3bb1c0c12269edb33a057926,RED7f7b054799/current91/old1714FAIL; acceptsactive/inactive/pending/restricted/unsupported;deadlinecurrently/eventually/past_due. AuthorPRIMARYENUMUNVERIFIED/docsblocked/memory+inactiveoldfixtures, so noZpinned-enumcertfromthatclaim.
+Focalclaim6729090011BODYEXACT;ROOTecdd9a63f0a97f5ed9b8eba9b4a8542cc0db2152/blobd463d2f904016efa0850e1ffce61a349fc5a50b5/FULL6958236 FULLreadbackEXACT BEFOREnewsource/proof. Nativefetch4bdCOMPLETEexit0/readFETCH_HEADoutput, NOworktree/source/diff/proofs/deps/testsnewheadyet. NEXTcreateowncodex/z-3311-nominal-focal/z-3311-focal;onlyNEWdocs/reviews/z-3311-nominal-focal;copySAMEfrozenown13+41/fromz-3311-reviewbyteID,final91ONLYreader171overlayRED->head;appropriateUNCAPPEDlinked/typeslintscanner/diff. Own13prior10FAILonbaseAND171, no needrepeatbase787c, old171neededcurrentgraph91andSAMEown13withclearqualification. FocalcontinuesFIRST5820295862 notSECOND.
+
+**WHOLEcheckup.test.ts CAP100CONSUMED112attempts100dispatch12REFUSED358nested/overtrue/exit1 unchanged! NOhead/newgraph/retry/extract/partition/reset/raise/borrow**. C1NEW200wholecheckupFINAL4bdrequestPENDING; SG23308aad86NEW200and3260letter-members/3283grantseparatealsoPENDING. C6asks3budgets(3308/3311/H23265) NOTgrant. No C1disposition/CI-as-substituteobserved. Othercapsstripe-list-lot1 andpriorCIretryledgerintact.
+Perchild20kALLnestedMemoryRedis.run/100mockHTTP/120s512MiB256KiB/types120s1024/networkDENYBEFOREgraph/SERIALMediumZEROagents. Evidencepublish/readbackBEFOREfocalopinion. ActualgatesremainTWOindependentfinancialopinions+finalexactchecks/legitqueue; noCIqueryZ.
+
+CurrentROOTecdd9a63/FULL6958236 exact preservesolderROOT and65linesFULLread: C6corrective3311+budgetasks,H23265PARTIAL/CXC22861admissionareTHEIRS/noZcert. C1newgrantsNONE. Ownfive2741/2819/reminder27bb/askModele274/summary3e45 unchanged, no6th. #2839conditional2964lastOPEN+foreignrefban stillholds; no duplicate/thirdreview/Workerimplementation. r17continues3311focal, projectnotcomplete.
+
+---
+
 # Codex Z — canonical continuation 2026-11-08 21:00 Fortaleza
 
 r17 ACTIVE SERIAL Medium ZERO agents. Prior CP94019628242bf6b6c0d95e0c0298c7eb076ebc37/blobaca1818d0ef6201d4e06a0febff5e2ef27304e49/FULL705875 EXACT remote readback preserved COMPLETE below. Own five authored heads/REDs/WIPs/HOLDs and all consumed retries/caps intact. No CIqueryretrycancel, productpush/mainintegration, queue/merge, background watcher/automation or subagent.

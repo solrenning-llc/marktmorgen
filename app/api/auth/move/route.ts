@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { discardTwoStep, moveTwoStep } from "@/lib/two-step";
-import { moveRecoveryAddress } from "@/lib/recovery-address";
+import { forgetMovedRecovery, moveRecoveryAddress } from "@/lib/recovery-address";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import {
@@ -180,6 +180,10 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
       ),
       Promise.all([moveMemberships(from, to), moveDevices(from, to)]).catch((error) => console.error("moving what belongs to the account failed", error)),
     ]);
+    // Not carried, whatever is still kept under `from` is forgotten (it may be the address itself, when the carry
+    // failed before writing, or a value that could not be read): an account made at `from` later would otherwise
+    // inherit it as its own way back in. Tried twice; still unanswered, it is logged, the person is told anyway.
+    if (!carried && !(await forgetLeftRecovery(from))) console.error("a recovery address may be left under an address an account moved away from", { from });
     // The old address is told the move finished every time, now, before anything else can stop it: the notice when
     // the move was asked for (lib/auth.ts sendMoveLink) says only that it may happen, and a move nobody there made is
     // learned of while there is still somebody to ask for help.
@@ -214,6 +218,14 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
   return response;
 }
 
+/** forgetMovedRecovery (lib/recovery-address.ts), tried twice; false when neither try was answered. */
+async function forgetLeftRecovery(from: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (await forgetMovedRecovery(from).catch(() => false)) return true;
+  }
+  return false;
+}
+
 /** What did not come along with a move, said in its notices and on the page it lands on. */
 type LeftBehind = { recovery: boolean };
 
@@ -228,8 +240,9 @@ async function tellMoved(from: string, to: string, link: string, left: LeftBehin
   const when = `When: ${new Date().toISOString().replace("T", " ").slice(0, 16)} UTC`;
   const send = (address: string, subject: string, lines: string[]) =>
     sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: address, replyTo: "support@marktmorgen.com", subject, text: lines.join("\n") }).catch(() => false);
-  const lost = left.recovery ? ["We could not carry its recovery address over, so the account may have no recovery address now."] : [];
-  const todo = left.recovery ? ", open your studio and add a recovery address again" : "";
+  // Not "may have none": a carry whose answer was lost may still have written it, and the studio shows which.
+  const lost = left.recovery ? ["We could not confirm that its recovery address came along with it."] : [];
+  const todo = left.recovery ? ", then check Recovery address in your studio and add a recovery address again if none is shown" : "";
   await Promise.all([
     send(from, "The email your Marktmorgen account logs in with changed", [
       `The Marktmorgen account that logged in with this address now logs in with ${to}. This address no longer logs in to it.`,
@@ -245,7 +258,7 @@ async function tellMoved(from: string, to: string, link: string, left: LeftBehin
     ...(lost.length
       ? [
           send(to, "Your recovery address did not move with your account", [
-            "Your Marktmorgen account now logs in with this address, but we could not carry its recovery address over. Your account may have no recovery address now.",
+            "Your Marktmorgen account now logs in with this address, but we could not confirm that its recovery address came along with it.",
             "",
             when,
             "",

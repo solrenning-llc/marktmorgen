@@ -77,6 +77,18 @@ export function hideAddress(address: string): string {
   return `${name.slice(0, 1)}•••@${host.slice(0, 1)}•••${end}`;
 }
 
+/**
+ * Forgets what is kept under a sign-in address an account moved away from without its recovery address coming along
+ * (app/api/auth/move): left there, an account made at that address later would inherit it as its own way back in.
+ * Nothing is read first, as the carry may have failed on that very read, and nobody is told (the route tells). True
+ * only when Redis answered the delete (0, 1 or 2 keys).
+ */
+export async function forgetMovedRecovery(email: string): Promise<boolean> {
+  if (!isRedisConfigured()) return true;
+  const removed = repliesFor(await redisPipeline([["DEL", addressKey(email), untilKey(email)]]), 1)?.[0];
+  return removed === 0 || removed === 1 || removed === 2;
+}
+
 const when = () => new Date().toISOString().replace("T", " ").slice(0, 16);
 
 async function mail(to: string, subject: string, lines: string[]): Promise<boolean> {

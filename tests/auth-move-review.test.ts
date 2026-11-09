@@ -132,6 +132,22 @@ async function main() {
   part("the carry failed on the read: nothing is left keyed by the old sign-in address");
   const stale = await move(RECOVERY, (from) => [unreadOld(from)]);
   is("no recovery address is left behind under the old sign-in address", stale.fromKey, null);
+  for (const [label, fault] of [
+    ["the carry refused", (_f: string, to: string) => [refuseCarry(to)]],
+    ["the carry's reply lost after it ran", (_f: string, to: string) => [loseCarryReply(to)]],
+  ] as const) {
+    const out = await move(RECOVERY, fault);
+    is(`${label}: nothing is left under the old sign-in address, and the account says what it has`, [out.fromKey, out.location], [null, "https://marktmorgen.com/studio?address=moved-no-recovery"]);
+  }
+  const lost = await move(RECOVERY, (_f, to) => [loseCarryReply(to)]);
+  is("a carry whose reply was lost but which ran keeps the address with the account", lost.atTo, RECOVERY);
+  is(
+    "the notices say to check, never that there is surely none",
+    [lost.toldFrom.includes("could not confirm"), lost.toldTo.includes("could not confirm"), /may have no(ne| recovery address)/.test(lost.toldFrom + lost.toldTo)],
+    [true, true, false],
+  );
+  const stuck = await move(RECOVERY, (from, to) => [refuseCarry(to), (commands) => (commands.some((c) => c[0] === "DEL" && c[1] === addressKey(from)) ? Promise.reject(new Error("refused")) : null)]);
+  is("with the old record's delete refused too, the move still stands and is said, and the old address is still told", [stuck.location, stuck.all.includes(stuck.from)], ["https://marktmorgen.com/studio?address=moved-no-recovery", true]);
   done();
 }
 void main();

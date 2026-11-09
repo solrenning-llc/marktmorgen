@@ -32,7 +32,9 @@ async function main() {
   payload = { id, status: "active", cancel_at_period_end: false };
   is("an identified legacy active observation remains available", (await readSubscription(id)).state, "active");
   status = 404; payload = { error: { message: "not found" } };
-  is("an explicit provider missing response remains missing", await readSubscription(id), { state: "inactive", reason: "missing" });
+  // Regra 23 (plan-lifecycle audit, M2): was { state: "inactive", reason: "missing" }. A 404 alone may be a key for
+  // another account or mode, so it is unknown and marked; only the daily job ends it, with proof the key reaches the account.
+  is("an explicit provider missing response is unknown, marked as not found", await readSubscription(id), { state: "unknown", notFound: true });
   status = 500; payload = { error: { message: "unavailable" } };
   is("provider unavailability is still unknown", await readSubscription(id), { state: "unknown" });
   done();

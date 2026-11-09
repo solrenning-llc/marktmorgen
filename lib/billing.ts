@@ -543,8 +543,14 @@ export type SubscriptionState =
     }
   /** Stripe knows it and it is not paying: unpaid, cancelled, incomplete. */
   | { state: "inactive"; reason: string }
-  /** Stripe could not be asked. Says nothing about whether they pay. */
-  | { state: "unknown" };
+  /**
+   * Stripe could not be asked. Says nothing about whether they pay.
+   * `notFound` when Stripe answered 404 for the subscription: on its own that
+   * is no proof it ended (the key may ask another account or mode), so only
+   * the daily job may end it, once the same key reads the store's customer
+   * (lib/billing-sync.ts, customerReachable).
+   */
+  | { state: "unknown"; notFound?: true };
 
 /**
  * The statuses Stripe treats as a subscription in good standing.
@@ -672,8 +678,11 @@ export async function readSubscription(
       `/subscriptions/${encodeURIComponent(subscriptionId)}`,
     );
   } catch (error) {
+    // Stripe keeps every subscription it made, cancelled ones too: a 404 is
+    // far likelier a key for another account or mode than a plan that ended,
+    // and read as ended it would close every paid store at once.
     if (error instanceof BillingError && error.status === 404) {
-      return { state: "inactive", reason: "missing" };
+      return { state: "unknown", notFound: true };
     }
     console.error("reading the subscription failed", error);
     return { state: "unknown" };
@@ -693,6 +702,24 @@ export async function readSubscription(
     return {...state,period:observed.period};
   }
   return state;
+}
+
+/**
+ * Whether the key we hold reads this store's own customer: proof that it
+ * reaches the account the store's plan was made on, so a 404 for that plan
+ * means Stripe does not have it there. "unknown" when Stripe could not be
+ * asked or answered anything but the customer itself.
+ */
+export async function customerReachable(customerId: string | null | undefined): Promise<"yes" | "no" | "unknown"> {
+  if (typeof customerId !== "string" || !CUSTOMER_PATTERN.test(customerId)) return "no";
+  try {
+    const customer = await onPlatform("GET", `/customers/${encodeURIComponent(customerId)}`);
+    return customer && typeof customer === "object" && !Array.isArray(customer) && customer.id === customerId ? "yes" : "unknown";
+  } catch (error) {
+    if (error instanceof BillingError && error.status === 404) return "no";
+    console.error("reading a store's customer failed", error);
+    return "unknown";
+  }
 }
 
 /**

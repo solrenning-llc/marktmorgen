@@ -13,9 +13,13 @@
  *      and the way back did not arrive — is written down, if it is plainly
  *      that store's (lib/billing.ts, ownedBy).
  *   2. Every store that still counts as paid up, and whose subscription the
- *      first step did not settle, is asked about on its own. That covers the
- *      one Stripe does not have at all (an id from another key, or another
- *      mode), and one the first step failed to apply or could not read.
+ *      first step did not settle, is asked about on its own. That covers one
+ *      the first step failed to apply or could not read, and one Stripe says
+ *      it does not have (404). That last one ends only when the same key
+ *      reads the store's own customer, so the key reaches the account the
+ *      plan was made on, and never when more than a few plans of one run say
+ *      404 at once: a key for another account or mode says 404 for every
+ *      plan, and must not end every paid store (plan-lifecycle audit, M2).
  *
  * Bounded by a deadline, safe to run as often as it is called, and it only
  * writes where the snapshot is actually wrong. The walk through the stores
@@ -30,6 +34,7 @@ import {
   isBillingConfigured,
   listSubscriptions,
   ownedBy,
+  customerReachable,
   readSubscription,
   startedFrom,
   startedFromObservedSubscription,
@@ -48,6 +53,38 @@ const CURSOR_SECONDS = 7 * 24 * 60 * 60;
 /** Where the reading of Stripe's list stopped, when the deadline stopped it. */
 const LIST_CURSOR_KEY = "nl:billing:sync:after";
 const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]+$/;
+/**
+ * The most plans one run may end because Stripe says it does not have them
+ * (404 on a key that reads their customers), or a tenth of the stores the run
+ * asked about when that is more. Past it none is ended: so many at once is a
+ * key, mode or account changed, not plans that ended.
+ */
+const MISSING_AT_MOST = 3;
+
+/** A paid store whose plan Stripe answered 404 for, on a key that reads its customer. */
+type Missing = { store: Store; state: SubscriptionState };
+
+/**
+ * Ends the plans one run found missing, unless there are more than
+ * MISSING_AT_MOST (or a tenth of those checked): then none is ended, each is
+ * a failure of the run, and the run says why so a person looks.
+ */
+async function settleMissing(missing: Missing[], counts: SyncCounts): Promise<void> {
+  if (!missing.length) return;
+  if (missing.length > Math.max(MISSING_AT_MOST, Math.floor(counts.checked / 10))) {
+    counts.failed += missing.length;
+    console.error(`billing-sync ALERT: Stripe says ${missing.length} of ${counts.checked} paid stores' plans do not exist; none was ended (wrong key, mode or account?)`);
+    return;
+  }
+  for (const { store, state } of missing) {
+    try {
+      if (await recordState(store, state)) counts.updated += 1;
+    } catch (error) {
+      counts.failed += 1;
+      console.error("ending a store's missing plan failed", error);
+    }
+  }
+}
 
 export type SyncCounts = {
   /** Subscriptions read from Stripe. */
@@ -228,6 +265,15 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
 
 /** Step 2: stores still paid up whose subscription step 1 did not see. */
 async function syncStores(deadline: number, seen: Set<string>, counts: SyncCounts): Promise<boolean> {
+  const missing: Missing[] = [];
+  try {
+    return await walkStores(deadline, seen, counts, missing);
+  } finally {
+    await settleMissing(missing, counts);
+  }
+}
+
+async function walkStores(deadline: number, seen: Set<string>, counts: SyncCounts, missing: Missing[]): Promise<boolean> {
   const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
   // `cursor|store`: the batch at `cursor` was cut short after that store (below). Only `cursor` (or an older value):
   // the batch from its start. Anything else: from the top, as every run read before this cursor existed.
@@ -275,6 +321,13 @@ async function syncStores(deadline: number, seen: Set<string>, counts: SyncCount
       counts.checked += 1;
       try {
         const state = await readSubscription(store.subscriptionId, store);
+        // Stripe said it does not have the plan: it ends only on a key that
+        // reads the store's own customer, and only with few such in the run
+        // (settleMissing), so a key for another account ends nothing.
+        if (state.state === "unknown" && state.notFound && (await customerReachable(store.stripeCustomerId)) === "yes") {
+          missing.push({ store, state: { state: "inactive", reason: "missing" } });
+          continue;
+        }
         // Stripe could not be asked: nothing changes, and it counts as a
         // failure, not as a store checked and found in line.
         if (state.state === "unknown") {

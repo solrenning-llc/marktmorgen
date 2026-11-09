@@ -64,7 +64,7 @@ import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recor
  * every store whose plan ended fits.
  */
 import { createHash } from "node:crypto";
-import { observeStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
+import { customerReachable, observeStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
 import { readAllListings } from "@/lib/catalog";
 import { editCourse, filesInCourse, readCourse, saveCourse } from "@/lib/course";
 import { bytesWords } from "@/lib/delivery";
@@ -868,7 +868,12 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   try {
     if (store.subscriptionId) {
       const own = await readSubscription(store.subscriptionId);
-      if (own.state === "unknown") return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
+      // A 404 alone may be a key for another account or mode, under which the
+      // search below finds nothing either: it is taken as Stripe's word only
+      // when the same key reads the store's own customer (plan-lifecycle audit, M2).
+      if (own.state === "unknown" && !(own.notFound && (await customerReachable(store.stripeCustomerId)) === "yes")) {
+        return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
+      }
       if (own.state === "active") {
         await setSubscription(key, { active: true, tier: own.tier, cycle: own.cycle, trialEnds: own.trialing ? own.until : 0, shared: own.shared, period: own.period });
         await redisPipeline([["DEL", stateKey(key)]]);

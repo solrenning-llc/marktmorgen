@@ -56,6 +56,7 @@ function centralAliases(file,root,here){
  if(file==='stream-hook-counter-admission.test.ts')for(const name of ['redis','stream','auto-captions'])aliases['@/lib/'+name]=join(here,'stream-hook-counter-admission-world.ts');
  if(file==='yearly-ask-read-evidence.test.ts')for(const name of ['redis','order-data','stripe-account','email','store','membership-manage','mail','contacts','purchase-email','catalog','store-checkout','auth','member-health','yearly-switch'])aliases['@/lib/'+name]=join(here,'yearly-ask-read-world.ts');
  if(['community-mail-read-evidence.test.ts','nx-community-mail.test.ts'].includes(file))for(const name of ['redis','community','community-access','community-events','email','mail','order-data','calls','phone-alerts'])aliases['@/lib/'+name]=join(here,'community-mail-read-world.ts');
+ if(file==='r30-scan-followup.test.ts')aliases['@/lib/contact-rules']=join(here,'r30-scan-followup-contact-rules.ts');
  if(file==='community-report-queue-view.test.ts'||file==='r30-studio-rsvp-unread.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
@@ -91,7 +92,7 @@ function centralAliases(file,root,here){
  if(file==='numbers-email-retry.test.ts')for(const name of ['request-guard','email','traffic','usage-billing','numbers-ask','ai','team','stats','chat-summary','ad-spend'])aliases['@/lib/'+name]=join(here,'numbers-email-retry-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
- if(file==='plan-refund-page.test.ts'){
+ if(file==='plan-refund-page.test.ts'||file==='kb9-plan-withdrawal.test.ts'||file==='n-2849-plan-recovery.test.ts'||file==='kb9-plan-withdrawal-honest.test.ts'){
   aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');

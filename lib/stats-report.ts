@@ -308,7 +308,19 @@ export async function weeklyOff(handle: string): Promise<boolean> {
 
 export async function setWeeklyOff(handle: string, off: boolean): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([[off ? "SADD" : "SREM", OFF, handle]]);
+  confirmedWrite(await redisPipeline([[off ? "SADD" : "SREM", OFF, handle]]), [1], "the weekly email's stop");
+}
+
+/**
+ * A write's own answer read exactly (CX-123 rule 24): one whole count per command, none above what that command
+ * could change; any other shape throws, so a stop or a change is never said as done when nothing confirmed it.
+ */
+function confirmedWrite(replies: unknown, most: number[], what: string): void {
+  const exact =
+    Array.isArray(replies) &&
+    replies.length === most.length &&
+    replies.every((reply, i) => typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0 && reply <= most[i]);
+  if (!exact) throw new UnknownReplyError(what);
 }
 
 // ---- The weekly email to the team (added 11 October 2026) ---------------------
@@ -335,12 +347,13 @@ export async function weeklyTeam(handle: string): Promise<string[]> {
 export async function setWeeklyTeam(handle: string, emails: string[]): Promise<void> {
   if (!isRedisConfigured()) return;
   const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))].slice(0, MAX_WEEKLY_TEAM);
-  await redisPipeline([["DEL", teamKey(handle)], ...(clean.length ? [["SADD", teamKey(handle), ...clean]] : [])]);
+  const replies = await redisPipeline([["DEL", teamKey(handle)], ...(clean.length ? [["SADD", teamKey(handle), ...clean]] : [])]);
+  confirmedWrite(replies, clean.length ? [1, clean.length] : [1], "who gets the weekly email");
 }
 
 export async function leaveWeeklyTeam(handle: string, email: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([["SREM", teamKey(handle), email.trim().toLowerCase()]]);
+  confirmedWrite(await redisPipeline([["SREM", teamKey(handle), email.trim().toLowerCase()]]), [1], "a team member's weekly email stop");
 }
 
 /** A team member's own stop link token: the store and their address, signed. */

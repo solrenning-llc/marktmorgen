@@ -14,8 +14,17 @@
  * Now only the exact address the room's page builds
  * (components/community-room.tsx) is answered, anything else is refused
  * with 400 before Redis is asked, and a look sends at most LOOK_BYTES of
- * messages (always at least one, so a page never sticks), with the cursor
- * at the last message it sent so the next look carries on from there.
+ * messages, or one whole message when that message alone is larger (always
+ * at least one, so a page never sticks), with the cursor at the last
+ * message it sent so the next look carries on from there.
+ *
+ * Then the reviews of #3329: one message of lone surrogate halves was sent
+ * as 6 bytes a unit (6,270 bytes through the real route), and one of 1,000
+ * CJK letters under a long name as about 3.4 kB, both above the 2,000 a
+ * look is priced at. A lone half is now made U+FFFD when said and when
+ * read, and the most one message can be sent as (LOOK_ONE_MESSAGE_BYTES)
+ * is what a look is priced at (LOOK_MOST_BYTES), with ten talking minutes
+ * at that size held within ROOM_LIVE_PARTS.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,7 +37,7 @@ import { parseChatSetting } from "@/lib/community-chat";
 import { CREATOR, freshConfig, memberKey, saveConfig } from "@/lib/community";
 import { claimHandle, ensureStatsId, setCommunity, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { IDLE_LOOKS, LIVE_LOOKS } from "@/lib/chat-pace";
+import { IDLE_LOOKS, LIVE_LOOKS, LOOK_BYTES, LOOK_KEY_UNITS, LOOK_MOST_BYTES, LOOK_NAME_UNITS, LOOK_ONE_MESSAGE_BYTES } from "@/lib/chat-pace";
 import { PARTS_PER_VISIT, ROOM_IDLE_PARTS, ROOM_LIVE_PARTS } from "@/lib/traffic-rules";
 import { ORIGIN_PER_BYTE, roomMinutesCost, visitCost } from "./traffic-cost";
 import { store as redis } from "./redis-stub";
@@ -161,6 +170,7 @@ async function main(): Promise<void> {
   const source = readFileSync(join(process.cwd(), "lib/community-chat.ts"), "utf8");
   is("the name a message keeps is cut at 80 units when said and when read", [/const said = cleanText\(name, 80\);/.test(source), /n: v\.n\.slice\(0, 80\)/.test(source)], [true, true]);
   is("a member's key is 32 units and the creator's shorter", [memberKey("someone@example.com").length, CREATOR.length <= KEY_UNITS], [KEY_UNITS, true]);
+  is("the room's own figures are the ones worked out here", [LOOK_NAME_UNITS, LOOK_KEY_UNITS, LOOK_ONE_MESSAGE_BYTES, LOOK_MOST_BYTES], [NAME_KEPT, KEY_UNITS, ONE_MESSAGE_WORST, Math.max(LOOK_BYTES, ONE_MESSAGE_WORST)]);
 
   // Through the real route, as the store's creator: a text of lone halves of
   // surrogate pairs, each escaped by JSON in 6 bytes (Claude 5's review).
@@ -214,6 +224,7 @@ async function main(): Promise<void> {
   const typedBytes = Number((typed ?? "NaN").replace(/_/g, ""));
   const measured = [far.bytes, next.bytes, opened.bytes, wide.bytes, wideNext.bytes, halvesLook.bytes, cjkLook.bytes, ...keptLooks.map((l) => l.bytes)];
   const perLook = Math.max(PRICED_BYTES, ONE_MESSAGE_WORST, ...measured);
+  is(`every look measured here sent at most LOOK_MOST_BYTES, ${LOOK_MOST_BYTES}`, measured.filter((b) => b > LOOK_MOST_BYTES), []);
   const part$ = visitCost() / PARTS_PER_VISIT;
   const minutes = (looks: number) => roomMinutesCost(looks) + looks * Math.max(0, perLook - typedBytes) * ORIGIN_PER_BYTE;
   const liveParts = minutes(LIVE_LOOKS) / part$;

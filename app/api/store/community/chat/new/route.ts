@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { LOOK_BYTES, shareFor } from "@/lib/chat-pace";
+import { wholeUnits } from "@/lib/community-chat-rules";
 import { passFits } from "@/lib/chat-pass";
 import { type ChatMessage, room } from "@/lib/community-chat";
 import { COMMUNITY_ID } from "@/lib/community-text";
@@ -27,14 +28,19 @@ const NOT_KEPT = { "Cache-Control": "no-store" };
  * and i=1 or nothing. Any other spelling (an extra parameter, another
  * order, a percent-encoded letter, a leading zero) is the same question at
  * an address the CDN has not seen, so it is answered 400 before Redis is
- * asked: otherwise one pass would open as many reads as spellings (R20
- * finding 1).
+ * asked, and spellings no longer open reads (R20 finding 1). A different
+ * s is still a different address, though: one pass can still open one
+ * read for each number it asks after, and that is not yet priced (part 2).
  *
- * A look sends at most LOOK_BYTES of messages, what it is priced at
- * (lib/chat-pace.ts), and always at least the next one, so a page never
- * sticks. Its cursor is the last message it sent: a page far behind is
- * brought up to date over its next looks instead of being sent a whole
- * page of the room each time.
+ * A look sends at most LOOK_BYTES of messages, or one whole message when
+ * that message alone is larger, and always at least the next one, so a
+ * page never sticks. The worst is one message at its most,
+ * LOOK_ONE_MESSAGE_BYTES (about 3.5 kB), and LOOK_MOST_BYTES is what a
+ * look is priced at (lib/chat-pace.ts). Every lone half of a surrogate
+ * pair is sent as U+FFFD (wholeUnits), so messages kept before the posting
+ * route made them whole are bounded the same way. Its cursor is the last
+ * message it sent: a page far behind is brought up to date over its next
+ * looks instead of being sent a whole page of the room each time.
  *
  *   c   the community's id
  *   p   the pass
@@ -56,7 +62,7 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: NOT_KEPT });
   try {
     const page = await room(id, since);
-    const messages = withinLook(page.messages, page.cursor);
+    const messages = withinLook(page.messages.map(whole), page.cursor);
     return Response.json(
       { ok: true, messages, cursor: messages.length ? messages[messages.length - 1].i : page.cursor },
       { headers: { "Cache-Control": `public, max-age=0, s-maxage=${shareFor(pace)}` } },
@@ -67,9 +73,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/** A message with every lone half of a surrogate pair in its texts made U+FFFD, as it is measured and sent. */
+function whole(message: ChatMessage): ChatMessage {
+  return { ...message, a: wholeUnits(message.a), text: wholeUnits(message.text), ...(message.n ? { n: wholeUnits(message.n) } : {}) };
+}
+
 /**
  * The first messages of a page that fit in LOOK_BYTES with the answer around
- * them, counted in the bytes they are sent as; always at least the first.
+ * them, counted in the bytes they are sent as (the very objects the answer
+ * serializes); always at least the first.
  * `cursor` is the largest the answer's cursor can be, so its digits are
  * counted at their most.
  */

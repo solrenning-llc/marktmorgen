@@ -82,6 +82,24 @@ const payKey = (s: string) => `nl:rev:pay:${s}`;
 const lockKey = (s: string, p: string) => `nl:rev:lock:${s}:${p}`;
 export const REVIEW_STORES_KEY = "nl:rev:stores";
 
+/**
+ * What a product's numbers hold while they wait to be counted again: written in the same request as every change to
+ * its reviews (a review written, changed or deleted), and replaced by the recount that follows. A recount that cannot
+ * be done (its read lost, thrown or in another shape, or a damaged record in the product's hash) leaves it there, so
+ * the product shows no stars and says its numbers could not be read (UNREAD_NUMBERS), never the numbers kept from
+ * before the change, which may still count a review hidden, refunded or deleted (rule 24; VR item 2). It is not the
+ * numbers' exact shape (exactSummary), so every reader takes it as unread.
+ */
+const RECOUNT_PENDING = "recount";
+const numbersPending = (statsId: string, productId: string): (string | number)[] => ["HSET", summaryKey(statsId), productId, RECOUNT_PENDING];
+
+/**
+ * A review's record that answered as text but does not read as that review (damaged, or another review's under its
+ * field). Waiting never changes it, unlike an answer lost or in another shape; it is still an UnknownReplyError for
+ * every caller that only knows that, and the refund pass (markRefunded) tells it apart.
+ */
+class DamagedReviewError extends UnknownReplyError {}
+
 /** One buyer's review of one product, always the same id, whatever order they write it from. */
 export function reviewId(statsId: string, productId: string, email: string): string {
   return createHash("sha256")
@@ -218,7 +236,8 @@ export async function summaries(statsId: string | null): Promise<ProductNumbers>
   }
   for (let i = 0; i < flat.length; i += 2) {
     const summary = exactSummary(flat[i + 1]);
-    if (!summary) console.error(`reviews: the numbers of product ${flat[i]} did not read; no stars are shown for it until they are counted again`);
+    if (!summary && flat[i + 1] === RECOUNT_PENDING) console.error(`reviews: the numbers of product ${flat[i]} wait to be counted again; no stars are shown for it until they are`);
+    else if (!summary) console.error(`reviews: the numbers of product ${flat[i]} did not read; no stars are shown for it until they are counted again`);
     out.set(flat[i], summary ?? UNREAD_NUMBERS);
   }
   return out;
@@ -353,9 +372,10 @@ function recordsOf(reply: unknown, productId: string): { ids: string[]; reviews:
 /**
  * Counts a product's numbers again from its reviews, and keeps them. Read exactly (CX-123 rule 24): only an exact
  * empty hash is a product with no reviews, whose numbers go. A read lost or in another shape writes nothing: the
- * numbers kept stay as they were, never deleted and never counted without a review that did not read; the recount
- * is left for the product's next change ("unsure"), and the log says so. So is a write of the numbers answered in
- * another shape.
+ * numbers are never deleted and never counted without a review that did not read; the recount is left for the
+ * product's next change ("unsure"), and the log says so. So is a write of the numbers answered in another shape.
+ * Every caller has already marked the numbers as waiting (numbersPending, in the same request as its change), so what
+ * stays meanwhile is that mark (no stars, said as unread), never the numbers from before the change.
  */
 async function recount(statsId: string, productId: string): Promise<Summary | "unsure"> {
   const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1);
@@ -375,7 +395,11 @@ async function recount(statsId: string, productId: string): Promise<Summary | "u
   return summary;
 }
 
-/** Writes a review; `also` goes in the same request (the AI summary's deletion), so a failure fails the write too. */
+/**
+ * Writes a review; `also` goes in the same request (the AI summary's deletion), so a failure fails the write too. The
+ * product's numbers are marked as waiting for their recount in the same request (numbersPending): a review is never
+ * written while its product's numbers from before it are still shown.
+ */
 async function write(statsId: string, review: Review, also: (string | number)[][] = []): Promise<void> {
   const member = `${review.productId}|${review.id}`;
   await redisPipeline([
@@ -385,6 +409,7 @@ async function write(statsId: string, review: Review, also: (string | number)[][
       : ["ZADD", visibleKey(statsId, review.productId), review.createdAt, review.id],
     ["ZADD", allKey(statsId), review.createdAt, member],
     ...also,
+    numbersPending(statsId, review.productId),
   ]);
 }
 
@@ -485,18 +510,6 @@ async function payEntry(statsId: string, pi: string, member: string): Promise<st
   const list = raw ? raw.split(";").filter(Boolean) : [];
   if (!list.includes(member)) list.push(member);
   return list.slice(-20).join(";");
-}
-
-/**
- * A review's field as read for a deletion (CX-123 rule 24): null only when it is confirmed absent; the review when it
- * reads. A reply in another shape, or a stored review that does not read, throws UnknownReplyError, never "no review",
- * so the deletion keeps it for the retry.
- */
-function storedReview(raw: unknown, what: string): Review | null {
-  if (raw === null) return null;
-  const review = typeof raw === "string" ? parseReview(raw) : null;
-  if (!review) throw new UnknownReplyError(what);
-  return review;
 }
 
 /**
@@ -613,6 +626,8 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
       // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it. One hidden or
       // refunded was never counted, and takes none away. A damaged one may have been: the summary goes (no date known).
       ...(!gone ? summaryGone(statsId, productId, 0) : counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
+      // Its numbers wait for their recount from the same request: never shown counting the review just deleted.
+      numbersPending(statsId, productId),
     ];
     // Every reply in its exact shape, or the deletion is unknown: no room given back, and the field is read again
     // (below) before it is said as deleted or thrown.
@@ -650,14 +665,16 @@ async function creatorChange(
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
   const what = "a review (the creator's change)";
   return locked(statsId, productId, async () => {
-    // Read exactly (CX-123 rule 24): only a confirmed absent field is "missing". A reply in another shape, or a stored
-    // review that does not read or is another's, throws: never "missing", which would let a refund pass take the
-    // refund as marked while the review's stars still count.
+    // Read exactly (CX-123 rule 24): only a confirmed absent field is "missing". A reply in another shape throws; so
+    // does a stored review that does not read or is another's (DamagedReviewError): never "missing", which would let a
+    // refund pass take the refund as marked while the review's stars still count.
     const read = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
     if (!read) throw new UnknownReplyError(what);
-    const before = storedReview(read[0], what);
-    if (!before) return "missing" as const;
-    if (before.id !== id || before.productId !== productId) throw new UnknownReplyError(what);
+    const raw = read[0];
+    if (raw !== null && typeof raw !== "string") throw new UnknownReplyError(what);
+    if (raw === null) return "missing" as const;
+    const before = parseReview(raw);
+    if (!before || before.id !== id || before.productId !== productId) throw new DamagedReviewError(what);
     const after = change(before);
     // What the creator's answer grows the review by takes room first (DataRoomError when it does not fit);
     // `room` is null for what only flips a mark or swaps a photo's path, which never refuses.
@@ -746,9 +763,14 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
   if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a refunded payment's reviews");
   const members = raw ? raw.split(";").filter(Boolean) : [];
   let changed = 0;
-  // A review that is busy, or does not read, is not marked: the first such failure is thrown once every other review
-  // of the payment has been tried, so the refund is not taken as seen (the sweep tries again) and one review never
-  // keeps the others' stars counting.
+  // A review that is busy, or whose read is lost or in another shape, is not marked: the first such failure is thrown
+  // once every other review of the payment has been tried, so the refund is not taken as seen (the sweep tries again)
+  // and one review never keeps the others' stars counting. A damaged record (text that does not read as that review)
+  // is not thrown: waiting never changes it, and thrown on every pass it would stop the refunds sweep there for good
+  // (lib/review-proof.ts), leaving every later refund's reviews counted. It is skipped as handled, never said as
+  // marked (not in the count returned) and never rewritten from a guess; the log names it by its ids, never anything
+  // personal; and its product's numbers are marked as waiting for a recount (no stars, said as unread), and its AI
+  // summary taken away, since they may count it. A mark that cannot be written is thrown as the others, so the next pass tries again.
   let failed: unknown = null;
   for (const member of members) {
     const [productId, id] = member.split("|");
@@ -764,7 +786,25 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
         return { ...review, refunded: true };
       }, null);
     } catch (error) {
-      failed ??= error;
+      if (!(error instanceof DamagedReviewError)) {
+        failed ??= error;
+        continue;
+      }
+      // The AI summary that may have counted it goes in the same request, as a damaged record's own deletion does
+      // (no date known): more taken away than counted, never less.
+      const mark = [numbersPending(statsId, productId), ...summaryGone(statsId, productId, 0)];
+      let marked = false;
+      try {
+        marked = exactWriteReplies(await redisPipeline(mark), mark) !== null;
+      } catch (markError) {
+        failed ??= markError;
+        continue;
+      }
+      if (!marked) {
+        failed ??= new UnknownReplyError("a damaged review's numbers (their mark)");
+        continue;
+      }
+      console.error(`reviews: a refunded payment's review record (${productId}|${id}) is damaged; not marked refunded, its product shows no stars until counted again`);
       continue;
     }
     if (done === "busy") failed ??= new Error("a review is busy; the refund is marked on the next try");

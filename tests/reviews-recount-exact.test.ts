@@ -3,8 +3,9 @@
 // lost or off-shape reply as "no reviews": it deleted the numbers the store
 // shows (average and count), or wrote numbers counted without a review that
 // did not read (rule 24; VR item 2). Now an unknown read writes nothing: the
-// numbers stay as they were, the recount is left for the next change and the
-// log says so. The same file's other writes that rested on a tolerant read
+// numbers are never deleted or counted from it, the recount is left for the
+// next change and the log says so; meanwhile the product shows no stars (its
+// numbers were marked as waiting with the change, tests/reviews-recount-unread.test.ts). The same file's other writes that rested on a tolerant read
 // (rule 30) now fail closed too: a payment's list of reviews (its refunds),
 // marking a refund, the creator's changes and dropping a removed product's
 // reviews. The numbers' own readers (summaries, summaryOf) say "unknown"
@@ -125,7 +126,11 @@ async function main(): Promise<void> {
     const { result, logged } = await outcome(() => setHidden(STATS, PRODUCT, ids[0], true, REASON));
     is(`${label}: the hide itself is written`, typeof result === "object" && result !== null && (result as Review).hidden === true, true);
     is(`${label}: the recount read it`, read.hit(), true);
-    is(`${label}: the numbers are kept, never deleted or counted from it`, await raw(["HGET", SUM, PRODUCT]), sum);
+    // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026): the numbers from before the hide were kept
+    // and shown, still counting the review just hidden. Now the change marks them as waiting ("recount") in its own
+    // request and an unsure recount leaves that mark: no stars, said as unread, never deleted or counted from the read.
+    is(`${label}: the numbers are never deleted or counted from it: they wait, unread`, await raw(["HGET", SUM, PRODUCT]), "recount");
+    is(`${label}: they were there before the hide`, typeof sum === "string" && sum.startsWith("{"), true);
     is(`${label}: the log says the recount was left`, logged > 0, true);
   }
 
@@ -149,7 +154,8 @@ async function main(): Promise<void> {
     // After an unknown read, the next change counts them right.
     swap("HGETALL", RECORDS, []);
     await outcome(() => setHidden(STATS, PRODUCT, ids[1], true, REASON));
-    is("left stale after an unknown read", await raw(["HGET", SUM, PRODUCT]), numbers(2, 9, 1, 1, 0, [0, 0, 0, 1, 1]));
+    // Rule 23 (pre-review, 9 November 2026): "left stale" showed the numbers from before this hide; now they wait, unread.
+    is("left waiting (unread) after an unknown read, never stale", await raw(["HGET", SUM, PRODUCT]), "recount");
     await outcome(() => setHidden(STATS, PRODUCT, ids[0], false));
     is("and right again at the next change", await raw(["HGET", SUM, PRODUCT]), numbers(2, 9, 1, 1, 0, [0, 0, 0, 1, 1]));
     await outcome(() => setHidden(STATS, PRODUCT, ids[1], false));
@@ -240,8 +246,13 @@ async function main(): Promise<void> {
   for (const [label, reply] of [["no reply", []], ["a number", [7]], ["a stored review that does not read", ["{not json"]]] as [string, unknown][]) {
     const { ids } = await seed();
     const pass = swap("HGET", RECORDS, reply);
-    is(`the review, ${label}: unknown, so the refund pass tries again`, (await outcome(() => markRefunded(STATS, "pi_1"))).result, "unknown");
+    // Rule 23 (pre-review, 9 November 2026): a stored review that does not read was "unknown" here, so every pass threw
+    // and the refunds sweep stopped at it for good. It is damaged (waiting never changes it): skipped, never said as
+    // marked (0), its product's numbers left waiting (unread). A reply lost or not text is still unknown.
+    const damaged = label === "a stored review that does not read";
+    is(`the review, ${label}: ${damaged ? "skipped, never said as marked" : "unknown, so the refund pass tries again"}`, (await outcome(() => markRefunded(STATS, "pi_1"))).result, damaged ? 0 : "unknown");
     is(`the review, ${label}: read`, pass.hit(), true);
+    if (damaged) is(`the review, ${label}: its product's numbers wait, unread`, await raw(["HGET", SUM, PRODUCT]), "recount");
     swap("HGET", RECORDS, reply);
     is(`one refund, ${label}: unknown`, (await outcome(() => markOneRefunded(STATS, PRODUCT, ids[0]))).result, "unknown");
     swap("HGET", RECORDS, reply);

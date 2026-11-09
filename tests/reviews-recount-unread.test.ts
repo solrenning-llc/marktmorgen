@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   const bad = await saveReview(STATS, { productId: PRODUCT, email: "buyer9@example.com", reference: "cs_test_9", pi: "pi_9", rating: 5, text: "Hurt", name: "B" }, ROOM, 1_700_000_001_000);
   const goodId = good.state === "created" ? good.review.id : "";
   const badId = bad.state === "created" ? bad.review.id : "";
-  await original([["HSET", RECORDS, badId, "{not json"]]);
+  await original([["HSET", RECORDS, badId, "{not json"], ["ZADD", `nl:rsum:${STATS}:${PRODUCT}:themes`, 1_700_000_001_000, "theme"]]);
   const lines: string[] = [];
   const log = console.error;
   console.error = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
@@ -161,6 +161,7 @@ async function main(): Promise<void> {
   is("the damaged record's product shows no stars, never its old numbers", await shown(), "unread");
   is("the log names the damaged record by its id", lines.some((line) => line.includes(`${PRODUCT}|${badId}`)), true);
   is("the log names nobody", lines.some((line) => line.includes("@") || line.includes("buyer9")), false);
+  is("its AI summary's themes are taken away with the mark", (await original([["EXISTS", `nl:rsum:${STATS}:${PRODUCT}:themes`]]))[0], 0);
   is("the damaged record is left as it was (never rewritten from a guess)", (await original([["HGET", RECORDS, badId]]))[0], "{not json");
   done();
 }

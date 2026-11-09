@@ -186,7 +186,11 @@ async function main(): Promise<void> {
     const { one, two } = await seed();
     await corrupt(records(ONE), one[0], "{not json");
     const { result } = await outcome(() => markRefunded(STATS, "pi_1"));
-    is("the pass is still unknown, so it is tried again", result, "unknown");
+    // Rule 23 (pre-review of claude5/reviews-recount-exact, 9 November 2026): the pass was "unknown" here, so it threw on
+    // every pass and the refunds sweep (lib/review-proof.ts) stopped at this damaged record for good. A damaged record is
+    // now skipped and never said as marked: one review marked (the other), the damaged one's product left unread.
+    is("the pass ends, the damaged record never said as marked", result, 1);
+    is("the damaged record's product shows no stars", await raw(["HGET", SUM, ONE]), "recount");
     is("the other review of that payment is marked", JSON.parse((await raw(["HGET", records(TWO), two])) as string).refunded, true);
     is("and its stars leave its numbers", JSON.parse((await raw(["HGET", SUM, TWO])) as string).count, 0);
   }

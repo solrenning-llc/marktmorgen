@@ -29,12 +29,16 @@
  *   J:  Resend's first answer is a 503, then the product is renamed: every later try sends the receipt as it was first
  *       made, the same bytes under the same key, so the guarded transport sees one attempt and makes no second
  *       request (second money review of #3387); kept words that do not read send nothing, and words deleted with the
- *       person are never made again for a key a request was already made under.
+ *       person are never made again for a key a request was already made under;
+ *   K:  the person deleted while their receipt is being kept: once the deletion is confirmed, the receipt is not kept
+ *       again, nothing is sent to them and the order leaves the list; a person deleted before they pay again is sent
+ *       the new receipt; a keep whose reply is not exact sends nothing; a store from before lists is given one first.
  */
 import { createHash } from "node:crypto";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, editProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
 import { forgetNoted } from "@/lib/erasure-index";
+import { erasePerson } from "@/lib/person-erasure";
 import { type Listing, readListing } from "@/lib/catalog";
 import { openOrder } from "@/lib/paypal-sales";
 import * as delivery from "@/lib/paypal-delivery";
@@ -546,6 +550,94 @@ async function main(): Promise<void> {
   is("no request with words made again", postsTo(buyerJ3).length, 1);
   is("and none are kept again", redis.run(["GET", mailKeyOf(j3)]), null);
   resendMode = "up";
+
+  part("K: a person deleted while their receipt is being kept: nothing kept or sent after the deletion confirmed");
+  startOfNextDay();
+  resendMode = "422";
+  /** Whether a command writes an order's kept receipt: the SET of its key, or a script given its key. */
+  const keepsReceipt = (c: (string | number)[]) =>
+    (c[0] === "SET" && String(c[1]).startsWith("nl:ppsell:mail:")) || (c[0] === "EVAL" && c.slice(3).some((arg) => String(arg).startsWith("nl:ppsell:mail:")));
+  /** Holds the first pipeline that keeps a receipt just before that command, until `release` is called. */
+  const holdKeep = () => {
+    const pipeline = redis.pipeline.bind(redis);
+    let entered!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>((resolve) => (entered = resolve));
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let held = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const at = commands.findIndex(keepsReceipt);
+      if (held || at < 0) return pipeline(commands);
+      held = true;
+      const before = at > 0 ? await pipeline(commands.slice(0, at)) : [];
+      entered();
+      await released;
+      return [...before, ...(await pipeline(commands.slice(at)))];
+    }) as typeof redis.pipeline;
+    return { reached, release, undo: () => (redis.pipeline = pipeline) };
+  };
+  const buyerK = "erased-while-kept@example.com";
+  const hold = holdKeep();
+  let k = "";
+  const paying = pay(15, buyerK).then((order) => (k = order));
+  await hold.reached;
+  const erased = await erasePerson(await fresh(), buyerK, { kind: "person" });
+  is("the deletion completes", erased.ok, true);
+  hold.release();
+  await paying;
+  hold.undo();
+  is("the receipt's words are not kept again after the deletion confirmed", redis.run(["GET", mailKeyOf(k)]), null);
+  is("nothing was sent to the deleted person", copies(buyerK).length, 0);
+  is("the order leaves the list: nothing of it is tried again for them", (await listed()).includes(k), false);
+  resendMode = "up";
+  await sweeps(3);
+  is("later sweeps send nothing to them and keep nothing", [copies(buyerK).length, redis.run(["GET", mailKeyOf(k)])], [0, null]);
+
+  part("K: control: a person deleted before they pay again is sent the receipt of the new payment");
+  startOfNextDay();
+  resendMode = "up";
+  const buyerK2 = "came-back@example.com";
+  const before = await erasePerson(await fresh(), buyerK2, { kind: "person" });
+  is("the earlier deletion completes", before.ok, true);
+  ahead += 5_000;
+  const k2 = await pay(16, buyerK2);
+  is("the new payment's receipt is sent once", copies(buyerK2).length, 1);
+  is("and the order leaves the list", (await listed()).includes(k2), false);
+
+  part("K: the keep's reply not in its exact shape: nothing sent, the order stays owed");
+  startOfNextDay();
+  resendMode = "up";
+  const buyerK3 = "odd-keep@example.com";
+  const undoK3 = after(keepsReceipt, () => ["OK"]);
+  const k3 = await pay(17, buyerK3);
+  undoK3();
+  is("nothing sent on a keep whose reply is not exact", copies(buyerK3).length, 0);
+  is("the order is still owed its receipt", (await listed()).includes(k3), true);
+  await sweep(6 / 60);
+  is("the next sweep keeps and sends it once", copies(buyerK3).length, 1);
+
+  part("K: a store from before lists is given one before a receipt is kept, so a deletion can be checked");
+  startOfNextDay();
+  resendMode = "up";
+  const recordKey = redis.keys().find((key) => {
+    let raw: unknown = null;
+    try {
+      raw = redis.run(["GET", key]);
+    } catch {
+      return false;
+    }
+    return typeof raw === "string" && raw.includes("\"handle\":\"harbor\"") && raw.includes("\"listId\":");
+  });
+  if (!recordKey) throw new Error("the store's record was not found");
+  const record = JSON.parse(String(redis.run(["GET", recordKey]))) as Record<string, unknown>;
+  record.listId = null;
+  redis.run(["SET", recordKey, JSON.stringify(record)]);
+  is("control: the store has no list", (await fresh()).listId, null);
+  const buyerK4 = "no-list-yet@example.com";
+  const k4 = await pay(18, buyerK4);
+  is("its receipt is sent once", copies(buyerK4).length, 1);
+  is("the store has a list now", typeof (await fresh()).listId, "string");
+  is("and the order leaves the list", (await listed()).includes(k4), false);
 
   done();
 }

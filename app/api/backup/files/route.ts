@@ -109,7 +109,8 @@ async function answerPage(kind: string, params: URLSearchParams, names: string[]
     );
     return Response.json(page, { headers: NO_STORE });
   } catch (error) {
-    console.error(`backup files: the ${kind} page could not be read`, error instanceof Error ? error.name : "unknown");
+    // The page name is logged from a literal, never from the request's text, so a crafted query cannot shape the log line.
+    console.error(kind === "stores" ? "backup files: the stores page could not be read" : "backup files: the deletions page could not be read", error instanceof Error ? error.name : "unknown");
     return refuse(503, unavailable);
   }
 }

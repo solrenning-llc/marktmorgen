@@ -49,7 +49,7 @@ let vaultDeletes: string[] = [];
 let vaultStatus = 204;
 globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if ((init.method ?? "GET") === "DELETE" && url.includes(".r2.cloudflarestorage.com/")) {
+  if ((init.method ?? "GET") === "DELETE" && new URL(url).hostname.endsWith(".r2.cloudflarestorage.com")) {
     vaultDeletes.push(decodeURIComponent(new URL(url).pathname.split("/").slice(2).join("/")));
     return new Response(null, { status: vaultStatus });
   }

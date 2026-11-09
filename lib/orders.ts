@@ -25,6 +25,7 @@ import { rememberFolderOwner } from "@/lib/delivery";
 import { allowanceWindow, calendarWindow } from "@/lib/allowance-window";
 import { shareBps } from "@/lib/platform-share";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type Admission, countHeldOrders, holdUncountedOrder, orderConfirmationAdmission, orderConfirmationHoldKeys } from "@/lib/order-admission";
@@ -413,6 +414,9 @@ export async function storeOrdersThisMonth(store: Store, now = Date.now()): Prom
 /** The stores that had any order counted in a month. */
 export async function orderedFolders(month = calendarWindow().id): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["SMEMBERS", foldersKey(month)]]);
-  return Array.isArray(raw) ? raw.filter((f): f is string => typeof f === "string" && FOLDER_PATTERN.test(f)).sort() : [];
+  // Read exactly (CX-123 rule 24): a reply that is not one list of strings is unknown and throws, so the daily run
+  // says it could not read these stores rather than going on as if no store had had an order.
+  const raw = stringList(repliesFor(await redisPipeline([["SMEMBERS", foldersKey(month)]]), 1)?.[0]);
+  if (!raw) throw new UnknownReplyError("the stores with orders");
+  return raw.filter((f) => FOLDER_PATTERN.test(f)).sort();
 }

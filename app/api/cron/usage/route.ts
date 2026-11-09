@@ -158,14 +158,18 @@ type VisitsRun = { stores: number; resting: number; failed: number; told: number
  * pages. Nothing is billed: since 17 October 2026 visits past a plan's figure
  * are not sold (lib/traffic-rules.ts); the pages rest instead, for every
  * standing, and what buyers already have goes on until the whole figure.
+ * `read` is false when the visited stores could not be read (CX-123 rule 24): the run goes on with the other parts
+ * and says so at the end.
  */
-async function visitsRun(): Promise<VisitsRun> {
+async function visitsRun(): Promise<{ out: VisitsRun; read: boolean }> {
   const out: VisitsRun = { stores: 0, resting: 0, failed: 0, told: 0 };
   let visited: string[] = [];
+  let read = true;
   try {
     visited = await foldersOfTwoMonths(visitedFolders);
   } catch (error) {
     console.error("could not read the stores that were visited", error);
+    read = false;
   }
   for (const folder of visited) {
     try {
@@ -225,7 +229,7 @@ async function visitsRun(): Promise<VisitsRun> {
       ? "visits-watch: every store inside its visits"
       : `visits-watch: ${out.resting} resting, ${out.failed} failed, ${out.told} written to`,
   );
-  return out;
+  return { out, read };
 }
 
 export async function GET(request: NextRequest) {
@@ -237,10 +241,10 @@ export async function GET(request: NextRequest) {
   }
 
   const { out: video, read: videoRead } = await videoRun();
-  const visits = await visitsRun();
-  const orders = await ordersRun();
+  const { out: visits, read: visitsRead } = await visitsRun();
+  const { out: orders, read: ordersRead } = await ordersRun();
   // A part whose list could not be read is said as unread at the end, never as "ok" (CX-123 rule 24).
-  const unread = videoRead ? [] : ["video"];
+  const unread = [...(videoRead ? [] : ["video"]), ...(visitsRead ? [] : ["visits"]), ...(ordersRead ? [] : ["orders"])];
   const finish = (body: Record<string, unknown>) =>
     unread.length
       ? Response.json({ ...body, ok: false, unread }, { status: 503, headers: { "Cache-Control": "no-store" } })
@@ -398,15 +402,17 @@ type OrdersRun = { stores: number; failed: number; told: number };
  * Writes to each creator the first time a month's orders reach their plan's
  * figure, where new orders stop (lib/order-admission.ts). Nothing is billed:
  * since 17 October 2026 orders past a plan's figure are not sold.
+ * `read` is false when the stores with orders could not be read (CX-123 rule 24): the run goes on with the other
+ * parts and says so at the end.
  */
-async function ordersRun(): Promise<OrdersRun> {
+async function ordersRun(): Promise<{ out: OrdersRun; read: boolean }> {
   const out: OrdersRun = { stores: 0, failed: 0, told: 0 };
   let ordered: string[] = [];
   try {
     ordered = await foldersOfTwoMonths(orderedFolders);
   } catch (error) {
     console.error("could not read the stores with orders", error);
-    return out;
+    return { out, read: false };
   }
   for (const folder of ordered) {
     try {
@@ -457,5 +463,5 @@ async function ordersRun(): Promise<OrdersRun> {
       ? "orders-watch: every store inside its orders"
       : `orders-watch: ${out.stores} at a plan's orders, ${out.failed} failed, ${out.told} written to`,
   );
-  return out;
+  return { out, read: true };
 }

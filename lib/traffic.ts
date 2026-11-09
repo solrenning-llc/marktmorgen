@@ -38,6 +38,7 @@ import { headers } from "next/headers";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepSecondsFor } from "@/lib/allowance-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { admitNonPaying } from "@/lib/free-pool";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { deriveKey } from "@/lib/secret-box";
@@ -196,8 +197,11 @@ export async function visitsIn(folder: string, month = calendarWindow().id): Pro
 /** The stores that had any visit in a month. */
 export async function visitedFolders(month = calendarWindow().id): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["SMEMBERS", foldersKey(month)]]);
-  return Array.isArray(raw) ? raw.filter((f): f is string => typeof f === "string" && FOLDER_PATTERN.test(f)).sort() : [];
+  // Read exactly (CX-123 rule 24): a reply that is not one list of strings is unknown and throws, so the daily run
+  // says it could not read these stores rather than going on as if no store had been visited.
+  const raw = stringList(repliesFor(await redisPipeline([["SMEMBERS", foldersKey(month)]]), 1)?.[0]);
+  if (!raw) throw new UnknownReplyError("the stores that were visited");
+  return raw.filter((f) => FOLDER_PATTERN.test(f)).sort();
 }
 
 /** Strict admission read. Display/billing fallbacks must never authorize new work.

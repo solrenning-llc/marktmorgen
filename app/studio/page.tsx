@@ -1109,7 +1109,14 @@ export default async function StudioPage({
   const closing = closingAt && (closesWhole || keptNow > keptRoom) ? { ...closingAt, bytes: keptNow, room: keptRoom, whole: closesWhole } : null;
   // Queue item 307 [EC1]: what members paid for past the closing day, from what was written down when the plan ended (no call to Stripe).
   const unusedTime = closing?.whole ? await unusedSummary(store!, closing.day).catch(() => null) : null;
-  const notPaused = closing?.whole ? await holdCounts(folder).catch(() => null) : null;
+  // The hold's counts, or "unread" when they cannot be read (CX-123 rule 24): never no notice, which would hide that a
+  // member may still be charged before the closing day.
+  const notPaused = closing?.whole
+    ? await holdCounts(folder).catch((error) => {
+        console.error("studio: a closing hold's counts could not be read", error);
+        return "unread" as const;
+      })
+    : null;
   const dayWords = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
   /** A moment to the minute, in UTC, said so. */
   const momentWords = (ms: number) => `${new Date(ms).toLocaleString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC`;
@@ -2583,7 +2590,11 @@ export default async function StudioPage({
                       : ""}
                   </p>
                 ) : null}
-                {notPaused && notPaused.failed + notPaused.over > 0 ? (
+                {notPaused === "unread" ? (
+                  <p className="mt-4 notice notice-warn" role="status" data-not-paused-unread="">
+                    {`Whether every membership's payments are paused could not be read just now. Open this page again in a moment to see. Every membership and payment plan sold through your store ends on ${dayWords(closing.day)}. If a member is charged before then, please refund them from Stripe.`}
+                  </p>
+                ) : notPaused && notPaused.failed + notPaused.over > 0 ? (
                   <p className="mt-4 notice notice-warn">
                     {`${notPaused.failed + notPaused.over} ${notPaused.failed + notPaused.over === 1 ? "membership's payments are" : "memberships' payments are"} not paused${notPaused.failed ? " yet: we try again every day" : ""}${notPaused.over ? `${notPaused.failed ? ", and some are" : ":"} past this closing's limit` : ""}. Every one of them ends on ${dayWords(closing.day)}. If a member is charged before then, please refund them from Stripe.`}
                   </p>

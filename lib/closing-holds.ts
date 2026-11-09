@@ -319,12 +319,39 @@ export async function membersOf(folder: string): Promise<{ emails: string[]; mis
   return out;
 }
 
-/** Whether a store's closing day has begun: then no plan may be started for it (app/api/billing/checkout). Throws when it cannot be read. */
+/** A score as Redis writes it: a number's text, with an exponent where Redis uses one ("1.5e+12"). */
+const SCORE_TEXT = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i;
+
+/**
+ * A store's place in the final line, from a pipeline that sent its ZSCORE
+ * alone, read only in its exact shape (CX-123 rule 24; review of #3279):
+ * null when the store is not in the line; else the end of its plan (ms, the
+ * line's score: lib/plan-closing.ts, closingDay), a positive finite number as
+ * Redis answers it (a number, or its text). Anything else (a missing or an
+ * extra reply, empty text, text that is not a number, NaN, Infinity, zero or
+ * below, a list, an object) throws UnknownReplyError: it is never "not in its
+ * closing day", so no plan is started or written down for a store that may be.
+ */
+export function closingScore(replies: unknown): number | null {
+  const read = repliesFor(replies, 1);
+  if (!read) throw new UnknownReplyError("a store's place in the final closing line");
+  const raw = read[0];
+  if (raw === null) return null;
+  const value = typeof raw === "number" ? raw : typeof raw === "string" && SCORE_TEXT.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(value) || value <= 0) throw new UnknownReplyError("a store's place in the final closing line");
+  return value;
+}
+
+/**
+ * Whether a store's closing day has begun: then no plan may be started for it
+ * (app/api/billing/checkout) or written down on the way back
+ * (app/api/billing/return). Throws when it cannot be read, a reply not in its
+ * exact shape included (closingScore): both routes then refuse, and write no plan.
+ */
 export async function inClosingDay(ref: string): Promise<boolean> {
   // With no database there is no closing day to be in (the line lives there); one that does not answer throws, and the caller refuses.
   if (!isRedisConfigured()) return false;
-  const [score] = await redisPipeline([["ZSCORE", FINAL_INDEX, ref]]);
-  return score !== null && score !== undefined;
+  return closingScore(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]])) !== null;
 }
 
 /** How the hold stands: the members it could not reach yet, and those past the budget. */

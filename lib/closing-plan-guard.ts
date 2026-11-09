@@ -42,7 +42,8 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
-import { FINAL_INDEX } from "@/lib/closing-holds";
+import { FINAL_INDEX, closingScore } from "@/lib/closing-holds";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
@@ -212,13 +213,28 @@ export async function markShut(store: Pick<Store, "handle" | "previousHandles" |
   await redisPipeline(handles.map((handle) => ["SET", shutKey(handle), value, "EX", SHUT_DAYS * 86_400]));
 }
 
-/** When the closing day of the store that sold under this address began, and its last plan ended, while that is still known. */
+/** A mark as markShut writes it: the day's start, a bar, and the plan's end or 0 (both whole ms). */
+const SHUT_MARK = /^([1-9][0-9]{0,15})\|(0|[1-9][0-9]{0,15})$/;
+
+/**
+ * When the closing day of the store that sold under this address began, and
+ * its last plan ended, while that is still known. Read only in its exact
+ * shape (CX-123 rule 24; review of #3279): null when there is no mark; a mark
+ * as markShut writes it; anything else (a missing or an extra reply, a number,
+ * text of another shape) throws UnknownReplyError, never "not marked", so a
+ * plan paid for a store already removed is never let through on it.
+ */
 export async function shutOf(handle: string): Promise<ClosingTimes | null> {
   if (!handle || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", shutKey(handle)]]);
-  if (raw === null || raw === undefined) return null;
-  const [since, ended] = String(raw).split("|").map(Number);
-  return Number.isFinite(since) && since > 0 ? { since, ended: Number.isFinite(ended) && ended > 0 ? ended : 0 } : null;
+  const read = repliesFor(await redisPipeline([["GET", shutKey(handle)]]), 1);
+  if (!read) throw new UnknownReplyError("a closed store's address mark");
+  const raw = read[0];
+  if (raw === null) return null;
+  const mark = typeof raw === "string" ? SHUT_MARK.exec(raw) : null;
+  const since = mark ? Number(mark[1]) : Number.NaN;
+  const ended = mark ? Number(mark[2]) : Number.NaN;
+  if (!Number.isSafeInteger(since) || !Number.isSafeInteger(ended)) throw new UnknownReplyError("a closed store's address mark");
+  return { since, ended };
 }
 
 /** When the closing day of the store that sold under this address began, while that is still known. */
@@ -228,15 +244,15 @@ export async function shutSince(handle: string): Promise<number | null> {
 
 /**
  * When this store's closing day began and its plan ended, or null when it is
- * not in one. Only a store whose plan ended can be. A failed read throws:
- * the caller does not adopt a plan it could not check.
+ * not in one. Only a store whose plan ended can be. A failed read throws, and
+ * so does a reply not in its exact shape (closingScore, shutOf:
+ * UnknownReplyError): the caller does not adopt a plan it could not check.
  */
 export async function closingSince(store: Store): Promise<ClosingTimes | null> {
   if (!store.planEndedAt || !isRedisConfigured()) return null;
-  const [score] = await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)]]);
-  if (score === null || score === undefined || !Number.isFinite(Number(score))) return null;
   // The line's score is the end of the plan (lib/plan-closing.ts, closingDay).
-  const ended = Number(score);
+  const ended = closingScore(await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)]]));
+  if (ended === null) return null;
   const marked = await shutOf(store.handle);
   return { since: marked?.since ?? ended, ended };
 }

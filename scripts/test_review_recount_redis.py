@@ -36,6 +36,8 @@ def main():
         raise RuntimeError("Run only against dedicated CI Redis on loopback port 16379")
     root = Path(__file__).resolve().parents[1]
     write_if = script(root / "lib/reviews.ts", "WRITE_NUMBERS_IF")
+    set_aside_if = script(root / "lib/reviews.ts", "SET_ASIDE_IF")
+    made = []
     numbers = "marktmorgen:integration:review-numbers:" + uuid.uuid4().hex
     mine, newer = "recount:" + "a" * 24, "recount:" + "b" * 24
     counted = '{"count":2,"stars":6,"visible":1,"hidden":1,"refunded":0,"dist":[1,0,0,0,1]}'
@@ -72,8 +74,35 @@ def main():
         ran = {name: after.get(name, 0) - before.get(name, 0) for name in ("eval", "hget", "hset", "hdel")}
         assert ran == {"eval": 1, "hget": 1, "hset": 1, "hdel": 0}, ran
         print("PASS: billed as the EVAL, its HGET and its HSET (three)")
+
+        # SET_ASIDE_IF (pre-review of a8737e12a6): damaged records moved in one step, only while still the text read.
+        base = "marktmorgen:integration:review-aside:" + uuid.uuid4().hex
+        keys = [base + ":records", base + ":aside", base + ":vis", base + ":all", base + ":new"]
+        made.extend(keys)
+        records, aside, vis, every, queue = keys
+
+        def set_aside(*pairs):
+            return redis.command("EVAL", set_aside_if, 5, *keys, "prod0009", *pairs)
+
+        redis.command("HSET", records, "a" * 24, "{not json", "b" * 24, '{"fresh":1}', "c" * 24, '{"ok":1}')
+        redis.command("ZADD", vis, 1, "a" * 24, 2, "b" * 24, 3, "c" * 24)
+        for key in (every, queue):
+            redis.command("ZADD", key, 1, "prod0009|" + "a" * 24, 2, "prod0009|" + "b" * 24)
+        assert set_aside("a" * 24, "{not json", "b" * 24, "{not json either") == 1
+        assert redis.command("HGET", aside, "a" * 24) == "{not json"
+        assert redis.command("HEXISTS", records, "a" * 24) == 0
+        assert redis.command("HGET", records, "b" * 24) == '{"fresh":1}' and redis.command("HEXISTS", aside, "b" * 24) == 0
+        assert redis.command("ZSCORE", vis, "a" * 24) is None and redis.command("ZSCORE", vis, "b" * 24) is not None
+        assert redis.command("ZSCORE", every, "prod0009|" + "a" * 24) is None and redis.command("ZSCORE", queue, "prod0009|" + "a" * 24) is None
+        assert redis.command("ZSCORE", every, "prod0009|" + "b" * 24) is not None
+        assert redis.command("TTL", aside) == -1
+        print("PASS: a record still as read is moved with its list entries; one written since stays where it is")
+
+        assert set_aside("a" * 24, "{not json") == 0 and redis.command("HGET", aside, "a" * 24) == "{not json"
+        print("PASS: moving again finds nothing and changes nothing")
     finally:
-        redis.command("DEL", numbers)
+        for key in [numbers, *made]:
+            redis.command("DEL", key)
         redis.close()
 
 

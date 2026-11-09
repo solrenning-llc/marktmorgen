@@ -212,6 +212,25 @@ export class MemoryRedis {
           this.run(value === "" ? ["HDEL", numbers, product] : ["HSET", numbers, product, value]);
           return 1;
         }
+        // lib/reviews.ts SET_ASIDE_IF: each damaged record moved into its product's set-aside hash, and out of the
+        // records and their three lists, only while it is still the text read; answers how many were moved.
+        if (key.startsWith("-- marktmorgen:review-set-aside:v1\n") && args[0] === "5" && args.length >= 8 && (args.length - 7) % 2 === 0) {
+          const [, records, aside, visible, all, queue, product] = args;
+          let moved = 0;
+          for (let i = 7; i < args.length; i += 2) {
+            const [id, text] = [args[i], args[i + 1]];
+            this.scriptCalls += 1;
+            if (this.run(["HGET", records, id]) !== text) continue;
+            this.scriptCalls += 5;
+            this.run(["HSET", aside, id, text]);
+            this.run(["HDEL", records, id]);
+            this.run(["ZREM", visible, id]);
+            this.run(["ZREM", all, `${product}|${id}`]);
+            this.run(["ZREM", queue, `${product}|${id}`]);
+            moved += 1;
+          }
+          return moved;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

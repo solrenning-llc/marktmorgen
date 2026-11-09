@@ -1137,12 +1137,13 @@ export const COST_LINES: CostLine[] = [
       // HGET and its HSET or HDEL, three billed where one HSET was), pre-review of claude5/reviews-recount-exact, 9 November 2026.
       // Measured on the stand-in that day: a save sends 15 commands and its script runs 2 inside, a delete 11 and 2 (the lock's
       // release EVAL, with its GET and DEL, among them); no test yet holds a whole review request under one public request's price.
-      // A recount that meets a damaged record sets it aside once (owner's decision 11, 9 November 2026): one HMGET reading
-      // it again, one SET a damaged record (its own bytes, already in the room), then HDEL, three ZREM and the AI
-      // summary's two, in three requests;
+      // A recount that meets a damaged record sets it aside once (owner's decision 11, 9 November 2026; one step since the
+      // pre-review of a8737e12a6): the AI summary's two commands, then one EVAL (SET_ASIDE_IF) that runs an HGET and, for a
+      // record still as read, HSET, HDEL and three ZREM (Upstash bills each), at most REVIEW_ASIDE_MOST records a recount;
       // never again for that record, which is out of the hash after. A buyer's delete and a person's erasure read the
-      // record's aside key in the same request as its field (one GET more) and delete it there (one DEL).
-      { file: "lib/reviews.ts", names: ["setAside(statsId, productId, records.damaged)", "[\"GET\", badKey(statsId, productId, id)]", "REVIEW_QUARANTINE_DAYS"] },
+      // record set aside in the same request as its field (one HGET more) and delete it there (one HDEL); a product's
+      // removal reads and deletes its hash of records set aside (one HGETALL and one DEL more).
+      { file: "lib/reviews.ts", names: ["setAside(statsId, productId, records.damaged)", "SET_ASIDE_IF", "REVIEW_ASIDE_MOST", "[\"HGET\", asideKey(statsId, productId), id]", "[\"DEL\", asideKey(statsId, productId)]"] },
       { file: "lib/reviews.ts", names: ["numbersPending(statsId, review.productId, mark)", "numbersPending(statsId, productId, mark)", "WRITE_NUMBERS_IF", "await recount(statsId, input.productId, mark)", "const recounted = (await recount(statsId, productId, mark)) !== \"unsure\""] },
       { file: "app/api/store/review/route.ts", names: ["withinStore(\"review\""] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).

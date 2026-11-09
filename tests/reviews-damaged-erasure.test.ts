@@ -182,7 +182,7 @@ test("another person's damaged record is never touched by this person's erasure"
   // it was (never deleted, never rewritten, never erased with A), out of the lists, and counts P1 from the others.
   assert.deepEqual({ b2: stored(P2, idB2), payB: pay(PI_B) }, { b2: before.b2, payB: before.payB });
   assert.equal(stored(P1, idB1), null, "B's damaged record left P1's hash");
-  assert.equal(redis.run(["GET", `nl:rev:bad:${STATS}:${P1}:${idB1}`]), before.b1, "set aside as it was, never deleted or rewritten");
+  assert.equal(redis.run(["HGET", `nl:rev:bad:${STATS}:${P1}`, idB1]), before.b1, "set aside as it was, never deleted or rewritten");
   assert.equal(redis.run(["ZSCORE", allKey, `${P1}|${idB1}`]), null, "B's studio entry left with it (it no longer reads)");
 });
 
@@ -214,7 +214,7 @@ test("the buyer's own delete when another record of the product is damaged too: 
   assert.equal(numbers(P1), 1, "C's review alone is counted");
   assert.equal(stored(P1, idA1), null);
   assert.equal(stored(P1, idB1), null, "B's damaged record left P1's hash");
-  assert.equal(redis.run(["GET", `nl:rev:bad:${STATS}:${P1}:${idB1}`]), "{B's record, damaged", "set aside as it was, never deleted with A's");
+  assert.equal(redis.run(["HGET", `nl:rev:bad:${STATS}:${P1}`, idB1]), "{B's record, damaged", "set aside as it was, never deleted with A's");
 });
 
 test("a healthy delete answers its photo, found, from the record it deleted", async () => {

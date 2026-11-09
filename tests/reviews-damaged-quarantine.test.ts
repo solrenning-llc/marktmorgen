@@ -8,10 +8,13 @@
  * while it was among the reviews it read.
  *
  * Now the recount (after each change, and the daily pass over the products whose numbers wait) moves each damaged
- * record out of the product's hash and lists into a key of its own (nl:rev:bad:<store>:<product>:<id>, gone by itself
- * after REVIEW_QUARANTINE_DAYS), and counts the readable ones, so the product shows stars again. The record is never
- * rewritten from a guess and never lost: it is written aside first, and only taken out of the hash once that is
- * confirmed. An unknown answer on the way leaves the product unread (its mark), never numbers made up.
+ * record out of the product's hash and lists into its product's hash of records set aside (nl:rev:bad:<store>:<product>,
+ * field its id; no time of its own since the pre-review of a8737e12a6), and counts the readable ones, so the product
+ * shows stars again. The record is never rewritten from a guess and never lost: it is moved in one step, only while it
+ * is still the text read. An unknown answer on the way leaves the product unread (its mark), never numbers made up.
+ * Rule 23 (pre-review of a8737e12a6): the probes read the record set aside with HGET of that hash (they read a key of
+ * its own with GET); it has no TTL (it had 30 days); the unknown answer is the move's own (it was the SET's); and the
+ * erasure case adds a fourth review, since two damaged records of three are now too many to move (REVIEW_ASIDE_MOST).
  *
  * A buyer's own delete and a person's erasure find their record where it was set aside, and delete it there.
  * Another person's record set aside is never touched. The log names ids, never anything personal.
@@ -43,7 +46,7 @@ const visKey = `nl:rev:vis:${STATS}:${P1}`;
 const allKey = `nl:rev:all:${STATS}`;
 const newKey = `nl:rev:new:${STATS}`;
 const sumKey = `nl:rev:sum:${STATS}`;
-const badKey = (id: string) => `nl:rev:bad:${STATS}:${P1}:${id}`;
+const aside = (id: string) => redis.run(["HGET", `nl:rev:bad:${STATS}:${P1}`, id]);
 const realPipeline = redis.pipeline.bind(redis);
 const idA = reviewId(STATS, P1, A);
 const idB = reviewId(STATS, P1, B);
@@ -91,9 +94,8 @@ test("a change to another review: the damaged record is set aside and the produc
   // A (5) and C (4, hidden: the numbers count it, as the page says) are read; B's damaged record is not counted.
   assert.deepEqual(await shown(), [2, 9], "stars again, from the readable records");
   assert.equal(redis.run(["HGET", productKey, idB]), null, "the damaged record left the product's hash");
-  assert.equal(redis.run(["GET", badKey(idB)]), "{not json", "it was set aside as it was, never rewritten");
-  const ttl = redis.run(["TTL", badKey(idB)]) as number;
-  assert.ok(ttl > 0 && ttl <= 30 * 86_400, `set aside for a bounded time (${ttl} s)`);
+  assert.equal(aside(idB), "{not json", "it was set aside as it was, never rewritten");
+  assert.equal(redis.run(["TTL", `nl:rev:bad:${STATS}:${P1}`]), -1, "no time of its own: it goes with its person, product or store");
   assert.ok(!members(visKey).includes(idB), "off the product's page list");
   assert.ok(!members(allKey).includes(`${P1}|${idB}`), "off the studio's list");
   assert.ok(!members(newKey).includes(`${P1}|${idB}`), "off the creator's queue");
@@ -107,7 +109,7 @@ test("a record under another review's id is set aside the same way", async () =>
   await logged(() => setHidden(STATS, P1, idC, true, REASON));
   assert.deepEqual(await shown(), [2, 9]);
   assert.equal(redis.run(["HGET", productKey, idB]), null);
-  assert.equal(typeof redis.run(["GET", badKey(idB)]), "string");
+  assert.equal(typeof aside(idB), "string");
 });
 
 test("the daily pass sets aside a damaged record whose product waits, and shows its stars again", async () => {
@@ -119,7 +121,7 @@ test("the daily pass sets aside a damaged record whose product waits, and shows 
   assert.ok(!(value instanceof Error), String(value));
   assert.equal((value as Pass).recounted, 1, "counted again, never unsure for good");
   assert.deepEqual(await shown(), [2, 9]);
-  assert.equal(redis.run(["GET", badKey(idB)]), "{not json");
+  assert.equal(aside(idB), "{not json");
 });
 
 test("the studio's overview reads again once the damaged record is set aside", async () => {
@@ -133,7 +135,7 @@ test("the studio's overview reads again once the damaged record is set aside", a
 test("unknown on the way: the aside write answered in another shape leaves the record in place and the product unread", async () => {
   await setup();
   redis.pipeline = (async (batch: Command[]) => {
-    if (batch.some((command) => command[0] === "SET" && String(command[1]).startsWith("nl:rev:bad:"))) return [];
+    if (batch.some((command) => command[0] === "EVAL" && String(command[1]).includes("review-set-aside"))) return [];
     return realPipeline(batch);
   }) as typeof redis.pipeline;
   await logged(() => setHidden(STATS, P1, idC, true, REASON));
@@ -147,33 +149,36 @@ test("a buyer's own delete finds their record where it was set aside, and delete
   const { value } = await logged(() => deleteOwnReview(STATS, P1, idB, ROOM));
   assert.equal(typeof value, "object", String(value));
   assert.equal((value as { state: string }).state, "deleted");
-  assert.equal(redis.run(["GET", badKey(idB)]), null, "gone from where it was set aside");
+  assert.equal(aside(idB), null, "gone from where it was set aside");
   assert.deepEqual(await shown(), [2, 9], "the numbers never counted it");
 });
 
 test("a person's erasure finds their record set aside, its photo too, and leaves another person's alone", async () => {
   await setup();
+  await save("quarantine-d@example.test", 3, 1_700_000_004_000);
   const path = await reviewPhotoPath("quarantine-owner@example.test", "image/jpeg");
   assert.equal(typeof (await setReviewPhoto(STATS, P1, idA, { path, width: 1200, height: 900 })), "object");
   // A's record damaged too, its last character cut: what the record keeps still says whose photo it is.
   const rawA = redis.run(["HGET", productKey, idA]) as string;
   redis.run(["HSET", productKey, idA, rawA.slice(0, -1)]);
   await logged(() => setHidden(STATS, P1, idC, true, REASON));
-  assert.equal(typeof redis.run(["GET", badKey(idA)]), "string", "A's record was set aside");
-  assert.equal(typeof redis.run(["GET", badKey(idB)]), "string", "B's record was set aside");
+  assert.equal(typeof aside(idA), "string", "A's record was set aside");
+  assert.equal(typeof aside(idB), "string", "B's record was set aside");
   const files: string[] = [];
   const { value } = await logged(() => forgetReviewsPerson(STATS, [P1], A, ROOM, files));
   assert.ok(!(value instanceof Error), String(value));
   assert.equal((value as { records: number }).records, 1, "A's record erased");
   assert.deepEqual((value as { photos: string[] }).photos, [path], "its photo found where it was set aside");
   assert.deepEqual(files, [path]);
-  assert.equal(redis.run(["GET", badKey(idA)]), null, "A's record is gone");
-  assert.equal(redis.run(["GET", badKey(idB)]), "{not json", "B's record is never touched");
+  assert.equal(aside(idA), null, "A's record is gone");
+  assert.equal(aside(idB), "{not json", "B's record is never touched");
   const again = await logged(() => forgetReviewsPerson(STATS, [P1], A, ROOM));
   assert.equal((again.value as { records: number }).records, 0, "a retry finds nothing left");
 });
 
-test("the key family is registered and the time set aside is bounded", () => {
-  assert.equal(typeof api.REVIEW_QUARANTINE_DAYS, "number");
-  assert.ok((api.REVIEW_QUARANTINE_DAYS as number) > 0 && (api.REVIEW_QUARANTINE_DAYS as number) <= 30);
+// Rule 23 (pre-review of a8737e12a6): held a time set aside of at most 30 days; a record set aside now has none, and
+// what is bounded is how many one recount may move (REVIEW_ASIDE_MOST, tests/reviews-aside-prerev.test.ts R5).
+test("how many records one recount may set aside is bounded", () => {
+  assert.equal(typeof api.REVIEW_ASIDE_MOST, "number");
+  assert.ok((api.REVIEW_ASIDE_MOST as number) > 0 && (api.REVIEW_ASIDE_MOST as number) <= 10);
 });

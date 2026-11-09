@@ -94,6 +94,8 @@ export async function POST(request: NextRequest) {
       if (typeof done === "object") {
         after(() => refreshStoreQuotes(store));
         await dropReviewPhoto(done.photo ? { path: done.photo } : null);
+        // An older record of the same buyer set aside as damaged may have had a photo of its own (lib/reviews.ts).
+        if (done.alsoPhoto) await dropReviewPhoto({ path: done.alsoPhoto });
         return answer(done.recounted ? "deleted" : "deletedUncounted");
       }
       return answer(done === "busy" ? "busy" : "deleted");

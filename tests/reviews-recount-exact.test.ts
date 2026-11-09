@@ -290,7 +290,10 @@ async function main(): Promise<void> {
     ["a field that is not a review id", "badfield"],
   ] as [string, unknown][]) {
     const { ids, rows } = await seed();
-    const answer = reply === "odd" ? [[ids[0], rows[0], ids[1]]] : reply === "badfield" ? [["../x", rows[0], ids[1], rows[1]]] : reply;
+    // Rule 23 (pre-review of a8737e12a6): the removal reads the product's records set aside in the same request (a
+    // second HGETALL), so an answer of one reply to the records carries the set-aside hash's own (empty) after it.
+    const records = reply === "odd" ? [[ids[0], rows[0], ids[1]]] : reply === "badfield" ? [["../x", rows[0], ids[1], rows[1]]] : reply;
+    const answer = Array.isArray(records) && records.length === 1 ? [...records, []] : records;
     const read = swap("HGETALL", RECORDS, answer);
     is(`${label}: unknown`, (await outcome(() => dropReviews(STATS, PRODUCT))).result, "unknown");
     is(`${label}: read`, read.hit(), true);
@@ -304,7 +307,8 @@ async function main(): Promise<void> {
     ["a record under another id", (ids: string[], rows: string[]) => [ids[0], rows[1], ids[1], rows[0]]],
   ] as [string, (ids: string[], rows: string[]) => string[]][]) {
     const { ids, rows } = await seed();
-    swap("HGETALL", RECORDS, [damaged(ids, rows)]);
+    // Rule 23 (pre-review of a8737e12a6): with the set-aside hash's own (empty) reply after the records' (see above).
+    swap("HGETALL", RECORDS, [damaged(ids, rows), []]);
     const { result, logged } = await outcome(() => dropReviews(STATS, PRODUCT));
     is(`${label}: dropped with the others, no photo taken from it`, result, []);
     is(`${label}: the log says so`, logged > 0, true);

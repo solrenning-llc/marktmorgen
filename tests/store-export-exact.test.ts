@@ -11,7 +11,13 @@
  *     refuses, and the file writes the products, leaves the courses out and
  *     says so (coursesNote), and never ends with "Nothing else". The lessons'
  *     text that cannot be read is said the same way (lessonTextNote), with
- *     the outlines kept. To a store whose plan has ended, every such note
+ *     the outlines kept. The measuring of a store whose plan runs no longer
+ *     refuses such a store for ever (Claude 6's review of #3397, MÉDIO: the
+ *     route answered 503 "Try again in a minute" each time, and the file was
+ *     never made): an outline it cannot read is priced at MAX_LESSONS, the
+ *     most a course holds, and the blog list it cannot read at MAX_POSTS
+ *     (rule 30), so the file is made and says what it could not read. To a
+ *     store whose plan has ended, every such note
  *     says the part is not in this file, never to download again in a few
  *     minutes (the route refuses that download).
  *  2. The orders' note blamed Stripe ("the rest are on your own Stripe
@@ -27,10 +33,12 @@
  */
 import { NextRequest } from "next/server";
 import { POST as courseRoute } from "@/app/api/store/course/route";
+import { GET as exportRoute } from "@/app/api/store/export/route";
 import { GET as leadsRoute } from "@/app/api/store/leads/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { readListing } from "@/lib/catalog";
 import { readCourse } from "@/lib/course";
+import { MAX_POSTS } from "@/lib/store-blog";
 import { exportShape, storeExport } from "@/lib/store-export";
 import { leads } from "@/lib/api-read";
 import { leadsKey } from "@/lib/contacts";
@@ -149,11 +157,54 @@ async function main(): Promise<void> {
         [(got.products as unknown[] | undefined)?.length, "courses" in got, got.coursesNote, text.includes(NOTHING_ELSE)],
         [1, false, `The courses and their lessons' text ${RUNNING_LATER}`, false],
       );
+      // Rule 23: this asserted "refused" until Claude 6's review of #3397 (MÉDIO): a refusal locked out for ever a
+      // store whose outline stays unreadable. The outline is now priced at the most a course holds (MAX_LESSONS), never
+      // at fewer lessons than the store has, so the file is made and says the courses are not in it.
       const measured = await exportShape(await a.store()).then(
-        () => "priced",
+        (got) => (got.commands >= shape.commands ? "priced at the ceiling" : `priced below the course (${got.commands} < ${shape.commands})`),
         () => "refused",
       );
-      is(`${name}: the measuring refuses, never prices the export without the course`, measured, "refused");
+      is(`${name}: the measuring prices the course at the most a course holds, never refuses nor prices it at less`, measured, "priced at the ceiling");
+    } finally {
+      restore();
+    }
+  }
+
+  part("1. An outline kept but unreadable for good: the route still makes the file, and it says so (Claude 6's probe P2)");
+  const kept = await real([["GET", `nl:course:${a.courseId}`]]);
+  await real([["SET", `nl:course:${a.courseId}`, "{corrupt outline"]]);
+  try {
+    for (const attempt of [1, 2]) {
+      const sid = (await a.store()).sid!;
+      const response = await exportRoute(new NextRequest("https://marktmorgen.com/api/store/export?what=store", { headers: { "x-nimbus-store": sid, cookie: `${SESSION_COOKIE}=${await openSession(a.owner)}` } }));
+      const text = await response.text();
+      const got = parse(text);
+      is(
+        `attempt ${attempt}: the file is made with the products, the courses said not to be in it, never "Nothing else" nor "Try again in a minute"`,
+        [response.status, (got.products as unknown[] | undefined)?.length, typeof got.coursesNote, text.includes(NOTHING_ELSE), text.includes("Try again in a minute")],
+        [200, 1, "string", false, false],
+      );
+    }
+  } finally {
+    await real([["SET", `nl:course:${a.courseId}`, String((kept as unknown[])[0])]]);
+  }
+  is("control: the outline reads again once restored", (await readCourse(a.courseId))?.id, a.courseId);
+
+  part("1. The blog list answered in an unknown shape (rule 30, the same measuring)");
+  for (const [name, reply] of [
+    ["the HVALS answered 'OK'", () => "OK"],
+    ["the HVALS threw", "throw"],
+  ] as [string, ((out: unknown) => unknown) | "throw"][]) {
+    swap((c) => c[0] === "HVALS" && String(c[1]).startsWith("nl:blog:meta:"), reply);
+    try {
+      const measured = await exportShape(await a.store()).then(
+        (got) => (got.commands >= shape.commands + Math.ceil(MAX_POSTS / 100) ? "priced at the ceiling" : `priced below the most posts (${got.commands})`),
+        () => "refused",
+      );
+      is(`${name}: the measuring prices the posts at the most a store keeps, never refuses`, measured, "priced at the ceiling");
+      const text = await textOf(storeExport(await a.store()));
+      const got = parse(text);
+      is(`${name}: the file says the posts could not be read, never "posts":[] nor "Nothing else"`, ["posts" in got, Object.keys(got).some((k) => /^unreadPart\d+$/.test(k)), text.includes(NOTHING_ELSE)], [false, true, false]);
     } finally {
       restore();
     }
@@ -259,8 +310,9 @@ async function main(): Promise<void> {
   const downloaded = await leadsRoute(new NextRequest("https://marktmorgen.com/api/store/leads", { headers: { "x-nimbus-store": listStore.sid!, cookie: `${SESSION_COOKIE}=${await openSession(listOwner)}` } }));
   const body = await downloaded.text();
   is(
-    "the list's download keeps the readable contacts, and its file name says it is not the whole list",
-    [downloaded.status, body.includes("good@example.com"), /-partial\.csv"$/.test(downloaded.headers.get("content-disposition") ?? "")],
+    // Rule 23: the name ended "-partial.csv" until Claude 6's review of #3397 (LEVE): it now says how many were left out.
+    "the list's download keeps the readable contacts, and its file name says it is not the whole list and how many were left out",
+    [downloaded.status, body.includes("good@example.com"), /-partial-1-contact-not-read\.csv"$/.test(downloaded.headers.get("content-disposition") ?? "")],
     [200, true, true],
   );
   const page = (await leads(listStore, null, false)) as { data: { email?: unknown }[]; unreadable?: number };

@@ -273,7 +273,7 @@ async function main(): Promise<void> {
   {
     const s = await makeStore();
     for (const [i, email] of people.entries()) redis.run(["HSET", `nl:wl:${s.sid}:${s.pid}`, email, place(i, 1)]);
-    is("launched for both", (await launch(await s.current(), s.product, { note: "", address: ADDRESS })).total, 2);
+    is("launched for both", (await launch(await s.current(), s.product, { note: "", address: ADDRESS }).then((r) => (r.ok ? r.total : r.reason))), 2);
     // The first address was emailed before the switch-off (the list is sorted: dana, then hal).
     const jobKey = `nl:wl:${s.sid}:${s.pid}:job`;
     const job = JSON.parse(String(redis.run(["GET", jobKey]))) as Record<string, number>;
@@ -310,7 +310,7 @@ async function main(): Promise<void> {
     const control = await makeStore();
     await paid(control.owner, 1);
     for (const [i, email] of many.entries()) redis.run(["HSET", `nl:wl:${control.sid}:${control.pid}`, email, place(i % 10, 1)]);
-    is("control launched for 101", (await launch(await control.current(), control.product, { note: "", address: ADDRESS })).total, 101);
+    is("control launched for 101", (await launch(await control.current(), control.product, { note: "", address: ADDRESS }).then((r) => (r.ok ? r.total : r.reason))), 101);
     batches.length = 0;
     await run();
     is("control: a store that stays on gets both batches in one run", batches.map((b) => b.length), [100, 1]);
@@ -318,7 +318,7 @@ async function main(): Promise<void> {
     const s = await makeStore();
     await paid(s.owner, 2);
     for (const [i, email] of many.entries()) redis.run(["HSET", `nl:wl:${s.sid}:${s.pid}`, email, place(i % 10, 1)]);
-    is("launched for 101", (await launch(await s.current(), s.product, { note: "", address: ADDRESS })).total, 101);
+    is("launched for 101", (await launch(await s.current(), s.product, { note: "", address: ADDRESS }).then((r) => (r.ok ? r.total : r.reason))), 101);
     batches.length = 0;
     duringBatch = () => noteTakedown(s.owner, null, true);
     await run();

@@ -2610,7 +2610,12 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
 
 // ---- The book ------------------------------------------------------------
 
-export type LineStatus = "earned" | "partly refunded" | "refunded" | "own purchase" | LeadStatus;
+/**
+ * "held": a PayPal sale PayPal reports refunded in part, whose amount is not read anywhere (audit R13, MEDIUM 2;
+ * lib/paypal-sales.ts, partlyRefundedMember). It earns nothing payable (commission 0, refunded 0 as a count, never
+ * shown as an amount) and stays out of every payment until PayPal refunds the rest.
+ */
+export type LineStatus = "earned" | "partly refunded" | "refunded" | "own purchase" | "held" | LeadStatus;
 
 export type Line = Referral & {
   /** Given back to the buyer, in cents, as Stripe says today. */
@@ -2772,6 +2777,11 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
     after = last.id;
   }
   return { byIntent, complete: false };
+}
+
+/** A sale held because PayPal refunded part of it and how much is not known: nothing of it is payable. */
+export function holdLine(referral: Referral): Line {
+  return { ...referral, refunded: 0, commission: 0, status: "held" };
 }
 
 /** A sale as it stands today, after any refund. */
@@ -2957,6 +2967,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   const bookings = leads.filter((l) => l.kind === "booking" && l.pi);
   let refunds = new Map<string, number>();
   let refundsChecked = true;
+  // PayPal payments refunded in part, by the payment as the book names it: their sales are held (holdLine).
+  const partlyHeld = new Set<string>();
   if (everything.length || bookings.length) {
     const since = Math.min(...[...everything, ...bookings].map((r) => r.at));
     try {
@@ -3016,18 +3028,19 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         if (!replies || back.length !== pis.length || seen.length !== asked.length || !back.every(answer) || !seen.every(answer)) refundsChecked = false;
         else {
           for (const [i, pi] of pis.entries()) if (back[i] !== null) refundedInFull(pi);
-          const partly = new Set<string>();
+          // A sale on this book PayPal refunded in part (audit R13, MEDIUM 2): how much came back is not read, so what
+          // it earns is unknown, never its whole commission and never a refund of nothing (rule 24). It is held by itself
+          // (holdLine): out of every payment, the rest of the book checked and payable as usual (the coordinator's
+          // review, 9 November 2026). The set is asked by the order, so its record gone changes nothing. A sale with no
+          // line here (nobody earns on it) is never asked about, so it leaves the book as it is.
           for (const [i, order] of orders.entries()) {
             if (seen[2 * i] !== null) refundedInFull(paypalOrders.get(order) as string);
-            if (seen[2 * i + 1] !== null) partly.add(paypalOrders.get(order) as string);
+            if (seen[2 * i + 1] !== null) partlyHeld.add(paypalOrders.get(order) as string);
           }
-          // A sale on this book PayPal refunded in part (audit R13, MEDIUM 2): how much came back is not read, so what
-          // it earns is unknown, never its whole commission and never a refund of nothing: no payout is made on it
-          // (rule 24). Refunded in full since, its amount is the whole sale's. A sale with no line here (nobody earns on
-          // it) is never asked about, so it leaves the book as it is.
-          for (const pi of partly) if (!paypalSeen.has(pi)) refundsChecked = false;
         }
       }
+      // Refunded in full since, by whichever reading saw it: its amount is the whole sale's, never held.
+      for (const pi of paypalSeen) partlyHeld.delete(pi);
     } catch (error) {
       console.error("reading refunds for the affiliate book failed", error);
       refundsChecked = false;
@@ -3046,7 +3059,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       }
     }
   }
-  const settled = everything.map((r) => settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0));
+  // A payment refunded in full since it was refunded in part is not in partlyHeld (paypalSeen, above):
+  // its amount is then the whole sale's, settled as any refund.
+  const settled = everything.map((r) => (r.pi && partlyHeld.has(r.pi) ? holdLine(r) : settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0)));
   // Each lead as it stands: the program's caps and budget counted across every affiliate's, then only the ones asked for.
   let ends = new Map<string, number>();
   const openBookings = leads.filter((l) => l.kind === "booking" && l.state === "open" && l.ref && mine(l.aff)).slice(0, 200);
@@ -3277,7 +3292,8 @@ export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<strin
   }
   const out: Line[] = [];
   for (const line of lines) {
-    if (line.self || line.commission <= 0 || !BROUGHT.includes(line.how)) continue;
+    // A held sale holds its second tier too: shown, nothing of it payable (holdLine).
+    if (line.self || (line.commission <= 0 && line.status !== "held") || !BROUGHT.includes(line.how)) continue;
     const recruit = byId.get(line.aff);
     if (!recruit?.by || (flags.get(recruit.id) ?? []).length) continue;
     const up = byId.get(recruit.by.id);
@@ -3285,7 +3301,8 @@ export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<strin
     if (up.status !== "approved" && (up.status !== "removed" || line.at * 1000 > up.decidedAt)) continue;
     const percent = Math.min(recruit.by.percent, MAX_COMMISSION - line.rate - (partners.get(line.ref) ?? 0));
     if (percent <= 0) continue;
-    out.push(settleLine({ ref: `tier2:${line.ref}`, pi: line.pi, aff: up.id, at: line.at, product: line.product, title: line.title, base: line.base, total: line.total, currency: line.currency, rate: percent, self: false, how: "tier2" }, line.refunded));
+    const second: Referral = { ref: `tier2:${line.ref}`, pi: line.pi, aff: up.id, at: line.at, product: line.product, title: line.title, base: line.base, total: line.total, currency: line.currency, rate: percent, self: false, how: "tier2" };
+    out.push(line.status === "held" ? holdLine(second) : settleLine(second, line.refunded));
   }
   return out;
 }
@@ -3374,10 +3391,11 @@ export function bookCsv(book: Book, all: Affiliate[]): string {
       l.ref,
       l.how === "lead" ? `${LEAD_KIND_WORDS[l.lead?.kind ?? "signup"]}${l.title ? `: ${l.title}` : ""}` : l.title,
       plainAmount(l.base, l.currency),
-      plainAmount(l.refunded, l.currency),
+      // A held sale's refund and commission are not known: said so, never 0.00 (holdLine).
+      l.status === "held" ? "unknown" : plainAmount(l.refunded, l.currency),
       l.rate,
-      plainAmount(l.commission, l.currency),
-      l.status,
+      l.status === "held" ? "unknown" : plainAmount(l.commission, l.currency),
+      l.status === "held" ? "held: partly refunded, amount unknown" : l.status,
       "",
       "",
       l.currency.toUpperCase(),

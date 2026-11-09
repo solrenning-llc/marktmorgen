@@ -196,15 +196,18 @@ async function main(): Promise<void> {
   is("the book stays checked", beside.checked, true);
   is("only the other sale's commission is offered", beside.through, 1470);
 
-  part("A partial refund whose payment cannot be named: the whole book is unknown, nothing is paid");
+  // Rule 23 (v3, on claude5/affiliate-refund-lifetime @5bbb840bba): the book asks the set about its own orders, by the
+  // order, so a partial refund whose payment cannot be named is no longer "any sale here": one of an order the book has
+  // no line of is never asked about. Was: the book not checked, nothing through.
+  part("A partial refund whose payment cannot be named, of an order the book has no line of: the book's own sale is paid as usual");
   await setup();
   await redis.pipeline([
     ["SET", `nl:ppsell:paid:${OTHER_ORDER}`, JSON.stringify({ ...other, capture: "" })],
     ["ZADD", `nl:ppsell:refunded:${SID}`, String(NOW), `part:${OTHER_ORDER}`],
   ]);
   const unnamed = await offered();
-  is("the book is not checked", unnamed.checked, false);
-  is("nothing passes the refund guard", unnamed.through, 0);
+  is("the book is checked", unnamed.checked, true);
+  is("its own sale's commission passes", unnamed.through, 1470);
 
   part("Control: another sale refunded in part, with no affiliate on it, leaves this commission payable");
   await setup();

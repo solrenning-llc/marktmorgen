@@ -34,6 +34,24 @@ export async function GET(request: NextRequest) {
     const started = await readStartedSubscription(store, sessionId);
     if (!started) return away(origin, studio("billing=unfinished"));
 
+    // A session keeps naming the subscription it made after that one has
+    // ended and another has taken its place (an old tab, the back button).
+    // So, as the daily job does (lib/billing-sync.ts, applyListed): the
+    // store's own subscription, or its first, is brought in line; another one
+    // is written only when it pays and the store has nothing paying written
+    // down. And the way back never ends a paying store: a subscription that
+    // could not be read comes back inactive too, and an end is the daily
+    // job's to write. Nothing is written then.
+    const own = !store.subscriptionId || store.subscriptionId === started.subscriptionId;
+    if (store.subscriptionActive && !started.active) {
+      return away(origin, studio(own ? "billing=unconfirmed" : "billing=already"));
+    }
+    if (!own && store.subscriptionActive) {
+      console.error(`store ${store.handle} has a second subscription in good standing: ${started.subscriptionId}`);
+      return away(origin, studio("billing=already"));
+    }
+    if (!own && !started.active) return away(origin, studio("billing=unconfirmed"));
+
     const saved = await setSubscription(ref, {
       customerId: started.customerId,
       subscriptionId: started.subscriptionId,

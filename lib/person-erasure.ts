@@ -151,7 +151,8 @@ export const ERASERS: Eraser[] = [
     module: "lib/lesson-comments.ts",
     run: async (s) => {
       let records = 0;
-      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner, s.store);
+      // No further, and no more, than erasureSize counted and the erasure was charged for.
+      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner, s.store, c.commentFields);
       return records;
     },
   },
@@ -240,7 +241,10 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
   };
 }
 
-/** How big this erasure is: the store's catalogue and courses, and the few things counted to know it. */
+/**
+ * How big this erasure is: the store's catalogue and courses, and the few things counted to know it. Each course
+ * keeps how many lesson comments it was counted with (commentFields), which their deletion walks no further than.
+ */
 export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   const id = scope.communityId;
   const [deals, conversations, dmConversations, roomMessages, events, certificates, comments] = await Promise.all([
@@ -252,6 +256,7 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     certificateCount(scope.courses.map((c) => c.courseId)),
     commentScanSize(scope.courses),
   ]);
+  scope.courses.forEach((course, k) => { course.commentFields = comments.fields[k]; });
   return {
     products: scope.productIds.length,
     courses: scope.courses.length,
@@ -264,6 +269,7 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     certificates,
     commentPages: comments.pages,
     commentPageLessons: comments.lessonPages,
+    commentTakes: comments.takes,
   };
 }
 

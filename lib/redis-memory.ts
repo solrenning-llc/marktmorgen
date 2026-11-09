@@ -883,56 +883,66 @@ export class MemoryRedis {
           return [gone.length, freed];
         }
         // lib/lesson-comments.ts FORGET_LESSON_COMMENTS: one step of a student's comments out of the course's record.
-        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v3\n")) {
+        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v4\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const argv = args.slice(1 + count);
           const [comments, all, replies, ...lessonKeys] = keys;
-          const [who, cursor, scanCount, mode, entryRaw, stepRaw] = argv;
+          const [who, cursor, scanCount, mode, entryRaw, stepRaw, mostRaw] = argv;
           const entry = Number(entryRaw);
           const step = Number(stepRaw);
-          if ((mode !== "free" && mode !== "all") || !Number.isFinite(entry) || !Number.isFinite(step) || step < 1) return ["x"];
-          const lessons = new Map(lessonKeys.map((k, i) => [argv[6 + i], k]));
+          const most = Number(mostRaw);
+          if ((mode !== "free" && mode !== "all") || !Number.isFinite(entry) || !Number.isFinite(step) || step < 1 || !Number.isFinite(most) || most < 0) return ["x"];
+          const lessons = new Map(lessonKeys.map((k, i) => [argv[7 + i], k]));
           for (const k of keys) this.live(k);
           const [next, flat] = this.scanStep(comments, cursor, Number(scanCount));
-          type Row = { id: string; raw: string; c: Record<string, unknown>; parent: string | null };
+          if (flat.length > 2_000) return ["x"];
+          type Row = { id: string; raw: string; c: Record<string, unknown>; parent: string | null; counted: boolean };
+          const seen = new Set<string>();
           const answers: Row[] = [];
           const threads: Row[] = [];
           for (let i = 0; i < flat.length; i += 2) {
+            if (seen.has(flat[i])) continue;
+            seen.add(flat[i]);
             let c: unknown;
             try { c = JSON.parse(flat[i + 1]); } catch { continue; }
             if (!c || typeof c !== "object") continue;
             const row = c as Record<string, unknown>;
-            const parent = row.r === undefined || row.r === null ? null : String(row.r);
-            if (parent !== null) answers.push({ id: flat[i], raw: flat[i + 1], c: row, parent });
-            else if (row.b === who) threads.push({ id: flat[i], raw: flat[i + 1], c: row, parent });
+            if (typeof row.r === "string") answers.push({ id: flat[i], raw: flat[i + 1], c: row, parent: row.r, counted: false });
+            else if (row.b === who) threads.push({ id: flat[i], raw: flat[i + 1], c: row, parent: null, counted: false });
           }
           const above = answers.length ? (this.run(["HMGET", comments, ...answers.map((a) => a.parent as string)]) as (string | null)[]) : [];
-          const under = new Set<string>();
+          const mine: Row[] = [];
           answers.forEach((a, k) => {
             const raw = above[k];
-            if (typeof raw !== "string") return;
-            try {
-              const p = JSON.parse(raw) as { b?: unknown } | null;
-              if (p && typeof p === "object" && p.b === who) under.add(a.parent as string);
-            } catch { /* not a comment */ }
+            let under = false;
+            if (typeof raw === "string") {
+              try {
+                const p = JSON.parse(raw) as { b?: unknown } | null;
+                under = !!p && typeof p === "object" && p.b === who;
+              } catch { /* not a comment */ }
+            }
+            if (a.c.b === who || under) mine.push({ ...a, counted: typeof raw === "string" });
           });
+          if (mine.length + threads.length > most) return ["x"];
           let gone = 0;
           let freed = 0;
           let held = 0;
+          const taken = new Set<string>();
           const take = (row: Row) => {
             if (this.run(["HDEL", comments, row.id]) !== 1) return;
+            taken.add(row.id);
             this.run(["ZREM", all, row.id]);
-            this.run(["HDEL", replies, row.id]);
+            if (row.parent === null) this.run(["HDEL", replies, row.id]);
             const lessonKey = typeof row.c.l === "string" ? lessons.get(row.c.l) : undefined;
             if (lessonKey) this.run(["ZREM", lessonKey, row.id]);
-            if (row.parent !== null && this.run(["HEXISTS", comments, row.parent]) === 1) this.run(["HINCRBY", replies, row.parent, -1]);
+            if (row.counted && row.parent !== null && !taken.has(row.parent)) this.run(["HINCRBY", replies, row.parent, -1]);
             let bytes = new TextEncoder().encode(row.raw).length;
             if (row.c.h === true) bytes -= ',"h":true'.length;
             freed += Math.floor((bytes + entry * 4 + step - 1) / step) * step;
             gone += 1;
           };
-          for (const a of answers) if (a.c.b === who || under.has(a.parent as string)) take(a);
+          for (const a of mine) take(a);
           if (threads.length) {
             const left = this.run(["HMGET", replies, ...threads.map((t) => t.id)]) as (string | null)[];
             threads.forEach((t, k) => {

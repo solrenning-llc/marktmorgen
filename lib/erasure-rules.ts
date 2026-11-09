@@ -30,7 +30,14 @@ export type ErasureScope = {
   /** The key courses and the community know the address by (lib/learn.ts emailKey). */
   learner: string;
   /** Every course of the store, with its lessons, as the courses' own records are keyed. */
-  courses: { productId: string; courseId: string; lessonIds: string[]; moduleIds: string[] }[];
+  courses: {
+    productId: string;
+    courseId: string;
+    lessonIds: string[];
+    moduleIds: string[];
+    /** How many lesson comments the course's record held when the erasure was charged (lib/person-erasure.ts, erasureSize). */
+    commentFields?: number;
+  }[];
   /** Every product of the store, by id. */
   productIds: string[];
   /** The store's community, when it has one. */
@@ -68,6 +75,8 @@ export type ErasureSize = {
    */
   commentPages: number;
   commentPageLessons: number;
+  /** The most lesson comments the deletion may take, each course's takesFor its record (lib/lesson-comments.ts). */
+  commentTakes: number;
 };
 
 /**
@@ -90,11 +99,14 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   roomMessages: [0, 1_200],
   events: [1, 150],
   certificates: [0, 500],
-  // Each step walked FORGET_PASSES (3) times at the most, each walk four billed commands and under 3,000 bytes
-  // before its lessons, 80 bytes a lesson (lib/lesson-comments.ts, forgetPageWork; held in
-  // tests/lesson-comments-copy-erasure-bounds.test.ts). The commands a step runs for each comment it deletes are not counted.
-  commentPages: [12, 9_000],
+  // Each step walked FORGET_PASSES (3) times at the most, each walk four billed commands and under 3,200 bytes
+  // before its lessons (3,000 until the script's most and its step bound, 9 November 2026), 80 bytes a lesson (lib/lesson-comments.ts, forgetPageWork; held in
+  // tests/lesson-comments-copy-erasure-bounds.test.ts).
+  commentPages: [12, 9_600],
   commentPageLessons: [0, 240],
+  // The commands the script runs inside for each comment it deletes, FORGET_TAKE_COMMANDS (4) at the most and no more
+  // comments than it is given (since 9 November 2026, rule 24): they move nothing over the network, so no bytes.
+  commentTakes: [4, 0],
 };
 /** The studio units that cover an erasure's own call, its CPU and memory, and waiting on Discord to take roles back. */
 export const ERASE_BASE_UNITS = 15;

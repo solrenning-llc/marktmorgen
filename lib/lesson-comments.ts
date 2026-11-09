@@ -621,87 +621,113 @@ export function scanPagesFor(fields: number): number {
 export const COMMENT_SCAN_PAGES = scanPagesFor(MOST_COURSE_COMMENTS);
 
 /**
+ * The most fields one step of the erasure takes in: HSCAN's COUNT is a hint,
+ * so a step it answers with more is refused before anything changes, and a
+ * step's two HMGET (the parents of its answers, the counts of its threads)
+ * each name at most this many (forgetPageWork).
+ */
+export const FORGET_STEP_FIELDS = 1_000;
+
+/** The commands FORGET_LESSON_COMMENTS runs for each comment it deletes, at the most (ERASE_PER.commentTakes). */
+export const FORGET_TAKE_COMMANDS = 4;
+
+/**
+ * The comments past those counted that one course's erasure may delete: a
+ * thread's whole worth of answers (MAX_REPLIES and the thread) written while
+ * it runs. None for a course that held none when counted.
+ */
+export function takesFor(fields: number): number {
+  return fields > 0 ? fields + MAX_REPLIES + 1 : 0;
+}
+
+/**
  * One step of taking one student's comments out of a course, on the Redis
  * side, with the answers under their own comments, as deleting a comment
  * does. KEYS: the comments, the newest, the answer counts, then each lesson's
  * comments; ARGV: the student's key, the cursor, COMMENT_SCAN_COUNT, "free"
  * (their own threads go once no answer is left under them) or "all", the
- * room's ENTRY_BYTES and DATA_STEP_BYTES, then each lesson's id in the order
- * of KEYS. Answers are taken before threads, each counted off its thread,
- * so a thread whose answers sit in a later step waits for the next pass and
- * none is left without its thread. Answers {the next cursor, how many went,
- * the room they were charged (commentBytes, visible), how many of their
- * threads wait}: counts, never the words (they were all sent back until 9
- * November 2026, past what the erasure counts). The name they chose goes in
+ * room's ENTRY_BYTES and DATA_STEP_BYTES, the most comments it may delete,
+ * then each lesson's id in the order of KEYS. Answers are taken before
+ * threads, each counted off its thread, so a thread whose answers sit in a
+ * later step waits for the next pass and none is left without its thread.
+ * Before it changes anything it answers {"x"} when the step holds more than
+ * FORGET_STEP_FIELDS fields, or more of theirs (and answers under theirs)
+ * than the most it was given: what it deletes, and the FORGET_TAKE_COMMANDS
+ * it runs for each, is never more than the erasure was charged for. A field
+ * HSCAN gives twice in one step is taken once. Answers {the next cursor, how
+ * many went, the room they were charged (commentBytes, visible), how many of
+ * their threads wait}: counts, never the words (they were all sent back until
+ * 9 November 2026, past what the erasure counts). The name they chose goes in
  * forgetLessonCommentsPerson.
  */
-export const FORGET_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-forget:v3
+export const FORGET_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-forget:v4
 local who = ARGV[1]
 local mode = ARGV[4]
 local entry = tonumber(ARGV[5])
 local step = tonumber(ARGV[6])
-if (mode ~= "free" and mode ~= "all") or not entry or not step or step < 1 then return {"x"} end
+local most = tonumber(ARGV[7])
+if (mode ~= "free" and mode ~= "all") or not entry or not step or step < 1 or not most or most < 0 then return {"x"} end
 local lessons = {}
-for i = 4, #KEYS do lessons[ARGV[i + 3]] = KEYS[i] end
+for i = 4, #KEYS do lessons[ARGV[i + 4]] = KEYS[i] end
 local page = redis.call("HSCAN", KEYS[1], ARGV[2], "COUNT", tonumber(ARGV[3]))
 local flat = page[2]
+if #flat > ${2 * FORGET_STEP_FIELDS} then return {"x"} end
+local seen = {}
 local answers = {}
 local parents = {}
 local threads = {}
 for i = 1, #flat, 2 do
-  local ok, c = pcall(cjson.decode, flat[i + 1])
-  if ok and type(c) == "table" then
-    local parent = c.r
-    if parent == cjson.null then parent = nil end
-    if parent ~= nil then
-      table.insert(answers, {flat[i], flat[i + 1], c, parent})
-      table.insert(parents, parent)
-    elseif c.b == who then
-      table.insert(threads, {flat[i], flat[i + 1], c})
+  local id = flat[i]
+  if not seen[id] then
+    seen[id] = true
+    local ok, c = pcall(cjson.decode, flat[i + 1])
+    if ok and type(c) == "table" then
+      local parent = c.r
+      if type(parent) == "string" then
+        table.insert(answers, {id, flat[i + 1], c, parent})
+        table.insert(parents, parent)
+      elseif c.b == who then
+        table.insert(threads, {id, flat[i + 1], c})
+      end
     end
   end
 end
-local function fields(key, names)
-  local out = {}
-  for first = 1, #names, 1000 do
-    local chunk = {}
-    for k = first, math.min(first + 999, #names) do table.insert(chunk, names[k]) end
-    local got = redis.call("HMGET", key, unpack(chunk))
-    for k = 1, #chunk do out[first + k - 1] = got[k] end
+local above = {}
+if #parents > 0 then above = redis.call("HMGET", KEYS[1], unpack(parents)) end
+local mine = {}
+for k, row in ipairs(answers) do
+  local up = above[k]
+  local under = false
+  if type(up) == "string" then
+    local ok, p = pcall(cjson.decode, up)
+    under = ok and type(p) == "table" and p.b == who
   end
-  return out
+  if row[3].b == who or under then table.insert(mine, {row[1], row[2], row[3], row[4], type(up) == "string"}) end
 end
-local under = {}
-local above = fields(KEYS[1], parents)
-for k = 1, #parents do
-  if above[k] then
-    local ok, p = pcall(cjson.decode, above[k])
-    if ok and type(p) == "table" and p.b == who then under[parents[k]] = true end
-  end
-end
+if #mine + #threads > most then return {"x"} end
 local gone = 0
 local freed = 0
 local held = 0
-local function take(id, raw, c, parent)
+local taken = {}
+local function take(id, raw, c, parent, counted)
   if redis.call("HDEL", KEYS[1], id) ~= 1 then return end
+  taken[id] = true
   redis.call("ZREM", KEYS[2], id)
-  redis.call("HDEL", KEYS[3], id)
+  if parent == nil then redis.call("HDEL", KEYS[3], id) end
   if type(c.l) == "string" and lessons[c.l] then redis.call("ZREM", lessons[c.l], id) end
-  if parent ~= nil and redis.call("HEXISTS", KEYS[1], parent) == 1 then redis.call("HINCRBY", KEYS[3], parent, -1) end
+  if counted and not taken[parent] then redis.call("HINCRBY", KEYS[3], parent, -1) end
   local bytes = string.len(raw)
   if c.h == true then bytes = bytes - string.len(',"h":true') end
   freed = freed + math.floor((bytes + entry * 4 + step - 1) / step) * step
   gone = gone + 1
 end
-for _, row in ipairs(answers) do
-  if row[3].b == who or under[row[4]] then take(row[1], row[2], row[3], row[4]) end
-end
+for _, row in ipairs(mine) do take(row[1], row[2], row[3], row[4], row[5]) end
 if #threads > 0 then
   local ids = {}
   for k = 1, #threads do ids[k] = threads[k][1] end
-  local left = fields(KEYS[3], ids)
+  local left = redis.call("HMGET", KEYS[3], unpack(ids))
   for k, row in ipairs(threads) do
-    if mode == "all" or (tonumber(left[k]) or 0) <= 0 then take(row[1], row[2], row[3], nil) else held = held + 1 end
+    if mode == "all" or (tonumber(left[k]) or 0) <= 0 then take(row[1], row[2], row[3], nil, false) else held = held + 1 end
   end
 end
 return {page[1], gone, freed, held}`;
@@ -713,21 +739,23 @@ return {page[1], gone, freed, held}`;
  */
 export const FORGET_PASSES = 3;
 
-function forgetCommand(courseId: string, lessonIds: string[], who: string, cursor: string, mode: "free" | "all"): (string | number)[] {
-  return ["EVAL", FORGET_LESSON_COMMENTS, 3 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), who, cursor, COMMENT_SCAN_COUNT, mode, ENTRY_BYTES, DATA_STEP_BYTES, ...lessonIds];
+function forgetCommand(courseId: string, lessonIds: string[], who: string, cursor: string, mode: "free" | "all", most: number): (string | number)[] {
+  return ["EVAL", FORGET_LESSON_COMMENTS, 3 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), who, cursor, COMMENT_SCAN_COUNT, mode, ENTRY_BYTES, DATA_STEP_BYTES, most, ...lessonIds];
 }
 
 /**
  * What one step of FORGET_LESSON_COMMENTS moves, for a course of these
  * lessons: four billed commands (the EVAL and, inside it, the HSCAN and two
- * HMGET of a step's fields; Upstash bills a script's inside too, docs/backup.md)
- * and the bytes of the command, at a cursor of twenty digits, and its answer
- * of four numbers. lib/erasure-rules.ts counts it in ERASE_PER (commentPages,
+ * HMGET of at most FORGET_STEP_FIELDS names each; Upstash bills a script's
+ * inside too, docs/backup.md) and the bytes of the command, at a cursor of
+ * twenty digits and a most of sixteen, and its answer of four numbers.
+ * lib/erasure-rules.ts counts it in ERASE_PER (commentPages,
  * commentPageLessons), held over this in tests/lesson-comments-copy-erasure-bounds.test.ts.
- * The commands it runs for each comment it deletes are not in it.
+ * The FORGET_TAKE_COMMANDS it runs for each comment it deletes are counted
+ * apart (ERASE_PER.commentTakes, takesFor).
  */
 export function forgetPageWork(courseId: string, lessonIds: string[], who: string): { commands: number; bytes: number } {
-  return { commands: 4, bytes: JSON.stringify(forgetCommand(courseId, lessonIds, who, "9".repeat(20), "free")).length + 64 };
+  return { commands: 4, bytes: JSON.stringify(forgetCommand(courseId, lessonIds, who, "9".repeat(20), "free", 10 ** 15)).length + 64 };
 }
 
 /** How many fields a course's record of comments holds, each read exactly. */
@@ -741,38 +769,48 @@ async function commentFields(courseIds: string[], what: string): Promise<number[
  * The steps deleting a person walks over these courses' comments, counted
  * before it runs (lib/person-erasure.ts, erasureSize): `pages`, each course's
  * scanPagesFor its record, and `lessonPages`, each of those steps times the
- * lessons it names. Each is walked FORGET_PASSES times at the most.
+ * lessons it names, each walked FORGET_PASSES times at the most; `takes`,
+ * the most comments it may delete, each course's takesFor its record; and
+ * `fields`, each course's count, which forgetLessonCommentsPerson is given so
+ * it walks and deletes no more than was charged.
  */
-export async function commentScanSize(courses: { courseId: string; lessonIds: string[] }[]): Promise<{ pages: number; lessonPages: number }> {
-  if (!courses.length || !isRedisConfigured()) return { pages: 0, lessonPages: 0 };
+export async function commentScanSize(courses: { courseId: string; lessonIds: string[] }[]): Promise<{ pages: number; lessonPages: number; takes: number; fields: number[] }> {
+  if (!courses.length || !isRedisConfigured()) return { pages: 0, lessonPages: 0, takes: 0, fields: courses.map(() => 0) };
   const counts = await commentFields(courses.map((c) => c.courseId), "the lesson comments counted for a person's erasure");
   let pages = 0;
   let lessonPages = 0;
+  let takes = 0;
   courses.forEach((course, k) => {
     const steps = scanPagesFor(counts[k]);
     pages += steps;
     lessonPages += steps * course.lessonIds.length;
+    takes += takesFor(counts[k]);
   });
-  return { pages, lessonPages };
+  return { pages, lessonPages, takes, fields: counts };
 }
 
 /**
  * Deletes one student's comments in a course (and the answers under their
  * own comments) and the name they chose (lib/person-erasure.ts). `who` is
- * lib/learn.ts emailKey. The course's record is walked in steps of
- * COMMENT_SCAN_COUNT, at most scanPagesFor its size a pass and FORGET_PASSES
- * passes. What they took goes back to `room` as the other deletions here give
+ * lib/learn.ts emailKey. `counted` is how many fields the course's record
+ * held when the erasure was charged (commentScanSize); without it they are
+ * counted here. The record is walked in steps of COMMENT_SCAN_COUNT, at most
+ * scanPagesFor that count a pass and FORGET_PASSES passes, and no more than
+ * takesFor it are deleted: past either, it throws (UnknownReply), never runs
+ * on unpaid. What they took goes back to `room` as the other deletions here give
  * it back: each comment at commentBytes, and the name kept once (a name typed
  * again was charged again; that part is not known, so it stays counted, never
  * less than kept), also when a later step fails. A reply that is not exactly
  * what was asked for throws UnknownReply (lib/redis-exact.ts), and what that
  * step did is not given back.
  */
-export async function forgetLessonCommentsPerson(courseId: string, lessonIds: string[], who: string, room?: DataStore): Promise<number> {
+export async function forgetLessonCommentsPerson(courseId: string, lessonIds: string[], who: string, room?: DataStore, counted?: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const what = "the deletion of a student's lesson comments";
-  const [fields] = await commentFields([courseId], what);
+  if (counted !== undefined && (!Number.isSafeInteger(counted) || counted < 0)) throw new UnknownReply(what);
+  const fields = counted ?? (await commentFields([courseId], what))[0];
   const pages = scanPagesFor(fields);
+  const most = takesFor(fields);
   let gone = 0;
   let freed = 0;
   try {
@@ -782,7 +820,7 @@ export async function forgetLessonCommentsPerson(courseId: string, lessonIds: st
       let held = 0;
       for (let page = 0; ; page += 1) {
         if (page >= pages) throw new UnknownReply(what);
-        const [reply] = exactReplies(await redisPipeline([forgetCommand(courseId, lessonIds, who, cursor, mode)]), 1, what);
+        const [reply] = exactReplies(await redisPipeline([forgetCommand(courseId, lessonIds, who, cursor, mode, most - gone)]), 1, what);
         // Exactly {the next cursor, how many went, their room, how many of their threads wait}: any other shape
         // leaves the step unknown (UnknownReply), and nothing of it is given back.
         const [next, taken, bytes, waiting] = exactReplies(reply, 4, what);
@@ -790,7 +828,7 @@ export async function forgetLessonCommentsPerson(courseId: string, lessonIds: st
         const count = replyCount(taken, what);
         const charged = replyCount(bytes, what);
         held += replyCount(waiting, what);
-        if (charged < count * 4 * ENTRY_BYTES || (count === 0) !== (charged === 0)) throw new UnknownReply(what);
+        if (charged < count * 4 * ENTRY_BYTES || (count === 0) !== (charged === 0) || count > most - gone) throw new UnknownReply(what);
         gone += count;
         freed += charged;
         cursor = next;

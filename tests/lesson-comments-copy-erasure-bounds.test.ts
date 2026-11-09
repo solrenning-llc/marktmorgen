@@ -27,7 +27,7 @@
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { COPIERS } from "@/lib/person-copy";
 import { emailKey } from "@/lib/learn";
-import { FORGET_LESSON_COMMENTS, FORGET_PASSES, LESSON_COMMENTS_OF, copyReadWork, forgetLessonCommentsPerson, forgetPageWork, lessonComments } from "@/lib/lesson-comments";
+import { FORGET_LESSON_COMMENTS, FORGET_PASSES, FORGET_TAKE_COMMANDS, LESSON_COMMENTS_OF, copyReadWork, forgetLessonCommentsPerson, forgetPageWork, lessonComments } from "@/lib/lesson-comments";
 import { serializeComment, type LessonComment } from "@/lib/lesson-comments-rules";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
@@ -232,6 +232,7 @@ async function main(): Promise<void> {
       [counted.commands - base.commands >= FORGET_PASSES * step.commands, counted.bytes - base.bytes >= FORGET_PASSES * step.bytes], [true, true]);
   }
   is("a step's lessons are counted by the step", ERASE_PER.commentPageLessons[1] > 0, true);
+  is("and each comment it deletes at the commands the script runs for it", ERASE_PER.commentTakes[0] >= FORGET_TAKE_COMMANDS, true);
 
   part("8. The copy has no budget of its own yet: the pending is written, and no door gives it");
   is("the cost registry names what it needs", typeof NOT_A_COST.PERSON_COPY_BUDGET === "string" && NOT_A_COST.PERSON_COPY_BUDGET.startsWith("PENDING"), true);

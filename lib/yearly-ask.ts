@@ -126,6 +126,8 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
     if (!claim || (claim[0] !== null && claim[0] !== "OK")) throw new UnknownReplyError("a yearly offer claim");
     const claimed = claim[0];
     if (claimed === null) continue;
+    // Set once the email is handed to the sender: from then on, not sent is not known (CX-123 rule 24).
+    let handed = false;
     try {
       const token = await mintYearlyLink(store, row.customer, row.sub);
       const url = `${base}/manage/switch?token=${token}&sub=${encodeURIComponent(row.sub)}&to=${YEARLY_TARGET}&from=offer`;
@@ -140,6 +142,7 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
       });
       const withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.yearlyAsk.address } };
       const rendered = render(withAddress, mail.subject, mail.body, unsub);
+      handed = true;
       const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
         from: fromLine(withAddress),
         to: row.email,
@@ -157,10 +160,13 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
           ["EXPIRE", count, COUNT_SECONDS],
         ]);
       } else {
-        await redisPipeline([["DEL", key]]);
+        // false is refused or unknown alike (Amazon SES or Resend may have taken it and the reply been lost), so the
+        // mark is kept, as lib/trial-nudges.ts keeps its own: the offer goes at most once, never twice (CX-123 rule 24).
+        console.error("the yearly offer may not have gone; kept as sent", store.handle);
       }
     } catch (error) {
-      await redisPipeline([["DEL", key]]).catch(() => {});
+      // Let go only when nothing was handed to the sender: a throw from the send itself is not known either.
+      if (!handed) await redisPipeline([["DEL", key]]).catch(() => {});
       console.error("sending the yearly offer failed", store.handle, error);
     }
   }

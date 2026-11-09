@@ -162,6 +162,17 @@ async function main(): Promise<void> {
   const full = await send(OWNER, { action: "step", to, copy: "2".repeat(32) });
   is("a data room too full", [full.error, full.lines.some((l: { text: string }) => l.text.includes("data room"))], ["plan", true]);
   await noteData(room, [{ slot: "filler", bytes: 0, set: true }]);
+  // The other store's studio requests cannot be read: refused as a plan that cannot be checked, never taken for room.
+  const original = redis.pipeline;
+  redis.pipeline = async (commands) =>
+    commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:allow:studio:") ? ["many"] : original(commands);
+  let unread: { error?: string; lines?: { level: string; text: string }[] };
+  try {
+    unread = await send(OWNER, { action: "step", to, copy: "3".repeat(32) });
+  } finally {
+    redis.pipeline = original;
+  }
+  is("the other store's studio requests unread", [unread.error, unread.lines?.some((l) => l.level === "stop" && l.text.includes("can't be read just now"))], ["plan", true]);
   is("nothing was written there", [(await target()).catalog.items.length, (await target()).sitePages.length], [before, 0]);
 
   part("The copy, step by step");

@@ -32,7 +32,7 @@
  */
 import type { Store } from "@/lib/store";
 import type { Listing } from "@/lib/catalog";
-import { type Course, lessonsInOrder, readBody, readCourse } from "@/lib/course";
+import { type Course, lessonsInOrder, readBodyKnown, readCourse } from "@/lib/course";
 import type { CommunityEvent } from "@/lib/community-events";
 import type { Member } from "@/lib/community";
 import { index, unindex } from "@/lib/community-search";
@@ -68,9 +68,14 @@ export async function reindexCourse(communityId: string, product: Listing, cours
   await Promise.all(entries.map((e) => index(communityId, "lesson", e.thing, e.score, e.parts).catch(() => {})));
 }
 
-/** Every lesson's body, in the course's order; an unreadable one is empty. */
+/**
+ * Every lesson's body, in the course's order; a lesson with no text is empty.
+ * A body that could not be read, or was answered in an unknown shape, throws
+ * (CX-123 rule 24): taken as empty, the reindex that follows would take every
+ * word of that lesson's text out of the index.
+ */
 export async function lessonBodies(course: Course): Promise<string[]> {
-  return Promise.all(lessonsInOrder(course).map(({ lesson }) => readBody(course.id, lesson.id).catch(() => "")));
+  return Promise.all(lessonsInOrder(course).map(({ lesson }) => readBodyKnown(course.id, lesson.id)));
 }
 
 /** What each lesson of a course is indexed as: its name in the index, its place, and the words it is found by. */
@@ -161,8 +166,13 @@ export async function indexMember(communityId: string, member: Member): Promise<
   await index(communityId, "member", e.thing, e.score, e.parts).catch(() => {});
 }
 
+/**
+ * Takes a member out for an erasure (lib/community-erasure.ts). Not swallowed:
+ * a failed or unknown read throws, so the erasure is said as not done and is
+ * run again, never reported finished while their name still finds them.
+ */
 export async function unindexMember(communityId: string, key: string): Promise<void> {
-  await unindex(communityId, "member", key).catch(() => {});
+  await unindex(communityId, "member", key);
 }
 
 /** A course read and indexed from the product alone, for the one-time backfill. */

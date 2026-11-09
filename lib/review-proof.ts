@@ -41,14 +41,14 @@ import { isSettled } from "@/lib/instant-pay";
 import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
-import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
+import { REVIEW_STORES_KEY, markRefunded, paymentReviewed } from "@/lib/reviews";
 import { refreshStoreQuotes } from "@/lib/store-quotes";
 import type { Listing, Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { takesReviews } from "@/lib/house-store";
 import { noteForErasure } from "@/lib/erasure-index";
-import { type StripePage, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { STRIPE_LIST_VERSION, type StripePage, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{10,200}$/;
@@ -282,12 +282,14 @@ const REFUND_PAGES = 3;
  * charge read refunded in full without covering the charge by itself): past it, the refund holds the anchor and is
  * read in the next pass. A scheduled job bounded by its schedule, like REFUND_PAGES; Stripe bills no API call.
  */
-const CHARGE_REFUND_LOOKUPS = 10;
+export const CHARGE_REFUND_LOOKUPS = 10;
 /**
  * A refund still on its way this long is said in the log, and still marks nothing (the owner's decision 18, 9 November
  * 2026: a refund pending for many days raises an alert, never a revocation). From the log alone: no store command.
  */
 const REFUND_STUCK_SECONDS = 7 * 86_400;
+/** One a charge and day: a reviewed purchase's refund on its way more than seven days is said once a day (SET NX EX). */
+const saidKey = (statsId: string, charge: string) => `nl:rev:refunds:said:${statsId}:${charge}`;
 
 // The reading of a refund in parts below is a copy of the one on #2868 (lib/licence-keys.ts, wholeOnItsOwn and
 // chargeRefundsSettled) and on claude5/group-buy-cursor-account (lib/group-buy.ts), not yet on main: once they are, one
@@ -332,7 +334,7 @@ async function chargeRefundsSettled(account: string, refund: Record<string, unkn
     return typeof status === "string" && REFUND_STATUS_KNOWN.has(status) && centsKnown(ownField(row, "amount")) && chargeId === id;
   };
   const listed = readStripePage(
-    await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`),
+    await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`, undefined, STRIPE_LIST_VERSION),
     legible,
   );
   if (listed.unreadable > 0 || listed.hasMore) throw new StripeListUnreadable("a charge's refunds");
@@ -358,8 +360,8 @@ const REFUND_CURSOR = /^[A-Za-z0-9_]{3,255}$/;
 /**
  * The Redis commands one run sends for its place in a store's refunds, outside the rows it reads (CX-123 rule 24): one
  * GET of the anchor and one of the pass, then at most three writes, either the pass kept (SET, with the anchor and the
- * read set's expiry written as before when the store had no anchor yet) or, at the end of a pass, the pass deleted and,
- * unless the pass left something unknown and the anchor cannot move, the anchor written and the read set's expiry
+ * read set's expiry written as before when the store had no anchor yet) or, at the end of a pass, the pass deleted, the
+ * anchor written (also where it stays, so a refund held for later never lets it lapse) and the read set's expiry
  * renewed. The pass is one key a store, under 400 bytes, kept
  * REFUND_PASS_SECONDS. A run still reads at most REFUND_PAGES pages of refunds.
  */
@@ -447,28 +449,44 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
     pass.floor = pass.floor === null ? created : Math.min(pass.floor, created);
   };
   let lookups = CHARGE_REFUND_LOOKUPS;
-  /** Refunds read in this run still on their way after REFUND_STUCK_SECONDS, each said in the log once a run. */
-  const stuck = new Set<string>();
+  /** Refunds read in this run still on their way after REFUND_STUCK_SECONDS, to be said in the log (sayStuck). */
+  const stuck: Row[] = [];
   /**
    * Whether a row may mark its reviews now: a lost dispute, or a refund that succeeded on a charge refunded in full. A
-   * refund still on its way marks nothing and, in the pass, holds the anchor at its time (the owner's decision 18); one
-   * that failed or was canceled, or a part, marks nothing.
+   * refund still on its way on a charge that reads refunded in full (Stripe counts it there) marks nothing and, in the
+   * pass, holds the anchor at its time (the owner's decision 18); one on a charge that does not, which can never give
+   * the whole charge back, holds nothing. One that failed or was canceled, or a part, marks nothing.
    */
   const givesBackNow = (refund: Row, inPass: boolean): boolean => {
     if (refund.object === "dispute") return rowGivesBack(refund);
     if (REFUND_ON_ITS_WAY.has(refund.status as string)) {
+      if (!refundedInFull(refund.charge)) return false;
       const created = typeof refund.created === "number" ? refund.created : 0;
-      if (created <= now - REFUND_STUCK_SECONDS && !stuck.has(refund.id as string)) {
-        stuck.add(refund.id as string);
-        // An alert for whoever reads the logs, never a revocation: the review counts until the refund succeeded.
-        console.error("a refund for a reviewed purchase has been pending for more than seven days; its review counts until it succeeds", { store: store.handle, account, refund: refund.id, status: refund.status, created });
-      }
+      if (created <= now - REFUND_STUCK_SECONDS) stuck.push(refund);
       // The newest page a resuming run reads first never moves the pass: one of the pass's window is held when the pass
       // reads it, and a newer one is in the next pass's window.
       if (inPass) hold(created);
       return false;
     }
     return refund.status === "succeeded" && refundedInFull(refund.charge);
+  };
+  /**
+   * A refund on its way more than seven days, said in the log only for a purchase with a review, at most once a day a
+   * charge (one SET NX EX a row, then one HGET of the payment's index on the first of the day): an alert for whoever
+   * reads the logs, never a revocation (the owner's decision 18; pre-review of 589eb24c1b).
+   */
+  const sayStuck = async () => {
+    const charges = new Set<string>();
+    for (const refund of stuck.splice(0)) {
+      const charge = plainObject(refund.charge) ? ownField(refund.charge, "id") : undefined;
+      if (typeof charge !== "string" || !CHARGE_PATTERN.test(charge) || charges.has(charge)) continue;
+      charges.add(charge);
+      const [first] = await redisPipeline([["SET", saidKey(statsId, charge), "1", "NX", "EX", 86_400]]);
+      const pi = idOf(refund.payment_intent);
+      if (first !== "OK" || !INTENT_ID.test(pi) || !(await paymentReviewed(statsId, pi))) continue;
+      // The review counts until the refund succeeded.
+      console.error("a refund for a reviewed purchase has been pending for more than seven days; its review counts until it succeeds", { store: store.handle, account, refund: refund.id, charge, status: refund.status, created: refund.created });
+    }
   };
   /**
    * A succeeded refund whose charge reads refunded in full (Stripe counts a refund still pending in amount_refunded)
@@ -499,6 +517,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
     const full = rows
       .filter((refund) => typeof refund.id === "string" && refund.id && givesBackNow(refund, inPass))
       .map((refund) => ({ row: refund, id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
+    await sayStuck();
     const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
     for (const [i, refund] of full.entries()) {
       if (Number(seen[i]) !== 1) {
@@ -613,17 +632,15 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
     // from a kept place no further than the newest closing it read, so a dispute closed meanwhile is read from the top
     // next run; review of #2158, inbox C4-24), never past when the pass began, nor past a refund it left unknown, nor
     // at all while the lost disputes were not all read and handled. The read refunds outlive it. A pass that left
-    // something unknown and cannot move the anchor leaves it as it is, so it lapses as it always did (reviews of
-    // #2158), unless the store has none yet: then it keeps the one the pass began at, as below.
+    // something unknown or held and cannot move the anchor writes it again where it is, its time renewed (pre-review
+    // of 589eb24c1b: it used to leave it to lapse, and a refund held there for weeks was then never read again).
     let top = pass.newest;
     if (!lostRead || !lostKept || !lostRead.complete) hold(since);
     else top = lostRead.resumed ? lostRead.newest : Math.max(top, lostRead.newest);
     const moved = Math.max(pass.from, Math.min(top, pass.start, pass.floor ?? Number.POSITIVE_INFINITY));
-    const writes: (string | number)[][] = [["DEL", passKey(statsId)]];
-    if (pass.floor === null || moved > pass.from || !(Number(anchorRaw) > 0)) {
-      writes.unshift(["SET", anchorKey(statsId), String(moved), "EX", REFUND_LOOKBACK_SECONDS * 2], ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400]);
-    }
-    await redisPipeline(writes);
+    // Written every time, also where it stays (a refund held at pass.from), so a refund held for later never lets the
+    // anchor lapse (pre-review of 589eb24c1b).
+    await redisPipeline([["SET", anchorKey(statsId), String(moved), "EX", REFUND_LOOKBACK_SECONDS * 2], ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400], ["DEL", passKey(statsId)]]);
     return marked;
   }
   // A pass not at its end is kept only when it moved, so one that cannot move lapses and starts again from the anchor.

@@ -568,6 +568,17 @@ export function setReply(statsId: string, productId: string, id: string, text: s
 }
 
 /**
+ * Whether a payment paid for any review of the store (one HGET of the payment's index): the reviews' refund job says
+ * a refund pending for days only for one (lib/review-proof.ts; the owner's decision 18). A reply in another shape is
+ * read as true, so such a refund is still said.
+ */
+export async function paymentReviewed(statsId: string, pi: string): Promise<boolean> {
+  if (!STATS_ID_PATTERN.test(statsId) || !pi) return false;
+  const [raw] = await redisPipeline([["HGET", payKey(statsId), pi]]);
+  return raw === null ? false : typeof raw !== "string" || raw.length > 0;
+}
+
+/**
  * Marks as refunded every review a payment paid for, once Stripe says the
  * payment was given back in full. Returns how many changed.
  */

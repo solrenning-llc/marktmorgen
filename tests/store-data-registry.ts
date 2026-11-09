@@ -828,6 +828,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rev:ask:due@lib/review-ask.ts": company("Review asks due", "One sorted set for every store: each an order's, gone when asked."),
   "nl:rev:link:@lib/review-proof.ts": short("A review link, sixty days", "monthly", 60, LINK_BYTES, MAIL("review ask")),
   "nl:rev:refunds:pass:@lib/review-proof.ts": { what: "Where a pass over the refunds for reviews stands", parts: [capped(400, "One a store, under 400 bytes, seven days after it last moved (Claude 5's audit of the Stripe reads, A3).")] },
+  "nl:rev:refunds:said:@lib/review-proof.ts": short("A reviewed purchase's refund pending more than seven days was said today (the owner's decision 18): one mark a charge, a day", "order", 1),
   "nl:rev:refunds:seen:@lib/review-proof.ts": { what: "Refunds already handled for reviews", parts: [capped(64 * KB, "Sixty-one days after the last one read.")] },
   "nl:rev:refunds:since:@lib/review-proof.ts": { what: "How far refunds were read", parts: [capped(KEY, "One a store.")] },
   "nl:none@lib/review-requests.ts": company("A key that is never written", "Read in place of a list a store does not have."),

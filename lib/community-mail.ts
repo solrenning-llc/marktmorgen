@@ -449,7 +449,14 @@ export async function advanceAnnouncements(load: (handle: string) => Promise<Sto
   let touched = 0;
   for (const id of ids) {
     if (Date.now() > deadline) break;
-    if (await advanceAnnouncement(id, load, deadline)) touched += 1;
+    // Each send in its own try, as advanceAll (lib/broadcasts.ts): one store that throws (its record, its members, the
+    // email service) is logged and left in line for the next run, its lock let go by advanceAnnouncement's finally,
+    // and never stops the other stores' sends in this run (Claude 5 pre-review of claude5/broadcast-lock-owner).
+    try {
+      if (await advanceAnnouncement(id, load, deadline)) touched += 1;
+    } catch (error) {
+      console.error("Advancing a community announcement's email failed; left for the next run", id, error);
+    }
   }
   return touched;
 }

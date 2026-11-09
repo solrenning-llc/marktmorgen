@@ -528,7 +528,13 @@ export async function advanceUpdates(load: (handle: string) => Promise<Store | n
   let touched = 0;
   for (const id of ids) {
     if (Date.now() > deadline) break;
-    if (await advanceUpdate(id, load, deadline)) touched += 1;
+    // Each update in its own try (rule 30, the same loop as advanceAnnouncements): one store that throws is logged and
+    // left in line for the next run, its lock let go by advanceUpdate's finally, and the others still move on.
+    try {
+      if (await advanceUpdate(id, load, deadline)) touched += 1;
+    } catch (error) {
+      console.error("Advancing a product update's email failed; left for the next run", id, error);
+    }
   }
   return touched;
 }

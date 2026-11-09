@@ -422,6 +422,27 @@ async function readConfig(statsId: string): Promise<Config | null> {
 /** How many times a change is tried again from a fresh read when another one landed first. */
 const CONFIG_WRITE_TRIES = 4;
 
+/** What the studio says when a settings change may or may not have been saved (WebhookSettingsUnsureError). */
+export const WEBHOOK_SETTINGS_UNSURE_WORDS = "We could not confirm whether that change was saved. Reload the page to see your endpoints before you try again.";
+
+/**
+ * A settings change whose write may have landed: its reply could not be read, and neither could the settings read
+ * back, or they hold another change since. It is never said saved, and never said unchanged either.
+ */
+export class WebhookSettingsUnsureError extends UnknownReplyError {
+  constructor() {
+    super("a store's webhook settings after a change");
+    this.name = "WebhookSettingsUnsureError";
+  }
+}
+
+/** A store's webhook settings as text, or null when there are none, read exactly (CX-123 rule 24). */
+async function settingsText(statsId: string): Promise<string | null> {
+  const read = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a store's webhook settings");
+  return read[0];
+}
+
 /**
  * Changes a store's webhook settings over exactly what was read (378 [TB4]).
  * Every writer reads the whole settings and writes them back; before this, two
@@ -432,17 +453,36 @@ const CONFIG_WRITE_TRIES = 4;
  * few times, and then refused. `change` returns null to write nothing.
  */
 async function changeConfig(statsId: string, change: (config: Config | null) => Config | null): Promise<{ before: Config | null; after: Config } | null> {
+  // The settings read back after an unknown reply, found as they were read: the next try starts from them.
+  let readBack: { raw: string | null } | null = null;
   for (let tries = 0; tries < CONFIG_WRITE_TRIES; tries += 1) {
-    // Read exactly (CX-123 rule 24): only GET null is "no settings"; another shape is unknown and nothing is written.
-    const read = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
-    if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a store's webhook settings");
-    const raw = read[0];
+    // Read exactly (CX-123 rule 24): only GET null is "no settings"; another shape, or text that is not settings, is
+    // unknown and nothing is written over it.
+    const raw: string | null = readBack ? readBack.raw : await settingsText(statsId);
+    readBack = null;
     const before = parseConfig(raw);
+    if (raw !== null && !before) throw new UnknownReplyError("a store's webhook settings");
     const after = change(before);
     if (!after) return null;
-    // Only 1 is saved and only [-1] / [-1, n] is "changed meanwhile, made again"; any other reply is unknown: it may
-    // have landed, so the change is never made again over it, and it is never said saved (rules 24 and 30).
-    if (compareAndSetReply(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), raw ?? "", JSON.stringify(after)]]), "the webhook settings' save") === "saved") return { before, after };
+    const text = JSON.stringify(after);
+    // Only 1 is saved and only [-1] / [-1, n] is "changed meanwhile, made again" (rules 24 and 30). Any other reply,
+    // or a call that fails, may have landed: the settings are read back once, exactly. The text written is saved;
+    // the text read is not written, and the change is made again from it, as for [-1]; anything else stays unsure.
+    let saved: "saved" | "changed" | "unknown";
+    try {
+      saved = compareAndSetReply(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), raw ?? "", text]]), "the webhook settings' save");
+    } catch {
+      saved = "unknown";
+    }
+    if (saved === "saved") return { before, after };
+    if (saved === "unknown") {
+      const now = await settingsText(statsId).catch(() => {
+        throw new WebhookSettingsUnsureError();
+      });
+      if (now === text) return { before, after };
+      if (now !== raw) throw new WebhookSettingsUnsureError();
+      readBack = { raw: now };
+    }
   }
   throw new Error("The webhook settings kept changing while being saved.");
 }
@@ -1197,16 +1237,20 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   // The mark read exactly (rules 24 and 30): [-1] / [-1, n] is another press first ("resent"); any other reply is
   // unknown, never marked: nothing is taken or sent, and it could not be sent just now. A mark that did land names a
   // resend that was never written, which reads as gone and allows the next press.
+  // The script's write clears the original's expiry; it keeps the time it had left, never more.
+  const keepExpiry = ["PEXPIRE", deliveryKey(deliveryId), ttl > 0 ? ttl : DELIVERY_SECONDS * 1000];
   let marked: "saved" | "changed";
   try {
     marked = compareAndSetReply(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId })]]), "a webhook resend's mark");
   } catch (error) {
+    // The mark may have landed and cleared the expiry: the time left is put back either way (the same one command as
+    // after a mark), so the original still goes when it would have.
+    await redisPipeline([keepExpiry]).catch((lost) => console.error("a webhook delivery's expiry could not be put back after a resend's mark", statsId, deliveryId, lost));
     if (!(error instanceof UnknownReplyError)) throw error;
     return { ok: false, reason: "unavailable" };
   }
   if (marked !== "saved") return { ok: false, reason: "resent" };
-  // The write cleared the original's expiry; it keeps the time it had left, never more.
-  await redisPipeline([["PEXPIRE", deliveryKey(deliveryId), ttl > 0 ? ttl : DELIVERY_SECONDS * 1000]]);
+  await redisPipeline([keepExpiry]);
   const tests = repliesFor(await redisPipeline([
     ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
     ["INCR", testsKey(statsId)],

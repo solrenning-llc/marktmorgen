@@ -1,7 +1,7 @@
 import { after } from "next/server";
 import { apiAdder, apiError, apiOk, apiWriter, readApiBody } from "@/lib/api-guard";
 import { noticeCreator } from "@/lib/account-notice";
-import { MAX_ENDPOINT_URL, addEndpoint, removeEndpoint, webhooksView } from "@/lib/webhooks";
+import { MAX_ENDPOINT_URL, WebhookSettingsUnsureError, addEndpoint, removeEndpoint, webhooksView } from "@/lib/webhooks";
 
 /**
  * POST /api/v1/hooks — adds a webhook endpoint from a tool, as the studio's
@@ -44,6 +44,8 @@ export async function POST(request: Request) {
     return apiOk({ data: { id: added.id, where: added.where, events: added.events, secret: result.secret, added_at: added.addedAt } });
   } catch (error) {
     console.error("api: adding a webhook failed", error);
+    // A write that may have landed is never said unchanged (lib/webhooks.ts, changeConfig).
+    if (error instanceof WebhookSettingsUnsureError) return apiError(502, "unavailable", "The endpoint may have been added, but this could not be confirmed. Check the store's Webhooks page in the studio before adding it again.");
     return apiError(502, "unavailable", "The endpoint could not be added just now. Nothing was changed; try again in a moment.");
   }
 }
@@ -62,6 +64,7 @@ export async function DELETE(request: Request) {
     return apiOk({ data: { id, status: "removed" } });
   } catch (error) {
     console.error("api: removing a webhook failed", error);
+    if (error instanceof WebhookSettingsUnsureError) return apiError(502, "unavailable", "The endpoint may have been removed, but this could not be confirmed. Check the store's Webhooks page in the studio before trying again.");
     return apiError(502, "unavailable", "The endpoint could not be removed just now. Try again in a moment.");
   }
 }

@@ -181,6 +181,25 @@ async function main(): Promise<void> {
   onAsk = () => undefined;
   is("the sweep's next look does not add it back", redis.run(["ZSCORE", PENDING, raced]), null);
 
+  part("The sweep never shortens a record kept past the thirty days (focal review of #3411, junction)");
+  // #3411's watchLater keeps a record six hours from a capture's answer that came back after the ceiling: an hour
+  // before it here, the record ends six hours from now. Asked about and still pending, it keeps those six hours, and
+  // its next look comes before they end, not before the ceiling's hour.
+  const late = "5O190127TNLATE0001";
+  const lateNow = Math.floor(Date.now() / 1000);
+  redis.run(["SET", orderKey(late), JSON.stringify({ s: STATS, h: "harbor", p: "guide01", c: 4900, cur: "usd", m: SELLER, at: lateNow - 30 * DAY + 3600, meta: {} })]);
+  // EXPIREAT, not SET's EXAT, which the in-memory Redis does not read (it would keep the record for ever).
+  redis.run(["EXPIREAT", orderKey(late), String(lateNow + 6 * 3600)]);
+  redis.run(["ZADD", PENDING, "1", late]);
+  const latePending = completed(late);
+  ((latePending.purchase_units as { payments: { captures: { status: string }[] } }[])[0].payments.captures[0]).status = "PENDING";
+  answers.set(late, latePending);
+  await sweep();
+  const lateTtl = Number(redis.run(["TTL", orderKey(late)]));
+  const lateScore = Number(redis.run(["ZSCORE", PENDING, late]));
+  is("its six hours are kept, not cut to the ceiling's one", lateTtl > 6 * 3600 - 120 && lateTtl <= 6 * 3600, true);
+  is("asked again before they end (five minutes before), not after", lateScore > lateNow + 3600 && lateScore <= lateNow + 6 * 3600 - 300, true);
+
   part("A record without a real opening time is not asked about as if opened in 1970 (pre-review, junction with #3411)");
   const noTime = "5O190127TNNOTIME01";
   redis.run(["SET", orderKey(noTime), JSON.stringify({ s: STATS, h: "harbor", p: "guide01", c: 4900, cur: "usd", m: SELLER, at: 0, meta: {} }), "EX", String(3 * DAY)]);

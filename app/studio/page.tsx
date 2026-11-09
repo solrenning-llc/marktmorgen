@@ -461,6 +461,14 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Canceled",
     body: "Nothing more will be charged. Your store keeps taking payments until the date below, and you can change your mind on this page until then.",
   },
+  "canceling-unpaid": {
+    title: "Canceled",
+    body: "Your plan will not renew. The renewal payment that did not go through is canceled at Stripe, so your card is not tried for it again. Until the date below your store's page stays up, but its checkout stays closed, as it has been since that payment failed; then your plan ends. You can change your mind on this page until then, and your plan is next charged on that date.",
+  },
+  "canceling-unpaid-open": {
+    title: "Canceled, but one payment may still be tried",
+    body: "Your plan will not renew, but we could not confirm that Stripe stopped trying the renewal payment that did not go through, so your card may still be charged for it. Cancel again on this page in a minute to stop it. Until the date below your checkout stays closed, as it has been since that payment failed.",
+  },
   resumed: {
     title: "Your subscription continues",
     body: "The cancellation is undone. Nothing else changed.",
@@ -2947,7 +2955,9 @@ export default async function StudioPage({
                     <p className="mt-5 notice notice-warn font-semibold">
                       {trialing
                         ? `Canceled during the trial. Your card will not be charged, and your store keeps taking payments until ${endsOn ?? "the trial ends"}.`
-                        : `Canceled. Nothing more will be charged, and your store keeps taking payments until ${endsOn ?? "the end of the period you paid for"}.`}
+                        : unpaidSince > 0
+                          ? `Canceled. Your plan will not renew. Its last renewal payment did not go through, so until ${endsOn ?? "the end of this period"} your store's page stays up but its checkout stays closed, and then your plan ends.`
+                          : `Canceled. Nothing more will be charged, and your store keeps taking payments until ${endsOn ?? "the end of the period you paid for"}.`}
                     </p>
                     <form action={`/api/billing/cancel${pin}`} method="post" className="mt-4">
                       <input type="hidden" name="intent" value="resume" />
@@ -3133,7 +3143,9 @@ export default async function StudioPage({
                       <p className="mt-3 text-sm text-ink-soft">
                         {trialing
                           ? `Your store keeps taking payments until ${endsOn ?? "the trial ends"}, and your card is never charged.`
-                          : `Your store keeps taking payments until ${endsOn ?? "the end of the period you already paid for"}, and nothing more is charged.`}
+                          : unpaidSince > 0
+                            ? `Your plan will not renew, and the renewal payment that did not go through is canceled at Stripe, so your card is not tried for it again. Your checkout stays closed until ${endsOn ?? "the end of this period"}, when your plan ends.`
+                            : `Your store keeps taking payments until ${endsOn ?? "the end of the period you already paid for"}, and nothing more is charged.`}
                       </p>
                       <form action={`/api/billing/cancel${pin}`} method="post" className="mt-3">
                         <input type="hidden" name="intent" value="cancel" />

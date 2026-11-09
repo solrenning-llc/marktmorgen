@@ -3,6 +3,7 @@ import { away, creatorFrom } from "@/lib/studio-route";
 import {
   BillingError,
   isBillingConfigured,
+  cancelAndStopUnpaidRenewal,
   readSubscription,
   setCancelAtPeriodEnd,
 } from "@/lib/billing";
@@ -50,7 +51,11 @@ export async function POST(request: NextRequest) {
       const done = PLAN_BREAKS_ENABLED ? await undoPause(store) : "none";
       if (done !== "none") return away(origin, studio(done === "kept" ? "billing=resumed" : "billing=ended"));
     }
-    const state = await setCancelAtPeriodEnd(store.subscriptionId, intent === "cancel");
+    // Canceling with the renewal unpaid also voids its open invoice, so the
+    // card is not tried for it after the studio says the plan will not renew.
+    const { state, renewal } = intent === "cancel"
+      ? await cancelAndStopUnpaidRenewal(store.subscriptionId)
+      : { state: await setCancelAtPeriodEnd(store.subscriptionId, false), renewal: "none" as const };
     // Leaving outright: a break that was set has nothing left to start again.
     if (intent === "cancel") await dropPause(store).catch((error) => console.error("dropping a break failed", error));
     if (state.state !== "active") {
@@ -59,7 +64,10 @@ export async function POST(request: NextRequest) {
       const written = await setSubscription(ref, { active: false });
       return away(origin, studio(written ? "billing=ended" : "billing=cancel-error"));
     }
-    return away(origin, studio(intent === "cancel" ? "billing=canceling" : "billing=resumed"));
+    if (intent !== "cancel") return away(origin, studio("billing=resumed"));
+    // With the renewal unpaid the store takes no payments until the period
+    // ends; the studio says that, and says so when the void is not confirmed.
+    return away(origin, studio(renewal === "voided" ? "billing=canceling-unpaid" : renewal === "unknown" ? "billing=canceling-unpaid-open" : "billing=canceling"));
   } catch (error) {
     // Stripe refuses to change a subscription that is already over. Ask what
     // it is doing before saying so, because a refusal for any other reason

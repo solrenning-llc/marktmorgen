@@ -603,6 +603,12 @@ export function retryLeft(subscription: Record<string, unknown>): "yes" | "no" |
   return "unread";
 }
 
+/** Whether the subscription's latest invoice, when expanded, was voided: its period was never paid. */
+function latestInvoiceVoided(subscription: Record<string, unknown>): boolean {
+  const invoice = subscription.latest_invoice;
+  return Boolean(invoice) && typeof invoice === "object" && !Array.isArray(invoice) && (invoice as { status?: unknown }).status === "void";
+}
+
 /**
  * When the period already paid for, or the trial, runs out.
  *
@@ -675,7 +681,9 @@ export function stateOf(subscription: Record<string, unknown>): SubscriptionStat
     cancelsAtEnd: subscription.cancel_at_period_end === true || cancelAt > 0,
     ...planOf(subscription),
     changePending: Boolean(subscription.pending_update),
-    renewalUnpaid: status === "past_due",
+    // A renewal voided unpaid (a cancel while it was unpaid, cancelAndStopUnpaidRenewal)
+    // leaves its period unpaid however Stripe then reads the subscription.
+    renewalUnpaid: status === "past_due" || latestInvoiceVoided(subscription),
     period: periodOf(subscription, trialing, subscription.cancel_at_period_end === true || cancelAt > 0),
   };
 }
@@ -1195,13 +1203,63 @@ export async function setCancelAtPeriodEnd(
   subscriptionId: string,
   cancel: boolean,
 ): Promise<SubscriptionState> {
-  if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
-    return { state: "inactive", reason: "shape" };
+  return (await writeCancelAtPeriodEnd(subscriptionId, cancel)).state;
+}
+
+/**
+ * What became of a renewal left unpaid when its plan was canceled: "none"
+ * when nothing was owed (paid up, in a trial, or paid since), "voided" when
+ * the open invoice is void at Stripe, so its card is not tried for it again,
+ * and "unknown" when that could not be confirmed.
+ */
+export type UnpaidRenewalOutcome = "none" | "voided" | "unknown";
+
+const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
+
+/**
+ * Cancels a plan at its period's end and, when its renewal is unpaid, voids
+ * the open renewal invoice too (plan-lifecycle audit, M3): otherwise Stripe
+ * keeps retrying it after the studio has said nothing more will be charged.
+ * The invoice is the one Stripe sends back on the cancellation itself (no
+ * extra read); it is voided once, under its own idempotency key, and only a
+ * reply that names it as void counts.
+ */
+export async function cancelAndStopUnpaidRenewal(
+  subscriptionId: string,
+): Promise<{ state: SubscriptionState; renewal: UnpaidRenewalOutcome }> {
+  const { state, subscription } = await writeCancelAtPeriodEnd(subscriptionId, true);
+  if (state.state !== "active" || !state.renewalUnpaid || !subscription) return { state, renewal: "none" };
+  const invoice = subscription.latest_invoice;
+  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return { state, renewal: "unknown" };
+  const { id, status } = invoice as { id?: unknown; status?: unknown };
+  if (typeof id !== "string" || !INVOICE_ID.test(id)) return { state, renewal: "unknown" };
+  if (status === "void") return { state, renewal: "voided" };
+  if (status === "paid") return { state, renewal: "none" };
+  if (status !== "open") return { state, renewal: "unknown" };
+  try {
+    const voided = await onPlatform("POST", `/invoices/${encodeURIComponent(id)}/void`, new URLSearchParams(), { idempotencyKey: `plan-cancel-void:${id}` });
+    return { state, renewal: voided?.id === id && voided.status === "void" ? "voided" : "unknown" };
+  } catch (error) {
+    console.error("voiding a canceled plan's unpaid renewal failed", error);
+    return { state, renewal: "unknown" };
   }
+}
+
+async function writeCancelAtPeriodEnd(
+  subscriptionId: string,
+  cancel: boolean,
+): Promise<{ state: SubscriptionState; subscription: Record<string, unknown> | null }> {
+  if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
+    return { state: { state: "inactive", reason: "shape" }, subscription: null };
+  }
+  // With its latest invoice: whether the renewal is still retried, and the
+  // invoice a cancel with the renewal unpaid voids (cancelAndStopUnpaidRenewal).
+  const body = new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false" });
+  body.append("expand[]", "latest_invoice");
   const subscription = await onPlatform(
     "POST",
     `/subscriptions/${encodeURIComponent(subscriptionId)}`,
-    new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false" }),
+    body,
   );
   // Only an identified, explicit provider observation can confirm this change.
   // Unknown replies must throw so callers retain paid access and pause evidence.
@@ -1215,7 +1273,7 @@ export async function setCancelAtPeriodEnd(
       (typeof subscription.cancel_at_period_end !== "boolean" || state.cancelsAtEnd !== cancel)) {
     throw new Error("The subscription did not acknowledge the requested cancellation setting");
   }
-  return state;
+  return { state, subscription };
 }
 
 export type SwitchResult =

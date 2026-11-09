@@ -305,6 +305,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:manage:link:": X(1), "nl:manage:opens:": X(1), "nl:manage:portal:": E,
   "nl:meet:conn:": E, "nl:meet:lock:": E, "nl:meet:log:": E, "nl:meet:q": I, "nl:meet:r:": E, "nl:meet:refresh:": E, "nl:meet:rf:": E,
   "nl:meet:state:": X(1), "nl:meet:stores": I, "nl:meet:test:": E, "nl:meet:user:": I, "nl:meet:zoomseen:": C,
+  "nl:member:c:": E, // a member price's coupon, named by the store's Stripe account, as nl:fair:c: (lib/fair-coupon.ts)
   "nl:member:status:": E,
   "nl:metaads:conn:": E, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,
   "nl:mnum:": E,

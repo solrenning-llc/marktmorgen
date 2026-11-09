@@ -2626,7 +2626,7 @@ Proveniência AB: passou a fazer parte do Bloco de abertura, posição (j), por 
 
 32. **[F1] Construtor de páginas mais livre, preservando acessibilidade, desempenho e honestidade.**
    - Pedido: P2 F1; datas/horas e grau de certeza em Proveniência.
-   - Estado: **a fazer**. Posição vigente: OR: Bloco B, posição 43/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
+   - Estado: **parcial; pelo 375 [TB1], incorporados no main: #2076 (linha de 1 a 3 colunas), #2133 (editor das colunas, prévia de computador e celular, "Add here" no lugar exato), #2135 (vídeo em janela), #2137 (o assistente da loja lê as colunas), #2202 (imagem que chega preserva as edições da linha), #2623 e #2659 (grupo "Arrange the page" com divisor e espaço, também nas páginas próprias da loja); menu lateral com busca, "Saved sections" e arrastar com linha de destino já existiam em components/page-editor.tsx. Falta (conferido no main 0e8b8c6b53, 09/11/2026): edição do texto direto na prévia com barra flutuante (negrito, itálico, sublinhado, riscado, alinhamento, link e reescrita por IA como sugestão), áudio como elemento de coluna, moldura do elemento selecionado com "Add element", barra superior fixa com estado do salvamento e os grupos "Navigation" e "More" do menu; Claude 4, 09/11/2026**. Posição vigente: OR: Bloco B, posição 43/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.
    - Custo e margem: Dimensionar payload, storage, renderização e limites antes de expandir envelope.
    - ComplementoTB1do dono29/10/2026,10h58Fortaleza: escopo detalhado no375[TB1] (menu lateral,inserção por arrasto/Add here,colunas/elementos seguros,edição direta/prévia dupla),incorporado aoeditor visual deste32sem itemduplicado,nem mudança de número/posição/estado;preservar blocos existentes eMR/TX/FX275/AX274/VR.
@@ -2645,7 +2645,7 @@ Proveniência AB: passou a fazer parte do Bloco de abertura, posição (j), por 
 
 35. **[F4] Mais idiomas de legenda e dublagem por IA, cobrados por uso, se fornecedor oferecer.**
    - Pedido: P2 F4; datas/horas e grau de certeza em Proveniência.
-   - Estado: **a fazer**. Posição vigente: OR: Bloco B, posição 46/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
+   - Estado: **parcial; legendas por IA cobradas por uso já existem (lib/auto-captions-rules.ts, 28 idiomas em CAPTION_LANGUAGES de lib/captions.ts). Estudo do fornecedor em docs/f4-caption-languages-study.md (documentação oficial do Bunny Stream lida em 09/11/2026): 56 idiomas, os nossos 28 incluídos, 28 a mais ainda não oferecidos, mesmo preço de US$ 0,10 por idioma e minuto; o Bunny não oferece dublagem por IA. Acrescentar idiomas e a dublagem (fornecedor, preço e aprovação) ficam em Depende do dono; Claude 4, 09/11/2026**. Posição vigente: OR: Bloco B, posição 46/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.
    - Custo e margem: Verificar capacidade oficial e custo mais caro por minuto/idioma; teto e reserva prévios; não prometer idioma sem prova.
 
@@ -2664,7 +2664,7 @@ Complemento WG (05/11/2026, pesquisa nova da Whop, pedido do dono pela mensagem 
 
 38. **[F7] Comparar velocidade e uso móvel com ClickFunnels/Kajabi/Hotmart/Stan por medições reais e registrar o que não puder medir.**
    - Pedido: P2 F7; datas/horas e grau de certeza em Proveniência.
-   - Estado: **a fazer**. Posição vigente: OR: Bloco B, posição 49/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
+   - Estado: **parcial; medição local registrada em docs/speed-comparison-2026-11-06.md, com o script e results.json em docs/speed-comparison-2026-11-06/ (#2938, incorporado em 07/11/2026): páginas do Marktmorgen medidas num build local do main. Concorrentes e marktmorgen.com em produção não foram medidos (o proxy deste ambiente recusou os hosts com 403); a medição real depende do dono liberar esses hosts na rede do ambiente ou rodar o script em outra máquina. Nenhuma alegação comparativa pública (AX274 item 7, VR item 7); Claude 4, 09/11/2026**. Posição vigente: OR: Bloco B, posição 49/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.
    - Custo e margem: Sem alegações comparativas antes de metodologia, ambiente e evidência reproduzível; custo de ferramentas precisa de aprovação se novo.
 

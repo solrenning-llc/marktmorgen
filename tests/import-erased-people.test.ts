@@ -506,6 +506,89 @@ async function main(): Promise<void> {
     }
     is("the API, on a store with no list yet: answered as deleted, nothing given", [raced, (await importedFor((await storeForEmail(BARE_API))!, "bareapi@example.com")).length], [{ ok: false, error: "deleted" }, 0]);
   }
+
+  part("Somebody deleted while their rows are being given, with the same row twice in the file");
+  {
+    store = await fresh();
+    const job = await startImport(store, OWNER, "purchases", { expected: 3, file: "orders.csv", email: true });
+    if (!job.ok) throw new Error(`not started: ${job.reason}`);
+    await addRows(store, job.job.id, [["2", "racetwice@example.com", "The Guide", "Paid"], ["3", "racetwice@example.com", "The Guide", "Paid"], ["4", "calmtwice@example.com", "The Guide", "Paid"]]);
+    await finishUpload(store, job.job.id);
+    afterFirst(roomTaken, async () => erasePerson(await fresh(), "racetwice@example.com", { kind: "person" }));
+    let after;
+    try {
+      after = await run(job.job.id);
+    } finally {
+      restore();
+    }
+    store = await fresh();
+    is("control: the other buyer is given the product", [after?.state, after?.counts.added, (await importedFor(store, "calmtwice@example.com")).length], ["done", 1, 1]);
+    const report = after ? await reportCsv(after) : "";
+    is(
+      "past buyers: both rows are left out as deleted, the address in neither the report nor the rows the import saw",
+      [after?.counts.skipped, report.split("Left out: Deleted from your store before, so left alone").length - 1, report.includes("racetwice@example.com"), heldUnder(`nl:import:${job.job.id}:errors`).includes("racetwice@example.com"), heldUnder(`nl:import:${job.job.id}:seen`).includes("racetwice@example.com")],
+      [2, 2, false, false, false],
+    );
+    const m = await startImport(store, OWNER, "members", { expected: 3, file: "patrons.csv", stopped: true });
+    if (!m.ok) throw new Error(`not started: ${m.reason}`);
+    await addRows(store, m.job.id, [["2", "racetwicem@example.com", "The Inner Circle", renews, ""], ["3", "racetwicem@example.com", "The Inner Circle", renews, ""], ["4", "calmtwicem@example.com", "The Inner Circle", renews, ""]]);
+    await finishUpload(store, m.job.id);
+    afterFirst(roomTaken, async () => erasePerson(await fresh(), "racetwicem@example.com", { kind: "person" }));
+    let mafter;
+    try {
+      mafter = await run(m.job.id);
+    } finally {
+      restore();
+    }
+    store = await fresh();
+    is("control: the other member is invited", [mafter?.state, mafter?.counts.added, heldUnder(`nl:mv:${store.statsId}`).includes("calmtwicem@example.com")], ["done", 1, true]);
+    const mreport = mafter ? await reportCsv(mafter) : "";
+    is(
+      "members: both rows are left out as deleted, the address in neither the report nor the rows the import saw",
+      [mafter?.counts.skipped, mreport.split("Left out: Deleted from your store before, so left alone").length - 1, mreport.includes("racetwicem@example.com"), heldUnder(`nl:import:${m.job.id}:errors`).includes("racetwicem@example.com"), heldUnder(`nl:import:${m.job.id}:seen`).includes("racetwicem@example.com")],
+      [2, 2, false, false, false],
+    );
+  }
+
+  part("A store with no list yet whose record cannot be read when the emails go");
+  {
+    const LATE_OWNER = "late-bare-owner@example.com";
+    await openStore(LATE_OWNER, "latebareshop", "acct_1TestLateBare1", "LateBareOwner1", false);
+    const shop = (await storeForEmail(LATE_OWNER))!;
+    is("setup: the store has no list yet", shop.listId ?? null, null);
+    const job = await startImport(shop, LATE_OWNER, "purchases", { expected: 2, file: "orders.csv", email: true });
+    if (!job.ok) throw new Error(`not started: ${job.reason}`);
+    await addRows(shop, job.job.id, [["2", "latebare@example.com", "The Guide", "Paid"], ["3", "ontimebare@example.com", "The Guide", "Paid"]]);
+    await finishUpload(shop, job.job.id);
+    before = emails.length;
+    // Once the rows have queued their emails: one of them is deleted (the print alone, as in the reminder's part, so
+    // that what was given stays and only the print can hold the email back), and the store, by its id and by its
+    // record, then answers in a shape that cannot be read.
+    const isRecord = (reply: unknown) => {
+      if (typeof reply !== "string" || !reply.startsWith("{")) return false;
+      const record = JSON.parse(reply) as { sid?: string; handle?: unknown };
+      return record.sid === shop.sid && typeof record.handle === "string";
+    };
+    let unreadable = false;
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      const out = await original(commands);
+      if (unreadable) return out.map((reply, i) => (commands[i]?.[0] === "GET" && (commands[i][1] === `nl:store:id:${shop.sid}` || isRecord(reply)) ? { x: 1 } : reply));
+      if (commands.some((c) => c[0] === "SADD" && c[1] === `nl:import:${job.job.id}:mail`)) {
+        redis.run(suppressCommand((await storeForEmail(LATE_OWNER))!.listId!, "latebare@example.com"));
+        unreadable = true;
+      }
+      return out;
+    };
+    let held;
+    try {
+      held = await runImport(job.job.id, Date.now() + 30_000);
+    } finally {
+      restore();
+    }
+    is("nobody is emailed, both still queued, the import still mailing", [held?.state, emails.length - before, redis.run(["SCARD", `nl:import:${job.job.id}:mail`])], ["mailing", 0, 2]);
+    const after = await run(job.job.id);
+    is("read again: the other buyer is emailed, the deleted one never", [after?.state, sentTo("ontimebare@example.com", before), sentTo("latebare@example.com", before)], ["done", 1, 0]);
+  }
   done();
 }
 

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
-import { holdListDownload } from "@/lib/list-download";
+import { csvPeople, holdListDownload } from "@/lib/list-download";
 import { listAsCsv } from "@/lib/free";
 
 /**
@@ -34,7 +34,8 @@ export async function GET(request: NextRequest) {
     // The byte-order mark makes Excel read the file as UTF-8, so a name with
     // an accent arrives with its accent. Every email tool ignores it.
     const body = `\uFEFF${csv}`;
-    await held.settle(new TextEncoder().encode(body).length);
+    // Settled at what was sent and at the people the file holds: those read and left out are paid for too.
+    await held.settle(new TextEncoder().encode(body).length, csvPeople(csv));
     return new Response(body, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",

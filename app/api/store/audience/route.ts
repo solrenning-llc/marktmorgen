@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
-import { holdListDownload } from "@/lib/list-download";
+import { LIST_UNSENT_RECORD_BYTES_PER_CONTACT, holdListDownload } from "@/lib/list-download";
 import { buyerAudience } from "@/lib/ad-audience";
 
 /**
@@ -17,8 +17,10 @@ export async function GET(request: NextRequest) {
   const held = await holdListDownload(store);
   if (!held.ok) return new Response(held.message, { status: held.status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
   try {
-    const { csv } = await buyerAudience(store);
-    await held.settle(new TextEncoder().encode(csv).length);
+    const { csv, rows } = await buyerAudience(store);
+    // Settled at what was sent and at the buyers the file holds: everyone else on the list was read for it too (their
+    // records only: the audience reads none of the store's fields).
+    await held.settle(new TextEncoder().encode(csv).length, rows, LIST_UNSENT_RECORD_BYTES_PER_CONTACT);
     const day = new Date().toISOString().slice(0, 10);
     // No byte-order mark: the addresses are plain letters, and an upload form need not know what one is.
     return new Response(csv, {

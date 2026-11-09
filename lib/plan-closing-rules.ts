@@ -96,3 +96,16 @@ export const RENEWALS_AT_ONCE = 25;
  * taken from the store's studio figure at its size (lib/store-export.ts).
  */
 export const ENDED_STORE_EXPORTS = 1;
+
+/**
+ * Downloads of its list a store's owner may take once its plan has ended,
+ * before it closes (app/api/store/leads and app/api/store/audience,
+ * lib/list-download.ts): the list file, either kind, and the buyers audience,
+ * counted together for that ending, never taken from the ended store's
+ * studio figure, so a list of any size still leaves with its owner (review of
+ * #3354). Two, so a download that did not reach the browser can be taken
+ * again. Each is priced at the largest list the store's room can hold, with
+ * the rest of its closing (tests/plan-cost-registry.ts, closure). While a
+ * plan runs, a list download is taken from the studio figure at its size.
+ */
+export const ENDED_LIST_DOWNLOADS: number = 2;

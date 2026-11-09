@@ -1708,6 +1708,7 @@
     "app/api/mail/unsubscribe/route.ts",
     "app/api/mcp/route.ts",
     "app/api/numbers-link/route.ts",
+    "app/api/operator/do-not-contact/check/route.ts",
     "app/api/operator/do-not-contact/route.ts",
     "app/api/operator/search-console/route.ts",
     "app/api/outreach/stop/route.ts",

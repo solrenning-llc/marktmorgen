@@ -91,7 +91,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:recount:", "nl:recount:ids", "nl:recount:lock", "nl:recount:state", "nl:recount:sum",
   "nl:recover:asks", "nl:recover:link:", "nl:recover:once:", "nl:recover:sent:", "nl:ref:all", "nl:ref:by:",
   "nl:ref:c:", "nl:ref:code:", "nl:ref:cursor", "nl:ref:list:", "nl:ref:mine:", "nl:ref:mycode:",
-  "nl:ref:owed", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:", "nl:research:dnc", "nl:research:dnc:day:",
+  "nl:ref:owed", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:", "nl:research:dnc", "nl:research:dnc:day:", "nl:research:dnc:public",
   "nl:resend-budget:{", "nl:rev:ask:due", "nl:rev:ask:sent:", "nl:rev:link:", "nl:rev:lock:", "nl:rev:refunds:seen:",
   "nl:reading:", "nl:reading:day:", "nl:rev:refunds:since:", "nl:rev:stores", "nl:rl:", "nl:rl:address:", "nl:rl:aff:addr:",
   "nl:rl:aff:click:", "nl:rl:aff:ip:", "nl:rl:cm:addr:", "nl:rl:cm:ev:", "nl:rl:cm:ip:", "nl:rl:creators:",
@@ -371,8 +371,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ref:mycode:": C, "nl:ref:owed": C,
   "nl:remind:": C, "nl:remind:failed:": C, "nl:remind:lock": C,
   "nl:report:": C, "nl:report:t:": C,
-  // Marktmorgen's own research do-not-contact list and the public form's count of a day (lib/research-do-not-contact.ts): the company's, no store's.
-  "nl:research:dnc": C, "nl:research:dnc:day:": C,
+  // Marktmorgen's own research do-not-contact list and the public form's counts of a day and ever (lib/research-do-not-contact.ts): the company's, no store's.
+  "nl:research:dnc": C, "nl:research:dnc:day:": C, "nl:research:dnc:public": C,
   "nl:rev:": E, "nl:rev:all:": E, "nl:rev:ask:due": I, "nl:rev:ask:sent:": X(120), "nl:rev:link:": T("nl:erase:ix:", 60), "nl:rev:lock:": E,
   "nl:rev:new:": E, "nl:rev:off:": E, "nl:rev:pay:": E, "nl:rev:refunds:seen:": E, "nl:rev:refunds:since:": E,
   "nl:rev:stop:": T("nl:erase:ix:", 400), "nl:rev:stores": I, "nl:rev:sum:": E, "nl:rev:vis:": E,

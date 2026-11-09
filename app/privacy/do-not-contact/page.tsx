@@ -4,9 +4,7 @@ import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { cookies } from "next/headers";
 import { DoNotContactForm } from "@/components/do-not-contact-form";
-import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
-import { configuredDemoStudioAdmin } from "@/lib/house-store";
-import { isOperator } from "@/lib/search-console";
+import { researchOperator } from "@/lib/research-operator";
 
 export const metadata: Metadata = {
   title: "Don't contact me for research — Marktmorgen",
@@ -17,18 +15,6 @@ export const metadata: Metadata = {
 type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
 /**
- * Whether the person viewing is the one who runs the site: read only when an
- * operator is configured and a session cookie was sent (one session read, as
- * any studio page makes), so everyone else costs nothing here.
- */
-async function viewedByOperator(): Promise<boolean> {
-  if (!configuredDemoStudioAdmin()) return false;
-  const session = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
-  if (!session) return false;
-  return isOperator(await emailForSession(session).catch(() => null));
-}
-
-/**
  * Asking Marktmorgen never to contact you for its research
  * (lib/research-do-not-contact.ts): one form, no account
  * (components/do-not-contact-form.tsx). It keeps only the contact detail typed
@@ -37,7 +23,8 @@ async function viewedByOperator(): Promise<boolean> {
 export default async function DoNotContactPage({ searchParams }: Params) {
   const query = await searchParams;
   const statusKey = typeof query.status === "string" ? query.status : "";
-  const operator = await viewedByOperator();
+  // Read only when an operator is configured and a session cookie was sent, so everyone else costs nothing here.
+  const operator = await researchOperator(await cookies());
 
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">

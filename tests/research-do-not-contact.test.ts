@@ -127,8 +127,8 @@ test("the public form adds a person without an account, and refuses what it shou
   assert.equal(await mayContactForResearch("bo@example.com"), false);
   assert.equal(statusOf(await POST(form({ contact: "bo@example.com", name: "" }))), "done", "asking again says the same");
   assert.equal(statusOf(await POST(form({ contact: "nobody", name: "" }))), "contact");
-  // A field no person sees: told it worked, and nothing kept.
-  assert.equal(statusOf(await POST(form({ contact: "bot@example.com", name: "", [DO_NOT_CONTACT_TRAP]: "spam" }))), "done");
+  // A field no person sees: told only that nothing was saved, and nothing kept.
+  assert.equal(statusOf(await POST(form({ contact: "bot@example.com", name: "", [DO_NOT_CONTACT_TRAP]: "spam" }))), "error");
   assert.equal(await mayContactForResearch("bot@example.com"), true);
   const other = (await POST(form({ contact: "x@example.com" }, { origin: "https://evil.example", "sec-fetch-site": "cross-site" })));
   assert.equal(other.status, 403);

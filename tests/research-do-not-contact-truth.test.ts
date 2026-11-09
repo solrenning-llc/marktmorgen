@@ -6,10 +6,11 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/privacy/do-not-contact/route";
 import {
   DO_NOT_CONTACT_KEY,
+  DO_NOT_CONTACT_PUBLIC_KEY,
   RESEARCH_DO_NOT_CONTACT_MAX,
+  RESEARCH_DO_NOT_CONTACT_PUBLIC_MAX,
   RESEARCH_STOP_PER_HOUR,
   addToDoNotContact,
-  mayContactForResearch,
   normalizeResearchContact,
 } from "@/lib/research-do-not-contact";
 import { store as redis } from "./redis-stub";
@@ -33,11 +34,17 @@ function post(contact: string, xff: string): NextRequest {
 }
 const statusOf = (response: Response) => new URL(response.headers.get("location")!).searchParams.get("status");
 
-/** The list filled to `entries` entries, written straight into the hash (and the count the first version kept beside it). */
+/**
+ * The list filled to `entries` entries, written straight into the hash, with
+ * the count the first version kept beside it and the public form's count of
+ * requests at its ceiling (since the second pre-review the public form is
+ * measured by that count, and the operator's room is what it leaves).
+ */
 function filled(entries: number): void {
   redis.clear();
   for (let i = 0; i < entries; i += 1) redis.run(["HSET", DO_NOT_CONTACT_KEY, `email:filler${i}@example.com`, ""]);
   redis.run(["SET", OLD_COUNT_KEY, String(entries)]);
+  redis.run(["SET", DO_NOT_CONTACT_PUBLIC_KEY, String(RESEARCH_DO_NOT_CONTACT_PUBLIC_MAX)]);
 }
 
 test("with the list full, the public form answers the same whether or not the contact is on it", async () => {
@@ -142,22 +149,6 @@ test("the privacy policy and the page promise only what the code does", () => {
   assert.doesNotMatch(page, /We check that list before any research message/);
 });
 
-test("anything that sends email and touches research checks the do-not-contact list first", async () => {
-  const { readdirSync, statSync } = await import("node:fs");
-  const files: string[] = [];
-  const walk = (dir: string) => {
-    for (const name of readdirSync(join(root, dir))) {
-      const path = `${dir}/${name}`;
-      if (statSync(join(root, path)).isDirectory()) walk(path);
-      else if (/\.(ts|tsx|mjs|js)$/.test(name)) files.push(path);
-    }
-  };
-  for (const dir of ["app", "lib", "components", "scripts"]) walk(dir);
-  const sends = /\b(sendEmail|sendBatch|sendListBatch|sendTo)\s*\(|api\.resend\.com|resend\.emails/;
-  const unchecked = files.filter((file) => {
-    const text = readFileSync(join(root, file), "utf8").replace(/import\s*\{\s*SUPPORT_EMAIL\s*\}\s*from\s*"@\/lib\/creator-research";/g, "");
-    return sends.test(text) && /research|creator-research-store|RESPONSES_KEY/i.test(text) && !/\bmayContactForResearch\(/.test(text);
-  });
-  assert.deepEqual(unchecked, [], "a research message is sent only after mayContactForResearch says yes");
-  assert.equal(await mayContactForResearch("not a contact"), false);
-});
+// The guard on research senders by keyword that stood here became structural in
+// tests/research-do-not-contact-sending.test.ts (every file that sends email is a known
+// non-research sender, or lib/research-outreach.ts, which asks the list first).

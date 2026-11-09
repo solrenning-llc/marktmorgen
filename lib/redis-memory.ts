@@ -1154,29 +1154,37 @@ export class MemoryRedis {
           }
           return 1;
         }
-        // lib/research-do-not-contact.ts ADD_DO_NOT_CONTACT: the ceilings read before the contact is looked for, then one HSETNX.
-        if (key.startsWith("-- marktmorgen:research-dnc-add:v1\n") && args[0] === "2" && args.length === 8) {
-          const [, list, day, field, name, most, perDayRaw, seconds] = args;
-          this.scriptCalls += 1;
-          if ((this.run(["HLEN", list]) as number) >= Number(most)) return -1;
-          const perDay = Number(perDayRaw);
-          if (perDay > 0) {
+        // lib/research-do-not-contact.ts ADD_DO_NOT_CONTACT: the public form by its own counts, the operator by the list's
+        // size plus what the public form may still add; a count that is not a number fails the script, as Lua does.
+        if (key.startsWith("-- marktmorgen:research-dnc-add:v2\n") && args[0] === "3" && args.length === 11) {
+          const [, list, day, publicCount, field, name, by, most, publicMost, perDay, seconds] = args;
+          const count = (target: string) => {
             this.scriptCalls += 1;
-            const held = this.run(["GET", day]);
-            const today = held === null || held === undefined ? 0 : Number(held);
-            if (!Number.isFinite(today)) throw new Error("ERR user_script: attempt to compare nil with number");
-            if (today >= perDay) return -2;
-          }
-          this.scriptCalls += 1;
-          if (this.run(["HSETNX", list, field, name]) === 0) return 0;
-          if (perDay > 0) {
-            this.scriptCalls += 1;
+            const held = this.run(["GET", target]);
+            const value = held === null || held === undefined ? 0 : Number(held);
+            if (!Number.isFinite(value)) throw new Error("ERR user_script: attempt to compare nil with number");
+            return value;
+          };
+          const taken = count(publicCount);
+          if (by === "public") {
+            if (taken >= Number(publicMost)) return -1;
+            if (count(day) >= Number(perDay)) return -2;
+            this.scriptCalls += 2;
+            this.run(["INCR", publicCount]);
             if (this.run(["INCR", day]) === 1) {
               this.scriptCalls += 1;
               this.run(["EXPIRE", day, seconds]);
             }
+            this.scriptCalls += 1;
+            return this.run(["HSETNX", list, field, name]);
           }
-          return 1;
+          if (by !== "operator") throw new Error("ERR unknown mode");
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", list, field]) === 1) return 0;
+          this.scriptCalls += 1;
+          if ((this.run(["HLEN", list]) as number) + 1 + Math.max(0, Number(publicMost) - taken) > Number(most)) return -1;
+          this.scriptCalls += 1;
+          return this.run(["HSETNX", list, field, name]);
         }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);

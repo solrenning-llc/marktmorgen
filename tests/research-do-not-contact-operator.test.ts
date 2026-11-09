@@ -10,6 +10,7 @@ import {
   ADD_DO_NOT_CONTACT,
   DO_NOT_CONTACT_DAY_PREFIX,
   DO_NOT_CONTACT_KEY,
+  DO_NOT_CONTACT_PUBLIC_KEY,
   RESEARCH_DO_NOT_CONTACT_MAX,
   RESEARCH_DO_NOT_CONTACT_PUBLIC_MAX,
   RESEARCH_STOP_NEW_PER_DAY,
@@ -64,7 +65,7 @@ async function withOperator<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-test("the public form takes at most RESEARCH_STOP_NEW_PER_DAY new entries a day, and says it the same way to someone already listed", async () => {
+test("the public form takes at most RESEARCH_STOP_NEW_PER_DAY requests a day, and says it the same way to someone already listed", async () => {
   redis.clear();
   assert.ok(RESEARCH_STOP_NEW_PER_DAY > 0 && RESEARCH_STOP_NEW_PER_DAY <= 500);
   assert.equal(statusOf(await pub("early@example.com")), "done");
@@ -85,6 +86,8 @@ test("the public form stops at its own ceiling; the operator adds above it, up t
   redis.clear();
   assert.ok(RESEARCH_DO_NOT_CONTACT_PUBLIC_MAX < RESEARCH_DO_NOT_CONTACT_MAX);
   fill(RESEARCH_DO_NOT_CONTACT_PUBLIC_MAX);
+  // The public form is measured by its own count of requests taken, here at its ceiling.
+  redis.run(["SET", DO_NOT_CONTACT_PUBLIC_KEY, String(RESEARCH_DO_NOT_CONTACT_PUBLIC_MAX)]);
   assert.equal(statusOf(await pub("public@example.com")), "full");
   assert.equal(await mayContactForResearch("public@example.com"), true);
   await withOperator(async () => {
@@ -205,20 +208,26 @@ test("the page shows the operator's form only to the operator", async () => {
 });
 
 test("the stand-in answers the script as a real Redis did, step for step", () => {
-  // Run by hand against redis-server 7 on 9 November 2026 (redis-cli EVAL, the same keys and arguments):
-  // 1 0 1 -2 -2, TTL 172800, 1 -1 -1, name "", HLEN 3, day "2"; a day count that is not a number fails the script.
+  // Run by hand against redis-server 7.0.15 on 9 November 2026 (redis-cli EVAL, the same keys and arguments: the
+  // list's ceiling 4, the public form's 2 then 5, its day's 3 then 1):
+  // 1 0 -1 0 1 1 1 -1, TTL 172800, public count "2", day "2", name "", HLEN 4; then 1 -2 -1, count "1", day "1";
+  // a mode it does not know, or a count that is not a number, fails the script.
   redis.clear();
-  const ev = (field: string, name: string, perDay: number) => redis.run(["EVAL", ADD_DO_NOT_CONTACT, "2", "L", "D", field, name, "3", String(perDay), "172800"]);
+  const ev = (field: string, name: string, by: string, publicMost: number, perDay: number) =>
+    redis.run(["EVAL", ADD_DO_NOT_CONTACT, "3", "L", "D", "P", field, name, by, "4", String(publicMost), String(perDay), "172800"]);
   assert.deepEqual(
-    [ev("email:a", "", 2), ev("email:a", "x", 2), ev("email:b", "", 2), ev("email:c", "", 2), ev("email:a", "", 2)],
-    [1, 0, 1, -2, -2],
+    [
+      ev("email:a", "", "public", 2, 3), ev("email:a", "x", "public", 2, 3), ev("email:b", "", "public", 2, 3), ev("email:a", "", "operator", 2, 3),
+      ev("email:b", "", "operator", 2, 3), ev("email:c", "", "operator", 2, 3), ev("email:d", "", "operator", 2, 3), ev("email:e", "", "operator", 2, 3),
+    ],
+    [1, 0, -1, 0, 1, 1, 1, -1],
   );
   assert.equal(redis.run(["TTL", "D"]), 172_800);
-  assert.deepEqual([ev("email:c", "", 0), ev("email:d", "", 0), ev("email:a", "", 0)], [1, -1, -1]);
-  assert.equal(redis.run(["HGET", "L", "email:a"]), "");
-  assert.equal(redis.run(["HLEN", "L"]), 3);
-  assert.equal(redis.run(["GET", "D"]), "2");
-  redis.run(["SET", "D", "abc"]);
-  redis.run(["DEL", "L"]);
-  assert.throws(() => ev("email:z", "", 2));
+  assert.deepEqual([redis.run(["GET", "P"]), redis.run(["GET", "D"]), redis.run(["HGET", "L", "email:a"]), redis.run(["HLEN", "L"])], ["2", "2", "", 4]);
+  redis.run(["DEL", "L", "D", "P"]);
+  assert.deepEqual([ev("email:x", "", "public", 5, 1), ev("email:y", "", "public", 5, 1), ev("email:z", "", "operator", 5, 1)], [1, -2, -1]);
+  assert.deepEqual([redis.run(["GET", "P"]), redis.run(["GET", "D"])], ["1", "1"]);
+  assert.throws(() => ev("email:q", "", "other", 5, 1));
+  redis.run(["SET", "P", "abc"]);
+  assert.throws(() => ev("email:q", "", "operator", 5, 1));
 });

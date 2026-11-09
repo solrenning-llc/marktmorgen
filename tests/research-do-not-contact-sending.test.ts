@@ -54,16 +54,20 @@ function senderFiles(): string[] {
     }
   };
   for (const dir of ["app", "lib", "components", "scripts"]) walk(dir);
-  const SENDING: Record<string, string[]> = { "@/lib/email": ["sendEmail", "sendBatch", "sendListBatch", "queuedShipmentMailSender"], "@/lib/mail": ["sendTo"] };
+  const SENDING: Record<string, string[]> = {
+    "@/lib/email": ["sendEmail", "sendBatch", "sendListBatch", "queuedShipmentMailSender"],
+    "@/lib/mail": ["sendTo"],
+    "@/lib/ses": ["sesSend", "sesBatch"],
+  };
   const out = new Set<string>();
   for (const file of files) {
     const text = readFileSync(join(root, file), "utf8");
     for (const m of text.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["']([^"']+)["']/g)) {
       const from = m[2];
       const names = m[1].split(",").map((s) => s.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]).filter(Boolean);
-      if (Object.hasOwn(SENDING, from) ? names.some((n) => SENDING[from].includes(n)) : /(^|\/)(email|mail)$/.test(from) && from.startsWith(".")) out.add(file);
+      if (Object.hasOwn(SENDING, from) ? names.some((n) => SENDING[from].includes(n)) : /(^|\/)(email|mail|ses)$/.test(from) && from.startsWith(".")) out.add(file);
     }
-    if (/import\s*\*\s*as\s+\w+\s+from\s+["']@\/lib\/(email|mail)["']|import\(\s*["']@\/lib\/(email|mail)["']\s*\)|require\(\s*["']@\/lib\/(email|mail)["']\s*\)/.test(text)) out.add(file);
+    if (/import\s*\*\s*as\s+\w+\s+from\s+["']@\/lib\/(email|mail|ses)["']|import\(\s*["']@\/lib\/(email|mail|ses)["']\s*\)|require\(\s*["']@\/lib\/(email|mail|ses)["']\s*\)/.test(text)) out.add(file);
   }
   return [...out].sort();
 }
@@ -75,14 +79,14 @@ test("no path but sendResearchMessage can send a research message: every other s
   assert.deepEqual(unknown, [], "a new file that sends email: research goes through sendResearchMessage (lib/research-outreach.ts); anything else is added to tests/email-senders.ts");
   const gone = NOT_RESEARCH_SENDERS.filter((f) => !senders.includes(f));
   assert.deepEqual(gone, [], "remove from tests/email-senders.ts what no longer sends");
-  // Nothing reaches a mail provider but lib/email.ts.
+  // Nothing reaches a mail provider but the two transports, lib/email.ts (Resend) and lib/ses.ts (Amazon).
   const direct: string[] = [];
   for (const dir of ["app", "lib", "components", "scripts"]) {
     const walk = (d: string) => {
       for (const name of readdirSync(join(root, d))) {
         const path = `${d}/${name}`;
         if (statSync(join(root, path)).isDirectory()) walk(path);
-        else if (/\.(ts|tsx|mjs|js)$/.test(name) && path !== "lib/email.ts" && /api\.resend\.com|SendEmailCommand|sesv2|\/v2\/email\/outbound-emails/.test(readFileSync(join(root, path), "utf8"))) direct.push(path);
+        else if (/\.(ts|tsx|mjs|js)$/.test(name) && path !== "lib/email.ts" && path !== "lib/ses.ts" && /api\.resend\.com|SendEmailCommand|sesv2|\/v2\/email\/outbound-emails/.test(readFileSync(join(root, path), "utf8"))) direct.push(path);
       }
     };
     walk(dir);

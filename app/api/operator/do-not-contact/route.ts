@@ -1,24 +1,21 @@
 import type { NextRequest } from "next/server";
-import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { originFrom } from "@/lib/request-origin";
-import { OPERATOR_CEILING, addToDoNotContact, normalizeResearchContact } from "@/lib/research-do-not-contact";
-import { isOperator } from "@/lib/search-console";
+import { addToDoNotContact, normalizeResearchContact } from "@/lib/research-do-not-contact";
+import { researchOperator } from "@/lib/research-operator";
 
 /**
  * The operator adding to the research do-not-contact list someone who asked
  * by email (lib/research-do-not-contact.ts): the same form as the public one
  * on /privacy/do-not-contact, shown only to the person who runs the site, up
- * to the whole list's ceiling, with no per-connection or daily count. Anybody
- * else is answered as if this did not exist, as app/api/operator/search-console is.
+ * to the whole list's ceiling, with no per-connection or daily count.
+ * Anybody else, a locked session, or a site with no operator configured, is
+ * answered as if this did not exist (lib/research-operator.ts).
  */
 export async function POST(request: NextRequest) {
   const notFound = new Response("Not found.", { status: 404, headers: { "Cache-Control": "no-store" } });
   if (fromAnotherSite(request)) return notFound;
-  const session = request.cookies.get(SESSION_COOKIE)?.value ?? "";
-  if (!session) return notFound;
-  const email = await emailForSession(session).catch(() => null);
-  if (!isOperator(email)) return notFound;
+  if (!(await researchOperator(request.cookies))) return notFound;
   const origin = originFrom(request);
   const away = (status: string) =>
     new Response(null, { status: 303, headers: { Location: `${origin}/privacy/do-not-contact?status=${status}`, "Cache-Control": "no-store" } });
@@ -28,7 +25,7 @@ export async function POST(request: NextRequest) {
   if (!normalizeResearchContact(contact)) return away("contact");
   if (form.get("confirm") !== "yes") return away("confirm");
   try {
-    const result = await addToDoNotContact({ contact, name: String(form.get("name") ?? "") }, OPERATOR_CEILING);
+    const result = await addToDoNotContact({ contact, name: String(form.get("name") ?? "") }, "operator");
     return away(result === "added" || result === "listed" ? "done" : "full");
   } catch (error) {
     console.error("an operator's do-not-contact entry failed", error);

@@ -41,37 +41,66 @@ function asciiHost(host: string): string | null {
   return TOP_LEVEL.test(ascii.slice(ascii.lastIndexOf(".") + 1)) ? ascii : null;
 }
 
+/** Other names of one site: a profile on either is the same profile. */
+const SAME_SITE: Readonly<Record<string, string>> = { "twitter.com": "x.com", "fb.com": "facebook.com", "instagr.am": "instagram.com" };
+/** Sites whose profile paths do not depend on case (instagram.com/AnaMakes is instagram.com/anamakes). */
+const CASELESS_PATHS = new Set(["instagram.com", "x.com", "facebook.com", "tiktok.com", "threads.net", "github.com", "pinterest.com", "linkedin.com"]);
+/** Gmail reads no dots in the name and is also googlemail.com. */
+const GMAIL = new Set(["gmail.com", "googlemail.com"]);
+
+/** A path with its percent-escapes written one way (%C3%A9, never %c3%a9), its trailing slash gone. */
+function pathOf(url: URL): string {
+  return url.pathname.replace(/\/+$/, "").replace(/%[0-9a-f]{2}/gi, (escape) => escape.toUpperCase());
+}
+
 /**
- * A contact detail in the one form the list keeps and checks: an email
- * address in lower case, its domain in punycode, or a link to a site or
- * profile as its host (without "www.", "m." or "mobile.") and path, in lower
- * case, without its query, fragment or trailing slash. What people put around
- * an address when they copy it ("mailto:", <>, quotes, a last full stop or
- * comma) is taken off first. Anything else, or a form longer than
- * CONTACT_FIELD_MAX_BYTES, is null: it is neither kept nor contacted.
+ * A contact detail in the one form the list keeps and checks, so one person
+ * is one entry and two people are never one:
+ *
+ *   - an email address in lower case, its domain in punycode, without its
+ *     "+tag"; at Gmail (and googlemail.com, kept as gmail.com) without dots;
+ *   - a link to a site or profile as its host in lower case, every "www.",
+ *     "m." and "mobile." taken off, the site's other names joined
+ *     (twitter.com is x.com, fb.com facebook.com, instagr.am instagram.com),
+ *     and its path as written, without query, fragment or trailing slash;
+ *     the path is lowered only on sites where its case does not matter
+ *     (CASELESS_PATHS, and YouTube's @handles), so channel ids that differ by
+ *     case stay apart; facebook.com/profile.php keeps its numeric id, and
+ *     without one is refused.
+ *
+ * What people put around an address when they copy it ("mailto:", <>,
+ * quotes, a last full stop or comma) is taken off first. Anything else, or a
+ * form longer than CONTACT_FIELD_MAX_BYTES, is null: it is neither kept nor
+ * contacted.
  */
 export function normalizeResearchContact(raw: string): string | null {
   if (typeof raw !== "string") return null;
-  let text = raw.normalize("NFC").trim().toLowerCase();
+  let text = raw.normalize("NFC").trim();
   if (!text || text.length > CONTACT_MAX_LENGTH) return null;
   for (let pass = 0; pass < 4; pass += 1) {
     const before = text;
     text = text.replace(LEADING, "").replace(TRAILING, "");
-    if (text.startsWith("mailto:")) text = text.slice("mailto:".length).replace(/\?.*$/, "");
+    if (/^mailto:/i.test(text)) text = text.slice("mailto:".length).replace(/\?.*$/, "");
     if (text === before) break;
   }
   if (!text || /\s/.test(text)) return null;
   let normalized: string;
   if (text.includes("@") && !text.includes("/") && !text.includes(":")) {
-    const parts = text.split("@");
+    const parts = text.toLowerCase().split("@");
     if (parts.length !== 2) return null;
-    const [local, domain] = parts;
-    if (!local || local.length > 64 || !LOCAL_PART.test(local)) return null;
-    const host = asciiHost(domain);
+    const [written, domain] = parts;
+    if (!written || written.length > 64 || !LOCAL_PART.test(written)) return null;
+    let host = asciiHost(domain);
     if (!host) return null;
+    let local = written.split("+")[0];
+    if (GMAIL.has(host)) {
+      host = "gmail.com";
+      local = local.replace(/\./g, "");
+    }
+    if (!local) return null;
     normalized = `email:${local}@${host}`;
   } else {
-    const withScheme = /^[a-z][a-z0-9+.-]*:/.test(text) ? text : `https://${text}`;
+    const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`;
     let url: URL;
     try {
       url = new URL(withScheme);
@@ -82,9 +111,20 @@ export function normalizeResearchContact(raw: string): string | null {
     if (url.username || url.password || url.port) return null;
     const host = asciiHost(url.hostname);
     if (!host) return null;
-    // The same profile on the mobile site, or behind "www.", is one entry.
-    const site = host.replace(/^(www|m|mobile)\.(?=[^.]+\.[^.]+)/, "");
-    const path = url.pathname.replace(/\/+$/, "").toLowerCase();
+    // The same profile on the mobile site, or behind "www.", however many, is one entry.
+    let site = host;
+    for (let before = ""; before !== site; ) {
+      before = site;
+      site = site.replace(/^(www|m|mobile)\.(?=[^.]+\.[^.]+)/, "");
+    }
+    site = SAME_SITE[site] ?? site;
+    let path = pathOf(url);
+    if (CASELESS_PATHS.has(site) || (site === "youtube.com" && /^\/@/.test(path))) path = path.toLowerCase();
+    if (site === "facebook.com" && path === "/profile.php") {
+      const id = url.searchParams.get("id") ?? "";
+      if (!/^\d{1,20}$/.test(id)) return null;
+      path = `${path}?id=${id}`;
+    }
     normalized = `link:${site}${path}`;
   }
   return new TextEncoder().encode(normalized).length <= CONTACT_FIELD_MAX_BYTES ? normalized : null;

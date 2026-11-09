@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { clientAddress, essentialLimitState, fromAnotherSite, limited } from "@/lib/request-guard";
-import { PUBLIC_CEILING, RESEARCH_STOP_PER_HOUR, addToDoNotContact, normalizeResearchContact } from "@/lib/research-do-not-contact";
+import { RESEARCH_STOP_PER_HOUR, addToDoNotContact, normalizeResearchContact } from "@/lib/research-do-not-contact";
 import { DO_NOT_CONTACT_TRAP } from "@/lib/research-contact";
 import { shareAddress } from "@/lib/traffic-rules";
 
@@ -15,9 +15,10 @@ import { shareAddress } from "@/lib/traffic-rules";
  *   confirm ("yes": the person read that the entry stays on the list)
  *
  * Counted per connection, an IPv6 one by its network (shareAddress, a /48),
- * and inside PUBLIC_CEILING: past the list's public ceiling or the day's new
- * entries, every contact is answered "full", listed or not, so the page never
- * tells who is on the list.
+ * and by the public form's own counts of requests taken (never by the list's
+ * size): past them every contact is answered "full", listed or not, and a
+ * request taken counts the same whether it was new, so neither this answer
+ * nor the next tells who is on the list.
  */
 export async function POST(request: NextRequest) {
   const origin = originFrom(request);
@@ -30,8 +31,8 @@ export async function POST(request: NextRequest) {
   } catch {
     return new Response("Bad request", { status: 400 });
   }
-  // A field no person can see: whatever filled it in is told it worked, and nothing is kept.
-  if (String(form.get(DO_NOT_CONTACT_TRAP) ?? "").trim()) return away("done");
+  // A field no person can see: whatever filled it in is told only that nothing was saved.
+  if (String(form.get(DO_NOT_CONTACT_TRAP) ?? "").trim()) return away("error");
   const contact = String(form.get("contact") ?? "");
   if (!normalizeResearchContact(contact)) return away("contact");
   if (form.get("confirm") !== "yes") return away("confirm");
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
   if (limit === "exceeded") return away("limited");
   if (limit === "unknown") return away("error");
   try {
-    const result = await addToDoNotContact({ contact, name: String(form.get("name") ?? "") }, PUBLIC_CEILING);
+    const result = await addToDoNotContact({ contact, name: String(form.get("name") ?? "") }, "public");
     // Already on the list is said the same way as added, and a ceiling is said before the list is looked in.
     return away(result === "added" || result === "listed" ? "done" : "full");
   } catch (error) {

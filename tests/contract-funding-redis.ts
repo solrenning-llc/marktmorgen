@@ -9,7 +9,7 @@ export function reset(){ledger.clear();calls.length=0;available=true;failure=fal
 export function settings(v:{available?:boolean;failure?:boolean;lostAck?:boolean;response?:unknown[]|null}){if(v.available!==undefined)available=v.available;if(v.failure!==undefined)failure=v.failure;if(v.lostAck!==undefined)lostAck=v.lostAck;if(v.response!==undefined)response=v.response;}
 export function seed(c:ContractFundingConfiguration){ledger.set('nl:contract-reserve:v1',new Map([['review',c.reviewId],['policy',createHash('sha256').update(c.binding).digest('hex')],['reserved',String(c.carryForwardCents)],['carried',String(c.carryForwardCents)],...Object.entries(c.fundedGrants).map(([key,n]):[string,string]=>['slots:'+key,String(n)])]));}
 
-function activate(args:(string|number)[]):unknown[]{
+function activate(args:(string|number)[],readOnly=false):unknown[]{
  const [key,binding,review,store,choice,nonce,subscription,rawCreated,rawNow,rawMinimum,rawLimit,rawCarry,rawSubmission,rawFunded,phase,rawStart,rawEnd]=args;
  const h=ledger.get(String(key));
  if(!h||h.get('policy')!==binding||h.get('review')!==review)return[0];
@@ -26,6 +26,8 @@ function activate(args:(string|number)[]):unknown[]{
  if(!['trial','paid'].includes(String(phase))||!Number.isSafeInteger(start)||!Number.isSafeInteger(finish)||start<created||start>now||finish<=now||finish<=start||finish*1000>through)return[0];
  const proof=[nonce,subscription,choice,rawCreated,phase,rawStart,rawEnd].join('|'),consumed=h.get('activated:'+nonce),active=h.get('active:'+store);
  if(consumed)return consumed===proof&&active===proof?[[2,finish]]:[0];
+ // The read-only observation (OBSERVE_CONTRACT) stops here: never a new activation, never a write.
+ if(readOnly)return[0];
  if(now>activation)return[0];
  if(h.get('pending:'+store)!==nonce||active)return[0];
  h.set('activated:'+nonce,proof);h.set('active:'+store,proof);h.delete('pending:'+store);
@@ -33,7 +35,7 @@ function activate(args:(string|number)[]):unknown[]{
 }
 
 
-function activateSwitch(args:(string|number)[]):unknown[]{
+function activateSwitch(args:(string|number)[],readOnly=false):unknown[]{
  const [key,binding,review,store,choice,nonce,sub,rawCreated,rawNow,rawMinimum,rawLimit,rawCarry,rawSubmission,rawFunded,phase,rawStart,rawFinish,rawSpan]=args;
  const h=ledger.get(String(key));if(!h||h.get('policy')!==binding||h.get('review')!==review)return[0];
  const parse=(v:unknown)=>typeof v==='string'&&/^(0|[1-9][0-9]*)$/.test(v)&&Number(v)<=1e12?Number(v):NaN;
@@ -56,6 +58,7 @@ function activateSwitch(args:(string|number)[]):unknown[]{
  const proof=[nonce,sub,choice,rawCreated,phase,rawStart,rawFinish].join('|'),consumed=h.get('activated:'+nonce),active=h.get('active:'+store);
  if(proof.length>256)return[0];
  if(consumed)return consumed===proof&&active===proof?[[2,finish]]:[0];
+ if(readOnly)return[0];
  if(now>deadline)return[0];
  if(active!==sourceRaw||h.get('pending:'+store)!==nonce)return[0];
  h.set('activated:'+nonce,proof);h.set('active:'+store,proof);h.delete('pending:'+store);return lostAck?[]:[[1,deadline]];
@@ -66,11 +69,11 @@ export async function redisPipeline(commands:(string|number)[][]):Promise<unknow
  calls.push(commands);if(failure)throw Error('Redis unavailable');if(response!==null)return response;
  if(String(commands[0]?.[1]).includes("local switchSource=redis.call")){
   if(commands.length!==1||commands[0][0]!=='EVAL'||commands[0][2]!==1)throw Error('Expected one switch activation');
-  return activateSwitch(commands[0].slice(3));
+  return activateSwitch(commands[0].slice(3),!String(commands[0][1]).includes("redis.call('HSET'"));
  }
  if(String(commands[0]?.[1]).includes("local consumed=redis.call")){
   if(commands.length!==1||commands[0][0]!=='EVAL'||commands[0][2]!==1)throw Error('Expected one activation');
-  return activate(commands[0].slice(3));
+  return activate(commands[0].slice(3),!String(commands[0][1]).includes("redis.call('HSET'"));
  }
  const [op,,keys,key,binding,review,store,choice,rawCharge,rawLimit,rawCarry,rawFunded,nonce,receipt,action,sourceSubscription,rawNow]=commands[0];
  if(op!=='EVAL'||keys!==1||commands.length!==1)throw Error('Expected one contract reservation');

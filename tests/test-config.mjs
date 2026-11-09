@@ -198,6 +198,14 @@ function centralAliases(file,root,here){
   aliases['@/lib/billing']=join(here,'contract-route-billing.ts');
   aliases['@/lib/store']=join(here,'contract-route-store.ts');
  }
+ if(file==='plan-card-funded.test.ts'){
+  aliases['@/lib/redis']=join(here,'contract-funding-redis.ts');
+  aliases['@/lib/contract-funding-rules']=join(here,'contract-funding-approved-policy.ts');
+  aliases['@/lib/commercial-margin']=join(here,'contract-commercial-context.ts');
+  aliases['@/lib/ai-spend-policy']=join(here,'commercial-ai-approved-policy.ts');
+  aliases['@/lib/upload-budget-policy']=join(here,'upload-budget-approved-policy.ts');
+  aliases['@/lib/llc-fixed-costs']=join(here,'llc-fixed-approved-policy.ts');
+ }
  if(file==='contract-billing-metadata.test.ts'){
   aliases['@/lib/plan']=join(here,'contract-billing-plan.ts');
   aliases['@/lib/contract-funding']=join(here,'contract-activation-billing.ts');

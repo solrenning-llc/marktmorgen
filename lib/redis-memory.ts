@@ -23,6 +23,34 @@ import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/pat
 
 type Entry = string | string[] | Map<string, string> | Set<string> | { score: number; member: string }[];
 
+/**
+ * A sorted set's order, as Redis keeps it: by score, then members of the same score by their bytes (memcmp of UTF-8),
+ * not by the locale's collation (which puts "C3|Z" after "c2|a"; Redis puts it first).
+ */
+const encoder = new TextEncoder();
+/** A score times its weight, as ZUNIONSTORE / ZINTERSTORE weigh it: inf x 0 is 0 in Redis, never NaN. */
+const weighed = (score: number, weight: number): number => {
+  const product = score * weight;
+  return Number.isNaN(product) ? 0 : product;
+};
+/**
+ * Redis's zunionInterAggregate: SUM adds and turns NaN into 0; MIN / MAX keep the target unless the value is lesser /
+ * greater (so a NaN value never wins).
+ */
+const aggregate = (how: string, target: number, value: number): number => {
+  if (how === "MIN") return value < target ? value : target;
+  if (how === "MAX") return value > target ? value : target;
+  const sum = target + value;
+  return Number.isNaN(sum) ? 0 : sum;
+};
+function zsetOrder(a: { score: number; member: string }, b: { score: number; member: string }): number {
+  if (a.score !== b.score) return a.score - b.score;
+  const left = encoder.encode(a.member);
+  const right = encoder.encode(b.member);
+  for (let i = 0; i < Math.min(left.length, right.length); i += 1) if (left[i] !== right[i]) return left[i] - right[i];
+  return left.length - right.length;
+}
+
 export class MemoryRedis {
   private data = new Map<string, Entry>();
   /** When a key stops existing, in ms since the epoch. */
@@ -84,6 +112,12 @@ export class MemoryRedis {
     return made;
   }
 
+  /** A sorted set read without making it: a missing key stays missing (EXISTS 0), as a read leaves it in Redis. */
+  private zsetSeen(key: string): { score: number; member: string }[] {
+    const held = this.data.get(key);
+    return Array.isArray(held) && (held.length === 0 || typeof held[0] === "object") ? (held as { score: number; member: string }[]) : [];
+  }
+
   private zset(key: string): { score: number; member: string }[] {
     const held = this.data.get(key);
     if (Array.isArray(held) && (held.length === 0 || typeof held[0] === "object")) {
@@ -92,6 +126,15 @@ export class MemoryRedis {
     const made: { score: number; member: string }[] = [];
     this.data.set(key, made);
     return made;
+  }
+
+  /** ZUNIONSTORE / ZINTERSTORE's WEIGHTS: one number a source, 1 each when not given; anything else is Redis's error. */
+  private weights(flags: string[], args: string[], howMany: number): number[] {
+    const at = flags.indexOf("WEIGHTS");
+    if (at < 0) return Array.from({ length: howMany }, () => 1);
+    const given = args.slice(at + 1, at + 1 + howMany).map(Number);
+    if (given.length !== howMany || !given.every(Number.isFinite)) throw new Error("ERR weight value is not a float");
+    return given;
   }
 
   /** Runs one command, the way redisPipeline runs each of its own. */
@@ -367,6 +410,20 @@ export class MemoryRedis {
           const targets = args.slice(2, count + 1);
           if (this.run(["GET", lock]) !== args[count + 1]) return 0;
           for (const target of targets) this.run(["DEL", target]);
+          return 1;
+        }
+        // lib/payment-request-store.ts SAVE: a request's record written only while its write lock is the writer's,
+        // "new" only when absent, "edit" only over the record still there, with its open entry and reminder in step.
+        if (key.startsWith("-- marktmorgen:payreq-save:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, lock, target, open, due, token, mode, value, seconds, id, openScore, member, dueScore] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          const there = Number(this.run(["EXISTS", target]));
+          if ((mode === "new" && there !== 0) || (mode !== "new" && there !== 1)) return 2;
+          this.run(["SET", target, value, "EX", seconds]);
+          if (mode === "edit") {
+            this.run(openScore === "" ? ["ZREM", open, id] : ["ZADD", open, openScore, id]);
+            this.run(dueScore === "" ? ["ZREM", due, member] : ["ZADD", due, dueScore, member]);
+          }
           return 1;
         }
         if (key.startsWith("-- marktmorgen:pause-due-observation:v1\n") && args[0] === "1" && args.length === 3) {
@@ -829,7 +886,7 @@ export class MemoryRedis {
           const most = Number(rawMost), entry = Number(rawEntry), step = Number(rawStep);
           if (![most, entry, step].every(Number.isSafeInteger) || most < 1 || entry < 0 || step < 1) return [-1, 0];
           if (root.r === null) {
-            const ids = this.zset(lesson).slice().sort((a, b) => a.score - b.score || a.member.localeCompare(b.member)).slice(0, most + 1).map(row => row.member);
+            const ids = this.zset(lesson).slice().sort((a, b) => zsetOrder(a, b)).slice(0, most + 1).map(row => row.member);
             if (ids.length > most) return [-1, 0];
             for (const id of ids) {
               const value = this.run(["HGET", comments, id]);
@@ -1496,12 +1553,16 @@ export class MemoryRedis {
       case "ZADD": {
         const z = this.zset(key);
         // Flags before the first score, in any order, as Redis reads them. "NX": a member already there keeps the
-        // score it has. "XX": only a member already there is moved. "CH": count the members changed too.
+        // score it has. "XX": only a member already there is moved. "GT" / "LT": a member already there is moved only to
+        // a greater / lesser score (a new member is still added). "CH": count the members changed too.
         let flags = 0;
-        while (flags < args.length && ["NX", "XX", "CH"].includes(String(args[flags]).toUpperCase())) flags += 1;
+        while (flags < args.length && ["NX", "XX", "GT", "LT", "CH"].includes(String(args[flags]).toUpperCase())) flags += 1;
         const set = new Set(args.slice(0, flags).map((flag) => String(flag).toUpperCase()));
         const onlyNew = set.has("NX");
         const onlyOld = set.has("XX");
+        // Redis refuses GT or LT with NX, and GT with LT.
+        if ((onlyNew && (set.has("GT") || set.has("LT"))) || (set.has("GT") && set.has("LT"))) throw new Error("ERR GT, LT, and/or NX options at the same time are not compatible");
+        const moves = (from: number, to: number) => (set.has("GT") ? to > from : set.has("LT") ? to < from : to !== from);
         const pairs = args.slice(flags);
         // Redis's answer: the members added, or with CH the members added or whose score changed.
         let added = 0;
@@ -1511,7 +1572,7 @@ export class MemoryRedis {
           const member = pairs[i + 1];
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) {
-            if (!onlyNew && z[at].score !== score) {
+            if (!onlyNew && moves(z[at].score, score)) {
               z[at].score = score;
               changed += 1;
             }
@@ -1520,7 +1581,7 @@ export class MemoryRedis {
             added += 1;
           }
         }
-        z.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
+        z.sort((a, b) => zsetOrder(a, b));
         return set.has("CH") ? added + changed : added;
       }
       case "ZREM": {
@@ -1530,6 +1591,8 @@ export class MemoryRedis {
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) { z.splice(at, 1); gone += 1; }
         }
+        // Redis deletes a sorted set left empty: EXISTS then answers 0.
+        if (z.length === 0) this.data.delete(key);
         return gone;
       }
       case "ZREMRANGEBYSCORE": {
@@ -1620,30 +1683,34 @@ export class MemoryRedis {
         return limited.map((e) => e.member);
       }
       case "ZINTERSTORE": {
-        // ZINTERSTORE dest numkeys key... [AGGREGATE MAX]. The destination is
-        // `key`; the sources follow the count.
+        // ZINTERSTORE dest numkeys key... [WEIGHTS w...] [AGGREGATE SUM|MIN|MAX]. The destination is
+        // `key`; the sources follow the count; each source's scores are multiplied by its weight first.
         const howMany = Number(args[0]);
         const sources = args.slice(1, 1 + howMany);
         const flags = args.map((a) => a.toUpperCase());
         const how = flags.indexOf("AGGREGATE") >= 0 ? flags[flags.indexOf("AGGREGATE") + 1] : "SUM";
+        const weights = this.weights(flags, args, howMany);
         const [firstKey, ...restKeys] = sources;
         for (const one of sources) this.live(one);
         const held = new Map<string, number>();
-        for (const entry of this.zset(firstKey ?? "")) held.set(entry.member, entry.score);
-        for (const other of restKeys) {
-          const theirs = new Map(this.zset(other).map((e) => [e.member, e.score]));
+        for (const entry of this.zsetSeen(firstKey ?? "")) held.set(entry.member, weighed(entry.score, weights[0]));
+        for (const [index, other] of restKeys.entries()) {
+          // A later set's score is weighed as it is (Redis turns NaN into 0 only in the sum, or keeps the target).
+          const theirs = new Map(this.zsetSeen(other).map((e) => [e.member, e.score * weights[index + 1]]));
           for (const [member, score] of [...held]) {
             const found = theirs.get(member);
             if (found === undefined) {
               held.delete(member);
               continue;
             }
-            held.set(member, how === "MAX" ? Math.max(score, found) : how === "MIN" ? Math.min(score, found) : score + found);
+            held.set(member, aggregate(how, score, found));
           }
         }
+        // A result with no member deletes the destination, as Redis does.
         const made = [...held].map(([member, score]) => ({ score, member }));
-        made.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
-        this.data.set(key, made);
+        made.sort((a, b) => zsetOrder(a, b));
+        if (made.length) this.data.set(key, made);
+        else this.data.delete(key);
         this.until.delete(key);
         // Redis answers with how many are in the set it just made, which is
         // what the search reads its total from.
@@ -1657,22 +1724,32 @@ export class MemoryRedis {
         const score = (at >= 0 ? z[at].score : 0) + by;
         if (at >= 0) z[at].score = score;
         else z.push({ score, member });
-        z.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
+        z.sort((a, b) => zsetOrder(a, b));
         this.data.set(key, z);
         return String(score);
       }
       case "ZUNIONSTORE": {
-        // ZUNIONSTORE dest numkeys key... — scores summed, as Redis does by default.
+        // ZUNIONSTORE dest numkeys key... [WEIGHTS w...] [AGGREGATE SUM|MIN|MAX] — scores summed by default, as
+        // Redis does, each source's scores multiplied by its weight first.
         const howMany = Number(args[0]);
         const sources = args.slice(1, 1 + howMany);
+        const flags = args.map((a) => a.toUpperCase());
+        const how = flags.indexOf("AGGREGATE") >= 0 ? flags[flags.indexOf("AGGREGATE") + 1] : "SUM";
+        const weights = this.weights(flags, args, howMany);
         const held = new Map<string, number>();
-        for (const one of sources) {
+        for (const [index, one] of sources.entries()) {
           this.live(one);
-          for (const entry of this.zset(one)) held.set(entry.member, (held.get(entry.member) ?? 0) + entry.score);
+          for (const entry of this.zsetSeen(one)) {
+            const score = weighed(entry.score, weights[index]);
+            const before = held.get(entry.member);
+            held.set(entry.member, before === undefined ? score : aggregate(how, before, score));
+          }
         }
+        // A result with no member deletes the destination, as Redis does.
         const made = [...held].map(([member, score]) => ({ score, member }));
-        made.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
-        this.data.set(key, made);
+        made.sort((a, b) => zsetOrder(a, b));
+        if (made.length) this.data.set(key, made);
+        else this.data.delete(key);
         this.until.delete(key);
         return made.length;
       }
@@ -1680,6 +1757,16 @@ export class MemoryRedis {
         const z = [...this.zset(key)].reverse();
         const at = z.findIndex((e) => e.member === args[0]);
         return at >= 0 ? at : null;
+      }
+      case "ZRANGE": {
+        // By rank only (no BYSCORE / BYLEX / REV): from the lowest score, members of a score by their bytes.
+        const z = this.zset(key);
+        const [from, to] = [Number(args[0]), Number(args[1])];
+        const start = from < 0 ? Math.max(0, z.length + from) : from;
+        const end = to < 0 ? z.length + to : to;
+        const page = z.slice(start, end + 1);
+        if (args.slice(2).map((a) => a.toUpperCase()).includes("WITHSCORES")) return page.flatMap((e) => [e.member, String(e.score)]);
+        return page.map((e) => e.member);
       }
       case "ZREVRANGE": {
         const z = [...this.zset(key)].reverse();

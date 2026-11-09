@@ -71,7 +71,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:mail:flowstats:", "nl:mail:health:", "nl:mail:lock", "nl:mail:paused:", "nl:mail:queue",
   "nl:mail:ramp:", "nl:mail:segs:", "nl:mail:used:", "nl:manage:link:", "nl:manage:opens:",
   "nl:manage:portal:", "nl:meet:conn:", "nl:meet:lock:", "nl:meet:log:", "nl:meet:q", "nl:meet:r:",
-  "nl:meet:refresh:", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
+  "nl:meet:refresh:", "nl:meet:refund-turns", "nl:meet:refund-turns:said", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
   "nl:meet:zoomseen:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:read:", "nl:metaads:reading:",
   "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
   "nl:monthly:sent:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
@@ -302,7 +302,11 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:mail:mk:": T("nl:store:leads:", 400), "nl:mail:paused:": E, "nl:mail:queue": I, "nl:mail:ramp:": E, "nl:mail:segs:": E,
   "nl:mail:unsub:": T("nl:store:leads:"), "nl:mail:used:": E,
   "nl:manage:link:": X(1), "nl:manage:opens:": X(1), "nl:manage:portal:": E,
-  "nl:meet:conn:": E, "nl:meet:lock:": E, "nl:meet:log:": E, "nl:meet:q": I, "nl:meet:r:": E, "nl:meet:refresh:": E, "nl:meet:rf:": E,
+  "nl:meet:conn:": E, "nl:meet:lock:": E, "nl:meet:log:": E, "nl:meet:q": I, "nl:meet:r:": E, "nl:meet:refresh:": E,
+  // The meetings' refund job's rotation (lib/call-meetings.ts): a member per member of nl:meet:stores, taken out with it
+  // within a run (ZINTERSTORE), and the day's log line of a late turn.
+  "nl:meet:refund-turns": Cr(1), "nl:meet:refund-turns:said": Cr(1),
+  "nl:meet:rf:": E,
   "nl:meet:state:": X(1), "nl:meet:stores": I, "nl:meet:test:": E, "nl:meet:user:": I, "nl:meet:zoomseen:": C,
   "nl:member:status:": E,
   "nl:metaads:conn:": E, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,

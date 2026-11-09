@@ -364,7 +364,7 @@ async function sayStuck(charge: string, since: number, checks?: RefundChecks): P
   } catch {
     // The mark could not be written: said anyway, as an alert is worth more than one line too many.
   }
-  console.error(`a full refund has been on its way for more than seven days; nothing is taken back until it succeeds (decision 18): charge ${charge}, since ${new Date(since * 1000).toISOString()}`);
+  console.error(`a full refund has been pending for more than seven days (or waiting on an action); nothing is taken back until it succeeds (decision 18): charge ${charge}, since ${new Date(since * 1000).toISOString()}`);
 }
 
 /**

@@ -25,7 +25,6 @@
  * Progress is kept per course and per student: which lessons they marked done
  * and when they last came back. That is all, and the creator sees it.
  */
-import { afterAnswer } from "@/lib/after-answer";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
@@ -822,7 +821,7 @@ export type LinkRequest = "sent" | "email" | "limited" | "error";
 
 /**
  * Emails a way into the course, when the address bought it. "sent" either
- * way, in the same time: only whoever reads the inbox learns whether it had.
+ * way: only whoever reads the inbox learns whether it had.
  */
 export async function requestCourseLink(input: {
   store: Store;
@@ -841,14 +840,9 @@ export async function requestCourseLink(input: {
   // False is unknown; the original rights and final sender checks still apply.
   if (serviceMailKnownUnavailable()) return "error";
 
-  // Whether the address bought it, and the email, after the answer (lib/after-answer.ts): "sent" in the same time either
-  // way, so the time does not tell who bought (Claude 5's authentication audit, L1, rule 30). A link that could not be
-  // sent is logged; the page already says a link comes only if the address bought the course.
-  await afterAnswer(async () => {
-    const paid = await paidCourses(store, raw);
-    if (paid.has(product.id) && !(await sendCourseLink(store, product, raw, origin))) console.error("a course link could not be sent");
-  }, "sending a course link");
-  return "sent";
+  const paid = await paidCourses(store, raw);
+  if (!paid.has(product.id)) return "sent";
+  return (await sendCourseLink(store, product, raw, origin)) ? "sent" : "error";
 }
 
 /** Sends the link itself. Also used when a buyer pays in another browser. */

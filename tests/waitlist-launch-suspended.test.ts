@@ -12,29 +12,45 @@
  *   called without the public route (lib/waitlist.ts joinWaitlist).
  * - A stored switch-off value that does not read as a day or as "on" (rule 24)
  *   is unknown: it is taken as switched off, never as on.
+ * - A held launch keeps its send list and its record alive on each held run,
+ *   so it still goes out months later; held 120 days from its start, it
+ *   stops, says so, and keeps the addresses not yet emailed to send again.
+ * - A switch-off during a run stops the rest of that run's batches.
+ * - The studio panel says a held launch is paused, never "On sale... going
+ *   out", and says a stopped launch stopped.
  *
  * Controls: a store that is on launches, sends and confirms exactly as before.
  * Synthetic data; no provider is called.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, noteTakedown, storeForEmail, storeForHandle } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, noteTakedown, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { confirmSpot, joinWaitlist, launch, runLaunches, setSoon, waitlistViews } from "@/lib/waitlist";
 import { waitlistTokenKey } from "@/lib/waitlist-tokens";
 import { POST as confirmRoute } from "@/app/api/store/waitlist/confirm/route";
+import { WaitlistPanel } from "@/components/waitlist-panel";
+import { NOT_A_COST } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
+import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
 type Sent = { to: string[] };
 const batches: Sent[][] = [];
 let single = 0;
+/** Runs once, while the provider takes a batch: a switch-off in the middle of a run. */
+let duringBatch: (() => Promise<unknown>) | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
     const batch = JSON.parse(String(init?.body)) as Sent[];
     batches.push(batch);
+    const hook = duringBatch;
+    duringBatch = null;
+    if (hook) await hook();
     return Response.json({ data: batch.map((_, i) => ({ id: `synthetic_${i}` })) });
   }
   if (url.hostname === "api.resend.com") {
@@ -73,6 +89,21 @@ async function writeSuspended(owner: string, value: unknown) {
   record.suspended = value;
   redis.run(["SET", key, JSON.stringify(record)]);
 }
+
+// The test clock: the code's Date.now and the stand-in's expiries move together.
+const realNow = Date.now.bind(Date);
+let shift = 0;
+Date.now = () => realNow() + shift;
+const later = (days: number) => {
+  shift += days * 86_400_000;
+};
+const DAY = 86_400;
+const near = (value: unknown, want: number) => typeof value === "number" && Math.abs(value - want) <= 2;
+const panelText = (view: unknown) =>
+  renderToStaticMarkup(createElement(WaitlistPanel, { productId: "p1", initial: view as never, suggestedAddress: "", price: "$39.00" }))
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#x27;/g, "'")
+    .replace(/\s+/g, " ");
 
 const inJobs = (sid: string, pid: string) => redis.run(["SISMEMBER", JOBS, `${sid}|${pid}`]);
 const run = () => runLaunches(storeForHandle, readListing, Date.now() + 10_000);
@@ -210,6 +241,117 @@ async function main(): Promise<void> {
     is("the spot does not count", entry.ok, 0);
     is("and the address is not on the creator's list", await leadsOf(s), []);
   }
+  part("A held launch keeps its list alive while the store stays off, and goes out months later");
+  {
+    const s = await makeStore();
+    for (const [i, email] of people.entries()) redis.run(["HSET", `nl:wl:${s.sid}:${s.pid}`, email, place(i, 1)]);
+    is("launched for both", (await launch(await s.current(), s.product, { note: "", address: ADDRESS })).ok, true);
+    await noteTakedown(s.owner, null, true);
+    batches.length = 0;
+    // The job runs every five minutes; a run every 25 days is enough to show the renewal.
+    for (let day = 0; day <= 100; day += 25) {
+      if (day) later(25);
+      await run();
+    }
+    is("nobody is emailed while it is off", batches.flat().length, 0);
+    const sendKey = `nl:wl:${s.sid}:${s.pid}:send`;
+    const jobKey = `nl:wl:${s.sid}:${s.pid}:job`;
+    is("after 100 days its send list is still whole", redis.run(["LLEN", sendKey]), 2);
+    is("the held run renewed the send list for 30 days", near(redis.run(["TTL", sendKey]), 30 * DAY), true);
+    is("and the launch's record for 120 days", near(redis.run(["TTL", jobKey]), 120 * DAY), true);
+    is("still queued", inJobs(s.sid, s.pid), 1);
+    const view = (await waitlistViews(await s.current(), [s.pid]))[s.pid];
+    is("the studio view says the store is switched off", view?.switchedOff, true);
+    await noteTakedown(s.owner, null, false);
+    batches.length = 0;
+    is("back on after 100 days: both are emailed, once", [await run(), batches.flat().map((m) => m.to[0]).sort()], [2, people]);
+    is("and then it is off the queue", inJobs(s.sid, s.pid), 0);
+    is("and the studio view says the store is on", (await waitlistViews(await s.current(), [s.pid]))[s.pid]?.switchedOff, false);
+  }
+
+  part("Held 120 days from its start, the launch stops, says so, and keeps who was not emailed");
+  {
+    const s = await makeStore();
+    for (const [i, email] of people.entries()) redis.run(["HSET", `nl:wl:${s.sid}:${s.pid}`, email, place(i, 1)]);
+    is("launched for both", (await launch(await s.current(), s.product, { note: "", address: ADDRESS })).total, 2);
+    // The first address was emailed before the switch-off (the list is sorted: dana, then hal).
+    const jobKey = `nl:wl:${s.sid}:${s.pid}:job`;
+    const job = JSON.parse(String(redis.run(["GET", jobKey]))) as Record<string, number>;
+    redis.run(["SET", jobKey, JSON.stringify({ ...job, cursor: 1, sent: 1 }), "EX", 120 * DAY]);
+    await noteTakedown(s.owner, null, true);
+    batches.length = 0;
+    for (let day = 0; day <= 100; day += 25) {
+      if (day) later(25);
+      await run();
+    }
+    is("still held at 100 days", inJobs(s.sid, s.pid), 1);
+    later(21);
+    await run();
+    is("at 121 days it is off the queue", inJobs(s.sid, s.pid), 0);
+    const view = (await waitlistViews(await s.current(), [s.pid]))[s.pid];
+    is("its record says it stopped unfinished: 1 of 2", [Boolean(view?.launch?.finished), Boolean(view?.launch?.stopped), view?.launch?.sent, view?.launch?.total], [true, true, 1, 2]);
+    is("its send list is gone", redis.keys().includes(`nl:wl:${s.sid}:${s.pid}:send`), false);
+    is("whoever had it is off the waitlist; the other is kept, confirmed", [redis.run(["HKEYS", `nl:wl:${s.sid}:${s.pid}`]), view?.confirmed], [["hal@example.com"], 1]);
+    is("nobody was emailed", batches.flat().length, 0);
+    await noteTakedown(s.owner, null, false);
+    is("back on: the stopped launch sends nothing by itself", [await run(), batches.flat().length], [0, 0]);
+    await setSoon(await s.current(), s.pid, true);
+    const again = await launch(await s.current(), s.product, { note: "", address: ADDRESS });
+    is("it can be started again, for the one not emailed", again, { ok: true, total: 1 });
+    is("and that one is emailed, once", [await run(), batches.flat().map((m) => m.to[0])], [1, ["hal@example.com"]]);
+  }
+
+  part("A switch-off in the middle of a run stops the rest of its batches");
+  {
+    const many = Array.from({ length: 101 }, (_, i) => `reader${String(i).padStart(3, "0")}@example.com`);
+    // A paid plan, so the store's own email figure takes 101 in a day.
+    const paid = (owner: string, n: number) =>
+      setSubscription(owner, { customerId: `cus_Launch0000${n}`, subscriptionId: `sub_Launch0000${n}`, active: true, tier: "pro", period: paidPeriod() });
+    const control = await makeStore();
+    await paid(control.owner, 1);
+    for (const [i, email] of many.entries()) redis.run(["HSET", `nl:wl:${control.sid}:${control.pid}`, email, place(i % 10, 1)]);
+    is("control launched for 101", (await launch(await control.current(), control.product, { note: "", address: ADDRESS })).total, 101);
+    batches.length = 0;
+    await run();
+    is("control: a store that stays on gets both batches in one run", batches.map((b) => b.length), [100, 1]);
+    later(1);
+    const s = await makeStore();
+    await paid(s.owner, 2);
+    for (const [i, email] of many.entries()) redis.run(["HSET", `nl:wl:${s.sid}:${s.pid}`, email, place(i % 10, 1)]);
+    is("launched for 101", (await launch(await s.current(), s.product, { note: "", address: ADDRESS })).total, 101);
+    batches.length = 0;
+    duringBatch = () => noteTakedown(s.owner, null, true);
+    await run();
+    is("switched off during the first batch: the second does not go", batches.map((b) => b.length), [100]);
+    const view = (await waitlistViews(await s.current(), [s.pid]))[s.pid];
+    is("the launch waits after the first batch", [inJobs(s.sid, s.pid), view?.launch?.cursor, Boolean(view?.launch?.finished)], [1, 100, false]);
+    await noteTakedown(s.owner, null, false);
+    batches.length = 0;
+    await run();
+    is("back on: the one left is emailed", batches.flat().map((m) => m.to[0]), [many[100]]);
+  }
+
+  part("The studio panel says a held launch is paused and a stopped one stopped");
+  {
+    const started = Date.UTC(2026, 10, 1, 12) / 1000;
+    const job = { handle: "harbor", note: "", address: ADDRESS, total: 2, cursor: 0, sent: 0, started, finished: 0 };
+    const held = panelText({ soon: false, confirmed: 2, waiting: 0, launch: job, switchedOff: true });
+    is("held: it says paused while the store is switched off", /paused while your store is switched off/i.test(held), true);
+    is("held: never on sale, never going out", /On sale|is going out/.test(held), false);
+    is("held: it says what was sent", /0 of 2/.test(held), true);
+    is("held: it says the day it stops if the store is still off", held.includes("March 1, 2027"), true);
+    const stopped = panelText({ soon: false, confirmed: 1, waiting: 0, launch: { ...job, cursor: 1, sent: 1, finished: started + 121 * DAY, stopped: started + 121 * DAY }, switchedOff: false });
+    is("stopped: it says it stopped, with what went out", /stopped/i.test(stopped) && /1 of 2/.test(stopped), true);
+    is("stopped: never \"Launched\"", /Launched\./.test(stopped), false);
+    is("stopped: it says how to send it again", /coming soon again/i.test(stopped), true);
+    const sending = panelText({ soon: false, confirmed: 2, waiting: 0, launch: job, switchedOff: false });
+    is("control: a store that is on still says it is going out", /On sale\. The waitlist email is going out: 0 of 2 so far/.test(sending), true);
+    const finished = panelText({ soon: false, confirmed: 0, waiting: 0, launch: { ...job, cursor: 2, sent: 2, finished: started + 60 }, switchedOff: false });
+    is("control: a finished launch still says launched", /Launched\. 2 of 2 waitlist emails went out\./.test(finished), true);
+  }
+
+  part("The held runs' commands are in the cost registry");
+  is("LAUNCH_HOLD_SECONDS is explained in NOT_A_COST", typeof NOT_A_COST.LAUNCH_HOLD_SECONDS, "string");
 }
 
 main()

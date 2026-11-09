@@ -54,7 +54,7 @@ import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
-import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE } from "@/lib/certificate-refunds";
+import { CERTIFICATE_PASS_EVERY_SECONDS, CERTIFICATE_REFUND_CHECKS_PER_MONTH, CERTIFICATE_REFUND_PAGES_PER_STORE, CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH } from "@/lib/certificate-refunds";
 import { LOST_DISPUTE_PAGES } from "@/lib/refunds";
 import { monthlyEmails, type Tier } from "@/lib/plan";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
@@ -836,12 +836,25 @@ export const CERTIFICATE_PASS_RUN_BYTES = 2 * (2 * 100 * LOST_DISPUTE_PAGES + 10
  */
 export const CERTIFICATE_PASS_CHECK_COMMANDS = 32;
 
-/** The most the pass costs one store on a plan in a month, in dollars: the turns read, its passes, and its checks. */
+/**
+ * Commands of one take of the part of the month's checks kept for rows tried again (second focal review of #3409,
+ * MEDIUM): its INCRBY and EXPIRE, once a row tried again in a pass. A take goes through only while that part is not
+ * spent before it and adds at least one to it, so a month has at most CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH that go
+ * through; the one past it ends the rows tried again, which a pass runs after every other row, so it is the pass's one
+ * take past a ceiling, already in CERTIFICATE_PASS_RUN_COMMANDS. The checks themselves are the month's checks.
+ */
+export const CERTIFICATE_RETRY_TAKE_COMMANDS = 2;
+
+/**
+ * The most the pass costs one store on a plan in a month, in dollars: the turns read, its passes, its checks (rows
+ * tried again included, inside the same month's checks) and the takes of the part kept for rows tried again.
+ */
 export function certificatePassMonthUsd(tier: Tier): number {
   const turns = CERTIFICATE_TURN_READS * CERTIFICATE_TURN_BYTES * DB_BYTE;
   const runs = CERTIFICATE_PASS_RUNS * (CERTIFICATE_PASS_RUN_COMMANDS * COMMAND + CERTIFICATE_PASS_RUN_BYTES * DB_BYTE);
   const checks = CERTIFICATE_REFUND_CHECKS_PER_MONTH[tier] * (CERTIFICATE_PASS_CHECK_COMMANDS * COMMAND + (MAX_PRODUCT_BYTES + 16_384) * DB_BYTE);
-  return turns + runs + checks;
+  const retries = CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH[tier] * CERTIFICATE_RETRY_TAKE_COMMANDS * COMMAND;
+  return turns + runs + checks + retries;
 }
 
 /** CX-61: two bounded provider reads, independent of released-name history.
@@ -925,7 +938,7 @@ export const COST_LINES: CostLine[] = [
     feature: "Certificates withdrawn when their course's payment is given back: the checkout sweep's pass (audit R41, DONO-18; second review of #3409, Claude 5, ALTO 1)",
     monthlyUsd: (tier) => certificatePassMonthUsd(tier),
     sources: [
-      { file: "lib/certificate-refunds.ts", names: ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE", "CERTIFICATE_REFUND_CHECKS_PER_MONTH", "CERTIFICATE_PASS_EVERY_SECONDS", "CERTIFICATE_REFUND_RETRY_SECONDS", "takeChecks", "seenAmong", "certificatePassesDue", "takeCertificatePass"] },
+      { file: "lib/certificate-refunds.ts", names: ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE", "CERTIFICATE_REFUND_CHECKS_PER_MONTH", "CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH", "CERTIFICATE_PASS_EVERY_SECONDS", "CERTIFICATE_REFUND_RETRY_SECONDS", "CERTIFICATE_REFUND_RETRY_MAX_SECONDS", "takeChecks", "takeRetries", "seenAmong", "certificatePassesDue", "takeCertificatePass"] },
       { file: "lib/certificate.ts", names: ["withdrawForRefund"] },
       { file: "lib/checkout-sweep.ts", names: ["certificatePassesDue(stores.slice(skip))", "takeCertificatePass(store)", "withdrawRefundedCertificates(store, deadline)"] },
       { file: "lib/refunds.ts", names: ["LOST_DISPUTE_PAGES"] },
@@ -933,7 +946,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/cron/mail/route.ts", names: ["sweepCheckouts"] },
       { file: "vercel.json", names: ["/api/cron/mail", "*/5 * * * *"] },
     ],
-    basis: "One store on a plan, a calendar month of DAY_WINDOWS days (the pass runs for any store paid through Stripe with a course, whatever its plan). Every run of the five-minute sweep reads the turns of its batch of stores in one MGET (a company fixed cost of the sweep, one command a batch whatever the number of stores), of which a store's share is CERTIFICATE_TURN_BYTES; a store whose pass is not due costs no command of its own. At most CERTIFICATE_PASS_RUNS passes, one each CERTIFICATE_PASS_EVERY_SECONDS (the store's turn, SET NX EX), at CERTIFICATE_PASS_RUN_COMMANDS and CERTIFICATE_PASS_RUN_BYTES each (CERTIFICATE_REFUND_PAGES_PER_STORE GET /refunds and LOST_DISPUTE_PAGES GET /events, Stripe bills no API call). No look at the store's courses: only the courses a refunded checkout gave are read. Every row looked up (at most CERTIFICATE_REFUND_LOOKUPS_PER_STORE a pass: 2 GET /refunds?charge and 1 GET /checkout/sessions, and the buyer's checkouts as courseStandingFor reads them) asks Stripe only until a course its checkout gave is read: each such course takes one of the plan's CERTIFICATE_REFUND_CHECKS_PER_MONTH before anything is read for it, and each row one before it is marked handled, each at CERTIFICATE_PASS_CHECK_COMMANDS and a listing and 16 KB of records; past them the pass waits for the next month at that row. A row that took its checks and was left unknown waits CERTIFICATE_REFUND_RETRY_SECONDS before it takes any again. The pass's time is inside CERTIFICATE_REFUND_PASS_MS of the sweep's run, whose schedule bounds it (a company fixed cost). Each reply read in its exact shape.",
+    basis: "One store on a plan, a calendar month of DAY_WINDOWS days (the pass runs for any store paid through Stripe with a course, whatever its plan). Every run of the five-minute sweep reads the turns of its batch of stores in one MGET (a company fixed cost of the sweep, one command a batch whatever the number of stores), of which a store's share is CERTIFICATE_TURN_BYTES; a store whose pass is not due costs no command of its own. At most CERTIFICATE_PASS_RUNS passes, one each CERTIFICATE_PASS_EVERY_SECONDS (the store's turn, SET NX EX), at CERTIFICATE_PASS_RUN_COMMANDS and CERTIFICATE_PASS_RUN_BYTES each (CERTIFICATE_REFUND_PAGES_PER_STORE GET /refunds and LOST_DISPUTE_PAGES GET /events, Stripe bills no API call). No look at the store's courses: only the courses a refunded checkout gave are read. Every row looked up (at most CERTIFICATE_REFUND_LOOKUPS_PER_STORE a pass: 2 GET /refunds?charge and 1 GET /checkout/sessions, and the buyer's checkouts as courseStandingFor reads them) asks Stripe only until a course its checkout gave is read: each such course takes one of the plan's CERTIFICATE_REFUND_CHECKS_PER_MONTH before anything is read for it, and each row one before it is marked handled, each at CERTIFICATE_PASS_CHECK_COMMANDS and a listing and 16 KB of records; past them the pass waits for the next month at that row. A row that took its checks and was left unknown waits its age, between CERTIFICATE_REFUND_RETRY_SECONDS and CERTIFICATE_REFUND_RETRY_MAX_SECONDS, before it takes any again; it is tried again after every row read for the first time in the pass, and takes its checks from the month's checks, its first take in the pass also counted in the part of them kept for rows tried again (CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH, let through only while it is not spent before it), each such take at CERTIFICATE_RETRY_TAKE_COMMANDS; past that part it waits for the next month. The pass's time is inside CERTIFICATE_REFUND_PASS_MS of the sweep's run, whose schedule bounds it (a company fixed cost). Each reply read in its exact shape.",
   },
   {
     id: "platform-subscription-search",

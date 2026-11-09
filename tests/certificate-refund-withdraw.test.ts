@@ -25,7 +25,7 @@
  */
 import { readFileSync } from "node:fs";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
-import { CERTIFICATE_REFUND_RETRY_SECONDS } from "@/lib/certificate-refunds";
+import { CERTIFICATE_REFUND_RETRY_MAX_SECONDS } from "@/lib/certificate-refunds";
 import * as certificates from "@/lib/certificate";
 import { type Certificate, issueCertificate, readCertificate } from "@/lib/certificate";
 import type { Course } from "@/lib/course";
@@ -41,9 +41,12 @@ process.env.STRIPE_SECRET_KEY = "sk_test_certificate_refund_withdraw";
 const realNow = Date.now;
 let offsetMs = 0;
 Date.now = () => realNow() + offsetMs;
-/** A row that took its checks and was left unknown is tried again CERTIFICATE_REFUND_RETRY_SECONDS later (focal review of #3409, MÉDIO 2). */
+/**
+ * A row that took its checks and was left unknown is tried again once its wait is over (focal review of #3409, MÉDIO 2):
+ * its age, at most CERTIFICATE_REFUND_RETRY_MAX_SECONDS (second focal review, MEDIUM).
+ */
 const later = () => {
-  offsetMs += (CERTIFICATE_REFUND_RETRY_SECONDS + 60) * 1000;
+  offsetMs += (CERTIFICATE_REFUND_RETRY_MAX_SECONDS + 60) * 1000;
 };
 
 const OWNER = "teacher@example.com";

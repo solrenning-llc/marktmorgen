@@ -25,10 +25,21 @@
  * plan) before anything is read for it, and every row one more before it is marked handled. Past them, the pass
  * stops where it is and goes on from that row the next month: nothing is skipped. A row read again while it waits (a
  * part of its refund still pending) asks Stripe only and takes none. A row that took its checks and was left unknown
- * (MÉDIO 2: its buyer's courses, its checkout's courses or its certificate could not be read) is marked to wait
- * CERTIFICATE_REFUND_RETRY_SECONDS, read with the same ZMSCORE: until then it holds the place without taking a check
- * again, and the rows after it go on; then it is tried again, and it is never forgotten. Priced per plan in
- * tests/plan-cost-registry.ts (COST_LINES, certificate-refund-pass).
+ * (MÉDIO 2: its buyer's courses, its checkout's courses or its certificate could not be read) is marked to wait, read
+ * with the same ZMSCORE: until then it holds the place without taking a check again, and the rows after it go on; then
+ * it is tried again, and it is never forgotten.
+ *
+ * Rows tried again (second focal review of #3409, Claude 5, MEDIUM): a row of many courses, tried again every day,
+ * took every course's check each time and so spent the month's checks a healthy refund needed. Now:
+ *   - the wait grows with the row's age, from CERTIFICATE_REFUND_RETRY_SECONDS to CERTIFICATE_REFUND_RETRY_MAX_SECONDS
+ *     (about 1, 2, 4 and 8 days after the refund, then once a week);
+ *   - a pass tries rows again only after every row it read for the first time, so they never stop those;
+ *   - a row tried again takes its checks from the month's checks as any row does; its first take in a pass also counts
+ *     in the part of them kept for rows tried again (CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH), and goes through only
+ *     while that part is not spent before it, so even a checkout of the most courses is tried again once a month, and
+ *     at most that many rows a month are let through. Past that part, a row holds its place and waits for the next
+ *     month.
+ * Priced per plan in tests/plan-cost-registry.ts (COST_LINES, certificate-refund-pass).
  *
  * DONO-18, applied exactly:
  *   - only a refund Stripe says `succeeded`, on a charge every refund of which that gives money back has succeeded and
@@ -66,6 +77,7 @@
  *                                  the place; and "w:<id>" for a row left unknown, by the time it may be tried again
  *   nl:certrefunds:next:<stats>    "1" while the store's pass is not due, for CERTIFICATE_PASS_EVERY_SECONDS
  *   nl:certrefunds:n:<stats>:<month>  the rows marked handled and courses checked in a calendar month (UTC), forty days
+ *   nl:certrefunds:n:<stats>:<month>:r  of them, those taken by rows tried again, forty days
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
@@ -102,8 +114,13 @@ export const CERTIFICATE_REFUND_PASS_MS = 4_000;
  * (tests/plan-cost-registry.ts, CERTIFICATE_PASS_RUNS).
  */
 export const CERTIFICATE_PASS_EVERY_SECONDS = 2 * 3_600;
-/** How long a row that took its checks and was left unknown waits before it is tried again (focal review, MÉDIO 2). */
+/** The shortest a row that took its checks and was left unknown waits before it is tried again (focal review, MÉDIO 2). */
 export const CERTIFICATE_REFUND_RETRY_SECONDS = 86_400;
+/**
+ * The longest such a row waits (second focal review, MEDIUM): the wait is the row's age, between the two. It stays
+ * below the fifteen days its set of rows handled outlives the last row written, so a wait is never lost with it.
+ */
+export const CERTIFICATE_REFUND_RETRY_MAX_SECONDS = CERTIFICATE_REFUND_LOOKBACK_SECONDS;
 /**
  * Rows marked handled and courses checked for one store in a calendar month (UTC), by its plan: each course a refunded
  * checkout gave takes one before anything is read for it, and each row one before it is marked handled. Past it the
@@ -111,22 +128,46 @@ export const CERTIFICATE_REFUND_RETRY_SECONDS = 86_400;
  * not an allowance of the plan. A store whose plan reads in no known way is held to the smallest.
  */
 export const CERTIFICATE_REFUND_CHECKS_PER_MONTH: Readonly<Record<Tier, number>> = { creator: 100, pro: 1_000, scale: 5_000 };
+/**
+ * Of the month's checks, the part rows tried again may take (second focal review of #3409, MEDIUM), by plan: a row tried
+ * again takes its checks from both, and from this part only while it is not spent before them, so rows tried again
+ * leave the rest of the month's checks to the rows read for the first time. Inside the month's checks, so their cost
+ * is the same; the count's own commands are priced in COST_LINES.
+ */
+export const CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH: Readonly<Record<Tier, number>> = { creator: 25, pro: 250, scale: 1_250 };
+const monthOf = () => new Date(Date.now()).toISOString().slice(0, 7);
 const checksKey = (sid: string, month: string) => `nl:certrefunds:n:${sid}:${month}`;
+const retriesKey = (sid: string, month: string) => `${checksKey(sid, month)}:r`;
 /** The month's checks are spent: the pass stops where it is. */
 class ChecksSpent extends Error {}
+/** The part of them for rows tried again is spent: the pass tries no more rows again. */
+class RetriesSpent extends ChecksSpent {}
 
-/** The store's checks of the month, by its plan; the smallest for a plan read in no known way. */
-function checksOf(store: Store): number {
+/** The store's figure of the month by its plan, from `figures`; the smallest for a plan read in no known way. */
+function ofPlan(store: Store, figures: Readonly<Record<Tier, number>>): number {
   const tier = store.tier as unknown;
-  return tier === "pro" || tier === "scale" ? CERTIFICATE_REFUND_CHECKS_PER_MONTH[tier] : CERTIFICATE_REFUND_CHECKS_PER_MONTH.creator;
+  return tier === "pro" || tier === "scale" ? figures[tier] : figures.creator;
 }
 
-/** Takes `n` of the store's checks of the month before they are spent, each reply read exactly; throws ChecksSpent past them. */
-async function takeChecks(sid: string, n: number, ceiling: number): Promise<void> {
-  const key = checksKey(sid, new Date(Date.now()).toISOString().slice(0, 7));
+/** Adds `n` to a count of the month, kept forty days, each reply read exactly: the count after it. */
+async function countUp(key: string, n: number): Promise<number> {
   const [count, kept] = exactReplies(await redisPipeline([["INCRBY", key, n], ["EXPIRE", key, 40 * 86_400]]), 2, WHAT);
   if (replyCount(kept, WHAT) !== 1) throw new UnknownReply(WHAT);
-  if (replyCount(count, WHAT) > ceiling) throw new ChecksSpent();
+  return replyCount(count, WHAT);
+}
+
+/** Takes `n` of the store's checks of the month before they are spent; throws ChecksSpent past them. */
+async function takeChecks(sid: string, n: number, ceiling: number): Promise<void> {
+  if ((await countUp(checksKey(sid, monthOf()), n)) > ceiling) throw new ChecksSpent();
+}
+
+/**
+ * For a row tried again, at its first take in a pass, counts its `n` checks in the part of the month's checks kept for
+ * rows tried again, while that part was not spent before them (so a row of more courses than it holds is still tried
+ * again once a month); throws RetriesSpent when it was. The month's checks are taken after it, as for any row.
+ */
+async function takeRetries(sid: string, n: number, part: number): Promise<void> {
+  if ((await countUp(retriesKey(sid, monthOf()), n)) - n >= part) throw new RetriesSpent();
 }
 
 /** What the set of rows handled says of some rows: the ids handled, and when each row left unknown may be tried again. */
@@ -221,11 +262,10 @@ async function refundedForGood(account: string, charge: Record<string, unknown>,
 
 /**
  * The buyer and the courses with certificates a payment's checkout gave, or null when it was no checkout of this store
- * or gave none: only those courses are read, their listings and one SCARD each. `charged` is called once their
- * checks are taken. Throws when unreadable.
+ * or gave none: only those courses are read, their listings and one SCARD each, once `take` took their checks.
+ * Throws when unreadable.
  */
-async function saleOf(store: Store, account: string, pi: string, deadline: number, charged: () => void): Promise<{ email: string; courses: Listing[] } | null> {
-  const sid = store.statsId!;
+async function saleOf(store: Store, account: string, pi: string, deadline: number, take: (n: number) => Promise<void>): Promise<{ email: string; courses: Listing[] } | null> {
   const legible = (row: Record<string, unknown>) => plainObject(ownField(row, "metadata"));
   const rows = await wholeList(account, "/checkout/sessions", new URLSearchParams({ payment_intent: pi, limit: "10" }), legible, 1, deadline);
   if (!rows) throw new UnknownReply(WHAT);
@@ -236,8 +276,7 @@ async function saleOf(store: Store, account: string, pi: string, deadline: numbe
   const kinds = new Set(idsOfKind(store, "course"));
   const asked = [...new Set(deliveredIds(meta).filter((id) => kinds.has(id)))];
   if (!asked.length) return null;
-  await takeChecks(sid, asked.length, checksOf(store));
-  charged();
+  await take(asked.length);
   const listed = (await readListingsExact(store, asked)).filter((p) => p.course);
   if (!listed.length) return null;
   const issued = exactReplies(await redisPipeline(listed.map((p) => ["SCARD", allKey(p.course!.id)])), listed.length, WHAT);
@@ -331,7 +370,8 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
   const until = Math.min(deadline, Date.now() + CERTIFICATE_REFUND_PASS_MS);
   const account = store.stripeAccountId;
   const sid = store.statsId;
-  const ceiling = checksOf(store);
+  const ceiling = ofPlan(store, CERTIFICATE_REFUND_CHECKS_PER_MONTH);
+  const retryPart = ofPlan(store, CERTIFICATE_REFUND_RETRY_CHECKS_PER_MONTH);
   const [anchorRaw] = exactReplies(await redisPipeline([["GET", anchorKey(sid)]]), 1, WHAT);
   const place = anchorRaw === null ? null : typeof anchorRaw === "string" ? PLACE.exec(anchorRaw) : null;
   if (anchorRaw !== null && !place) throw new UnknownReply(WHAT);
@@ -348,9 +388,14 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
   let blind = place?.[4] === "1";
   let lookups = CERTIFICATE_REFUND_LOOKUPS_PER_STORE;
   let withdrawn = 0;
+  /** Rows to try again, left to the end of the pass, after every row read for the first time (second focal review, MEDIUM). */
+  const later: { row: Record<string, unknown>; dispute: boolean; seen: Seen }[] = [];
 
-  /** One refund or lost dispute: "done" when dealt with, "held" when it must be read again, "stop" when this pass can do no more. */
-  const handle = async (row: Record<string, unknown>, dispute: boolean, seen: Seen): Promise<"done" | "held" | "stop"> => {
+  /**
+   * One refund or lost dispute: "done" when dealt with, "held" when it must be read again, "stop" when this pass can do
+   * no more (`retrying`: the row is tried again at the end of the pass).
+   */
+  const handle = async (row: Record<string, unknown>, dispute: boolean, seen: Seen, retrying = false): Promise<"done" | "held" | "stop"> => {
     if (Date.now() >= until) return "stop";
     const id = typeof row.id === "string" ? row.id : "";
     const created = whole(row.created) ? row.created : 0;
@@ -368,14 +413,34 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
     // Left unknown by an earlier pass after it took its checks: it holds the place, and takes none again, until its
     // wait is over (focal review of #3409, MÉDIO 2); the rows after it go on.
     if ((seen.until.get(id) ?? 0) > now) return "held";
+    // Left unknown before and its wait over: tried again at the end of the pass, on the part of the month's checks for
+    // rows tried again (second focal review, MEDIUM); until then it holds the place as a row that waits.
+    const again = seen.until.has(id);
+    if (again && !retrying) {
+      later.push({ row, dispute, seen });
+      return "held";
+    }
     // Whether this row took any of the month's checks in this pass: if it is left unknown, it then waits.
     let charged = false;
+    // A row tried again passes the part kept for rows tried again once, at its first take: the check that marks it
+    // handled afterward takes the month's checks only, so a row let through always ends.
+    let gate = again;
+    const take = async (k: number): Promise<void> => {
+      if (gate) {
+        await takeRetries(sid, k, retryPart);
+        gate = false;
+      }
+      await takeChecks(sid, k, ceiling);
+      charged = true;
+    };
     const wait = async (): Promise<"held"> => {
       if (!charged) return "held";
+      // The longer the row has been unknown, the longer it waits, within the two bounds.
+      const pause = Math.min(CERTIFICATE_REFUND_RETRY_MAX_SECONDS, Math.max(CERTIFICATE_REFUND_RETRY_SECONDS, now - created));
       try {
         exactReplies(
           await redisPipeline([
-            ["ZADD", seenKey(sid), now + CERTIFICATE_REFUND_RETRY_SECONDS, waitMember(id)],
+            ["ZADD", seenKey(sid), now + pause, waitMember(id)],
             ["EXPIRE", seenKey(sid), CERTIFICATE_REFUND_LOOKBACK_SECONDS * 2 + 86_400],
           ]),
           2,
@@ -392,7 +457,7 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
     try {
       // A lost dispute with no payment to look up: nothing of this store can be told from it, so it is read and never
       // holds the disputes' place back.
-      if (dispute && !PI_ID.test(pi)) return await markRead(id, created, () => (charged = true));
+      if (dispute && !PI_ID.test(pi)) return await markRead(id, created, take);
       if (lookups <= 0) return "stop";
       lookups -= 1;
       if (!dispute) {
@@ -400,7 +465,7 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
         if (settled === "waiting") return "held";
         if (settled === "no") return "done";
       }
-      const sale = await saleOf(store, account, pi, until, () => (charged = true));
+      const sale = await saleOf(store, account, pi, until, take);
       let left = false;
       for (const product of sale?.courses ?? []) {
         const standing = await courseStandingFor(store, sale!.email, product.id);
@@ -412,17 +477,16 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
       }
       if (left) return await wait();
       // Marked read once handled: a pass that stops halfway leaves it to the next, which does the same again.
-      return await markRead(id, created, () => (charged = true));
+      return await markRead(id, created, take);
     } catch (error) {
       if (error instanceof ChecksSpent) return "stop";
       console.error("a refund for certificates was left for the next pass", id, error instanceof Error ? error.name : typeof error);
       return await wait();
     }
   };
-  /** The row marked handled, by its time, each reply read exactly; `charged` is called once its check is taken. */
-  const markRead = async (id: string, created: number, charged: () => void): Promise<"done"> => {
-    await takeChecks(sid, 1, ceiling);
-    charged();
+  /** The row marked handled, by its time, each reply read exactly, once `take` took its check. */
+  const markRead = async (id: string, created: number, take: (n: number) => Promise<void>): Promise<"done"> => {
+    await take(1);
     exactReplies(
       await redisPipeline([
         ["ZADD", seenKey(sid), created, id],
@@ -522,6 +586,13 @@ export async function withdrawRefundedCertificates(store: Store, deadline: numbe
     if (!next) break;
   }
   reach = Math.min(reach, hold);
+
+  // The rows to try again, once every row read for the first time was dealt with; each holds the place already, so one
+  // handled here is passed by the place at a later pass. The first that cannot go on (the month's checks or their part
+  // for rows tried again spent, the lookups or the time used) ends them: the others wait for a later pass.
+  for (const row of stopped ? [] : later) {
+    if ((await handle(row.row, row.dispute, row.seen, true)) === "stop") break;
+  }
 
   // The lost disputes' place moves only once every one read was handled, and the refunds' place with it.
   const lostKept = await keepLostPlace(lost, sid);

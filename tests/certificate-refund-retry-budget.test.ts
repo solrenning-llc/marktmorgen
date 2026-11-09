@@ -221,7 +221,17 @@ async function main(): Promise<void> {
   part("Never forgotten: once the buyer's courses read, the row is tried again and withdrawn, the next month at the latest");
   unreadable.delete("stuck5@example.com");
   unreadable.delete("stuck1@example.com");
-  const next = new Date(Date.UTC(new Date(startOf).getUTCFullYear(), new Date(startOf).getUTCMonth() + 1, 2, 6)).getTime();
+  const first = new Date(startOf);
+  const lastDay = Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0, 6);
+  while (Date.now() + DAY_MS < lastDay + 3_600_000) {
+    shift += DAY_MS;
+    await run(five);
+    await run(one);
+  }
+  is("the month's last day", new Date(Date.now()).toISOString().slice(0, 10), new Date(lastDay).toISOString().slice(0, 10));
+  is("the one-course row, inside the part for rows tried again, is withdrawn within the month", publicName((await record(stuckOneId))!), null);
+  is("the five-course row, past that part, holds its place and waits for the next month", await stands(stuckFiveId), true);
+  const next = Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 2, 6);
   while (Date.now() < next) {
     shift += DAY_MS;
     await run(five);

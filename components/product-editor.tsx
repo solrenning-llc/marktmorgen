@@ -392,6 +392,7 @@ function ProductForm({
   return (
     <form
       ref={formRef}
+      id={`product-form-${id}`}
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
@@ -400,7 +401,11 @@ function ProductForm({
         const held = aiDraftHold(aiChecks);
         setAiHeld(held);
         if (held) {
-          formRef.current?.querySelector<HTMLInputElement>("[data-ai-review] input:not(:checked)")?.focus();
+          const first = formRef.current?.querySelector<HTMLInputElement>("[data-ai-review] input:not(:checked)");
+          // The checks sit in the AI box, which the creator may have closed: open it, or the focus goes nowhere.
+          const box = first?.closest("details");
+          if (box) box.open = true;
+          requestAnimationFrame(() => first?.focus());
           return;
         }
         onSubmit();
@@ -2304,7 +2309,8 @@ export function ProductEditor({
                   </dl>
                   <p className="mt-2">{review.note}</p>
                   {/* The confirmation is here, after what it confirms, so the reading and the focus order end on it. */}
-                  <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={save}>
+                  {/* It submits the form itself, so an AI draft still unchecked holds it like Save does (756 [STN3]). */}
+                  <button type="submit" form={`product-form-${product.id}`} className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy}>
                     Yes, save what buyers pay
                   </button>
                 </div>

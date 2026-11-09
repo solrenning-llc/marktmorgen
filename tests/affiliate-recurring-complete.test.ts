@@ -179,6 +179,31 @@ async function main(): Promise<void> {
   }
   is("past the rebuild, the late payment is on a whole book", caught, 51 * 600);
 
+  part("Past half the ceiling kept, an old invoice paid late is still counted once the kept invoices are read again");
+  // Pre-review, 9 November 2026: the reading again kept every invoice it read beside the ones already kept, so past
+  // half of INVOICES_KEPT_MAX_LINES the two never fitted together, the reading again was dropped each time and begun
+  // again, and an old invoice paid late was never counted, on a book that said it read every invoice.
+  const { product: pk } = await setUp();
+  const termsK = { product: pk, via: SARA, via_rate: "30", via_months: String(RECURRING_ALWAYS), via_at: String(NOW - 300 * DAY) };
+  const MANY = 4_000;
+  all = [inv("in_SaraLate002", NOW - 150 * DAY, termsK, "open")];
+  for (let i = 0; i < MANY; i += 1) all.push(inv(`in_Sara0${String(i).padStart(6, "0")}`, NOW - 200 * DAY - i, termsK));
+  const many = await readUntilWhole(8);
+  is("whole before the late payment, every renewal", [many.whole, many.earned], [true, MANY * 600]);
+  all[0] = inv("in_SaraLate002", NOW - 150 * DAY, termsK);
+  shift = 2 * DAY * 1000;
+  let manyCaught = 0;
+  let wholeShort = false;
+  for (let n = 0; n < 12 && manyCaught !== (MANY + 1) * 600; n += 1) {
+    const read = await sara();
+    if (read.whole) {
+      manyCaught = read.earned;
+      if (read.earned < MANY * 600) wholeShort = true;
+    }
+  }
+  is("past the rebuild, the late payment is on a whole book", manyCaught, (MANY + 1) * 600);
+  is("and no whole book ever showed less than was read before", wholeShort, false);
+
   part("A kept record that does not read is never an empty one");
   const { product: p3 } = await setUp();
   const terms3 = { product: p3, via: SARA, via_rate: "30", via_months: String(RECURRING_ALWAYS), via_at: String(NOW - 300 * DAY) };

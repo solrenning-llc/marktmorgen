@@ -160,12 +160,46 @@ export const CONFIRMED_SECONDS = 430 * 86_400;
  * Where a booking's confirmation stands, by its mark (Claude 5, 9 November 2026; rules 24 and 30). "sending": the
  * time is kept for good (written in the same step as the mark) and what follows is owed; "booked": the orders, the
  * lead, the reminders and the webhook are done, both emails owed; "buyer": the buyer's email went, the creator's is
- * owed; "done": all of it. "1" is the mark written before this day, and by a move before any confirmation, and reads
- * as done, as it always did. Each value is no longer than "sending", which the store's room was charged for.
+ * owed; "done": all of it. "moved": the buyer moved it before it was done, so the move's emails told both people
+ * and the two "Booked" emails are never sent, but the rest ("sending"'s orders, lead, hosts, webhook and alert) is
+ * still owed. "1" is the mark written before this day and reads as done, as it always did.
+ *
+ * The mark moves on only from the stage its writer read (CONFIRM_STEP), so a try under way never writes past a move.
+ * Each value is no longer than the first one written, which the store's room was charged for: "sending" by a
+ * confirmation, "moved" (written first by a move) moves on only to "done", and a move only shortens a mark.
  */
-type ConfirmStage = "sending" | "booked" | "buyer" | "done";
-const CONFIRM_OWED: ReadonlySet<string> = new Set<ConfirmStage>(["sending", "booked", "buyer"]);
+type ConfirmStage = "sending" | "booked" | "buyer" | "done" | "moved";
+const CONFIRM_OWED: ReadonlySet<string> = new Set<ConfirmStage>(["sending", "booked", "buyer", "moved"]);
 const CONFIRM_DONE: ReadonlySet<string> = new Set(["done", "1"]);
+/**
+ * Moves a confirmation mark (KEYS[1]) on, only from a stage named (Claude 5, 9 November 2026): ARGV[1] its time to
+ * live, then pairs of (from, to). The mark is read and written in one step: {1, held} when it was moved on from held,
+ * {0, held} when it holds another stage (another try, or a move, got there first) and nothing is written, {0} when it
+ * is gone. Held against a real Redis 7.0 with the in-memory one (lib/redis-memory.ts).
+ */
+export const CONFIRM_STEP = `-- marktmorgen:call-confirm-step:v1
+local held = redis.call('GET', KEYS[1])
+if not held then return {0} end
+for i = 2, #ARGV - 1, 2 do
+  if held == ARGV[i] then
+    redis.call('SET', KEYS[1], ARGV[i + 1], 'XX', 'EX', ARGV[1])
+    return {1, held}
+  end
+end
+return {0, held}`;
+
+/**
+ * One step of a confirmation mark (CONFIRM_STEP), read exactly (rule 24): "stepped" when it was moved on, "gone" when
+ * there is no mark, or the stage it holds instead. Anything else is unknown and thrown.
+ */
+async function stepMark(session: string, steps: [string, string][]): Promise<"stepped" | "gone" | { held: string }> {
+  const reply = repliesFor(await redisPipeline([["EVAL", CONFIRM_STEP, 1, confirmedKey(session), CONFIRMED_SECONDS, ...steps.flat()]]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 1 && reply[0] === 0) return "gone";
+  if (Array.isArray(reply) && reply.length === 2 && (reply[0] === 1 || reply[0] === 0) && typeof reply[1] === "string") {
+    return reply[0] === 1 ? "stepped" : { held: reply[1] };
+  }
+  throw new UnknownReplyError("a booking's confirmation mark, moved on");
+}
 
 /** A time as the diary's writers make it: a whole number of milliseconds since 1970, after 1970. */
 const diaryTime = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
@@ -609,8 +643,9 @@ export async function catchUpBookings(store: Store, paid: PaidCall[], origin: st
   const now = Date.now();
   const due = paid.filter((c) => c.session && c.end > now).slice(0, 20);
   if (!due.length) return;
-  // Each one's mark, read exactly: only a confirmation done is left; one never made or left short of done (a try that
-  // failed after the mark) is confirmed now, and confirmBooking decides on a mark it does not know.
+  // Each one's mark, read exactly: only a confirmation done is left; one never made, left short of done (a try that
+  // failed after the mark) or moved before it was done is confirmed now, and confirmBooking decides on a mark it does
+  // not know.
   const seen = repliesFor(await redisPipeline(due.map((c) => ["GET", confirmedKey(c.session)])), due.length);
   if (!seen) throw new UnknownReplyError("the confirmation marks of a store's paid calls");
   const find = listingFinder(store);
@@ -1386,13 +1421,23 @@ export async function moveBooking(input: {
     }
     const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(teamOwn ? { h: teamOwn.hosts, c: teamOwn.claim } : {}) };
     // Counted in the store's room at what it really adds (lib/order-data.ts).
-    await orderWrite(store, [
+    // Moved before its confirmation was done (Claude 5, 9 November 2026; rules 24 and 30): the move's emails say it
+    // all, so no "Booked" email follows them, but what a booking does besides is still owed ("moved", ConfirmStage),
+    // never taken for done: the orders counted, the lead, the hosts, the webhook and the creator's alert. Before, a
+    // move wrote "1" (done), and a confirmation that had failed before its mark was never made.
+    const replies = await orderWrite(store, [
       ...(old.length ? [["HDEL", busyKey(callsId), ...old]] : []),
       ["HSET", busyKey(callsId), session, JSON.stringify(entry)],
-      // Moved before it was ever confirmed: the move email says it all, and
-      // no "Booked" email for the old time follows it.
-      ["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS],
+      ["SET", confirmedKey(session), "moved", "NX", "EX", CONFIRMED_SECONDS],
     ]);
+    // A confirmation already begun: one that stopped before its emails is left owed without them, and one whose
+    // emails were (partly) sent is done, the move's emails standing in for the rest. Done stays done. The move is
+    // written by now, so a mark that cannot be moved on is logged, not a failed move.
+    if (replies.at(-1) !== "OK") {
+      await stepMark(session, [["sending", "moved"], ["booked", "done"], ["buyer", "done"]]).catch((error) =>
+        console.error("moving a moved booking's confirmation mark on failed", error),
+      );
+    }
   } catch (error) {
     console.error("moving a booking failed", error);
     return { ok: false, reason: "error" };
@@ -1671,7 +1716,8 @@ export async function confirmBooking(input: {
   cancel?: CancelPromise | null;
   origin: string;
 }): Promise<void> {
-  const { store, product, session, start, end, buyerEmail, origin } = input;
+  const { store, product, session, buyerEmail, origin } = input;
+  let { start, end } = input;
   if (!isRedisConfigured() || !store.callsId) return;
   // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
   // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
@@ -1726,13 +1772,19 @@ export async function confirmBooking(input: {
     // let go since (a cancellation, a refund, a call long past) is not told to anybody as booked.
     const kept = repliesFor(await redisPipeline([["HGET", busyKey(store.callsId), session]]), 1)?.[0];
     if (kept !== null && typeof kept !== "string") throw new UnknownReplyError("a booking's time, resuming its confirmation");
+    stage = write.held as ConfirmStage;
     if (kept === null) {
-      await markConfirmed(session, "done");
+      await markConfirmed(session, stage, "done");
       return;
     }
-    stage = write.held as ConfirmStage;
+    // The time as the diary keeps it now, read exactly: a move since this try was asked for (with the time the page
+    // or the job read before it) is what the hosts, the reminders and the webhook are told of, never the old time.
+    const now = entryOf(session, kept);
+    start = now.start;
+    end = now.e;
   }
-  if (stage === "sending") {
+  // Moved before it was done ("moved"): what a booking does besides its two emails, which the move's stand in for.
+  if (stage === "sending" || stage === "moved") {
     // Booked: the orders it was admitted as are the window's (lib/orders.ts), once each by its reference, however
     // often this is tried, by the checkout.
     for (let unit = 1; unit <= CALL_ORDER_UNITS; unit += 1) await countOrder(store, `call:${session}:${unit}`, input.amountCents ?? 0);
@@ -1777,9 +1829,14 @@ export async function confirmBooking(input: {
       },
       { seed: session },
     ).catch((error) => console.error("a booking notification failed", error));
+    // Moved: the move's emails told both people, so this is done, and no "Booked" email follows them.
+    if (stage === "moved") {
+      await markConfirmed(session, stage, "done");
+      return;
+    }
     // Written down at once, so a later try never counts the team's round robin again (confirmTeam's HINCRBY).
     if (writesAboutBookings(store)) {
-      if (!(await markConfirmed(session, "booked"))) return;
+      if (!(await markConfirmed(session, stage, "booked"))) return;
       stage = "booked";
     }
   }
@@ -1794,7 +1851,7 @@ export async function confirmBooking(input: {
     return null;
   });
   if (!writesAboutBookings(store)) {
-    await markConfirmed(session, "done");
+    await markConfirmed(session, stage, "done");
     return;
   }
 
@@ -1853,7 +1910,8 @@ export async function confirmBooking(input: {
       replyTo: store.email,
       attachments: [{ filename: "call.ics", content: invite(buyerNote(b, store, room, place), b) }],
     });
-    if (!(await markConfirmed(session, "buyer"))) return;
+    if (!(await markConfirmed(session, stage, "buyer"))) return;
+    stage = "buyer";
   }
 
   const creatorSide = hostRecipient(store, hosts);
@@ -1906,7 +1964,7 @@ export async function confirmBooking(input: {
       ? {}
       : { attachments: [{ filename: "call.ics", content: invite(place ? `With ${buyerEmail ?? "your buyer"}. In person, at: ${placeLine(place)}` : `With ${buyerEmail ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`) }] }),
   });
-  await markConfirmed(session, "done");
+  await markConfirmed(session, stage, "done");
 }
 
 /** The idempotency key of a booking's confirmation email: the same on every try, a different one for each side. */
@@ -1915,14 +1973,18 @@ function confirmEmailKey(session: string, side: "buyer" | "creator"): string {
 }
 
 /**
- * Moves a booking's confirmation mark on to `stage` (ConfirmStage), only while it is there (XX): true when written,
- * false when the mark is gone (the store's data erased since), and then nothing more is done or sent. Any other
- * answer is unknown and thrown (rule 24), and the next try does this stage again.
+ * Moves a booking's confirmation mark on from `from`, the stage this try read, to `to` (ConfirmStage), in one step
+ * (CONFIRM_STEP): true when written; false when the mark is gone (the store's data erased since) or another try got
+ * further first, and then nothing more is done or sent here. A mark the buyer's move made "moved" meanwhile is thrown
+ * (Claude 5, 9 November 2026), never written over: no "Booked" email follows the move's, and the mail job keeps the
+ * booking for its next run, which finishes it as moved. Any other answer is unknown and thrown (rule 24).
  */
-async function markConfirmed(session: string, stage: Exclude<ConfirmStage, "sending">): Promise<boolean> {
-  const reply = repliesFor(await redisPipeline([["SET", confirmedKey(session), stage, "XX", "EX", CONFIRMED_SECONDS]]), 1)?.[0];
-  if (reply === "OK") return true;
-  if (reply === null) return false;
+async function markConfirmed(session: string, from: ConfirmStage, to: Exclude<ConfirmStage, "sending" | "moved">): Promise<boolean> {
+  const step = await stepMark(session, [[from, to]]);
+  if (step === "stepped") return true;
+  if (step === "gone") return false;
+  if (step.held === "moved") throw new Error("a booking moved while it was being confirmed; finished as moved by the next try");
+  if (CONFIRM_OWED.has(step.held) || CONFIRM_DONE.has(step.held)) return false;
   throw new UnknownReplyError("a booking's confirmation mark");
 }
 

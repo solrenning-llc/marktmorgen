@@ -4,8 +4,8 @@ import { BlobNotFoundError } from "@vercel/blob";
  * A file store in memory for tests/failure-cleanup-paths.test.ts: lib/blob (which lib/file-store reads) and the upload door's
  * SDK, so the real routes read, check and delete real (synthetic) files and the test reads what is left.
  */
-/** Each file with when it was stored (ms); one with no time was stored long ago. */
-export const files = new Map<string, { bytes: Uint8Array; contentType: string; at?: number }>();
+/** Each file with when it was stored (ms); one with no time was stored long ago. `size` stands for a file too large to hold here. */
+export const files = new Map<string, { bytes: Uint8Array; contentType: string; at?: number; size?: number }>();
 export const deleted: string[] = [];
 
 function missing(pathname: string): Error {
@@ -18,7 +18,7 @@ function missing(pathname: string): Error {
 export async function head(pathname: string) {
   const file = files.get(pathname);
   if (!file) throw missing(pathname);
-  return { pathname, size: file.bytes.length, contentType: file.contentType, url: `https://blob.test/${pathname}`, downloadUrl: "", uploadedAt: new Date(file.at ?? 0), cacheControl: "", contentDisposition: "", etag: "" };
+  return { pathname, size: file.size ?? file.bytes.length, contentType: file.contentType, url: `https://blob.test/${pathname}`, downloadUrl: "", uploadedAt: new Date(file.at ?? 0), cacheControl: "", contentDisposition: "", etag: "" };
 }
 
 export async function get(pathname: string) {
@@ -40,8 +40,11 @@ export async function put(pathname: string, body: Uint8Array, options: { content
   return { pathname, url: `https://blob.test/${pathname}` };
 }
 
-export async function list() {
-  return { blobs: [], hasMore: false, cursor: undefined };
+/** Every file under the prefix, in one page, as the file store lists them (images/ for lib/image-space.ts). */
+export async function list(options: { prefix?: string } = {}) {
+  const prefix = options.prefix ?? "";
+  const blobs = [...files].filter(([pathname]) => pathname.startsWith(prefix)).map(([pathname, file]) => ({ pathname, size: file.size ?? file.bytes.length }));
+  return { blobs, hasMore: false, cursor: undefined };
 }
 
 export async function issueSignedToken(): Promise<string> {

@@ -5,19 +5,23 @@
  * after startGroup (a unit someone else holds, paused orders, a payment page
  * Stripe would not open) goes back to the group form with the store's own
  * words for it, not to the store's front page, and what was typed comes back
- * (WCAG 3.3.7). Rendering, source checks and the real checkout route against
- * a Stripe stand-in; no browser, no assistive technology, no real store.
+ * (WCAG 3.3.7). A reason about one field (how many people, which option)
+ * marks that field and is tied to it, as on the gift form (3.3.1, 4.1.2).
+ * Rendering, source checks and the real checkout route against a Stripe
+ * stand-in; no browser, no assistive technology, no real store.
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Listing, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { GroupBox } from "@/components/store-product";
 import { wordsIn } from "@/lib/buyer-words";
 import { GIFT_RETURN_NOTICES, GIFT_TYPED_KEEP_MS, GROUP_TYPED_FIELDS, giftTypedKey, groupTypedKey, packGroupTyped, sweepGiftTyped, unpackGroupTyped } from "@/lib/gift-typed";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
+import { ADMIT_ORDERS } from "@/lib/order-admission";
+import { MAX_PEOPLE, MIN_PEOPLE } from "@/lib/group-rules";
 import { withConsent } from "./digital-consent-fixture";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -82,12 +86,50 @@ async function main(): Promise<void> {
     is(`?group=${notice}: the store's own words for it, drawn in the group form`, html.includes(text.replace(/'/g, "&#x27;")), true);
     is(`?group=${notice}: the form is open, as an alert that can take the focus`, [/<details[^>]*\bopen=""/.test(html), attr(tagWithId(html, errorId), "role"), attr(tagWithId(html, errorId), "tabindex")], [true, "alert", "-1"]);
   }
-  is("the group's own reasons are still drawn, under the same id", attr(tagWithId(draw("people"), errorId), "role"), "alert");
+  // Rule 23: was `attr(tagWithId(draw("people"), errorId), "role")` expected "alert". A number of people is now
+  // tied to its field (3.3.1, 4.1.2), so it is read with the field and not announced as an alert too (the gift
+  // form's rule); a group reason no field can fix is still the alert, under the same id.
+  is("the group's own reasons are still drawn, under the same id", [tagWithId(draw("people"), errorId) !== "", attr(tagWithId(draw("product"), errorId), "role"), attr(tagWithId(draw("unavailable"), errorId), "role")], [true, "alert", "alert"]);
   is("no reason, no alert", [tagWithId(draw(""), errorId), /role="alert"/.test(draw(""))], ["", false]);
   for (const crafted of ["__proto__", "constructor", "toString"]) {
     is(`?group=${crafted} draws no reason at all`, [tagWithId(draw(crafted), errorId), /role="alert"/.test(draw(crafted))], ["", false]);
   }
   is("every store language has those words", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((lang) => GIFT_RETURN_NOTICES.every((n) => Boolean(wordsIn(lang).notices[n]?.title && wordsIn(lang).notices[n]?.body))), true);
+
+  part("3.3.1 and 4.1.2: a refused number of people or option is marked and tied to the reason, with scripts off");
+  const withOptions = {
+    ...listing,
+    options: [
+      { id: "opt_small_team", label: "Small", priceCents: 1900, file: null, link: "https://example.com/small", details: [] },
+      { id: "opt_large_team", label: "Large", priceCents: 2900, file: null, link: "https://example.com/large", details: [] },
+    ],
+  } as unknown as Listing;
+  const drawFor = (product: Listing, problem: string) => renderToStaticMarkup(createElement(GroupBox, { store, product, problem }));
+  const peopleId = `group-people-${listing.id}`;
+  const optionId = `group-option-${listing.id}`;
+  const team = wordsIn("en").teamProblems(MIN_PEOPLE, MAX_PEOPLE);
+  for (const problem of ["people", "amount"]) {
+    const html = draw(problem);
+    const field = tagWithId(html, peopleId);
+    is(`?group=${problem}: the reason's words, under their own id`, [tagWithId(html, errorId) !== "", html.includes(team[problem].replace(/'/g, "&#x27;"))], [true, true]);
+    is(`?group=${problem}: how many people says it is invalid`, attr(field, "aria-invalid"), "true");
+    is(`?group=${problem}: and points to the reason`, (attr(field, "aria-describedby") ?? "").split(" ").includes(errorId), true);
+    is(`?group=${problem}: read with the field, not announced as an alert too`, /role="alert"/.test(html), false);
+  }
+  const option = drawFor(withOptions, "option");
+  const select = tagWithId(option, optionId);
+  is("?group=option: the option list says it is invalid", attr(select, "aria-invalid"), "true");
+  is("?group=option: and points to the reason", (attr(select, "aria-describedby") ?? "").split(" ").includes(errorId), true);
+  is("?group=option: how many people is not marked then", attr(tagWithId(option, peopleId), "aria-invalid"), null);
+  is("?group=option: read with the field, not announced as an alert too", /role="alert"/.test(option), false);
+  const noOptions = draw("option");
+  is("an option refused on a product with none to choose: the alert, no field marked", [attr(tagWithId(noOptions, errorId), "role"), noOptions.includes('aria-invalid="true"'), noOptions.includes(`aria-describedby="${errorId}"`)], ["alert", false, false]);
+  for (const problem of ["product", "unavailable", ...GIFT_RETURN_NOTICES]) {
+    const html = drawFor(withOptions, problem);
+    is(`?group=${problem}: a reason no field can fix marks no field and is the alert`, [attr(tagWithId(html, errorId), "role"), html.includes('aria-invalid="true"'), html.includes(`aria-describedby="${errorId}"`)], ["alert", false, false]);
+  }
+  const clean = drawFor(withOptions, "");
+  is("with no reason, neither field is marked nor points anywhere", [attr(tagWithId(clean, peopleId), "aria-invalid"), attr(tagWithId(clean, peopleId), "aria-describedby"), attr(tagWithId(clean, optionId), "aria-invalid"), attr(tagWithId(clean, optionId), "aria-describedby")], [null, null, null, null]);
 
   part("3.3.7: what was typed into the group form comes back, in this browser tab only");
   const now = Date.UTC(2026, 10, 9, 6, 0, 0);
@@ -108,6 +150,7 @@ async function main(): Promise<void> {
   const source = readFileSync("components/store-product.tsx", "utf8");
   const groupBox = source.slice(source.indexOf("export function GroupBox"), source.indexOf("export function WaitlistForm"));
   is("the group form draws the keeper, for the group, with its reason", /<GiftTypedKeeper\b[^>]*form="group"[^>]*problem=\{problem\}/.test(groupBox), true);
+  is("the field in error takes the focus, as on the gift form", /<GiftTypedKeeper\b[^>]*form="group"[^>]*focusId=\{/.test(groupBox), true);
   is("the reason is read only as the words' own keys (Object.hasOwn)", /Object\.hasOwn\(problems, problem\)/.test(groupBox) && /Object\.hasOwn\(w\.notices, problem\)/.test(groupBox), true);
   const keeper = readFileSync("components/gift-typed-keeper.tsx", "utf8");
   is("the keeper knows the group form's fields and key", /GROUP_TYPED_FIELDS/.test(keeper) && /groupTypedKey\(/.test(keeper), true);
@@ -134,6 +177,41 @@ async function main(): Promise<void> {
   bad.set("people", "1");
   const refused = await checkoutRoute(post(withConsent(bad)));
   is("a number that cannot be sold still goes back to the form with its own reason, as before", refused.headers.get("location"), `https://marktmorgen.com/@${store.handle}/p/${listing.id}?group=people#group`);
+  const pipeline = redis.pipeline.bind(redis);
+  // The store's orders for the month reached (lib/order-admission.ts answers 0): the real route, not its source.
+  redis.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "EVAL" && commands[0][1] === ADMIT_ORDERS ? [0] : pipeline(commands));
+  let paused: Response;
+  try {
+    paused = await checkoutRoute(post(groupForm()));
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("paused orders: back to the group form, said there", [paused.status, paused.headers.get("location")], [303, `https://marktmorgen.com/@${store.handle}/p/${listing.id}?group=paused#group`]);
+  // The group could not be written down (the database refused it): the real route reads it as not available.
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "SET" && String(command[1]).startsWith("nl:grp:"))) throw new Error("Stand-in: the database refused the write.");
+    return pipeline(commands);
+  };
+  let unwritten: Response;
+  try {
+    unwritten = await checkoutRoute(post(groupForm()));
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("a group that could not be written down: back to the group form, read as not available", [unwritten.status, unwritten.headers.get("location")], [303, `https://marktmorgen.com/@${store.handle}/p/${listing.id}?group=unavailable#group`]);
+  // A busy unit cannot reach a group through the route: a product with limited stock is never bought for several
+  // people (lib/group-rules.ts, canGroup), and is refused before any unit is held. The route's own branch is held
+  // by its source below.
+  const limited = await addProduct(OWNER, "Signed Loaf Print", "A print, signed.", "29", null);
+  if (!limited.ok) throw new Error("no limited product");
+  await setProductLink(OWNER, limited.product.id, "https://example.com/print");
+  const stocked = await setProductExtras(OWNER, limited.product.id, { stock: 3 });
+  const few = new FormData();
+  few.set("handle", store.handle);
+  few.set("product", limited.product.id);
+  few.set("people", "4");
+  const refusedLimited = await checkoutRoute(post(withConsent(few)));
+  is("a product with limited stock: refused for several people before any unit is held, said in the group form", [stocked.ok, refusedLimited.headers.get("location")], [true, `https://marktmorgen.com/@${store.handle}/p/${limited.product.id}?group=product#group`]);
   const route = readFileSync("app/api/store/checkout/route.ts", "utf8");
   is("a group that could not be written down goes back to the group form, read as not available", /if \(!started\) return away\(groupBack\("unavailable"\)\)/.test(route), true);
   is("a busy unit or paused orders send a group back to its form too", [/group && held\.reason === "busy" \? groupBack\("busy"\)/.test(route), /OrdersPausedError\)[^\n]*\n?[^\n]*group \? groupBack\(/.test(route)], [true, true]);
@@ -144,6 +222,12 @@ async function main(): Promise<void> {
   const said = privacy.slice(privacy.indexOf('id="gift-typed"'), privacy.indexOf('id="gift-typed"') + 1200);
   is("the privacy policy names the group form and what of it is kept", /several people/.test(said) && /how many/.test(said), true);
   is("lib/person-data.ts says it too", /several people/.test(readFileSync("lib/person-data.ts", "utf8").split("\n").find((l) => l.includes('file: "lib/gift-typed.ts"')) ?? ""), true);
+
+  part("AX274 Part A: the scripts-off record says what the group form now does");
+  const programme = readFileSync("docs/accessibility-programme.md", "utf8");
+  const record = programme.slice(programme.indexOf("## Gift form sent back with scripts off"), programme.indexOf("## Gift form sent back with scripts off") + 2_500);
+  is("it no longer says a group reason is always the alert, tied to no field", /always the alert, tied to no field/.test(record), false);
+  is("it says how many people and the option are tied to their reason", /how many people/.test(record) && /aria-describedby/.test(record), true);
 
   done();
 }

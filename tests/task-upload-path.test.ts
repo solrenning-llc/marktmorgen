@@ -13,25 +13,38 @@
  * one, is refused, so the daily sweep can never be pointed at it). Synthetic only: the real door, the real SDK on
  * both sides with a token made in Vercel's shape, the real lib/assignment.ts, an in-memory file store
  * (tests/failure-cleanup-world.ts) and the in-memory Redis (tests/redis-stub.ts).
+ *
+ * The pre-review of the fix (9 November 2026) added: a hand-in that takes the name off the list and then lets the file
+ * go (none there yet, the wrong kind, too big, no room, work not kept) puts the name back on the list, since the
+ * browser's PUT may still land within the door's five minutes and would otherwise be kept for ever, outside the sweep
+ * and the room; the sweep keeps a file that is a student's handed-in work whatever the list says; the door lists its
+ * name again after asking the file store, in case the sweep took an old listing of it meanwhile; the door's whole cost
+ * is priced and held inside a buyer action; and a file the door refuses is said honestly, since the SDK's error says
+ * nothing of why.
  */
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { uploadPresigned } from "@vercel/blob/client";
 import { POST } from "@/app/api/store/course/task/upload/route";
+import { POST as HAND_IN } from "@/app/api/store/course/task/route";
 import * as rules from "@/lib/assignment-rules";
 import { ownsTaskPath, taskFolder } from "@/lib/assignment-rules";
 import { storeFolder, storeRef } from "@/lib/store";
-import { sweepTaskUploads, takeTaskUpload } from "@/lib/assignment";
+import { noteTaskUpload, submissionOf, sweepTaskUploads, takeTaskUpload } from "@/lib/assignment";
+import { coursesWords } from "@/lib/buyer-words/courses";
+import { LANGUAGE_CODES } from "@/lib/store-language";
+import * as registry from "./plan-cost-registry";
 import { deleteFile } from "@/lib/file-store";
 import { files } from "./failure-cleanup-world";
-import { SIGNING_KEY, STORE, asStudent, issued } from "./task-upload-path-world";
+import { COURSE, LESSON, SIGNING_KEY, STORE, STUDENT_A, STUDENT_B, asStudent, issued, setFailDeletes } from "./task-upload-path-world";
+import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.BLOB_WEBHOOK_PUBLIC_KEY = "webhook-public-key-for-tests";
 const SITE = "https://marktmorgen.com";
 (globalThis as unknown as { location: { href: string } }).location = { href: `${SITE}/@shop/course/product-1/lesson-1` };
-const where = { handle: "shop", product: "product-1", lesson: "lesson-1" };
+const where = { handle: "shop", product: "product-1", lesson: LESSON };
 const PDF = "application/pdf";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -47,7 +60,7 @@ function browserName(folder: string, extension: string): string {
 }
 
 async function folderOf(who: string): Promise<string> {
-  return taskFolder(await storeFolder(storeRef(STORE as never)), "course-1", "lesson-1", who);
+  return taskFolder(await storeFolder(storeRef(STORE as never)), COURSE, LESSON, who);
 }
 
 /** Every PUT the SDK sent the file store, as the browser would. */
@@ -108,12 +121,25 @@ async function ask(name: string, type = PDF): Promise<{ status: number; error?: 
 }
 
 const listed = async (path: string) => (await redis.pipeline([["ZSCORE", "nl:tasks:doors", path]]))[0] !== null;
-const store = (path: string) => files.set(path, { bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]), contentType: PDF, at: Date.now() });
+const store = (path: string, contentType = PDF, size = 4) => files.set(path, { bytes: new Uint8Array(size).fill(0x25), contentType, at: Date.now() });
+
+/** The hand-in, as the lesson's form sends it. */
+async function handIn(path: string): Promise<string> {
+  const request = new Request(`${SITE}/api/store/course/task`, {
+    method: "POST",
+    headers: { host: "marktmorgen.com", origin: SITE, "content-type": "application/json" },
+    body: JSON.stringify({ ...where, text: "", file: { path, name: "plan.pdf" } }),
+  });
+  answering(request);
+  const answer = await HAND_IN(request as never);
+  const json = (await answer.json()) as { ok?: boolean; error?: string };
+  return json.ok ? "ok" : (json.error ?? `status ${answer.status}`);
+}
 
 async function main(): Promise<void> {
   part("The browser's PUT is the request the door signed");
-  asStudent("student-a");
-  const folder = await folderOf("student-a");
+  asStudent(STUDENT_A);
+  const folder = await folderOf(STUDENT_A);
   const name = browserName(folder, "pdf");
   puts.length = 0;
   const sent = await send(name);
@@ -128,7 +154,7 @@ async function main(): Promise<void> {
   is("the door signed one name and never an overwrite", issued.at(-1)?.operations, ["put"]);
 
   part("The door checks the name, never trusts it");
-  const other = await folderOf("student-b");
+  const other = await folderOf(STUDENT_B);
   is("a name in another student's folder is refused", await ask(browserName(other, "pdf")), { status: 400, error: "invalid" });
   is("a name outside the store's tasks is refused", await ask("stores/elsewhere/0123456789abcdef0123456789abcdef.pdf"), { status: 400, error: "invalid" });
   is("a name that is not a fresh one is refused", await ask(`${folder}task.pdf`), { status: 400, error: "invalid" });
@@ -163,9 +189,70 @@ async function main(): Promise<void> {
   files.get = original;
   is("and the name is not left on the sweep's list", await listed(unknown), false);
 
+  part("A hand-in that finds no file yet puts the name back, so a PUT landing later is swept (pre-review, ALTO)");
+  const early = browserName(folder, "pdf");
+  is("the door opens", (await ask(early)).status, 200);
+  is("handed in before the browser's PUT landed: missing", await handIn(early), "missing");
+  is("the name is back on the sweep's list", await listed(early), true);
+  store(early);
+  const late = await sweepTaskUploads(deleteFile, Date.now() + DAY_MS + 3_600_000);
+  is("the file that landed later is swept the next day", [late.includes(early), files.has(early)], [true, false]);
+
+  part("Every hand-in that does not keep its file puts the name back");
+  const wrong = browserName(folder, "pdf");
+  is("the door opens", (await ask(wrong)).status, 200);
+  store(wrong, "image/png");
+  setFailDeletes(true);
+  is("a file of another kind is refused", await handIn(wrong), "type");
+  setFailDeletes(false);
+  is("and, not deleted, its name is back on the list", await listed(wrong), true);
+  const big = browserName(folder, "pdf");
+  is("the door opens", (await ask(big)).status, 200);
+  store(big, PDF, rules.MAX_TASK_FILE_BYTES + 1);
+  setFailDeletes(true);
+  is("a file over the limit is refused", await handIn(big), "too_big");
+  setFailDeletes(false);
+  is("and, not deleted, its name is back on the list", await listed(big), true);
+
+  part("The sweep never deletes a student's handed-in work, whatever the list says");
+  const kept = browserName(folder, "pdf");
+  is("the door opens", (await ask(kept)).status, 200);
+  store(kept);
+  is("the file is handed in", await handIn(kept), "ok");
+  is("it is the student's work now", (await submissionOf(COURSE, LESSON, STUDENT_A))?.file?.path, kept);
+  await noteTaskUpload(kept, 0);
+  const stray = await sweepTaskUploads(deleteFile, Date.now() + DAY_MS + 3_600_000);
+  is("a stray listing of it does not get it deleted", [stray.includes(kept), files.has(kept)], [false, true]);
+
+  part("The door lists its name again after asking the file store");
+  const raced = browserName(folder, "pdf");
+  const plain = files.get.bind(files);
+  files.get = ((key: string) => {
+    // The sweep takes an old listing of this name off the list while the door asks the file store about it.
+    if (key === raced) void redis.pipeline([["ZREM", "nl:tasks:doors", raced]]);
+    return plain(key);
+  }) as typeof files.get;
+  is("the door opens", (await ask(raced)).status, 200);
+  files.get = plain;
+  is("and its name is on the list for the file it lets in", await listed(raced), true);
+
+  part("The door's whole cost is priced, inside one buyer action");
+  const prices = registry as Record<string, unknown>;
+  const door = prices.TASK_DOOR_COST as number | undefined;
+  const simple = prices.BLOB_SIMPLE_OPERATION as number | undefined;
+  const advanced = prices.BLOB_ADVANCED_OPERATION as number | undefined;
+  is("the head and the two advanced operations are priced, never zero", [simple ?? 0, advanced ?? 0].every((price) => price > 0), true);
+  is("the door counts them", typeof door === "number" && door > (simple ?? 0) + 2 * (advanced ?? 0), true);
+  is("the door, all of it, costs no more than one buyer action", typeof door === "number" && door <= registry.UNIT_COST.buyer, true);
+
+  part("A file the door refuses is said honestly, in every language");
+  is("every language has its words", LANGUAGE_CODES.every((language) => (coursesWords(language) as unknown as Record<string, unknown>).taskFileFailed), true);
+
   part("The component and the lesson page send the name the door checks");
   const component = readFileSync("components/lesson-task.tsx", "utf8");
   is("the component names the file with taskUploadPath, in the folder it is given", /uploadPresigned\(taskUploadPath\(folder, /.test(component), true);
+  is("its id comes from crypto.getRandomValues, which older phones have", /crypto\.getRandomValues\(/.test(component) && !/randomUUID/.test(component), true);
+  is("a refused upload says what may have happened (taskFileFailed), never a bare try again", /setError\(w\.taskFileFailed\)/.test(component) && !/message\.includes\("full"\)/.test(component), true);
   const page = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
   is("the lesson page gives the student's folder (taskFolder)", /folder=\{taskFolderFor\}/.test(page) && /taskFolder\(await storeFolder\(storeRef\(store\)\), course\.id, lesson\.id, who\)/.test(page), true);
   const route = readFileSync("app/api/store/course/task/upload/route.ts", "utf8");

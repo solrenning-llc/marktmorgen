@@ -6,7 +6,19 @@
  * the shape Vercel issues one (a delegation scope, then a key the scope is signed with), and the network under the
  * SDK (undici) is the test's own fetch, so the browser's PUT is read instead of sent.
  */
-export { del, deleted, files, get, head, list, put } from "./failure-cleanup-world";
+import { del as deleteStored } from "./failure-cleanup-world";
+
+export { deleted, files, get, head, list, put } from "./failure-cleanup-world";
+
+/** Whether the file store refuses to delete, to follow what a hand-in does with a file it cannot let go of. */
+let failDeletes = false;
+export function setFailDeletes(fail: boolean): void {
+  failDeletes = fail;
+}
+export async function del(pathnames: string | string[]): Promise<void> {
+  if (failDeletes) throw new Error("the file store did not delete");
+  await deleteStored(pathnames);
+}
 
 /** The key a delegation's presigned requests are signed with (IssuedSignedToken.clientSigningToken). */
 export const SIGNING_KEY = "client-signing-key-for-tests";
@@ -33,7 +45,12 @@ export const fetch = (...args: Parameters<typeof globalThis.fetch>) => globalThi
 // ---------------------------------------------------------------- @/lib/assignment-access
 
 export const STORE = { handle: "shop", name: "Shop", email: "creator@example.com", sid: "s-1", tier: "creator", subscriptionActive: true, trialEnds: 0, language: "en" };
-let student = "student-a";
+/** A course's, a lesson's and two students' ids in the shapes lib/course.ts and lib/learn.ts make them. */
+export const COURSE = "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0";
+export const LESSON = "lesson000001";
+export const STUDENT_A = "a".repeat(32);
+export const STUDENT_B = "b".repeat(32);
+let student = STUDENT_A;
 /** Signs in as this student. */
 export function asStudent(who: string): void {
   student = who;
@@ -44,8 +61,8 @@ export async function studentOnTask() {
     ok: true as const,
     store: STORE,
     product: { id: "product-1" },
-    course: { id: "course-1" },
-    lesson: { id: "lesson-1" },
+    course: { id: COURSE },
+    lesson: { id: LESSON, title: "Your plan" },
     unit: { id: "unit-1" },
     task: { prompt: "Send your plan.", review: false, gate: false, file: true },
     who: student,
@@ -56,5 +73,9 @@ export async function studentOnTask() {
 // ---------------------------------------------------------------- @/lib/buyer-actions
 
 export async function takeBuyerAction() {
+  return true;
+}
+
+export async function takeBuyerRead() {
   return true;
 }

@@ -2,5 +2,6 @@
   "@/lib/blob": "task-upload-path-world.ts",
   "@/lib/assignment-access": "task-upload-path-world.ts",
   "@/lib/buyer-actions": "task-upload-path-world.ts",
-  "undici": "task-upload-path-world.ts"
+  "undici": "task-upload-path-world.ts",
+  "next/headers": "security/next-headers.ts"
 }

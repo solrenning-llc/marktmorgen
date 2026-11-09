@@ -1,3 +1,4 @@
+import { countOf, repliesFor, UnknownReplyError } from '@/lib/redis-reply';
 import { type SourceHooks, readSourcePage, sourceReadingOn } from "@/lib/source-page";
 import { allowanceWindow, windowId } from "@/lib/allowance-window";
 import { BUYER_LENSES, type BuyerLens, PREDICTS } from "@/lib/page-coach";
@@ -80,7 +81,7 @@ function model(): string {
 function jobCount(value: unknown): number | null {
   if (typeof value !== "number" && (typeof value !== "string" || !/^\d+$/.test(value))) return null;
   const count = Number(value);
-  return Number.isSafeInteger(count) && count >= 0 ? count : null;
+  return Number.isSafeInteger(count) && count >= 0 && (typeof value === "number" || String(count) === value) ? count : null;
 }
 
 /** A store's writing jobs, counted in its window (lib/allowance-window.ts): null when none is known, and then none is taken. */
@@ -133,10 +134,13 @@ export function aiAllowance(store: Store, now = Date.now()): number {
 export async function aiLeft(store: Store, now = Date.now()): Promise<number> {
   const key = monthKey(store, new Date(now));
   if (!store.statsId || !isRedisConfigured() || !key) return 0;
-  const [used] = await redisPipeline([["GET", key]]);
+  const replies = repliesFor(await redisPipeline([["GET", key]]), 1);
+  if (!replies) throw new UnknownReplyError("AI writing balance");
+  const used = replies[0];
   if (used === null) return aiAllowance(store, now);
-  const count = jobCount(used);
-  return count === null ? 0 : Math.max(0, aiAllowance(store, now) - count);
+  const count = typeof used === "string" ? jobCount(used) : null;
+  if (count === null) throw new UnknownReplyError("AI writing balance");
+  return Math.max(0, aiAllowance(store, now) - count);
 }
 
 /**
@@ -368,12 +372,13 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
   const key = monthKey(store, new Date(now));
   if (!key) return { ok: false, reason: "off" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "off" };
-  const [used] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["INCRBY", key, jobs],
     ["EXPIRE", key, 40 * 86_400],
-  ]);
-  const count = jobCount(used);
-  if (count === null || count < jobs) return { ok: false, reason: "off" };
+  ]), 2);
+  const count = countOf(replies?.[0]);
+  // A partial reservation is unknown; never undo an unconfirmed increment.
+  if (!replies || count === null || count < jobs || replies[1] !== 1) return { ok: false, reason: "off" };
   if (count > allowance) {
     await redisPipeline([["DECRBY", key, jobs]]).catch(() => {});
     return { ok: false, reason: "used" };
@@ -387,7 +392,7 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
   // Provider work may cost money even when the response is unusable.
   // Only a refused reservation is returned; a started attempt stays counted.
   if (value === null) return { ok: false, reason: "failed" };
-  return { ok: true, value, left: Math.max(0, allowance - Number(used)) };
+  return { ok: true, value, left: Math.max(0, allowance - count) };
 }
 
 // ------------------------------------------------------------------ jobs

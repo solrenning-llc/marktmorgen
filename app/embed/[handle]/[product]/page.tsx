@@ -5,8 +5,9 @@ import { connection } from "next/server";
 import { headers } from "next/headers";
 import { SITE_URL } from "@/lib/site-url";
 import { cache } from "react";
-import { type Listing, type Store, normaliseHandle, storeForPage } from "@/lib/store";
-import { readListing, readListings } from "@/lib/catalog";
+import { type Listing, type Store, normaliseHandle } from "@/lib/store";
+import { storeForHandleExactly } from "@/lib/store-exact";
+import { readListingExactly, readListings } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { lookStyle } from "@/lib/store-look";
 import { imageUrl } from "@/lib/product-image";
@@ -30,6 +31,7 @@ import { bookingWords } from "@/lib/buyer-words/booking";
 import { chargeNow } from "@/lib/call-deposit";
 import { slotWords } from "@/lib/slot-words";
 import { placeLine } from "@/lib/call-place";
+import { WhoAnswers, saysWhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -62,26 +64,47 @@ type Params = {
  * Once a creator lists their sites, a card pasted anywhere else shows the
  * plain link too; with no list it is drawn wherever it is pasted, as before.
  */
-const load = cache(async (raw: string, id: string): Promise<{ store: Store | null; product: Listing | null }> => {
+/**
+ * The store and the product, or null for one that is not there. A read that
+ * failed is `unread`, never "not there" (CX-123 rule 24): the card then says
+ * it could not be loaded just now, never that the product is no longer on sale. The store is read exactly
+ * (lib/store-exact.ts), so an address that answered out of shape is unread too (Codex J on #2910), and so is the
+ * product's own record (readListingExactly; Claude 3 on #2910).
+ */
+const load = cache(async (raw: string, id: string): Promise<{ store: Store | null; product: Listing | null; unread: boolean }> => {
   let decoded = "";
   try {
     decoded = decodeURIComponent(raw);
   } catch {
-    return { store: null, product: null };
+    return { store: null, product: null, unread: false };
   }
-  const store = await storeForPage(normaliseHandle(decoded.replace(/^@/, ""))).catch(() => null);
+  let found: Awaited<ReturnType<typeof storeForHandleExactly>>;
+  try {
+    found = await storeForHandleExactly(normaliseHandle(decoded.replace(/^@/, "")));
+  } catch {
+    return { store: null, product: null, unread: true };
+  }
+  if (found === "unknown") return { store: null, product: null, unread: true };
+  const store = found === "none" ? null : found;
   // A store switched off after notices (lib/takedown.ts) shows no card.
-  if (!store || store.suspended) return { store: null, product: null };
+  if (!store || store.suspended) return { store: null, product: null, unread: false };
   // A draft is not on sale, and its card says so as its page would.
-  const product = await readListing(store, id).catch(() => null);
-  return { store, product: product && !product.hidden ? product : null };
+  let product: Listing | null;
+  try {
+    const read = await readListingExactly(store, id);
+    if (read === "unknown") return { store, product: null, unread: true };
+    product = read;
+  } catch {
+    return { store, product: null, unread: true };
+  }
+  return { store, product: product && !product.hidden ? product : null, unread: false };
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
-  const { store, product } = await load(handle, id);
+  const { store, product, unread } = await load(handle, id);
   return {
-    title: store && product ? `${product.title} — ${store.name}` : "Not on sale",
+    title: store && product ? `${product.title} — ${store.name}` : unread ? "Not available just now" : "Not on sale",
     robots: { index: false, follow: false },
   };
 }
@@ -141,14 +164,18 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     return (
       <div className="flex h-screen items-center justify-center p-4" style={{ background: "transparent" }}>
         <style>{SEE_THROUGH}</style>
-        <p className="rounded-3xl bg-white px-5 py-4 text-center text-sm text-ink-soft ring-1 ring-line">
+        {/* With a store, the sentence is in its language and says so (3.1.2); without one, it is English, as the page. */}
+        <p lang={store ? speech(store).lang.locale : undefined} className="rounded-3xl bg-white px-5 py-4 text-center text-sm text-ink-soft ring-1 ring-line">
           {store ? (
             <>
-              {`${speech(store).w.noLongerOnSale} `}
+              {`${loaded.unread ? speech(store).w.cardUnread : speech(store).w.noLongerOnSale} `}
               <a href={tag(`/@${store.handle}`)} {...aside} className="font-semibold underline underline-offset-4">
                 {speech(store).w.seeStore(store.name)}
               </a>
             </>
+          ) : loaded.unread ? (
+            // The store could not be read, so neither could its language: in English, as below.
+            "This product could not be loaded just now. Try again in a moment."
           ) : (
             "This product is no longer on sale."
           )}
@@ -159,16 +186,24 @@ export default async function EmbedCard({ params, searchParams }: Params) {
 
   const selling = canSell(store);
   const [coming, stock, noKeys, related, summary] = await Promise.all([
-    soonOne(store, product.id).catch(() => ({ soon: false, day: null })),
+    // Unknown is null, never "not coming soon" (CX-123 rule 24): the card then draws no buy button.
+    soonOne(store, product.id).catch(() => null),
     stockLeft(store, product).catch(() => null),
-    outOfKeys(store, product).catch(() => false),
+    // Unknown is null, never "keys left" (CX-123 rule 24; Claude 4 on #2910): the card then draws no buy button.
+    outOfKeys(store, product).catch(() => null),
     product.bumps.length ? readListings(store, bumpTargets(product)).catch(() => []) : Promise.resolve([]),
     summaryOf(store.statsId, product.id).catch(() => null),
   ]);
-  const soon = coming.soon;
-  const count = noKeys ? 0 : stock;
+  const soon = coming?.soon ?? false;
+  // With the key count unknown, how many are left is not said either.
+  const count = noKeys === null ? null : noKeys ? 0 : stock;
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
-  const computed = pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day));
+  // Whether it is coming soon, or whether a key is left, could not be read: buying, the waitlist or the pre-order cannot
+  // be told apart, or the product may be sold out, so the card says buying is not available just now, and its title
+  // still leads to the product's page.
+  const computed = coming && noKeys !== null
+    ? pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day))
+    : { action: { kind: "none" as const, text: speech(store).w.cardBuyUnread }, label: "" };
   const page = tag(productPath(store, product));
   // A card the script opened on a site the creator did not list, past the
   // store's visits or past the opens one connection gets, and one pasted
@@ -290,6 +325,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
             />
             </>
           )}
+          {/* Before the buyer picks a time and pays (components/who-answers.tsx). */}
+          {chooses || read === null ? null : <WhoAnswers store={store} className="st-muted mt-3 text-sm" />}
           <p className="mt-4 text-center text-sm">
             <a href={here({}, ["view", "length"], "calendar-button")} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">{b.backToCard(product.title)}</a>
           </p>
@@ -313,6 +350,11 @@ export default async function EmbedCard({ params, searchParams }: Params) {
         : "";
   const image = product.image;
   const height = image ? CARD_HEIGHTS.picture : CARD_HEIGHTS.plain;
+  // In a frame, a button that goes straight to paying (a shipped product) leaves no room for the whole sentence on who
+  // answers for the sale (components/who-answers.tsx), so the line under the title says a short one of its own, wrapped,
+  // never cut: the card then grows past the frame and scrolls inside it rather than clip anything. The title leads to the
+  // product's page, where the whole sentence is; as a page of its own, the card has the whole one under it.
+  const soldBy = action.kind === "checkout" && open?.mode !== "page" && saysWhoAnswers(store);
   // Told what happened only on a listed site, and only while it may buy here.
   const messaging = open?.mode === "overlay" && open.live && open.site ? open.site : null;
   // Which product, never a price; and, from the script, the listed site it
@@ -332,7 +374,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     ) : null;
 
   const card = (
-      <article className="st-card flex h-full flex-col overflow-hidden p-4" style={{ boxShadow: "none" }}>
+      <article className={`st-card flex ${soldBy ? "min-h-full" : "h-full"} flex-col overflow-hidden p-4`} style={{ boxShadow: "none" }}>
         {image ? (
           <a href={page} {...aside} tabIndex={-1} className="em-cover -mx-4 -mt-4 mb-4 h-[160px] shrink-0 overflow-hidden" style={{ background: "var(--st-item)" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -352,7 +394,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
                 {product.title}
               </a>
             </h1>
-            <p className="st-muted truncate text-sm">{store.name}</p>
+            {soldBy ? <p className="st-muted text-sm break-words">{w.cardSoldBy(store.name)}</p> : <p className="st-muted truncate text-sm">{store.name}</p>}
           </div>
         </div>
         <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -369,7 +411,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
             <p
               className="em-sum st-muted text-sm leading-relaxed"
               data-picture={image ? "" : undefined}
-              style={{ "--lines": product.title.length > LONG_TITLE ? 1 : 2 } as React.CSSProperties}
+              style={{ "--lines": product.title.length > LONG_TITLE || soldBy ? 1 : 2 } as React.CSSProperties}
             >
               {product.summary}
             </p>
@@ -399,17 +441,19 @@ export default async function EmbedCard({ params, searchParams }: Params) {
         ) : (
           <p className="st-muted mt-3 text-center text-sm font-semibold">{action.text}</p>
         )}
-        {note ? <p className="st-muted mt-2 truncate text-center text-xs">{note}</p> : null}
+        {note ? <p className="st-muted mt-2 break-words text-center text-xs">{note}</p> : null}
       </article>
   );
 
   if (open?.mode === "page") {
     return (
-      <div lang={lang.locale} className={`st-page st-theme-${store.look.theme} flex min-h-screen items-center justify-center px-4 py-10`} style={lookStyle(store.look) as React.CSSProperties}>
+      <div lang={lang.locale} className={`st-page st-theme-${store.look.theme} flex min-h-screen flex-col items-center justify-center px-4 py-10`} style={lookStyle(store.look) as React.CSSProperties}>
         <style>{ON_A_PAGE}</style>
         <main id="content" className="w-full max-w-[400px]" style={{ height }}>
           {card}
         </main>
+        {/* Under the card, which keeps its height, wherever the card can take a payment (components/who-answers.tsx). */}
+        {action.kind === "checkout" ? <WhoAnswers store={store} className="st-muted mt-4 w-full max-w-[400px] text-center text-sm" /> : null}
       </div>
     );
   }
@@ -417,12 +461,15 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   return (
     <div
       lang={lang.locale}
-      className={`st-page st-theme-${store.look.theme} h-screen`}
+      className={`st-page st-theme-${store.look.theme} h-screen${soldBy ? " overflow-y-auto" : ""}`}
       style={{ ...(lookStyle(store.look) as React.CSSProperties), background: "transparent" }}
       data-card-height={height}
     >
       <style>{SEE_THROUGH}</style>
-      {card}
+      {/* One main landmark around the card, as on every page (1.3.1); it fills the frame as the card did. */}
+      <main id="content" className="h-full">
+        {card}
+      </main>
       {messaging ? <EmbedMessenger to={messaging} height={height} /> : null}
     </div>
   );

@@ -45,7 +45,7 @@ async function main() {
   }) as typeof redis.pipeline;
   const down = await Promise.all([poolPlace(free(1), now), admitNonPaying(free(1), now), takeAllowance(free(1), "studio", 1, now)]);
   is("a database that does not answer: unknown, not let in, and never called full", [down[0], down[1], !down[2].ok && down[2].reason, !down[2].ok && down[2].message], ["unknown", false, "unknown", "This can't be counted right now. Try again in a minute."]);
-  is("and a webhook refused for it waits to be tried again on the schedule, where before it failed for good as 'full'", readFileSync("lib/webhooks.ts", "utf8").includes('if (taken.reason === "unknown" && retryIn !== undefined) return { ...delivery, state: "retrying"'), true);
+  is("and a webhook refused for it waits to be tried again on the schedule, where before it failed for good as 'full'", [readFileSync("lib/webhooks.ts", "utf8").includes('if (taken.reason === "unknown" && delivery.type !== "test") {'), readFileSync("lib/webhooks.ts", "utf8").includes('return { ...next, ...counted, state: "retrying", next: now + retryIn * 60_000, lastStatus: 0, lastError: taken.message };')], [true, true]);
   const studio = await countStudio(free(1) as never, null);
   is("so the studio's count says unknown too", [!studio.ok && studio.reason], ["unknown"]);
   redis.pipeline = pipeline;

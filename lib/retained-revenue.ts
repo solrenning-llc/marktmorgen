@@ -101,6 +101,24 @@ export function windowStarts(today: string): Record<Window, string> {
 
 const channelOf = (source: string) => (source === "" || source === "direct" ? "direct" : source);
 
+const DAY_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Whether a reading holds an entry it could not read (CX-123 rule 24): a day
+ * that is not a day, or, in the window, an amount that is not a whole number
+ * of the smallest unit or a currency that is not named. A refund, renewal or
+ * dispute is never for nothing, so a zero there is an amount not read too.
+ * Such an entry makes the reading incomplete: left out, the money would make
+ * the kept figure look exactly like a real one.
+ */
+function holdsUnread(entries: Entry[], from: string, positive: boolean): boolean {
+  return entries.some((e) => {
+    if (typeof e.day !== "string" || !DAY_SHAPE.test(e.day)) return true;
+    if (e.day < from) return false;
+    return !Number.isSafeInteger(e.cents) || e.cents < (positive ? 1 : 0) || typeof e.currency !== "string" || !e.currency;
+  });
+}
+
 /** What each currency kept in one window, and the store currency's kept money by channel. */
 export function keptIn(readings: Readings, from: string, storeCurrency: string): KeptWindow {
   const by = new Map<string, KeptLine>();
@@ -146,10 +164,10 @@ export function keptIn(readings: Readings, from: string, storeCurrency: string):
   // The store's own currency always has a line, so "nothing was paid" is said rather than left blank.
   line(storeCurrency);
   const missing: KeptLine["missing"] = [];
-  if (!readings.sales.complete) missing.push("sales");
-  if (readings.renewals && !readings.renewals.complete) missing.push("renewals");
-  if (!readings.refunds?.complete) missing.push("refunds");
-  if (!readings.disputes?.complete) missing.push("disputes");
+  if (!readings.sales.complete || holdsUnread(readings.sales.entries, from, false)) missing.push("sales");
+  if (readings.renewals && (!readings.renewals.complete || holdsUnread(readings.renewals.entries, from, true))) missing.push("renewals");
+  if (!readings.refunds?.complete || holdsUnread(readings.refunds.entries, from, true)) missing.push("refunds");
+  if (!readings.disputes?.complete || holdsUnread(readings.disputes.entries, from, true)) missing.push("disputes");
   const lines = [...by.values()].map((row) => ({
     ...row,
     missing,

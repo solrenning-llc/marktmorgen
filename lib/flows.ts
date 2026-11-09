@@ -41,6 +41,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
@@ -67,7 +68,7 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CrmDealReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { CrmDealReadUnavailable, readDealExact, readFieldsWhole, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
 import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
@@ -291,7 +292,8 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   }
   const formOutcome = trigger === "form" && typeof raw.formOutcome === "string" ? raw.formOutcome : "";
   // The store's fields and stages, for a step that sets one or moves a deal (lib/crm.ts).
-  const [crmFields, stages] = await Promise.all([readFields(store.statsId), readStages(store.statsId)]);
+  // Both exactly as saved: unknown ones throw CrmSchemaReadUnavailable, never "none" or the defaults (CX-123 rule 30).
+  const [crmFields, stages] = await Promise.all([readFieldsWhole(store.statsId), readStages(store.statsId)]);
   // A stage of one of the store's pipelines; one workflow a stage, so a deal entering it starts one run at the most.
   const stageId = trigger === "stage" && typeof raw.stageId === "string" ? raw.stageId : "";
   if (trigger === "stage" && !stages.some((st) => st.id === stageId)) return { ok: false, reason: "stage" };
@@ -365,11 +367,17 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
 export async function removeFlow(store: Store, id: string): Promise<FlowResult> {
   if (!store.listId) return { ok: false, reason: "unknown" };
   const flows = await readFlowListStrict(store.listId);
-  if (!flows.some((f) => f.id === id)) return { ok: false, reason: "unknown" };
+  const flow = flows.find((f) => f.id === id);
+  if (!flow) return { ok: false, reason: "unknown" };
+  // Paused first, so nobody new starts it and nothing more of it is sent while its runs are erased; then its runs,
+  // their history, starts and queued steps, so nothing of the people in it is kept; and only once that is confirmed
+  // is it taken off the list. An erasure that cannot be confirmed throws with the workflow still listed (paused), so a
+  // removal tried again, a person's erasure request (forgetWorkflowPerson) or the store's deletion
+  // (forgetStoreWorkflows), which walk the listed workflows, still reach its runs (CX-123 rule 24).
+  if (flow.active) await writeFlows(store, store.listId, flows.map((f) => (f.id === id ? { ...f, active: false } : f)));
+  await purgeFlow(store, flow);
   const next = flows.filter((f) => f.id !== id);
   await writeFlows(store, store.listId, next);
-  // Its runs, their history, starts and queued steps: nothing of the people in it is kept.
-  await purgeFlow(store, flows.find((f) => f.id === id)!).catch((error) => console.error("erasing a removed workflow's runs failed", error));
   return { ok: true, flows: next };
 }
 
@@ -388,12 +396,16 @@ function queuedOf(store: Store, flow: Pick<Flow, "id">, emails: string[]): (stri
   return out;
 }
 
-/** Confirms a pipeline of deletions was answered in full; anything else is not an erasure. */
+/**
+ * Confirms a pipeline of deletions (DEL and ZREM only) was answered in full, each reply the count its command
+ * answers, a whole number from zero up (countOf); anything else, a null included, is not an erasure (Codex M on
+ * #3083, CX-123 rule 24) and throws, so the workflow stays listed and its runs findable.
+ */
 async function erase(commands: (string | number)[][]): Promise<void> {
   for (let i = 0; i < commands.length; i += 500) {
     const chunk = commands.slice(i, i + 500);
-    const reply = await redisPipeline(chunk);
-    if (!Array.isArray(reply) || reply.length !== chunk.length) throw new FlowWriteUnconfirmed();
+    const replies = repliesFor(await redisPipeline(chunk), chunk.length);
+    if (!replies || replies.some((reply) => countOf(reply) === null)) throw new FlowWriteUnconfirmed();
   }
 }
 
@@ -737,7 +749,15 @@ async function actOnPeople(
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
   if (action.do === "field") {
-    const field = (await readFields(statsId)).find((f) => f.id === action.field);
+    let fields: Awaited<ReturnType<typeof readFieldsWhole>>;
+    try {
+      // Exactly as saved: a reply in an unknown shape is unknown, never "the field was removed" (CX-123 rule 24).
+      fields = await readFieldsWhole(statsId);
+    } catch {
+      // Nothing was written: tried again later, which is safe (never "uncertain", held for the creator, for a read).
+      return each(emails, "deferred", "Your fields could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "retry" as const }));
+    }
+    const field = fields.find((f) => f.id === action.field);
     if (!field) return each(emails, "failed", "The field was removed from your store.");
     const out: Acted[] = [];
     for (const email of emails) {
@@ -829,10 +849,13 @@ async function actOnDeals(
   at: { flow: Flow; step: FlowStep; index: number },
   held: Held | null,
 ): Promise<Acted[]> {
-  const pipelines = await readPipelines(statsId);
-  const stages = allStages(pipelines);
+  let pipelines: Awaited<ReturnType<typeof readPipelines>>;
+  let stages: ReturnType<typeof allStages>;
   let deals: Awaited<ReturnType<typeof readDeals>>;
   try {
+    // The store's own pipelines, or nothing: unknown ones are never read as the default stages (CX-123 rule 30).
+    pipelines = await readPipelines(statsId);
+    stages = allStages(pipelines);
     deals = await readDeals(statsId, stages);
   } catch {
     // Nothing was written: tried again later, which is safe.

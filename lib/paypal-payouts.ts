@@ -37,7 +37,7 @@ import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affilia
 import { plainAmount } from "@/lib/money";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
-import { type Store, storeForId } from "@/lib/store";
+import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
 /** Local tests may point this at a stand-in on 127.0.0.1; nothing else is taken. */
 const PAYPAL_API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? "")
@@ -583,9 +583,19 @@ export async function settleAllPayPal(deadline: number): Promise<number> {
   let done = 0;
   for (const sid of Array.isArray(sids) ? (sids as string[]) : []) {
     if (Date.now() >= deadline) break;
-    const store = await storeForId(sid).catch(() => null);
+    let store: Store | null;
+    try {
+      store = await storeForId(sid);
+    } catch (error) {
+      // Not read (rule 24): never "gone". A store with a batch still open stays in the daily job, and its affiliates
+      // are settled on a later day; only a store whose id key is gone leaves the set.
+      console.error("a PayPal store's record could not be read; it is tried again next run", error);
+      continue;
+    }
     if (!store) {
-      await redisPipeline([["SREM", STORES, sid]]);
+      // storeForId also answers null for an id key of another shape or an owner record that came back cut, so null alone
+      // is not "gone": only an EXISTS of the id key that is exactly 0 (storeIdGone) takes the store off the daily job.
+      if (await storeIdGone(sid).catch(() => false)) await redisPipeline([["SREM", STORES, sid]]);
       continue;
     }
     await settlePayPal(store).catch((error) => console.error("settling PayPal payouts failed", error));

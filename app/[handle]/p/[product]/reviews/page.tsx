@@ -71,9 +71,9 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
+      <main id="content" className="st-measure relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
         <p className="text-center">
-          <Link href={productPath(store, product)} className="st-footer-link text-sm font-semibold">
+          <Link href={productPath(store, product)} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {w.backTo(product.title)}
           </Link>
         </p>
@@ -86,6 +86,7 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
             productTitle={product.title}
             moreHref={null}
             lang={store.language}
+            level={1}
           />
           {summary.visible === 0 ? <p className="st-note mt-6 text-sm">{w.noReviewsToShow}</p> : null}
         </div>

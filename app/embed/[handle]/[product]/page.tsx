@@ -24,6 +24,7 @@ import { speech } from "@/lib/buyer-words";
 import { scriptMode, withTags } from "@/lib/embed-sites";
 import { type ScriptOpen, readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
+import { StoreBeacon } from "@/components/store-beacon";
 import { SlotPicker } from "@/components/slot-picker";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
 import { bookingLength, offeredLengths } from "@/lib/call-lengths";
@@ -268,6 +269,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     return (
       <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} h-screen overflow-y-auto`} style={lookStyle(store.look) as React.CSSProperties} data-embed-times="">
         <main id="content" className="p-4">
+          {open ? <StoreBeacon handle={store.handle} front={false} /> : null}
           {/* Where focus starts once the times open in the frame (2.4.3): the frame's address names it. */}
           <h1 id="times-title" tabIndex={-1} className="font-display text-[1.0625rem] font-semibold leading-snug">{product.title}</h1>
           <p className="st-price mt-1 text-sm">{say.money(cents)}</p>
@@ -375,6 +377,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
 
   const card = (
       <article className={`st-card flex ${soldBy ? "min-h-full" : "h-full"} flex-col overflow-hidden p-4`} style={{ boxShadow: "none" }}>
+        {/* Opened by the checkout script: the visit, counted by the page itself through the host's browser check (lib/embed-open.ts). */}
+        {open ? <StoreBeacon handle={store.handle} front={false} /> : null}
         {image ? (
           <a href={page} {...aside} tabIndex={-1} className="em-cover -mx-4 -mt-4 mb-4 h-[160px] shrink-0 overflow-hidden" style={{ background: "var(--st-item)" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -1,19 +1,35 @@
 "use client";
 
 import { useEffect } from "react";
+import { initBotId } from "botid/client/core";
 import { sourceTag } from "@/lib/source-rules";
 
 // One count per page load, however many times React runs the effect.
 const sent = new Set<string>();
 
-function beacon(payload: Record<string, string>) {
-  const body = JSON.stringify(payload);
+// The host's browser check answers for every count this page sends (lib/bot-check.ts, browserProof), set up once.
+// It signs fetch only, never sendBeacon, so the count goes by fetch. Each initBotId keeps the routes it was given
+// and passes the others on, so the sign-in form's own protection (components/signin-form.tsx) stays as it is.
+let checked = false;
+// The fetch from before the check wrapped it: a count whose check could not be loaded still goes, unsigned, and the
+// server then counts it as no visit (app/api/store/hit), as it would a program's.
+let unsigned: typeof fetch | null = null;
+function withBrowserCheck() {
+  if (checked) return;
+  checked = true;
+  unsigned = window.fetch.bind(window);
   try {
-    if (navigator.sendBeacon && navigator.sendBeacon("/api/store/hit", new Blob([body], { type: "text/plain" }))) return;
+    initBotId({ protect: [{ path: "/api/store/hit", method: "POST" }] });
   } catch {
-    // Fall through to fetch.
+    // Without the check the count still goes; the server then counts it as no visit (app/api/store/hit).
   }
-  fetch("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } }).catch(() => {});
+}
+
+function beacon(payload: Record<string, string>) {
+  withBrowserCheck();
+  const body = JSON.stringify(payload);
+  const send = (via: typeof fetch) => via("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } });
+  send(fetch).catch(() => (unsigned ? send(unsigned) : undefined)?.catch(() => {}));
 }
 
 /**

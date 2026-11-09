@@ -1056,11 +1056,18 @@ async function main(): Promise<void> {
     resend.filter(m => m.to === SUPPORT).map(m => m.subject), ["Amazon SES is not sending: check the account"]);
   redis.clear(); resendKeys.clear(); clear(); account = approved();
   amazonSays = () => ({ status: 400, type: "BadRequestException", message: "Synthetic confirmed recipient refusal" });
-  // Rule 23 (claude5/broadcast-refused-recipient): was "refused" for the whole batch. Amazon's words are about the
-  // recipient, so it is that address's refusal, reported as such and never "sent"; nothing reaches Resend.
+  // Rule 23 (claude5/broadcast-refused-recipient): was "refused" for the whole batch; the first fix made it
+  // { refused: [{ address: true }] } on the word "recipient". C3's HIGH 1 on #3489: the words do not say which address
+  // (the creator's From or Reply-To is refused the same way), nobody else in the batch was taken and the text does not
+  // name the recipient, so it is again the batch's refusal: never "sent", nobody taken off, nothing reaches Resend.
   is("a known recipient refusal cannot be called a sent list",
     [await sendListBatch([letter("list-rejected@example.com")], "list:rejected", { by: "monthly" }), amazon.length, resend.length],
-    [{ refused: [{ to: "list-rejected@example.com", address: true }] }, 0, 0]);
+    ["refused", 0, 0]);
+  redis.clear(); resendKeys.clear(); clear(); account = approved();
+  amazonSays = () => ({ status: 400, type: "BadRequestException", message: "Illegal address: list-named@example.com" });
+  is("a refusal whose text names the recipient's address is that address's own",
+    [await sendListBatch([letter("list-named@example.com")], "list:named", { by: "monthly" }), amazon.length, resend.length],
+    [{ refused: [{ to: "list-named@example.com", address: true }] }, 0, 0]);
   redis.clear(); resendKeys.clear(); clear(); account = approved();
   amazonSays = () => ({ status: 400, type: "MessageRejected", message: "Synthetic confirmed content refusal" });
   is("an email refused as it is, for nobody taken, is still the batch's refusal",

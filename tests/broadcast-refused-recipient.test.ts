@@ -10,6 +10,13 @@
  * address) takes nobody off the list and says so; an answer that was lost
  * stays uncertain; and accepted people whose `did` mark was not written keep
  * the batch uncertain, since nothing durable says who took it.
+ *
+ * Parts H-J (C3's first review of #3489, HIGH 1): SES's text does not say
+ * which of the email's addresses it refused. When it refuses every email of
+ * a batch for the creator's own Reply-To or From line, nobody may be taken
+ * off the list: an address is read as the recipient's own only when another
+ * email of the same batch was taken (the sender side is then fine) or when
+ * the text names the recipient's address or domain.
  */
 import { advanceBroadcast } from "@/lib/broadcasts";
 import { claimHandle, ensureListId, setMailSettings, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
@@ -27,6 +34,11 @@ const BAD = "bad@exämple.com";
 
 /** What Amazon does with each email: refuse the bad address, refuse the email as it is, or lose one answer. */
 let amazon: "address" | "content" | "lost" = "address";
+/** What Amazon's refusal of an address says: nothing more ("Illegal address"), the address, or its domain as sent (punycode). */
+let says: "plain" | "address" | "domain" = "plain";
+/** When set, Amazon refuses every email with this text, as it does for a sender's own header it will not take. */
+let refuseAll: string | null = null;
+const refusal = (message: string) => new Response(JSON.stringify({ message }), { status: 400, headers: { "content-type": "application/json", "x-amzn-errortype": "BadRequestException" } });
 const contactOf = (listId: string, email: string) => parseContact(redis.run(["HGET", leadsKey(listId), email]));
 
 async function main(): Promise<void> {
@@ -44,12 +56,12 @@ async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_send_time_suppression_only";
   const mail = installSesMailFixture({
     // Amazon refuses these addresses (BAD and, in G, one more at the same domain) for good, as it does an address it will not take; every other goes.
-    onSes: (message) => amazon === "content"
+    onSes: (message) => refuseAll !== null ? refusal(refuseAll) : amazon === "content"
       ? new Response(JSON.stringify({ message: "Email content rejected" }), { status: 400, headers: { "content-type": "application/json", "x-amzn-errortype": "MessageRejected" } })
       : amazon === "lost" && message.to.includes("bo@example.com")
         ? new Response("", { status: 500 })
         : message.to.some((to) => to.endsWith("@exämple.com"))
-          ? new Response(JSON.stringify({ message: "Illegal address" }), { status: 400, headers: { "content-type": "application/json", "x-amzn-errortype": "BadRequestException" } })
+          ? refusal(says === "address" ? `Illegal address: ${message.to.join(", ")}` : says === "domain" ? "Domain xn--exmple-cua.com is not allowed" : "Illegal address")
           : undefined,
   });
   mail.configure();
@@ -85,7 +97,11 @@ async function main(): Promise<void> {
   is("the studio is not told the email service asked to slow down", /slow down/.test(b?.note ?? ""), false);
   is("the month's emails are not spent on three refusals that sent nothing", (await usedThisMonthExact(listId, window)) - before, 0);
 
-  part("B2: a broadcast whose only address is one Amazon has not refused before");
+  // Rule 23, C3 HIGH 1: B2's three assertions changed. Amazon refuses its only email with a bare "Illegal address",
+  // which does not say whether the recipient or the creator's own Reply-To/From was refused, and nobody in the batch
+  // was taken. Before: answered once, sent, and the address taken off for good. Now: the broadcast stops at once,
+  // saying the email was refused as it is, and the address stays on the list; B3/B4 take it off when Amazon names it.
+  part("B2: a broadcast whose only address is one Amazon has not refused before, refused without saying which address");
   mail.clearCaptured();
   const lone = "lone@exämple.com";
   await upsertContact(listId, lone, { agreed: true, explicit: true, source: "import" }, ROOM);
@@ -95,11 +111,34 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", key4, JSON.stringify({ ...broadcast, id: id4, total: 1 })], ["RPUSH", `${key4}:to`, lone], ["SADD", "nl:mail:queue", id4]]);
   let b2 = null;
   for (let run = 0; run < 3; run += 1) b2 = await advanceBroadcast(id4, storeForHandle, Date.now() + 10_000);
-  is("it is answered once and done, saying why", [b2?.status, b2?.note, mail.sesAttempts.length], ["sent", "1 address on your list was not accepted by the email service, so it did not get this email. The email service refused the address itself, so it was taken off your list.", 1]);
-  // The one attempt pays, before it is made, for asking Amazon, the read-back of the did marks and taking the address
-  // off (lib/mail.ts sendTo; tests/plan-cost-registry.ts, list-email); being off the list, it is never paid for again.
+  is("it is answered once and stops, saying the email was refused as it is", [b2?.status, b2?.note, mail.sesAttempts.length], ["failed", "The email service refused this email as it is, so nothing more was sent. The saved recipient list is retained.", 1]);
+  // The one attempt pays, before it is made, for asking Amazon (lib/mail.ts sendTo; tests/plan-cost-registry.ts,
+  // list-email); the broadcast stopped, so it is never paid for again.
   is("the month pays for the one attempt only", (await usedThisMonthExact(listId, window)) - beforeB2, 1);
-  is("and the address is taken off the list", contactOf(listId, lone)?.gone, "refused");
+  is("and the address stays on the list, since nothing says it was the one refused", [contactOf(listId, lone)?.unsub ?? false, contactOf(listId, lone)?.gone], [false, undefined]);
+
+  part("B3: the same, but Amazon's text names the address it refused");
+  mail.clearCaptured();
+  says = "address";
+  const named = "named@exämple.com";
+  await upsertContact(listId, named, { agreed: true, explicit: true, source: "import" }, ROOM);
+  const id8 = "aaaaaaaaaaaaaaaaaaaaaaaa";
+  const key8 = `nl:mail:bc:${id8}`;
+  await redis.pipeline([["SET", key8, JSON.stringify({ ...broadcast, id: id8, total: 1 })], ["RPUSH", `${key8}:to`, named], ["SADD", "nl:mail:queue", id8]]);
+  const b3 = await advanceBroadcast(id8, storeForHandle, Date.now() + 10_000);
+  is("named by Amazon, the address is the refused one: done, and taken off the list", [b3?.status, contactOf(listId, named)?.gone], ["sent", "refused"]);
+
+  part("B4: the same, but Amazon's text names the address's domain, as sent (punycode)");
+  mail.clearCaptured();
+  says = "domain";
+  const domained = "domained@exämple.com";
+  await upsertContact(listId, domained, { agreed: true, explicit: true, source: "import" }, ROOM);
+  const id9 = "bbbbbbbbbbbbbbbbbbbbbbbb";
+  const key9 = `nl:mail:bc:${id9}`;
+  await redis.pipeline([["SET", key9, JSON.stringify({ ...broadcast, id: id9, total: 1 })], ["RPUSH", `${key9}:to`, domained], ["SADD", "nl:mail:queue", id9]]);
+  const b4 = await advanceBroadcast(id9, storeForHandle, Date.now() + 10_000);
+  is("its domain named by Amazon, the address is the refused one: done, and taken off the list", [b4?.status, contactOf(listId, domained)?.gone], ["sent", "refused"]);
+  says = "plain";
 
   part("C: 150 on the list, the refused one in the first batch of 100");
   mail.clearCaptured();
@@ -169,6 +208,61 @@ async function main(): Promise<void> {
   redis.pipeline = pipeline;
   is("without the marks, who took it is not proved: the batch stays uncertain", [g?.status, /could not be confirmed/.test(g?.note ?? "")], ["failed", true]);
   is("and the refused address is not taken off on that unproved answer", contactOf(listId, odd)?.unsub ?? false, false);
+
+  part("H: the creator's own address (the Reply-To) is one Amazon will not take, so it refuses every email");
+  mail.clearCaptured();
+  const cafe = "owner@café-example.com";
+  await claimHandle(cafe, "cafeshop", "Cafe Shop", "");
+  await ensureListId(cafe);
+  await setSubscription(cafe, { customerId: "cus_Cafe00000001", subscriptionId: "sub_Cafe00000001", active: true, tier: "pro", period: paidPeriod() });
+  await setMailSettings(cafe, { fromName: "Cafe Shop", address: "4 Paper Lane, Boston, MA 02108" });
+  const cafeStore = (await storeForEmail(cafe))!;
+  const cafeList = cafeStore.listId!;
+  const readers = ["r1@example.com", "r2@example.com", "r3@example.com", "r4@example.com"];
+  for (const email of readers) await upsertContact(cafeList, email, { agreed: true, explicit: true, source: "import" }, ROOM);
+  const onList = (list: string, emails: string[]) => emails.map((email) => [contactOf(list, email)?.unsub ?? false, contactOf(list, email)?.gone ?? null]);
+  const kept = (emails: string[]) => emails.map(() => [false, null]);
+  refuseAll = "Illegal address";
+  const idH = "cccccccccccccccccccccccc";
+  const keyH = `nl:mail:bc:${idH}`;
+  await redis.pipeline([["SET", keyH, JSON.stringify({ ...broadcast, id: idH, listId: cafeList, handle: cafeStore.handle, total: readers.length })], ["RPUSH", `${keyH}:to`, ...readers], ["SADD", "nl:mail:queue", idH]]);
+  const h = await advanceBroadcast(idH, storeForHandle, Date.now() + 10_000);
+  is("nobody is taken off the list for a refusal that may be the creator's own address", onList(cafeList, readers), kept(readers));
+  is("it stops at once, saying the email was refused as it is (not that the people were at fault)", [h?.status, h?.note], ["failed", "The email service refused this email as it is, so nothing more was sent. The saved recipient list is retained."]);
+
+  part("H2: the same, Amazon naming the creator's own address, whose domain ends like the recipients'");
+  mail.clearCaptured();
+  refuseAll = `Illegal address: ${cafe}`;
+  const idH2 = "dddddddddddddddddddddddd";
+  const keyH2 = `nl:mail:bc:${idH2}`;
+  await redis.pipeline([["SET", keyH2, JSON.stringify({ ...broadcast, id: idH2, listId: cafeList, handle: cafeStore.handle, total: readers.length })], ["RPUSH", `${keyH2}:to`, ...readers], ["SADD", "nl:mail:queue", idH2]]);
+  const h2 = await advanceBroadcast(idH2, storeForHandle, Date.now() + 10_000);
+  is("\"café-example.com\" does not name \"example.com\": nobody is taken off", onList(cafeList, readers), kept(readers));
+  is("and it stops at once", h2?.status, "failed");
+
+  part("I: Amazon will not take the From line, so it refuses every email");
+  mail.clearCaptured();
+  refuseAll = "Illegal address in From header";
+  const two = ["ana@example.com", "bo@example.com"];
+  const idI = "eeeeeeeeeeeeeeeeeeeeeeee";
+  const keyI = `nl:mail:bc:${idI}`;
+  await redis.pipeline([["SET", keyI, JSON.stringify({ ...broadcast, id: idI, total: two.length })], ["RPUSH", `${keyI}:to`, ...two], ["SADD", "nl:mail:queue", idI]]);
+  const iOut = await advanceBroadcast(idI, storeForHandle, Date.now() + 10_000);
+  is("nobody is taken off the list for the creator's own From line", onList(listId, two), kept(two));
+  is("it stops at once", iOut?.status, "failed");
+
+  part("J: a sequence step whose every email Amazon refuses for the creator's own address");
+  mail.clearCaptured();
+  refuseAll = "Illegal address";
+  const followers = ["f1@example.com", "f2@example.com"];
+  for (const email of followers) await upsertContact(cafeList, email, { agreed: true, explicit: true, source: "import" }, ROOM);
+  const savedJ = await saveFlow(cafeStore, { name: "Welcome", trigger: "joined", active: true, steps: [{ delayHours: 0, subject: "Hello", body: "First email." }] }, { activate: true });
+  is("the sequence is saved", savedJ.ok, true);
+  const cafeFresh = (await storeForEmail(cafe))!;
+  for (const email of followers) await enroll(cafeFresh, email, { joined: true });
+  for (let r = 0; r < 2; r += 1) await sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
+  is("nobody in the sequence is taken off the list", onList(cafeList, followers), kept(followers));
+  refuseAll = null;
 
   mail.restore();
   done();

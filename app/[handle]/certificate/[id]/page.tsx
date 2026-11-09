@@ -7,7 +7,7 @@ import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { SITE_URL } from "@/lib/site-url";
 import { storeKey } from "@/lib/learn";
-import { CERT_ID_PATTERN, type Certificate, linkedInAddUrl, linkedInShareUrl, readCertificate, standingOf } from "@/lib/certificate";
+import { CERT_ID_PATTERN, type Certificate, linkedInAddUrl, linkedInShareUrl, publicName, readCertificate, standingOf } from "@/lib/certificate";
 import { readCourse } from "@/lib/course";
 import { CertificateActions } from "@/components/certificate-actions";
 import { readCourseListing } from "@/lib/catalog";
@@ -74,9 +74,12 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   if (!found) return { title: coursesWords(await languageOf(handle)).metaCertNotFound, robots: { index: false, follow: false } };
   const { certificate } = found;
   const w = coursesWords(found.store.language);
+  // Withdrawn because its course's payment was given back: no name in the tab or in a link's preview either (DONO-18).
+  const name = publicName(certificate);
+  if (name === null) return { title: w.withdrawnOn(speech(found.store).date(certificate.withdrawnAt * 1000)), robots: { index: false, follow: false } };
   return {
-    title: w.metaCert(certificate.name, certificate.title),
-    description: w.metaCertDescription(certificate.name, certificate.title, certificate.creator),
+    title: w.metaCert(name, certificate.title),
+    description: w.metaCertDescription(name, certificate.title, certificate.creator),
     robots: { index: false, follow: false },
   };
 }
@@ -99,6 +102,9 @@ export default async function CertificatePage({ params, searchParams }: Params) 
   const said = speech(store);
   const w = coursesWords(store.language);
   const withdrawn = certificate.withdrawnAt > 0;
+  // Null once withdrawn because its course's payment was given back (lib/certificate-refunds.ts): the page then says
+  // why, and draws no sheet, so the name is shown nowhere (DONO-18; Claude 2 on #3374).
+  const name = publicName(certificate);
   // A certificate past its validity (639 [GL7](32)) says so, and is still the record of what it certified.
   const expired = !sample && standingOf(certificate, Math.floor(new Date().getTime() / 1000)) === "expired";
   const url = `${SITE_URL}/@${store.handle}/certificate/${certificate.id}`;
@@ -120,8 +126,12 @@ export default async function CertificatePage({ params, searchParams }: Params) 
             </div>
           ) : withdrawn ? (
             <div className="rounded-2xl bg-danger-soft px-5 py-4 text-sm text-ink" role="status">
-              <p className="font-bold">{w.withdrawnOn(said.date(certificate.withdrawnAt * 1000))}</p>
-              <p className="mt-1">{w.withdrawnBody(certificate.creator)}</p>
+              {name === null ? (
+                <h1 className="font-bold">{w.withdrawnOn(said.date(certificate.withdrawnAt * 1000))}</h1>
+              ) : (
+                <p className="font-bold">{w.withdrawnOn(said.date(certificate.withdrawnAt * 1000))}</p>
+              )}
+              <p className="mt-1">{name === null ? w.withdrawnRefundBody : w.withdrawnBody(certificate.creator)}</p>
             </div>
           ) : expired ? (
             <div className="rounded-2xl px-5 py-4 text-sm" style={{ background: "var(--st-item)", color: "var(--st-text)" }} role="status">
@@ -152,9 +162,10 @@ export default async function CertificatePage({ params, searchParams }: Params) 
           )}
         </div>
 
+        {name === null ? null : (
         <article
           className={`cert-sheet mx-auto mt-6 ${withdrawn ? "cert-withdrawn" : ""}`}
-          aria-label={w.certAria(certificate.name)}
+          aria-label={w.certAria(name)}
         >
           <div className="cert-frame">
             <div className="cert-head">
@@ -171,7 +182,7 @@ export default async function CertificatePage({ params, searchParams }: Params) 
 
             <h1 className="cert-kicker">{w.kicker}<span className="font-accent">{w.kickerAccent}</span></h1>
             <p className="cert-lead">{w.certifies}</p>
-            <p className="cert-name">{certificate.name}</p>
+            <p className="cert-name">{name}</p>
             <p className="cert-lead">{w.hasCompleted}</p>
             <p className="cert-title">{certificate.title}</p>
             <p className="cert-by">{w.taughtBy(certificate.creator, issued)}</p>
@@ -188,6 +199,7 @@ export default async function CertificatePage({ params, searchParams }: Params) 
             {sample ? <p className="cert-stamp" aria-hidden="true">{w.stampSample}</p> : withdrawn ? <p className="cert-stamp" aria-hidden="true">{w.stampWithdrawn}</p> : null}
           </div>
         </article>
+        )}
 
         <div className="cert-noprint mt-8 text-center">
           <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">

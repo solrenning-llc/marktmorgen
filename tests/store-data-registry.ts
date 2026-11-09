@@ -409,6 +409,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:catalog:@lib/catalog.ts": { what: "Products: their listings, their heavy rest, their cards", room: ["lib/store.ts"], parts: [capped(KEY, "The mark of a catalog moved.")] },
   "nl:cert:@lib/certificate.ts": { what: "Certificates, kept for good", room: ["lib/certificate.ts"] },
   "nl:course:@lib/certificate.ts": { what: "A course's certificates, by student", room: ["lib/certificate.ts"] },
+  "nl:certrefunds:seen:@lib/certificate-refunds.ts": { what: "Refunds and lost disputes already handled for certificates", parts: [capped(64 * KB, "Fifteen days after the last one read.")] },
+  "nl:certrefunds:since:@lib/certificate-refunds.ts": { what: "How far refunds were read for certificates", parts: [capped(KEY, "One a store, fourteen days.")] },
   "nl:cm:@lib/chat-grant.ts": short("A member's leave from the live room's cooldown", "buyer", 1),
   "nl:chatsum:@lib/chat-summary.ts": { what: "Where a chat summary goes, sealed", parts: [capped(KB, "One a store.")] },
   "nl:recover:asks@lib/checkout-ask.ts": company("Checkout asks due", "One sorted set for every store, members gone when asked (a few hours): each a public request's."),

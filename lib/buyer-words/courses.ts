@@ -280,6 +280,8 @@ const en = {
   withdrawnOn: (date: string) => `This certificate was withdrawn on ${date}.`,
   withdrawnBody: (creator: string) =>
     `${creator} withdrew it, so it no longer certifies anything. If it is yours, the course page lets you issue it again.`,
+  /** A certificate withdrawn because its course's payment was given back (lib/certificate-refunds.ts): its page shows no name. */
+  withdrawnRefundBody: "It was withdrawn because the payment for the course was given back, so it no longer certifies anything.",
   certReady: "Your certificate is ready.",
   certGenuine: "This certificate is genuine.",
   onRecord: (store: string, date: string) =>
@@ -591,6 +593,7 @@ const es: CoursesWords = {
   withdrawnOn: (date) => `Este certificado se retiró el ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} lo retiró, así que ya no certifica nada. Si es tuyo, desde la página del curso puedes volver a emitirlo.`,
+  withdrawnRefundBody: "Se retiró porque se devolvió el pago del curso, así que ya no certifica nada.",
   certReady: "Tu certificado está listo.",
   certGenuine: "Este certificado es auténtico.",
   onRecord: (store, date) =>
@@ -897,6 +900,7 @@ const fr: CoursesWords = {
   withdrawnOn: (date) => `Ce certificat a été retiré le ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'a retiré, il ne certifie donc plus rien. S'il est à vous, la page de la formation vous permet de le délivrer à nouveau.`,
+  withdrawnRefundBody: "Il a été retiré parce que le paiement de la formation a été rendu : il ne certifie donc plus rien.",
   certReady: "Votre certificat est prêt.",
   certGenuine: "Ce certificat est authentique.",
   onRecord: (store, date) =>
@@ -1199,6 +1203,7 @@ const de: CoursesWords = {
   withdrawnOn: (date) => `Dieses Zertifikat wurde am ${date} zurückgezogen.`,
   withdrawnBody: (creator) =>
     `${creator} hat es zurückgezogen, es bescheinigt also nichts mehr. Wenn es Ihres ist, können Sie es auf der Kursseite erneut ausstellen.`,
+  withdrawnRefundBody: "Es wurde zurückgezogen, weil die Zahlung für den Kurs zurückgegeben wurde, und bescheinigt daher nichts mehr.",
   certReady: "Ihr Zertifikat ist fertig.",
   certGenuine: "Dieses Zertifikat ist echt.",
   onRecord: (store, date) =>
@@ -1502,6 +1507,7 @@ const it: CoursesWords = {
   withdrawnOn: (date) => `Questo attestato è stato revocato il ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'ha revocato, quindi non attesta più nulla. Se è tuo, dalla pagina del corso puoi farlo rilasciare di nuovo.`,
+  withdrawnRefundBody: "È stato revocato perché il pagamento del corso è stato restituito, quindi non attesta più nulla.",
   certReady: "Il tuo attestato è pronto.",
   certGenuine: "Questo attestato è autentico.",
   onRecord: (store, date) =>
@@ -1806,6 +1812,7 @@ const nl: CoursesWords = {
   withdrawnOn: (date) => `Dit certificaat is ingetrokken op ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} heeft het ingetrokken, dus het bevestigt niets meer. Is het van jou, dan kun je het via de cursuspagina opnieuw laten uitreiken.`,
+  withdrawnRefundBody: "Het is ingetrokken omdat de betaling voor de cursus is teruggegeven, dus het bevestigt niets meer.",
   certReady: "Je certificaat is klaar.",
   certGenuine: "Dit certificaat is echt.",
   onRecord: (store, date) =>
@@ -2110,6 +2117,7 @@ const pt: CoursesWords = {
   withdrawnOn: (date) => `Este certificado foi retirado a ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} retirou-o, por isso já não certifica nada. Se for seu, pode voltar a emiti-lo na página do curso.`,
+  withdrawnRefundBody: "Foi retirado porque o pagamento do curso foi devolvido, por isso já não certifica nada.",
   certReady: "O seu certificado está pronto.",
   certGenuine: "Este certificado é autêntico.",
   onRecord: (store, date) =>

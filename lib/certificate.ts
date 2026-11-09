@@ -64,6 +64,12 @@ export type Certificate = {
   /** When the creator withdrew it; 0 while it stands. */
   withdrawnAt: number;
   /**
+   * Present only on one withdrawn because the payment that gave its course was
+   * given back in full, a refund that succeeded or a dispute lost
+   * (lib/certificate-refunds.ts): its page no longer shows the name.
+   */
+  withdrawnFor?: "refund";
+  /**
    * The last moment it is valid, in seconds (639 [GL7](32)), fixed when it is
    * issued from the course's validity then; absent is for good.
    */
@@ -142,7 +148,7 @@ export function hasFinished(course: Course, done: Set<string>, passed: Set<strin
 
 type CertificateRecord = Record<string, unknown> & Pick<Certificate, "id" | "name" | "title" | "store">;
 /** Privacy export keeps status as stored, without claiming that it is valid. */
-type CertificateCopy = Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil"> & Partial<Record<"issuedAt" | "withdrawnAt" | "validUntil", unknown>>;
+type CertificateCopy = Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil" | "withdrawnFor"> & Partial<Record<"issuedAt" | "withdrawnAt" | "validUntil" | "withdrawnFor", unknown>>;
 
 function certificateRecord(raw: unknown): CertificateRecord | null {
   if (typeof raw !== "string" || !raw) return null;
@@ -157,7 +163,7 @@ function certificateRecord(raw: unknown): CertificateRecord | null {
   }
 }
 
-function certificateFields(value: CertificateRecord): Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil"> {
+function certificateFields(value: CertificateRecord): Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil" | "withdrawnFor"> {
   return {
     id: value.id,
     store: value.store,
@@ -176,6 +182,7 @@ function copyCertificate(value: CertificateRecord): CertificateCopy {
     ...(Object.hasOwn(value, "issuedAt") ? { issuedAt: value.issuedAt } : {}),
     ...(Object.hasOwn(value, "withdrawnAt") ? { withdrawnAt: value.withdrawnAt } : {}),
     ...(Object.hasOwn(value, "validUntil") ? { validUntil: value.validUntil } : {}),
+    ...(Object.hasOwn(value, "withdrawnFor") ? { withdrawnFor: value.withdrawnFor } : {}),
   };
 }
 
@@ -190,12 +197,28 @@ function parseCertificate(raw: unknown): Certificate | null {
   if (!Object.hasOwn(value, "withdrawnAt") || !seconds(value.withdrawnAt)) return null;
   const hasExpiration = Object.hasOwn(value, "validUntil");
   if (hasExpiration && (!seconds(value.validUntil) || value.validUntil === 0)) return null;
+  // Withdrawn for a refund only as the refund pass writes it: on a withdrawn
+  // one, exactly "refund". Anything else is no certificate, never one that
+  // shows the name again.
+  const forRefund = Object.hasOwn(value, "withdrawnFor");
+  if (forRefund && (value.withdrawnFor !== "refund" || value.withdrawnAt === 0)) return null;
   return {
     ...certificateFields(value),
     issuedAt: value.issuedAt,
     withdrawnAt: value.withdrawnAt,
     ...(hasExpiration ? { validUntil: value.validUntil as number } : {}),
+    ...(forRefund ? { withdrawnFor: "refund" as const } : {}),
   };
+}
+
+/**
+ * The name a certificate's public page, its title and its description show:
+ * none once it was withdrawn because its course's payment was given back
+ * (DONO-18; Claude 2 on #3374). A certificate the creator withdrew shows it,
+ * marked withdrawn, as before.
+ */
+export function publicName(certificate: Pick<Certificate, "name" | "withdrawnAt" | "withdrawnFor">): string | null {
+  return certificate.withdrawnAt > 0 && certificate.withdrawnFor === "refund" ? null : certificate.name;
 }
 
 export const certKey = (id: string) => `nl:cert:${id}`;
@@ -376,13 +399,16 @@ export async function certificatesFor(courseId: string): Promise<{ list: Certifi
 /**
  * Withdraws a certificate. The page stays and says it was withdrawn, and the
  * student may issue it again. Only a certificate of this course is touched.
+ * `why` "refund": withdrawn because its course's payment was given back
+ * (withdrawForRefund), so its page no longer shows the name.
  */
-export async function withdrawCertificate(courseId: string, id: string): Promise<boolean> {
+export async function withdrawCertificate(courseId: string, id: string, why?: "refund"): Promise<boolean> {
   const found = await readCertificate(id);
   if (!found || found.courseId !== courseId) return false;
   if (!found.withdrawnAt) {
+    const marked: Certificate = { ...found, withdrawnAt: Math.floor(Date.now() / 1000), ...(why ? { withdrawnFor: why } : {}) };
     // XX: only while it is still there, so a withdrawal racing the person's deletion never writes it back.
-    const [written] = exactReplies(await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]), 1, "a certificate's withdrawal");
+    const [written] = exactReplies(await redisPipeline([["SET", certKey(id), JSON.stringify(marked), "XX"]]), 1, "a certificate's withdrawal");
     if (written === null) return false;
     // Unknown whether it was marked withdrawn: the slot is not freed for a second one (CX-123 rule 24).
     if (written !== "OK") throw new UnknownReply("a certificate's withdrawal");
@@ -391,6 +417,27 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
   const [current] = exactReplies(await redisPipeline([["HGET", indexKey(courseId), who]]), 1, "a certificate's withdrawal");
   if (current === id) await redisPipeline([["HDEL", indexKey(courseId), who]]);
   return true;
+}
+
+/**
+ * Withdraws the certificate a student holds for a course because the payment
+ * that gave them the course was given back in full and the course no longer
+ * opens for them (lib/certificate-refunds.ts; owner decision DONO-18): marked
+ * withdrawn for a refund, so its page no longer shows the name. True when one
+ * was withdrawn now; false when the student's slot holds none that stands
+ * (none issued, or withdrawn already), so running it again changes nothing.
+ * Every reply is read exactly: one that is not what was asked for throws
+ * UnknownReply (CX-123 rule 24), and the caller tries again on its next run.
+ */
+export async function withdrawForRefund(courseId: string, email: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const what = "a certificate's withdrawal for a refund";
+  const holder = await slotHolder(courseId, emailKey(email), what);
+  if (!holder?.standing) return false;
+  if (await withdrawCertificate(courseId, holder.id, "refund")) return true;
+  // Nothing withdrawn while the slot still names one that stands: its record read in a shape that says nothing, never "none".
+  if ((await slotHolder(courseId, emailKey(email), what))?.standing) throw new UnknownReply(what);
+  return false;
 }
 
 /**

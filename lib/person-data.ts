@@ -189,6 +189,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/assistant-reminder.ts", how: "erased", what: "A checkout reminder they asked for with your Store assistant's box at checkout: the address they typed, the sentence they checked, when and its version. Deleted by itself three days after that checkout opened, sent or not" },
   { file: "lib/next-offer.ts", how: "expires", days: 3, what: "The one next product your Store assistant suggested after an order, under the order's reference and with no name or address, deleted three days later; what the buyer already owns is read from your Stripe account to leave it out, and not kept" },
   { file: "lib/yearly-ask.ts", how: "none", what: "Marks that a membership's yearly offer went, by its Stripe subscription, never by address" },
+  { file: "lib/certificate-refunds.ts", how: "none", what: "The pass that withdraws a certificate whose course was refunded reads the buyer's address from the store's Stripe account only to find their certificate, and keeps no address: only the ids of the refunds and closed disputes it handled, and how far it read" },
 ];
 
 /** Whether a line holds for this door. */

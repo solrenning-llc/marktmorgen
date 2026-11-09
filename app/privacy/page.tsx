@@ -1205,7 +1205,12 @@ export default function PrivacyPage() {
           store that issued them is open, so the page goes on proving what it
           says; a withdrawn one says it was withdrawn. When the store closes
           (section 6), its certificates go with it.
-          A student who wants theirs withdrawn asks the creator.
+          A student who wants theirs withdrawn asks the creator. A certificate
+          whose course was refunded in full or lost in a dispute is withdrawn
+          on its own within minutes once the course no longer opens for the
+          student, and its page then no longer shows the name, the course or
+          the date; a refund still pending, failed or canceled withdraws
+          nothing.
         </p>
         <p id="assignments">
           <strong className="text-black">Course assignments.</strong> When a

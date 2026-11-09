@@ -529,6 +529,27 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
   return ended.has(product.id) ? { state: "ended", learner } : { state: "closed", learner };
 }
 
+/**
+ * Whether an address can still open a course here, as every door decides it, asked of Stripe afresh: its kept answer
+ * is forgotten first, so an answer kept from before a refund never decides. "shut" only on a whole reading; "unknown"
+ * when Stripe could not be read whole (CX-123 rule 24), never "shut". A course handed over at a community level is
+ * read again here, and a read of it that throws throws here too, never "not earned". The certificate of a course whose
+ * payment was given back is withdrawn only on "shut" (lib/certificate-refunds.ts).
+ */
+export async function courseStandingFor(store: Store, email: string, productId: string): Promise<"open" | "shut" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  const forgot = countOf(repliesFor(await redisPipeline([["DEL", paidCacheKey(store, email)]]), 1)?.[0]);
+  if (forgot !== 0 && forgot !== 1) throw new UnknownReplyError("forgetting the kept answer about an address's courses");
+  const { paid, unknown } = await courseLedger(store, email);
+  if (paid.has(productId)) return "open";
+  if (unknown.has(productId)) return "unknown";
+  if (store.community?.id) {
+    const earned = await earnedCourses(store.community.id, emailKey(email), Date.now(), store.community.on, store);
+    if (earned.has(productId)) return "open";
+  }
+  return "shut";
+}
+
 // ------------------------------------------------------------ progress
 
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;

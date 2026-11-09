@@ -81,8 +81,8 @@ import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
 import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
 import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, previewContactRows, readTags } from "@/lib/contacts";
 import { csvLine, readConsent } from "@/lib/csv";
-import { suppressedAmong } from "@/lib/suppression";
-import { grantImported, importedFor } from "@/lib/imported-purchases";
+import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth } from "@/lib/mail";
@@ -611,6 +611,24 @@ async function deletedAmong(listId: string | null | undefined, emails: string[])
 /** Why a deleted address is left out. Said by its row only: the address is not written back next to it. */
 const DELETED = "Deleted from your store before, so left alone";
 
+/**
+ * The store's list, given one when it has none yet (as a deletion gives one), so that who was deleted can be checked
+ * where the rows are written: a store made before every store had a list is checked the same way.
+ */
+async function listFor(store: Store): Promise<string> {
+  const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId;
+  if (!listId) throw new Error("the store's list could not be read");
+  return listId;
+}
+
+/** How the rows' writes check the store's deleted people in the same step (lib/imported-purchases.ts, lib/move-members.ts). */
+const erasedCheck = (listId: string) => ({ key: suppressedKey(listId), print: (email: string) => suppressionPrint(listId, email) });
+
+/** That step's answer could not be read whole: the step starts again from the last saved place, a full room said as full. */
+const writeUnknown = (error: unknown): never => {
+  throw error instanceof DataRoomError ? error : new UnknownReplyError("the rows checked where they are written");
+};
+
 const isEmail = (email: string) => email.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(email);
 
 /** What a row of contacts holds once it is read, and what it says about consent. */
@@ -925,27 +943,37 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
   if (!statsId) throw new Error("the store has no statsId");
   const listings = await listingsNamed(store, rows);
   const { valid, problems, skipped } = classifyPurchases(listings, rows);
-  const seen = await firstSeen(job, valid.map((v) => ({ key: `p:${v.email}|${v.productId}`, line: v.line })));
-  const fresh = valid.filter((v, i) => {
-    if (seen[i] === null) return true;
-    skipped.push({ line: v.line, column: "email", problem: `The same buyer and product as row ${seen[i]}`, value: v.email });
-    return false;
-  });
   // Nobody deleted from the store is given anything again or emailed ("no import puts them back"); unknown throws.
-  const deleted = await deletedAmong(store.listId, fresh.map((v) => v.email));
-  const kept = fresh.filter((v) => {
+  // Read before the repeat check, so a deleted address on several rows is left out on each, never written into the
+  // report or kept among the rows the import saw.
+  const listId = await listFor(store);
+  const deleted = await deletedAmong(listId, valid.map((v) => v.email));
+  const kept = valid.filter((v) => {
     if (!deleted.has(v.email)) return true;
     skipped.push({ line: v.line, column: "email", problem: DELETED, value: "" });
     return false;
   });
-  const given = await grantImported(statsId, job.id, kept.map((v) => ({ email: v.email, productId: v.productId, items: v.bundle })), undefined, store.sid, store);
+  const seen = await firstSeen(job, kept.map((v) => ({ key: `p:${v.email}|${v.productId}`, line: v.line })));
+  const fresh = kept.filter((v, i) => {
+    if (seen[i] === null) return true;
+    skipped.push({ line: v.line, column: "email", problem: `The same buyer and product as row ${seen[i]}`, value: v.email });
+    return false;
+  });
+  // Checked again where each is written, in the same step (GRANT_UNLESS_ERASED): somebody deleted since is left out
+  // the same way, nothing written for them, and let go from the rows the import saw.
+  const given = await grantUnlessErased(statsId, job.id, fresh.map((v) => ({ email: v.email, productId: v.productId, items: v.bundle })), erasedCheck(listId), store).catch(writeUnknown);
   const toMail: string[] = [];
-  given.forEach((isNew, i) => {
-    if (isNew) {
+  const unseen: string[] = [];
+  given.forEach((answer, i) => {
+    if (answer === "erased") {
+      skipped.push({ line: fresh[i].line, column: "email", problem: DELETED, value: "" });
+      unseen.push(`p:${fresh[i].email}|${fresh[i].productId}`);
+    } else if (answer === "new") {
       job.counts.added += 1;
-      toMail.push(kept[i].email);
+      toMail.push(fresh[i].email);
     } else job.counts.already += 1;
   });
+  if (unseen.length) await redisPipeline([["HDEL", seenKey(job.id), ...unseen]]);
   if (job.options.email && toMail.length) {
     await redisPipeline([["SADD", mailKey(job.id), ...new Set(toMail)], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
   }
@@ -1060,14 +1088,12 @@ export async function previewImport(store: Store, kind: ImportKind, input: Start
   const { valid, problems, skipped } = classifyPurchases(listings, raw);
   told(problems, "error");
   told(skipped, "skipped");
-  const fresh = repeated(valid, (v) => `p:${v.email}|${v.productId}`, "email", (v) => v.email, "The same buyer and product as row");
+  // Read before the repeat check, as the import reads it.
+  const deleted = await deletedAmong(store.listId, valid.map((v) => v.email));
+  for (const v of valid) if (deleted.has(v.email)) out.push([v.line, "skipped", "email", DELETED, "", "", 0]);
+  const fresh = repeated(valid.filter((v) => !deleted.has(v.email)), (v) => `p:${v.email}|${v.productId}`, "email", (v) => v.email, "The same buyer and product as row");
   const titles = new Map(listings.map((p) => [p.id, p.title]));
-  const deleted = await deletedAmong(store.listId, fresh.map((v) => v.email));
   for (const v of fresh) {
-    if (deleted.has(v.email)) {
-      out.push([v.line, "skipped", "email", DELETED, "", "", 0]);
-      continue;
-    }
     out.push([v.line, "added", "product", `Given ${titles.get(v.productId) ?? "the product"}, unless they already have it`, v.email, `p:${v.email}|${v.productId}`, 0]);
   }
   return { ok: true, rows: out.sort((a, b) => a[0] - b[0]), room: null };
@@ -1155,27 +1181,35 @@ async function membersStep(job: ImportJob, store: Store, rows: string[][], now =
     }
     valid.push({ line, email, productId: product.id, option, renews: renews.at });
   }
-  const seen = await firstSeen(job, valid.map((v) => ({ key: `m:${v.email}|${v.productId}`, line: v.line })));
-  const fresh = valid.filter((v, i) => {
-    if (seen[i] === null) return true;
-    skipped.push({ line: v.line, column: "email", problem: `The same member and membership as row ${seen[i]}`, value: v.email });
-    return false;
-  });
-  // Nobody deleted from the store is invited or emailed ("no import puts them back"); unknown throws.
-  const deleted = await deletedAmong(store.listId, fresh.map((v) => v.email));
-  const kept = fresh.filter((v) => {
+  // Nobody deleted from the store is invited or emailed ("no import puts them back"); unknown throws. Read before
+  // the repeat check, as for past buyers.
+  const listId = await listFor(store);
+  const deleted = await deletedAmong(listId, valid.map((v) => v.email));
+  const kept = valid.filter((v) => {
     if (!deleted.has(v.email)) return true;
     skipped.push({ line: v.line, column: "email", problem: DELETED, value: "" });
     return false;
   });
-  const fields = await inviteMembers(store, job.id, kept, now);
+  const seen = await firstSeen(job, kept.map((v) => ({ key: `m:${v.email}|${v.productId}`, line: v.line })));
+  const fresh = kept.filter((v, i) => {
+    if (seen[i] === null) return true;
+    skipped.push({ line: v.line, column: "email", problem: `The same member and membership as row ${seen[i]}`, value: v.email });
+    return false;
+  });
+  // Checked again where each is written, in the same step (INVITE_UNLESS_ERASED), as for past buyers.
+  const fields = await inviteMembers(store, job.id, fresh, now, erasedCheck(listId)).catch(writeUnknown);
   const toMail: string[] = [];
-  fields.forEach((field) => {
-    if (field) {
+  const unseen: string[] = [];
+  fields.forEach((field, i) => {
+    if (field === false) {
+      skipped.push({ line: fresh[i].line, column: "email", problem: DELETED, value: "" });
+      unseen.push(`m:${fresh[i].email}|${fresh[i].productId}`);
+    } else if (field) {
       job.counts.added += 1;
       toMail.push(field);
     } else job.counts.already += 1;
   });
+  if (unseen.length) await redisPipeline([["HDEL", seenKey(job.id), ...unseen]]);
   if (toMail.length) await redisPipeline([["SADD", mailKey(job.id), ...toMail], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
   await note(job, skipped, "skipped");
   await note(job, problems, "errors");

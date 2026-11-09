@@ -406,6 +406,72 @@ async function main(): Promise<void> {
     is("answered as deleted, nothing given or emailed", [raced, (await importedFor(store, "raceapi@example.com")).length, sentTo("raceapi@example.com", before)], [{ ok: false, error: "deleted" }, 0, 0]);
   }
 
+  part("An unknown answer from the step that checks and writes holds the rows, and the API refuses");
+  {
+    /** Answers the checked writes' script in `reply` (or throws) without running it; every other command as it is. */
+    const scriptAnswers = (name: string, reply: unknown) => {
+      redis.pipeline = async (commands: (string | number)[][]) => {
+        if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith(`-- marktmorgen:${name}:v1\n`))) {
+          if (reply === "throw") throw new Error("synthetic script failure");
+          return commands.map(() => reply);
+        }
+        return original(commands);
+      };
+    };
+    const SHAPES: [string, unknown][] = [["a reply that is not a list", "OK"], ["a list shorter than the grants", [1]], ["an answer that is text", ["1", "1"]], ["a failed step", "throw"]];
+    for (const [i, [what, reply]] of SHAPES.entries()) {
+      store = await fresh();
+      const job = await startImport(store, OWNER, "purchases", { expected: 2, file: "orders.csv", email: true });
+      if (!job.ok) throw new Error(`not started: ${job.reason}`);
+      const pair = [`w1x${i}@example.com`, `w2x${i}@example.com`];
+      await addRows(store, job.job.id, [["2", pair[0], "The Guide", "Paid"], ["3", pair[1], "The Guide", "Paid"]]);
+      await finishUpload(store, job.job.id);
+      before = emails.length;
+      scriptAnswers("grant-unless-erased", reply);
+      let held;
+      try {
+        held = await runImport(job.job.id, Date.now() + 30_000);
+      } finally {
+        restore();
+      }
+      store = await fresh();
+      is(`past buyers, ${what}: nothing counted or emailed, the import still running`, [held?.state, (await readJob(job.job.id))?.done, (await readJob(job.job.id))?.counts.added, emails.length - before], ["running", 0, 0, 0]);
+      const after = await run(job.job.id);
+      // (Their emails come from the store's month, which the earlier parts used: what is held is the writes.)
+      is(`past buyers, ${what}: read again, both given once`, [after?.state, after?.counts.added, (await importedFor(store, pair[0])).length, (await importedFor(store, pair[1])).length], ["done", 2, 1, 1]);
+    }
+    {
+      store = await fresh();
+      const job = await startImport(store, OWNER, "members", { expected: 1, file: "patrons.csv", stopped: true });
+      if (!job.ok) throw new Error(`not started: ${job.reason}`);
+      await addRows(store, job.job.id, [["2", "wmember@example.com", "The Inner Circle", renews, ""]]);
+      await finishUpload(store, job.job.id);
+      before = emails.length;
+      scriptAnswers("invite-unless-erased", "OK");
+      let held;
+      try {
+        held = await runImport(job.job.id, Date.now() + 30_000);
+      } finally {
+        restore();
+      }
+      is("members, an unknown answer: nobody invited or emailed, the import still running", [held?.state, held?.counts.added, emails.length - before], ["running", 0, 0]);
+      const after = await run(job.job.id);
+      is("members, read again: invited once", [after?.state, after?.counts.added, heldUnder(`nl:mv:${(await fresh()).statsId}`).split("wmember@example.com").length - 1], ["done", 1, 1]);
+    }
+    {
+      store = await fresh();
+      before = emails.length;
+      scriptAnswers("grant-unless-erased", [2]);
+      let unknown;
+      try {
+        unknown = await giveAccess(store, "key_erased_test", { email: "wapi@example.com", product: guide.product.id, notify: true });
+      } finally {
+        restore();
+      }
+      is("the API, an unknown answer: refused as unavailable, nothing emailed", [unknown, sentTo("wapi@example.com", before)], [{ ok: false, error: "unavailable" }, 0]);
+    }
+  }
+
   part("A store with no list yet: somebody deleted while their rows are being given");
   {
     const BARE_OWNER = "bare-owner@example.com";

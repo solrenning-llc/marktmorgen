@@ -634,6 +634,45 @@ export class MemoryRedis {
           else this.run(["SET", copy, value, "EX", seconds]);
           return gone;
         }
+        // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
+        // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.
+        if (key.startsWith("-- marktmorgen:grant-unless-erased:v1\n") && Number(args[0]) >= 3 && args.length === 1 + Number(args[0]) + 1 + 4 * (Number(args[0]) - 2)) {
+          const n = Number(args[0]) - 2;
+          const [erased, who] = [args[1], args[2]];
+          const keys = args.slice(3, 3 + n);
+          const brought = args[3 + n];
+          const rest = args.slice(4 + n);
+          // As Redis: the script stops at its HMGET, nothing written, when the prints are not a hash.
+          if (!["none", "hash"].includes(this.run(["TYPE", erased]) as string)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...keys.map((_, i) => rest[4 * i])]) as unknown[];
+          const noted = new Set<string>();
+          return keys.map((target, i) => {
+            if (found[i] !== null) return -1;
+            const address = rest[4 * i + 1];
+            if (brought !== "" && !noted.has(address)) {
+              this.scriptCalls += 1;
+              this.run(["HSETNX", who, address, brought]);
+              noted.add(address);
+            }
+            this.scriptCalls += 1;
+            return this.run(["HSETNX", target, rest[4 * i + 2], rest[4 * i + 3]]);
+          });
+        }
+        // lib/move-members.ts INVITE_UNLESS_ERASED: each invitation HSETNX only when its print is not among the store's
+        // deleted people (-1, nothing written).
+        if (key.startsWith("-- marktmorgen:invite-unless-erased:v1\n") && args[0] === "2" && args.length >= 6 && (args.length - 3) % 3 === 0) {
+          const [, erased, invites, ...rest] = args;
+          const n = rest.length / 3;
+          if (!["none", "hash"].includes(this.run(["TYPE", erased]) as string)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...Array.from({ length: n }, (_, i) => rest[3 * i])]) as unknown[];
+          return Array.from({ length: n }, (_, i) => {
+            if (found[i] !== null) return -1;
+            this.scriptCalls += 1;
+            return this.run(["HSETNX", invites, rest[3 * i + 1], rest[3 * i + 2]]);
+          });
+        }
         if (key.startsWith("-- marktmorgen:form-save:v1\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
           this.live(target);

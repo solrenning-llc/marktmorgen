@@ -16,7 +16,7 @@
  *   - one reminder, never to somebody who already kept it.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { MIN_DEFER_SECONDS, datesInFile, firstChargeAt, letteredDate, readRenewal, reminderAt } from "@/lib/move-rules";
 import { addRows, finishUpload, runImport, sendMoveReminders, startImport } from "@/lib/imports";
 import { moveCounts, openMove, readMove } from "@/lib/move-members";
@@ -110,6 +110,8 @@ async function main(): Promise<void> {
   const OWNER = "owner@example.com";
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);
+  // A members import needs the postal address its emails carry (lib/move-members.ts, movePostal).
+  await setMailSettings(OWNER, { fromName: "Harbor Kitchen", address: "12 Harbor Lane, Portland, ME 04101, USA" });
   await setStripeAccount(OWNER, "acct_1TestHarbor0001", true);
   await setSubscription(OWNER, { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: true, period: paidPeriod() });
   const club = await addProduct(OWNER, "The Inner Circle", "", "29", { interval: "month", trialDays: 7, payments: 0 });

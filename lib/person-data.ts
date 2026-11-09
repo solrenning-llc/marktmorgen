@@ -55,7 +55,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/product-updates.ts", how: "expires", days: 60, what: "An update email already going out keeps its addresses until it finishes; a deleted address is passed over" },
   { file: "lib/product-updates.ts", how: "suppression", what: "If they had pressed stop on update emails, that one-way mark stays, as their own no" },
   { file: "lib/review-requests.ts", how: "suppression", what: "If they had pressed stop on review requests, that one-way mark stays, as their own no" },
-  { file: "lib/checkout-recovery.ts", how: "suppression", what: "If they had pressed stop on checkout reminders, that one-way mark stays, as their own no" },
+  { file: "lib/checkout-recovery.ts", how: "suppression", what: "If they had pressed stop on checkout reminders or on the emails about a moved membership, that one-way mark stays, as their own no" },
   { file: "lib/checkout-recovery.ts", how: "erased", what: "The marks that they heard a checkout reminder about a product this week" },
   { file: "lib/checkout-ask.ts", how: "expires", days: 1, what: "A checkout reminder they asked for in the last hour waits in its queue; it is not sent to a deleted address" },
   { file: "lib/review-ask.ts", how: "none", what: "Review requests wait for their day by the order's reference, never by address, and are not sent to a deleted address" },

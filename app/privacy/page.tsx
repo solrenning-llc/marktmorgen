@@ -887,7 +887,8 @@ export default function PrivacyPage() {
           saying what moved and how to open it. We send it on the
           creator&apos;s instruction and on their word that these people
           bought from them and may be told so, which we cannot check against
-          the other platform. A store may send up to 20,000 of these in 30
+          the other platform. Nobody who left that creator&apos;s list is
+          written to. A store may send up to 20,000 of these in 30
           days, and for that we keep only a count.
         </p>
         <p id="moved-members">
@@ -909,7 +910,12 @@ export default function PrivacyPage() {
           the membership, so somebody who kept it is not written to. We send
           these on the creator&apos;s instruction and on their word that these
           people are their members, which we cannot check against the other
-          platform; they count within the same 20,000 in 30 days. Keeping the
+          platform; they count within the same 20,000 in 30 days. Nobody who
+          left that creator&apos;s list is written to. Each of these emails
+          carries the creator&apos;s postal address and a link that stops
+          them, tied to the address and the store, for 400 days; pressing it
+          keeps a one-way hash of the address for that store for good, so
+          that store never sends them a reminder again. Keeping the
           membership is a checkout on the creator&apos;s own Stripe account,
           like any purchase in their store.
         </p>

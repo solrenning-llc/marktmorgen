@@ -79,7 +79,8 @@ import { readAllListings, readListings, readTitles } from "@/lib/catalog";
 import { priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
 import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
-import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, previewContactRows, readTags } from "@/lib/contacts";
+import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, leftListAmong, previewContactRows, readTags } from "@/lib/contacts";
+import { moveStopLink, remindersStoppedAmong } from "@/lib/checkout-recovery";
 import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
@@ -92,7 +93,7 @@ import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
-import { inviteEmail, inviteMembers, keptAlready, noteKept, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
+import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
 import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, readRenewal } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
 
@@ -267,6 +268,13 @@ const END_TRIES = 2;
  */
 export const IMPORT_END_EXTRA_COMMANDS = END_TRIES * (1 + JOB_WRITE_IF_EXTRA_COMMANDS) - 1 + (END_TRIES - 1) + GIVE_BACK_FLOOR_EXTRA_COMMANDS;
 /**
+ * The most each email to somebody brought over costs in commands beside what it did before: the creator's list's rows
+ * read (one HMGET a portion, at most one an email: leftListAmong), and for a member's email or reminder the stop mark
+ * read (one EXISTS: remindersStoppedAmong) and its own stop link written with its erasure notes (one SET and three:
+ * lib/checkout-recovery.ts moveStopLink, lib/erasure-index.ts noteForErasure).
+ */
+export const MOVED_EMAIL_EXTRA_COMMANDS = 1 + 1 + 1 + 3;
+/**
  * What an upload holding the month's emails costs the five-minute job until it is given up (priced per start in
  * tests/plan-cost-registry.ts): its SADD to the active set when it starts, one GET each pass while it receives
  * (every five minutes for RECEIVING_MS, and one more), and the give-up at its ceiling of commands (the lock, the
@@ -334,6 +342,8 @@ export type ImportJob = {
     dateOrder?: DateOrder | "";
     /** Where the file came from; absent on imports made before ClickFunnels files were read. */
     source?: ImportSource;
+    /** Purchases: false when the file has no status column (StartInput.statusColumn); absent is read as having one. */
+    statusColumn?: boolean;
   };
   finishedAt: number;
   /**
@@ -449,7 +459,7 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
   return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
 }
 
-export type StartProblem = "busy" | "too_many" | "consent" | "email" | "list" | "store" | "unavailable" | "stripe" | "stopped";
+export type StartProblem = "busy" | "too_many" | "consent" | "email" | "list" | "store" | "unavailable" | "stripe" | "stopped" | "address";
 
 /** What an import is started with, as the studio sends it. */
 export type StartInput = {
@@ -462,6 +472,12 @@ export type StartInput = {
   stopped?: boolean;
   dateOrder?: string;
   source?: ImportSource;
+  /**
+   * Purchases: whether the file has a status column the creator matched. With one, an empty status is not known and
+   * gives nothing (lib/clickfunnels-csv.ts readOrderStatus); only a file with none is read as all paid. Taken as
+   * having one unless the page says it has none.
+   */
+  statusColumn?: boolean;
 };
 
 /**
@@ -490,6 +506,8 @@ export function startProblem(store: Store, kind: ImportKind, input: StartInput):
   if (kind === "members" && !canSell(store)) return { reason: "stripe" };
   // And only once the creator says they will stop the old renewals, so nobody pays twice.
   if (kind === "members" && input.stopped !== true) return { reason: "stopped" };
+  // Each member's email carries the creator's postal address, as their other emails do (lib/move-members.ts).
+  if (kind === "members" && !movePostal(store)) return { reason: "address" };
   return null;
 }
 
@@ -586,6 +604,7 @@ export async function startImport(
       email: (kind === "purchases" && input.email === true) || kind === "members",
       dateOrder: kind === "members" && (input.dateOrder === "mdy" || input.dateOrder === "dmy") ? input.dateOrder : "",
       source: input.source === "clickfunnels" && kind !== "members" ? "clickfunnels" : "csv",
+      ...(kind === "purchases" ? { statusColumn: input.statusColumn !== false } : {}),
     },
     finishedAt: 0,
     ...(held ? { held } : {}),
@@ -1086,7 +1105,7 @@ async function productsStep(job: ImportJob, store: Store, rows: string[][]): Pro
 type PurchaseRow = { line: number; email: string; productId: string; bundle: string[] | null };
 
 /** Reads a chunk of past buyers the way the import and its dry run both read it, against the store's products. */
-function classifyPurchases(listings: Awaited<ReturnType<typeof readListings>>, rows: string[][]): { valid: PurchaseRow[]; problems: Problem[]; skipped: Problem[] } {
+function classifyPurchases(listings: Awaited<ReturnType<typeof readListings>>, rows: string[][], statusColumn: boolean): { valid: PurchaseRow[]; problems: Problem[]; skipped: Problem[] } {
   const problems: Problem[] = [];
   const skipped: Problem[] = [];
   const byId = new Map(listings.map((p) => [p.id, p]));
@@ -1104,13 +1123,14 @@ function classifyPurchases(listings: Awaited<ReturnType<typeof readListings>>, r
       continue;
     }
     // Only a paid order gives anything: a refunded, failed or canceled one never does.
-    const status = readOrderStatus(rawStatus);
+    // An empty status is not known in a file that has a status column, and is never read as paid there.
+    const status = readOrderStatus(rawStatus, statusColumn);
     if (status === "unpaid") {
       skipped.push({ line, column: "status", problem: "Not a paid order, so nothing is given", value: rawStatus });
       continue;
     }
     if (status === "unknown") {
-      problems.push({ line, column: "status", problem: "Not a status that can be read: only paid orders are given", value: rawStatus });
+      problems.push({ line, column: "status", problem: rawStatus.trim() ? "Not a status that can be read: only paid orders are given" : "No status: only paid orders are given", value: rawStatus });
       continue;
     }
     const asked = rawProduct.replace(/\s+/g, " ").trim();
@@ -1152,7 +1172,7 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
   const statsId = store.statsId;
   if (!statsId) throw new Error("the store has no statsId");
   const listings = await listingsNamed(store, rows);
-  const { valid, problems, skipped } = classifyPurchases(listings, rows);
+  const { valid, problems, skipped } = classifyPurchases(listings, rows, job.options.statusColumn !== false);
   // Nobody deleted from the store is given anything again or emailed ("no import puts them back"); unknown throws.
   // Read before the repeat check, so a deleted address on several rows is left out on each, never written into the
   // report or kept among the rows the import saw.
@@ -1239,6 +1259,7 @@ export async function previewImport(store: Store, kind: ImportKind, input: Start
     email: kind === "purchases" && input.email === true,
     dateOrder: "",
     source: input.source === "clickfunnels" ? "clickfunnels" : "csv",
+    ...(kind === "purchases" ? { statusColumn: input.statusColumn !== false } : {}),
   };
   const out: PreviewRow[] = [];
   const told = (list: Problem[], outcome: PreviewOutcome) => {
@@ -1301,7 +1322,7 @@ export async function previewImport(store: Store, kind: ImportKind, input: Start
   }
 
   const listings = await listingsNamed(store, raw);
-  const { valid, problems, skipped } = classifyPurchases(listings, raw);
+  const { valid, problems, skipped } = classifyPurchases(listings, raw, options.statusColumn !== false);
   told(problems, "error");
   told(skipped, "skipped");
   // Read before the repeat check, as the import reads it.
@@ -1448,6 +1469,14 @@ function senderAddress(): string {
   return (match ? match[1] : NIMBUS_FROM).trim();
 }
 
+/** An import's email as HTML: its text, a paragraph for each blank line, a line break for each line. */
+function letterHtml(text: string): string {
+  return `<div style="font-family:system-ui,sans-serif;line-height:1.5">${text
+    .split("\n\n")
+    .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
+    .join("")}</div>`;
+}
+
 /** The one email a past buyer gets, when the creator ticked it: what moved, and how to open it. */
 export async function movedEmail(store: Store, job: ImportJob, email: string): Promise<{ subject: string; text: string } | null> {
   const given = (await importedFor(store, email)).filter((p) => p.job === job.id);
@@ -1515,46 +1544,94 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   /** What was taken from the portion and did not go is given back to it. */
   const unsent = (n: number) => rampBack(job.sid, n);
   const tags = healthTags(store, false);
-  const messages = [];
-  for (const email of emails) {
+  const members = job.kind === "members";
+  // The members' emails carry the creator's postal address (lib/move-members.ts, movePostal): with none, none is
+  // sent, and they are counted as not emailed. A members import does not start without one (startProblem).
+  if (members && !movePostal(store)) {
+    job.counts.unmailed += emails.length;
+    await unsent(portion);
+    return "more";
+  }
+  const messages: { from: string; to: string; subject: string; text: string; html: string; replyTo: string; headers?: Record<string, string>; tags: typeof tags }[] = [];
+  // Each letter read whole (CX-123 rule 24): an invitation read in an unknown shape puts the same addresses back,
+  // gives the portion back and throws, the step left as it was, never one dropped unsent.
+  let letters: ({ to?: string; subject: string; text: string } | null)[];
+  try {
+    letters = [];
     // For members, what waits is the invitation's field; the address is in it.
-    const letter = job.kind === "members" ? await inviteEmail(store, email) : await movedEmail(store, job, email);
-    if (!letter) continue;
+    for (const email of emails) letters.push(members ? await inviteEmail(store, email) : await movedEmail(store, job, email));
+  } catch (error) {
+    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    await unsent(portion);
+    throw error;
+  }
+  letters.forEach((letter, i) => {
+    if (!letter) return;
     messages.push({
       from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
-      to: (letter as { to?: string }).to ?? email,
+      to: letter.to ?? emails[i],
       subject: letter.subject,
       text: letter.text,
-      html: `<div style="font-family:system-ui,sans-serif;line-height:1.5">${letter.text
-        .split("\n\n")
-        .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
-        .join("")}</div>`,
+      html: "",
       replyTo: store.email,
       tags,
     });
-  }
+  });
   // Nobody deleted from the store since they were queued is written to. Read whole (CX-123 rule 24): any other reply
   // puts the same addresses back, gives the portion back and throws, the step left as it was. A store read without a
   // list is read again and given one if it still has none, as the rows' step does (listFor); one whose record cannot
   // be read is the same unknown, never taken as having deleted nobody.
+  // Nor anybody the creator's list keeps as having left it (unsubscribed, a spam report, a bounce for good), nor, for
+  // the members' emails, anybody who pressed stop on this store's reminders: each read exactly, the same unknown.
+  // Those left out for it are counted as not emailed only once nothing is put back, so a pass tried again never
+  // counts them twice.
+  let refusedCount = 0;
   if (messages.length) {
     let deleted: Set<string>;
+    let refused: Set<string>;
     try {
       const listId = await listFor(store).catch(() => {
         throw new UnknownReplyError("the store's list");
       });
-      deleted = await deletedAmong(listId, messages.map((m) => m.to));
+      const tos = messages.map((m) => m.to);
+      deleted = await deletedAmong(listId, tos);
+      refused = await leftListAmong(listId, tos);
+      if (members) for (const stopped of await remindersStoppedAmong(store, tos)) refused.add(stopped);
     } catch (error) {
       await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
       await unsent(portion);
       throw error;
     }
-    for (let i = messages.length - 1; i >= 0; i -= 1) if (deleted.has(messages[i].to)) messages.splice(i, 1);
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (deleted.has(messages[i].to)) messages.splice(i, 1);
+      else if (refused.has(messages[i].to)) {
+        messages.splice(i, 1);
+        refusedCount += 1;
+      }
+    }
   }
   if (messages.length === 0) {
+    job.counts.unmailed += refusedCount;
     await unsent(portion);
     return "more";
   }
+  // Each member's email with its own stop link (lib/checkout-recovery.ts, moveStopLink: a page, a one-click address
+  // and the header a mail app reads) and the creator's postal address. A link not confirmed written sends nothing:
+  // the same addresses go back, the portion is given back, and it throws, the step left as it was.
+  if (members) {
+    try {
+      for (const message of messages) {
+        const stop = await moveStopLink(store, message.to);
+        message.text = [message.text, ...moveFoot(store, stop.page)].join("\n");
+        message.headers = { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" };
+      }
+    } catch (error) {
+      await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+      await unsent(portion);
+      throw error;
+    }
+  }
+  for (const message of messages) message.html = letterHtml(message.text);
   // The company's day first: over it, the same buyers wait for tomorrow.
   if (!(await reserveDay(messages.length))) {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
@@ -1583,7 +1660,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   if (sending.length < messages.length) await releaseDay(messages.length - sending.length);
   if (sending.length === 0) {
-    job.counts.unmailed += messages.length;
+    job.counts.unmailed += messages.length + refusedCount;
     await unsent(portion);
     return "more";
   }
@@ -1596,7 +1673,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await unsent(portion);
     return "retry";
   }
-  job.counts.unmailed += messages.length - sending.length;
+  job.counts.unmailed += messages.length - sending.length + refusedCount;
   if (sent === "sent") {
     // What a bounce or a complaint is later measured against.
     await noteSent(job.sid, sending.length);
@@ -1848,9 +1925,14 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       if (!store?.statsId || !isPaidUp(store) || (await pausedFor(sid))) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
-      // Never to somebody deleted from the store. Read whole (CX-123 rule 24): unknown throws, and the reminder is put
-      // back in line (the catch below).
+      // Never to somebody deleted from the store, nor to somebody the creator's list keeps as having left it, nor to
+      // somebody who pressed stop on this store's reminders. Each read whole (CX-123 rule 24): unknown throws, and the
+      // reminder is put back in line (the catch below).
       if ((await deletedAmong(store.listId, [invite.e])).size) continue;
+      if ((await leftListAmong(store.listId, [invite.e])).size) continue;
+      if ((await remindersStoppedAmong(store, [invite.e])).size) continue;
+      // It carries the creator's postal address: with none, it is not sent.
+      if (!movePostal(store)) continue;
       if (await keptAlready(store, invite.e, invite.p)) {
         await noteKept(store, invite.e, invite.p, now);
         counts.kept += 1;
@@ -1858,6 +1940,10 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
       const letter = await reminderEmail(store, field, now);
       if (!letter) continue;
+      // Its own stop link, made before anything is taken (moveStopLink throws when it is not confirmed written: the
+      // catch below puts the reminder back in line, nothing taken or sent).
+      const stop = await moveStopLink(store, letter.to);
+      const text = [letter.text, ...moveFoot(store, stop.page)].join("\n");
       if (!(await reserveDay(1))) {
         await remindLater(sid, field, now);
         continue;
@@ -1878,12 +1964,10 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
             to: letter.to,
             subject: letter.subject,
-            text: letter.text,
-            html: `<div style="font-family:system-ui,sans-serif;line-height:1.5">${letter.text
-              .split("\n\n")
-              .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
-              .join("")}</div>`,
+            text,
+            html: letterHtml(text),
             replyTo: store.email,
+            headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
             tags: healthTags(store, false),
           },
         ],

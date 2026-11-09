@@ -330,6 +330,35 @@ export async function isMailable(listId: string, rawEmail: string): Promise<bool
 }
 
 /**
+ * Which of these addresses the list keeps as having left it: unsubscribed
+ * themselves, or taken off for a spam report or a bounce for good (`gone`).
+ * One HMGET, read exactly (CX-123 rule 24): no row is somebody the list does
+ * not hold; a row is read only when it is a contact whose `unsub`, when
+ * present, is true or false. Any other reply, or a row in another shape,
+ * throws UnknownReplyError, never "has not left". No list: nobody.
+ */
+export async function leftListAmong(listId: string | null | undefined, rawEmails: string[]): Promise<Set<string>> {
+  const left = new Set<string>();
+  if (!listId || !rawEmails.length) return left;
+  const emails = rawEmails.map(normaliseEmail);
+  const rows = fieldsOf((await redisPipeline([["HMGET", leadsKey(listId), ...emails]]))[0], emails.length, "the list's rows of addresses to email");
+  rows.forEach((raw, i) => {
+    if (raw === null) return;
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      throw new UnknownReplyError("a list row of an address to email");
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value) || ("unsub" in value && typeof value.unsub !== "boolean")) {
+      throw new UnknownReplyError("a list row of an address to email");
+    }
+    if (parseContact(raw)?.unsub) left.add(rawEmails[i]);
+  });
+  return left;
+}
+
+/**
  * Brings in addresses the creator says agreed to hear from them, a few
  * hundred per round trip. Nobody who left is put back, and nobody already on
  * the list is changed except to mark that they agreed.

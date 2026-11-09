@@ -142,6 +142,7 @@ const MESSAGES: Record<string, string> = {
   members_email: "Moving members needs your store's plan to be active: each member is emailed their own link.",
   stripe: "Members keep their membership by paying on your own Stripe account. Connect Stripe first.",
   stopped: "Check the box to confirm you will stop these memberships renewing where they are now.",
+  address: "Each member's email shows your postal address, as your other emails do. Save it under Email in your studio, then start this import again.",
   date_order: "Choose how this file writes dates, from the list above the first rows.",
   list: "Your store's list could not be set up. Try again in a moment.",
   store: "Open the studio once, then come back here.",
@@ -441,6 +442,8 @@ export function ImportTool({
     consentColumn: kind === "contacts" ? (mapping.consent ?? -1) >= 0 : undefined,
     tags: kind === "contacts" ? tags.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
     email: kind === "purchases" ? email : undefined,
+    // Whether the file has a status column: with one, an empty status gives nothing (lib/clickfunnels-csv.ts).
+    statusColumn: kind === "purchases" ? (mapping.status ?? -1) >= 0 : undefined,
     stopped: kind === "members" ? stopped : undefined,
     dateOrder: kind === "members" ? dateOrder : undefined,
   });

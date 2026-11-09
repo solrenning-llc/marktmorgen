@@ -99,17 +99,22 @@ export function consentFrom(status: ClickFunnelsStatus, confirmed: boolean): Con
   return "none";
 }
 
-/** What an order's status column says: paid, not paid, or not understood. Empty is taken as paid, as a file with no status column is. */
+/**
+ * What an order's status column says: paid, not paid, or not understood. Empty is not understood: it is never taken
+ * as paid in a file that has a status column. Only a file with no status column at all is read as all paid.
+ */
 export type OrderStatus = "paid" | "unpaid" | "unknown";
 
 /**
  * An order's billing status, in the words checkout platforms use. Only a
  * paid order gives a past buyer what they bought: a refunded, failed or
- * canceled one never does.
+ * canceled one never does, nor one whose status is empty or not known.
+ * `column` is false only for a file with no status column, whose empty
+ * cells are then read as paid, as before; words are read as words either way.
  */
-export function readOrderStatus(raw: string): OrderStatus {
+export function readOrderStatus(raw: string, column = true): OrderStatus {
   const value = raw.trim().toLowerCase().replace(/[\s_-]+/g, " ");
-  if (value === "") return "paid";
+  if (value === "") return column ? "unknown" : "paid";
   const paid = ["paid", "complete", "completed", "succeeded", "success", "successful", "active", "fulfilled", "settled", "captured", "paid in full", "approved"];
   const unpaid = [
     "refunded",

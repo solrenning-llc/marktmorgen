@@ -120,9 +120,10 @@ export function productLink(store: Store, productId: string): string {
   return `${storeBase(store)}/p/${encodeURIComponent(productId)}`;
 }
 
-async function stopLink(store: Store, email: string): Promise<{ page: string; oneClick: string }> {
+async function stopLink(store: Store, email: string, what?: "move"): Promise<{ page: string; oneClick: string }> {
   const token = randomBytes(20).toString("hex");
-  const grant = { k: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.name };
+  // `w`: what the email was about, so the stop page names it; the mark it leaves is the same either way.
+  const grant = { k: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.name, ...(what ? { w: what } : {}) };
   const notes = noteForErasure(store.statsId, email, linkKey(token));
   // Read in their exact shape (CX-123 rule 24): the link written ("OK") and
   // each erasure note a count. Anything else is unknown, and the reminder is
@@ -142,7 +143,35 @@ async function stopLink(store: Store, email: string): Promise<{ page: string; on
   };
 }
 
-type StopGrant = { k: string; e: string; n?: unknown; h?: unknown };
+type StopGrant = { k: string; e: string; n?: unknown; h?: unknown; w?: unknown };
+
+/**
+ * The stop link of an email to a member moved from another platform
+ * (lib/imports.ts, lib/move-members.ts): the same door, page and one-click
+ * address as a checkout reminder's, and the same mark, so pressing it stops
+ * every reminder from that store to that address, the move's among them.
+ * Throws when its record is not confirmed written (stopLink).
+ */
+export function moveStopLink(store: Store, email: string): Promise<{ page: string; oneClick: string }> {
+  return stopLink(store, email, "move");
+}
+
+/**
+ * Which of these addresses pressed stop on this store's reminders: one
+ * EXISTS each, read exactly (markThere), so an unknown answer throws and is
+ * never "did not press stop". A store with no stats id has no marks.
+ */
+export async function remindersStoppedAmong(store: Pick<Store, "statsId">, emails: string[]): Promise<Set<string>> {
+  const stopped = new Set<string>();
+  if (!store.statsId || !emails.length) return stopped;
+  const statsId = store.statsId;
+  const marks = repliesFor(await redisPipeline(emails.map((email) => ["EXISTS", offKey(statsId, email)])), emails.length);
+  if (!marks) throw new UnknownReplyError("the reminders' stop marks");
+  marks.forEach((mark, i) => {
+    if (markThere(mark, "a reminder's stop mark")) stopped.add(emails[i]);
+  });
+  return stopped;
+}
 
 /**
  * A stop link's grant, read from its GET reply only in its exact shape
@@ -159,8 +188,8 @@ function stopGrantOf(replies: unknown): StopGrant | null {
   try {
     const grant = JSON.parse(raw) as unknown;
     if (!grant || typeof grant !== "object") return null;
-    const { k, e, n, h } = grant as { k?: unknown; e?: unknown; n?: unknown; h?: unknown };
-    return typeof k === "string" && typeof e === "string" && k && e ? { k, e, n, h } : null;
+    const { k, e, n, h, w } = grant as { k?: unknown; e?: unknown; n?: unknown; h?: unknown; w?: unknown };
+    return typeof k === "string" && typeof e === "string" && k && e ? { k, e, n, h, w } : null;
   } catch {
     return null;
   }
@@ -169,7 +198,7 @@ function stopGrantOf(replies: unknown): StopGrant | null {
 /** Who a stop link belongs to, without acting on it. */
 export async function readStopToken(
   token: string,
-): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
+): Promise<{ email: string; storeName: string; stopped: boolean; handle: string; move?: true } | null> {
   if (!STOP_TOKEN.test(token) || !isRedisConfigured()) return null;
   const grant = stopGrantOf(await redisPipeline([["GET", linkKey(token)]]));
   if (!grant) return null;
@@ -179,7 +208,8 @@ export async function readStopToken(
   if (count !== 0 && count !== 1) throw new UnknownReplyError("a reminder's stop mark");
   // The store's handle, so the page can speak the store's language.
   const handle = typeof grant.h === "string" ? grant.h : "";
-  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: count === 1, handle };
+  // A link from a moved member's email: the page names those emails (lib/buyer-words/move.ts).
+  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: count === 1, handle, ...(grant.w === "move" ? { move: true as const } : {}) };
 }
 
 /**

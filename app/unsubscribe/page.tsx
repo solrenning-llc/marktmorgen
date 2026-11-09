@@ -9,6 +9,7 @@ import { readConfig } from "@/lib/community";
 import { type Store, storeForPage } from "@/lib/store";
 import { REVIEW_STOP, readReviewStop } from "@/lib/review-requests";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
+import { moveWords } from "@/lib/buyer-words/move";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { countingFor } from "@/lib/mail-clicks";
 import { blockWords } from "@/lib/buyer-words/blocks";
@@ -216,12 +217,14 @@ async function StopAnnouncements({ token, notSaved }: { token: string; notSaved:
   );
 }
 
-/** The same one button, for a store's abandoned-checkout reminders. */
+/** The same one button, for a store's abandoned-checkout reminders, and for the emails to a member it moved here. */
 async function StopReminders({ token }: { token: string }) {
   const found = STOP_TOKEN.test(token) ? await readStopToken(token) : null;
   const store = found?.handle ? await storeForPage(found.handle) : null;
   const who = found?.storeName || "";
-  const a = wordsFor(store);
+  // A moved member's link names those emails (lib/buyer-words/move.ts); the mark it leaves is the same.
+  const m = found?.move ? moveWords(store?.language) : null;
+  const a = { ...wordsFor(store), ...(m ? { remindersDoneTitle: m.stopDoneTitle, remindersDone: m.stopDone, remindersAsk: m.stopAsk, stopReminders: m.stopButton } : {}) };
   return (
     <main id="content" lang={localeOf(store)} className="min-h-screen bg-paper px-4 py-20 text-ink">
       <div className="card mx-auto max-w-md p-7 sm:p-9">

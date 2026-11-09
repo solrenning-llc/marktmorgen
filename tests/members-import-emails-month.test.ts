@@ -20,7 +20,7 @@
  *   - a reminder refused by a full month is tried once more when the month opens again, while that is still before
  *     the renewal date, and is never sent twice.
  */
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { addRows, advanceImports, cancelImport, finishUpload, releaseMoved, reserveMoved, runImport, sendMoveReminders, startImport, storeImports } from "@/lib/imports";
 import { moveCounts } from "@/lib/move-members";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -120,6 +120,8 @@ async function run(id: string) {
 async function creatorStore(owner: string, handle: string, fields: { tier?: "creator" | "pro"; period: ReturnType<typeof paidPeriod> & { funded?: true } }) {
   await claimHandle(owner, handle, "Harbor Kitchen", "");
   await ensureStatsId(owner);
+  // A members import needs the postal address its emails carry (lib/move-members.ts, movePostal).
+  await setMailSettings(owner, { fromName: "Harbor Kitchen", address: "12 Harbor Lane, Portland, ME 04101, USA" });
   await setStripeAccount(owner, `acct_1Test${handle.slice(0, 6).padEnd(6, "0")}01`, true);
   await setSubscription(owner, { customerId: `cus_${handle}`, subscriptionId: `sub_${handle}`, active: true, ...(fields.tier ? { tier: fields.tier } : {}), period: fields.period });
   const club = await addProduct(owner, "The Inner Circle", "", "29", { interval: "month", trialDays: 0, payments: 0 });

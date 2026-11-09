@@ -92,12 +92,13 @@ test("what an order keeps for good is written where it is measured, and charged 
   // room what each write adds (tests/order-data.test.ts,
   // scripts/test_order_data_redis.py). So every file a kept or item part
   // names must write through it.
+  // Rule 23 (review of #3448, 9 November 2026): orderWriteIfSame, the same write behind a check of the row it was decided from, counts as writing through lib/order-data.ts; lib/contacts.ts now calls only that one.
   const files = new Set<string>();
   for (const [name, family] of Object.entries(FAMILIES)) {
     if ((family.parts ?? []).some((part) => "kept" in part || "item" in part)) files.add(name.slice(name.indexOf("@") + 1));
   }
   assert.ok(files.size >= 20, `only ${files.size} files keep what an order leaves`);
-  for (const file of files) assert.match(read(file), /\borderWrite(Charged)?\(/, `${file} keeps what an order leaves and does not write it through lib/order-data.ts`);
+  for (const file of files) assert.match(read(file), /\borderWrite(Charged|IfSame)?\(/, `${file} keeps what an order leaves and does not write it through lib/order-data.ts`);
   assert.doesNotMatch(read("lib/orders.ts"), /chargeOrderData|ORDER_DATA_BYTES/, "an order is charged a fixed ceiling again");
 });
 

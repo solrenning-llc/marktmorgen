@@ -203,8 +203,11 @@ export class MemoryRedis {
           return out;
         }
         // lib/contacts.ts CONTACT_WRITE_IF: a contact's row written only while it and the address's deleted mark hold what was read, with its counts.
-        if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && args[0] === "4" && args.length === 13) {
-          const [list, marks, agreedCount, leftCount, field, was, value, print, markWas, lift, agreed, left] = args.slice(1);
+        // With the person's set of stores joined (KEYS[5], ARGV[9] the store, ARGV[10] its day), added to after the checks.
+        if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && ((args[0] === "4" && args.length === 13) || (args[0] === "5" && args.length === 16))) {
+          const withIndex = args[0] === "5";
+          const [list, marks, agreedCount, leftCount] = args.slice(1, 5);
+          const [field, was, value, print, markWas, lift, agreed, left, member, day] = args.slice(withIndex ? 6 : 5);
           const sha1 = (text: unknown) => (typeof text === "string" ? createHash("sha1").update(text).digest("hex") : "");
           if (sha1(this.run(["HGET", list, field])) !== was) return 0;
           if (print !== "" && sha1(this.run(["HGET", marks, print])) !== markWas) return 0;
@@ -213,6 +216,10 @@ export class MemoryRedis {
           if (agreed === "1") this.run(["INCR", agreedCount]);
           if (left === "1") this.run(["INCR", leftCount]);
           else if (left === "-1") this.run(["DECR", leftCount]);
+          if (withIndex) {
+            this.run(["SADD", args[5], member]);
+            this.run(["EXPIREAT", args[5], day]);
+          }
           return 1;
         }
         // lib/order-data.ts ORDER_WRITE_IF_SAME: each check, then ORDER_WRITE as it is on the rest.

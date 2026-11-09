@@ -22,23 +22,24 @@ type Commands = (string | number)[][];
 const real = redis.pipeline.bind(redis);
 
 /** Commands as Upstash bills them for one trip: each command 1, a script 1 plus the calls it makes inside. */
-function billed(commands: Commands): number {
+function billed(commands: Commands, scriptCalls: number): number {
   let total = 0;
   for (const c of commands) {
     const head = String(c[1] ?? "");
     if (c[0] !== "EVAL") total += 1;
     else if (head.startsWith("-- marktmorgen:store-data:")) continue;
-    else if (head.startsWith("-- marktmorgen:contact-write-if:v1")) total += 1 + CONTACT_WRITE_CALLS;
+    else if (head.startsWith("-- marktmorgen:contact-write-if:v1")) total += 1 + scriptCalls;
     else if (head.startsWith("-- marktmorgen:contact-cas-hset:v1")) total += 1 + 2 * ((c.length - 4) / 3);
     else total += 1000; // a script this test does not know is not free
   }
   return total;
 }
 
-async function measure(run: () => Promise<unknown>): Promise<number> {
+/** `scriptCalls`: what CONTACT_WRITE_IF runs for the path measured (an unsubscribe: the row, the row written, the left count). */
+async function measure(run: () => Promise<unknown>, scriptCalls = CONTACT_WRITE_CALLS): Promise<number> {
   let sum = 0;
   redis.pipeline = async (commands: Commands) => {
-    sum += billed(commands);
+    sum += billed(commands, scriptCalls);
     return real(commands);
   };
   try {
@@ -82,7 +83,7 @@ async function main() {
     is("and it stays inside a later page's commands, as a public request's work does", first + 2 <= COMMANDS.laterPage + COMMANDS.laterCount, true);
     const again = await measure(() => upsertContact(list, email, { agreed: true, explicit: true, source: "free", sid, productId: "p1", title: "T" }, ROOM));
     is("a sign-up over an existing row, no race", again <= CONTACT_COMMANDS_MOST.upsertRound, true);
-    const note = await measure(() => noteProduct(list, email, "p2", "Two", { sid: ROOM.sid, statsId: "s", handle: "h" } as never));
+    const note = await measure(() => noteProduct(list, email, "p2", "Two", { sid: "", statsId: "", handle: "" }));
     is("a purchase noted", note <= CONTACT_COMMANDS_MOST.noteProductRound, true);
     const token = (await tokensFor(list, [email], "h")).get(email) ?? "";
     is("control: the link exists", token.length > 0, true);
@@ -94,7 +95,7 @@ async function main() {
     await upsertContact(list, "clicks@example.com", { agreed: true, explicit: true, source: "free", clicks: true }, ROOM);
     const back = await measure(() => takeBackClicks(list, "clicks@example.com"));
     is("taking back the permission", back <= CONTACT_COMMANDS_MOST.takeBackRound, true);
-    const left = await measure(() => unsubscribe(token));
+    const left = await measure(() => unsubscribe(token), 3);
     is("an unsubscribe", left <= CONTACT_COMMANDS_MOST.unsubscribeRound, true);
     is("control: the row was written", String(redis.run(["HGET", leadsKey(list), email])).includes('"unsub":true'), true);
   }

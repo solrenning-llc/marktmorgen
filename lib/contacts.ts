@@ -41,7 +41,7 @@ import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact
 import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, dataKey, giveData, needData } from "@/lib/store-data";
-import { type DataOwner, orderWrite, orderWriteIfSame } from "@/lib/order-data";
+import { type DataOwner, orderWriteIfSame } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
 /** How many product names one address keeps. */
@@ -319,12 +319,42 @@ export async function upsertContact(
 }
 
 /**
- * How many times a contact is read again when it changed between the read and the write. upsertContact at its
- * worst, every round lost to a change made in between: 3 x (3 reads + the deleted mark's time + the stores joined,
- * 2 + the script, 1) = 21 commands, all inside an order's or a sign-up's own work (ORDER_COMPUTE); without a race,
- * the commands it always made.
+ * How many times a contact is read again when it changed between the read and the write.
  */
 const CONTACT_WRITE_TRIES = 3;
+
+/**
+ * The most redis.call one run of CONTACT_WRITE_IF makes: the row's read, the mark's read, the row, the lifted mark,
+ * the agreed count, the left count (INCR or DECR, one of them) and the stores joined (SADD, EXPIREAT). Upstash bills
+ * a script as one command plus every call inside it (lib/capped-count.ts), so a script is 1 + this. Held against
+ * the script's text in tests/contacts-write-cost.test.ts.
+ */
+export const CONTACT_WRITE_CALLS = 8;
+
+/**
+ * The most database commands each path of this file's checked writes makes, a script counted as 1 plus its calls
+ * (review of #3448, 9 November 2026; held in tests/contacts-write-cost.test.ts and named in
+ * tests/plan-cost-registry.ts). Each is CONTACT_WRITE_TRIES rounds lost to a change made in between, and, once, the
+ * read back of an answer in another shape. The room's own charge scripts (lib/store-data.ts) are left out: the data
+ * room's line prices them. A sign-up (upsertContact) is a public request's work, not an order's, unless its room is
+ * an order's (orderRoom): there the checks add two reads inside ORDER_WRITE_IF_SAME, inside the order's own compute.
+ */
+export const CONTACT_COMMANDS_MOST = {
+  tries: CONTACT_WRITE_TRIES,
+  /** upsertContact: the row, the list's size and the deleted mark; the mark's time; the script and its calls. */
+  upsertRound: 3 + 1 + 1 + CONTACT_WRITE_CALLS,
+  upsert: CONTACT_WRITE_TRIES * (3 + 1 + 1 + CONTACT_WRITE_CALLS) + 2,
+  /** unsubscribe: the link, the row, the script and the 3 calls it makes there (the row, the row written, the left count). */
+  unsubscribeRound: 1 + 1 + 1 + 3,
+  unsubscribe: CONTACT_WRITE_TRIES * (1 + 1 + 1 + 3),
+  /** noteProduct and takeBackClicks: the row, and the checked write (CAS_HSET: the script and its HGET and HSET). */
+  noteProductRound: 1 + 1 + 2,
+  noteProduct: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
+  takeBackRound: 1 + 1 + 2,
+  takeBack: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
+  /** tokensFor for `n` addresses: both reads, and for each a token's record, its checked write (1 + 2 calls) and, lost, the record taken back. */
+  tokens: (n: number): number => CONTACT_WRITE_TRIES * (2 + n * (1 + 3 + 1)),
+} as const;
 
 /**
  * Whether something that happened at `at` (an ISO time) is after the deletion whose mark holds `mark`, the second
@@ -346,9 +376,10 @@ function afterDeletion(mark: string | null, at: string | undefined): boolean {
  * read ("" for none), ARGV[3] the row to write, ARGV[4] the address's mark ("" when the mark is not looked at),
  * ARGV[5] the SHA-1 of the mark's value as read ("" for none), ARGV[6] "1" to lift it with the write (their own
  * yes, given after the deletion), ARGV[7] "1" to count one more who agreed, ARGV[8] "1" or "-1" for one more or
- * one fewer who left. Answers 1 written, 0 changed (nothing written).
+ * one fewer who left; with KEYS[5] (the person's set of stores joined, lib/joined-stores.ts) ARGV[9] the store's id
+ * to add to it and ARGV[10] the day it ends. Answers 1 written, 0 changed (nothing written).
  */
-const CONTACT_WRITE_IF = [
+export const CONTACT_WRITE_IF = [
   // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
   "-- marktmorgen:contact-write-if:v1",
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
@@ -365,6 +396,11 @@ const CONTACT_WRITE_IF = [
   'if ARGV[6] == "1" and ARGV[4] ~= "" then redis.call("HDEL", KEYS[2], ARGV[4]) end',
   'if ARGV[7] == "1" then redis.call("INCR", KEYS[3]) end',
   'if ARGV[8] == "1" then redis.call("INCR", KEYS[4]) elseif ARGV[8] == "-1" then redis.call("DECR", KEYS[4]) end',
+  // The stores the address joined, with the row and only after the checks held: a deletion that won leaves no index.
+  "if #ARGV >= 10 then",
+  '  redis.call("SADD", KEYS[5], ARGV[9])',
+  '  redis.call("EXPIREAT", KEYS[5], ARGV[10])',
+  "end",
   "return 1",
 ].join("\n");
 
@@ -372,9 +408,10 @@ const CONTACT_WRITE_IF = [
  * Writes one contact's row, the lifting of its deleted mark when `lift`, and its counts, only while the row is
  * still `raw` and the mark still `mark` (consent audit of 9 November 2026: a read and then a plain HSET wrote an
  * unsubscribe, a complaint or a deletion made in between over). The stores the address joined (`joined`, how
- * "delete me from every store" finds this one) are written first: one left over when the row is not is harmless,
- * a row without it is not. An order's are written by lib/order-data.ts and charged there at what they add, all in
- * one script (ORDER_WRITE_IF_SAME); anybody else's in CONTACT_WRITE_IF, the counts with the row. True when
+ * "delete me from every store" finds this one) are written with the row, after the checks, never before: one left
+ * over for a person whose deletion won would list this store for them for 13 quarters (review of #3448, MEDIUM 1).
+ * An order's are written by lib/order-data.ts and charged there at what they add, all in one script
+ * (ORDER_WRITE_IF_SAME); anybody else's in CONTACT_WRITE_IF, the counts with the row. True when
  * written, false when the row or the mark changed meanwhile (nothing written). A reply in another shape is read
  * back: the row holding exactly what was to be written (and the mark gone, when lifted) means the script ran,
  * counts and all; anything else throws UnknownReplyError, never "not written" nor "written".
@@ -407,11 +444,8 @@ async function writeContactIf(
     ];
     return (await orderWriteIfSame(room.order, [{ key, field: email, sha1: was }, { key: marks, field: print, sha1: markWas }], commands)) !== null;
   }
-  if (joined.length) {
-    if (room && isOrderRoom(room)) await orderWrite(room.order, joined);
-    else await redisPipeline(joined);
-  }
-  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts);
+  // A room that is an order's but has no key of its own (dataKey) gets them here as well, in the same script.
+  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts, false, joined);
 }
 
 /**
@@ -427,13 +461,18 @@ async function writeRowIf(
   mark: { print: string; markWas: string; mark: string | null; lift: boolean } | null,
   counts: { agreed: boolean; left: -1 | 0 | 1 },
   strict = false,
+  /** joinedCommands: the person's set of stores joined, added to in the script after its checks. */
+  joined: (string | number)[][] = [],
 ): Promise<boolean> {
   const key = leadsKey(listId);
   const marks = suppressedKey(listId);
   const args = [email, was, value, mark?.print ?? "", mark?.markWas ?? "", mark?.lift ? "1" : "0", counts.agreed ? "1" : "0", String(counts.left)];
+  // joinedCommands is [SADD set sid, EXPIREAT set day]; anything else is not sent (no index is better than a wrong one).
+  const [add, expire] = joined;
+  const index = add?.[0] === "SADD" && expire?.[0] === "EXPIREAT" && joined.length === 2 && add[1] === expire[1];
   let result: unknown;
   try {
-    result = repliesFor(await redisPipeline([["EVAL", CONTACT_WRITE_IF, 4, key, marks, agreedKey(listId), unsubKey(listId), ...args]]), 1)?.[0];
+    result = repliesFor(await redisPipeline([["EVAL", CONTACT_WRITE_IF, index ? 5 : 4, key, marks, agreedKey(listId), unsubKey(listId), ...(index ? [String(add[1])] : []), ...args, ...(index ? [String(add[2]), String(expire[2])] : [])]]), 1)?.[0];
     if (result !== 0 && result !== 1) throw new UnknownReplyError("a contact's write");
   } catch (error) {
     if (strict) throw error instanceof UnknownReplyError ? error : new UnknownReplyError("a contact's write");

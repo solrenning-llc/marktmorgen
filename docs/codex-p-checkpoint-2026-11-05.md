@@ -2704,3 +2704,64 @@ Ownonlyproof/docs, syntheticdata, noauthortrackedchange;scannerpycacheremoved. S
 ### Delivery receipt — 2026-11-09 01:47 Fortaleza
 
 PONTO CXP-20261109-0147-C1-1 DELIVERED027a93d55c147db5d1df8c1da38d621f8a7735bf/blob19c4b7ca71d7155f9226e4b3f15a5b8f2d8fde15/FULL7394927 EXACTreadback, noSTOPCAS409. LatestfreshFULL7388962/blob7b419db42ced40553634f9a5b050cc055d9fc934 preserved7379313exact; delta9649FULLreadafterappendbeforeCPfinalreceipt. C5newfocals/reservas/H2SECOND3322/C2FIRST3327/C6R21requests3325+3328 andC5scoreduplicateack areTHEIRS, noPclaims/grants; H2explicit3324P+M preserved. C53325priorMEDtargetsize remainsoutsideP3324. No nominalC1new/dispositionPconditionalrace; review5821729391 remainsNOTCLEANpendingR2/C1. No stoprepost. Existingcontinuity kept/noautomationchange/backgroundwatch. NextlatestCP+ownSTOP, onlycausalnewhead/disposition; no sameprobeGREENrerun/reset/exhaustedgraphs. Final28nativeidentitiesinthisCP, no newerheadtransferorCI/mergecert; allrealdata/providermutationszero.
+
+
+## 2026-11-09 02:37 Fortaleza — #3324 nominal focal delivered; P residual closed
+
+FIRST canonical7bc79bfcf46201f5b40db36a20c7a01f886c1316/blob768fb8f85346bf2ec55d2f09fc3a740eb54bdaa7/FULL489518 latestsectionFULL then ownSTOP0147FULL. Channel7542651/blob0352007d223996330823c2dc8f2c59ab1ea12932 indexed147headers, directedC5-P0201/M0201+0203+0205+0207/ownscope/requestsreadFULL, notallpeerpayloadsFULL. C5nominalPrequest02h01 received; M's distinct legacyM1closure5821850115 isTHEIRS, not P proof/closure. Newhead72f9 samecorrectiveunitnotnew/thirdreview. Scope syntheticcodeonly/noactualPII.
+
+# Codex P nominal focal: PR #3324
+
+Exact72f917007b0179c5f1761b017a6d5202cc9f4655/treea20df4f687940b4e4582b86c9d3a4383c19b52c5, comparison5eb6a3ca9b3a47548b2e794c45627619c428bf1b. C5 request02h01 FULLread before source; Pclaim6733047597; RES6d1f52b1945f2f8996b84012be96ff3063d1fc38/blobb5fb15ba07d48a24b20568d8ab85f0f689304b53/FULL7543771 exactFULLreadback BEFORE new source/fetch/checkout/diff/tests. No RES conflict this run. FIRST canonical7bc79bfcf46201f5b40db36a20c7a01f886c1316/FULL489518 lastsection and ownSTOP0147 read FULL;147headers indexed/directed P/C5/M originals FULL, not allpeerpayloads. Same ONE privacy review, not third; M5821850115 closes HIS M1, not P execution or legal disposition.
+
+Read whole five-path corrective delta: withList retrieves a legacy snapshot's current list via existing ensureListId/storeRef, refuses if unavailable; all four send doors use it; subscription cookies always KEEP_UNLESS_ERASED, no no-list plain SET. Renewal claim now reads cookies again and exact HEXISTS after SET NX; only own claim, exact nonsuppressed reply and current cookie object permit delivery; confirmed suppression removes legacy cookie cache. Notes/index mechanism retained. Privacy/inventory now explicitly allow an already-being-sent event to arrive after erasure. This is a narrower documented boundary, not a proven atomic exclusion after the claim pipeline, legal approval of that boundary or cancellation of already dispatched HTTP.
+
+SAME frozen P4 test source Git506c79ca77584bbd31f216663e0ca34091c8eb2c/SHA2567a06acfb03a186b7b1b18e39600e286544ff754f57d8c12030404f867cffe938, byte-identical to prior durable proof. Historical latest5eb6 log4checks/2FAIL retained without rerun; current4PASS. Actual erasePerson still runs/finishes between first Redis reads and continuation, cookie key gone; now sendRenewals0/mockMeta0. Closed by causal code for this schedule, not simply by wording change. Prior oldmodule4/3FAIL remains historical; initial inconclusive stale-list exploration remains excluded, never relabeled GREEN or substituted with M's result.
+
+Own12 finite claim-response observations PASS: actual claim executes, but returned suppression slot replaced with undefined, string0, array, null, confirmed1, healthy0; only numeric0 sends and reaches mockMeta. Expected conservative sent-mark retention on unknown reply, no retry assertion or false event receipt. Original P4 source untouched; complementary controls separate.
+
+Changed permanent erasure38PASS, legacy-list19PASS (synthetic legacy record), affected server-conversions43, exact-marks11, person-data-registry20, store-data-registry7PASS. Total154observations with overlap, not154unique scenarios, not sums of old heads. Actual strict5changedroots1104sources0diagnostics, ES2017/Bundler, no filtering; changed5path lint0warnings/errors/scanner4695tracked0/diff0, own artifact scanner separate. No whole suite/erasure sweep/browser/AT/build/real provider/native Redis-Lua/CI/queue/merge/publication/global privacy/legal/cost certificate. Additional withList/recheck IO not cost-certified by this focal; unknown costs never zero.
+
+Predeclared per child120s outer/512MiB heap/types1024/256KiB output/20000ALLnested MemoryRedis.run/100mockHTTP, denied fetch/net/tls/http/https before imports/compiler/lint. Counter before dispatch and cap-latched exit86. Max1004nested/26mockHTTP, no cap reached/reset/raised/replay/split/borrow. Serial zero agents, exact-lock offline donor ee4ba5640d542cb07c7ed382f256c816b076026d739bbe30d906870f351e67df, no install. No setup error or replay in this focal. All previous proofs, cap qualifications, exploratory failures preserved in prior archives.
+
+Fresh native mainf8c8e0d69201461ed4541d0053dc6a120803c8f6 +27pullheads confirmed;3324new72f9,2868ea3794,292262eeb4,3035d4284 advanced, rest unchanged from priorCP. No foreign ref promotion or CI/merged inference. Same normsAGENTS/CLAUDE/inbox as prior main source. Own new proofs/p/3324-focal/*+docs/reviews/p-3324-focal.md only; detached copy, author source/test/ref read-only; no real personal data/provider/account/commercial/price/gate/flag change.
+
+Disposition only AFTER durable complete evidence/readback: P's conditional inherited read-before-erasure/send-after-erasure residual CLOSED for SAME schedule on72f9; no new HIGH/MEDIUM/LOW in this corrective delta. Existing M closure credited separately. May enter within this review scope after required exact-head gates/owner dispositions; no universal erasure-HTTP atomicity, legal policy approval or foreign merge authorization inferred.
+
+
+DELIVERED COMMENT5822012519 BODYexactreadback anchored72f9. P5821729391conditional inherited residual CLOSED on SAMEschedule; no newH/M/L in five-path corrective delta. Codecausallyre-readspreclaimsnapshot, P4old2FAILhistoryretained→current4PASS. Policyinflightqualification explicit NOTC1legal/contractapproval/global privacyatomicity. Additional12controls/linked138PASS total154withoverlap. 5roots1104diagnostics0/lint0/scanner4695/0/max1004nested26mock/nocap/setup/replay. All sources29artifacts136505rawJSONbytesSHA52c6824c514fc5f6838bcb19a0c0b8acb7b7bfc325e4008babbfe1ecb6df2611/parts6733084640+6733084899 bothEXACTreadback BEFOREopinion; frozenpriorproofs preserved. No author/ref/source/test mutation/actualdata/providercall.
+
+Freshnative28identities(main+27PRheads):
+```
+f8c8e0d69201461ed4541d0053dc6a120803c8f6	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+d8e871ad3ce54cd3dc708dacf7bf2bbfb0100341	refs/pull/2832/head
+daaf5306187d4aa43c9f47590d429dcb10656519	refs/pull/2843/head
+ea3794beb42a73a63c2489a8ea497d97c6726603	refs/pull/2868/head
+6c3077cdaefaac049ca0e12e836be68691bfd875	refs/pull/2892/head
+62eeb4ee1a7af9f2f1a38ef97b6942cf554d253d	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+c5db63a1fffc5c79a5866831d54ddff01b3825fa	refs/pull/2999/head
+8e3d930eed8ef1a2dc715f0fe101ba8e7f00cb8a	refs/pull/3014/head
+1a20dd5c31a70da2f2a95aee20f7b520b76dcd41	refs/pull/3034/head
+d4284d9d127c6f76436d9eff323527834c1d0c08	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+442a057113c87b8728e1a23711510fa852bd0e6d	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+1b38fa1cf19813764fc9256c9b81808db7fc0c0d	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
+64dc6cf819c3cac7e34d7036e7f09bbecabfb51b	refs/pull/3317/head
+72f917007b0179c5f1761b017a6d5202cc9f4655	refs/pull/3324/head
+```
+Mainf8c8same; changed2868ea3794/292262eeb4/3035d4284/332472f9; othersunchangedfrompriorCP. NoCIorMERGED inference or offPRcandidatepromotion. OwnoldfourproductsMERGEDhistorynorecreate. 2020C1scope/2514CodeQLHIGHHOLD preserved. Previous3107focalclosedbuttwoWHOLE100capinconclusive; C5independentsecondcreditunchanged;3317done/3135done/3263done/3054qualified/3245done no replay. M3316/U2832/G3299/S3309/otherbudgetsth eirsnotPgrant. C5newheads/reservations/financialchanges notPtakeover.
+
+Only own proofs/p/3324-focal/*+docs/reviews/p-3324-focal.md new in detachedcopy, oldp3324-review unchanged. SerialMedium0agents/noActionsloop/CIqueryretrycancel/enqueue/fila/merge/pushproduct/docsreservations/provider/PIIreal/price/limit/commission/flag/gate/account/payment/terms/key/contact/automationchange/backgroundwatch. Unknowncostnever0; additional IO notglobalcost-certified. Projectongoing/transientfuturegates/ownerdispositions, existingcontinuitykept. FinalPONTOafterfreshSHA→FULLUTF8 prefix/dedup append/readback; nextFIRSTlatestsection+STOP, returnonlycausalnewdelta/request, doNOTrepeatP4/154green/M1legacyclosure.

@@ -302,7 +302,9 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
         ? "Taken off your list: their address could not receive email."
         : contact.gone === "complained"
           ? "Taken off your list: they marked an email as spam."
-          : `Left your list${isoDay(contact.unsubAt) ? ` on ${isoDay(contact.unsubAt)}` : ""}. They are not written to again.`
+          : contact.gone === "refused"
+            ? "Taken off your list: the email service refused their address."
+            : `Left your list${isoDay(contact.unsubAt) ? ` on ${isoDay(contact.unsubAt)}` : ""}. They are not written to again.`
       : contact.agreed
         ? `On your list, and agreed to hear from you${isoDay(contact.agreedAt) ? ` on ${isoDay(contact.agreedAt)}` : ""}.`
         : "On your list, without agreeing to hear from you: only their purchase emails reach them.";

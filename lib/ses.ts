@@ -585,7 +585,9 @@ const BATCH_MS = 9_000;
  * may send, and says which it took and which are left for the other sender:
  * the ones not reached in time, and all of them from the moment Amazon
  * refuses one for the account's own sake. One it refused for the email's own
- * sake is in neither: it is not sent by anybody. An uncertain acceptance
+ * sake is in neither: it is not sent by anybody, and it is in `refused`
+ * with what Amazon said, so a caller can tell an address Amazon will not
+ * take from an email it will not take as it is. An uncertain acceptance
  * stops new waves and rounds; callers must not hand its remainder elsewhere.
  */
 export async function sesBatch<T extends SesMessage>(
@@ -593,9 +595,9 @@ export async function sesBatch<T extends SesMessage>(
   state: SesState,
   messages: T[],
   batchKey: string,
-): Promise<{ taken: T[]; left: T[]; down: string; uncertain?: true }> {
+): Promise<{ taken: T[]; left: T[]; refused: { message: T; why: string }[]; down: string; uncertain?: true }> {
   const taken: T[] = [];
-  const refused = new Set<T>();
+  const refused = new Map<T, string>();
   const perSecond = Math.max(1, Math.floor(state.rate || 1));
   const started = Date.now();
   let down = "";
@@ -620,7 +622,7 @@ export async function sesBatch<T extends SesMessage>(
           again.push(wave[j]);
         } else if (result.outcome === "sent") done.push(wave[j]);
         else if (result.outcome === "refused") {
-          refused.add(wave[j]);
+          refused.set(wave[j], result.why);
           console.error("Amazon SES refused an email", result.why);
         } else {
           again.push(wave[j]);
@@ -642,5 +644,11 @@ export async function sesBatch<T extends SesMessage>(
       await pause(1_000);
     }
   }
-  return { taken, left: queue.filter((m) => !refused.has(m)), down, ...(uncertain ? { uncertain: true as const } : {}) };
+  return {
+    taken,
+    left: queue.filter((m) => !refused.has(m)),
+    refused: [...refused].map(([message, why]) => ({ message, why })),
+    down,
+    ...(uncertain ? { uncertain: true as const } : {}),
+  };
 }

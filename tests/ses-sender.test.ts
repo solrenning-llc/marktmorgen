@@ -1056,14 +1056,23 @@ async function main(): Promise<void> {
     resend.filter(m => m.to === SUPPORT).map(m => m.subject), ["Amazon SES is not sending: check the account"]);
   redis.clear(); resendKeys.clear(); clear(); account = approved();
   amazonSays = () => ({ status: 400, type: "BadRequestException", message: "Synthetic confirmed recipient refusal" });
+  // Rule 23 (claude5/broadcast-refused-recipient): was "refused" for the whole batch. Amazon's words are about the
+  // recipient, so it is that address's refusal, reported as such and never "sent"; nothing reaches Resend.
   is("a known recipient refusal cannot be called a sent list",
     [await sendListBatch([letter("list-rejected@example.com")], "list:rejected", { by: "monthly" }), amazon.length, resend.length],
+    [{ refused: [{ to: "list-rejected@example.com", address: true }] }, 0, 0]);
+  redis.clear(); resendKeys.clear(); clear(); account = approved();
+  amazonSays = () => ({ status: 400, type: "MessageRejected", message: "Synthetic confirmed content refusal" });
+  is("an email refused as it is, for nobody taken, is still the batch's refusal",
+    [await sendListBatch([letter("list-content@example.com"), letter("list-content-2@example.com")], "list:content", { by: "monthly" }), amazon.length, resend.length],
     ["refused", 0, 0]);
   redis.clear(); resendKeys.clear(); clear(); account = approved();
   amazonSays = to => to === "list-bad@example.com" ? { status: 400, type: "BadRequestException", message: "Synthetic confirmed refusal" } : { status: 200 };
   const mixedList = [letter("list-good@example.com"), letter("list-bad@example.com")];
-  is("partial acceptance holds the caller rather than authorizing automatic replay",
-    await sendListBatch(mixedList, "list:mixed", { by: "monthly" }), "retry");
+  // Rule 23 (claude5/broadcast-refused-recipient): was "retry". With every email answered and the accepted one's did
+  // mark read back, the batch is a known partial: the refused one is named, never "sent", and nothing is replayed.
+  is("partial acceptance with its did mark read back names the refused one rather than holding or replaying",
+    await sendListBatch(mixedList, "list:mixed", { by: "monthly" }), { refused: [{ to: "list-bad@example.com", address: false }] });
   is("the held partial batch has one accepted recipient and no fallback",
     [amazon.map(m => m.to), resend.length], [["list-good@example.com"], 0]);
   redis.clear(); resendKeys.clear(); clear(); account = approved();

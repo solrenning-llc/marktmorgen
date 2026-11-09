@@ -67,7 +67,8 @@ async function main(): Promise<void> {
   is("the broadcast completes (the refused address is a known refusal, not an unknown)", a?.status, "sent");
   is("it does not tell the creator that sending could not be confirmed", /could not be confirmed/.test(a?.note ?? ""), false);
   is("it tells the creator how many were not accepted, and why", a?.note, "1 address on your list was not accepted by the email service, so it did not get this email. The email service refused the address itself, so it was taken off your list.");
-  is("only the three accepted are taken from the month; the refused one is given back", (await usedThisMonthExact(listId, windowId(store)!)) - usedBeforeA, 3);
+  // The refused one's email stays taken: it paid for asking Amazon, the read-back and taking it off (lib/mail.ts sendTo).
+  is("the four attempts are taken from the month, and nothing more", (await usedThisMonthExact(listId, windowId(store)!)) - usedBeforeA, 4);
   is("the refused address is taken off the list, saying why", [contactOf(listId, BAD)?.unsub, contactOf(listId, BAD)?.gone], [true, "refused"]);
   is("the good addresses stay on the list", good.map((email) => contactOf(listId, email)?.unsub ?? false), [false, false, false]);
 
@@ -83,6 +84,22 @@ async function main(): Promise<void> {
   is("nothing was sent", mail.ses.length, 0);
   is("the studio is not told the email service asked to slow down", /slow down/.test(b?.note ?? ""), false);
   is("the month's emails are not spent on three refusals that sent nothing", (await usedThisMonthExact(listId, window)) - before, 0);
+
+  part("B2: a broadcast whose only address is one Amazon has not refused before");
+  mail.clearCaptured();
+  const lone = "lone@exämple.com";
+  await upsertContact(listId, lone, { agreed: true, explicit: true, source: "import" }, ROOM);
+  const id4 = "999999999999999999999999";
+  const key4 = `nl:mail:bc:${id4}`;
+  const beforeB2 = await usedThisMonthExact(listId, window);
+  await redis.pipeline([["SET", key4, JSON.stringify({ ...broadcast, id: id4, total: 1 })], ["RPUSH", `${key4}:to`, lone], ["SADD", "nl:mail:queue", id4]]);
+  let b2 = null;
+  for (let run = 0; run < 3; run += 1) b2 = await advanceBroadcast(id4, storeForHandle, Date.now() + 10_000);
+  is("it is answered once and done, saying why", [b2?.status, b2?.note, mail.sesAttempts.length], ["sent", "1 address on your list was not accepted by the email service, so it did not get this email. The email service refused the address itself, so it was taken off your list.", 1]);
+  // The one attempt pays, before it is made, for asking Amazon, the read-back of the did marks and taking the address
+  // off (lib/mail.ts sendTo; tests/plan-cost-registry.ts, list-email); being off the list, it is never paid for again.
+  is("the month pays for the one attempt only", (await usedThisMonthExact(listId, window)) - beforeB2, 1);
+  is("and the address is taken off the list", contactOf(listId, lone)?.gone, "refused");
 
   part("C: 150 on the list, the refused one in the first batch of 100");
   mail.clearCaptured();

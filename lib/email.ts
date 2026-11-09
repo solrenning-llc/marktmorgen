@@ -544,13 +544,35 @@ export async function sendBatch(
   runtime: ResendTransportRuntime = {},
 ): Promise<"sent" | "retry" | "refused"> {
   const result = await dispatchBatch(messages, batchKey, meter, only, false, runtime);
-  return result === "waiting" ? "retry" : result;
+  // A partial answer is a list batch's only (listOnly); never one here.
+  return result === "waiting" || typeof result === "object" ? "retry" : result;
 }
+
+/**
+ * What Amazon said when it refused one email for that email's own sake,
+ * read as being about the address itself ("Illegal address", a domain it
+ * will not take): that address is refused again by every email. Anything
+ * else (the content, a header) is the email as it is. The account's own
+ * refusals never get here (lib/ses.ts sesSend: "account").
+ */
+const REFUSED_ADDRESS = /\b(address|addresses|domain|recipient|mailbox)\b/i;
+
+/** One email of a list batch Amazon refused for good; `address` when it refused the address itself (REFUSED_ADDRESS). */
+export type ListRefusal = { to: string; address: boolean };
+
+/**
+ * A list batch's outcome. `{ refused }`: Amazon answered for every email of
+ * the batch, took every one not in `refused`, each with its `did` mark read
+ * back, and refused those in it for good; none of them is uncertain.
+ * "refused": Amazon refused the email as it is (not an address) and took it
+ * for nobody. "waiting": nothing went, and it may be tried again whole.
+ */
+export type ListBatchOutcome = "sent" | "waiting" | "retry" | "refused" | { refused: ListRefusal[] };
 
 /** List mail waits for SES; a known no-send result is distinct from unknown acceptance. */
 export async function sendListBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
-): Promise<"sent" | "waiting" | "retry" | "refused"> {
+): Promise<ListBatchOutcome> {
   if (messages.length === 0) return "sent";
   return dispatchBatch(messages, batchKey, meter, "amazon", true);
 }
@@ -558,7 +580,7 @@ export async function sendListBatch(
 async function dispatchBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
   only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime = {},
-): Promise<"sent" | "waiting" | "retry" | "refused"> {
+): Promise<ListBatchOutcome> {
   if (!isSenderConfigured()) return listOnly ? "waiting" : "retry";
   if (messages.length === 0) return "sent";
   // What actually goes: a message with no address that can be written to is
@@ -650,9 +672,28 @@ async function dispatchBatch(
       // SES excludes definitively refused recipients from both accepted and
       // pending lists. Missing recipients cannot establish a completed list.
       if (listOnly && result.taken.length + result.left.length < going.length) {
-        // Accepted-recipient markers are not an acknowledged durable receipt.
-        // A partial send must hold the caller, never authorize automatic replay.
-        return result.taken.length > 0 ? "retry" : "refused";
+        // Amazon answered for every email and refused some for good: those are
+        // known not sent, never uncertain. That holds only with nothing left
+        // over (no account stop, no time out) and every one either taken or
+        // refused. Otherwise, with somebody taken, the batch holds its caller
+        // as before; with nobody taken nothing went (a lost answer returned
+        // above), so the batch waits and is tried again whole.
+        const refusals: ListRefusal[] = result.refused.map(({ message, why }) => ({ to: message.original.to, address: REFUSED_ADDRESS.test(why) }));
+        if (result.taken.length + result.left.length + refusals.length !== going.length) return "retry";
+        if (result.left.length || result.down) return result.taken.length > 0 ? "retry" : "waiting";
+        // Nobody taken and an email refused as it is: the email's own, not an
+        // address's. "refused" for a list batch means only this.
+        if (!result.taken.length && refusals.some((r) => !r.address)) return "refused";
+        // Who was taken is proved by the `did` mark written for each (lib/ses.ts),
+        // read back exactly: each taken one marked, each refused one not. A mark
+        // that did not land or does not read keeps the batch uncertain, so
+        // nobody is counted as sent or taken off the list on an unproved answer.
+        const unmarked = await notYetTaken(batchKey, [...result.taken, ...result.refused.map((r) => r.message)]);
+        const refusedHere = new Set(result.refused.map((r) => r.message));
+        if (!unmarked || unmarked.length !== refusedHere.size || unmarked.some((m) => !refusedHere.has(m))) {
+          return result.taken.length > 0 ? "retry" : "waiting";
+        }
+        return { refused: refusals };
       }
       going = result.left.map((m) => m.original);
     }

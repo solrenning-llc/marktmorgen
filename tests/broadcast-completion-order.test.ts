@@ -1,4 +1,4 @@
-import { advanceBroadcast } from "@/lib/broadcasts";
+import { REFUSED_EMAIL_NOTE, advanceBroadcast } from "@/lib/broadcasts";
 import { claimHandle, ensureListId, setMailSettings, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { upsertContact } from "@/lib/contacts";
 import { store as redis } from "./redis-stub";
@@ -115,16 +115,17 @@ async function main() {
     is("next reader cleans the queue without another provider attempt",
       [mail.calls.ses, mail.sesAttempts.length, mail.resendAttempts.length, (await original.call(redis, [["SISMEMBER", "nl:mail:queue", id]]))[0]], [2, 2, 0, 0]);
 
-    part("Confirmed refusal keeps the existing bounded retry policy");
+    // Rule 23 (claude5/broadcast-refused-recipient, 9 November 2026): this part held five tries of an email Amazon
+    // refused as it is, each told to the creator as "asked us to slow down". Every try meets the same refusal and
+    // spends the month again, so it now stops at the first, saying so; still no unknown-acceptance shortcut.
+    part("Confirmed refusal of the email as it is stops at once, saying so");
     await seed();
     mail.setSesOutcome("refused");
-    for (let count = 1; count <= 5; count += 1) {
-      const refused = (await advance())!;
-      is(`known refusal ${count}: no unknown-acceptance shortcut`,
-        [refused.status, refused.failures, refused.sent], [count === 5 ? "failed" : "sending", count, 0]);
-    }
-    is("known refusals still allow exactly the existing five tries and accept nobody",
-      [mail.calls.ses, mail.ses.length, mail.resendAttempts.length], [10, 0, 0]);
+    const refused = (await advance())!;
+    is("known refusal: no unknown-acceptance shortcut, stopped at once",
+      [refused.status, refused.failures, refused.sent, refused.note], ["failed", 0, 0, REFUSED_EMAIL_NOTE]);
+    is("known refusal: later workers do not ask the provider again",
+      [(await advance())?.status, mail.calls.ses, mail.ses.length, mail.resendAttempts.length], ["failed", 2, 0, 0]);
   } finally { redis.pipeline = original; mail.restore(); }
   done();
 }

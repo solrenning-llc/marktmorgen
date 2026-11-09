@@ -52,6 +52,13 @@ const en = {
   outline: (lessons: number, count: number) =>
     `${lessons} ${plural(lessons, "lesson", "lessons")} in ${count} ${plural(count, "module", "modules")}`,
   withCertificate: "certificate of completion",
+  /**
+   * How long the course's video runs, summed from what the video service
+   * measured (lib/course-facts.ts, 292 [SQ3]); a part that is zero is left out.
+   */
+  videoTotal: (hours: number, minutes: number) =>
+    `${[hours ? `${hours} ${plural(hours, "hour", "hours")}` : "", minutes ? `${minutes} ${plural(minutes, "minute", "minutes")}` : ""].filter(Boolean).join(" ")} of video`,
+  videoUnderMinute: "under 1 minute of video",
   ownTitle: "This is your own course",
   ownBody: "You see every lesson, as a student sees an open one. Nothing you do here is counted as progress.",
   seeSample: "See the certificate students get",
@@ -152,6 +159,11 @@ const en = {
   /** The button under a stamped lesson video (602 [WP1]): puts the video and the buyer's mark in full screen together. */
   fullScreen: "Full screen",
   exitFullScreen: "Exit full screen",
+  /** Where the student stopped in a lesson video, kept on their device (650 [WG10]); `at` is "12:40". */
+  resumeLabel: "Where you stopped",
+  resumeStopped: (at: string) => `You stopped at ${at} last time.`,
+  resumeContinue: (at: string) => `Continue at ${at}`,
+  resumeStartOver: "Start over",
   openSite: (host: string) => `Open ${host}`,
   downloads: "Downloads",
   /** A file's size: the units, and a size under a kilobyte. */
@@ -294,7 +306,7 @@ const en = {
   podcastNotices: {
     sent: {
       title: "Check your inbox",
-      body: "If that address has this podcast, a link to its own feed is on its way. It comes from the store via Marktmorgen and usually arrives within a minute; if it is not there, look in spam.",
+      body: "If that address has access to this podcast, we'll try to email its feed link. Check your inbox and spam folder.",
     },
     email: { title: "That does not look like an email address", body: "Type the address you bought it with." },
     limited: { title: "Too many requests for now", body: "Try again in an hour." },
@@ -369,6 +381,9 @@ const es: CoursesWords = {
   courseLabel: "Curso",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "lección", "lecciones")} en ${count} ${plural(count, "módulo", "módulos")}`,
   withCertificate: "certificado de finalización",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} ${plural(hours, "hora", "horas")}` : "", minutes ? `${minutes} ${plural(minutes, "minuto", "minutos")}` : ""].filter(Boolean).join(" ")} de vídeo`,
+  videoUnderMinute: "menos de 1 minuto de vídeo",
   ownTitle: "Este es tu propio curso",
   ownBody: "Ves todas las lecciones, como un estudiante ve una que ya está abierta. Nada de lo que hagas aquí cuenta como progreso.",
   seeSample: "Ver el certificado que reciben los estudiantes",
@@ -463,6 +478,10 @@ const es: CoursesWords = {
   videoNotLoaded: "No se pudo cargar el video en este momento. Actualiza la página en un momento.",
   fullScreen: "Pantalla completa",
   exitFullScreen: "Salir de pantalla completa",
+  resumeLabel: "Dónde te detuviste",
+  resumeStopped: (at: string) => `La última vez te detuviste en ${at}.`,
+  resumeContinue: (at: string) => `Continuar en ${at}`,
+  resumeStartOver: "Empezar de nuevo",
   openSite: (host) => `Abrir ${host}`,
   downloads: "Descargas",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },
@@ -591,7 +610,7 @@ const es: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Revisa tu bandeja de entrada",
-      body: "Si esa dirección tiene este pódcast, va en camino un enlace a su propio feed. Lo envía la tienda a través de Marktmorgen y suele llegar en menos de un minuto; si no está, mira en spam.",
+      body: "Si esa dirección tiene acceso a este pódcast, intentaremos enviarle por email el enlace a su feed. Revisa la bandeja de entrada y el spam.",
     },
     email: { title: "Eso no parece una dirección de email", body: "Escribe la dirección con la que lo compraste." },
     limited: { title: "Demasiadas solicitudes por ahora", body: "Inténtalo de nuevo dentro de una hora." },
@@ -664,6 +683,9 @@ const fr: CoursesWords = {
   courseLabel: "Formation",
   outline: (lessons, count) => `${lessons}${S}${frPlural(lessons, "leçon", "leçons")} en ${count}${S}${frPlural(count, "module", "modules")}`,
   withCertificate: "certificat de fin de formation",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours}${S}${frPlural(hours, "heure", "heures")}` : "", minutes ? `${minutes}${S}${frPlural(minutes, "minute", "minutes")}` : ""].filter(Boolean).join(" ")} de vidéo`,
+  videoUnderMinute: "moins d’une minute de vidéo",
   ownTitle: "C'est votre propre formation",
   ownBody: "Vous voyez toutes les leçons, comme un participant voit une leçon ouverte. Rien de ce que vous faites ici n'est compté comme progression.",
   seeSample: "Voir le certificat que reçoivent les participants",
@@ -759,6 +781,10 @@ const fr: CoursesWords = {
   videoNotLoaded: "La vidéo n'a pas pu être chargée pour le moment. Actualisez la page dans un instant.",
   fullScreen: "Plein écran",
   exitFullScreen: "Quitter le plein écran",
+  resumeLabel: "Où vous en étiez",
+  resumeStopped: (at: string) => `La dernière fois, vous en étiez à ${at}.`,
+  resumeContinue: (at: string) => `Reprendre à ${at}`,
+  resumeStartOver: "Recommencer",
   openSite: (host) => `Ouvrir ${host}`,
   downloads: "Téléchargements",
   sizeUnits: { gb: "Go", mb: "Mo", kb: "Ko" },
@@ -886,7 +912,7 @@ const fr: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Consultez votre boîte de réception",
-      body: `Si cette adresse possède ce podcast, un lien vers son propre flux est en route. Il vient de la boutique via Marktmorgen et arrive généralement en moins d'une minute${S}; s'il n'est pas là, regardez dans les spams.`,
+      body: "Si cette adresse a accès à ce podcast, nous essaierons de lui envoyer le lien de son flux par e-mail. Vérifiez votre boîte de réception et vos spams.",
     },
     email: { title: "Cela ne ressemble pas à une adresse e-mail", body: "Saisissez l'adresse avec laquelle vous l'avez acheté." },
     limited: { title: "Trop de demandes pour le moment", body: "Réessayez dans une heure." },
@@ -953,6 +979,9 @@ const de: CoursesWords = {
   courseLabel: "Kurs",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "Lektion", "Lektionen")} in ${count} ${plural(count, "Modul", "Modulen")}`,
   withCertificate: "Abschlusszertifikat",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} ${plural(hours, "Stunde", "Stunden")}` : "", minutes ? `${minutes} ${plural(minutes, "Minute", "Minuten")}` : ""].filter(Boolean).join(" ")} Video`,
+  videoUnderMinute: "weniger als 1 Minute Video",
   ownTitle: "Das ist Ihr eigener Kurs",
   ownBody: "Sie sehen jede Lektion so, wie Teilnehmende eine freigeschaltete sehen. Nichts, was Sie hier tun, zählt als Fortschritt.",
   seeSample: "Das Zertifikat ansehen, das Teilnehmende erhalten",
@@ -1049,6 +1078,10 @@ const de: CoursesWords = {
   videoNotLoaded: "Das Video konnte gerade nicht geladen werden. Laden Sie die Seite gleich neu.",
   fullScreen: "Vollbild",
   exitFullScreen: "Vollbild beenden",
+  resumeLabel: "Wo Sie aufgehört haben",
+  resumeStopped: (at: string) => `Zuletzt haben Sie bei ${at} aufgehört.`,
+  resumeContinue: (at: string) => `Bei ${at} weiterschauen`,
+  resumeStartOver: "Von vorn beginnen",
   openSite: (host) => `${host} öffnen`,
   downloads: "Downloads",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },
@@ -1177,7 +1210,7 @@ const de: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Sehen Sie in Ihrem Posteingang nach",
-      body: "Wenn zu dieser Adresse dieser Podcast gehört, ist ein Link zu ihrem eigenen Feed unterwegs. Er kommt vom Shop über Marktmorgen und ist meist innerhalb einer Minute da; wenn nicht, sehen Sie im Spam nach.",
+      body: "Wenn diese Adresse Zugang zu diesem Podcast hat, versuchen wir, ihr den Feed-Link per E-Mail zu senden. Sehen Sie im Posteingang und im Spam-Ordner nach.",
     },
     email: { title: "Das sieht nicht wie eine E-Mail-Adresse aus", body: "Geben Sie die Adresse ein, mit der Sie ihn gekauft haben." },
     limited: { title: "Vorerst zu viele Anfragen", body: "Versuchen Sie es in einer Stunde erneut." },
@@ -1247,6 +1280,9 @@ const it: CoursesWords = {
   courseLabel: "Corso",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "lezione", "lezioni")} in ${count} ${plural(count, "modulo", "moduli")}`,
   withCertificate: "attestato di completamento",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} ${plural(hours, "ora", "ore")}` : "", minutes ? `${minutes} ${plural(minutes, "minuto", "minuti")}` : ""].filter(Boolean).join(" ")} di video`,
+  videoUnderMinute: "meno di 1 minuto di video",
   ownTitle: "Questo è il tuo corso",
   ownBody: "Vedi ogni lezione come uno studente vede una lezione aperta. Niente di ciò che fai qui viene contato come progresso.",
   seeSample: "Vedi l'attestato che ricevono gli studenti",
@@ -1341,6 +1377,10 @@ const it: CoursesWords = {
   videoNotLoaded: "Non è stato possibile caricare il video in questo momento. Ricarica la pagina tra un momento.",
   fullScreen: "Schermo intero",
   exitFullScreen: "Esci da schermo intero",
+  resumeLabel: "Ultima posizione",
+  resumeStopped: (at: string) => `L'ultima volta il video era a ${at}.`,
+  resumeContinue: (at: string) => `Continua da ${at}`,
+  resumeStartOver: "Ricomincia dall'inizio",
   openSite: (host) => `Apri ${host}`,
   downloads: "Download",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },
@@ -1469,7 +1509,7 @@ const it: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Controlla la tua casella di posta",
-      body: "Se quell'indirizzo ha questo podcast, un link al suo feed personale è in arrivo. Lo invia il negozio tramite Marktmorgen e di solito arriva entro un minuto; se non c'è, guarda nello spam.",
+      body: "Se quell'indirizzo ha accesso a questo podcast, proveremo a inviargli il link al feed per email. Controlla la posta in arrivo e lo spam.",
     },
     email: { title: "Non sembra un indirizzo email", body: "Scrivi l'indirizzo con cui l'hai acquistato." },
     limited: { title: "Troppe richieste per ora", body: "Riprova tra un'ora." },
@@ -1539,6 +1579,9 @@ const nl: CoursesWords = {
   courseLabel: "Cursus",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "les", "lessen")} in ${count} ${plural(count, "module", "modules")}`,
   withCertificate: "certificaat van voltooiing",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} uur` : "", minutes ? `${minutes} ${plural(minutes, "minuut", "minuten")}` : ""].filter(Boolean).join(" ")} video`,
+  videoUnderMinute: "minder dan 1 minuut video",
   ownTitle: "Dit is je eigen cursus",
   ownBody: "Je ziet elke les zoals een cursist een geopende les ziet. Niets wat je hier doet, telt als voortgang.",
   seeSample: "Bekijk het certificaat dat cursisten krijgen",
@@ -1634,6 +1677,10 @@ const nl: CoursesWords = {
   videoNotLoaded: "De video kon nu niet worden geladen. Vernieuw de pagina zo.",
   fullScreen: "Volledig scherm",
   exitFullScreen: "Volledig scherm sluiten",
+  resumeLabel: "Waar je gebleven was",
+  resumeStopped: (at: string) => `De vorige keer stopte je bij ${at}.`,
+  resumeContinue: (at: string) => `Verder vanaf ${at}`,
+  resumeStartOver: "Opnieuw beginnen",
   openSite: (host) => `Open ${host}`,
   downloads: "Downloads",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },
@@ -1762,7 +1809,7 @@ const nl: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Kijk in je inbox",
-      body: "Als dat adres deze podcast heeft, is er een link naar een eigen feed onderweg. Die komt van de winkel via Marktmorgen en is er meestal binnen een minuut; staat hij er niet, kijk dan bij spam.",
+      body: "Als dat adres toegang heeft tot deze podcast, proberen we de feedlink per e-mail te sturen. Kijk in je inbox en bij spam.",
     },
     email: { title: "Dat lijkt geen e-mailadres", body: "Vul het adres in waarmee je hem hebt gekocht." },
     limited: { title: "Voorlopig te veel verzoeken", body: "Probeer het over een uur opnieuw." },
@@ -1832,6 +1879,9 @@ const pt: CoursesWords = {
   courseLabel: "Curso",
   outline: (lessons, count) => `${lessons} ${plural(lessons, "aula", "aulas")} em ${count} ${plural(count, "módulo", "módulos")}`,
   withCertificate: "certificado de conclusão",
+  videoTotal: (hours, minutes) =>
+    `${[hours ? `${hours} ${plural(hours, "hora", "horas")}` : "", minutes ? `${minutes} ${plural(minutes, "minuto", "minutos")}` : ""].filter(Boolean).join(" ")} de vídeo`,
+  videoUnderMinute: "menos de 1 minuto de vídeo",
   ownTitle: "Este é o seu próprio curso",
   ownBody: "Vê todas as aulas, tal como um aluno vê uma aula aberta. Nada do que fizer aqui conta como progresso.",
   seeSample: "Ver o certificado que os alunos recebem",
@@ -1927,6 +1977,10 @@ const pt: CoursesWords = {
   videoNotLoaded: "Não foi possível carregar o vídeo neste momento. Atualize a página daqui a pouco.",
   fullScreen: "Tela cheia",
   exitFullScreen: "Sair da tela cheia",
+  resumeLabel: "Onde você parou",
+  resumeStopped: (at: string) => `Da última vez, você parou em ${at}.`,
+  resumeContinue: (at: string) => `Continuar em ${at}`,
+  resumeStartOver: "Começar do início",
   openSite: (host) => `Abrir ${host}`,
   downloads: "Transferências",
   sizeUnits: { gb: "GB", mb: "MB", kb: "KB" },
@@ -2055,7 +2109,7 @@ const pt: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Consulte a sua caixa de entrada",
-      body: "Se esse endereço tem este podcast, uma ligação para o seu próprio feed está a caminho. É enviada pela loja através da Marktmorgen e costuma chegar em menos de um minuto; se não estiver lá, veja no spam.",
+      body: "Se esse endereço tiver acesso a este podcast, tentaremos enviar-lhe por email a ligação para o feed. Consulte a sua caixa de entrada e o spam.",
     },
     email: { title: "Isso não parece um endereço de email", body: "Introduza o endereço com que o comprou." },
     limited: { title: "Demasiados pedidos por agora", body: "Tente novamente daqui a uma hora." },

@@ -23,7 +23,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
@@ -244,11 +244,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         sent += 1;
         await redisPipeline([["INCR", countKey(statsId)]]);
       } else {
-        // Not sent: tried again on the next run, inside the same window.
-        // Only our own claims are let go (Revisor 1 on #2719); the offer's link is this run's alone.
-        await releaseMark(sentKey(account, subId), claim);
-        await releaseMark(onceKey(statsId, email, product.id), onceValue);
-        await redisPipeline([["DEL", linkKey(token)]]);
+        // false is refused or unknown alike (Amazon SES or Resend may have taken it and the reply been lost), so the
+        // marks and the offer's link are kept, as lib/trial-nudges.ts keeps its mark: the person is written to at most
+        // once, and the link in an email that may have arrived keeps working (CX-123 rule 24).
+        console.error("a come-back offer may not have gone; kept as sent", store.handle);
       }
     } catch (error) {
       console.error("sending a come-back offer failed", store.handle, error);
@@ -369,6 +368,8 @@ export async function openWinBack(
 /** Forgets that one person heard a come-back offer about each product lately (lib/person-erasure.ts). */
 export async function forgetWinbackPerson(statsId: string | null, productIds: string[], email: string): Promise<number> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]);
-  return Number(gone) || 0;
+  // DEL's own count only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("the come-back marks forgotten");
+  return gone;
 }

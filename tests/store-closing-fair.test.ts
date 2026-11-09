@@ -109,6 +109,9 @@ function subscriptionOf(sub: Sub) {
   return { ...sub, customer: { id: `cus_${sub.id.slice(4)}`, email: `${sub.id.slice(4)}@buyers.example.com` } };
 }
 
+/** What every invoice of a member names, as Stripe's do: its subscription and its customer. */
+const ownerOf = (sub: Sub) => ({ subscription: sub.id, customer: `cus_${sub.id.slice(4)}` });
+
 /** The member's last paid invoice: its membership line, and a proration credit beside it when it has one. */
 function paidInvoiceOf(sub: Sub) {
   const id = sub.id.slice(4);
@@ -117,14 +120,14 @@ function paidInvoiceOf(sub: Sub) {
     { type: "subscription", proration: false, amount: sub.amount, discount_amounts: sub.discount ? [{ amount: sub.discount }] : [], period: { start: sub.pe - lengthOf(sub), end: sub.pe } },
   ];
   const paid = lines.reduce((sum, line) => sum + line.amount - line.discount_amounts.reduce((a, d) => a + d.amount, 0), 0);
-  return { id: `in_${id}`, status: "paid", amount_paid: paid, subtotal: paid, total: paid, currency: "usd", payment_intent: `pi_${id}`, lines: { data: lines } };
+  return { id: `in_${id}`, status: "paid", ...ownerOf(sub), amount_paid: paid, subtotal: paid, total: paid, currency: "usd", payment_intent: `pi_${id}`, lines: { data: lines } };
 }
 
 /** The member's paid invoices, newest first: a proration-only one on top when it has one. */
 function paidInvoicesOf(sub: Sub) {
   const own = paidInvoiceOf(sub);
   if (!sub.prorationOnlyLast) return [own];
-  return [{ id: `in_${sub.id.slice(4)}pr`, status: "paid", amount_paid: 300, subtotal: 300, total: 300, currency: "usd", payment_intent: `pi_${sub.id.slice(4)}pr`, lines: { data: [{ type: "invoiceitem", proration: true, amount: 300, period: { start: sub.pe - 86_400, end: sub.pe } }] } }, own];
+  return [{ id: `in_${sub.id.slice(4)}pr`, status: "paid", ...ownerOf(sub), amount_paid: 300, subtotal: 300, total: 300, currency: "usd", payment_intent: `pi_${sub.id.slice(4)}pr`, lines: { data: [{ type: "invoiceitem", proration: true, amount: 300, period: { start: sub.pe - 86_400, end: sub.pe } }] } }, own];
 }
 
 /** Stripe renews every membership whose period is over by `at`, and retries an open invoice: one with collection paused gets a voided invoice, any other is charged. */
@@ -190,8 +193,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const status = url.searchParams.get("status");
     if (!row) return json({ object: "list", data: [], has_more: false });
     if (status === "paid") return json({ object: "list", data: paidInvoicesOf(row).slice(0, Number(url.searchParams.get("limit") ?? 10)), has_more: false });
-    if (status === "draft") return json({ object: "list", data: row.draft ? [{ id: row.draft.id, status: "draft", auto_advance: row.draft.auto_advance, metadata: row.draft.metadata }] : [], has_more: false });
-    if (status === "open") return json({ object: "list", data: row.open?.status === "open" ? [{ id: row.open.id, status: "open" }] : [], has_more: false });
+    if (status === "draft") return json({ object: "list", data: row.draft ? [{ id: row.draft.id, status: "draft", ...ownerOf(row), auto_advance: row.draft.auto_advance, metadata: row.draft.metadata }] : [], has_more: false });
+    if (status === "open") return json({ object: "list", data: row.open?.status === "open" ? [{ id: row.open.id, status: "open", ...ownerOf(row) }] : [], has_more: false });
     return json({ object: "list", data: [], has_more: false });
   }
   const drafted = path.match(/^\/invoices\/(in_\w+)$/);

@@ -5,7 +5,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { MIN_BUNDLE_ITEMS, deliverableItems } from "@/lib/bundle-rules";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { isSoon } from "@/lib/waitlist";
+import { isComingSoon } from "@/lib/preorders";
 import { countHit } from "@/lib/visit";
 import { openOrder, paypalReady } from "@/lib/paypal-sales";
 import { cameFrom } from "@/lib/came-from";
@@ -47,7 +47,9 @@ export async function POST(request: NextRequest) {
   if (!product) return away(`/@${store.handle}`);
   if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) return away(`/@${store.handle}?status=slow`);
   if (!paypalReady(store, product)) return away(`/@${store.handle}/p/${product.id}`);
-  if (await isSoon(store, product.id).catch(() => false)) return away(`/@${store.handle}/p/${product.id}#waitlist`);
+  const comingSoon = await isComingSoon(store, product.id).catch(() => null);
+  if (comingSoon === null) return away(`/@${store.handle}?status=error`);
+  if (comingSoon) return away(`/@${store.handle}/p/${product.id}#waitlist`);
   if (product.bundle && deliverableItems(product, await readListings(store, product.bundle)).length < MIN_BUNDLE_ITEMS) {
     return away(`/@${store.handle}`);
   }

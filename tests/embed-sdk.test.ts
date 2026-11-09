@@ -66,9 +66,14 @@ function standIn(hash = "") {
         el.children = (el.children as unknown[]).filter((c) => c !== child);
         child.parentNode = null;
       },
-      focus() {},
-      contentWindow: tag === "iframe" ? { name: "frame-window" } : undefined,
+      // What has the focus is recorded on the page, as a browser's document.activeElement.
+      focus() {
+        document.activeElement = el;
+      },
+      contentWindow: tag === "iframe" ? { name: "frame-window", focus() { (el.contentWindow as Record<string, unknown>).focused = true; document.activeElement = el; } } : undefined,
     };
+    // The browser's own modal dialog: what showModal does is recorded, nothing more.
+    if (tag === "dialog") el.showModal = () => { el.modal = true; };
     return el;
   };
   const body = make("body");
@@ -82,6 +87,7 @@ function standIn(hash = "") {
     child.parentNode = null;
   };
   const document = {
+    activeElement: null as unknown,
     readyState: "complete",
     body,
     documentElement: { style: { overflow: "" } },
@@ -236,7 +242,7 @@ async function main(): Promise<void> {
 
   const page = standIn();
   is("nothing is touched on load", page.touched, []);
-  is("one global, with its version", (page.window.Marktmorgen as { version: number }).version, 1);
+  is("one global, with its version", (page.window.Marktmorgen as { version: number }).version, 2);
   is("a click on any other link is left alone", [page.click(page.link("https://example.com/", "overlay")), page.click(page.link("https://marktmorgen.com/@harbor", "overlay")), page.appended.length], [false, false, 0]);
   is("so is a click with a key held, for a new tab", [page.click(page.link("https://marktmorgen.com/embed/harbor/k3j9x2p1ab?mm=page", "overlay"), { metaKey: true }), page.appended.length], [false, 0]);
   const pageLink = page.link("https://marktmorgen.com/embed/harbor/k3j9x2p1ab?mm=page", "page");
@@ -248,6 +254,33 @@ async function main(): Promise<void> {
   const frame = box?.children[0] as { src: string; referrerPolicy: string; title: string; contentWindow: unknown; style: { height?: string } };
   is("and opens one dialog, named by the link, with a frame and a close button", [page.appended.length, box.attributes.role, box.attributes["aria-modal"], box.attributes["aria-label"], box.children.length], [1, "dialog", "true", "Buy The Reset", 2]);
   is("the frame is the card, over the page, asking for the site's origin only", [frame.src, frame.referrerPolicy], ["https://marktmorgen.com/embed/harbor/k3j9x2p1ab?mm=overlay&utm_source=blog", "origin"]);
+  // The keyboard stays in the dialog (2.4.3, 2.4.11): the browser's own modal dialog makes the rest of the page unreachable
+  // until it closes, without the script reading or changing any element of the page.
+  is("the dialog is the browser's own modal one", [(box as unknown as { tag: string }).tag, (box as unknown as { modal?: boolean }).modal], ["dialog", true]);
+  is("the card's frame takes the focus as the dialog opens", page.document.activeElement === frame, true);
+  (frame as unknown as { onload?: (() => void) | null }).onload?.();
+  // contentWindow.focus() focuses the card's window, not one of its controls: the next Tab reaches the first of them.
+  is("once the card has loaded, the focus is in its window, so the next Tab reaches the card's first control", (frame.contentWindow as { focused?: boolean }).focused, true);
+  const shut = box.children[1] as { tag: string; style: Record<string, string>; onfocus?: () => void; onblur?: () => void; focus: () => void };
+  // The card loads again when it moves within its frame (a call's times, a form sent): the person may be on Close by then.
+  (frame.contentWindow as { focused?: boolean }).focused = false;
+  shut.focus();
+  (frame as unknown as { onload?: (() => void) | null }).onload?.();
+  is("a later load of the card never takes the focus back from where the person is (3.2.1, 3.2.5)", [(frame.contentWindow as { focused?: boolean }).focused ?? false, page.document.activeElement === shut], [false, true]);
+  const late = standIn();
+  late.click(late.link("https://marktmorgen.com/embed/harbor/k3j9x2p1ab?mm=page", "overlay", "Buy The Reset"));
+  const lateParts = (late.appended[0] as { children: Record<string, unknown>[] }).children;
+  const lateFrame = lateParts[0] as { contentWindow: { focused?: boolean }; onload?: (() => void) | null };
+  (lateParts[1] as { focus: () => void }).focus();
+  lateFrame.onload?.();
+  is("nor does a card that loads after the person has already moved on to Close", [lateFrame.contentWindow.focused ?? false, late.document.activeElement === lateParts[1]], [false, true]);
+  shut.onfocus?.();
+  is("its close button shows its focus in two colors, 3 px each, seen on any page under it (2.4.13)", [shut.tag, shut.style.boxShadow], ["button", "0 0 0 3px #15112e,0 0 0 6px #fff"]);
+  // Forced colors (high contrast) drop box-shadow: an outline, transparent elsewhere, is what shows the focus there (2.4.7, 2.4.13).
+  is("with an outline too, which forced colors paint in the system's color", /^\d+px solid transparent$/.test(shut.style.outline ?? ""), true);
+  is("never the browser's own outline taken away for good", shut.style.cssText.includes("outline:none"), false);
+  shut.onblur?.();
+  is("and only while it has the focus", [shut.style.boxShadow, shut.style.outline ?? ""], ["none", ""]);
   is("the page under it stops scrolling", (page.document.documentElement as { style: { overflow: string } }).style.overflow, "hidden");
   is("a second press opens no second frame", [page.click(buy), page.appended.length], [true, 1]);
   const before = page.fired.length;
@@ -272,6 +305,10 @@ async function main(): Promise<void> {
   is("a status of another shape is left out", (page.fired.at(-1)?.detail as { status?: string }).status, undefined);
   page.key("Escape");
   is("Escape closes it", [page.appended.length, (page.fired.at(-1)?.detail as { reason: string }).reason], [0, "escape"]);
+  page.click(join);
+  let held = false;
+  (page.appended[0] as unknown as { oncancel?: (event: { preventDefault: () => void }) => void }).oncancel?.({ preventDefault: () => (held = true) });
+  is("the browser's own Escape on the dialog closes it the same way, never leaving it shown but not modal", [held, page.appended.length, (page.fired.at(-1)?.detail as { reason: string }).reason], [true, 0, "escape"]);
   is("and still nothing was read from the page", page.touched, []);
 
   const order = eventIdFor("0123456789abcdef0123456789abcdef", "sale.completed", "cs_test_123");

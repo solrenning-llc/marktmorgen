@@ -6,6 +6,7 @@ import {
   type SearchAnswer,
   answerSentence,
   cleanQuery,
+  enterTarget,
   hasAt,
   isAddress,
   searchScheduler,
@@ -35,10 +36,13 @@ function refusalSentence(reply: Reply): string {
  *
  * The WAI-ARIA Authoring Practices combobox with a grouped listbox: focus
  * stays in the field, the arrows move through the results (Home and End to
- * the first and last once one is chosen), Enter opens the chosen one, Escape
+ * the first and last once one is chosen), Enter opens the chosen one (or the
+ * only one, when none is chosen: enterTarget), Escape
  * closes the list and then clears the field, and Tab leaves as it always
  * does. The list sits in the page under the field, never over the menus. How
- * many were found is said once per answer in a polite live region.
+ * many were found is said once per answer in a polite live region, drawn
+ * anew each time so the same words are said again. The whole block is the
+ * studio's search landmark.
  *
  * Searching waits SEARCH_DELAY_MS after the last key and keeps the last
  * answers, so typing never reads per key (lib/studio-search-rules.ts,
@@ -53,6 +57,12 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
   const [text, setText] = useState("");
   const [answer, setAnswer] = useState<SearchAnswer | null>(null);
   const [sentence, setSentence] = useState("");
+  // Bumped with every sentence said, so the live region's words are drawn anew and read out even when unchanged.
+  const [said, setSaid] = useState(0);
+  const say = (words: string) => {
+    setSentence(words);
+    setSaid((n) => n + 1);
+  };
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const [busy, setBusy] = useState(false);
@@ -74,15 +84,15 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
       answer: (q, reply) => {
         if (reply.status === 200 && reply.body.ok === true && Array.isArray(reply.body.groups)) {
           setAnswer({ groups: reply.body.groups });
-          setSentence(answerSentence({ groups: reply.body.groups }, q));
+          say(answerSentence({ groups: reply.body.groups }, q));
         } else {
           setAnswer(null);
-          setSentence(refusalSentence(reply));
+          say(refusalSentence(reply));
         }
       },
       failed: () => {
         setAnswer(null);
-        setSentence("We could not search just now. Check your connection and try again.");
+        say("We could not search just now. Check your connection and try again.");
       },
     });
     return scheduler.current;
@@ -112,7 +122,7 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
     if (hasAt(q)) {
       schedule().type(null);
       setAnswer(null);
-      setSentence(
+      say(
         buyers
           ? isAddress(q)
             ? "1 result: open this buyer's page."
@@ -144,7 +154,7 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
         window.location.assign(reply.href);
         return;
       }
-      setSentence(
+      say(
         reply.message
           ? reply.message
           : reply.error === "limited"
@@ -152,7 +162,7 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
             : "We could not open that buyer's page just now. Try again in a moment.",
       );
     } catch {
-      setSentence("We could not open that buyer's page just now. Check your connection and try again.");
+      say("We could not open that buyer's page just now. Check your connection and try again.");
     }
     setBusy(false);
   };
@@ -170,9 +180,9 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
     } else if ((event.key === "Home" || event.key === "End") && expanded && active >= 0) {
       event.preventDefault();
       setActive(event.key === "Home" ? 0 : last);
-    } else if (event.key === "Enter" && expanded && active >= 0) {
+    } else if (event.key === "Enter" && expanded && enterTarget(active, options.length) >= 0) {
       event.preventDefault();
-      void choose(active);
+      void choose(enterTarget(active, options.length));
     } else if (event.key === "Escape") {
       event.preventDefault();
       if (expanded) {
@@ -194,7 +204,7 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
   });
 
   return (
-    <div className="border-b border-line bg-white">
+    <div role="search" aria-label="Studio" className="border-b border-line bg-white">
       <div className="container-page py-3">
         <label htmlFor={inputId} className="field-label">
           Search the studio
@@ -228,7 +238,7 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
           className="field mt-2 min-h-[44px] w-full"
         />
         <p aria-live="polite" className="mt-2 text-sm text-ink-soft">
-          {sentence}
+          <span key={said}>{sentence}</span>
         </p>
         <div role="listbox" id={listId} aria-label="Search results" hidden={!expanded} className="mt-2 rounded-2xl bg-white p-1 ring-1 ring-line">
           {groups.map((group, g) => (

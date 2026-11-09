@@ -7,8 +7,9 @@
  * route (app/api/store/studio-search, lib/studio-search.ts) read the same
  * rules. What a search costs is STUDIO_SEARCH_UNITS of the store's studio
  * requests (lib/studio-allowance-rules.ts), taken before it reads, with
- * SEARCHES_PER_MINUTE and SEARCHES_PER_DAY a store besides, so a box left
- * typing on its own cannot spend the store's month.
+ * SEARCHES_PER_MINUTE and SEARCHES_PER_DAY a store besides, counted before
+ * them: a search those refuse takes none, so a box left typing on its own
+ * cannot spend the store's month.
  *
  * A buyer is never searched here: a full address typed opens that buyer's
  * page through the studio's existing look-up (app/api/store/person), for the
@@ -56,6 +57,15 @@ export function hasAt(query: string): boolean {
 /** Whether the words are one whole email address, which can open a buyer's page. */
 export function isAddress(query: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(query.trim());
+}
+
+/**
+ * Which result Enter opens: the chosen one, or the only one when there is
+ * one and none is chosen; -1 opens nothing (several, none chosen).
+ */
+export function enterTarget(active: number, count: number): number {
+  if (active >= 0 && active < count) return active;
+  return active < 0 && count === 1 ? 0 : -1;
 }
 
 /** Words as a search compares them: no accents, no case, letters and digits only. */

@@ -23,6 +23,7 @@ import {
   pickMatches,
   searchScheduler,
 } from "@/lib/studio-search-rules";
+import * as searchRules from "@/lib/studio-search-rules";
 import { STUDIO_SEARCH_UNITS } from "@/lib/studio-allowance-rules";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { LOCKED_UNTIL_STAR_COMMANDS, ORIGIN_PER_BYTE, TAKE_COMMANDS, UNIT_COST, request } from "./plan-cost-registry";
@@ -118,12 +119,25 @@ async function main(): Promise<void> {
   await timers.advance(10_000);
   is("an answer that came too late is not shown", answers.includes("slow"), false);
 
+  part("Enter opens a lone result");
+  const enterTarget = (searchRules as Record<string, unknown>).enterTarget as ((active: number, count: number) => number) | undefined;
+  is("Enter opens the chosen one, or the only one; with several and none chosen, nothing", typeof enterTarget === "function" ? [
+    enterTarget(2, 5),
+    enterTarget(-1, 1),
+    enterTarget(-1, 3),
+    enterTarget(-1, 0),
+    enterTarget(0, 1),
+  ] : "missing", [2, 0, -1, -1, 0]);
+
   part("The box");
   const box = readFileSync("components/studio-search.tsx", "utf8");
   for (const piece of ['"use client"', 'role="combobox"', 'aria-autocomplete="list"', "aria-activedescendant", "aria-expanded", "aria-controls", 'role="listbox"', 'role="group"', 'role="option"', "aria-selected", 'aria-live="polite"', "min-h-[44px]", "motion-reduce", "useSyncExternalStore", '"ArrowDown"', '"ArrowUp"', '"Home"', '"End"', '"Enter"', '"Escape"', "searchScheduler", "/api/store/studio-search", "/api/store/person", "x-nimbus-store", "Search the studio"])
     is(`the box has ${piece}`, box.includes(piece), true);
   for (const piece of ["autoPlay", "<video", "<iframe", "fixed ", "absolute", '"Tab"', "setInterval", "console."])
     is(`the box has no ${piece}`, box.includes(piece), false);
+  is("the box is the studio's search landmark", /role="search"\s+aria-label="Studio"/.test(box), true);
+  is("Enter asks enterTarget which one to open", box.includes("enterTarget(active, options.length)"), true);
+  is("the live region's words are drawn anew for every answer, so the same words are said again", /aria-live="polite"[^>]*>\s*<span key=\{said\}>\{sentence\}<\/span>/.test(box), true);
   const header = readFileSync("components/studio-header.tsx", "utf8");
   is("the studio's top bar draws it, below the bar, with the role's buyers right", header.includes("<StudioSearch") && header.includes('buyers={can(role, "orders")}') && header.indexOf("</header>") < header.indexOf("<StudioSearch"), true);
   is("no video in the top bar", ["autoPlay", "<video", "<iframe"].some((piece) => header.includes(piece)), false);

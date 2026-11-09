@@ -25,6 +25,8 @@ export const HELP_CENTER_SEARCH = "/help#help-search";
  * The answers for each studio screen, by its folder under app/studio
  * ("" is the studio home). An empty list says the help center has no answer
  * just for that screen yet; the panel then offers the search and a person.
+ * The two screens that do not draw the studio's top bar (new, paused) have
+ * no entry, since the panel is never shown there.
  */
 export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   "": ["What is Marktmorgen today?", "Can I see how my store is doing?", "When am I paid?"],
@@ -59,11 +61,9 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   labels: ["Can I keep my own details about people, and track deals?"],
   meetings: ["Can I sell paid calls?", "Can I run a community or a webinar?"],
   memberships: ["Can I sell a membership?"],
-  new: ["Can I run more than one store, or have someone help me?"],
   outreach: ["Can my store help me find sponsors and partners?", "Who can I write to, and what are the rules?"],
   pages: ["Can I build a sales page or a landing page?", "Can I reuse a section on several pages?"],
   path: [],
-  paused: ["What else does my plan cover each month?", "When do my plan's monthly figures start again?"],
   people: ["Can I see everything one buyer has bought from me?", "Someone asked me to delete their data. What do I do?"],
   phone: ["Does it work on a phone?"],
   podcast: ["Can I sell a private podcast?"],
@@ -84,7 +84,8 @@ export function helpAnchor(q: string): string {
 /** The studio screen a path is ("" for the studio home), or null outside the studio or for a screen with no entry. */
 export function screenOf(pathname: string | null): string | null {
   if (!pathname) return null;
-  const match = pathname.match(/^\/studio(?:\/([^/?#]*))?/);
+  // The studio and its screens only: "/studiox" is not the studio home.
+  const match = pathname.match(/^\/studio(?:\/([^/?#]*))?(?=[/?#]|$)/);
   if (!match) return null;
   const screen = match[1] ?? "";
   return Object.hasOwn(SCREEN_HELP, screen) ? screen : null;

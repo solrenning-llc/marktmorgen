@@ -33,8 +33,12 @@
  */
 import type { Tier } from "@/lib/plan";
 
-/** A paying store's rights budget, in units, for a UTC month: its plan pays for it. */
-export const RIGHTS_PLAN_UNITS: Record<Tier, number> = { creator: 300, pro: 2_000, scale: 5_000 };
+/**
+ * A paying store's rights budget, in units, for a UTC month: its plan pays for it. Store's is 200 (300 before
+ * 9 November 2026, to keep the Store's first year refunded under its ceiling in tests/plan-margin.test.ts): what
+ * does not fit waits for the next month or the company's budget, always done within the legal month.
+ */
+export const RIGHTS_PLAN_UNITS: Record<Tier, number> = { creator: 200, pro: 2_000, scale: 5_000 };
 /** The most of the company's budget one store that pays nothing may take in a UTC month. */
 export const RIGHTS_FREE_STORE_UNITS = 1_000;
 /** The company's rights budget for a UTC month, for stores that pay nothing and for what is near its deadline. */

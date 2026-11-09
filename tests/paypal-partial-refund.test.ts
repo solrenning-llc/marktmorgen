@@ -323,6 +323,66 @@ async function main(): Promise<void> {
   is("the book is not checked", unnamed.checked, false);
   is("nothing passes the refund guard", unnamed.through, 0);
 
+  part("P3 for a partial refund: the refunds' set expires, the sale stays held for good (kept like a refund in full)");
+  await setup();
+  captures.set(CAPTURE, "PARTIALLY_REFUNDED");
+  await watch();
+  await redis.pipeline([["DEL", `nl:ppsell:refunded:${SID}`]]);
+  const setGone = await readBook(store);
+  is("still held, never earned again", setGone.lines.find((l) => l.ref === `paypal:${ORDER}`)?.status, "held");
+  is("the book stays checked and nothing is paid on it", [setGone.refundsChecked, payableLines(setGone, new Set()).reduce((sum, line) => sum + line.cents, 0)], [true, 0]);
+
+  part("P4 for a partial refund: its paid record expires too, the sale stays held and the book checked");
+  await redis.pipeline([["DEL", `nl:ppsell:paid:${ORDER}`]]);
+  const recordGone = await readBook(store);
+  is("still held", recordGone.lines.find((l) => l.ref === `paypal:${ORDER}`)?.status, "held");
+  is("the book stays checked", recordGone.refundsChecked, true);
+
+  part("The record gone while the set still lists the partial refund: held, never the whole book unchecked");
+  await setup();
+  captures.set(CAPTURE, "PARTIALLY_REFUNDED");
+  await watch();
+  await redis.pipeline([["DEL", `nl:ppsell:paid:${ORDER}`]]);
+  const onlyRecordGone = await readBook(store);
+  is("held, and the book checked", [onlyRecordGone.lines.find((l) => l.ref === `paypal:${ORDER}`)?.status, onlyRecordGone.refundsChecked], ["held", true]);
+
+  part("A commission paid before the partial refund stays paid, also once the set has expired");
+  await setup();
+  captures.set(CAPTURE, "COMPLETED");
+  await watch();
+  await addPayout(store, { aff: AFF, cents: 1470, currency: "usd", date: "2026-10-01", reference: "synthetic" });
+  captures.set(CAPTURE, "PARTIALLY_REFUNDED");
+  await redis.pipeline([["ZADD", `nl:ppsell:watch:${SID}`, "0", ORDER]]);
+  await watch();
+  await redis.pipeline([["DEL", `nl:ppsell:refunded:${SID}`]]);
+  const paidLasting = await readBook(store);
+  is("paid, partly refunded, and nothing owed back", [paidLasting.lines.find((l) => l.ref === `paypal:${ORDER}`)?.status, paidLasting.rows[0]?.owed], ["paid, partly refunded", 0]);
+
+  part("Then refunded in full, the set expired: the refund in full kept for good wins, counted once");
+  captures.set(CAPTURE, "REFUNDED");
+  await redis.pipeline([["ZADD", `nl:ppsell:watch:${SID}`, "0", ORDER]]);
+  await watch();
+  await redis.pipeline([["DEL", `nl:ppsell:refunded:${SID}`]]);
+  const fullLasting = (await readBook(store)).lines.find((l) => l.ref === `paypal:${ORDER}`);
+  is("refunded, the sale's cents, once", [fullLasting?.status, fullLasting?.refunded, fullLasting?.commission], ["refunded", 4900, 0]);
+
+  part("The partial refund's lasting mark not known written: looked at again in an hour, nothing else marked");
+  await setup();
+  captures.set(CAPTURE, "PARTIALLY_REFUNDED");
+  const beforeLasting = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    const replies = await beforeLasting.call(redis, commands);
+    return commands.map((command, i) => (String(command[0]).toUpperCase() === "EVALSHA" || String(command[0]).toUpperCase() === "EVAL" ? "QUEUED" : replies[i]));
+  };
+  try {
+    await watch();
+  } finally {
+    redis.pipeline = beforeLasting;
+  }
+  const lastingAgain = Number(await watchScore(ORDER));
+  is("asked again within the hour", lastingAgain > NOW && lastingAgain <= NOW + 3600 + 5, true);
+  is("not marked in the set before the lasting mark is known written", await marks(), 0);
+
   part("Control: another sale refunded in part, with no affiliate on it, leaves this commission payable");
   await setup();
   await redis.pipeline([

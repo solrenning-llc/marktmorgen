@@ -949,6 +949,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stream:v:@lib/stream.ts": { what: "What is known about a video", room: ["app/api/store/stream/route.ts", "lib/stream.ts"] },
 
   // ---------------------------------------------------------------- lib/ t–z
+  "nl:csa:alert:@lib/child-safety-alerts.ts": company("An open child-safety or intimate-image report's reminder: kind, Marktmorgen address, store handle, what was done, dates and the hashes of its handled links, never the reporter's words or address", "The company's own record of a report to the support inbox: at most OPEN_ALERTS_MAX (200) open at once, each gone when marked handled, after its last reminder, or by itself in ALERT_KEEP_SECONDS (32 days)."),
+  "nl:csa:alerts@lib/child-safety-alerts.ts": company("The open child-safety reports by when each reminder is next due", "The company's one list, at most OPEN_ALERTS_MAX (200) members, each taken out when its report ends; the list itself gone by itself 32 days after the last report."),
   "nl:csa:file:@lib/held-files.ts": short("A file of a product kept for a child-safety report, by a hash of its path or video id: never deleted or handed out for 400 days (18 U.S.C. 2258A(h))", "studio", 400, 96),
   "nl:csa:keep:@lib/child-safety.ts": short("A product kept for a child-safety report: not removed, changed or published again, nor its files, options, picture, page, episodes or lessons replaced or deleted, for 400 days (18 U.S.C. 2258A(h))", "studio", 400, 64),
   "nl:csa:held:@lib/child-safety.ts": short("Which products child-safety reports took off a store that day (a set of at most the cap's product ids), two days: the cap on the automatic step", "studio", 2, 128),

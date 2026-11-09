@@ -46,6 +46,7 @@ import { type Report, reportedProduct } from "@/lib/takedown";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
 import { holdFiles } from "@/lib/held-files";
 import { productFilePaths } from "@/lib/held-product-files";
+import { withReminders } from "@/lib/child-safety-alerts";
 import { productIdFor } from "@/lib/catalog";
 
 /** Automatic holds a store takes from child-safety reports in one UTC day; past them the owner decides. */
@@ -253,14 +254,17 @@ export async function alertOwner(report: { kind: ReportKind; url: string; work?:
         "Do not forward or describe the image, and do not ask any AI agent to look at it.",
         "The steps are in docs/incident-response.md. The request itself, with the person's signature, is in the notice email.",
       ];
-  return sendEmail({
-    meter: { by: "company" },
-    from: NIMBUS_FROM,
-    to: SUPPORT_EMAIL,
-    subject: subject.slice(0, 200),
-    text: lines.join("\n"),
-    idempotencyKey: `report-urgent-${report.kind}-${now}-${handle || "none"}`,
-  })
+  // Repeated every 24 hours until it is marked handled, with the link that does so (lib/child-safety-alerts.ts).
+  return withReminders({ kind: report.kind, url: report.url, handle: handle || "", outcome }, now, (more) =>
+    sendEmail({
+      meter: { by: "company" },
+      from: NIMBUS_FROM,
+      to: SUPPORT_EMAIL,
+      subject: subject.slice(0, 200),
+      text: [...lines, ...more].join("\n"),
+      idempotencyKey: `report-urgent-${report.kind}-${now}-${handle || "none"}`,
+    }),
+  )
     .catch(() => false)
     .then((sent) => {
       if (!sent) console.error("the urgent report email was not sent", report.kind);

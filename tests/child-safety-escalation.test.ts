@@ -75,7 +75,7 @@ async function answering<T>(match: (command: Commands[number]) => boolean, reply
 
 const tokenOf = (mail: Sent | undefined) => mail?.text.match(LINK)?.[1] ?? "";
 const idOf = (token: string) => token.slice(0, 32);
-const due = () => redis.run(["ZRANGE", ALERTS_DUE, 0, -1]) as string[];
+const due = () => redis.run(["ZRANGEBYSCORE", ALERTS_DUE, "-inf", "+inf"]) as string[];
 const post = (token: string, origin = "https://marktmorgen.com") =>
   handledRoute(
     new NextRequest("https://marktmorgen.com/api/report/handled", {
@@ -132,7 +132,8 @@ async function main(): Promise<void> {
   is("and shows no reported content", [shown.includes(WORDS), shown.includes("reporter@example.com")], [false, false]);
   is("opening the page closes nothing", redis.run(["ZSCORE", ALERTS_DUE, idOf(first)]) !== null, true);
   is("a post from another site is refused", (await post(first, "https://elsewhere.example")).status, 403);
-  is("a link that is not one of ours is not found", (await post("f".repeat(96))).status, 404);
+  is("a link off its shape is not found", (await post("not-a-link")).status, 404);
+  is("a link of the right shape that is not one of ours closes nothing", (await post("f".repeat(96))).headers.get("location")?.endsWith("?done=0"), true);
   is("a wrong secret for a real alert closes nothing", [(await post(idOf(first) + "0".repeat(64))).headers.get("location")?.endsWith("?done=0"), redis.run(["ZSCORE", ALERTS_DUE, idOf(first)]) !== null], [true, true]);
   const closed = await post(second);
   is("the reminder's own link closes it: back to the page, done", [closed.status, closed.headers.get("location")?.endsWith(`/report/handled/${second}?done=1`)], [303, true]);
@@ -188,7 +189,11 @@ async function main(): Promise<void> {
   sent.length = 0;
   const odd = Date.UTC(2026, 10, 3, 9, 0);
   await alertOwner({ kind: "child_safety", url }, "held", odd);
-  const oddId = idOf(tokenOf(sent[0]));
+  const oddToken = tokenOf(sent[0]);
+  const oddId = idOf(oddToken);
+  const unreadPage = await answering((c) => c[0] === "GET" && String(c[1]).startsWith("nl:csa:alert:"), "QUEUED", () => page(oddToken));
+  is("the page with the report unread says so, keeps the button and closes nothing", [/could not be read just now/.test(unreadPage), /Mark this report handled/.test(unreadPage), /not one of an open report/.test(unreadPage)], [true, true, false]);
+  is("marking it handled while it cannot be read closes nothing", [await answering((c) => c[0] === "GET" && String(c[1]).startsWith("nl:csa:alert:"), "QUEUED", () => closeAlert(oddToken)), redis.run(["ZSCORE", ALERTS_DUE, oddId]) !== null], ["unknown", true]);
   sent.length = 0;
   const whenDue = odd + DAY + 60_000;
   for (const reply of ["QUEUED", 7, ["x"], "{not json", JSON.stringify({ kind: "other" })]) {

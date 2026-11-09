@@ -3932,6 +3932,27 @@ export async function setQuotes(email: string, raw: unknown): Promise<Store | nu
   return patchStore(email, (store) => (JSON.stringify(store.quotes) === JSON.stringify(quotes) ? null : { quotes }));
 }
 
+/**
+ * Keeps the store page's quotes as `read` works them out with the store's lock held (lib/store-quotes.ts,
+ * refreshStoreQuotes). A change that takes a review's words off takes this lock after its own change (dropQuotes),
+ * so a list read before that change is written before it, never after. Writes nothing when the list is the same.
+ * Null when no store is read.
+ */
+export async function keepQuotes(email: string, read: (store: Store) => Promise<unknown>): Promise<Store | null> {
+  return withStore(email, async (store, save) => {
+    const quotes = parseQuotes(await read(store));
+    return JSON.stringify(store.quotes) === JSON.stringify(quotes) ? store : save({ ...store, quotes });
+  });
+}
+
+/**
+ * Takes the quotes `gone` picks off the store page's "What buyers say", from the list as it is under the store's
+ * lock (lib/store-quotes.ts, dropReviewQuote); writes nothing when it picks none. Null when no store is read.
+ */
+export async function dropQuotes(email: string, gone: (quote: StoreQuote) => boolean): Promise<Store | null> {
+  return patchStore(email, (store) => (store.quotes.some(gone) ? { quotes: store.quotes.filter((quote) => !gone(quote)) } : null));
+}
+
 /** Switches the store page's sign-up box and saves its words. */
 export async function setJoin(email: string, raw: unknown): Promise<Store | null> {
   const join = parseJoin(raw);

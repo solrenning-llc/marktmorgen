@@ -2792,32 +2792,45 @@ export function holdLine(referral: Referral): Line {
 }
 
 /**
+ * What a line earned before any refund: a held sale's whole commission, a lead's or a bonus's own amount (neither is
+ * refunded), and for a sale its commission on the whole amount (settleLine with nothing refunded), so a sale paid and
+ * refunded since still counts as what a payout of that time paid.
+ */
+function earnedBeforeRefunds(line: Line): number {
+  if (line.status === "held") return line.whole ?? 0;
+  if (line.how === "lead" || line.how === "bonus") return line.commission;
+  return settleLine(line, 0).commission;
+}
+
+/**
  * A held sale whose commission was already paid when PayPal's partial refund was first seen (`since`, by payment):
  * what was paid stands, as "paid, partly refunded", so nothing is taken back from later commissions. The amount
  * refunded is unknown, so no part of it is clawed back automatically (the coordinator's decision on the pre-review
  * of 3b4b8ac4e1). Payouts are written as totals, not by sale, so "already paid" is read the way that takes the
- * least of it as paid: an affiliate's payouts written down up to that moment, less the commissions of their other
- * lines from before it (and of held sales already counted as paid), paid this sale's whole commission at the most.
- * A payout written after the partial refund was seen never counts for it. The line counts at most what it earned
- * before the partial refund, so nothing becomes payable that was not payable before it.
+ * least of it as paid, and never pays twice (pre-review of 61b851bdbe, HIGH A and B): only a payout written after
+ * the held sale was made and no later than the partial refund was seen can have paid it; at each such payout's time,
+ * everything paid up to then, less what every other line of the affiliate made by then earned before any refund
+ * (earnedBeforeRefunds, held sales included), is what can have gone to it; the most of those, at most its whole
+ * commission. With none, nothing of it was paid: it stays held. So a sale made after that payout stays owed (A), a
+ * payout made before the held sale never covers it, and a sale paid and refunded since keeps its clawback (B).
  */
 export function paidBeforeHold(lines: Line[], payouts: Payout[], since: Map<string, number>, currency: string): Line[] {
   const held = lines.filter((l) => l.status === "held" && l.currency === currency && since.has(l.pi));
   if (!held.length) return lines;
   const out = new Map<Line, Line>();
-  for (const aff of new Set(held.map((l) => l.aff))) {
-    const own = lines.filter((l) => l.aff === aff && l.currency === currency);
-    const mine = held.filter((l) => l.aff === aff).sort((a, b) => (since.get(a.pi) ?? 0) - (since.get(b.pi) ?? 0) || a.at - b.at);
-    let counted = 0;
-    for (const line of mine) {
-      const at = since.get(line.pi) ?? 0;
-      const paidBy = payouts.filter((p) => p.aff === aff && p.currency === currency && Math.floor(p.at / 1000) <= at).reduce((sum, p) => sum + p.cents, 0);
-      const before = own.filter((l) => l.status !== "held" && l.at <= at).reduce((sum, l) => sum + l.commission, 0);
-      const covered = Math.min(line.whole ?? 0, Math.max(0, paidBy - before - counted));
-      if (covered <= 0) continue;
-      counted += covered;
-      out.set(line, { ...line, commission: covered, status: "paid, partly refunded" });
+  for (const line of held) {
+    const seen = since.get(line.pi) ?? 0;
+    const own = payouts.filter((p) => p.aff === line.aff && p.currency === currency);
+    const others = lines.filter((l) => l !== line && l.aff === line.aff && l.currency === currency);
+    let covered = 0;
+    for (const payout of own) {
+      const at = Math.floor(payout.at / 1000);
+      if (at < line.at || at > seen) continue;
+      const paidBy = own.filter((p) => Math.floor(p.at / 1000) <= at).reduce((sum, p) => sum + p.cents, 0);
+      const earnedBy = others.filter((l) => l.at <= at).reduce((sum, l) => sum + earnedBeforeRefunds(l), 0);
+      covered = Math.max(covered, Math.min(line.whole ?? 0, paidBy - earnedBy));
     }
+    if (covered > 0) out.set(line, { ...line, commission: covered, status: "paid, partly refunded" });
   }
   return lines.map((l) => out.get(l) ?? l);
 }

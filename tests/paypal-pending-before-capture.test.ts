@@ -88,10 +88,14 @@ const timeout = () => new Error("Synthetic: Redis timed out");
  *  - "settle": the step that writes the payment down never reaches Redis (probe A);
  *  - "watch-unsent": putting the order in pending never reaches Redis;
  *  - "watch-lost": it is applied, but its answer is lost on the way back;
- *  - "watch-text" / "watch-wrapped": it is applied and answers in a shape not known (rule 24).
+ *  - "watch-text" / "watch-wrapped": it is applied and answers in a shape not known (rule 24);
+ *  - "record-gone": the order's record ends just before the step that puts it in pending (its life renewed there);
+ *  - "life-text" / "life-two" / "life-null": that renewal is applied and answers in a shape not known (rule 24).
  */
-type Fault = "none" | "settle" | "watch-unsent" | "watch-lost" | "watch-text" | "watch-wrapped";
+type Fault = "none" | "settle" | "watch-unsent" | "watch-lost" | "watch-text" | "watch-wrapped" | "record-gone" | "life-text" | "life-two" | "life-null";
 const pendingWrite = (commands: Commands) => commands.some((command) => command[0] === "ZADD" && String(command[1]).startsWith("nl:ppsell:pending:"));
+/** Where the step that puts an order in pending renews the order's record, if it does. */
+const lifeAt = (commands: Commands) => commands.findIndex((command) => command[0] === "EXPIRE" && String(command[1]).startsWith("nl:ppsell:o:"));
 const settleWrite = (commands: Commands) => commands.some((command) => command[0] === "EVAL" && String(command[1]).includes("marktmorgen:paypal-settle"));
 
 async function returnFor(store: Store, order: string, fault: Fault): Promise<{ status: number; location: string }> {
@@ -102,6 +106,18 @@ async function returnFor(store: Store, order: string, fault: Fault): Promise<{ s
     if (fault === "settle" && settleWrite(commands)) {
       struck = true;
       throw timeout();
+    }
+    if (fault === "record-gone" && pendingWrite(commands) && lifeAt(commands) >= 0) {
+      struck = true;
+      await pipeline([["DEL", String(commands[lifeAt(commands)][1])]]);
+      return pipeline(commands);
+    }
+    if (fault.startsWith("life-") && pendingWrite(commands) && lifeAt(commands) >= 0) {
+      struck = true;
+      const replies = await pipeline(commands);
+      const at = lifeAt(commands);
+      replies[at] = fault === "life-text" ? String(replies[at]) : fault === "life-two" ? 2 : null;
+      return replies;
     }
     if (fault.startsWith("watch-") && pendingWrite(commands)) {
       struck = true;
@@ -261,6 +277,50 @@ async function main(): Promise<void> {
   is("and the order stays in pending, nothing paid", await state(earlier, "earlier@example.com"), {
     paid: false, owned: 0, receipts: 0, sales: 0, pending: true, owed: false, captured: 2,
   });
+
+  part("Late in the record's life: PayPal takes the payment 71.5 hours after the order opened, then writing it down fails");
+  captureWith = "take";
+  const late = await open("late@example.com");
+  ahead += 71.5 * 3_600_000;
+  await returnFor(store, late, "settle");
+  is("PayPal took it once, nothing is written down yet, the order stands in pending", [captures.get(late), Boolean(await readPaid(late)), await pending(late)], [1, false, true]);
+  const life = (await redis.pipeline([["TTL", `nl:ppsell:o:${late}`]]))[0] as number;
+  is("the order's record now lives thirty days from the try, not what was left of its three", life > 29 * 86_400 && life <= 30 * 86_400, true);
+  let lateCleared = 0;
+  for (let i = 0; i < 3; i += 1) lateCleared += await sweep();
+  is("three sweeps later, past the record's first three days: paid, handed over, one receipt, counted once, off pending, never captured again", await state(late, "late@example.com"), {
+    paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
+  });
+  is("handed over by the sweep, once", lateCleared, 1);
+
+  part("The order's record ends just before it is put in pending");
+  captureWith = "take";
+  const gone = await open("gone@example.com");
+  const goneBack = await returnFor(store, gone, "record-gone");
+  is("PayPal is not asked to take anything", captures.get(gone) ?? 0, 0);
+  is("and the buyer is never shown the thanks page as paid", goneBack.location.includes("/thanks?paypal="), false);
+  is("nothing written down, handed over or receipted", [Boolean(await readPaid(gone)), await owned("gone@example.com"), receipts.get("gone@example.com") ?? 0, await sales(gone)], [false, 0, 0, 0]);
+  is("a sweep lets go of the entry and takes nothing", [await sweep(), await pending(gone), captures.get(gone) ?? 0], [0, false, 0]);
+
+  for (const [fault, label] of [
+    ["life-text", "renewing the order's record answers in text, not a count"],
+    ["life-two", "renewing the order's record answers a count that is neither 0 nor 1"],
+    ["life-null", "renewing the order's record answers nothing"],
+  ] as [Fault, string][]) {
+    part(`Rule 24: ${label}`);
+    captureWith = "take";
+    const buyer = `${fault}@example.com`;
+    const order = await open(buyer);
+    const shown = await returnFor(store, order, fault);
+    is("PayPal is not asked to take anything", captures.get(order) ?? 0, 0);
+    is("and the buyer is never shown the thanks page as paid", shown.location.includes("/thanks?paypal="), false);
+    is("nothing written down, handed over or receipted", [Boolean(await readPaid(order)), await owned(buyer), receipts.get(buyer) ?? 0, await sales(order)], [false, 0, 0, 0]);
+    const again = await returnFor(store, order, "none");
+    is("the buyer opening the return again with Redis well: taken once and sent to the thanks page", [captures.get(order), again.location.includes("/thanks?paypal=")], [1, true]);
+    is("paid, handed over, one receipt, counted once, off pending, not owed", await state(order, buyer), {
+      paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
+    });
+  }
 
   done();
 }

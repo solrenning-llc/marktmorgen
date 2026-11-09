@@ -2,7 +2,7 @@
  * A monthly member moving to the same membership's yearly price, on the
  * creator's own Stripe account (the rules are in lib/yearly-switch-rules.ts).
  *
- *   nl:yearly:price:<account>:<product>:<cents>:<currency>:checked   the yearly price made for switches, reused
+ *   nl:yearly:price:<account>:<product>:<cents>:<currency>[:<tax>]:checked   the yearly price made for switches, reused
  *   nl:yearly:link:<hash>                                     the emailed link to one switch, 14 days
  *
  * The same two steps as a switch between plans (lib/tier-switch.ts), so
@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { chargedOf, isPriceWritten, previewBody, previewKnown, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
+import { chargedOf, isPriceWritten, previewBody, previewKnown, switchBody, switchReply, taxMode, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -58,10 +58,13 @@ async function sha256Hex(value: string): Promise<string> {
 
 const linkKey = async (token: string) => `nl:yearly:link:${(await sha256Hex(`nimbus-yearly:${token}`)).slice(0, 40)}`;
 /**
+ * One kept price per product, amount, currency and tax treatment, as a tier's (lib/tier-switch.ts): a price's tax
+ * behavior never changes, so a store that turns tax on, or moves it inside its prices, is given a new one.
  * Only a price Stripe answered as the one written is kept (isPriceWritten), under the `:checked` ending; an id kept
  * before that check, under the key without it, was never read against the price written and is never read again.
  */
-const priceKey = (account: string, product: Listing, cents: number, currency: string) => `nl:yearly:price:${account}:${product.id}:${cents}:${currency}:checked`;
+const priceKey = (account: string, product: Listing, cents: number, currency: string, tax: string) =>
+  `nl:yearly:price:${account}:${product.id}:${cents}:${currency}${tax ? `:${tax}` : ""}:checked`;
 
 /** A link to one membership's switch, for the email that offers it. Opens nothing else. */
 export async function mintYearlyLink(store: Store, customer: string, subscription: string): Promise<string> {
@@ -98,7 +101,7 @@ export function priceWords(store: Store, cents: number, interval: "month" | "yea
 
 /** The yearly price a membership is moved onto, as Stripe is sent it: it names the same product. */
 export function yearlyPriceBody(store: Store, product: Listing, cents: number): URLSearchParams {
-  return new URLSearchParams({
+  const body = new URLSearchParams({
     currency: store.currency,
     unit_amount: String(cents),
     "recurring[interval]": "year",
@@ -111,18 +114,25 @@ export function yearlyPriceBody(store: Store, product: Listing, cents: number): 
     "metadata[every]": "year",
     "metadata[made_by]": "nimbus-labs",
   });
+  // With Stripe Tax on, the price says whether tax is inside it or on top, as the monthly price and every checkout line
+  // do (lib/tier-switch.ts, tierPriceBody; lib/tax.ts, applyTax). Left unspecified, Stripe charged it as the account's
+  // default, not the store's: in a store whose prices include tax, the year could be charged with tax on top of the
+  // amount the page shows.
+  const tax = taxMode(store);
+  if (tax) body.set("tax_behavior", tax);
+  return body;
 }
 
 /** The yearly price, made once on the creator's account for each amount and reused. */
 export async function yearlyPrice(store: Store, product: Listing, cents: number): Promise<string> {
   const account = store.stripeAccountId as string;
-  const key = priceKey(account, product, cents, store.currency);
+  const tax = taxMode(store);
+  const key = priceKey(account, product, cents, store.currency, tax);
   const [cached] = await redisPipeline([["GET", key]]);
   if (typeof cached === "string" && PRICE_PATTERN.test(cached)) return cached;
   const made = await onAccount("POST", account, "/prices", yearlyPriceBody(store, product, cents));
   // Nothing is kept on any other reply: the move that asked fails, and the next one asks Stripe again (rule 30).
-  // No tax treatment is sent for the yearly price, so none is asked back.
-  if (!isPriceWritten(made, { cents, currency: store.currency, interval: "year", tax: "", product: product.id })) throw new Error("Stripe did not return the price just written");
+  if (!isPriceWritten(made, { cents, currency: store.currency, interval: "year", tax, product: product.id })) throw new Error("Stripe did not return the price just written");
   await redisPipeline([["SET", key, made.id, "EX", 400 * 86_400]]);
   return made.id;
 }

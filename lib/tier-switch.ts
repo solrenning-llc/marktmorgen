@@ -48,7 +48,7 @@ const SWITCHABLE = new Set(["active", "trialing"]);
 export const PREVIEW_SECONDS = 15 * 60;
 
 /** How a price made here treats tax, as checkout's own price data does (lib/tax.ts, applyTax): none when tax is off. */
-const taxMode = (store: Store): "inclusive" | "exclusive" | "" => (store.tax.enabled ? (store.tax.included ? "inclusive" : "exclusive") : "");
+export const taxMode = (store: Store): "inclusive" | "exclusive" | "" => (store.tax.enabled ? (store.tax.included ? "inclusive" : "exclusive") : "");
 /**
  * One cached price per product, amount, currency, interval and tax treatment: a price's tax behavior never changes.
  * Only a price Stripe answered as the one written is kept (isPriceWritten), under the `:checked` ending; an id kept

@@ -16,12 +16,12 @@ test("every listed product's reviews, added together", () => {
     ["b", s(2, 9, [0, 0, 0, 1, 1], { hidden: 1, refunded: 1, visible: 2 })],
     ["draft", s(5, 5, [5, 0, 0, 0, 0])],
   ]);
-  const total = storeSummary(each, ["a", "b", "nothing-yet"]);
+  const total = storeSummary(each, ["a", "b", "nothing-yet"])!;
   assert.deepEqual(total, { count: 5, stars: 23, visible: 5, hidden: 1, refunded: 1, dist: [0, 0, 0, 2, 3] });
   assert.equal(average(total), 4.6);
   assert.equal(showsRating(total), true);
 });
 
 test("no reviews, no stars", () => {
-  assert.equal(showsRating(storeSummary(new Map(), ["a", "b"])), false);
+  assert.equal(showsRating(storeSummary(new Map(), ["a", "b"])!), false);
 });

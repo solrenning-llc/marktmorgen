@@ -59,7 +59,9 @@ import {
   REVIEW_ID_PATTERN,
   type Review,
   type ReviewPhoto,
+  type ProductNumbers,
   type Summary,
+  UNREAD_NUMBERS,
   summarise,
   type HideReason,
   isHideReason,
@@ -200,20 +202,24 @@ function exactSummary(raw: string): Summary | null {
 }
 
 /**
- * The numbers of every product of a store that has reviews, in one read. Throws UnknownReplyError when the reply, a
- * product's id or its numbers are not in their exact shape: a page says the numbers could not be read, never that
- * there are none (rule 24; VR item 2). Only an exact empty hash is a store with no numbers.
+ * The numbers of every product of a store that has reviews, in one read. Throws UnknownReplyError when the reply is
+ * not in its exact shape (a flat list of texts, each field a product's id): a page says the numbers could not be read,
+ * never that there are none (rule 24; VR item 2). Only an exact empty hash is a store with no numbers. Each product's
+ * numbers are read on their own: one whose numbers are not in their exact shape is UNREAD_NUMBERS (no stars, never a
+ * number made up), and the others are shown, so one product's damaged numbers never take every product's stars.
  */
-export async function summaries(statsId: string | null): Promise<Map<string, Summary>> {
-  const out = new Map<string, Summary>();
+export async function summaries(statsId: string | null): Promise<ProductNumbers> {
+  const out: ProductNumbers = new Map();
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return out;
   const read = repliesFor(await redisPipeline([["HGETALL", summaryKey(statsId)]]), 1);
   const flat = read && stringList(read[0]);
-  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's review numbers");
+  if (!flat || flat.length % 2 !== 0 || flat.some((field, i) => i % 2 === 0 && !PRODUCT_ID_PATTERN.test(field))) {
+    throw new UnknownReplyError("a store's review numbers");
+  }
   for (let i = 0; i < flat.length; i += 2) {
-    const summary = PRODUCT_ID_PATTERN.test(flat[i]) ? exactSummary(flat[i + 1]) : null;
-    if (!summary) throw new UnknownReplyError("a store's review numbers");
-    out.set(flat[i], summary);
+    const summary = exactSummary(flat[i + 1]);
+    if (!summary) console.error(`reviews: the numbers of product ${flat[i]} did not read; no stars are shown for it until they are counted again`);
+    out.set(flat[i], summary ?? UNREAD_NUMBERS);
   }
   return out;
 }
@@ -321,6 +327,27 @@ function exactReviews(reply: unknown, productId: string): Review[] | null {
     reviews.push(review);
   }
   return reviews;
+}
+
+/**
+ * A product's review records as HGETALL answers them, for dropping them (CX-123 rule 24): null when the reply is not a
+ * flat list of texts with each field a review's id (unknown: nothing is dropped). Otherwise every field's id, the
+ * reviews that read as this product's under their own id, and the ids of the records that do not (damaged).
+ */
+function recordsOf(reply: unknown, productId: string): { ids: string[]; reviews: Review[]; unreadable: string[] } | null {
+  const flat = stringList(reply);
+  if (!flat || flat.length % 2 !== 0) return null;
+  const ids: string[] = [];
+  const reviews: Review[] = [];
+  const unreadable: string[] = [];
+  for (let i = 0; i < flat.length; i += 2) {
+    if (!REVIEW_ID_PATTERN.test(flat[i])) return null;
+    ids.push(flat[i]);
+    const review = parseReview(flat[i + 1]);
+    if (review && review.id === flat[i] && review.productId === productId) reviews.push(review);
+    else unreadable.push(flat[i]);
+  }
+  return { ids, reviews, unreadable };
 }
 
 /**
@@ -644,21 +671,31 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
   if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a refunded payment's reviews");
   const members = raw ? raw.split(";").filter(Boolean) : [];
   let changed = 0;
+  // A review that is busy, or does not read, is not marked: the first such failure is thrown once every other review
+  // of the payment has been tried, so the refund is not taken as seen (the sweep tries again) and one review never
+  // keeps the others' stars counting.
+  let failed: unknown = null;
   for (const member of members) {
     const [productId, id] = member.split("|");
     if (!productId || !id) continue;
     // Only while the review still rests on that payment: a buyer who wrote it
     // again from a later order that was kept is a buyer who kept one.
     let hit = false;
-    const done = await creatorChange(statsId, productId, id, (review) => {
-      if (review.pi !== pi || review.refunded) return review;
-      hit = true;
-      return { ...review, refunded: true };
-    }, null);
-    // A review busy just now is not marked: thrown, so the refund is not taken as seen and the sweep tries again.
-    if (done === "busy") throw new Error("a review is busy; the refund is marked on the next try");
+    let done: Awaited<ReturnType<typeof creatorChange>>;
+    try {
+      done = await creatorChange(statsId, productId, id, (review) => {
+        if (review.pi !== pi || review.refunded) return review;
+        hit = true;
+        return { ...review, refunded: true };
+      }, null);
+    } catch (error) {
+      failed ??= error;
+      continue;
+    }
+    if (done === "busy") failed ??= new Error("a review is busy; the refund is marked on the next try");
     if (hit) changed += 1;
   }
+  if (failed !== null) throw failed;
   return changed;
 }
 
@@ -683,12 +720,14 @@ export type StudioRow = Review & { unseen: boolean };
 
 /**
  * What the studio lists: the queue (reviews not seen yet), or every review,
- * newest first, one page at a time.
+ * newest first, one page at a time. A record on the page that does not read
+ * is left out and counted in `unreadable`, so the page says so and lists the
+ * others; a reply in another shape still refuses the page.
  */
 export async function studioReviews(
   statsId: string | null,
   options: { queue: boolean; offset: number; limit: number },
-): Promise<{ rows: StudioRow[]; total: number; unseen: number }> {
+): Promise<{ rows: StudioRow[]; total: number; unseen: number; /** Records on this page that did not read (damaged), when any. */ unreadable?: number }> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) throw new Error("Review list unavailable");
   const source = options.queue ? newKey(statsId) : allKey(statsId);
   const index = await redisPipeline([
@@ -720,13 +759,21 @@ export async function studioReviews(
     ? await redisPipeline(products.map(([productId, ids]) => ["HMGET", productKey(statsId, productId), ...ids]))
     : [];
   const found = new Map<string, Review>();
+  let unreadable = 0;
   if (!Array.isArray(read) || read.length !== products.length) throw new Error("Review records incomplete");
   read.forEach((values, group) => {
     const [productId, ids] = products[group];
     if (!Array.isArray(values) || values.length !== ids.length) throw new Error("Review records incomplete");
     values.forEach((value, i) => {
+      // Anything but a text is unknown, and the page is refused. A text that does not read as this review is a damaged
+      // record: waiting would never change it, so it is counted and said (`unreadable`), and the page lists the others
+      // instead of refusing every review on it.
+      if (typeof value !== "string") throw new Error("Review record unreadable");
       const review = parseReview(value);
-      if (!review || review.productId !== productId || review.id !== ids[i]) throw new Error("Review record unreadable");
+      if (!review || review.productId !== productId || review.id !== ids[i]) {
+        unreadable += 1;
+        return;
+      }
       found.set(`${review.productId}|${review.id}`, review);
     });
   });
@@ -740,7 +787,7 @@ export async function studioReviews(
     if (!review) return;
     rows.push({ ...review, unseen: options.queue ? true : flags[i] !== null && flags[i] !== undefined });
   });
-  return { rows, total: Number(total) || 0, unseen: Number(unseen) || 0 };
+  return { rows, total: Number(total) || 0, unseen: Number(unseen) || 0, ...(unreadable ? { unreadable } : {}) };
 }
 
 /** The most reviews the studio's overview reads at once (636 [GL4](c)). */
@@ -786,14 +833,20 @@ export async function reviewsSince(statsId: string | null, since: number): Promi
 export async function dropReviews(statsId: string | null, productId: string, tries = 1): Promise<string[]> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return [];
   // Read once: a deletion that ran but did not answer in time leaves nothing to read again, and its photos would be lost.
-  // Read exactly (CX-123 rule 24), in one command, before anything is deleted: a reply lost or in another shape, or a
-  // review that does not read, throws and nothing is deleted. Dropped without their ids, the reviews would stay in the
-  // studio's lists; without their records, their photos would stay in the picture folder with nothing to find them by.
+  // Read exactly (CX-123 rule 24), in one command, before anything is deleted: a reply lost or in another shape throws
+  // and nothing is deleted. Dropped without their ids, the reviews would stay in the studio's lists; without their
+  // records, their photos would stay in the picture folder with nothing to find them by.
+  // A record that answered in its exact place but does not read as this product's review under its own id is damaged,
+  // not unknown: waiting would never change it, and the removal drops every record of the product anyway. It goes with
+  // the rest, by its field (its id); only its photo cannot be found, and the log names it.
   const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1);
-  const reviews = read ? exactReviews(read[0], productId) : null;
-  if (!reviews) throw new UnknownReplyError("a removed product's reviews");
-  const photos = reviews.map((review) => review.photo?.path).filter((path): path is string => Boolean(path));
-  const members = reviews.map((review) => `${productId}|${review.id}`);
+  const records = read ? recordsOf(read[0], productId) : null;
+  if (!records) throw new UnknownReplyError("a removed product's reviews");
+  if (records.unreadable.length) {
+    console.error(`reviews: product ${productId} was removed with ${records.unreadable.length} review record(s) that did not read (${records.unreadable.join(", ")}); dropped with the others, a photo of theirs could not be found`);
+  }
+  const photos = records.reviews.map((review) => review.photo?.path).filter((path): path is string => Boolean(path));
+  const members = records.ids.map((id) => `${productId}|${id}`);
   // Only the deletion is tried again (it can run twice: every command in it is the same the second time).
   for (let attempt = 1; ; attempt += 1) {
     try {

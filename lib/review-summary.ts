@@ -133,14 +133,29 @@ export function average(summary: Summary): number {
   return summary.count ? Math.round((summary.stars / summary.count) * 10) / 10 : 0;
 }
 
+/** A product whose kept numbers did not read (rule 24; VR item 2): no stars are drawn for it, never a number made up. */
+export const UNREAD_NUMBERS = "unread" as const;
+
+/** Each product's kept numbers, as lib/reviews.ts summaries() reads them: a product whose numbers did not read is UNREAD_NUMBERS. */
+export type ProductNumbers = Map<string, Summary | typeof UNREAD_NUMBERS>;
+
+/** A product's numbers for its stars: null when it has none or when they did not read (no stars either way). */
+export function numbersOf(each: ProductNumbers, id: string): Summary | null {
+  const one = each.get(id);
+  return one === undefined || one === UNREAD_NUMBERS ? null : one;
+}
+
 /**
  * The store's own numbers: every listed product's reviews added together, for
  * the stars under the store's name. Only products a visitor can see count.
+ * Null while one listed product's numbers did not read: a total without them
+ * would be a number made up (rule 24; VR item 2), so no stars are drawn.
  */
-export function storeSummary(each: Map<string, Summary>, listed: Iterable<string>): Summary {
+export function storeSummary(each: ProductNumbers, listed: Iterable<string>): Summary | null {
   const total: Summary = { ...EMPTY_SUMMARY, dist: [0, 0, 0, 0, 0] };
   for (const id of listed) {
     const one = each.get(id);
+    if (one === UNREAD_NUMBERS) return null;
     if (!one) continue;
     total.count += one.count;
     total.stars += one.stars;

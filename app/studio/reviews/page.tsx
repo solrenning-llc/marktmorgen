@@ -9,6 +9,7 @@ import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { canWrite } from "@/lib/mail";
 import { HIDDEN_RULE, OVERVIEW_READ_MAX, type StudioRow, averageText, reviewsSince, showsRating, studioReviews, summaries } from "@/lib/reviews";
+import { UNREAD_NUMBERS, numbersOf } from "@/lib/review-summary";
 import { OVERVIEW_MONTHS, byMonth, monthAverage, monthStart } from "@/lib/review-overview";
 import { ReviewAskEditor, ReviewRow, SeenAllButton, type StudioReview } from "@/components/review-studio";
 import { ReviewQr } from "@/components/review-qr";
@@ -69,7 +70,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   ]);
   const months = recent ? byMonth(recent.reviews, now) : null;
   const listKnown = list !== null;
-  const current = list ?? { rows: [], total: 0, unseen: 0 };
+  const current = list ?? { rows: [], total: 0, unseen: 0, unreadable: 0 };
   // Only the products that have reviews, or are on this page of them, are
   // read (lib/catalog.ts), in the store's own order.
   const wanted = new Set([...(numbers?.keys() ?? []), ...current.rows.map((r: StudioRow) => r.productId)]);
@@ -93,13 +94,19 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
     photo: r.photo ? imageUrl(r.photo) : null,
   }));
   const pages = Math.max(1, Math.ceil(current.total / PAGE_SIZE));
-  const reviewed = numbers === null ? [] : named.filter((p) => (numbers.get(p.id)?.visible ?? 0) + (numbers.get(p.id)?.hidden ?? 0) > 0);
+  // A product whose totals did not read (UNREAD_NUMBERS) is listed and says so; the others keep their numbers.
+  const reviewed = numbers === null ? [] : named.filter((p) => {
+    const n = numbers.get(p.id);
+    return n === UNREAD_NUMBERS || (n?.visible ?? 0) + (n?.hidden ?? 0) > 0;
+  });
+  const unreadTotals = reviewed.filter((p) => numbers?.get(p.id) === UNREAD_NUMBERS).length;
   // Each reviewed product's AI summary kept this week (636 [GL4](d)): read only, nothing made by opening the page,
-  // every product's in one request.
-  const summed = reviewed.slice(0, 30);
+  // every product's in one request. Only products whose totals read: how many reviews one has decides what it offers.
+  const summed = reviewed.filter((p) => numbers?.get(p.id) !== UNREAD_NUMBERS).slice(0, 30);
   const keptSummaries = await readReviewSummaries(store.statsId, summed.map((p) => p.id)).catch(() => null);
-  // Without the totals, which products have reviews is not known: the summaries say they could not be loaded.
-  const aiSummaries = keptSummaries === null || numbers === null ? null : summed.map((p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
+  // Without the totals, which products have reviews is not known: the summaries say they could not be loaded. So when
+  // every reviewed product's totals did not read: "no product has reviews yet" would not be true.
+  const aiSummaries = keptSummaries === null || numbers === null || (summed.length === 0 && unreadTotals > 0) ? null : summed.map((p) => ({ id: p.id, title: p.title, reviews: numbersOf(numbers, p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
   const tab = (view: "new" | "all", label: string) => (
     <Link
       href={studioPath(store, view === "new" ? "" : "view=all", "reviews")}
@@ -150,7 +157,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 <p className="text-lg font-semibold text-ink">Reviews could not be verified</p>
                 <p className="mt-2 text-ink-soft">Reload to check your reviews. An unavailable list does not mean there are no reviews or that every review has been seen.</p>
               </div>
-            ) : rows.length === 0 ? (
+            ) : rows.length === 0 && !current.unreadable ? (
               <StudioEmptyState
                 level={3}
                 className="card mt-5 p-6 sm:p-8"
@@ -167,6 +174,13 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
               />
             ) : (
               <AiOn value={ai}>
+                {current.unreadable ? (
+                  <p role="status" className="card mt-5 p-4 text-sm text-ink-soft">
+                    {current.unreadable === 1
+                      ? "1 review on this page could not be read, so it is not listed here. It is not shown on your pages either."
+                      : `${current.unreadable} reviews on this page could not be read, so they are not listed here. They are not shown on your pages either.`}
+                  </p>
+                ) : null}
                 <ul className="mt-5 space-y-3">
                   {rows.map((review) => (
                     <ReviewRow key={`${review.productId}|${review.id}`} review={review} />
@@ -217,6 +231,14 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 <ul className="mt-3 space-y-3">
                   {reviewed.map((p) => {
                     const n = numbers.get(p.id)!;
+                    if (n === UNREAD_NUMBERS) {
+                      return (
+                        <li key={p.id} className="text-sm">
+                          <p className="truncate font-semibold text-ink">{p.title}</p>
+                          <p className="mt-0.5 text-ink-soft" role="status">Its totals could not be read, so no stars are shown for it on your pages. They are counted again from its reviews the next time one of them changes. This does not mean it has none.</p>
+                        </li>
+                      );
+                    }
                     return (
                       <li key={p.id} className="text-sm">
                         <p className="truncate font-semibold text-ink">{p.title}</p>

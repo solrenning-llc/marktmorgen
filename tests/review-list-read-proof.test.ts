@@ -23,10 +23,17 @@ async function main() {
  const good=await studioReviews(stats,{queue:true,offset:0,limit:20});
  is("stored review retained",good.rows[0]?.id,saved.review.id);
  is("known total retained",good.total,1);
- for (const value of [[],[[]],[[null]],[["not JSON"]]]) {
+ for (const value of [[],[[]],[[null]]]) {
   redis.pipeline = async commands => commands[0]?.[0]==="HMGET" ? value : original(commands);
   is("partial or unreadable record refused",await refused(),true);
  }
+ // Rule 23 (claude5/reviews-recount-exact, the per-product fix): [["not JSON"]] left the list above. A record answered
+ // in its exact place that does not read is damaged, not unknown: refusing the page refused every other review on it
+ // with no way out, so it is left out and counted instead (tests/reviews-unread-isolated.test.ts).
+ redis.pipeline = async commands => commands[0]?.[0]==="HMGET" ? [["not JSON"]] : original(commands);
+ const damaged=await studioReviews(stats,{queue:true,offset:0,limit:20});
+ redis.pipeline=original;
+ is("a damaged record is left out and counted",[damaged.rows.length,damaged.unreadable,damaged.total],[0,1,1]);
  redis.pipeline=original;
  const all=await studioReviews(stats,{queue:false,offset:0,limit:20});
  is("all view preserves unseen flag",all.rows[0]?.unseen,true);

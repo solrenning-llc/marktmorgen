@@ -23,7 +23,7 @@ import { kitWords } from "@/lib/buyer-words/kit";
 import { Icon } from "@/components/icons";
 import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchStore, searchWords } from "@/lib/catalog";
 import { StoreQuotes } from "@/components/store-quotes";
-import { showsRating, storeSummary } from "@/lib/review-summary";
+import { numbersOf, showsRating, storeSummary } from "@/lib/review-summary";
 import { RatingLine } from "@/components/review-list";
 import { StoreShareButton } from "@/components/store-share-button";
 import { guideOn } from "@/lib/store-guide";
@@ -351,7 +351,8 @@ export default async function StorePage({ params, searchParams }: Params) {
             </h1>
             <p className="st-muted mt-1 text-sm font-semibold">@{store.handle}</p>
             {/* Every listed product's reviews together, from the numbers this page reads anyway (lib/review-summary.ts). */}
-            {showsRating(storeRating) ? (
+            {/* Unknown (null) while one listed product's numbers did not read: no stars, never a total without them. */}
+            {storeRating !== null && showsRating(storeRating) ? (
               <p className="mt-3 flex flex-wrap items-center justify-center gap-x-2 text-sm">
                 <RatingLine summary={storeRating} lang={store.language} />
                 <span className="st-muted">{bw.storeRatingNote}</span>
@@ -464,7 +465,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                             writes={writes}
                             selling={selling}
                             manageable={manageable}
-                            rating={rated.get(product.id) ?? null}
+                            rating={numbersOf(rated, product.id)}
                             bundleItems={bundleItems.get(product.id) ?? null}
                             soon={soon.has(product.id)}
                             preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}

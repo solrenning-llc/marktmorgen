@@ -16,7 +16,7 @@ import { outOfKeys } from "@/lib/licence-keys";
 import { canWrite } from "@/lib/mail";
 import { canManage } from "@/lib/membership-manage";
 import { canUseDomain } from "@/lib/domains";
-import { summaries } from "@/lib/reviews";
+import { numbersOf, summaries } from "@/lib/reviews";
 import { forVisitor } from "@/lib/visitor";
 import { isResting, takePublicRequest } from "@/lib/traffic";
 import { bundleItemUnits, collectionUnits } from "@/lib/page-read-rules";
@@ -203,7 +203,7 @@ export default async function CollectionPage({ params }: Params) {
               writes={writes}
               selling={selling}
               manageable={manageable}
-              rating={rated.get(product.id) ?? null}
+              rating={numbersOf(rated, product.id)}
               bundleItems={inBundles.get(product.id) ?? null}
               soon={soon.has(product.id)}
               preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}

@@ -170,7 +170,8 @@ export default async function MediaKitPage({ params }: Params) {
                 <dt className="st-muted text-sm font-semibold">{w.productsLabel}</dt>
                 <dd className="font-display mt-1 text-2xl font-semibold tabular-nums">{said.num(products)}</dd>
               </div>
-              {showsRating(rating) ? (
+              {/* Unknown (null) while one listed product's numbers did not read: no rating, never a total without them. */}
+              {rating !== null && showsRating(rating) ? (
                 <div className="st-card px-5 py-4 text-center">
                   <dt className="st-muted text-sm font-semibold">{w.ratingLabel}</dt>
                   <dd className="font-display mt-1 text-2xl font-semibold tabular-nums">

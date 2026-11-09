@@ -186,10 +186,17 @@ async function main(): Promise<void> {
     ["numbers", [[PRODUCT, 2]]],
     ["a hole", [sparse(2)]],
     ["a field that is not a product", [["../x", good]]],
-    ...badNumbers.map(([what, value]) => [`numbers ${what}`, [[PRODUCT, value]]]),
   ] as [string, unknown][]) {
     swap("HGETALL", SUM, reply);
     is(`summaries, ${label}: unknown`, (await outcome(() => summaries(STATS))).result, "unknown");
+  }
+  // Rule 23 (claude5/reviews-recount-exact, the per-product fix): one product's numbers not in their exact shape were
+  // "unknown" for the whole store, which took every product's stars away; now only that product is unread (no stars,
+  // never a number), and the reply's own shape is still unknown for all (above). tests/reviews-unread-isolated.test.ts.
+  for (const [what, value] of badNumbers) {
+    swap("HGETALL", SUM, [[PRODUCT, value]]);
+    const read = (await outcome(() => summaries(STATS))).result;
+    is(`summaries, numbers ${what}: that product is unread`, read instanceof Map ? [...(read as Map<string, unknown>)] : read, [[PRODUCT, "unread"]]);
   }
   for (const [label, reply] of [
     ["no reply", []],
@@ -255,22 +262,38 @@ async function main(): Promise<void> {
   part("A removed product's reviews are never dropped from an unknown read");
   // Read with one HGETALL (ids and records from one moment), no longer HKEYS then HVALS: the replies below are that
   // command's (rule 23, see the fix's commit).
+  // Rule 23 (the per-product fix): "a stored review that does not read" and "a record under another id" left this list.
+  // They were unknown and nothing was dropped, so a removed product's reviews stayed with no way out; such a record
+  // answered in its exact place is damaged, not unknown, and is dropped with the others below (its photo cannot be
+  // found, and the log says so). tests/reviews-unread-isolated.test.ts holds it with photos.
   for (const [label, reply] of [
     ["no reply", []],
     ["nil", [null]],
     ["an id without its record", "odd"],
-    ["a stored review that does not read", null],
-    ["a record under another id", "swapped"],
+    ["a field that is not a review id", "badfield"],
   ] as [string, unknown][]) {
     const { ids, rows } = await seed();
-    const answer =
-      reply === null ? [[ids[0], rows[0], ids[1], "{not json"]] : reply === "swapped" ? [[ids[0], rows[1], ids[1], rows[0]]] : reply === "odd" ? [[ids[0], rows[0], ids[1]]] : reply;
+    const answer = reply === "odd" ? [[ids[0], rows[0], ids[1]]] : reply === "badfield" ? [["../x", rows[0], ids[1], rows[1]]] : reply;
     const read = swap("HGETALL", RECORDS, answer);
     is(`${label}: unknown`, (await outcome(() => dropReviews(STATS, PRODUCT))).result, "unknown");
     is(`${label}: read`, read.hit(), true);
     is(`${label}: the reviews are kept`, await raw(["HLEN", RECORDS]), 2);
     is(`${label}: and the studio's list of them`, await raw(["ZCARD", ALL]), 2);
     is(`${label}: and the numbers`, typeof (await raw(["HGET", SUM, PRODUCT])), "string");
+  }
+
+  for (const [label, damaged] of [
+    ["a stored review that does not read", (ids: string[], rows: string[]) => [ids[0], rows[0], ids[1], "{not json"]],
+    ["a record under another id", (ids: string[], rows: string[]) => [ids[0], rows[1], ids[1], rows[0]]],
+  ] as [string, (ids: string[], rows: string[]) => string[]][]) {
+    const { ids, rows } = await seed();
+    swap("HGETALL", RECORDS, [damaged(ids, rows)]);
+    const { result, logged } = await outcome(() => dropReviews(STATS, PRODUCT));
+    is(`${label}: dropped with the others, no photo taken from it`, result, []);
+    is(`${label}: the log says so`, logged > 0, true);
+    is(`${label}: the reviews are gone`, await raw(["HLEN", RECORDS]), 0);
+    is(`${label}: and the studio's list of them`, await raw(["ZCARD", ALL]), 0);
+    is(`${label}: and the numbers`, await raw(["HGET", SUM, PRODUCT]), null);
   }
 
   part("Dropping a removed product's reviews: control");
@@ -290,7 +313,7 @@ async function main(): Promise<void> {
     studio.includes('<p className="mt-2 text-sm text-ink-soft" role="status">The totals could not be read just now. Reload to try again; this does not mean there are none.</p>'),
     true,
   );
-  is("the AI summaries are not drawn from totals that were not read", studio.includes("const aiSummaries = keptSummaries === null || numbers === null ? null"), true);
+  is("the AI summaries are not drawn from totals that were not read", studio.includes("const aiSummaries = keptSummaries === null || numbers === null || (summed.length === 0 && unreadTotals > 0) ? null"), true);
   is("the reviews page keeps a failed read of the totals as unknown", reviewsPage.includes("summaryOf(store.statsId, product.id).catch((): null => null)"), true);
   is("and then reads no reviews, saying they could not be loaded", reviewsPage.includes("const reviews = summary === null ? null :"), true);
   is("and never says there are none to show", reviewsPage.includes("{summary !== null && summary.visible === 0 ?"), true);

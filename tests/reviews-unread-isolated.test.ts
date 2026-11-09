@@ -202,7 +202,7 @@ async function main(): Promise<void> {
   is("the media kit's stars only when known", kit.includes("rating !== null && showsRating(rating)"), true);
   is(
     "the studio says which product's totals did not read, in a live region",
-    studio.includes("Its totals could not be read just now. Reload to try again; this does not mean it has none."),
+    studio.includes("Its totals could not be read, so no stars are shown for it on your pages. They are counted again from its reviews the next time one of them changes. This does not mean it has none."),
     true,
   );
   is("the studio says how many reviews on the page did not read", studio.includes("current.unreadable"), true);

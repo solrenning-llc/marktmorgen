@@ -45,6 +45,7 @@ function subscription(id: string): Record<string, unknown> {
   return {
     id,
     status: "active",
+    cancel_at: null,
     cancel_at_period_end: false,
     items: {
       data: [

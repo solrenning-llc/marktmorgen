@@ -17,13 +17,15 @@
  * over. A package refunded in full books nothing more. A package with a last
  * day to book is kept a year past it, then dropped.
  *
- *   nl:pkg:t:<sha(token)>:used  the sessions it spent for good, kept exactly as long as the package
+ *   nl:pkg:t:<sha(token)>:used  how each past hold ended, for good: spent or left unpaid; kept exactly as long as the package
  *
  * A booked session's own mark (nl:call:confirmed, lib/calls.ts) lives
  * CONFIRMED_SECONDS, while a package with no last day lives for good (Claude 6,
  * R40): each confirmed session is written down with the package the first time
- * it is seen, and a session whose mark may have expired unseen, or whose mark
- * is not read for sure, counts as spent. Unknown never frees a session.
+ * it is seen, and so is a hold read for sure as never confirmed a week after it
+ * ended (Claude 6 on #3487). A hold whose ending was never read for sure, once
+ * its mark could have expired, or whose mark is not read for sure, counts as
+ * spent. Unknown never frees a session.
  */
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
@@ -37,7 +39,7 @@ import { purchaseRefunded } from "@/lib/refunds";
 import { sendEmail } from "@/lib/email";
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { withLock } from "@/lib/redis-lock";
-import type { CallPackage } from "@/lib/call-package-rules";
+import { MAX_PACKAGE_SESSIONS, type CallPackage } from "@/lib/call-package-rules";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { speechFor, wordsIn } from "@/lib/buyer-words";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -70,10 +72,12 @@ export type Bought = {
 const sha = (v: string) => createHash("sha256").update(v).digest("hex");
 const pkgKey = (checkout: string) => `nl:pkg:${checkout}`;
 const tokenKey = (token: string) => `nl:pkg:t:${sha(token)}`;
-/** The sessions a package spent for good, a short id of each (spentId): at most its `total`, kept as long as the package. */
+/** How a package's past holds ended (endedAs): at most its `total` spent and MAX_PACKAGE_SESSIONS left unpaid, kept as long as the package. */
 const usedKey = (token: string) => `${tokenKey(token)}:used`;
-/** A session's short id in usedKey: 16 hex characters, so a package's set stays under SPENT_SET_BYTES. */
-const spentId = (session: string) => sha(session).slice(0, 16);
+/** A hold's ending in usedKey: "u" spent or "f" left unpaid, then 15 hex characters of its session, 16 in all. */
+const endedAs = (ending: "u" | "f", session: string) => `${ending}${sha(session).slice(0, 15)}`;
+/** Holds left unpaid written down per package: past that, a later one is not, and counts as spent once its mark could have expired. */
+const FREED_MAX = MAX_PACKAGE_SESSIONS;
 /**
  * The packages a store sold (added 18 October 2026): a package with no last
  * day is kept for as long as it can be used, and is named by its checkout,
@@ -110,17 +114,20 @@ export async function boughtByToken(token: string): Promise<{ checkout: string; 
  * How long after a hold's end a missing confirmation mark still means "never
  * confirmed": the mark is written after the hold began and lives
  * CONFIRMED_SECONDS, so it is there until then for sure (two days spare for
- * the hold itself). Past that, a missing mark may have expired: spent.
+ * the hold itself). Past that, a missing mark may have expired.
  */
 const MARK_SURE_SECONDS = CONFIRMED_SECONDS - 2 * 86_400;
+/** A hold read for sure as never confirmed this long after it ended is written down as left unpaid: a late confirmation has had a week. */
+const FREED_AFTER_SECONDS = 7 * 86_400;
 
 /**
  * Sessions spent: held now, written down as spent with the package, or
- * confirmed. A hold past its time comes back only when Redis answers, for
- * sure, that its mark is not there while the mark could not yet have
- * expired; any other answer, or none, counts it spent (rule 24). A
- * confirmation seen for the first time is written down with the package, so
- * it outlives its mark.
+ * confirmed. A hold past its time comes back when it was written down as left
+ * unpaid, or when Redis answers, for sure, that its mark is not there while
+ * the mark could not yet have expired; any other answer, or none, counts it
+ * spent (rule 24). A confirmation seen for the first time is written down with
+ * the package, so it outlives its mark, and so is a hold a week past its end
+ * read for sure as never confirmed; a confirmation seen later still wins.
  */
 export async function spent(bought: Bought, at = now()): Promise<number> {
   const past = bought.holds.filter((hold) => hold.until + HOLD_GRACE_SECONDS <= at);
@@ -135,26 +142,43 @@ export async function spent(bought: Bought, at = now()): Promise<number> {
   if (!Array.isArray(answers) || answers.length !== past.length + 1) return bought.holds.length;
   const listed = answers[0];
   const kept = Array.isArray(listed) && listed.every((id) => typeof id === "string") ? new Set<string>(listed) : null;
-  const seen: string[] = [];
+  const used: string[] = [];
+  const freed: string[] = [];
   past.forEach((hold, i) => {
-    const id = spentId(hold.session);
     const mark = answers[i + 1];
-    if (kept?.has(id)) n += 1;
-    else if (mark === 0 && at < hold.until + MARK_SURE_SECONDS) return;
-    else {
+    const u = endedAs("u", hold.session);
+    const f = endedAs("f", hold.session);
+    if (kept?.has(u) || mark === 1) {
       n += 1;
-      if (mark === 1) seen.push(id);
-    }
+      if (mark === 1 && kept && !kept.has(u)) used.push(u);
+    } else if (mark === 0 && kept?.has(f)) {
+      return;
+    } else if (mark === 0 && at < hold.until + MARK_SURE_SECONDS) {
+      if (kept && at >= hold.until + FREED_AFTER_SECONDS) freed.push(f);
+    } else n += 1;
   });
-  // Written down once, while the mark is still there; never more than the package holds.
-  const room = kept ? bought.total - kept.size : 0;
-  if (seen.length && room > 0) {
-    const ttl = keep(bought);
-    await redisPipeline([["SADD", usedKey(bought.token), ...seen.slice(0, room)], ...(ttl.length ? [["EXPIRE", usedKey(bought.token), ttl[1]]] : [])]).catch((error) =>
-      console.error("writing down a package's spent sessions failed; tried again on the next reading", error),
-    );
-  }
+  if (!kept) return n;
+  // Written down while the mark still says it for sure; never more than the package can hold.
+  const count = (ending: string) => [...kept].filter((id) => id.startsWith(ending)).length;
+  const adds = [...used.slice(0, Math.max(0, bought.total - count("u"))), ...freed.slice(0, Math.max(0, FREED_MAX - count("f")))];
+  if (adds.length) await writeEndings(bought, adds);
   return n;
+}
+
+/**
+ * Adds to a package's record of how its holds ended, with the package's own
+ * expiry, and takes it away again when the package is gone by then (a closing
+ * store deletes its keys), so nothing is left behind for good.
+ */
+async function writeEndings(bought: Bought, adds: string[]): Promise<void> {
+  const key = usedKey(bought.token);
+  const ttl = keep(bought);
+  try {
+    const replies = await redisPipeline([["SADD", key, ...adds], ...(ttl.length ? [["EXPIRE", key, ttl[1]]] : []), ["EXISTS", tokenKey(bought.token)]]);
+    if (replies[replies.length - 1] !== 1) await redisPipeline([["DEL", key]]);
+  } catch (error) {
+    console.error("writing down how a package's holds ended failed; tried again on the next reading", error);
+  }
 }
 
 export type PackageState = { left: number; total: number; expired: boolean; until: number };

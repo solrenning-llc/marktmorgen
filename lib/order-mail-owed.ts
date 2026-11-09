@@ -34,6 +34,20 @@
  * path drops a deleted address. A read of it that does not answer 0 or 1
  * (rule 24) leaves the email for the next try, sending nothing.
  *
+ * A creator's own notice about an order (sendStoreNotice: a buyer waits for
+ * a license key, the pool of keys runs low, lib/licence-keys.ts; rule 30 of
+ * EM1) is owed the same way, with three differences. Every try is taken from
+ * the store's own email figure (meter "store"), as the notice always was, so
+ * a notice that is sent takes it once and N certain refusals take it at most
+ * REFUSED_TRIES times. It carries what must still be true for it to be sent
+ * (`still`: the buyer still waits, the pool's warning is still the one
+ * claimed), read before each try again, so a notice no longer true is let go
+ * unsent and takes nothing. And given up it is logged only: the creator is
+ * the one it could not reach. It goes to the creator's own address, which is
+ * not a subscriber of the store, so the erased prints (M1) are not read for
+ * it; the buyer a waiting notice names is covered by `still` (the waiting
+ * record), which is gone once the buyer is served or the sale forgotten.
+ *
  * Keys (one family, nl:owedmail:):
  *
  *   nl:owedmail:due        sorted set for every store: "<id>|<store>", scored
@@ -52,6 +66,7 @@
  */
 import { createHash } from "node:crypto";
 import { NIMBUS_FROM, type SendOutcome, sendEmailOutcome } from "@/lib/email";
+import type { AllowanceStore } from "@/lib/store-allowance";
 import { REFUSED_TRIES, countRefusal } from "@/lib/refused-tries";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -63,6 +78,12 @@ export type OrderMessage = Omit<Parameters<typeof sendEmailOutcome>[0], "meter" 
 };
 /** The store an order email is for: who is told when it is given up, where the cap is counted, and whom it erased. */
 export type OwedStore = { statsId?: string | null; handle: string; email: string; name: string; listId?: string | null };
+/** A store as the email job reads it back: its plan's fields too, when a creator's notice is taken from its figure. */
+export type OwedStoreRead = OwedStore & Partial<AllowanceStore>;
+/** What must still be true for a creator's notice to be sent: a hash's field still there, or a key still holding the value claimed. */
+export type Still = { key: string; field: string } | { key: string; value: string };
+/** A creator's own notice about an order (sendStoreNotice): an order email's shape, with what must still be true. */
+export type StoreNotice = OrderMessage & { still: Still };
 
 /** Emails a store may owe at once (its notices about given-up ones included); one more is given up, and its creator told. */
 export const OWED_MAIL_PER_STORE = 20;
@@ -128,10 +149,15 @@ async function erased(listId: string | null | undefined, email: string): Promise
   }
 }
 
-/** "n": a notice to the creator about an email given up, given up itself only with a log. */
-type Owed = { h: string; s: string; m: OrderMessage; t: number; n?: 1 };
+/**
+ * "n": a notice to the creator (about an email given up, or a license-key
+ * notice), given up itself only with a log. "k" and "w": a license-key notice,
+ * taken from its store's figure while `w` still holds.
+ */
+type Owed = { h: string; s: string; m: OrderMessage; t: number; n?: 1; k?: "store"; w?: Still };
 
 const asMessage = (message: OrderMessage) => ({ meter: { by: "order" } as const, ...message });
+const asNotice = (store: AllowanceStore, message: OrderMessage) => ({ meter: { by: "store", store, kind: "email" } as const, ...message });
 /** The name its refusals are counted under (lib/refused-tries.ts): the email's own key. */
 const refusalName = (message: OrderMessage) => `owedmail:${message.idempotencyKey}`;
 const storeOf = (store: OwedStore) => store.statsId || store.handle;
@@ -151,13 +177,25 @@ const SAID: Record<Reason, string> = {
  * already, and its caller goes on.
  */
 export async function sendOrderMail(store: OwedStore, message: OrderMessage, what: string): Promise<SendOutcome> {
-  return firstTry(store, message, what, false);
+  return firstTry(store, message, what, false, null);
 }
 
-async function firstTry(store: OwedStore, message: OrderMessage, what: string, notice: boolean): Promise<SendOutcome> {
+/**
+ * Sends a creator's own notice about an order (above), from the store's own
+ * email figure, and keeps it owed, with what must still be true for it, when
+ * a sender refused it for certain. Never throws for the notice's sake.
+ */
+export async function sendStoreNotice(store: OwedStore & AllowanceStore, notice: StoreNotice, what: string): Promise<SendOutcome> {
+  const { still, ...message } = notice;
+  return firstTry(store, message, what, true, { store, still });
+}
+
+type Held = { store: AllowanceStore; still: Still };
+
+async function firstTry(store: OwedStore, message: OrderMessage, what: string, notice: boolean, held: Held | null): Promise<SendOutcome> {
   let outcome: SendOutcome;
   try {
-    outcome = await sendEmailOutcome(asMessage(message));
+    outcome = await sendEmailOutcome(held ? asNotice(held.store, message) : asMessage(message));
   } catch (error) {
     // Thrown after it may have been handed over: never sent again.
     console.error(`${what}: the send threw; it may have gone, so it is not sent again`, error);
@@ -170,19 +208,19 @@ async function firstTry(store: OwedStore, message: OrderMessage, what: string, n
     await giveUp(store, message, what, "unsaved", notice);
     return outcome;
   }
-  const kept = await owe(store, message, OWED_MAIL_RETRY_SECONDS[0], notice);
+  const kept = await owe(store, message, OWED_MAIL_RETRY_SECONDS[0], notice, held?.still ?? null);
   if (kept !== "kept") await giveUp(store, message, what, kept, notice);
   else console.error(`${what}: refused for certain; kept to be tried again`);
   return outcome;
 }
 
 /** Writes the email down as owed, tried again `after` seconds from now. */
-async function owe(store: OwedStore, message: OrderMessage, after: number, notice: boolean): Promise<"kept" | Reason> {
+async function owe(store: OwedStore, message: OrderMessage, after: number, notice: boolean, still: Still | null): Promise<"kept" | Reason> {
   if (!isRedisConfigured()) return "unsaved";
   const owner = storeOf(store);
   if (!owner || !/^[A-Za-z0-9_-]{1,80}$/.test(owner)) return "unsaved";
   const id = idOf(message.idempotencyKey);
-  const entry: Owed = { h: store.handle, s: owner, m: message, t: now(), ...(notice ? { n: 1 as const } : {}) };
+  const entry: Owed = { h: store.handle, s: owner, m: message, t: now(), ...(notice ? { n: 1 as const } : {}), ...(still ? { k: "store" as const, w: still } : {}) };
   const json = JSON.stringify(entry);
   if (Buffer.byteLength(json) > OWED_MAIL_MAX_BYTES) return "heavy";
   try {
@@ -215,7 +253,8 @@ async function finish(id: string, owner: string): Promise<void> {
  * Gives an order email up: logged, and its creator told once, so the buyer
  * hears from them. Not when the email was the creator's own (telling the
  * address that refused it would be refused too), not about an erased person
- * (their address is not carried to anyone), and not about a notice itself.
+ * (their address is not carried to anyone), and not about a notice itself
+ * (a license-key notice to the creator included: it was to them).
  * The notice is an owed email of its own (A1): refused, it is kept and tried
  * again, so a sender refusing for a while does not lose both.
  */
@@ -250,7 +289,7 @@ async function giveUp(store: OwedStore, message: OrderMessage, what: string, why
       "The order itself is recorded as usual. Please get in touch with them yourself, so they are not left waiting.",
     ].join("\n"),
     idempotencyKey: `nimbus-owed-told:${id}`,
-  }, `${what}, its creator's notice`, true);
+  }, `${what}, its creator's notice`, true, null);
 }
 
 /**
@@ -260,7 +299,7 @@ async function giveUp(store: OwedStore, message: OrderMessage, what: string, why
  * run cut short never tries it again sooner.
  */
 export async function sendOwedOrderMail(
-  storeFor: (handle: string) => Promise<OwedStore | null>,
+  storeFor: (handle: string) => Promise<OwedStoreRead | null>,
   deadline: number,
 ): Promise<{ sent: number; owed: number; given: number }> {
   const counts = { sent: 0, owed: 0, given: 0 };
@@ -289,7 +328,7 @@ export async function sendOwedOrderMail(
     let entry: Owed | null = null;
     try {
       const parsed = JSON.parse(String(value)) as Owed;
-      if (parsed && typeof parsed.h === "string" && parsed.s === owner && parsed.m && typeof parsed.m.to === "string" && typeof parsed.m.idempotencyKey === "string" && idOf(parsed.m.idempotencyKey) === id) entry = parsed;
+      if (parsed && typeof parsed.h === "string" && parsed.s === owner && parsed.m && typeof parsed.m.to === "string" && typeof parsed.m.idempotencyKey === "string" && idOf(parsed.m.idempotencyKey) === id && kindKnown(parsed)) entry = parsed;
     } catch {}
     if (!entry) {
       console.error("an owed order email did not read; dropped", id);
@@ -299,7 +338,7 @@ export async function sendOwedOrderMail(
     const notice = entry.n === 1;
     const what = `an owed order ${notice ? "notice" : "email"} of ${entry.h}`;
     const store = await storeFor(entry.h).catch(() => null);
-    const current: OwedStore = store ?? { handle: entry.h, email: "", name: "", statsId: entry.s };
+    const current: OwedStore = store ? { handle: store.handle, email: store.email, name: store.name, statsId: store.statsId, listId: store.listId } : { handle: entry.h, email: "", name: "", statsId: entry.s };
     // An erased person is never sent it (M1); not known, it waits for its next try.
     const gone = notice ? false : await erased(store?.listId, entry.m.to);
     if (gone === null) continue;
@@ -308,9 +347,25 @@ export async function sendOwedOrderMail(
       await finish(id, owner);
       continue;
     }
+    let figure: AllowanceStore | null = null;
+    if (entry.k === "store" && entry.w) {
+      // A creator's license-key notice is sent only while it is true, and only from its store's own figure: a store that
+      // does not read whole, or a condition whose answer is not known, sends nothing now (tried at the lease's time).
+      const holds = await stillHolds(entry.w);
+      if (holds === false) {
+        console.error(`${what}: a creator's notice is no longer true; let go unsent`);
+        await finish(id, owner);
+        continue;
+      }
+      figure = store && store.statsId === entry.s && allowanceStore(store) ? store : null;
+      if (holds === null || !figure) {
+        console.error(`${what}: a creator's notice could not be checked (${holds === null ? "its condition did not read" : "its store did not read"}); tried later`);
+        continue;
+      }
+    }
     let outcome: SendOutcome;
     try {
-      outcome = await sendEmailOutcome(asMessage(entry.m));
+      outcome = await sendEmailOutcome(figure ? asNotice(figure, entry.m) : asMessage(entry.m));
     } catch (error) {
       console.error(`${what}: the send threw; it may have gone, so it is not sent again`, error);
       outcome = "uncertain";
@@ -335,4 +390,36 @@ export async function sendOwedOrderMail(
     await giveUp(current, entry.m, what, "tried", notice);
   }
   return counts;
+}
+
+/** An owed email's kind reads exactly: an order email, or a creator's license-key notice (n 1) with what must still be true. */
+function kindKnown(entry: Owed): boolean {
+  if (entry.k === undefined) return entry.w === undefined;
+  if (entry.k !== "store" || entry.n !== 1 || !entry.w || typeof entry.w !== "object" || typeof entry.w.key !== "string" || !entry.w.key) return false;
+  const w = entry.w as Record<string, unknown>;
+  return Object.keys(w).length === 2 && (typeof w.field === "string" || typeof w.value === "string");
+}
+
+/** Whether a creator's notice is still true: true, false, or null when the answer is not in its exact shape. */
+async function stillHolds(still: Still): Promise<boolean | null> {
+  try {
+    if ("field" in still) {
+      const replies = repliesFor(await redisPipeline([["HEXISTS", still.key, still.field]]), 1);
+      const count = replies ? countOf(replies[0]) : null;
+      return count === 1 ? true : count === 0 ? false : null;
+    }
+    const replies = repliesFor(await redisPipeline([["GET", still.key]]), 1);
+    if (!replies) return null;
+    const [value] = replies;
+    if (value === null) return false;
+    return typeof value === "string" ? value === still.value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A store read back whole enough for its email figure: its plan's fields, each in its type. */
+function allowanceStore(store: OwedStoreRead): store is OwedStore & AllowanceStore {
+  return typeof store.subscriptionActive === "boolean" && (store.subscriptionId === null || typeof store.subscriptionId === "string") &&
+    typeof store.trialEnds === "number" && typeof store.planEndedAt === "string";
 }

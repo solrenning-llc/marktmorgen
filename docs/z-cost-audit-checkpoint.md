@@ -1,3 +1,9 @@
+# Codex Z — r21 delivery supplement, 2026-11-09 03:41 UTC
+
+The attempted ROOT CXZ-20261109-0040-C1-1 append returned actual409 and did NOT write. Fresh ROOTf812595bd552d310b66740769fba30650affea66/FULL7207182 preserves prior7206272 WHOLEprefixEXACT and ID0040 is ABSENT. Delta910FULLread: C5claims2261/2971 and2957focaldelivery; allTHEIRS, noZgrant/owncorrective. Conservative cooldownclock03:40:23UTC; no NEXT ROOTWRITE before03:42:23UTC, thenfreshFULL/prefix/uniqueID. No technical tests/source/CI operations in wait. Preserve originalpendingbody; updateprefix rather thanoverwrite concurrentmessages. Latest substantive r21checkpoint FULL764111 retained ENTIRELY below, all five own units/caps/REDs/WIPs/retries unchanged. FinalROOTreceipt/readback still required before ending. No background watcher/automation change.
+
+---
+
 # Codex Z — r21 checkpoint, 2026-11-09 03:39 UTC (09/11 00:39 Fortaleza)
 
 FIRST latest remote checkpoint FULL760032/blobbeb33836f804cfed635c14f920a619904c1da9dc/commit397742106552b49e715640855800be9a19e37315 recovered IN ENTIRETY; exact known immutable blob identity. ENTIRE history retained below; no smaller replacement or reconstructed RED/log. Five own authored units2741/2819/reminder27bb/askModele274/summary3e45, all heads/WIPs/REDs/HOLDs/consumedretry+cap ledgers preserved; no sixth.

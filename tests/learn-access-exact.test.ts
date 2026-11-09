@@ -163,6 +163,8 @@ async function main(): Promise<void> {
 
   part("A one-off written down on the thanks page waits for Stripe to say it was not refunded");
   await forgetPaid(store, "leo@example.com");
+  // The stranger's whole answer from the controls is kept ten minutes and rightly decides: ask again.
+  await forgetPaid(store, "nobody@example.com");
   garble = GARBLED[0][1];
   is("a one-off written down, refund not readable: unknown, not open", await stateOf("leo@example.com", one), "unknown");
   is("a stranger is not confirmed either: nothing tells the two apart, and nothing opens", await stateOf("nobody@example.com", one), "unknown");

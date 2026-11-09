@@ -78,7 +78,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const jar = await cookies();
   const access = await courseAccess(store, product, jar);
   // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
-  const forgetKey = access.state !== "open" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
+  // Not while Stripe could not be read: that student may well still have the course.
+  const forgetKey = access.state !== "open" && access.state !== "unknown" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
   const open = access.state === "open";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's
@@ -206,6 +207,18 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
+          {access.state === "unknown" ? (
+            <div className="st-note mt-6" role="status">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.accessUnknownTitle}</p>
+              <p className="mt-1 text-sm">{w.accessUnknownBody}</p>
+              <p className="mt-2 text-sm">
+                <Link href={base} className="font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+                  {w.accessUnknownAgain}
+                </Link>
+              </p>
+            </div>
+          ) : null}
+
           {open ? (
             <div className="mt-6">
               {!access.learner.owner ? (
@@ -276,7 +289,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </div>
               ) : null}
             </div>
-          ) : (
+          ) : access.state === "unknown" ? null : (
             <div className="mt-6 space-y-6">
               {selling ? (
                 <form action="/api/store/checkout" method="post" target="_top" data-checkout="">

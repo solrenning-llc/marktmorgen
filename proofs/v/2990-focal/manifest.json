@@ -1,0 +1,120 @@
+{
+  "artifacts": 26,
+  "jsonBytes": 543344,
+  "sha256": "75d079bfffe4b20e3375a34c39ceaa2869fd08d38c0f96468c9a66a6653b8191",
+  "files": [
+    {
+      "path": "proofs/v/2990-focal/composition-initial.json",
+      "sha256": "1b2a8fd705ce3029f1ec587bbfc8ce5413b11e4740e100228f1ab10d621417d2"
+    },
+    {
+      "path": "proofs/v/2990-focal/composition.json",
+      "sha256": "cfdbbb1be5589a89ea86dc7d1bb762348d18ef427b693547bb7cc185e4e01265"
+    },
+    {
+      "path": "proofs/v/2990-focal/dependencies.json",
+      "sha256": "c3a2d57c9a7c51987bc14d46e3e8eafca8b8d2e3fc15ea158c18497accbb6c41"
+    },
+    {
+      "path": "proofs/v/2990-focal/diff-initial.json",
+      "sha256": "44c6cfe86a856b513c5abcde5ce55f6d7f071ee7814b4710e1cbdf5bf31b7e5f"
+    },
+    {
+      "path": "proofs/v/2990-focal/essential-limit-state.test.ts.head.json",
+      "sha256": "775dc4f60460abcc9866d3abfa94d883a01feb4ae2292f74526bef5480b513ee"
+    },
+    {
+      "path": "proofs/v/2990-focal/essential-limit-state.test.ts.imports.json",
+      "sha256": "69cca47231120666c02aa8931f05a1c2a2dd14ec04d400394917c07eb9e38468"
+    },
+    {
+      "path": "proofs/v/2990-focal/essential-studio-allowance.test.ts.head.json",
+      "sha256": "559c4fe59899a431272d179bc7456992b06ab70c0219590d5df10f373977fad1"
+    },
+    {
+      "path": "proofs/v/2990-focal/essential-studio-allowance.test.ts.imports.json",
+      "sha256": "cf1a7084eca409da3d6d7006b0994176c7848e2700b06c24e724d8e970f17efe"
+    },
+    {
+      "path": "proofs/v/2990-focal/final-checks.json",
+      "sha256": "bf21a973f8cca4b8a8e3d3dee570bc769050fa28a57901441f4e188005a517c6"
+    },
+    {
+      "path": "proofs/v/2990-focal/group-place-delivery-copy.test.ts.head.json",
+      "sha256": "3dc00950752a8c8c78a4df3b7cc900a81f4c4dabfaf0f5b7e50952f6e7fbb038"
+    },
+    {
+      "path": "proofs/v/2990-focal/group-place-delivery-copy.test.ts.imports.json",
+      "sha256": "75ab231bee95f486c117937a602b0f2db11301de95bed0c7a18258f97d6f8c20"
+    },
+    {
+      "path": "proofs/v/2990-focal/lint.json",
+      "sha256": "c2205751ff4d70bd3ee34f15f55565f86ea111cef3a333be4c207993c8656df5"
+    },
+    {
+      "path": "proofs/v/2990-focal/plan-invoices-amounts.test.ts.head.json",
+      "sha256": "f3834ac40037389bb22951f615acf8576a53c02365a8cfc91deef25535106380"
+    },
+    {
+      "path": "proofs/v/2990-focal/plan-invoices-amounts.test.ts.imports.json",
+      "sha256": "ff41f84ad3699b35513b049f2ae528b0a537b5f5a3df148a435315b525ed8d53"
+    },
+    {
+      "path": "proofs/v/2990-focal/plan-invoices.test.ts.head.json",
+      "sha256": "cfe6226c88ba1f29f5137bdb8b99886fa61da833fa631484154b00b80d347e8a"
+    },
+    {
+      "path": "proofs/v/2990-focal/plan-invoices.test.ts.imports.json",
+      "sha256": "f46b3113b73a32a1d3df9f6f9c002a2139d06825bb7b156a8bd83149d9360221"
+    },
+    {
+      "path": "proofs/v/2990-focal/redis-memory.ts.conflicted.json",
+      "sha256": "05f3e9798732131219b5471cba094ad48d5c0d03c5725e306cdfe3c7872b1334"
+    },
+    {
+      "path": "proofs/v/2990-focal/redis-memory.ts.union.txt",
+      "sha256": "73b07a90847e357c238e2dfe38e4de1cde4b55b2572b4dff00c05880b2c139de"
+    },
+    {
+      "path": "proofs/v/2990-focal/request-guard-shape.test.ts.head.json",
+      "sha256": "dbc4040273c7005f6b7b20df4e8a29ce5119c7746353cd254160d9f7a7816ebd"
+    },
+    {
+      "path": "proofs/v/2990-focal/request-guard-shape.test.ts.imports.json",
+      "sha256": "770c255c1e85bb44799afd777cc2b4aac1bb978cda817f13bd1f9bd8347daca8"
+    },
+    {
+      "path": "proofs/v/2990-focal/run.mjs",
+      "sha256": "9dcc08aa333a466996c6033ca640ab71cdbfb4dd7ea74d31922c357d7303b3e8"
+    },
+    {
+      "path": "proofs/v/2990-focal/studio-route.ts.conflicted.json",
+      "sha256": "cbe8be1f86ac3e0564e98f4b89dc85ca52e3f801e3a2407798125e3872a7ab0b"
+    },
+    {
+      "path": "proofs/v/2990-focal/studio-route.ts.union.txt",
+      "sha256": "f29e535cd4552f096deb6cd44c729a05b5e0a1e92c68d6a8ec9bb3cf4c44b596"
+    },
+    {
+      "path": "proofs/v/2990-focal/types.log",
+      "sha256": "e4324e66c309059f91ce13781ca5be749cc8e7a7a6e9a63781d57ab83e2cc3bb"
+    },
+    {
+      "path": "proofs/v/2990-focal/types.mjs",
+      "sha256": "62e6c4ba6ddfb9e5e9b5a078a82c70d8f39cd3c9a13058e37e72b701bb613254"
+    },
+    {
+      "path": "proofs/v/2990-focal/whole-tree.json",
+      "sha256": "33b0e637da674d4b2e51547df39b3563a2a7b55b8997b179949cfbc33b27a154"
+    }
+  ],
+  "transport": {
+    "parts": [
+      "proofs/v/2990-focal/archive.part1.b64",
+      "proofs/v/2990-focal/archive.part2.b64",
+      "proofs/v/2990-focal/archive.part3.b64",
+      "proofs/v/2990-focal/archive.part4.b64"
+    ],
+    "decode": "Concatenate trimmed base64 parts in order, decode base64, decompress gzip, parse JSON. Each artifact data is UTF8; verify its sha256."
+  }
+}

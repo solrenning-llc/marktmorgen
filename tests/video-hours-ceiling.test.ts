@@ -196,6 +196,16 @@ async function main(): Promise<void> {
     is("read before its token ran out: still in line, the hold kept", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [true, 5]);
     await measureDue(Date.now() + 60_000, start + 3 * 3600 * 1000);
     is("read an interval after it ran out: given back, and out of line", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [false, 0]);
+    // A count of what is held that cannot be read keeps the store in line (rule 24), never takes it out.
+    await redis.pipeline([["ZADD", "nl:watch:due", 0, FOLDER]]);
+    const pipeline = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = await pipeline(commands);
+      return commands.map((c, i) => (c[0] === "ZCARD" && c[1] === HOLDS ? "not a count" : replies[i]));
+    }) as typeof redis.pipeline;
+    await measureDue(Date.now() + 60_000, start + 3 * 3600 * 1000);
+    redis.pipeline = pipeline;
+    is("a count of what is held that cannot be read keeps the store in line", await due(), true);
   }
 
   part("a lesson's token: its length and the pauses, never past four hours");

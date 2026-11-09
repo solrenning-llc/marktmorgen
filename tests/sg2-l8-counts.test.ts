@@ -185,7 +185,9 @@ async function main(): Promise<void> {
   const DUE = "nl:watch:due";
   for (const [label, reply] of BAD_GETS) {
     await redis.pipeline([["ZADD", DUE, 0, folder]]);
-    rule = { when: first("GET", "nl:watch:opened:"), reply };
+    // Rule 23 (9 November 2026): the opened mark is read with the count of playback held (lib/watch.ts, holdPlayback),
+    // a ZCARD beside the GET. A one-slot bad reply is given its held count (none) so the GET's own slot is what is unknown.
+    rule = { when: first("GET", "nl:watch:opened:"), reply: Array.isArray(reply) && reply.length === 1 ? [...reply, 0] : reply };
     const now = Date.now();
     await outcome(() => measureDue(now + 60_000, now));
     rule = null;
@@ -194,13 +196,14 @@ async function main(): Promise<void> {
   }
   {
     await redis.pipeline([["ZADD", DUE, 0, folder]]);
-    rule = { when: first("GET", "nl:watch:opened:"), reply: [null] };
+    // Rule 23 (9 November 2026): was [null]; the GET is now beside a ZCARD of the playback held, here none (0).
+    rule = { when: first("GET", "nl:watch:opened:"), reply: [null, 0] };
     const now = Date.now();
     await measureDue(now + 60_000, now);
     rule = null;
     is("measureDue: never opened (no key) is taken out of line, as before", (await redis.pipeline([["ZSCORE", DUE, folder]]))[0], null);
     await redis.pipeline([["ZADD", DUE, 0, folder]]);
-    rule = { when: first("GET", "nl:watch:opened:"), reply: [String(now - 1000)] };
+    rule = { when: first("GET", "nl:watch:opened:"), reply: [String(now - 1000), 0] };
     await measureDue(now + 60_000, now);
     rule = null;
     is("measureDue: opened a moment ago stays in line for the next hour", Number((await redis.pipeline([["ZSCORE", DUE, folder]]))[0]), now + MEASURE_EVERY_MS);

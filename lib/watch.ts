@@ -173,12 +173,12 @@ export async function holdPlayback(folder: string, month: string, limit: number,
   const units = Math.min(Math.ceil(wanted / HOLD_UNIT_SECONDS), Math.floor(PLAYER_SECONDS / HOLD_UNIT_SECONDS), HOLD_UNITS_MOST);
   const runsOut = now + units * HOLD_UNIT_SECONDS * 1000;
   const mark = randomBytes(6).toString("hex");
-  const members = Array.from({ length: units }, (_, i) => `${mark}:${i}`);
+  const slots = Array.from({ length: units }, (_, i) => `${mark}:${i}`);
   let replies: unknown[];
   try {
     replies = await redisPipeline([
       ["GET", secondsKey(folder, month)],
-      ["ZADD", holdKey(folder), ...members.flatMap((member) => [runsOut, member])],
+      ["ZADD", holdKey(folder), ...slots.flatMap((slot) => [runsOut, slot])],
       ["ZCARD", holdKey(folder)],
     ]);
   } catch (error) {
@@ -197,7 +197,7 @@ export async function holdPlayback(folder: string, month: string, limit: number,
   const free = left - (count - units) * HOLD_UNIT_SECONDS;
   const granted = free >= HOLD_MIN_SECONDS ? Math.min(units * HOLD_UNIT_SECONDS, free) : 0;
   const keep = Math.ceil(granted / HOLD_UNIT_SECONDS);
-  const back = members.slice(keep);
+  const back = slots.slice(keep);
   const writes: (string | number)[][] = [];
   if (back.length) writes.push(["ZREM", holdKey(folder), ...back]);
   // In line to be read whenever a unit may be held past this step: always but when the hours measured are used,

@@ -223,6 +223,9 @@ async function main(): Promise<void> {
   ownPlans.set(g.handle, { id: `sub_${g.handle}0001`, object: "subscription", status: "canceled", customer: `cus_${g.handle}0001`, metadata: { store: g.handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } } }] } });
   connected = "revoked";
   const g1 = await quietly(() => closeOne(g.email, g.ended + (C + 1) * DAY, hands));
+  // Rule 23 (fourth pre-review, MÉDIO 1): refusals count in a row only when seen on daily runs, as the closing job
+  // looks; the store is looked at every day, and the check a minute short of the days is the same.
+  for (let d = 2; d < SILENT; d += 1) await quietly(() => closeOne(g.email, g.ended + (C + d) * DAY, hands));
   const g2 = await quietly(() => closeOne(g.email, g.ended + (C + SILENT) * DAY - 60_000, hands));
   is("refused from its day, and still a minute short of the days in a row: kept", [g1.state, g2.state, filesOf(g)], ["held", "held", 1]);
   const gBefore = sent.length;

@@ -292,7 +292,10 @@ async function main(): Promise<void> {
   // the same run (our key is the right one); this store's ended plan is there to read.
   ownPlans.set(v.handle, { id: `sub_${v.handle}0001`, object: "subscription", status: "canceled", customer: `cus_${v.handle}0001`, metadata: { store: v.handle, tier: "creator" }, items: { data: [{ price: { recurring: { interval: "month" } } }] } });
   connected = "revoked";
+  // Rule 23 (fourth pre-review, MÉDIO 1): refusals count in a row only when seen on daily runs, so the store is
+  // looked at every day up to its deadline, as the closing job does; the days checked are the same.
   for (const d of [1, SILENT + 1, 60, 400]) {
+    if (d === SILENT + 1) for (let day = 2; day <= SILENT; day += 1) await quietly(() => closeOne(v.email, v.ended + (C + day) * DAY, hands));
     const r = await quietly(() => closeOne(v.email, v.ended + (C + d) * DAY, hands));
     is(`day C+${d}`, [d, r.state, r.note, filesOf(v)], [d, d <= SILENT ? "held" : "removed", r.note, d <= SILENT ? 1 : 0]);
   }

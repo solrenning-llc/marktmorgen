@@ -1,4 +1,4 @@
-import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recordHeldMonth, recordLapsed, recordOverdue, OVERDUE_REASONS, type HeldFunding, type OverdueReason } from "@/lib/held-stores";
+import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recordHeldMonth, accountsRefuseTogether, noteAccountReply, recordLapsed, recordOverdue, OVERDUE_REASONS, type HeldFunding, type OverdueReason } from "@/lib/held-stores";
 import { type StripeFailure, stripeFailure } from "@/lib/stripe-silence";
 /**
  * A store whose plan has ended, and what it still keeps.
@@ -146,8 +146,12 @@ type State = {
   lapsed?: number;
   /** Closed without Stripe before its renewals were stopped: how many of its members' subscriptions were known (M2). */
   unstopped?: number;
-  /** When its connected account began refusing us (403 account_invalid) without a break (third pre-review, ALTO 1). */
+  /**
+   * When its connected account began refusing us (403 account_invalid) without a break, and when a refusal was last
+   * seen (third and fourth pre-reviews): a gap of more than REFUSAL_GAP_MS between two starts the count again.
+   */
   refusedFrom?: number;
+  refusedLast?: number;
   /** Why it was last kept past the published time, so a run that did not ask counts it under the same reason. */
   overdueWhy?: OverdueReason;
 };
@@ -162,7 +166,7 @@ function parseState(raw: unknown): State {
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     const out: State = {};
-    for (const name of ["of", "ended", "month", "week", "removed", "said", "fit", "renewals", "due", "erased", "hold", "holdFrom", "day", "buyersFrom", "buyersDone", "buyersPages", "buyersCapped", "untold", "refunds", "lapseFrom", "lapsed", "unstopped", "refusedFrom"] as const) {
+    for (const name of ["of", "ended", "month", "week", "removed", "said", "fit", "renewals", "due", "erased", "hold", "holdFrom", "day", "buyersFrom", "buyersDone", "buyersPages", "buyersCapped", "untold", "refunds", "lapseFrom", "lapsed", "unstopped", "refusedFrom", "refusedLast"] as const) {
       if (typeof value[name] === "number" && Number.isFinite(value[name] as number)) out[name] = value[name] as number;
     }
     if (typeof value.buyersAfter === "string" && /^(start|\d{1,3}\|[!-~]{0,800})$/.test(value.buyersAfter)) out.buyersAfter = value.buyersAfter;
@@ -199,6 +203,12 @@ export function removalDay(endedAt: number): number {
  * run. So deletion within ERASE_WITHIN_DAYS of the closing day is not guaranteed in the worst case.
  */
 export const STRIPE_SILENT_DAYS = ERASE_WITHIN_DAYS - ERASE_EVERY_DAYS;
+/**
+ * Refusals by a creator's account count as "in a row" only when seen on runs at most this far apart (the closing
+ * job runs daily; a day may be skipped): one refusal after a longer gap, in which the account was not asked, starts
+ * the count again (fourth pre-review, MÉDIO 1).
+ */
+export const REFUSAL_GAP_MS = 2 * DAY_MS + 12 * 60 * 60 * 1000;
 
 /**
  * Whether Stripe's silence about a closing store no longer holds it at `now`, counted from its closing day.
@@ -226,10 +236,17 @@ function failureOf(kinds: StripeFailure[]): StripeFailure | null {
  * account's (third pre-review, ALTO 1): a key of another Stripe account answers 404 for it, and every creator account
  * 403 account_invalid, as a creator who disconnected does.
  */
-async function platformReadsOwn(store: Store): Promise<boolean> {
-  if (!store.subscriptionId) return false;
-  const own = await readSubscription(store.subscriptionId, store);
-  return own.state === "active" || (own.state === "inactive" && own.reason !== "missing" && own.reason !== "shape");
+async function platformReadsOwn(store: Store): Promise<"ok" | OverdueReason> {
+  // With no plan subscription id, or an answer that does not say (a server error, a shape), our key is not shown
+  // wrong either: not confirmed, said as "other" (fourth pre-review, LEVE 2). Only Stripe not finding the store's
+  // own subscription, or refusing our key, is our key's.
+  if (!store.subscriptionId) return "other";
+  let failure: unknown = null;
+  let failed = false;
+  const own = await readSubscription(store.subscriptionId, store, (error) => { failed = true; failure = error; });
+  if (own.state === "active") return "ok";
+  if (own.state === "inactive") return own.reason === "missing" ? "key" : own.reason === "shape" ? "other" : "ok";
+  return failed && stripeFailure(failure) === "key" ? "key" : "other";
 }
 const reasonOf = (kind: StripeFailure | null): OverdueReason => (kind === "key" || kind === "answer" ? kind : "other");
 
@@ -792,7 +809,8 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   // Kept past the published time: counted once a month by reason (DONO-3, the owner's report). A run that did not ask
   // (its daily recheck denied) knows no reason of its own and counts the last one seen, kept on its record; a reason
   // seen is written there when it changes. A count or a note that fails is said in the log; it never holds or moves
-  // the closing.
+  // the closing. The read and the write of the reason are two commands, not one; the closing job runs under its own
+  // lock (nl:closing:lock), so no other writer comes between them (fourth pre-review, LEVE 4).
   if (result.overdue) {
     try {
       const [raw] = await redisPipeline([["GET", stateKey(key)]]);
@@ -1074,18 +1092,26 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
   // silence only after STRIPE_SILENT_DAYS of refusals in a row (refusedFrom, written at the first, cleared by any
   // answer of the account), and only when the platform reads this store's own subscription in the same run; when it
   // cannot, the store is held as our key's ("key"), never lapsed.
+  // Fourth pre-review: refusals count in a row only when seen on runs no more than REFUSAL_GAP_MS apart
+  // (refusedLast), and several distinct accounts refusing together are ours, never a lapse (lib/held-stores.ts).
   let refusedAs: OverdueReason = "other";
-  let ownChecked: boolean | null = null;
+  let ownChecked: "ok" | OverdueReason | null = null;
+  const account = store.stripeAccountId;
+  const note = (refused: boolean) => (account ? noteAccountReply(account, refused, now).catch((error) => console.error("noting a creator account's reply failed", error)) : Promise.resolve());
   const refusalLapses = async (): Promise<boolean> => {
-    if (next.refusedFrom === undefined) {
-      next = { ...next, refusedFrom: now };
-      await save(next);
+    const restart = next.refusedFrom === undefined || next.refusedLast === undefined || now - next.refusedLast > REFUSAL_GAP_MS;
+    next = { ...next, refusedFrom: restart ? now : next.refusedFrom, refusedLast: now };
+    await save(next);
+    await note(true);
+    // Several accounts refusing together is ours, whatever this store's own count says: kept, reported as our key's.
+    if (await accountsRefuseTogether(now)) {
+      refusedAs = "key";
       return false;
     }
-    if (now < next.refusedFrom + STRIPE_SILENT_DAYS * DAY_MS) return false;
+    if (restart || now < (next.refusedFrom ?? now) + STRIPE_SILENT_DAYS * DAY_MS) return false;
     ownChecked ??= await platformReadsOwn(store);
-    if (!ownChecked) {
-      refusedAs = "key";
+    if (ownChecked !== "ok") {
+      refusedAs = ownChecked;
       return false;
     }
     return lapses();
@@ -1094,8 +1120,9 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
   const heldAs = (kind: StripeFailure): OverdueReason => (kind === "refused" ? refusedAs : reasonOf(kind));
   /** The account answered: a run of refusals is over. */
   const answered = async (): Promise<void> => {
-    if (next.refusedFrom === undefined) return;
-    next = { ...next, refusedFrom: undefined };
+    await note(false);
+    if (next.refusedFrom === undefined && next.refusedLast === undefined) return;
+    next = { ...next, refusedFrom: undefined, refusedLast: undefined };
     await save(next);
   };
   if (!next.renewals) {

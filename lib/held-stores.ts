@@ -164,6 +164,35 @@ export type OverdueReason = (typeof OVERDUE_REASONS)[number];
 export async function recordOverdue(ref: string, reason: OverdueReason, now: number): Promise<void> {
   await countOnce(ref, now, "over:" + reason);
 }
+/**
+ * Fourth pre-review of DONO-3: which creator accounts refused us (403 account_invalid) or answered on a UTC day,
+ * under hashed identities, kept ACCOUNT_NOTE_SECONDS. A creator who disconnects is one account; several distinct
+ * accounts refusing together is ours (Connect suspended for the platform, account ids gone wrong), never a lapse.
+ */
+export const ACCOUNT_NOTE_SECONDS = 3 * 86400;
+const accountsKey = (kind: "refused" | "answered", day: string) => (kind === "refused" ? "nl:held:refused:" : "nl:held:answered:") + day;
+export async function noteAccountReply(account: string, refused: boolean, now: number): Promise<void> {
+  const day = dayOf(now);
+  if (!refValid(account) || day === null) throw new Error("account reply identity or clock is unknown");
+  const key = accountsKey(refused ? "refused" : "answered", day);
+  const values = exactArray(await redisPipeline([["HSET", key, identity(account), 1], ["EXPIRE", key, ACCOUNT_NOTE_SECONDS]]));
+  if (!values || values.length !== 2 || number(values[0]) === null || values[1] !== 1) throw new Error("account reply note is unknown");
+}
+/**
+ * Whether creator accounts refused together today or yesterday: three or more distinct accounts, or two or more
+ * and more than answered. Not known is together: it never lets a refusal delete.
+ */
+export async function accountsRefuseTogether(now: number): Promise<boolean> {
+  const today = dayOf(now), yesterday = dayOf(now - 86400_000);
+  if (today === null || yesterday === null) return true;
+  try {
+    const values = exactArray(await redisPipeline([["HLEN", accountsKey("refused", today)], ["HLEN", accountsKey("answered", today)], ["HLEN", accountsKey("refused", yesterday)], ["HLEN", accountsKey("answered", yesterday)]]));
+    const n = values?.map(number);
+    if (!n || n.length !== 4 || n.some((value) => value === null)) return true;
+    const together = (refused: number, answered: number) => refused >= 3 || (refused >= 2 && refused > answered);
+    return together(n[0] as number, n[1] as number) || together(n[2] as number, n[3] as number);
+  } catch { return true; }
+}
 /** The month's figures, known only once its last day was observed (as readHeldMonth); otherwise unknown, never zero. */
 async function monthFields(month: string, fields: string[]): Promise<(number | null)[] | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;

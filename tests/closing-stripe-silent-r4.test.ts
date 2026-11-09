@@ -202,7 +202,8 @@ async function main(): Promise<void> {
 
   part("PROOF P2: a closing store with no plan subscription id, creator disconnected, our key fine: counted as 'key' for ever");
   const n = await closingStore("nosubid");
-  await setSubscription(n.email, { subscriptionId: null });
+  // Typed as the proof calls it (no `active`): only the id is cleared.
+  await setSubscription(n.email, { subscriptionId: null } as Parameters<typeof setSubscription>[1]);
   await told(n);
   await setStripeAccount(n.email, "acct_1NoSubId0000001");
   connected = "revoked";
@@ -245,8 +246,12 @@ async function main(): Promise<void> {
     for (const made of many) lastMany.push(await quietly(() => closeOne(made.email, base + (C + d) * DAY, hands)));
   }
   is("three accounts refusing every day for the whole time: all kept, files kept", [lastMany.map((r) => r.state), many.map(filesOf)], [["held", "held", "held"], [1, 1, 1]]);
-  const laterMany = await quietly(() => closeOne(many[0].email, base + (C + ERASE_WITHIN_DAYS + 1) * DAY, hands));
-  is("and past the published time it is reported as our key's", [laterMany.state, laterMany.overdue], ["held", "key"]);
+  // Rule 23: the stores are looked at every day, as the closing job does, up to past the published time.
+  for (let d = SILENT + 2; d <= ERASE_WITHIN_DAYS + 1; d += 1) {
+    lastMany = [];
+    for (const made of many) lastMany.push(await quietly(() => closeOne(made.email, base + (C + d) * DAY, hands)));
+  }
+  is("and past the published time they are reported as our key's", [lastMany.map((r) => r.state), lastMany.map((r) => r.overdue)], [["held", "held", "held"], ["key", "key", "key"]]);
   connected = "up";
   done();
 }

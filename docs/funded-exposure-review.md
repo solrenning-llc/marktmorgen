@@ -21,7 +21,12 @@ and only the dated closing record stays (`lapsed`, `unstopped`), counted in the 
 deadline, is followed; our own key refused (401), an unreadable answer, Stripe not
 configured, a member's notice that cannot go out (or no email credit for it) or a failure
 of ours still holds with no deadline, and each such store past the published time is
-counted once a month by reason in the owner's report ("retidas além do prazo publicado"). The deadline is the earliest moment, not a guaranteed
+counted once a month by reason in the owner's report ("retidas além do prazo publicado").
+A creator account refusing us (403 account_invalid) lapses only after STRIPE_SILENT_DAYS of
+refusals seen on daily runs at most REFUSAL_GAP_MS apart, with the platform reading the store's
+own subscription in the same run, and never while several distinct accounts refuse together
+(`nl:held:refused:`/`nl:held:answered:`); its work is CLOSING_DEADLINE_WORK in
+tests/plan-cost-registry.ts. The deadline is the earliest moment, not a guaranteed
 latest: a store already in the held recheck line waits its turn among the50 rechecks a
 day, and the walk then runs at most every WALK_GAP_MS, so deletion within
 ERASE_WITHIN_DAYS of the closing day is not guaranteed in the worst case. A store held

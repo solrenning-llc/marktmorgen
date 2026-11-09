@@ -25,6 +25,7 @@
  * (lib/payment-recovery.ts), so nothing depends on the redirect arriving.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -92,10 +93,20 @@ type SubRow = {
 const customerOf = (sub: SubRow) =>
   typeof sub.customer === "string" ? sub.customer : sub.customer && typeof sub.customer === "object" ? String((sub.customer as { id?: unknown }).id ?? "") : "";
 
-/** The membership a grant names, when it is this customer's and this store's. */
+/**
+ * A Stripe reply decides only when it is the object asked for (rule 30): it holds its own id, equal to the one
+ * requested. Another membership of the same customer on the same store, or a reply with no id, says nothing about
+ * this one: its status, its card and its unpaid invoice are not this membership's. A reply that is not an object at all (an HTTP 200 whose JSON body is `null`) is not this object either: it never
+ * throws here.
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
+
+/** The membership a grant names, when Stripe's reply is that membership and it is this customer's and this store's. */
 async function subFor(store: Store, account: string, customer: string, subscription: string): Promise<SubRow | null> {
   if (!SUB_PATTERN.test(subscription)) return null;
   const sub = (await onAccount("GET", account, `/subscriptions/${subscription}?expand[]=latest_invoice`)) as SubRow;
+  if (!isOwnReply(sub, subscription)) return null;
   if (customerOf(sub) !== customer || !saleHandles(store).has(sub.metadata?.store ?? "")) return null;
   return sub;
 }
@@ -123,6 +134,15 @@ export async function cardView(store: Store, grant: CardGrant): Promise<CardView
   }
 }
 
+/** The presses after SET ... NX and INCR: a whole number from one up, or null when the reply is not that. */
+function pressCount(replies: unknown): number | null {
+  const both = repliesFor(replies, 2);
+  const set = both?.[0];
+  if (!both || (set !== "OK" && set !== null)) return null;
+  const count = countOf(both[1]);
+  return count !== null && count >= 1 ? count : null;
+}
+
 export type OpenCard = { ok: true; url: string } | { ok: false; reason: "expired" | "used" | "ended" | "error" };
 
 /** The button: a Stripe page in setup mode that saves a card for this membership. */
@@ -130,11 +150,20 @@ export async function openCardUpdate(store: Store, token: string, origin: string
   const grant = await cardGrant(store, token);
   if (!grant) return { ok: false, reason: "expired" };
   const key = await opensKey(token);
-  const [, count] = await redisPipeline([
+  // Counted before Stripe is asked, in its exact shape: a press that cannot
+  // be counted is not a first press (CX-123 rule 24).
+  const presses = await redisPipeline([
     ["SET", key, "0", "EX", CARD_LINK_SECONDS, "NX"],
     ["INCR", key],
-  ]);
-  if (Number(count) > MAX_OPENS) return { ok: false, reason: "used" };
+  ]).then(
+    (replies) => pressCount(replies),
+    (error: unknown) => {
+      console.error("counting a card link's presses failed", store.handle, error);
+      return null;
+    },
+  );
+  if (presses === null) return { ok: false, reason: "error" };
+  if (presses > MAX_OPENS) return { ok: false, reason: "used" };
   try {
     const sub = await subFor(store, grant.a, grant.c, grant.s);
     if (!sub) return { ok: false, reason: "error" };
@@ -186,6 +215,9 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
       metadata?: Record<string, string> | null;
       setup_intent?: { status?: unknown; payment_method?: unknown; metadata?: Record<string, string> | null } | string | null;
     };
+    // Another page's reply, or one with no id, never sets a card: "error" keeps the page waiting (nl:card:open), so
+    // the daily job (lib/payment-recovery.ts) asks again.
+    if (!isOwnReply(session, sessionId)) return "error";
     if (session.mode !== "setup" || session.metadata?.kind !== "card" || !saleHandles(store).has(session.metadata?.store ?? "")) return "error";
     if (session.status !== "complete") return "canceled";
     const intent = session.setup_intent && typeof session.setup_intent === "object" ? session.setup_intent : null;

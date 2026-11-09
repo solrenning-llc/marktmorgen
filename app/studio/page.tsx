@@ -24,7 +24,9 @@ import { lowestPriceCents } from "@/lib/product-option";
 import { SaleEditor } from "@/components/sale-editor";
 import { FairPriceEditor } from "@/components/fair-price-editor";
 import { CartDealEditor } from "@/components/cart-deal-editor";
+import { CartLinkBuilder } from "@/components/cart-link-builder";
 import { offersCart } from "@/lib/cart-checkout";
+import { CART_LINK_CHOICES, cartLinkCandidates, cartLinkProducts } from "@/lib/cart-link-products";
 import { allCountries, countryName } from "@/lib/fair-price";
 import { TierEditor } from "@/components/tier-editor";
 import { canTier } from "@/lib/tier-rules";
@@ -62,7 +64,7 @@ import { SocialsEditor } from "@/components/socials-editor";
 import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
 import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
-import { productsInStats, reachProducts, readAllTimeSales, studioStats } from "@/lib/stats";
+import { productsInStats, reachProducts, readAllTimeSales, resultsByCampaign, studioStats } from "@/lib/stats";
 import { ReadingFailed, ReadingsUsed, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
@@ -108,7 +110,7 @@ import { assistantLeft, assistantMissed } from "@/lib/store-assistant";
 import { assistantRefusal, syncAssistant } from "@/lib/assistant-billing";
 import { assistantWindow } from "@/lib/store-assistant-rules";
 import { STORE_PAGE, answersAllowance, answersUsed, missedQuestions } from "@/lib/answers";
-import { readCards, readTitles } from "@/lib/catalog";
+import { readCards } from "@/lib/catalog";
 import { TaxEditor } from "@/components/tax-editor";
 import { StoreLanguageEditor } from "@/components/store-language-editor";
 import { RecoveryEditor } from "@/components/recovery-editor";
@@ -225,7 +227,7 @@ import { AppCodeInvite } from "@/components/app-code-invite";
 import { showAppCodeInvite } from "@/lib/app-code-invite-words";
 import { lockedUntil, twoStepStatus } from "@/lib/two-step";
 import { LOCKED_LIST } from "@/lib/locked-words";
-import { RecoveryAddressManager } from "@/components/recovery-address-manager";
+import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
 import { LeaveTeam } from "@/components/team-manager";
@@ -527,6 +529,10 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Stripe did not answer",
     body: "Nothing changed and nothing was charged. Try again in a moment.",
   },
+  "switch-unconfirmed": {
+    title: "We could not confirm the change",
+    body: "Stripe may have changed your plan and charged for it. Each time this page opens, it asks Stripe which plan you are on, and we check again every day. Look at your plan below before you try again.",
+  },
   paused: {
     title: "Your break is set",
     body: "Your store keeps taking payments until the date below, and then nothing is charged until your plan starts again by itself. We have emailed you the dates, and will write a week before.",
@@ -758,8 +764,8 @@ async function saleCandidates(store: Store): Promise<{ id: string; title: string
  * "Goes well with" can pick (lib/store-collections.ts). One read of the
  * cards, whatever the store's size (lib/catalog.ts, readCards).
  */
-async function publishedChoices(store: Store): Promise<{ id: string; title: string }[]> {
-  const cards = await readCards(store).catch(() => new Map<string, { title: string }>());
+async function publishedChoices(store: Store, cardsRead: Promise<Map<string, { title: string }>>): Promise<{ id: string; title: string }[]> {
+  const cards = await cardsRead;
   return store.catalog.items
     .filter((item) => (item.kind & KIND.hidden) === 0)
     .map((item) => ({ id: item.id, title: cards.get(item.id)?.title ?? "" }))
@@ -818,12 +824,69 @@ export default async function StudioPage({
   // A store from before visits were counted gets its counter the first time
   // its studio is opened.
   const store = loaded && !loaded.statsId ? ((await ensureStatsId(ref)) ?? loaded) : loaded;
-  const folder = store ? await storeFolder(ref) : "";
-  const pictures = store ? await imageFolder(ref) : "";
+  // 651 [WG11] unit 2: every read below that needs only the store or the person is sent now, together, and each is
+  // still waited for where this page used it before, with the same conditions; nothing more is read (tests/
+  // studio-today-trips.test.ts). A read started early carries a catch only so that a refusal before its await is not
+  // an unhandled rejection: the await below still throws it, as before.
+  const early = <T,>(read: Promise<T>): Promise<T> => {
+    read.catch(() => undefined);
+    return read;
+  };
+  // Google Calendar and Zoom (lib/meet-connect.ts): which accounts calls can
+  // make meetings on, for the call editor, and what was made for each booked
+  // time, for the list below. Nothing is read when the deployment has neither.
+  // Read whenever the deployment has either app: an account connected while
+  // it was offered stays in sight even once it is not (lib/meet-connect.ts).
+  const meetOn = store ? configuredProviders().length > 0 : false;
+  // Somebody who opened the link in Zoom's Marketplace listing before logging
+  // in came to connect Zoom (lib/zoom-arrival.ts): it is offered here too,
+  // and the way to it is said at the top of the studio.
+  const arrivedZoom = cameForZoom(cookieStore) && isConfigured("zoom");
+  // Passkeys whose wait has run out are removed first (lib/passkeys.ts pendingRemoval, a write under the account's
+  // lock, which also logs out what they opened). The two second-step checks apply the same removal themselves before
+  // they read (lib/second-step-gate.ts), so they start at once. The rest of what is read of the person waits for the
+  // page's own removal; the list of passkeys waits for all three, as before this unit, so that when the page's own
+  // removal read fails and one of the checks applies it, the list is what is left (tests/studio-today-removal-order
+  // .test.ts; Codex M, review 5806799980).
+  const removing = email ? early(pendingRemoval(email).catch(() => null)) : null;
+  const mayAdd = email ? early(mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : null;
+  const liveStep = email ? early(liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : null;
+  const afterRemoval = <T,>(read: () => Promise<T>): Promise<T> => early((removing ?? Promise.resolve(null)).then(read));
+  const passkeysLeft = early(Promise.all([removing, mayAdd, liveStep]).then(() => (email ? listPasskeys(email).catch(() => []) : [])));
+  const firstReads = {
+    folder: early(store ? storeFolder(ref) : Promise.resolve("")),
+    pictures: early(store ? imageFolder(ref) : Promise.resolve("")),
+    aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => 0)) : null,
+    live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId)) : null,
+    pause: store && isBillingConfigured() ? early(pauseView(store)) : null,
+    list: store && may("export") ? early(listSize(store)) : null,
+    callProducts: store ? early(readKind(store, "call")) : null,
+    meet: store && meetOn && (may("products") || may("orders")) ? early(meetView(store.statsId, store, arrivedZoom).catch(() => null)) : null,
+    shelf: store ? early(studioShelf(store, params)) : null,
+    removing,
+    mayAdd,
+    liveStep,
+    person: afterRemoval(() =>
+      Promise.all([
+        passkeysLeft,
+        store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
+        isFreshSession(cookieStore.get(SESSION_COOKIE)?.value).catch(() => false),
+        // Whether this browser got in without its second step, and until when what matters is locked (lib/two-step.ts).
+        lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => 0),
+        // The person's two-step login (lib/two-step.ts), beside their passkeys.
+        // null when it could not be read: never taken for "no request to turn it off" (Claude 4, C4-2980 on #2900).
+        email ? twoStepStatus(email).catch(() => null) : Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" }),
+        // The person's recovery address, partly hidden (lib/recovery-address.ts).
+        email ? recoveryAddress(email).then((a) => (a ? hideAddress(a) : "")).catch(() => null) : Promise.resolve(""),
+      ]),
+    ),
+  };
+  const folder = await firstReads.folder;
+  const pictures = await firstReads.pictures;
   /** Carried on the forms below that post to the studio's routes, so each acts on this store. */
   const pin = store?.sid ? `?store=${store.sid}` : "";
   // The writing help, and what is left of it this month: read once for the whole studio page.
-  const ai = store && aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
+  const ai = store && aiAvailableFor(store) ? { on: true, left: firstReads.aiLeft ? await firstReads.aiLeft : 0 } : { on: false, left: 0 };
   const notice =
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
     STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
@@ -840,10 +903,7 @@ export default async function StudioPage({
   // is the page the creator opens and therefore the moment they would notice
   // it being wrong. A store that never started a subscription is not asked
   // about, and neither is one on a deployment with no billing configured.
-  const live =
-    store?.subscriptionId && isBillingConfigured()
-      ? await readSubscription(store.subscriptionId)
-      : null;
+  const live = firstReads.live ? await firstReads.live : null;
   // "unknown" means Stripe could not be asked, which is not the same as not
   // paying. The snapshot stands rather than closing a paying creator's till
   // over a network blip.
@@ -873,8 +933,89 @@ export default async function StudioPage({
   const recordedSince = (written ?? store)?.renewalUnpaidSince ?? 0;
   const unpaidSince = plan ? (plan.renewalUnpaid ? Math.max(1, recordedSince) : 0) : paid ? recordedSince : 0;
   const current = store ? { ...store, subscriptionActive: paid, ...(plan ?? {}), renewalUnpaidSince: unpaidSince } : null;
-  // Stripe's own page that pays an unpaid renewal, read fresh on each load (232 [CA1] unit 4).
-  const renewalPage = current && unpaidSince > 0 && store?.subscriptionId && isBillingConfigured() ? await renewalInvoicePage(store.subscriptionId) : null;
+  // How this creator is billed, and what the other way would cost them.
+  const billedYearly = live?.state === "active" ? live.cycle === "year" : current?.cycle === "year";
+  const tier = current?.tier ?? "creator";
+  // The store's own domain: shown where this deployment can add one, and its
+  // records read from Vercel only while it is not yet live.
+  const domainsOn = isDomainsConfigured();
+  // What this store has sent out this month, and how long its lesson video
+  // was watched: the one thing here that is charged by use, visible to the
+  // creator before it is visible on an invoice (lib/watch-rules.ts).
+  // Counted in the store's window: its billing month when it pays us, the
+  // calendar month otherwise (lib/allowance-window.ts). The page reads the
+  // record as refreshed above, so a period just read from Stripe is used.
+  const usageWindow = current ? allowanceWindow(current) : null;
+  const usageId = usageWindow?.id ?? calendarWindow().id;
+  // Where the store stands with its plan decides how much it may keep and
+  // how long its video may be watched (lib/plan-standing.ts).
+  const standing = store ? standingOf(store) : "none";
+  // "Update now" asks for the store's numbers read again, from the day's own budget (inbox C4-33 (2)).
+  const freshNumbers = params.numbers === "fresh";
+  // 651 [WG11] unit 2: every read below that needs the record as refreshed above is sent now, together, and each is
+  // still waited for where this page used it before, with the same conditions.
+  const planReads = {
+    // Stripe's own page that pays an unpaid renewal, read fresh on each load (232 [CA1] unit 4).
+    renewalPage: current && unpaidSince > 0 && store?.subscriptionId && isBillingConfigured() ? early(renewalInvoicePage(store.subscriptionId)) : null,
+    firstSale: PLANS_ON_SALE && store && paid && !billedYearly ? early(firstSaleAt(store)) : null,
+    domainNow: domainsOn && store?.domain && !store.domain.liveAt && paid && hasPro(tier) ? early(domainStatus(store.domain.name, store).catch(() => null)) : null,
+    sold: current && current.stripeAccountId && may("orders") ? early(listSales(current)) : null,
+    usage: early(
+      Promise.all([
+        store && may("settings") ? deliveredThisMonth(folder) : Promise.resolve(null),
+        store && may("settings") ? watchedForAdmission(folder, usageId) : Promise.resolve(null),
+        store && may("settings") ? trafficForAdmission(folder, usageId) : Promise.resolve(null),
+      ]),
+    ),
+    ordered: store && may("settings") ? early(ordersIn(folder, usageId)) : null,
+    figures: current && may("settings") ? early(Promise.all(ALLOWANCE_KINDS.map(async (kind) => ({ kind, used: await allowanceUsed(current, kind), limit: allowanceFor(current, kind) })))) : null,
+    data: current && may("settings") ? early(dataUsed(current).catch(() => null)) : null,
+    closingAt: store && standing === "ended" && may("settings") ? early(closingOf(store).catch(() => null)) : null,
+    apiKeys: current && may("export") ? early(shownKeys(current, email, role).catch(() => "unread" as const)) : null,
+    // The creator's calendars: the private subscription address is made the
+    // first time there is a call to put in it, before the calendar is read.
+    calendar: current
+      ? early(
+          (async () => {
+            const callProducts = firstReads.callProducts ? await firstReads.callProducts : [];
+            if (callProducts.length > 0 && may("settings")) await ensureFeedToken(current).catch(() => {});
+            return Promise.all([
+              callProducts.length > 0 && may("settings") ? calendarView(current).catch(() => null) : Promise.resolve(null),
+              callProducts.some((p) => p.call?.kind === "live") && may("orders")
+                ? calendarBusy(current).then((r) => r.busy, () => [])
+                : Promise.resolve([]),
+              may("settings") ? webhooksView(current).catch(() => null) : Promise.resolve(null),
+            ]);
+          })(),
+        )
+      : null,
+  };
+  // "Update now" takes the day's reading of the store's numbers (lib/store-readings.ts takeStoreReading), so the two
+  // kept readings are asked for only once every read this page waits for before them, and the shelf after them, has
+  // answered: a page that ends in its error never spends it (Claude 5, LEVE 1 on #2835). Those reads are already
+  // under way, and the rest of the panel's reads still go with them.
+  const answered = current && may("stats")
+    ? early(Promise.all([...Object.values(planReads), firstReads.pause, firstReads.list, firstReads.callProducts, firstReads.meet, firstReads.shelf]))
+    : null;
+  const statsRead = current && answered
+    ? early(Promise.all([
+        // Kept for every page that shows them, and read again only from the store's own daily budget (lib/store-readings.ts).
+        answered.then(() => keptStats(current, undefined, freshNumbers)).then((kept) => kept, () => null),
+        readsSales(current)
+          ? answered.then(() => keptSales(current, undefined, freshNumbers)).then(
+              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true, unnamed: kept.unnamed === true }),
+              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed, unnamed: false }),
+            )
+          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false }),
+        readNotes(current.statsId).catch(() => []),
+        readSpends(current.statsId).catch(() => []),
+        heardOff(current.handle).catch(() => false),
+        readTrouble(current.statsId).catch(() => ({ week: 0, last: null })),
+        // What the store recorded on its own: emails sent, products added, sales (lib/auto-marks.ts).
+        readMarks(current, ...chartDays()).catch(() => []),
+      ]))
+    : null;
+  const renewalPage = planReads.renewalPage ? await planReads.renewalPage : null;
   const trialing = live?.state === "active" && live.trialing;
   // The trial is once per store. A store starting again is told, on every
   // button, that it pays from today — the same rule the checkout opens with.
@@ -886,30 +1027,21 @@ export default async function StudioPage({
   // Read from Stripe on this page load. When Stripe could not be asked, the
   // cancel button still shows: the route asks again before it does anything.
   const cancelling = live?.state === "active" && live.cancelsAtEnd;
-  // How this creator is billed, and what the other way would cost them.
-  const billedYearly = live?.state === "active" ? live.cycle === "year" : current?.cycle === "year";
   // A store that has sold sees the yearly plan offered open, not folded away
   // (lib/yearly-offer.ts). One read, and only for a monthly plan.
-  const firstSale = PLANS_ON_SALE && store && paid && !billedYearly ? await firstSaleAt(store) : 0;
+  const firstSale = planReads.firstSale ? await planReads.firstSale : 0;
   // A break the creator chose (lib/plan-pause.ts): set and not yet begun on
   // this subscription, or begun, with the plan starting again on its day.
-  const pauseObservation = store && isBillingConfigured() ? await pauseView(store) : { kind: "missing" as const };
+  const pauseObservation = firstReads.pause ? await firstReads.pause : { kind: "missing" as const };
   const pause = pauseObservation.kind === "known" ? pauseObservation.record : null;
   const pauseUnknown = pauseObservation.kind === "unknown";
   const pauseSet = Boolean(pause && store && pause.subscription === store.subscriptionId && paid);
   const onBreakNow = Boolean(pause && !paid && breakRunning(pause));
   const breakDay = (seconds: number) =>
     new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
-  const tier = current?.tier ?? "creator";
   // Whether a larger plan can be had now (lib/larger-plan.ts): none above Scale, none while Pro is not sold, nothing while no plan is on sale.
   const largerOnSale = PLANS_ON_SALE && planAboveSold(tier);
-  // The store's own domain: shown where this deployment can add one, and its
-  // records read from Vercel only while it is not yet live.
-  const domainsOn = isDomainsConfigured();
-  const domainNow =
-    domainsOn && store?.domain && !store.domain.liveAt && paid && hasPro(tier)
-      ? await domainStatus(store.domain.name, store).catch(() => null)
-      : null;
+  const domainNow = planReads.domainNow ? await planReads.domainNow : null;
   const billedNow =
     live?.state === "active" && live.amountCents > 0
       ? `$${live.amountCents % 100 ? (live.amountCents / 100).toFixed(2) : live.amountCents / 100} a ${live.cycle}`
@@ -943,26 +1075,10 @@ export default async function StudioPage({
   // request that could only come back empty.
   // What each part below reads is only read for a role that is shown it
   // (lib/team-roles.ts), so nothing a role may not see reaches the page.
-  const sold =
-    current && current.stripeAccountId && may("orders") ? await listSales(current) : null;
+  const sold = planReads.sold ? await planReads.sold : null;
 
-  // What this store has sent out this month, and how long its lesson video
-  // was watched: the one thing here that is charged by use, visible to the
-  // creator before it is visible on an invoice (lib/watch-rules.ts).
-  // Counted in the store's window: its billing month when it pays us, the
-  // calendar month otherwise (lib/allowance-window.ts). The page reads the
-  // record as refreshed above, so a period just read from Stripe is used.
-  const usageWindow = current ? allowanceWindow(current) : null;
-  const usageId = usageWindow?.id ?? calendarWindow().id;
-  const [delivery, watchedReading, trafficReading] = await Promise.all([
-    store && may("settings") ? deliveredThisMonth(folder) : Promise.resolve(null),
-    store && may("settings") ? watchedForAdmission(folder, usageId) : Promise.resolve(null),
-    store && may("settings") ? trafficForAdmission(folder, usageId) : Promise.resolve(null),
-  ]);
+  const [delivery, watchedReading, trafficReading] = await planReads.usage;
   const watched = watchedReading ?? 0;
-  // Where the store stands with its plan decides how much it may keep and
-  // how long its video may be watched (lib/plan-standing.ts).
-  const standing = store ? standingOf(store) : "none";
   const videoLimit = store ? videoLimitFor(store) : null;
   const videoRoom = videoLimit ?? paidVideoSeconds();
   // The visits the store has had this month, the other thing charged by use
@@ -975,18 +1091,16 @@ export default async function StudioPage({
   const visitLimit = store ? visitLimitFor(store) : null;
   const visitRoom = visitLimit ?? (store ? visitsIncluded(store.tier) : 0);
   // The orders counted this month, the third thing charged by use (lib/order-rules.ts).
-  const ordered = store && may("settings") ? await ordersIn(folder, usageId) : 0;
+  const ordered = planReads.ordered ? await planReads.ordered : 0;
   // What the store has taken of each of its other figures in the window (lib/store-allowance.ts).
-  const figures = current && may("settings")
-    ? await Promise.all(ALLOWANCE_KINDS.map(async (kind) => ({ kind, used: await allowanceUsed(current, kind), limit: allowanceFor(current, kind) })))
-    : null;
+  const figures = planReads.figures ? await planReads.figures : null;
   // How full the store's data room is (lib/store-data.ts), and what its orders keep of it.
-  const data = current && may("settings") ? await dataUsed(current).catch(() => null) : null;
+  const data = planReads.data ? await planReads.data : null;
   const orderRoom = standing === "paid" && store ? ordersIncluded(store.tier) : TRIAL_ORDERS;
   // A store whose plan has ended and that keeps more than a store with no
   // plan may: the day what it keeps is removed, counted the way the daily
   // job counts it (lib/plan-closing.ts). Measured only for such a store.
-  const closingAt = store && standing === "ended" && may("settings") ? await closingOf(store).catch(() => null) : null;
+  const closingAt = planReads.closingAt ? await planReads.closingAt : null;
   const keptNow = closingAt ? (await storageUsed(folder, SETUP_STORAGE_BYTES)).bytes : 0;
   // What it may keep with no date: none for a plan ended from 18 October 2026 (lib/plan-closing-rules.ts).
   const keptRoom = closingAt ? keptRoomFor(closingAt.endedAt) : 0;
@@ -1001,11 +1115,11 @@ export default async function StudioPage({
   const momentWords = (ms: number) => `${new Date(ms).toLocaleString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC`;
   // The list is shown once there is something that fills it, or once it holds
   // anybody — a creator who stops giving things away still owns what came in.
-  const list = store && may("export") ? await listSize(store) : null;
+  const list = firstReads.list ? await firstReads.list : null;
   const givesAway = store ? sellsAny(store, "free") : false;
   // Booked calls are read from the creator's Stripe account, the ledger, and
   // only asked for when the store sells calls at all.
-  const callProducts = store ? await readKind(store, "call") : [];
+  const callProducts = firstReads.callProducts ? await firstReads.callProducts : [];
   const paidRead =
     current && current.stripeAccountId && callProducts.length > 0 && may("orders")
       ? await paidCallsRead(current).catch(() => null)
@@ -1015,18 +1129,7 @@ export default async function StudioPage({
   // The room of each booked time: the one made for it, or the creator's own link.
   const callRooms =
     calls && store ? await slotRooms(store, calls.flatMap((slot) => slot.people), callProducts).catch(() => null) : null;
-  // Google Calendar and Zoom (lib/meet-connect.ts): which accounts calls can
-  // make meetings on, for the call editor, and what was made for each booked
-  // time, for the list below. Nothing is read when the deployment has neither.
-  // Read whenever the deployment has either app: an account connected while
-  // it was offered stays in sight even once it is not (lib/meet-connect.ts).
-  const meetOn = store ? configuredProviders().length > 0 : false;
-  // Somebody who opened the link in Zoom's Marketplace listing before logging
-  // in came to connect Zoom (lib/zoom-arrival.ts): it is offered here too,
-  // and the way to it is said at the top of the studio.
-  const arrivedZoom = cameForZoom(cookieStore) && isConfigured("zoom");
-  const meet: MeetView | null =
-    store && meetOn && (may("products") || may("orders")) ? await meetView(store.statsId, store, arrivedZoom).catch(() => null) : null;
+  const meet: MeetView | null = firstReads.meet ? await firstReads.meet : null;
   const meetAccounts = meet
     ? meet.providers.flatMap((p) => {
         const c = meet.connected[p];
@@ -1048,44 +1151,16 @@ export default async function StudioPage({
   // The creator's calendars: the private subscription address is made the
   // first time there is a call to put in it, and the busy times are read (from
   // the ten-minute copy, usually) to point out a dated session that clashes.
-  if (current && callProducts.length > 0 && may("settings")) await ensureFeedToken(current).catch(() => {});
   // A list that cannot be read is said as such in the studio, never as no keys (audit SG2, finding 23).
-  const apiKeys = current && may("export") ? await shownKeys(current, email, role).catch(() => "unread" as const) : null;
-  const [calendar, calendarBusyTimes, hooks] = current
-    ? await Promise.all([
-        callProducts.length > 0 && may("settings") ? calendarView(current).catch(() => null) : Promise.resolve(null),
-        callProducts.some((p) => p.call?.kind === "live") && may("orders")
-          ? calendarBusy(current).then((r) => r.busy, () => [])
-          : Promise.resolve([]),
-        may("settings") ? webhooksView(current).catch(() => null) : Promise.resolve(null),
-      ])
-    : [null, [], null];
+  const apiKeys = planReads.apiKeys ? await planReads.apiKeys : null;
+  const [calendar, calendarBusyTimes, hooks] = planReads.calendar ? await planReads.calendar : [null, [], null];
   if (current) after(() => keepHandle(current));
   // A buyer who paid and never came back from Stripe still gets their email,
   // and so does the creator, the next time the creator looks.
   if (current && paidList && paidList.length) after(() => catchUpBookings(current, paidList, SITE_URL));
   // Visits from Redis and sales from the creator's Stripe, read side by side,
   // with the creator's own notes on the chart and what they spent on ads.
-  // "Update now" asks for the store's numbers read again, from the day's own budget (inbox C4-33 (2)).
-  const freshNumbers = params.numbers === "fresh";
-  const [visitsKept, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = current && may("stats")
-    ? await Promise.all([
-        // Kept for every page that shows them, and read again only from the store's own daily budget (lib/store-readings.ts).
-        keptStats(current, undefined, freshNumbers).then((kept) => kept, () => null),
-        readsSales(current)
-          ? keptSales(current, undefined, freshNumbers).then(
-              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true, unnamed: kept.unnamed === true }),
-              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed, unnamed: false }),
-            )
-          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false }),
-        readNotes(current.statsId).catch(() => []),
-        readSpends(current.statsId).catch(() => []),
-        heardOff(current.handle).catch(() => false),
-        readTrouble(current.statsId).catch(() => ({ week: 0, last: null })),
-        // What the store recorded on its own: emails sent, products added, sales (lib/auto-marks.ts).
-        readMarks(current, ...chartDays()).catch(() => []),
-      ])
-    : [null, null, [], [], false, { week: 0, last: null }, []];
+  const [visitsKept, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = statsRead ? await statsRead : [null, null, [], [], false, { week: 0, last: null }, []];
   const visits = visitsKept?.value ?? null;
   // When the numbers shown were read, whether the day still has a reading to read them again, and when the
   // day's readings come back: said on the panel, the kept copy shown as it is (inbox C4-33 (2), (3)).
@@ -1106,9 +1181,12 @@ export default async function StudioPage({
         left: readsSales(current) ? left.heavyLeft : left.anyLeft,
       }
     : null;
-  const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]) : [];
+  // Read after the day's reading, from what it read, so it cannot be waited for before it: when the products it names
+  // could not be read (one outside the catalog's head is read from its own record), the numbers wait, as when they
+  // could not be read, rather than end the page or name a product "no longer in your store" (Claude 5 on #2835).
+  const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]).catch(() => null) : [];
   const counted =
-    current && visits && salesRead
+    current && visits && salesRead && statListings
       ? studioStats(current, visits, salesRead.value, salesRead.state, statListings)
       : null;
   // Its rates beside those of stores its size (lib/benchmarks.ts): this page's numbers are kept as the
@@ -1132,7 +1210,7 @@ export default async function StudioPage({
   const todayScreen = current ? todayView(todayCounts, may) : null;
   // The list of products: all of a short one, a page of a long one, found by
   // name when the creator searched (lib/catalog.ts reads only that page in full).
-  const shelf = store ? await studioShelf(store, params) : null;
+  const shelf = firstReads.shelf ? await firstReads.shelf : null;
   // Asked of Stripe each time, because the setup is the creator's and lives there.
   // Stripe's answers about the creator's own account, asked side by side: the
   // tax setup, the ways to pay it offers, and the currencies it can charge in.
@@ -1148,21 +1226,15 @@ export default async function StudioPage({
   // Adding a passkey needs a login from the last fifteen minutes (lib/auth.ts).
   // Passkeys whose wait to be removed has run out go first, so the list below is what is left; and
   // whether this session may add a passkey or an app (lib/second-step-gate.ts), so the managers say so.
-  const removing = email ? await pendingRemoval(email).catch(() => null) : null;
-  const passkeyRemovals: Record<string, number> = removing ? removing.atOf : {};
-  const needsStep = email ? !(await mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : false;
-  const canKeep = email ? mayKeepPasskey(await liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : false;
-  const [passkeys, team, freshLogin, lockedTill, twoStep, recoveryShown] = await Promise.all([
-    email ? listPasskeys(email).catch(() => []) : Promise.resolve([]),
-    store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
-    isFreshSession(cookieStore.get(SESSION_COOKIE)?.value).catch(() => false),
-    // Whether this browser got in without its second step, and until when what matters is locked (lib/two-step.ts).
-    lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => 0),
-    // The person's two-step login (lib/two-step.ts), beside their passkeys.
-    email ? twoStepStatus(email).catch(() => ({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" })) : Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" }),
-    // The person's recovery address, partly hidden (lib/recovery-address.ts).
-    email ? recoveryAddress(email).then((a) => (a ? hideAddress(a) : "")).catch(() => "") : Promise.resolve(""),
-  ]);
+  const removed = firstReads.removing ? await firstReads.removing : null;
+  const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
+  const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
+  const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
+  const [passkeys, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  // Not read just now (null) is not "none": the recovery section says so in place of its manager (rule 24).
+  const recoveryShown = recoveryRead ?? "";
+  // When it could not be read, the banner over Today and Two-step login below say so (unread); neither takes it for "off".
+  const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
   const connectReady = isConnectConfigured();
   const billingReadyForSteps = isBillingConfigured();
   // The first steps of a store, each ticked from what the store really has.
@@ -1201,6 +1273,21 @@ export default async function StudioPage({
   const billingReady = isBillingConfigured();
   const NEXT = connectReady ? NEXT_WHEN_SELLING : NEXT_WHEN_NOT;
 
+  // 651 [WG11] unit 2, step 2: each section below that waits for its own reads is an async function called in place,
+  // a promise React renders beside the other sections, so they wait together and not one after another. Each sits
+  // where it did, under the same condition, and reads and writes what it did; a refusal still fails the page.
+  // tests/studio-today-trips.test.ts renders the tree whole.
+  // The store writes in the parts below keep the order they had: the ready cart link's count, which writes the billing
+  // month when the store's snapshot has none (lib/billing-sync.ts refreshPeriod), then a token's platforms
+  // (ServerEvents), then the add-on's month read again from Stripe (the assistant), so they never wait on each other's
+  // store lock in one visit. Each part takes the one before from here and puts its own, while the page's JSX is built,
+  // before it awaits anything (tests/studio-today-removal-order.test.ts).
+  const serverWrite: { done: Promise<unknown> } = { done: Promise.resolve() };
+  // The store's cards, read once for the parts that show them (the short links' titles, the product editor's pairs,
+  // the cards and the welcome offer), when the first of them asks: read side by side, each would repair a cold cache again (Codex M on
+  // #2900). Read in order as before, the later two found it repaired.
+  const cardsOnce: { read: Promise<Awaited<ReturnType<typeof readCards>>> | null } = { read: null };
+  const storeCards = (shop: Store) => (cardsOnce.read ??= early(readCards(shop).catch(() => new Map())));
   return (
     <div className="min-h-screen bg-paper text-ink">
       {store && view ? (
@@ -1249,6 +1336,16 @@ export default async function StudioPage({
               {`You got in through your recovery address or without your second step, so ${LOCKED_LIST} wait until then. Everything else is open: your products, pages, buyers, numbers and drafts. On that day nothing is locked any more, and you can move your sign-in address to an inbox you have. Logging in with your sign-in email, a passkey or your app's code before then opens everything at once.`}
             </p>
           </div>
+        ) : twoStepRead === null ? (
+          <div className="notice notice-warn mt-6" role="status">
+            <p className="font-bold text-ink">Two-step login could not be read just now</p>
+            <p className="mt-1 text-sm text-ink-soft">
+              So this page cannot tell whether somebody asked to turn your two-step login off. Open this page again in a moment to see. Once it shows, if a request is waiting and it was not you, press Cancel under Two-step login, and change your email password.
+            </p>
+            <a href="#two-step" className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
+              Go to Two-step login
+            </a>
+          </div>
         ) : twoStep.reset > 0 ? (
           <div className="notice notice-warn mt-6" role="status">
             <p className="font-bold text-ink">Two-step login is set to turn off</p>
@@ -1262,7 +1359,7 @@ export default async function StudioPage({
         ) : null}
 
         {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
-        {store && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
+        {store && twoStepRead !== null && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
@@ -1474,22 +1571,21 @@ export default async function StudioPage({
                 <summary className="cursor-pointer text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
                 <div className="mt-4">
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
-                  {may("page") && store.statsId ? (
-                    <ShortLinks
-                      links={await readLinks(store.statsId).catch(() => [])}
-                      products={[...(await readTitles(store).catch(() => new Map<string, string>()))].map(([id, title]) => ({ id, title }))}
-                      results={
-                        numbers
-                          ? (numbers.posts?.d90 ?? []).reduce<Record<string, { visits: number; sales: number; cents: number }>>((all, row) => {
-                              const sum = all[row.campaign] ?? { visits: 0, sales: 0, cents: 0 };
-                              all[row.campaign] = { visits: sum.visits + row.visits, sales: sum.sales + row.sales, cents: sum.cents + row.cents };
-                              return all;
-                            }, {})
-                          : undefined
-                      }
-                      currency={store.currency}
-                    />
-                  ) : null}
+                  {may("page") && store.statsId ? (async () => {
+                    const titles = storeCards(store).then((cards) => new Map([...cards].map(([id, card]) => [id, card.title] as const)));
+                    return (
+                      <ShortLinks
+                        links={await readLinks(store.statsId).catch(() => [])}
+                        products={[...(await titles)].map(([id, title]) => ({ id, title }))}
+                        results={
+                          numbers
+                            ? resultsByCampaign(numbers.posts?.d90 ?? [])
+                            : undefined
+                        }
+                        currency={store.currency}
+                      />
+                    );
+                  })() : null}
                   {may("page") ? (
                     <AiOn value={ai}>
                       <AiPosts url={storeBase(store)} what="store" />
@@ -1514,61 +1610,73 @@ export default async function StudioPage({
                     </p>
                   </div>
                 ) : null}
-                <StatsPanel
-                  data={numbers}
-                  reading={numbersReading}
-                  canExport={may("export")}
-                  notes={statsNotes}
-                  marks={autoMarks}
-                  spends={adSpends}
-                  beside={beside}
-                  meta={await metaView(store.statsId, store.currency).then((view) => (view ? { ...view, readPaused: costsPaused(store) } : view)).catch(() => null)}
-                  canConnectMeta={may("settings")}
-                  pin={pin}
-                  askHeard={!heardIsOff}
-                  canSetHeard={may("settings")}
-                  canSetAttribution={may("settings")}
-                  canAsk={aiAvailableFor(store)}
-                  voice={store ? await readVoice(store).catch(() => null) : undefined}
-                  insightContext={{
-                    storeUrl: current ? storeBase(current) : undefined,
-                    reminders: current ? current.recovery.enabled : undefined,
-                    may: { settings: may("settings"), page: may("page"), draft: may("draft") },
-                    pages: statListings.filter((l) => l.page).map((l) => l.id),
-                    promotionProducts: current && (may("page") || may("draft"))
-                      ? statListings.filter((product) => !product.hidden).map((product) => ({ id: product.id, title: product.title, url: `${storeBase(current)}/p/${productSegment(product)}` }))
-                      : [],
-                  }}
-                  weeklyAi={may("settings") && aiAvailableFor(store) && store ? store.weeklyAi : undefined}
-                  weeklyTeam={
-                    team && store
-                      ? {
-                          members: team.members.filter((m) => can(m.role, "stats")).map((m) => m.email.toLowerCase()),
-                          chosen: await weeklyTeam(store.handle).catch(() => []),
-                        }
-                      : null
-                  }
-                  goal={(await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0 }))).cents}
-                  chat={may("settings") ? await chatSetup(store.statsId).catch(() => null) : undefined}
-                  chatSales={store.chatSales}
-                  deviceMarked={isMarkedDevice((await cookies()).get(NO_COUNT_COOKIE)?.value, store.sid)}
-                />
-                {await (async () => {
+                {(async () => {
+                  const meta = metaView(store.statsId, store.currency).then((view) => (view ? { ...view, readPaused: costsPaused(store) } : view)).catch(() => null);
+                  const voice = store ? readVoice(store).catch(() => null) : undefined;
+                  const chosen = team && store ? weeklyTeam(store.handle).catch(() => []) : null;
+                  const goal = readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0 }));
+                  const chat = may("settings") ? chatSetup(store.statsId).catch(() => null) : undefined;
+                  return (
+                    <StatsPanel
+                      data={numbers}
+                      reading={numbersReading}
+                      canExport={may("export")}
+                      notes={statsNotes}
+                      marks={autoMarks}
+                      spends={adSpends}
+                      beside={beside}
+                      meta={await meta}
+                      canConnectMeta={may("settings")}
+                      pin={pin}
+                      askHeard={!heardIsOff}
+                      canSetHeard={may("settings")}
+                      canSetAttribution={may("settings")}
+                      canAsk={aiAvailableFor(store)}
+                      voice={await voice}
+                      insightContext={{
+                        storeUrl: current ? storeBase(current) : undefined,
+                        reminders: current ? current.recovery.enabled : undefined,
+                        may: { settings: may("settings"), page: may("page"), draft: may("draft") },
+                        pages: (statListings ?? []).filter((l) => l.page).map((l) => l.id),
+                        promotionProducts: current && (may("page") || may("draft"))
+                          ? (statListings ?? []).filter((product) => !product.hidden).map((product) => ({ id: product.id, title: product.title, url: `${storeBase(current)}/p/${productSegment(product)}` }))
+                          : [],
+                      }}
+                      weeklyAi={may("settings") && aiAvailableFor(store) && store ? store.weeklyAi : undefined}
+                      weeklyTeam={
+                        team && store
+                          ? {
+                              members: team.members.filter((m) => can(m.role, "stats")).map((m) => m.email.toLowerCase()),
+                              chosen: (await chosen) ?? [],
+                            }
+                          : null
+                      }
+                      goal={(await goal).cents}
+                      chat={await chat}
+                      chatSales={store.chatSales}
+                      deviceMarked={isMarkedDevice((await cookies()).get(NO_COUNT_COOKIE)?.value, store.sid)}
+                    />
+                  );
+                })()}
+                {(async () => {
                   // What buyers get next (lib/next-bought.ts): read from the week's
                   // record, and read again in the background after six hours.
                   if (!store.stripeAccountId) return null;
                   const paths = await readPaths(store.statsId).catch(() => null);
-                  if (pathsStale(paths) && (await claimPathsRead(store.statsId).catch(() => false))) {
-                    after(() => readAllTimeSales(store).then(() => undefined).catch(() => undefined));
-                  }
-                  if (!paths) return null;
-                  const pairs = Object.entries(paths.next)
+                  // The claim and the titles below go together; the read again starts only when this page won the claim.
+                  const claimed = pathsStale(paths) ? claimPathsRead(store.statsId).catch(() => false) : false;
+                  const pairs = Object.entries(paths?.next ?? {})
                     .flatMap(([from, steps]) => steps.map((step) => ({ from, ...step })))
                     .sort((a, b) => b.buyers - a.buyers || a.days - b.days)
                     .slice(0, 12);
-                  const firstOnes = Object.entries(paths.starts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+                  const firstOnes = Object.entries(paths?.starts ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
                   const ids = [...new Set([...pairs.flatMap((p) => [p.from, p.id]), ...firstOnes.map(([id]) => id)])];
-                  const listed = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p]));
+                  const titled = paths && ids.length ? readListings(store, ids).catch(() => []) : null;
+                  if (await claimed) {
+                    after(() => readAllTimeSales(store).then(() => undefined).catch(() => undefined));
+                  }
+                  if (!paths) return null;
+                  const listed = new Map(((await titled) ?? []).map((p) => [p.id, p]));
                   const withOffers = new Set(idsOfKind(store, "funnel"));
                   const rows = pairs
                     .map((p) => ({ p, a: listed.get(p.from), b: listed.get(p.id) }))
@@ -1584,11 +1692,16 @@ export default async function StudioPage({
                   const starts = firstOnes.flatMap(([id, buyers]) => (listed.get(id) && buyers >= 3 ? [{ title: listed.get(id)!.title, buyers }] : []));
                   return <BuyerPaths rows={rows} starts={starts} canEdit={may("products")} />;
                 })()}
-                <GoogleSearches
-                  searches={await storeSearches(store).catch(() => null)}
-                  operator={isOperator(email) ? await searchConsoleStatus().catch(() => ({ connected: false, account: "" })) : null}
-                  result={typeof params.gsc === "string" ? params.gsc : ""}
-                />
+                {(async () => {
+                  const operator = isOperator(email) ? searchConsoleStatus().catch(() => ({ connected: false, account: "" })) : null;
+                  return (
+                    <GoogleSearches
+                      searches={await storeSearches(store).catch(() => null)}
+                      operator={await operator}
+                      result={typeof params.gsc === "string" ? params.gsc : ""}
+                    />
+                  );
+                })()}
               </div>
             ) : null}
 
@@ -1632,34 +1745,42 @@ export default async function StudioPage({
 
             {may("products") ? (
               <div id="products" className="scroll-mt-32">
-                <ProductEditor
-                  products={shelf?.products ?? []}
-                  total={productCount(store)}
-                  positions={shelf?.positions}
-                  paging={shelf?.paging ?? null}
-                  choices={shelf?.choices}
-                  named={shelf?.named}
-                  notes={shelf?.notes}
-                  folder={folder}
-                  imageFolder={pictures}
-                  handle={store.handle}
-                  selling={current ? canSell(current) : false}
-                  testMode={isConnectInTestMode()}
-                  email={store.email}
-                  currency={store.currency}
-                  meetings={meetAccounts}
-                  ai={ai}
-                  newComments={await newCommentsFor(shelf?.products ?? [])}
-                  waitlists={await waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}))}
-                  preorders={await preorderViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}))}
-                  mailAddress={store.mail?.address ?? store.winback?.address ?? ""}
-                  cover={{ accent: store.look.accent, font: store.look.font, name: store.name, language: store.language }}
-                  look={store.look}
-                  ownHosts={store.domain?.name ? [store.domain.name] : []}
-                  pairChoices={await publishedChoices(store)}
-                  tiers={store.tiers}
-                  taxOnTop={store.tax.enabled && !store.tax.included}
-                />
+                {(async () => {
+                  const newComments = early(newCommentsFor(shelf?.products ?? []));
+                  const waitlists = waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));
+                  const preorders = preorderViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));
+                  const pairChoices = early(publishedChoices(store, storeCards(store)));
+                  return (
+                    <ProductEditor
+                      products={shelf?.products ?? []}
+                      total={productCount(store)}
+                      positions={shelf?.positions}
+                      paging={shelf?.paging ?? null}
+                      choices={shelf?.choices}
+                      named={shelf?.named}
+                      notes={shelf?.notes}
+                      folder={folder}
+                      imageFolder={pictures}
+                      handle={store.handle}
+                      selling={current ? canSell(current) : false}
+                      testMode={isConnectInTestMode()}
+                      email={store.email}
+                      currency={store.currency}
+                      meetings={meetAccounts}
+                      ai={ai}
+                      newComments={await newComments}
+                      waitlists={await waitlists}
+                      preorders={await preorders}
+                      mailAddress={store.mail?.address ?? store.winback?.address ?? ""}
+                      cover={{ accent: store.look.accent, font: store.look.font, name: store.name, language: store.language }}
+                      look={store.look}
+                      ownHosts={store.domain?.name ? [store.domain.name] : []}
+                      pairChoices={await pairChoices}
+                      tiers={store.tiers}
+                      taxOnTop={store.tax.enabled && !store.tax.included}
+                    />
+                  );
+                })()}
               </div>
             ) : (
               <section className="card mt-8 p-6 sm:p-8" aria-labelledby="catalogue-title">
@@ -1887,38 +2008,54 @@ export default async function StudioPage({
               <>
                 <DiscountEditor selling={current ? canSell(current) : false} currency={store.currency} address={`${SITE_URL}/@${store.handle}`} />
 
-                <SaleEditor
-                  initial={store.sale}
-                  products={await saleCandidates(store)}
-                  connected={Boolean(current?.stripeAccountId)}
-                  now={saleClock()}
-                />
+                {(async () => (
+                  <SaleEditor
+                    initial={store.sale}
+                    products={await saleCandidates(store)}
+                    connected={Boolean(current?.stripeAccountId)}
+                    now={saleClock()}
+                  />
+                ))()}
 
-                <FairPriceEditor
-                  initial={store.fair}
-                  currency={store.currency}
-                  examplePrice={2700}
-                  products={await saleCandidates(store)}
-                  names={Object.fromEntries(allCountries().map((code) => [code, countryName(code)]))}
-                />
+                {(async () => (
+                  <FairPriceEditor
+                    initial={store.fair}
+                    currency={store.currency}
+                    examplePrice={2700}
+                    products={await saleCandidates(store)}
+                    names={Object.fromEntries(allCountries().map((code) => [code, countryName(code)]))}
+                  />
+                ))()}
 
                 <CartDealEditor initial={store.cartDeal} currency={store.currency} offered={offersCart(store)} />
 
-                {await (async () => {
+                {offersCart(store) ? (async () => {
+                  const products = cartLinkProducts(store);
+                  serverWrite.done = products;
+                  return <CartLinkBuilder address={`${SITE_URL}/@${store.handle}`} products={await products} more={cartLinkCandidates(store).length > CART_LINK_CHOICES ? CART_LINK_CHOICES : 0} />;
+                })() : null}
+
+                {(async () => {
                   const tiers = await tierCandidates(store);
                   return tiers.length ? <TierEditor initial={store.tiers} memberships={tiers} /> : null;
                 })()}
 
                 <PixelEditor pixels={store.pixels} canViewAttribution={may("stats")} />
-                {hasPixels(store.pixels) ? (
+                {hasPixels(store.pixels) ? (async () => {
+                  const before = serverWrite.done;
+                  const setupRead = (async () => {
+                    const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
+                    // A token saved before the store kept its own list of platforms is written there now, once, after
+                    // the cart link's write.
+                    const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
+                    if (on.join() !== store.adsServer.join()) await before.catch(() => null).then(() => setAdsServer(storeRef(store), on)).catch(() => null);
+                    return setup;
+                  })();
+                  // The writes after this one wait for the cart link's too, even when this part writes nothing.
+                  serverWrite.done = Promise.all([before.catch(() => null), setupRead]);
+                  return (
                   <ServerEventsEditor
-                    setup={await (async () => {
-                      const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
-                      // A token saved before the store kept its own list of platforms is written there now, once.
-                      const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
-                      if (on.join() !== store.adsServer.join()) await setAdsServer(storeRef(store), on).catch(() => null);
-                      return setup;
-                    })()}
+                    setup={await setupRead}
                     pixels={{
                       meta: Boolean(store.pixels.meta),
                       tiktok: Boolean(store.pixels.tiktok),
@@ -1927,11 +2064,39 @@ export default async function StudioPage({
                     }}
                     googleId={store.pixels.google ?? ""}
                   />
-                ) : null}
+                  );
+                })() : null}
 
-                {await (async () => {
+                {(async () => {
+                  const cardsRead = storeCards(store);
+                  // The answers' month and the assistant's need only the store: they are sent with the cards, and each
+                  // is still shown where it was, under the same condition.
+                  const answers = may("page") && aiAvailableFor(store) ? { used: answersUsed(store).catch(() => 0), missed: missedQuestions(store).catch(() => []) } : null;
+                  const assistant = may("page")
+                    ? early((async () => {
+                        // The add-on's month as Stripe has it, read again when the snapshot has run out (lib/assistant-billing.ts).
+                        const own = store.assistantPlan && !assistantWindow(store.assistantPlan) && isBillingConfigured() ? await serverWrite.done.then(() => syncAssistant(store)).catch(() => store) : store;
+                        const missed = assistantMissed(own).catch(() => []);
+                        return (
+                          <StoreAssistantEditor
+                            setting={own.assistant}
+                            next={own.nextOffer}
+                            remind={own.assistReminder}
+                            postal={own.recovery.address !== ""}
+                            plan={own.assistantPlan}
+                            onSale={ASSISTANT_ON_SALE}
+                            canBill={may("billing")}
+                            refusal={assistantRefusal(own)}
+                            usage={await assistantLeft(own).catch(() => null)}
+                            missed={await missed}
+                            notice={typeof params.assistant === "string" ? params.assistant : ""}
+                            pin={pin}
+                          />
+                        );
+                      })())
+                    : null;
                   // The free, published products, by name: what can be offered to a leaving visitor.
-                  const cards = await readCards(store).catch(() => new Map());
+                  const cards = await cardsRead;
                   const free = store.catalog.items
                     .filter((item) => (item.kind & KIND.free) !== 0 && (item.kind & KIND.hidden) === 0)
                     .map((item) => ({ id: item.id, title: cards.get(item.id)?.title ?? "" }))
@@ -1965,12 +2130,12 @@ export default async function StudioPage({
                           signup={joinOpen(store)}
                         />
                       ) : null}
-                      {may("page") && aiAvailableFor(store) ? (
+                      {answers ? (
                         <AnswersEditor
                           setting={store.answers}
-                          used={await answersUsed(store).catch(() => 0)}
+                          used={await answers.used}
                           allowance={answersAllowance(store)}
-                          missed={(await missedQuestions(store).catch(() => [])).map((row) => ({
+                          missed={(await answers.missed).map((row) => ({
                             title:
                               row.productId === STORE_PAGE
                                 ? "Looked for on your store page, and nothing fit"
@@ -1980,28 +2145,7 @@ export default async function StudioPage({
                           }))}
                         />
                       ) : null}
-                      {may("page")
-                        ? await (async () => {
-                            // The add-on's month as Stripe has it, read again when the snapshot has run out (lib/assistant-billing.ts).
-                            const own = store.assistantPlan && !assistantWindow(store.assistantPlan) && isBillingConfigured() ? await syncAssistant(store).catch(() => store) : store;
-                            return (
-                              <StoreAssistantEditor
-                                setting={own.assistant}
-                                next={own.nextOffer}
-                                remind={own.assistReminder}
-                                postal={own.recovery.address !== ""}
-                                plan={own.assistantPlan}
-                                onSale={ASSISTANT_ON_SALE}
-                                canBill={may("billing")}
-                                refusal={assistantRefusal(own)}
-                                usage={await assistantLeft(own).catch(() => null)}
-                                missed={await assistantMissed(own).catch(() => [])}
-                                notice={typeof params.assistant === "string" ? params.assistant : ""}
-                                pin={pin}
-                              />
-                            );
-                          })()
-                        : null}
+                      {assistant}
                     </>
                   );
                 })()}
@@ -2010,15 +2154,18 @@ export default async function StudioPage({
 
                 {may("settings") ? <StoreLanguageEditor language={store.language} handle={store.handle} /> : null}
 
-                {givesAway && may("settings") ? (
-                  <WelcomeOfferEditor
-                    offer={store.welcomeOffer}
-                    products={[...(await readCards(store).catch(() => new Map()))].map(([, c]) => c).filter((c) => c.priceCents > 0).map((c) => ({ id: c.id, title: c.title }))}
-                    connected={Boolean(current?.stripeAccountId)}
-                    suggestedAddress={store.winback.address || store.recovery.address || store.mail?.address || ""}
-                    offered={await welcomesOffered(store).catch(() => 0)}
-                  />
-                ) : null}
+                {givesAway && may("settings") ? (async () => {
+                  const offered = welcomesOffered(store).catch(() => 0);
+                  return (
+                    <WelcomeOfferEditor
+                      offer={store.welcomeOffer}
+                      products={[...(await storeCards(store))].map(([, c]) => c).filter((c) => c.priceCents > 0).map((c) => ({ id: c.id, title: c.title }))}
+                      connected={Boolean(current?.stripeAccountId)}
+                      suggestedAddress={store.winback.address || store.recovery.address || store.mail?.address || ""}
+                      offered={await offered}
+                    />
+                  );
+                })() : null}
 
                 <RecoveryEditor
                   recovery={store.recovery}
@@ -2033,25 +2180,34 @@ export default async function StudioPage({
                   <>
                     <DunningEditor dunning={store.dunning} connected={Boolean(current?.stripeAccountId)} />
                     <LeaveEditor leaving={store.leaving} pause={store.pause} tiers={store.tiers.length} />
-                    <NudgeEditor
-                      nudge={store.nudge}
-                      suggestedAddress={store.mail?.address || store.winback.address || store.recovery.address || ""}
-                      sent={await nudgesThisMonth(store).catch(() => 0)}
-                    />
-                    <YearlyAskEditor
-                      ask={store.yearlyAsk}
-                      suggestedAddress={store.nudge.address || store.mail?.address || store.winback.address || store.recovery.address || ""}
-                      sent={await yearlyAsksThisMonth(store).catch(() => 0)}
-                      offersYearly={(await readKind(store, "recurring").catch(() => [])).some((p) => activeYearly(p, store.tiers) !== null)}
-                    />
+                    {(async () => (
+                      <NudgeEditor
+                        nudge={store.nudge}
+                        suggestedAddress={store.mail?.address || store.winback.address || store.recovery.address || ""}
+                        sent={await nudgesThisMonth(store).catch(() => 0)}
+                      />
+                    ))()}
+                    {(async () => {
+                      const recurring = readKind(store, "recurring").catch(() => []);
+                      return (
+                        <YearlyAskEditor
+                          ask={store.yearlyAsk}
+                          suggestedAddress={store.nudge.address || store.mail?.address || store.winback.address || store.recovery.address || ""}
+                          sent={await yearlyAsksThisMonth(store).catch(() => 0)}
+                          offersYearly={(await recurring).some((p) => activeYearly(p, store.tiers) !== null)}
+                        />
+                      );
+                    })()}
                     <SaveOfferEditor save={store.save} connected={Boolean(current?.stripeAccountId)} />
                     <PauseEditor months={store.pause} />
-                    <WinBackEditor
-                      winback={store.winback}
-                      connected={Boolean(current?.stripeAccountId)}
-                      suggestedAddress={store.recovery.address || store.mail?.address || ""}
-                      sent={await winbacksSent(store).catch(() => 0)}
-                    />
+                    {(async () => (
+                      <WinBackEditor
+                        winback={store.winback}
+                        connected={Boolean(current?.stripeAccountId)}
+                        suggestedAddress={store.recovery.address || store.mail?.address || ""}
+                        sent={await winbacksSent(store).catch(() => 0)}
+                      />
+                    ))()}
                   </>
                 ) : null}
               </>
@@ -3303,8 +3459,8 @@ export default async function StudioPage({
                 removals={passkeyRemovals}
                 removalDays={REMOVAL_DAYS}
               />
-              <RecoveryAddressManager shown={recoveryShown} />
-              <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
+              {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
+              <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
 
               {role !== "owner" ? (
                 <section aria-labelledby="leave-title" className="mt-8 border-t border-line pt-6">
@@ -3393,8 +3549,8 @@ export default async function StudioPage({
                   removals={passkeyRemovals}
                   removalDays={REMOVAL_DAYS}
                 />
-                <RecoveryAddressManager shown={recoveryShown} />
-                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
+                {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
+                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
                 <p className="text-sm text-ink-soft">
                   <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
                     Once it is set up, log in again with it

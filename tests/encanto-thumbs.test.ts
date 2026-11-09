@@ -8,9 +8,11 @@
  *     narrower than the copies above it); a copy that fails is dropped and never written;
  *   - (2) it lives in the store's picture folder, so the storage meter counts it, and it goes with the picture when
  *     the picture is replaced or deleted, or copied to the pictures' own bucket (imagePaths);
- *   - (3) its cost is written down: every thumbnail upload needs its own studio request (studioAccess, counted against
- *     the plan's studio figure, a hard ceiling a month), so the line `picture-thumbnails` in tests/plan-cost-registry.ts
- *     counts its Blob operations at that ceiling, from the official price (vercel.com, read 6 Nov 2026);
+ *   - (3) its cost is written down: every thumbnail upload is its own studio request through the pictures' upload
+ *     route (studioAccess, counted against the plan's studio figure, a hard ceiling a month), which the line
+ *     `picture-uploads` already prices at the dearest upload request; the line `picture-thumbnails` in
+ *     tests/plan-cost-registry.ts counts what it adds to the attaching request, at that ceiling, from the official price
+ *     (vercel.com, read 6 Nov 2026);
  *   - (4) pictures from before have none and are served as they were.
  */
 import { readFileSync } from "node:fs";
@@ -56,18 +58,30 @@ is("and checks its size, type and width as the smaller copy's", /copy\.size <= M
 
 part("Its cost, at the plan's studio ceiling, from the official price");
 const line = COST_LINES.find((each) => each.id === "picture-thumbnails");
+const uploads = COST_LINES.find((each) => each.id === "picture-uploads");
 is("a line for the thumbnail copy's Blob operations", Boolean(line), true);
+// Its own upload request is the pictures' upload route, the same request as the picture's and the smaller copy's, so
+// the line picture-uploads, which prices every studio request at the dearest upload request plus the attaching one,
+// already counts it (Claude 5, #2801 over #2803's eacb4edaa: the first year given back passed the owner's US$ 66).
+is("the thumbnail is sent through the pictures' own upload route, as the other copies are", (editor.match(/handleUploadUrl: "\/api\/store\/image\/upload"/g) ?? []).length >= 3 && /shrink\(file, THUMB_LONG_SIDE, MAX_THUMB_BYTES\);\s*const thumbPath = [^;]+;\s*await uploadPresigned\(thumbPath, copy\.blob, \{\s*access: "private",\s*handleUploadUrl: "\/api\/store\/image\/upload"/.test(editor), true);
 for (const tier of ["creator", "pro", "scale"] as const) {
-  // Its put with every try again the Blob SDK may send, 1 + 10 (Revisor 1 on #2803, rule 30); its two heads (the name,
-  // then the thumbnail) tried as often; its one read, a plain fetch, once (Codex S on #2801). Unknown is never zero.
-  // Its own upload request also asks the Blob for a signed token (issueSignedToken, requestApi, tried as often), priced
-  // at the dearer operation since no official page names its class; its read also pays Fast Origin Transfer on its
-  // bytes and one CDN request, as PICTURE_READ does (Claude 1 on #2801, 6708233552, finding 1).
-  const perRequest = 11 * (5 / 1e6) + 11 * (5 / 1e6) + (2 * 11 + 1) * (0.4 / 1e6) + 40_000 * (0.1 / 1e9 + 0.06 / 1e9) + 2 / 1e6;
-  is(`${tier}: the plan's studio figure, each at the dearest request it may be`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
+  // An upload request at its dearest: its put and its signed token, each with every try again the SDK may send
+  // (1 + 10), at the dearer Advanced Operation, and the head that checks its name is free, tried as often.
+  const uploadRequest = 11 * (5 / 1e6) + 11 * (5 / 1e6) + 11 * (0.4 / 1e6);
+  is(`${tier}: picture-uploads prices every studio request at no less than the dearest upload request, the thumbnail's included`, (uploads?.monthlyUsd(tier) ?? 0) >= STORE_ALLOWANCES[tier].studio * uploadRequest, true);
+  // Rule 23 (#2801 over #2803's eacb4edaa, the first year given back at US$ 66.12 over the owner's US$ 66): the line was
+  // the thumbnail's whole upload request (put, signed token and the head of its name, 11 tries each, already priced by
+  // picture-uploads) plus what it adds when attached; it is now only what it adds to the attaching request: its head,
+  // tried as often (Revisor 1 on #2803, rule 30), its one read, a plain fetch, once (Codex S on #2801), Fast Origin
+  // Transfer on its bytes and one CDN request, as PICTURE_READ does (Claude 1 on #2801, 6708233552, finding 1).
+  const perRequest = 11 * (0.4 / 1e6) + 0.4 / 1e6 + 40_000 * (0.1 / 1e9 + 0.06 / 1e9) + 2 / 1e6;
+  is(`${tier}: the plan's studio figure, each attaching request with the thumbnail's head and read at its dearest`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
 is("its source and date are said", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? ""), true);
-is("the signing request is named among its sources", line?.sources.some((each) => each.file === "app/api/store/image/upload/route.ts" && each.names.includes("issueSignedToken")) ?? false, true);
+// Rule 23 (#2801 over #2803's eacb4edaa): the signing request is now counted once, by picture-uploads, which prices the
+// thumbnail's upload request with the others; the thumbnail's line names that line's route and the attaching request's.
+is("the signing request is named among the sources of the line that counts it", uploads?.sources.some((each) => each.file === "app/api/store/image/upload/route.ts" && each.names.includes("issueSignedToken")) ?? false, true);
+is("the thumbnail's line names the attaching request it adds to", line?.sources.some((each) => each.file === "app/api/store/image/route.ts" && each.names.includes("head(thumbPath)") && each.names.includes("firstBytes(thumbPath)")) ?? false, true);
 // One typed CDN price only: the line reads the visit model's CDN_PER_REQUEST (tests/traffic-cost.ts), so a later move
 // of that price to the dearest region moves this line with it (Claude 4 on #2801, 6711058322, finding 2).
 const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");

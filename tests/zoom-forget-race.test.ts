@@ -19,6 +19,7 @@
  * command carries it, so the test reads the same on the old code (two commands) and on one where they are one step.
  */
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { finishConsent, forgetUser } from "@/lib/meet-connect";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -224,6 +225,16 @@ async function main(): Promise<void> {
     const odd = await consent(one.statsId).catch((error: unknown) => `threw ${error instanceof Error ? error.name : error}`);
     is(`${shape}: not said to be connected`, typeof odd === "string" ? odd.startsWith("threw") : odd.ok === false, true);
   }
+
+  // Rule 23 (pre-review of claude5/zoom-forget-race): the give-back on "removed" is revoke(...).catch(() => {}), never
+  // confirmed, so the studio's words may say it was asked for, not that it was done (VR 2; the same line the
+  // disconnect keeps with providerAccessRemoved).
+  part("The studio's words for 'removed' never say an unconfirmed give-back was done");
+  const page = readFileSync("app/studio/meetings/page.tsx", "utf8");
+  const removedWords = page.match(/case "removed":\s*return \{[^}]*text: `([^`]*)`/)?.[1] ?? "";
+  is("the words are there", removedWords.length > 0, true);
+  is("they do not say the permission was given back", /gave (the|its) (permission|access) back|gave back/i.test(removedWords), false);
+  is("they say Zoom was asked to cancel the access", /asked \$\{name\} to cancel/.test(removedWords), true);
 
   Date.now = realNow;
   done();

@@ -30,6 +30,7 @@ import { installSesMailFixture } from "./ses-mail-fixture";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import * as registry from "./plan-cost-registry";
+import { CURRENT_LLC_FIXED_COST_CEILINGS, FIXED_COST_SOURCE_OBSERVATIONS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
 
 process.env.RESEND_API_KEY = "re_SYNTHETIC_TEST_ONLY";
 process.env.RESEND_WEBHOOK_SECRET = `whsec_${Buffer.from("a-stand-in-secret-for-tests-only").toString("base64")}`;
@@ -43,6 +44,7 @@ const SENDER_DAILY = limits.SUPPORT_SENDER_DAILY ?? 30;
 const DAILY = limits.SUPPORT_DAILY ?? 200;
 const PUBLIC_DAILY = limits.SUPPORT_PUBLIC_DAILY ?? 120;
 const ANNOUNCED = limits.SUPPORT_ANNOUNCED_DAILY ?? 1_000;
+const CREATOR_SENDER_DAILY = limits.SUPPORT_CREATOR_SENDER_DAILY ?? 30;
 const FILE_BYTES = limits.SUPPORT_FILE_BYTES_DAILY ?? 300_000_000;
 type Forward = (id: string, now?: number, announcedTo?: unknown) => Promise<string>;
 const forward = inbound.forwardInbound as unknown as Forward;
@@ -144,11 +146,13 @@ function message(from: string, listed: number[] = [], real: number[] = listed, t
   return id;
 }
 /** A store under an address, as lib/store.ts keys its owner (only the key's presence is read). */
-function makeCreator(email: string) {
+function makeCreator(email: string, paid = true) {
   const key = `nl:store:owner:${createHash("sha256").update(`nimbus-store:${email.toLowerCase()}`).digest("hex").slice(0, 40)}`;
-  redis.run(["SET", key, "{}"]);
+  // A paid plan is the store's own subscriptionActive; a free store is a store all the same.
+  redis.run(["SET", key, JSON.stringify({ handle: `h${createHash("sha256").update(email).digest("hex").slice(0, 10)}`, name: "Synthetic", email, subscriptionActive: paid })]);
 }
 function fresh() {
+  (inbound as unknown as { forgetSupportDayState?: () => void }).forgetSupportDayState?.();
   redis.clear();
   fixture.reset();
   fixture.configure();
@@ -317,6 +321,53 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   const doc = readFileSync("docs/funded-exposure-review.md", "utf8");
   is("the review names the ceilings and its monthly figure", ["SUPPORT_DAILY", "SUPPORT_PUBLIC_DAILY", "SUPPORT_ANNOUNCED_DAILY"].every((n) => doc.includes(n)) && doc.includes(`$${(figure?.modeledUsd ?? NaN).toFixed(2)}`), true);
   is("the review does not promise held messages are kept", /Every message is kept|is held, not dropped/.test(doc), false);
+
+
+  part("2nd pre-review MEDIO 1: only a PAID plan's address counts as a creator, and one creator address has its own small day");
+  is("SUPPORT_CREATOR_SENDER_DAILY is a positive whole number well under the sender's day", Number.isSafeInteger(limits.SUPPORT_CREATOR_SENDER_DAILY) && CREATOR_SENDER_DAILY > 0 && CREATOR_SENDER_DAILY < SENDER_DAILY, true);
+  fresh();
+  for (let s = 0; s < 7; s++) makeCreator(`attacker${s}@evil.example`, false);
+  let fromFree = 0;
+  for (let h = 0; h < 3; h++) { for (let s = 0; s < 7; s++) for (let i = 0; i < HOURLY; i++) if ((await forward(message(`attacker${s}@evil.example`), NOON)) === "sent") fromFree++; advance(3_601_000); }
+  is("7 self-made FREE stores take the public share only", fromFree <= PUBLIC_DAILY, true);
+  makeCreator("paying-creator@studio.example");
+  is("a paying creator's own message is still sent on", await forward(message("paying-creator@studio.example"), NOON), "sent");
+
+  fresh();
+  for (let i = 0; i < PUBLIC_DAILY; i++) await forward(message(`x${i}@made${i}.example`), NOON);
+  const known = ["known0", "known1", "known2"].map((n) => `${n}@studio.example`);
+  known.forEach((a) => makeCreator(a));
+  let forged = 0;
+  for (let h = 0; h < 3; h++) { for (const a of known) for (let i = 0; i < HOURLY; i++) if ((await forward(message(a), NOON)) === "sent") forged++; advance(3_601_000); }
+  is("a forged From of known paying creators takes at most the small day each", forged <= known.length * CREATOR_SENDER_DAILY, true);
+  makeCreator("paying-creator2@studio.example");
+  is("another paying creator is still sent on", await forward(message("paying-creator2@studio.example"), NOON), "sent");
+
+  part("2nd pre-review MEDIO 3: past the day's announcements a held one costs no command beyond the route's");
+  fresh();
+  for (let i = 0; i < ANNOUNCED + 1; i++) await forward(message(`a${i}@q${i}.example`), NOON);
+  commands = 0;
+  const pastDay: string[] = [];
+  for (let i = 0; i < 500; i++) pastDay.push(await forward(message(`b${i}@q${i}.example`), NOON));
+  is("500 more are held", pastDay.every((r) => r === "held"), true);
+  is("with no command of ours (a memory of the exhausted day, per instance)", commands, 0);
+  is("and the inbox still got one notice for the day", notices().length, 1);
+
+  part("2nd pre-review MEDIO 2: the support forward is a line of the LLC's fixed costs, unknown");
+  is("support-forward in LLC_FIXED_COST_IDS", (LLC_FIXED_COST_IDS as readonly string[]).includes("support-forward"), true);
+  const supportLine = CURRENT_LLC_FIXED_COST_CEILINGS.find((l) => l.id === "support-forward");
+  is("its ceiling is unknown", [supportLine?.fullMonthlyUsdCents, supportLine?.fullAnnualUsdCents, supportLine?.reserveReviewed], [null, null, false]);
+  is("its observation is not an approved ceiling", (FIXED_COST_SOURCE_OBSERVATIONS as unknown as Record<string, { approvedCeiling?: boolean } | undefined>).supportForward?.approvedCeiling, false);
+
+  part("2nd pre-review LEVE 4: the notice names the address the held mail was written to");
+  fresh();
+  for (let i = 0; i < HOURLY; i++) await forward(message("loud@example.com", [], [], "orders@marktmorgen.com"), NOON);
+  await forward(message("loud@example.com", [], [], "orders@marktmorgen.com"), NOON);
+  is("held after its read: orders@, not support@", [/written to orders@marktmorgen\.com/.test(notices()[0]?.text ?? ""), /written to support@/.test(notices()[0]?.text ?? "")], [true, false]);
+  fresh();
+  for (let i = 0; i < ANNOUNCED; i++) await forward(message(`a${i}@q${i}.example`), NOON);
+  await forward(message("late@q.example", [], [], "hello@marktmorgen.com"), NOON, ["hello@marktmorgen.com"]);
+  is("held at the announcement: hello@", [/written to hello@marktmorgen\.com/.test(notices()[0]?.text ?? ""), /written to support@/.test(notices()[0]?.text ?? "")], [true, false]);
 
   globalThis.fetch = originalFetch;
   fixture.restore();

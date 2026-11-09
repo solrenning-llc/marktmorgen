@@ -558,7 +558,9 @@ export type SubscriptionState =
  * `past_due` is deliberately in here: a card that failed this morning is a
  * card, not a decision to leave, and Stripe retries it for days. Cutting a
  * creator's store off mid-retry would take their sales away over a bank's
- * timing.
+ * timing. Only while Stripe still retries it, though (retryLeft): our
+ * account may be set to leave a subscription past due after its last try,
+ * and then nothing would ever end it (plan-lifecycle audit, M1).
  */
 const GOOD = new Set(["active", "trialing", "past_due"]);
 
@@ -581,6 +583,24 @@ export function pastDueInGrace(subscription: Record<string, unknown>): boolean {
   const start = periodStart(subscription);
   const trialEnd = typeof subscription.trial_end === "number" ? subscription.trial_end : 0;
   return !(trialEnd && start && Math.abs(start - trialEnd) < 24 * 60 * 60);
+}
+
+/**
+ * Whether a renewal that failed still has another attempt coming, read from
+ * the subscription's latest invoice when it was expanded: "no" when that
+ * invoice is open (or marked uncollectible) with `next_payment_attempt` null,
+ * which is Stripe having stopped trying; "yes" when an attempt is scheduled;
+ * "unread" when the invoice is not there to read, or says neither. The
+ * subscription carries no retry date of its own (#3370 reads memberships the
+ * same way, lib/membership-access.ts).
+ */
+export function retryLeft(subscription: Record<string, unknown>): "yes" | "no" | "unread" {
+  const invoice = subscription.latest_invoice;
+  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return "unread";
+  const { status, next_payment_attempt: next } = invoice as { status?: unknown; next_payment_attempt?: unknown };
+  if (typeof next === "number" && Number.isSafeInteger(next) && next > 0) return "yes";
+  if (next === null && (status === "open" || status === "uncollectible")) return "no";
+  return "unread";
 }
 
 /**
@@ -637,6 +657,11 @@ export function stateOf(subscription: Record<string, unknown>): SubscriptionStat
   const status = typeof subscription.status === "string" ? subscription.status : "";
   if (!GOOD.has(status)) return { state: "inactive", reason: status || "unknown" };
   if (status === "past_due" && !pastDueInGrace(subscription)) return { state: "inactive", reason: "past_due" };
+  // Stripe tries no more: the plan has ended, whether or not our account is
+  // set to cancel it then, and section 8 of the Terms applies. An invoice not
+  // expanded is read as before (the grace: costs paused, nothing closes);
+  // readSubscription and the daily job always expand it.
+  if (status === "past_due" && retryLeft(subscription) === "no") return { state: "inactive", reason: "past_due_no_retry" };
 
   const trialing = status === "trialing";
   // Newer versions also fill `cancel_at` when a subscription is set to stop at
@@ -673,9 +698,10 @@ export async function readSubscription(
 
   let subscription: Record<string, unknown>;
   try {
+    // With its latest invoice: whether a past-due renewal is still retried is on it (retryLeft).
     subscription = await onPlatform(
       "GET",
-      `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+      `/subscriptions/${encodeURIComponent(subscriptionId)}?expand[]=latest_invoice`,
     );
   } catch (error) {
     // Stripe keeps every subscription it made, cancelled ones too: a 404 is
@@ -695,6 +721,8 @@ export async function readSubscription(
       !["active", "trialing", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "paused"].includes(subscription.status)) {
     return { state: "unknown" };
   }
+  // Past due without the invoice it was asked with: whether Stripe still retries is not known.
+  if (subscription.status === "past_due" && retryLeft(subscription) === "unread") return { state: "unknown" };
   const state=stateOf(subscription);
   if(state.state==='active'&&hasContractFunding(subscription)){
     if(!fundingStore||subscription.id!==subscriptionId)return{state:'unknown'};
@@ -1351,8 +1379,10 @@ export async function listSubscriptions(
   const query = new URLSearchParams({ status, limit: "100" });
   query.append("expand[]", "data.customer");
   // A renewal that failed is told about with the page that pays it, which is
-  // on the invoice, not on the subscription (lib/billing-reminders.ts).
-  if (status === "past_due") query.append("expand[]", "data.latest_invoice");
+  // on the invoice, not on the subscription (lib/billing-reminders.ts); and
+  // the daily job (lib/billing-sync.ts) needs it to tell a renewal Stripe
+  // still retries from one it gave up on (retryLeft).
+  if (status === "past_due" || status === "all") query.append("expand[]", "data.latest_invoice");
   if (startingAfter) query.set("starting_after", startingAfter);
   const page = await onPlatform("GET", `/subscriptions?${query}`);
   // An unreadable page is not an empty account or the end of pagination.

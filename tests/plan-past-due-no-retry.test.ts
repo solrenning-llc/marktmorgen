@@ -13,7 +13,7 @@
  * unknown, and the daily job asks for the invoice.
  */
 import { readSubscription, stateOf } from "@/lib/billing";
-import { failedPlan, failedPlanEmail } from "@/lib/billing-reminders";
+import { failedPlan, failedPlanEmail, planEndedSeconds } from "@/lib/billing-reminders";
 import { syncSubscriptions } from "@/lib/billing-sync";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { ENDED_INDEX } from "@/lib/plan-standing";
@@ -113,6 +113,29 @@ async function main() {
   is("it gives the date before which nothing is removed", email.text.includes(closing), true);
   const withTry = failedPlanEmail(failedPlan(retrying)!);
   is("with a try scheduled it still names that day", withTry.text.includes("We will try your card again on"), true);
+
+  part("the email counts from the day the store's plan end was written down");
+  // The daily job may have ended the plan days before the email goes (it is
+  // retried on the next run when it fails): the date is from that end.
+  await claimHandle("mail@example.com", "no-retry-mail", "No retry mail", "");
+  await ensureStatsId("mail@example.com");
+  await setSubscription("mail@example.com", { customerId: "cus_PastDueMail01", subscriptionId: "sub_PastDueMail01", active: true, tier: "creator", cycle: "month", period });
+  const realNow = Date.now;
+  const fiveDaysAgo = realNow() - 5 * DAY * 1000;
+  Date.now = () => fiveDaysAgo;
+  try {
+    await setSubscription("mail@example.com", { active: false });
+  } finally {
+    Date.now = realNow;
+  }
+  const endedAt = (await storeForEmail("mail@example.com"))!.planEndedAt;
+  is("the store's end was written down five days ago", Math.round((realNow() - Date.parse(endedAt)) / (DAY * 1000)), 5);
+  const mailed = subscription("sub_PastDueMail01", "no-retry-mail", { ...openInvoice(null), id: "in_PastDueMail0001" });
+  const counted = await planEndedSeconds(mailed);
+  is("the email's closing date is counted from the end the store wrote down", counted, Math.floor(Date.parse(endedAt) / 1000));
+  const fromEnd = new Date((counted + CLOSING_DAYS * DAY) * 1000).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" });
+  is("and the email names that day", failedPlanEmail(failedPlan(mailed)!, counted).text.includes(fromEnd), true);
+  is("a store that keeps another subscription is counted from today", await planEndedSeconds({ ...mailed, id: "sub_SomeOtherPlan1" }) >= NOW, true);
   done();
 }
 main();

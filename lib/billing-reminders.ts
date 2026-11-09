@@ -14,9 +14,11 @@ import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { recordUnpaidRenewal } from "@/lib/billing-sync";
+import { storeForHandle } from "@/lib/store";
 import { RENEWAL_KEPT_WORDS, RENEWAL_PAUSED_WORDS, RENEWAL_RESUME_WORDS } from "@/lib/renewal-unpaid-words";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_NAMES, PLAN_PRICES, type Cycle, type Tier } from "@/lib/plan";
+import { CLOSING_DAYS } from "@/lib/plan-closing-rules";
 
 const DAY = 86_400;
 /** Sent on the first daily run with at most this long left: seven to eight days. */
@@ -191,8 +193,13 @@ export function failedPlan(subscription: Record<string, unknown>): FailedPlan | 
 }
 
 /** The email itself, plain text. */
-export function failedPlanEmail(failed: FailedPlan): { subject: string; text: string } {
+export function failedPlanEmail(failed: FailedPlan, endedSeconds = Math.floor(Date.now() / 1000)): { subject: string; text: string } {
   const name = PLAN_NAMES[failed.tier];
+  // With no other try, the plan has ended (lib/billing.ts, retryLeft) and the
+  // store closes as the Terms say: nothing is removed before CLOSING_DAYS
+  // after the day its end is written down (lib/plan-closing.ts, removalDay),
+  // the day the store records, or today when it has not been written yet.
+  const keptUntil = day(endedSeconds + CLOSING_DAYS * DAY);
   const price = money(failed.amountCents);
   const studio = `${SITE_URL}/studio#billing`;
   return {
@@ -217,16 +224,32 @@ export function failedPlanEmail(failed: FailedPlan): { subject: string; text: st
             "",
             failed.nextTry
               ? `We will try your card again on ${day(failed.nextTry)}. If it is still unpaid after the last try, your plan can end, and then your store closes as our Terms say.`
-              : "If it is not paid, your plan can end, and then your store closes as our Terms say.",
+              : "Stripe will not try your card again for it, so your plan has ended. If you pay it on that page, your plan goes on; if you do not, your store closes as our Terms say.",
           ].join("\n"),
       "",
-      `If you meant to stop, you do not need to do anything, or you can cancel in your studio: ${studio}`,
+      failed.nextTry
+        ? `If you meant to stop, you do not need to do anything, or you can cancel in your studio: ${studio}`
+        : `If you meant to stop, your plan has already ended and this card is not tried for it again. Your store closes as our Terms say, we email you before anything is removed, and nothing is removed before ${keptUntil}.`,
       "",
       `Questions: reply to this email, or write to ${SUPPORT_EMAIL}.`,
       "",
       "Marktmorgen",
     ].join("\n"),
   };
+}
+
+/**
+ * When the store that keeps this subscription wrote its plan's end down, in
+ * seconds, or now when it has not (the daily job writes it once it reads the
+ * plan ended): the day its closing is counted from.
+ */
+export async function planEndedSeconds(subscription: Record<string, unknown>): Promise<number> {
+  const now = Math.floor(Date.now() / 1000);
+  const handle = (subscription.metadata as Record<string, unknown> | null | undefined)?.store;
+  if (typeof handle !== "string" || !handle) return now;
+  const store = await storeForHandle(handle);
+  const ended = store && store.subscriptionId === subscription.id ? Date.parse(store.planEndedAt) : NaN;
+  return Number.isFinite(ended) ? Math.min(now, Math.floor(ended / 1000)) : now;
 }
 
 /** Every plan whose payment failed and that has not been written to about it yet. */
@@ -250,7 +273,7 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
         if (!due.afterTrial) await recordUnpaidRenewal(subscription);
         // First, so the card that pays is the one the next renewal uses.
         await keepCardThatPays(due.subscription);
-        const { subject, text } = failedPlanEmail(due);
+        const { subject, text } = failedPlanEmail(due, due.nextTry ? undefined : await planEndedSeconds(subscription));
         const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: due.email, subject, text, replyTo: SUPPORT_EMAIL });
         if (!ok) throw new Error("the email was not sent");
         counts.sent += 1;

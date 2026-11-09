@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   is("the badge's link says prefetch={false}", /<Link href=\{badgeLink\} prefetch=\{false\}/.test(badge), true);
 
   part("6. A store that may take the badge off and did shows nothing");
-  is("the badge is shown only when kept on or when the plan does not allow it off", /store\.look\.badge \|\| !canUse\(store, "branding"\) \?/.test(badge), true);
+  is("the badge is shown only when kept on or when the plan does not allow it off", /\{showBadge \? \(/.test(badge), true);
   is("and the code is read only when the badge is shown", /const showBadge = store\.look\.badge \|\| !canUse\(store, "branding"\);/.test(page) && /showBadge \? await badgeInviteCode\(store\.sid\) : null/.test(page), true);
 
   part("Cost: one command more on the front page only while the link is on");

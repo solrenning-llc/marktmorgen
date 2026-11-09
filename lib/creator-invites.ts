@@ -129,6 +129,19 @@ async function setOnce(key: string, value: string): Promise<"ours" | "taken" | "
   }
 }
 
+/**
+ * A store's invite code if it already has one, read exactly (CX-123 rule 24) and never made: for a page that must
+ * not write, such as the store page's badge (lib/badge-link.ts). Null when the store has none, when its id is not
+ * one, or when the stored value is not a code; any reply of another shape throws UnknownReplyError.
+ */
+export async function existingInviteCode(sid: string): Promise<string | null> {
+  if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", myCodeKey(sid)]]), 1);
+  const have = replies?.[0];
+  if (!replies || (have !== null && typeof have !== "string")) throw new UnknownReplyError("a store's invite code");
+  return typeof have === "string" && INVITE_CODE_PATTERN.test(have) ? have : null;
+}
+
 /** A store's invite code, made the first time it is asked for. */
 export async function inviteCode(sid: string): Promise<string | null> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return null;

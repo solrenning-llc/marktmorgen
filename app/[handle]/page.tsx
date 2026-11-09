@@ -58,6 +58,7 @@ import { sellsInTestMode } from "@/lib/stripe-connect";
 import { DemoNote } from "@/components/demo-notes";
 import { lookStyle } from "@/lib/store-look";
 import { canUse } from "@/lib/plan";
+import { badgeHref, badgeInviteCode } from "@/lib/badge-link";
 import { photoUrl } from "@/lib/photo-limits";
 import { canManage } from "@/lib/membership-manage";
 import { canRecover, sellsDeliverables } from "@/lib/buyer-orders";
@@ -300,6 +301,10 @@ export default async function StorePage({ params, searchParams }: Params) {
 
   // The store's latest real purchases, where the creator shows them (lib/recent-sales.ts).
   const recent = await recentSales(store);
+  // The badge at the foot of the page, and where it leads: the creator's invite code only while the invite programme and
+  // sales are both open (lib/badge-link.ts, 14 [D11]); read, never made, and only when the badge is shown.
+  const showBadge = store.look.badge || !canUse(store, "branding");
+  const badgeLink = badgeHref(showBadge ? await badgeInviteCode(store.sid) : null);
 
   return (
     <div
@@ -741,8 +746,8 @@ export default async function StorePage({ params, searchParams }: Params) {
                 {bw.deleteMyData}
               </Link>
             </p>
-            {store.look.badge || !canUse(store, "branding") ? (
-              <Link href="/" prefetch={false} className="st-footer-link text-sm font-semibold">
+            {showBadge ? (
+              <Link href={badgeLink} prefetch={false} className="st-footer-link text-sm font-semibold">
                 {w.madeWith}
               </Link>
             ) : null}

@@ -72,6 +72,37 @@ async function main(): Promise<void> {
   for (let i = (await readLinks(mine.statsId)).length; i < MAX_LINKS; i += 1) await addLink(mine, { name: `post-${i}`, place: "x", target: { kind: "store" } }, isProduct);
   is("the hundred and first is refused", (await addLink(mine, { name: "one-more", place: "x", target: { kind: "store" } }, isProduct)).ok ? "" : "full", "full");
 
+  part("A list whose reply is not whole is unknown, never no links (CX-123 rule 24)");
+  // The store's list (HVALS) answered in another shape: never [] ("no links made"), so the studio says it could not
+  // read them, and adding one is not let past the hundred or a name already taken on a list it could not read.
+  const kept = redis.pipeline;
+  const garbled = async <T>(reply: unknown, run: () => Promise<T>): Promise<T | "threw"> => {
+    redis.pipeline = (async (commands: unknown[][]) => (commands.some((c) => c[0] === "HVALS") ? commands.map(() => reply) : kept.call(redis, commands as never))) as never;
+    try {
+      return await run();
+    } catch {
+      return "threw";
+    } finally {
+      redis.pipeline = kept;
+    }
+  };
+  for (const [what, reply] of [["text", "garbled"], ["a number", 7], ["an object", { a: 1 }], ["a list with a number in it", ["x", 3]]] as const) {
+    is(`readLinks on ${what} throws, never []`, await garbled(reply, () => readLinks(mine.statsId)), "threw");
+  }
+  is("a pipeline of the wrong length is unknown too", await (async () => {
+    redis.pipeline = (async () => []) as never;
+    try {
+      return await readLinks(mine.statsId);
+    } catch {
+      return "threw";
+    } finally {
+      redis.pipeline = kept;
+    }
+  })(), "threw");
+  const before = (await readLinks(mine.statsId)).length;
+  is("adding on a list that could not be read makes no link past the hundred", [await garbled("garbled", () => addLink(mine, { name: "past-the-cap", place: "x", target: { kind: "store" } }, isProduct)), (await readLinks(mine.statsId)).length], ["threw", before]);
+  is("control: an empty list is still no links", await readLinks("f".repeat(18)), []);
+
   done();
 }
 

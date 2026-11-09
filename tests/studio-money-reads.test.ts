@@ -57,6 +57,8 @@ import { paidPeriod } from "./billing-period-fixture";
 import { savePaidPeriod } from "@/lib/closing-holds";
 import { UNKNOWN_SALES_GOAL_CENTS } from "@/lib/sales-goal";
 import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
+import { PairsEditor } from "@/components/pairs-editor";
+import { createElement } from "react";
 import { SECOND_STEP_WORDS, putMember, setRequireTwoStep } from "@/lib/team";
 import { makePasskey } from "./passkey-world";
 
@@ -351,6 +353,13 @@ async function main(): Promise<void> {
   for (const picker of PICKERS) is(`${picker} is never drawn with no products in place of the real ones`, element(picker), null);
   is("never 'Add a paid product first' to a store that has them", has(drawnText(element("WelcomeOfferEditor")), "Add a paid product first"), false);
   is("never 'Add something free' to a store that gives something away", has(drawnText(element("ExitOfferEditor")), "Add something free"), false);
+  // "Goes well with" (components/pairs-editor.tsx) picks among the same names: not read, it is said so on each product,
+  // never left out with no word as if the store had no other product to pick (VR 2).
+  const editor = element("ProductEditor");
+  const pairChoices = editor?.props.pairChoices;
+  is("the product editor is told the picks' names could not be read, never given none", [editor !== null, pairChoices], [true, null]);
+  const pairsText = renderToStaticMarkup(createElement(PairsEditor, { productId: "p1", initial: ["p2"], choices: pairChoices as never })).replace(/<[^>]+>/g, " ").replace(/&#x27;|&#39;|&rsquo;/g, "'").replace(/\s+/g, " ");
+  is("'Goes well with' is still drawn, saying its picks could not be read and are kept, with how to check again", [has(pairsText, "Goes well with"), has(pairsText, "We could not read your other products' names just now"), has(pairsText, "kept as they are"), has(pairsText, RELOAD)], [true, true, true, true]);
 
   part("Short links that could not be read");
   const linksDown = await shown(COUNTER, (command) => command[0] === "HVALS" && command[1] === `nl:slink:store:${countsStats}`);
@@ -374,6 +383,16 @@ async function main(): Promise<void> {
   is("the page still renders when the second step cannot be read", doorDown !== null, true);
   is("never told to set up a second step it may already have", has(doorDown, SECOND_STEP_WORDS.set_up.title), false);
   is("the second step that could not be read is said so", [has(doorDown, "We could not check just now how you log in with a second step"), has(doorDown, RELOAD)], [true, true]);
+  // A way forward, as the other ways of this notice have one: the login page, where the second step is asked for anyway.
+  const login = drawn.find((one) => one.props.href === "/signin" && String(one.props.children).includes("Go to the login page"));
+  is("with a way forward: a link to the login page", [login !== undefined, has(doorDown, "Go to the login page")], [true, true]);
+
+  part("One sentence to reload, on the whole of Today");
+  // The studio's notices say "Reload this page in a moment to check again."; the AI allowance and the calls not read
+  // said it in other words (a minute, try again, the page). One sentence, the simplest, everywhere on this page.
+  const source = readFileSync("app/studio/page.tsx", "utf8");
+  is("the AI allowance not read ends in the same sentence", AI_ALLOWANCE_UNKNOWN.endsWith(RELOAD), true);
+  is("the calls not read from Stripe end in it too", [source.includes("Nothing is lost; reload the page in a moment."), source.includes("Your calls could not be read from Stripe just now. Nothing is lost. Reload this page in a moment to check again.")], [false, true]);
 
   done();
 }

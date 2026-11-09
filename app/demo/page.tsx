@@ -12,6 +12,12 @@ export const metadata: Metadata = {
 };
 
 /**
+ * No longer than the demo store's lock (lib/demo-seed.ts, 120 s): a visit that has to build the store stops its
+ * work inside the lock, and is never left running beside the next visit's build.
+ */
+export const maxDuration = 120;
+
+/**
  * The address everybody has for the demo, and has had from the first day:
  * marktmorgen.com/demo. It is not a page of its own any more.
  *

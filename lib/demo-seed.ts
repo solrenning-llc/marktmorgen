@@ -30,6 +30,11 @@
  *
  *   nl:house:seed        the mark: fingerprint, what is still missing, when
  *   nl:house:seed:lock   held while it runs, so two requests never both do
+ *
+ * A run ends before its lock does: the work runs inside a cutoff (lib/fetch-timeout.ts, withCutoff) that leaves
+ * the rest of the lock for writing the mark and letting the lock go, and /demo may run no longer than the lock
+ * (its maxDuration). A run that is cut stops between two steps, says "run:cutoff" in its mark, and is never
+ * written down as finished; the next run after the wait below picks up what is still missing.
  */
 import { createHash } from "node:crypto";
 import { readNote } from "@/lib/thanks-note";
@@ -41,7 +46,7 @@ import { isDemoCheckoutConfigured } from "@/lib/demo-store";
 import { DEMO_CONNECTED_ACCOUNT } from "@/lib/demo-account";
 import { type DemoFileName, getDemoFile } from "@/lib/demo-file";
 import { rememberFolderOwner } from "@/lib/delivery";
-import { timed } from "@/lib/fetch-timeout";
+import { REDIS_TIMEOUT_MS, timeLeft, timed, withCutoff } from "@/lib/fetch-timeout";
 import { configuredDemoStudioAdmin, HOUSE_HANDLE, HOUSE_OWNER } from "@/lib/house-store";
 import { readAbout, writeAbout } from "@/lib/product-about";
 import { type ProductFile, fileFolder } from "@/lib/product-file";
@@ -409,6 +414,46 @@ That is the whole method. The planner below puts it on one printable page per we
 const MARK = "nl:house:seed";
 const LOCK = "nl:house:seed:lock";
 const LOCK_SECONDS = 120;
+/**
+ * How long the work may run, counted from just before the lock is taken: the twenty seconds left of the lock are
+ * for writing the mark and letting the lock go (one Redis request each, at most REDIS_TIMEOUT_MS), with room.
+ */
+const BUILD_MS = (LOCK_SECONDS - 20) * 1000;
+/** Kept, inside a cutoff of the caller's own (the daily job's), for writing the mark and letting the lock go. */
+const WRITE_ROOM_MS = 2 * REDIS_TIMEOUT_MS;
+/** Below this, there is no time to ask anything more (lib/fetch-timeout.ts, timed). */
+const NO_TIME_MS = 50;
+const CUTOFF = "cutoff";
+
+/** What a run that reached its cutoff stops with, between two steps. */
+class CutOff extends Error {
+  constructor() {
+    super(CUTOFF);
+  }
+}
+
+/** Stops the run here when its cutoff has come: nothing more is asked, and nothing after this is written. */
+function inTime(): void {
+  if (timeLeft() < NO_TIME_MS) throw new CutOff();
+}
+
+/** The stand-ins and the real file store alike, each asked only while there is time. */
+function bounded(deps: SeedDeps): SeedDeps {
+  return {
+    putFile: async (pathname, bytes, contentType) => {
+      inTime();
+      await deps.putFile(pathname, bytes, contentType);
+    },
+    removeFile: async (pathname) => {
+      inTime();
+      await deps.removeFile(pathname);
+    },
+    fetchBytes: async (url) => {
+      inTime();
+      return deps.fetchBytes(url);
+    },
+  };
+}
 /** How long a step that failed is left before it is tried again. */
 export const RETRY_SECONDS = 10 * 60;
 
@@ -931,27 +976,41 @@ async function build(before: Mark | null, deps: SeedDeps): Promise<Mark> {
   let store = await ensureStore(pending);
   if (!store) return mark;
   mark.store = true;
+  inTime();
 
   const photo = await ensurePhoto(store, mark.photo, deps, pending);
   store = photo.store;
   mark.photo = photo.source;
+  inTime();
 
   const made = await ensureProduct(store, pending);
   if (!made) {
     if (!pending.some((p) => p.startsWith("product"))) pending.push(refused("product", "missing"));
     return mark;
   }
+  inTime();
   store = await ensureFiles(made.store, made.product, deps, pending);
+  inTime();
   const picture = await ensureImage(store, made.product, mark.image, deps, pending);
   store = picture.store;
   mark.image = picture.source;
+  inTime();
   store = await ensureAbout(store, made.product, pending);
+  inTime();
   store = await ensurePage(store, made.product, pending);
+  inTime();
   store = await ensureNote(store, made.product, pending);
+  inTime();
   store = await ensurePlan(store, made.product, pending);
+  inTime();
   store = await ensurePost(store, made.product, pending);
-  for (const extra of DEMO_EXTRAS) store = await ensureExtra(store, extra, mark, deps, pending);
+  for (const extra of DEMO_EXTRAS) {
+    inTime();
+    store = await ensureExtra(store, extra, mark, deps, pending);
+  }
+  inTime();
   store = await ensureCall(store, mark, deps, pending);
+  inTime();
 
   // Whoever connects the demo store's Zoom and Google Calendar in its studio
   // (lib/team.ts, putMember), from lib/house-store.ts.
@@ -986,9 +1045,13 @@ export async function ensureDemoStore(deps: SeedDeps = REAL): Promise<SeedResult
   // Something failed a moment ago: left alone for a while, not tried on every visit.
   if (current && now - mark.at < RETRY_SECONDS) return { ok: mark.store, pending: mark.pending, ran: false };
 
+  // Inside a caller's own cutoff (the daily job's), with no time left to build and write: nothing is taken or written.
+  if (timeLeft() - WRITE_ROOM_MS < 1_000) return { ok: mark?.store ?? false, pending: mark?.pending.length ? mark.pending : [refused("run", CUTOFF)], ran: false };
+
   // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an unknown
   // answer builds nothing this time and is named, and the lock is let go at the end only while it still holds this
   // run's own value, so a run never deletes another run's lock.
+  const started = Date.now();
   const lock = claimValue();
   const got = await claimMark(LOCK, LOCK_SECONDS, lock);
   // Somebody else is doing it right now. The store, if there was one, is still there.
@@ -998,7 +1061,19 @@ export async function ensureDemoStore(deps: SeedDeps = REAL): Promise<SeedResult
     return { ok: mark?.store ?? false, pending: [refused("lock", "unknown")], ran: false };
   }
   try {
-    const next = await build(mark, deps);
+    // The work ends before the lock does, and before a caller's own cutoff, with room to write the mark and let go.
+    const end = Math.min(started + BUILD_MS, Date.now() + timeLeft() - WRITE_ROOM_MS);
+    const next = await withCutoff(end, async () => {
+      try {
+        const built = await build(mark, bounded(deps));
+        // A request given up at the cutoff may have been read by a step as "nothing there": never finished.
+        if (timeLeft() < NO_TIME_MS && !built.pending.includes(refused("run", CUTOFF))) built.pending.push(refused("run", CUTOFF));
+        return built;
+      } catch (error) {
+        if (timeLeft() < NO_TIME_MS) throw new CutOff();
+        throw error;
+      }
+    });
     await redisPipeline([["SET", MARK, JSON.stringify(next)]]);
     return { ok: next.store, pending: next.pending, ran: true };
   } catch (error) {

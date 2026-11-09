@@ -513,13 +513,27 @@ function stepsOf(store: Store, steps: AiStepsRun | undefined, unrun: Unrun) {
     }
   };
   return {
-    /** One step's call. `reached` is false when it never reached the model; its jobs are then given back. */
-    async step<R>(id: AiStepId, jobs: number, call: () => Promise<R>): Promise<{ reached: boolean; value: R }> {
+    /**
+     * One step's call. `reached` is false when it never reached the model; its jobs are then given back.
+     * `later` is the jobs of the steps after it: when the call throws (a rejected fetch, an answer that
+     * is not JSON), those steps never start and are given back, with this step's own jobs if its call
+     * never reached the model; what was sent stays counted (review of #3447, M1).
+     */
+    async step<R>(id: AiStepId, jobs: number, call: () => Promise<R>, later = 0): Promise<{ reached: boolean; value: R }> {
       say(id, "started");
       const before = aiDispatchCount();
-      const value = await call();
-      const after = aiDispatchCount();
-      const reached = before === null || after === null || after > before;
+      const sent = () => {
+        const after = aiDispatchCount();
+        return before === null || after === null || after > before;
+      };
+      let value: R;
+      try {
+        value = await call();
+      } catch (error) {
+        unrun.jobs += (sent() ? 0 : jobs) + later;
+        throw error;
+      }
+      const reached = sent();
       if (reached) say(id, "done");
       else unrun.jobs += jobs;
       return { reached, value };
@@ -1442,8 +1456,8 @@ async function readPdfFacts(store: Store, pdf: Uint8Array): Promise<string | nul
  * jobs, READ_PDF_JOBS + 1, are taken before the first call; each call
  * reserves its own money right before it is sent (askModel). A stop between
  * the steps, a reading with nothing in it (said as "empty" in a run told in
- * steps) or a request that cannot be made leaves the writing step out, and
- * its job is given back; a step that ran
+ * steps), a reading whose call throws or a request that cannot be made
+ * leaves the writing step out, and its job is given back; a step that ran
  * stays counted, even when what it wrote is refused by `keep`.
  */
 export async function readPdfThenWrite<T>(
@@ -1464,7 +1478,7 @@ export async function readPdfThenWrite<T>(
   const unrun: Unrun = { jobs: 0, asked: false };
   const flow = stepsOf(store, steps, unrun);
   return countedRun(store, now, async () => {
-    const read = await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf));
+    const read = await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf), 1);
     const fileFacts = read.value;
     const request = fileFacts ? write.request(fileFacts) : null;
     if (!request) {
@@ -1498,7 +1512,7 @@ export async function writePage(
   const flow = stepsOf(store, steps, unrun);
   return countedRun(store, now, async () => {
     // What the product's own first pages hold, when the creator asked for them to be read.
-    const read = pdf ? await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf)) : null;
+    const read = pdf ? await flow.step("read", READ_PDF_JOBS, () => readPdfFacts(store, pdf), 1) : null;
     const fileFacts = read ? read.value : null;
     // Nothing to write from: the writing step never starts, and its job is
     // given back. A run told in steps says the PDF, read, gave nothing, so

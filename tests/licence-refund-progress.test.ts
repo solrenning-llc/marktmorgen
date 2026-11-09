@@ -215,10 +215,22 @@ async function main(): Promise<void> {
     is("the refund since the anchor is read", await checkKey(store, app, keyed.key), "revoked");
   }
 
+  part("6b. A pass whose place Stripe no longer knows starts again from the anchor, never stuck on it");
+  {
+    await fresh();
+    const keyed = await sale();
+    await memory([["SET", anchorKey(), String(NOW - 7200), "EX", 3600], ["SET", passKey(), JSON.stringify({ from: NOW - 7200, start: NOW - 60, after: "re_GoneFromStripe1", newest: NOW - 7200, floor: null }), "EX", 3600]]);
+    // Behind a full page of newer refunds, so the newest page a resuming run reads first does not reach it.
+    refunds = [...partials(100, NOW - 3000, 7), full("re_ProgressKey007", keyed.pi, NOW - 3600)];
+    const took = await runs(2, revokedKey(keyed.key));
+    is("the refund since the anchor is read within two runs", took <= 2, true);
+    is("the anchor never moved past it", (await anchorOf()) >= NOW - 7200, true);
+  }
+
   part("7. What a run sends for its place is registered (CX-123 rule 24)");
   {
     const listed = (licenceKeys as Record<string, unknown>).KEY_REFUND_PLACE_COMMANDS;
-    is("the commands of the place are a number exported by lib/licence-keys.ts", typeof listed, "number");
+    is("the commands of the place are a number the job exports", typeof listed, "number");
     is("and named in the cost registry", typeof NOT_A_COST.KEY_REFUND_PLACE_COMMANDS, "string");
     await fresh();
     refunds = partials(450, NOW - 3000, 6);

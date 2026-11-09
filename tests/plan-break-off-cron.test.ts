@@ -31,6 +31,14 @@ async function main(){
  is("payment request reminders still run after a failed nudge pass",calls,["renewal","failed","trial","requests"]);
  is("the failed nudge pass is said, not hidden",(await failing.json()).nudges,{error:"failed"});
  is("the run's lock is let go after it",await redis.pipeline([["GET","nl:remind:lock"]]).then(([v])=>v),null);
+ part("Passes before the nudges that run late still leave the nudges a slice, never past 40 s (Claude 2 on #3342)");
+ const realNow=Date.now;let lateBy=0;Date.now=()=>realNow()+lateBy;
+ const started=Date.now();let renewalDone=0;
+ world.onRenewal=()=>{lateBy=33_000;renewalDone=Date.now();};
+ try{await GET(new NextRequest("https://local.example/api/cron/reminders"));}finally{world.onRenewal=()=>{};Date.now=realNow;}
+ is("the nudges still have a few seconds after passes that took 33 s",world.trialDeadline>=renewalDone+5_000,true);
+ is("and stop starting it by 40 s into the run",world.trialDeadline<=started+40_000+1_000,true);
+ is("the payment request reminders still run past the nudges' deadline",world.requestsDeadline>world.trialDeadline,true);
  done();
 }
 main().catch(e=>{console.error(e);process.exit(1);});

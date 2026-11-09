@@ -16,7 +16,10 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
+import { NextRequest } from "next/server";
 import BookPage, { generateMetadata as bookMeta } from "@/app/[handle]/book/[product]/page";
+import { POST as bookRoute } from "@/app/api/store/book/route";
+import { POST as moveRoute } from "@/app/api/store/book/move/route";
 import EmbedCard from "@/app/embed/[handle]/[product]/page";
 import { StoreResting } from "@/components/store-resting";
 import { bookTimesUnits, bookingDiaryKey } from "@/lib/book-page-rules";
@@ -34,11 +37,15 @@ import { done, is, part } from "./check";
 let stripe = 0;
 let unitsNow = 0;
 let firstAt: number | null = null;
+// The window's units taken when each Stripe call was made, on the request being watched.
+let atStripe: number[] = [];
+let netNow = 0;
 // A paid booking's checkout, as Stripe answers it for a buyer's move; anything else is an empty list.
 const paidSessions = new Map<string, Record<string, unknown>>();
 globalThis.fetch = (async (input: RequestInfo | URL) => {
   stripe += 1;
   if (firstAt === null) firstAt = unitsNow;
+  atStripe.push(unitsNow);
   const url = String(input);
   for (const [id, session] of paidSessions) if (url.includes(`/checkout/sessions/${id}`)) return new Response(JSON.stringify(session), { status: 200 });
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
@@ -49,16 +56,22 @@ const NY = "America/New_York";
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
 const weekly = { kind: "weekly", minutes: 30, tz: NY, weekly: WEEKDAYS, noticeHours: 1, horizonDays: 14, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] };
 
-type Watched = { stripe: number; units: number; firstAt: number | null; result: unknown };
+type Watched = { stripe: number; units: number; net: number; firstAt: number | null; atStripe: number[]; result: unknown };
 
 async function watch(headers: Record<string, string>, run: () => Promise<unknown>): Promise<Watched> {
   answering(new Request("https://marktmorgen.com/x", { headers }));
   const original = redis.pipeline.bind(redis);
   const before = stripe;
   unitsNow = 0;
+  netNow = 0;
   firstAt = null;
+  atStripe = [];
   redis.pipeline = async (cmds) => {
-    for (const c of cmds) if (c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:")) unitsNow += Number(c[2]);
+    for (const c of cmds) {
+      if (!String(c[1]).startsWith("nl:traffic:r:")) continue;
+      if (c[0] === "INCRBY") { unitsNow += Number(c[2]); netNow += Number(c[2]); }
+      if (c[0] === "DECRBY") netNow -= Number(c[2]);
+    }
     return original(cmds);
   };
   let result: unknown = null;
@@ -71,7 +84,7 @@ async function watch(headers: Record<string, string>, run: () => Promise<unknown
   } finally {
     redis.pipeline = original;
   }
-  return { stripe: stripe - before, units: unitsNow, firstAt, result };
+  return { stripe: stripe - before, units: unitsNow, net: netNow, firstAt, atStripe, result };
 }
 
 const resting = (result: unknown) => (result as { type?: unknown } | null)?.type === StoreResting;
@@ -213,11 +226,54 @@ async function main(): Promise<void> {
   is("the buyer still sees their booking", resting(kept.result), false);
   is("and is told the times could not be read", texts(kept.result).includes(words.timesUnread), true);
 
+  part("Review of #3478, MEDIUM 1: the booking form's POST pays for the times it reads");
+  const post = (s: Shop, route: (r: NextRequest) => Promise<Response>, path: string, fields: Record<string, string>, ip: string) =>
+    watch({ "x-forwarded-for": ip, "user-agent": "curl/8" }, () => route(new NextRequest(`https://marktmorgen.test${path}`, {
+      method: "POST",
+      headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": ip },
+      body: new URLSearchParams({ handle: s.store.handle, product: s.call, ...fields }).toString(),
+    })));
+  const START = String(Date.now() + 3 * 86_400_000);
+  const form = await shop("admitpost");
+  const opened = await post(form, bookRoute, "/api/store/book", { start: START, tz: NY }, "198.51.100.70");
+  is("with the window open, a booking takes its times' requests and its own before it reads", opened.units >= bookTimesUnits(1) + 2, true);
+  is("none of them before Stripe is asked", opened.atStripe.every((units) => units >= bookTimesUnits(1) + 2), true);
+  await spendWindow(form.store, publicVisitLimit(requestLimitFor(form.store)));
+  let posted = 0, held = 0;
+  for (let i = 0; i < 10; i += 1) {
+    const r = await post(form, bookRoute, "/api/store/book", { start: START, tz: NY }, `203.0.113.${100 + i}`);
+    posted += r.stripe;
+    held += Math.max(0, r.net - 1);
+  }
+  console.log(`  measured: 10 bookings with the public share used up -> ${posted} Stripe calls`);
+  is("with the public share used up, 10 bookings from 10 addresses ask Stripe nothing", posted, 0);
+  is("and keep nothing of the buyers' reserve beyond a refused request each", held, 0);
+  const forged = await post(form, bookRoute, "/api/store/book", { start: START, tz: NY, pkg: "cd".repeat(24) }, "203.0.113.120");
+  is("a made-up package does not book from the buyers' reserve", forged.stripe, 0);
+
+  part("Review of #3478, MEDIUM 1: moving a booking pays for the times it reads, and only a booking in the diary is read");
+  const mover = await shop("admitmovepost");
+  let made = 0;
+  for (let i = 0; i < 10; i += 1) made += (await post(mover, moveRoute, "/api/store/book/move", { session: `cs_test_${"z".repeat(20)}${i}`, start: START }, `203.0.113.${130 + i}`)).stripe;
+  is("10 made-up sessions ask Stripe nothing", made, 0);
+  const REAL = `cs_test_${"y".repeat(24)}`;
+  booking(mover, REAL);
+  const real = await post(mover, moveRoute, "/api/store/book/move", { session: REAL, start: START }, "203.0.113.150");
+  is("(fact) a booking in the diary is read from Stripe", real.stripe >= 1, true);
+  is("its times are paid for before they are read (the times' units after the order's read)", real.units >= 1 + bookTimesUnits(1) && (real.atStripe[1] ?? Infinity) >= 1 + bookTimesUnits(1), true);
+
+  part("Review of #3478, LOW 2: a made-up ?move= with the window open asks Stripe nothing");
+  const page = await shop("admitmovepage");
+  let asked = 0;
+  for (let i = 0; i < 10; i += 1) asked += (await book(page, { move: `cs_test_${"x".repeat(20)}${i}` }, `198.51.100.${80 + i}`)).stripe;
+  is("10 made-up moves ask Stripe nothing", asked, 0);
+
   part("The buyer's proof reads lib/calls.ts's own diary");
   is("the diary key is lib/calls.ts's busyKey", readFileSync("lib/calls.ts", "utf8").includes("const busyKey = (callsId: string) => `nl:call:busy:${callsId}`;") && bookingDiaryKey("abc") === "nl:call:busy:abc", true);
 
   part("(e) The help says what a call's booking times count");
   is("the help names the booking times' requests", /booking times/.test(readFileSync("lib/help-content.ts", "utf8")), true);
+  is("and what booking a time and moving a booking count", /Booking a time[^`]*moving a booking/.test(readFileSync("lib/help-content.ts", "utf8")), true);
   done();
 }
 main().catch((e) => { console.error(e); process.exit(1); });

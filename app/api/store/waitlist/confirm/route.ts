@@ -17,6 +17,8 @@ export async function POST(request: NextRequest) {
   }
   const grant = WAIT_TOKEN.test(token) ? await readWaitToken(token) : null;
   const store = grant ? await storeForHandle(grant.h) : null;
+  // Switched off after notices about its content: nothing is confirmed, and the answer is the store's page, as on its sign-up.
+  if (store?.suspended) return new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}`, "Cache-Control": "no-store" } });
   const result = grant ? await confirmSpot(token, store) : { ok: false as const };
   const handle = store?.handle ?? grant?.h ?? "";
   const target = handle

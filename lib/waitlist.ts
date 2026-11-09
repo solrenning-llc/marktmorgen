@@ -110,6 +110,8 @@ export async function joinWaitlist(input: {
   origin: string;
 }): Promise<JoinResult> {
   const { store, product, consent, ip, origin } = input;
+  // Switched off after notices about its content (lib/takedown.ts): no address is taken, as on its list.
+  if (store.suspended) return "closed";
   const raw = input.email.trim();
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!store.statsId || !isRedisConfigured()) return "error";
@@ -175,6 +177,8 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
 
 /** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
 export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
+  // Switched off after notices about its content: the spot does not count and joins no list (lib/store-join.ts listOpen).
+  if (store?.suspended) return { ok: false };
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
   const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
@@ -236,13 +240,15 @@ function entriesOf(raw: unknown): [string, WaitEntry][] {
   return pairs.map(([k, v]) => [k, parseEntry(v)] as [string, WaitEntry | null]).filter((p): p is [string, WaitEntry] => p[1] !== null);
 }
 
-export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "address" | "busy" };
+export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "address" | "busy" | "switched_off" };
 
 /**
  * Puts the product on sale and starts the one email to everyone who
- * confirmed. The five-minute job sends it (runLaunches).
+ * confirmed. The five-minute job sends it (runLaunches). Refused, with
+ * nothing written, while the store is switched off after notices.
  */
 export async function launch(store: Store, product: Listing, input: { note: unknown; address: unknown }): Promise<LaunchResult> {
+  if (store.suspended) return { ok: false, reason: "switched_off" };
   const address = cleanLine(input.address, MAX_LAUNCH_ADDRESS);
   const note = cleanText(input.note, MAX_LAUNCH_NOTE);
   if (!store.statsId) return { ok: false, reason: "busy" };
@@ -348,6 +354,11 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       continue;
     }
     const { store, product } = target;
+    // Switched off after notices about its content (lib/takedown.ts): the
+    // launch waits where it is, nothing reserved or sent, and goes on once
+    // the store is back on. Bounded as any hold: the job key lapses 120 days
+    // after its last write.
+    if (store.suspended) continue;
     const said = speech(store);
     const g = givingWords(store.language);
     const words = launchBody(

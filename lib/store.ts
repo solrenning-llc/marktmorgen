@@ -641,7 +641,8 @@ export type Store = {
   numbersLinks: NumbersLink[];
   /**
    * Taken down after notices (lib/takedown.ts): the day the store's pages and
-   * sales were switched off ("" while they are on), and every piece of
+   * sales were switched off ("" while they are on; "unknown" when the stored
+   * value is neither, read as off: rule 24), and every piece of
    * content taken down, newest first — the record a repeat infringer is
    * judged by.
    */
@@ -1045,7 +1046,14 @@ function parseStore(raw: unknown): Store | null {
       tips: parseTips(value.tips),
       kit: parseKit(value.kit),
       numbersLinks: parseLinks(value.numbersLinks),
-      suspended: typeof value.suspended === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.suspended) ? value.suspended : "",
+      // On only when nothing or "" is stored (noteTakedown writes "" or a day). Any other value is unknown
+      // and reads as switched off, never as on (rule 24); switching the store back on writes "" again.
+      suspended:
+        value.suspended === undefined || value.suspended === ""
+          ? ""
+          : typeof value.suspended === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.suspended)
+            ? value.suspended
+            : "unknown",
       strikes: parseStrikes(value.strikes),
       faq: parseFaq(value.faq),
       intro: parseVideo(value.intro),

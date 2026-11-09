@@ -406,11 +406,13 @@ async function endToEnd() {
         return o.queueReply !== undefined ? o.queueReply : { total_count: (o.queueRuns ?? []).length, workflow_runs: o.queueRuns ?? [] };
       }
       if (path === `actions/runs?branch=main&head_sha=${o.head}&per_page=100&page=1`) return { total_count: o.headRuns.length, workflow_runs: o.headRuns };
-      const older = /^actions\/workflows\/([\w.-]+)\/runs\?branch=main&status=completed&per_page=100&page=(\d+)$/.exec(path);
+      const older = /^actions\/workflows\/([\w.-]+)\/runs\?branch=main(&status=completed)?&per_page=100&page=(\d+)$/.exec(path);
       if (older) {
         if (o.olderReply !== undefined) return o.olderReply;
-        const pages = o.older?.[older[1]] ?? [];
-        return { total_count: pages.flat().length, workflow_runs: pages[Number(older[2]) - 1] ?? [] };
+        // As GitHub answers it: with status=completed, the runs still going are not in the listing.
+        const keep = (r: unknown) => !older[2] || (r as { status?: string }).status === "completed";
+        const pages = (o.older?.[older[1]] ?? []).map((page) => page.filter(keep));
+        return { total_count: pages.flat().length, workflow_runs: pages[Number(older[3]) - 1] ?? [] };
       }
       const jobs = /^actions\/runs\/(\d+)\/jobs\?per_page=100$/.exec(path);
       if (jobs) return o.jobs?.[Number(jobs[1])] ?? o.defaultJobs ?? cleanJobs;
@@ -482,6 +484,16 @@ async function endToEnd() {
     const gh = github({ head: HEAD, headRuns: [...restGreen(), b], jobs: { [b.id]: skipped }, older: { "product-checks.yml": [[]] } });
     await alarmRun({ api: gh.api, trigger: b, log: quiet });
     is("canceled with its jobs skipped, none stopped: nothing opens", gh.writes, []);
+  }
+  {
+    // Claude 6 on #3422 (MEDIUM): three quick merges. B's push run canceled A's and is itself still being canceled
+    // by C's (in progress on MID), so it is in no completed listing; the head is C, its product-checks running.
+    // A was superseded by B, so it is no evidence: nothing opens.
+    const a = run(PC, stopped, { head_sha: OLD, id: 7_101, updated_at: "2026-11-06T23:00:00Z" });
+    const b = run(PC, null, { head_sha: MID, id: 7_102, created_at: "2026-11-06T22:59:00Z" });
+    const gh = github({ head: HEAD, headRuns: [...restGreen(), run(PC, null, { id: 7_103, created_at: "2026-11-06T23:10:00Z" })], older: { "product-checks.yml": [[b, a]] } });
+    const d = await alarmRun({ api: gh.api, trigger: restGreen()[0], log: quiet });
+    is("superseded by a newer push run still being canceled itself (not completed): no evidence, nothing opens", [d.action, gh.writes], ["none", []]);
   }
   {
     const a = run(PC, stopped, { head_sha: OLD, id: 7_003 });

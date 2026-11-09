@@ -101,7 +101,7 @@ import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
-import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
@@ -114,7 +114,7 @@ import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import type { ReadWork } from "@/lib/api-read-rules";
+import { BOOK_KEPT_REFUND_BYTES, type ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
@@ -400,8 +400,7 @@ export const POST_META_BYTES = 2_048;
 export const SITEMAP_LINE_BYTES = 300;
 /**
  * Working out an affiliate program's book, besides what scales: the book
- * counted (eight), the seven hashes, the PayPal refunds' set and the ones
- * kept for good (one HMGET for the book's PayPal payments), two reads of
+ * counted (eight), the seven hashes, the PayPal refunds' set, two reads of
  * listings, the lock taken, read and let go, the kept book's state read
  * again under it and its previous marks, and the parts written to a draft
  * that is renamed into place.
@@ -430,11 +429,15 @@ const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_S
  */
 export function affiliatePageRead(size: AffiliatePageSize): number {
   const rows = Math.min(size.rows, AFFILIATE_ROW_CAP);
-  const bytes = AFFILIATE_PAGE_BYTES + size.fields * AFFILIATE_FIELD_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
+  // And the book's two questions about its PayPal payments (lib/affiliates.ts, readBook: an HMGET of the refunds kept
+  // for good and a ZMSCORE of the set, in slices of BOOK_KEPT_SLICE), each field a ceiling of the payments: their
+  // names sent and their answers, BOOK_KEPT_REFUND_BYTES a field, and two commands a slice (pre-review C).
+  const asks = 2 * Math.ceil(size.fields / BOOK_KEPT_SLICE);
+  const bytes = AFFILIATE_PAGE_BYTES + size.fields * (AFFILIATE_FIELD_BYTES + BOOK_KEPT_REFUND_BYTES) + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
   // Every field could be an affiliate with a part of their own; every part its lines.
   const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES + size.fields * BOOK_PART_BYTES);
   const writes = Math.ceil(kept / 512_000) + 1;
-  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + 2 * writes, bytes + kept) + perMegabyte(bytes + kept)
+  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + asks + 2 * writes, bytes + kept) + perMegabyte(bytes + kept)
     + size.stripePages * stripePage();
 }
 /** What one load of an approved affiliate's page costs at the most: the page, its own part of the kept book, its listings, and its codes when it reads them. */

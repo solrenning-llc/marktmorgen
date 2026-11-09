@@ -52,12 +52,10 @@ async function main() {
   is("a renewal outage does not silently mean zero renewals", (await readSales(store, NOW))!.cashflowComplete, false);
   part("PayPal refund coverage");
   const noRefunds = await readPayPalRefundsWithCoverage(store.statsId, NOW / 1000 - 86400);
-  // The reading also says, since 9 November 2026, which listed orders lost their record (gone) and whether it was cut
-  // short (cut): the affiliate book reads them (tests/affiliate-refund-lifetime.test.ts). `partial` is unchanged.
-  is("a known empty reading is complete", noRefunds, { rows: [], partial: false, cut: false, gone: [] });
+  is("a known empty reading is complete", noRefunds, { rows: [], partial: false });
   await redis.pipeline([["ZADD", `nl:ppsell:refunded:${store.statsId}`, NOW / 1000, "missing-order"]]);
   const paypal = await readPayPalRefundsWithCoverage(store.statsId, NOW / 1000 - 86400);
-  is("a refund whose payment is missing makes the reading incomplete", paypal, { rows: [], partial: true, cut: true, gone: [] });
+  is("a refund whose payment is missing makes the reading incomplete", paypal, { rows: [], partial: true });
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

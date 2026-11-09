@@ -273,7 +273,9 @@ async function main(): Promise<void> {
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   const page = registry.slice(registry.indexOf("export function affiliatePageRead("), registry.indexOf("export function affiliateLoadRead("));
   is("affiliatePageRead counts BOOK_KEPT_REFUND_BYTES a field", page.includes("BOOK_KEPT_REFUND_BYTES"), true);
-  is("what one answer and its name weigh is counted, both questions (HMGET and ZMSCORE)", BOOK_KEPT_REFUND_BYTES >= 2 * (16 + 71 + 16 + 24), true);
+  // Corrected in the fix commit (rule 23): a bulk string's framing is at most 8 bytes ("$NN\r\n" and "\r\n"), not 16;
+  // the names and answers are those of the code: "paypal:" and 64, a time of 12, an order of 36, a score of 24.
+  is("what one answer and its name weigh is counted, both questions (HMGET and ZMSCORE)", BOOK_KEPT_REFUND_BYTES >= 4 * 8 + 71 + 12 + 36 + 24, true);
   is("the entry's own bytes are still counted", AFFILIATE_ENTRY_BYTES, 4_096);
 
   part("The refund seen twice, in the lasting record and in the set, counts once");

@@ -118,10 +118,18 @@ export const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
 /**
  * The store's PayPal payments refunded in full, kept for good (a field per payment, named as the affiliate book names
  * it, paypalPaymentId; its value when the refund was seen): the affiliate book's lines are kept for good, so what
- * takes one back must be too. refundedKey is the short-lived index the store's numbers read; the book reads this.
+ * takes one back must be too. refundedKey is the short-lived index the store's numbers list; the book reads this,
+ * and asks refundedKey about its own orders only (lib/affiliates.ts, readBook).
  */
 export const backKey = (statsId: string) => `nl:ppsell:back:${statsId}`;
+/** The most names one question of the affiliate book carries (an HMGET of backKey, a ZMSCORE of refundedKey); a longer list is asked in slices. */
+export const BOOK_KEPT_SLICE = 500;
 const SALES_KEPT_SECONDS = 400 * 86_400;
+/**
+ * A member of refundedKey that is a partial refund's mark rather than an order refunded in full: "part:" and the
+ * order (the partial refund's unit builds on this). Readers of refunds in full pass over it, never as a cut.
+ */
+export const PARTIAL_MARK = /^part:[A-Z0-9]{10,36}$/;
 
 type Partner = { client: string; secret: string; merchant: string; bn: string };
 
@@ -857,7 +865,9 @@ export async function watchPayPal(
     // again once they expire (P3), or the whole book left unchecked once the record alone did (P4). Charged to the
     // store's room as an order's record (lib/order-data.ts). Its one reply read exactly, 0 or 1 (written, or already
     // there); anything else, or a write that failed, is unknown: the order stays watched, looked at again in an hour,
-    // before anything is told (rule 24). The set's mark above still takes the sale back in the meantime.
+    // before anything is told (rule 24). The set's mark above still takes the sale back in the meantime, and the
+    // affiliate book asks the set about its own orders as well as this record. No count of tries: a refund never
+    // kept for good is never let go, so a failure that lasts costs one look an hour, inside the run's 25 orders.
     let lasting: unknown[] | null = null;
     try {
       lasting = await orderWrite(store, [["HSETNX", backKey(statsId), paypalPaymentId(paid.capture), String(now)]]);
@@ -1079,27 +1089,26 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
 /**
  * PayPal sales refunded in full since `since` (seconds): the payment, how
  * much, in what, and when the refund was seen. At most PAYPAL_REFUNDS_READ,
- * their records read in one MGET. `partial` when that did not cover every
- * one; of it, `cut` when more were listed or one listed is no order's, and
- * `gone` the orders listed whose record is gone (or is not this store's):
- * the affiliate book takes each of those as a refund in full of its own line
- * of that order, when it has one, rather than as a reading it cannot trust.
+ * their records read in one MGET; `partial` when that did not cover every
+ * one (more listed, one listed that is no order's, or one whose record is
+ * gone). A member PARTIAL_MARK names (a partial refund's, "part:<order>")
+ * is neither a refund in full nor a cut: it is left to its own reader.
+ * The affiliate book does not read this: it asks the set about its own
+ * orders and reads backKey (lib/affiliates.ts, readBook).
  */
-export async function readPayPalRefundsWithCoverage(
-  statsId: string | null,
-  since: number,
-): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean; cut: boolean; gone: string[] }> {
-  if (!statsId || !isRedisConfigured()) return { rows: [], partial: false, cut: false, gone: [] };
+export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
+  if (!statsId || !isRedisConfigured()) return { rows: [], partial: false };
   // The listing read exactly (rule 24): one reply, a list of text. Anything else is not "no refunds" but a reading
-  // that covered nothing, so it is cut (9 November 2026, with the affiliate book's refunds kept for good).
+  // that covered nothing, so it is partial (9 November 2026).
   const orders = repliesFor(await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(Math.max(0, since)), "+inf", "WITHSCORES", "LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)]]), 1)?.[0];
   const known = Array.isArray(orders) && orders.every((item) => typeof item === "string");
   const flat = known ? (orders as string[]) : [];
   const listed: { order: string; at: number }[] = [];
-  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) || 0 });
+  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) {
+    if (!PARTIAL_MARK.test(flat[i])) listed.push({ order: flat[i], at: Number(flat[i + 1]) || 0 });
+  }
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
-  const gone: string[] = [];
-  const cut = !known || flat.length > 2 * PAYPAL_REFUNDS_READ || listed.some((entry) => !ORDER_ID.test(entry.order));
+  let missing = !known || listed.some((entry) => !ORDER_ID.test(entry.order));
   const readable = listed.filter((entry) => ORDER_ID.test(entry.order));
   const [records] = readable.length ? await redisPipeline([["MGET", ...readable.map((entry) => paidKey(entry.order))]]) : [[]];
   const raws = Array.isArray(records) ? (records as unknown[]) : [];
@@ -1111,9 +1120,9 @@ export async function readPayPalRefundsWithCoverage(
       paid = null;
     }
     if (paid && paid.store === statsId) out.push({ order: paid.order, capture: paid.capture, cents: paid.cents, currency: paid.currency, at: entry.at });
-    else gone.push(entry.order);
+    else missing = true;
   });
-  return { rows: out, partial: cut || gone.length > 0, cut, gone };
+  return { rows: out, partial: flat.length > 2 * PAYPAL_REFUNDS_READ || missing };
 }
 
 export async function readPayPalRefunds(statsId: string | null, since: number): Promise<{ order: string; capture: string; cents: number; currency: string; at: number }[]> {

@@ -764,7 +764,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:paid:@lib/paypal-sales.ts": short("A PayPal order paid", "order", 400, KB, KIND("paypal")),
   "nl:ppsell:pending:@lib/paypal-sales.ts": short("Orders whose payment PayPal holds, until it completes", "order", 30, MARK, KIND("paypal")),
   "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),
-  // A PayPal order hands over one product, never a membership or a call (lib/paypal-sales.ts), so its kind is its own.
+  // A PayPal order hands over one product (lib/paypal-sales.ts, sellsWithPayPal): never a call, a recurring one or
+  // license keys, but it can open a community or a private podcast, so the membership parts it can reach count with
+  // it (PAYPAL_NEVER_REACHES leaves out only what a recurring product or license keys keep): the parts of no kind, those
+  // membership parts and this one stay within ITEM_DATA_BYTES (tests/store-data-registry.test.ts, paypalItemBytes).
   // A field of "paypal:" and a capture id of up to 64 characters, a time of up to 12 digits, ORDER_ENTRY_BYTES and a
   // quarter more, rounded up (lib/order-data.ts): 192 bytes; 256 with the key's own share.
   "nl:ppsell:back:@lib/paypal-sales.ts": { what: "PayPal payments refunded in full, kept for good for the affiliate book's lines (9 November 2026)", parts: [item(256, "One field per refunded PayPal order, written through lib/order-data.ts.", "paypal")] },
@@ -1253,6 +1256,24 @@ export function followedBytes(tier: Tier, trial = false): number {
 /** The parts an order keeps for good, which ORDER_DATA_BYTES must hold. */
 export function keptParts(): { family: string; bytes: number }[] {
   return Object.entries(FAMILIES).flatMap(([family, f]) => (f.parts ?? []).flatMap((part) => ("kept" in part ? [{ family, bytes: part.kept }] : [])));
+}
+
+/**
+ * Membership parts a product sold through PayPal never reaches (lib/paypal-sales.ts, sellsWithPayPal refuses a recurring
+ * product and one with license keys): a membership's save offer and yearly ask, and the keys given.
+ */
+export const PAYPAL_NEVER_REACHES = ["nl:save:@lib/membership-manage.ts", "nl:yearask:@lib/yearly-ask.ts", "nl:keys:@lib/licence-keys.ts"] as const;
+
+/** What one product sold through PayPal keeps for good at the most: the parts of no kind, the membership parts it can reach, and the PayPal ones. */
+export function paypalItemBytes(): number {
+  let total = 0;
+  for (const [name, f] of Object.entries(FAMILIES)) {
+    for (const part of f.parts ?? []) {
+      if (!("item" in part)) continue;
+      if (!part.kind || part.kind === "paypal" || (part.kind === "membership" && !(PAYPAL_NEVER_REACHES as readonly string[]).includes(name))) total += part.item;
+    }
+  }
+  return total;
 }
 
 /** What one product an order hands over keeps for good at the most, which ITEM_DATA_BYTES must hold: the parts of no kind, and those of its dearest kind. */

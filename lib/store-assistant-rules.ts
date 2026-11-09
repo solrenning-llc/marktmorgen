@@ -65,6 +65,22 @@ export const ASSISTANT_NAME = "Store assistant";
 /** What every reply is shown under, in the store's language too (lib/buyer-words/assistant.ts). */
 export const ASSISTANT_LABEL = "AI assistant";
 
+/**
+ * Pages of each of the customer's lists (subscriptions, open checkout pages) the add-on's start reads before it opens
+ * a page (lib/assistant-billing.ts, startAssistant): a longer list is not known to hold no add-on, and nothing opens.
+ */
+export const ASSISTANT_START_LIST_PAGES = 2;
+/**
+ * The most Stripe calls one start of the add-on makes (lib/assistant-billing.ts, startAssistant): the subscriptions,
+ * the open pages, the open pages read again after Stripe answers 409 for a key in progress, then the price read, the
+ * product read and write, the price write and the checkout POST. Adopting a live add-on makes fewer (its pages, the
+ * invoices read and one ending). Priced at every essential billing event in tests/plan-cost-registry.ts
+ * (assistant-start-reads).
+ */
+export const ASSISTANT_START_STRIPE_CALLS = 3 * ASSISTANT_START_LIST_PAGES + 5;
+/** How long a start waits, when Stripe answers that another tab's request under the same key is in progress, before it reads the open pages again; priced with the calls. */
+export const ASSISTANT_IN_PROGRESS_WAIT_MS = 1_000;
+
 /** The model: the cheapest current one, fixed here so no deployment setting can make a message dearer than priced. */
 export const ASSISTANT_MODEL = "claude-haiku-5-5" as const;
 

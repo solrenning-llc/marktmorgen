@@ -20,7 +20,7 @@ import { ADD_ON_MARK, BillingError, onPlatform, onPlatformAt, setCancelAtPeriodE
 export { ADD_ON_MARK, isAddOn } from "@/lib/billing";
 import { standingOf } from "@/lib/plan-standing";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, setAssistantPlan, storeForHandle, storeRef } from "@/lib/store";
-import { ASSISTANT_NAME, ASSISTANT_PRICE_CENTS, type AssistantPlan } from "@/lib/store-assistant-rules";
+import { ASSISTANT_NAME, ASSISTANT_PRICE_CENTS, ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_LIST_PAGES, type AssistantPlan } from "@/lib/store-assistant-rules";
 import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 export const ASSISTANT_PRODUCT_ID = "nimbus_labs_store_assistant";
@@ -125,9 +125,11 @@ export async function createAssistantCheckout(store: Store, origin: string): Pro
     cancel_url: `${origin}/studio?${store.sid ? `store=${store.sid}&` : ""}assistant=canceled#assistant`,
   });
   // Two tabs at the same moment send the same key, and Stripe gives both the same page (startAssistant gives an open
-  // page again afterward). The price is in the key: a request with other values under a used key is refused by Stripe.
+  // page again afterward, and reads the open pages again when Stripe answers that the key is still in progress). The
+  // price is in the key: a request with other values under a used key is refused by Stripe. The store is named by its
+  // id, which a rename does not change; a store with none is its owner's first, the only one without.
   const slot = Math.floor(Date.now() / 1000 / CHECKOUT_KEY_SECONDS);
-  const idempotencyKey = `assistant-checkout:${store.stripeCustomerId}:${store.handle}:${body.get("line_items[0][price]")}:${slot}`;
+  const idempotencyKey = `assistant-checkout:${store.stripeCustomerId}:${store.sid || "first"}:${body.get("line_items[0][price]")}:${slot}`;
   const session = await onPlatform("POST", "/checkout/sessions", body, { version: CHECKOUT_VERSION, idempotencyKey });
   if (typeof session.url !== "string" || !session.url) throw new Error("Stripe did not return a checkout URL");
   return session.url;
@@ -136,17 +138,27 @@ export async function createAssistantCheckout(store: Store, origin: string): Pro
 /** How long one add-on checkout key lasts: two tabs opened at once fall in the same window. */
 const CHECKOUT_KEY_SECONDS = 300;
 /** The most pages of one customer's list read before a start; a longer list is not known to hold no add-on. */
-const START_LIST_PAGES = 2;
+const START_LIST_PAGES = ASSISTANT_START_LIST_PAGES;
 /** Statuses under which Stripe charges a subscription, or may still charge it. */
 const STILL_CHARGES = new Set(["active", "trialing", "past_due", "unpaid", "incomplete", "paused"]);
+/** Of those, the ones where a payment was asked and did not go through: the creator is told so, never "not confirmed yet". */
+const PAYMENT_FAILED = new Set(["past_due", "unpaid", "paused"]);
 /** Statuses under which Stripe charges a subscription no more. */
 const ENDED = new Set(["canceled", "incomplete_expired"]);
 const CHECKOUT_PAGE = /^https:\/\/checkout\.stripe\.com\//;
 
+/**
+ * Whether a name in an add-on's `assistant_for` is this store's: its address now, or one it moved from (lib/store.ts
+ * renameHandle keeps those in previousHandles, and they still lead to this store). The add-on, its open page and its
+ * paid return made before a rename stay this store's.
+ */
+const namesStore = (named: unknown, store: Store): boolean =>
+  typeof named === "string" && named !== "" && (named === store.handle || store.previousHandles.includes(named));
+
 /** A row that names this store's add-on in its own metadata. */
 const isStoreAddOn = (row: Record<string, unknown>, store: Store): boolean => {
   const meta = ownField(row, "metadata");
-  return plainObject(meta) && ownField(meta, "addon") === ADD_ON_MARK && ownField(meta, "assistant_for") === store.handle;
+  return plainObject(meta) && ownField(meta, "addon") === ADD_ON_MARK && namesStore(ownField(meta, "assistant_for"), store);
 };
 
 /**
@@ -173,8 +185,12 @@ export type AssistantStart =
   | { checkout: string }
   /** A live add-on at Stripe for this store, written down now: no checkout opened. */
   | { already: Store }
-  /** One Stripe may still charge for this store (its first payment, or a retried one): no second one beside it. */
-  | { waiting: true };
+  /**
+   * One Stripe may still charge for this store: no second one beside it. "pending" while its first payment is not
+   * confirmed (incomplete, or a trial not yet charged); "failed" when a payment was asked and did not go through
+   * (past_due, unpaid, paused). The route shows the notice of that name.
+   */
+  | { waiting: "pending" | "failed" };
 
 /**
  * Where a creator starts the add-on (app/api/billing/assistant/route.ts). The local record alone does not show the
@@ -202,19 +218,35 @@ export async function startAssistant(store: Store, origin: string): Promise<Assi
     if (!saved) throw new Error("the store's live add-on was not written down");
     return { already: await syncAssistant(saved, live) };
   }
-  if (mine.some((row) => STILL_CHARGES.has(ownField(row, "status") as string))) return { waiting: true };
+  const charged = mine.filter((row) => STILL_CHARGES.has(ownField(row, "status") as string));
+  if (charged.length) return { waiting: charged.some((row) => PAYMENT_FAILED.has(ownField(row, "status") as string)) ? "failed" : "pending" };
   if (!subscriptions.complete) throw new StripeListUnreadable("the store's add-on subscriptions are not all known");
 
-  const pages = await readCustomerList("/checkout/sessions", new URLSearchParams({ customer, status: "open", limit: "100" }), (row) => {
-    const meta = ownField(row, "metadata");
-    if (!(meta === null || plainObject(meta)) || ownField(row, "status") !== "open" || typeof ownField(row, "mode") !== "string") return false;
-    const url = ownField(row, "url");
-    return !isStoreAddOn(row, store) || (ownField(row, "customer") === customer && typeof url === "string" && CHECKOUT_PAGE.test(url));
-  }, CHECKOUT_VERSION);
-  const open = pages.rows.find((row) => isStoreAddOn(row, store) && ownField(row, "mode") === "subscription");
-  if (open) return { checkout: ownField(open, "url") as string };
-  if (!pages.complete) throw new StripeListUnreadable("the store's open add-on pages are not all known");
-  return { checkout: await createAssistantCheckout(store, origin) };
+  const openPage = async (): Promise<string | null> => {
+    const pages = await readCustomerList("/checkout/sessions", new URLSearchParams({ customer, status: "open", limit: "100" }), (row) => {
+      const meta = ownField(row, "metadata");
+      if (!(meta === null || plainObject(meta)) || ownField(row, "status") !== "open" || typeof ownField(row, "mode") !== "string") return false;
+      const url = ownField(row, "url");
+      return !isStoreAddOn(row, store) || (ownField(row, "customer") === customer && typeof url === "string" && CHECKOUT_PAGE.test(url));
+    }, CHECKOUT_VERSION);
+    const open = pages.rows.find((row) => isStoreAddOn(row, store) && ownField(row, "mode") === "subscription");
+    if (open) return ownField(open, "url") as string;
+    if (!pages.complete) throw new StripeListUnreadable("the store's open add-on pages are not all known");
+    return null;
+  };
+  const open = await openPage();
+  if (open) return { checkout: open };
+  try {
+    return { checkout: await createAssistantCheckout(store, origin) };
+  } catch (error) {
+    // Stripe answers 409 while another tab's request under the same key is still running: that tab's page is read
+    // from the open pages once, after a moment. Not there yet, the error stands and nothing more is opened.
+    if (!(error instanceof BillingError) || error.status !== 409) throw error;
+    await new Promise((resolve) => setTimeout(resolve, ASSISTANT_IN_PROGRESS_WAIT_MS));
+    const page = await openPage();
+    if (!page) throw error;
+    return { checkout: page };
+  }
 }
 
 /** What one add-on subscription says, as the store keeps it. Only "active" answers: an unpaid month of AI is not given on credit. */
@@ -243,8 +275,9 @@ export async function readAssistantReturn(store: Store, sessionId: string | unde
   // Another page's reply, or one with no id, grants nothing: the return says "unconfirmed", and the daily job
   // (billing-sync) reads the add-on again from Stripe's list.
   if (!isOwnReply(session, sessionId)) throw new NotOwnReply(sessionId);
-  const meta = session.metadata as Record<string, string> | null;
-  if (session.mode !== "subscription" || meta?.addon !== ADD_ON_MARK || meta.assistant_for !== store.handle) return null;
+  // A store renamed since it paid is still the one the session names (namesStore): the return is not "nothing was started".
+  const meta = ownField(session, "metadata");
+  if (session.mode !== "subscription" || !plainObject(meta) || ownField(meta, "addon") !== ADD_ON_MARK || !namesStore(ownField(meta, "assistant_for"), store)) return null;
   if (typeof session.customer !== "string" || session.customer !== store.stripeCustomerId) return null;
   const subscriptionId = typeof session.subscription === "string" ? session.subscription : "";
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) return null;

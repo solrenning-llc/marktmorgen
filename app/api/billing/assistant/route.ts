@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       // second subscription beside it. A list not known throws, and the creator is told something went wrong.
       const started = await startAssistant(store, origin);
       if ("checkout" in started) return new Response(null, { status: 303, headers: { Location: started.checkout } });
-      if ("waiting" in started) return back("pending");
+      if ("waiting" in started) return back(started.waiting);
       const plan = started.already.assistantPlan;
       return back(plan?.disputedAt ? "disputed" : plan?.active ? "already" : "pending");
     }

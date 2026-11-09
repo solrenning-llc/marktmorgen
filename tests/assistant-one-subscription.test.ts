@@ -344,7 +344,9 @@ async function main(): Promise<void> {
   const line = COST_LINES.find((row) => row.id === "assistant-start-reads");
   is("a cost line cites the start and its count", Boolean(line?.sources.some((s) => s.file === "lib/assistant-billing.ts" && s.names.includes("startAssistant")) && line?.sources.some((s) => s.names.includes("ASSISTANT_START_STRIPE_CALLS"))), true);
   for (const tier of ["creator", "pro", "scale"] as const) {
-    const expected = ((startCalls as number) - PLATFORM_SUBSCRIPTION_SEARCH.maxGets) * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet * PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow;
+    const wait = (assistantRules as Record<string, unknown>).ASSISTANT_IN_PROGRESS_WAIT_MS as number;
+    const waited = (wait / 1000) * PLATFORM_SUBSCRIPTION_SEARCH.memoryGb * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGbHour / 3600;
+    const expected = (((startCalls as number) - PLATFORM_SUBSCRIPTION_SEARCH.maxGets) * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet + waited) * PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow;
     is(`${tier}: the calls past the two already priced, at every essential event of the month`, [line ? line.monthlyUsd(tier) : null, expected > 0], [expected, true]);
   }
 

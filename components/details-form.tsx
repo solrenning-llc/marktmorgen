@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AI_ALLOWANCE_UNKNOWN, allowanceOf } from "@/components/ai-assist";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -31,7 +32,7 @@ export function DetailsForm({
   name: string;
   bio: string;
   /** The writing help, and what is left of it this month (lib/ai.ts, writeBio). */
-  ai?: { on: boolean; left: number };
+  ai?: { on: boolean; left: number; known?: false };
 }) {
   const router = useRouter();
   const disclosure = useRef<HTMLDetailsElement>(null);
@@ -42,7 +43,7 @@ export function DetailsForm({
   const [lines, setLines] = useState<string[]>([]);
   const [writing, setWriting] = useState(false);
   const [aiNote, setAiNote] = useState("");
-  const [left, setLeft] = useState(ai.left);
+  const [left, setLeft] = useState<number | null>(allowanceOf(ai));
 
   /** Three lines to choose from, written from what the store sells and the words in the box. */
   async function suggest() {
@@ -179,10 +180,10 @@ export function DetailsForm({
             </label>
             <input id="bio-hint" className="field mt-2" maxLength={400} value={hint} placeholder="Who it is for, what makes it yours (optional)" onChange={(e) => setHint(e.target.value)} />
             <div className="mt-2 flex flex-wrap items-center gap-3">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => void suggest()} disabled={writing || left <= 0} aria-busy={writing}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => void suggest()} disabled={writing || (left !== null && left <= 0)} aria-busy={writing}>
                 {writing ? "Writing…" : lines.length ? "Three more" : "Suggest three lines"}
               </button>
-              <span className="text-xs text-ink-soft">{`${left} left this month`}</span>
+              <span className="text-xs text-ink-soft">{left === null ? AI_ALLOWANCE_UNKNOWN : `${left} left this month`}</span>
             </div>
             {aiNote ? (
               <p className="notice notice-error mt-2 text-sm" role="alert">

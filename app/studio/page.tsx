@@ -134,7 +134,7 @@ import { WinBackEditor } from "@/components/winback-editor";
 import { WelcomeOfferEditor } from "@/components/welcome-offer-editor";
 import { welcomesOffered } from "@/lib/welcome-offer-send";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
-import { AiOn } from "@/components/ai-assist";
+import { AiOn, allowanceOf } from "@/components/ai-assist";
 import { AiPosts } from "@/components/ai-posts";
 import { winbacksSent } from "@/lib/winback-send";
 import { sellsMemberships } from "@/lib/membership-manage";
@@ -749,6 +749,19 @@ async function newCommentsFor(products: { id: string; course?: { id: string } | 
   return Object.fromEntries(courses.map(([product, c]) => [product, counts.get(c) ?? 0]));
 }
 
+/**
+ * What could not be read just now, said in place of what needs it (VR 2): never drawn as none, never an editor
+ * holding nothing that could save over what is there. A plain function, so its words are in the page's own tree.
+ */
+function unreadNotice(title: string, body: string) {
+  return (
+    <div className="notice notice-warn mt-8" role="status">
+      <p className="font-bold text-ink">{title}</p>
+      <p className="mt-1 text-sm text-ink-soft">{`${body} Nothing was changed. Reload this page in a moment to check again.`}</p>
+    </div>
+  );
+}
+
 /** The products a store-wide sale can cover (lib/store-sale.ts), by title, for the sale's picker. */
 async function saleCandidates(store: Store): Promise<{ id: string; title: string }[]> {
   const ids = store.catalog.items
@@ -764,8 +777,11 @@ async function saleCandidates(store: Store): Promise<{ id: string; title: string
  * "Goes well with" can pick (lib/store-collections.ts). One read of the
  * cards, whatever the store's size (lib/catalog.ts, readCards).
  */
-async function publishedChoices(store: Store, cardsRead: Promise<Map<string, { title: string }>>): Promise<{ id: string; title: string }[]> {
+async function publishedChoices(store: Store, cardsRead: Promise<Map<string, { title: string }> | null>): Promise<{ id: string; title: string }[]> {
   const cards = await cardsRead;
+  // Not read just now: no choice is offered, so "Goes well with" is not drawn (components/pairs-editor.tsx) and its
+  // picks are left as they are.
+  if (!cards) return [];
   return store.catalog.items
     .filter((item) => (item.kind & KIND.hidden) === 0)
     .map((item) => ({ id: item.id, title: cards.get(item.id)?.title ?? "" }))
@@ -813,7 +829,8 @@ export default async function StudioPage({
   // A team that requires two-step sign-in held this session at its door
   // (lib/team.ts teamTwoStepBlocks): what to do next, in place of starting a store.
   const heldAt = !found.ok && found.reason === "two_step" && found.email ? found.store ?? null : null;
-  const secondStep = heldAt && !found.ok && found.email ? await secondStepWay(found.email).catch(() => "set_up" as const) : null;
+  // "unread" when it could not be read: said so at the door, never "set up a second step" to somebody who may have one (VR 2).
+  const secondStep = heldAt && !found.ok && found.email ? await secondStepWay(found.email).catch(() => "unread" as const) : null;
   const email = view?.email ?? (found.ok ? "" : (found.email ?? ""));
   const role: Role = view?.role ?? "owner";
   /** Whether this person's role on this store has a permission (lib/team-roles.ts). */
@@ -842,6 +859,8 @@ export default async function StudioPage({
   // in came to connect Zoom (lib/zoom-arrival.ts): it is offered here too,
   // and the way to it is said at the top of the studio.
   const arrivedZoom = cameForZoom(cookieStore) && isConfigured("zoom");
+  // Set when the team could not be read just now: its card says so, never "invite up to" to an owner with a team (VR 2).
+  let teamUnread = false;
   // Passkeys whose wait has run out are removed first (lib/passkeys.ts pendingRemoval, a write under the account's
   // lock, which also logs out what they opened). The two second-step checks apply the same removal themselves before
   // they read (lib/second-step-gate.ts), so they start at once. The rest of what is read of the person waits for the
@@ -856,7 +875,7 @@ export default async function StudioPage({
   const firstReads = {
     folder: early(store ? storeFolder(ref) : Promise.resolve("")),
     pictures: early(store ? imageFolder(ref) : Promise.resolve("")),
-    aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => 0)) : null,
+    aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => null)) : null,
     live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId)) : null,
     pause: store && isBillingConfigured() ? early(pauseView(store)) : null,
     list: store && may("export") ? early(listSize(store)) : null,
@@ -869,7 +888,12 @@ export default async function StudioPage({
     person: afterRemoval(() =>
       Promise.all([
         passkeysLeft,
-        store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
+        store?.sid && may("team")
+          ? readTeam(store.sid).catch(() => {
+              teamUnread = true;
+              return null;
+            })
+          : Promise.resolve(null),
         isFreshSession(cookieStore.get(SESSION_COOKIE)?.value).catch(() => false),
         // Whether this browser got in without its second step, and until when what matters is locked (lib/two-step.ts).
         lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => 0),
@@ -885,8 +909,10 @@ export default async function StudioPage({
   const pictures = await firstReads.pictures;
   /** Carried on the forms below that post to the studio's routes, so each acts on this store. */
   const pin = store?.sid ? `?store=${store.sid}` : "";
-  // The writing help, and what is left of it this month: read once for the whole studio page.
-  const ai = store && aiAvailableFor(store) ? { on: true, left: firstReads.aiLeft ? await firstReads.aiLeft : 0 } : { on: false, left: 0 };
+  // The writing help, and what is left of it this month: read once for the whole studio page. Not read just now, it
+  // is unknown (known: false): each editor says so, never "0 left"; the server still checks before a job (VR 2).
+  const aiLeftRead = firstReads.aiLeft ? await firstReads.aiLeft : 0;
+  const ai: { on: boolean; left: number; known?: false } = store && aiAvailableFor(store) ? (aiLeftRead === null ? { on: true, left: 0, known: false } : { on: true, left: aiLeftRead }) : { on: false, left: 0 };
   const notice =
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
     STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
@@ -1312,8 +1338,9 @@ export default async function StudioPage({
   // The store's cards, read once for the parts that show them (the short links' titles, the product editor's pairs,
   // the cards and the welcome offer), when the first of them asks: read side by side, each would repair a cold cache again (Codex M on
   // #2900). Read in order as before, the later two found it repaired.
-  const cardsOnce: { read: Promise<Awaited<ReturnType<typeof readCards>>> | null } = { read: null };
-  const storeCards = (shop: Store) => (cardsOnce.read ??= early(readCards(shop).catch(() => new Map())));
+  // Null when the products could not be read just now: what picks from them says so in their place, never "none" (VR 2).
+  const cardsOnce: { read: Promise<Awaited<ReturnType<typeof readCards>> | null> | null } = { read: null };
+  const storeCards = (shop: Store) => (cardsOnce.read ??= early(readCards(shop).catch(() => null)));
   return (
     <div className="min-h-screen bg-paper text-ink">
       {store && view ? (
@@ -1442,13 +1469,13 @@ export default async function StudioPage({
             ) : null}
             {/* A store with nothing on it yet: its first draft, written with AI from a few sentences (lib/ai.ts, writeStoreSetup). */}
             {ai.on && may("page") && may("products") && productCount(store) === 0 ? (
-              <StoreSetupAi currency={store.currency} left={ai.left} hasFaq={store.faq.length > 0} storeName={store.name} />
+              <StoreSetupAi currency={store.currency} left={allowanceOf(ai)} hasFaq={store.faq.length > 0} storeName={store.name} />
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.hint})), "store")} /> : null}
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
-            {ai.on ? <StudioHelp left={ai.left} /> : null}
+            {ai.on ? <StudioHelp left={allowanceOf(ai)} /> : null}
             {/* Once there is something on the store: what else it does to sell, with a score (lib/store-coach.ts). */}
             {may("page") ? (
               <StoreCoach checks={storeChecks(store, { path: (page) => studioPath(store, "", page) })} />
@@ -1542,7 +1569,9 @@ export default async function StudioPage({
                       {
                         href: studioPath(store, "", "team"),
                         title: "Team",
-                        text: team && team.members.length
+                        text: teamUnread
+                          ? "We could not check just now who helps run this store."
+                          : team && team.members.length
                           ? `${team.members.length} ${team.members.length === 1 ? "person helps" : "people help"} run this store.`
                           : `Invite up to ${MAX_TEAM} people, each with a role.`,
                         icon: "user" as const,
@@ -1598,11 +1627,19 @@ export default async function StudioPage({
                 <div className="mt-4">
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
                   {may("page") && store.statsId ? (async () => {
-                    const titles = storeCards(store).then((cards) => new Map([...cards].map(([id, card]) => [id, card.title] as const)));
+                    const statsId = store.statsId;
+                    // Either not read just now: said in place of the links, never drawn as none made (VR 2).
+                    const [links, cards] = await Promise.all([readLinks(statsId).catch(() => null), storeCards(store)]);
+                    if (!links || !cards) {
+                      return unreadNotice(
+                        links ? "We could not read your products just now" : "We could not read your short links just now",
+                        "So your short links are not shown here, and no new one can be made from this page until they are.",
+                      );
+                    }
                     return (
                       <ShortLinks
-                        links={await readLinks(store.statsId).catch(() => [])}
-                        products={[...(await titles)].map(([id, title]) => ({ id, title }))}
+                        links={links}
+                        products={[...cards].map(([id, card]) => ({ id, title: card.title }))}
                         results={
                           numbers
                             ? resultsByCampaign(numbers.posts?.d90 ?? [])
@@ -2123,22 +2160,33 @@ export default async function StudioPage({
                     : null;
                   // The free, published products, by name: what can be offered to a leaving visitor.
                   const cards = await cardsRead;
-                  const free = store.catalog.items
+                  // Null when not read just now: the editors that pick products say so in their place, never drawn with
+                  // none that could save over the real ones (VR 2).
+                  const free = (cards ? store.catalog.items : [])
                     .filter((item) => (item.kind & KIND.free) !== 0 && (item.kind & KIND.hidden) === 0)
-                    .map((item) => ({ id: item.id, title: cards.get(item.id)?.title ?? "" }))
+                    .map((item) => ({ id: item.id, title: cards?.get(item.id)?.title ?? "" }))
                     .filter((p) => p.title);
                   // The published products, in the store's own order: where a section can start, and what the news can lead to.
-                  const published = store.catalog.items
+                  const published = (cards ? store.catalog.items : [])
                     .filter((item) => (item.kind & KIND.hidden) === 0)
-                    .map((item) => ({ id: item.id, title: cards.get(item.id)?.title ?? "" }))
+                    .map((item) => ({ id: item.id, title: cards?.get(item.id)?.title ?? "" }))
                     .filter((p) => p.title);
                   return (
                     <>
-                      <ExitOfferEditor current={store.exitOffer} free={free} />
-                      {may("page") ? <StoreLayoutEditor sections={store.sections} announcement={store.announcement} products={published} /> : null}
+                      {cards ? (
+                        <ExitOfferEditor current={store.exitOffer} free={free} />
+                      ) : (
+                        unreadNotice(
+                          "We could not read your products just now",
+                          may("page")
+                            ? "So the offer to a leaving visitor, your page's sections, your collections, your buy buttons and your checkout script are not shown here."
+                            : "So the offer to a leaving visitor is not shown here.",
+                        )
+                      )}
+                      {cards && may("page") ? <StoreLayoutEditor sections={store.sections} announcement={store.announcement} products={published} /> : null}
                       {may("page") ? <VisitUsEditor visitUs={store.visitUs} /> : null}
-                      {may("page") ? <CollectionsEditor collections={store.collections ?? []} products={published} handle={store.handle} /> : null}
-                      {may("page") ? (
+                      {cards && may("page") ? <CollectionsEditor collections={store.collections ?? []} products={published} handle={store.handle} /> : null}
+                      {cards && may("page") ? (
                         <BuyButtonEditor
                           handle={store.handle}
                           products={published}
@@ -2146,7 +2194,7 @@ export default async function StudioPage({
                           onFill={lookColours(store.look).onAccent}
                         />
                       ) : null}
-                      {may("page") ? (
+                      {cards && may("page") ? (
                         <CheckoutScriptEditor
                           handle={store.handle}
                           products={published}
@@ -2165,7 +2213,9 @@ export default async function StudioPage({
                             title:
                               row.productId === STORE_PAGE
                                 ? "Looked for on your store page, and nothing fit"
-                                : cards.get(row.productId)?.title ?? "A product that is no longer listed",
+                                : cards
+                                  ? cards.get(row.productId)?.title ?? "A product that is no longer listed"
+                                  : "A product whose name could not be read just now",
                             question: row.question,
                             at: row.at,
                           }))}
@@ -2183,10 +2233,13 @@ export default async function StudioPage({
                 {givesAway && may("settings") ? (async () => {
                   // Null when it could not be read: the editors below say so, never "0" (VR 2).
                   const offered = welcomesOffered(store).catch(() => null);
+                  const cards = await storeCards(store);
+                  // Not read just now: said in its place, never "add a paid product first" to a store that has one (VR 2).
+                  if (!cards) return unreadNotice("We could not read your products just now", "So your welcome offer is not shown here.");
                   return (
                     <WelcomeOfferEditor
                       offer={store.welcomeOffer}
-                      products={[...(await storeCards(store))].map(([, c]) => c).filter((c) => c.priceCents > 0).map((c) => ({ id: c.id, title: c.title }))}
+                      products={[...cards].map(([, c]) => c).filter((c) => c.priceCents > 0).map((c) => ({ id: c.id, title: c.title }))}
                       connected={Boolean(current?.stripeAccountId)}
                       suggestedAddress={store.winback.address || store.recovery.address || store.mail?.address || ""}
                       offered={await offered}
@@ -3555,6 +3608,22 @@ export default async function StudioPage({
             </div>
             </div>
           </>
+        ) : secondStep === "unread" ? (
+          <section aria-labelledby="second-step-title" className="card mt-8 p-6 sm:p-8">
+            <h2 id="second-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+              This store asks for a second step
+            </h2>
+            {heldAt?.name ? (
+              <p className="mt-2 max-w-[80ch] text-ink-soft">
+                {"You help run "}
+                <strong className="text-ink [overflow-wrap:anywhere]">{heldAt.name}</strong>.
+              </p>
+            ) : null}
+            <div className="mt-4 notice notice-warn" role="status">
+              <p className="font-bold text-ink">We could not check just now how you log in with a second step</p>
+              <p className="mt-1 text-sm text-ink-soft">This store&rsquo;s owner asks everyone on the team to log in with a passkey or an authenticator app. Nothing was changed. Reload this page in a moment to check again.</p>
+            </div>
+          </section>
         ) : secondStep ? (
           <section aria-labelledby="second-step-title" className="card mt-8 p-6 sm:p-8">
             <h2 id="second-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">

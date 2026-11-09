@@ -1116,7 +1116,7 @@ export async function storeForEmailSeen(
 /**
  * Whether an address has a store under it, by one EXISTS of its owner key and
  * nothing read: true, false, or null when the answer could not be read
- * (lib/inbound-mail.ts, support's reserved share of the day).
+ * (lib/inbound-mail.ts, the announcements' reserve for a From that has a store).
  */
 export async function ownsAStore(email: string): Promise<boolean | null> {
   if (!email || !isRedisConfigured()) return null;

@@ -58,7 +58,8 @@
  * in docs/funded-exposure-review.md):
  *
  *   - announcements of mail not written to a store, SUPPORT_ANNOUNCED_DAILY a
- *     UTC day, counted before the message is even read at Resend;
+ *     UTC day, counted before the message is even read at Resend, of which
+ *     SUPPORT_ANNOUNCED_CREATOR_DAILY are kept for a From that has a store;
  *   - one sender, however the address is written, SUPPORT_SENDER_HOURLY an
  *     hour and SUPPORT_SENDER_DAILY a day;
  *   - every sender together SUPPORT_DAILY a UTC day, of which a sender with
@@ -91,7 +92,7 @@ import { creatorDomain } from "@/lib/mail-from";
 import { redisPipeline } from "@/lib/redis";
 import { stringList } from "@/lib/redis-reply";
 import { essentialLimitState, withinLimit } from "@/lib/request-guard";
-import { HANDLE_PATTERN, storeForEmail, storeForHandle } from "@/lib/store";
+import { HANDLE_PATTERN, ownsAStore, storeForEmail, storeForHandle } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -108,7 +109,7 @@ export const SUPPORT_SENDER_HOURLY = 10;
 export const SUPPORT_SENDER_DAILY = 30;
 /** Messages sent on to our own support in a UTC day, every sender together: a company cost. */
 export const SUPPORT_DAILY = 200;
-/** Of those, the most a UTC day from senders with no store under their address. */
+/** Of those, the most a UTC day from senders with no paid plan under their address. */
 export const SUPPORT_PUBLIC_DAILY = 120;
 /**
  * One paying creator's address, a UTC day. From is not authenticated, so a forged one of a creator known to pay
@@ -118,6 +119,14 @@ export const SUPPORT_PUBLIC_DAILY = 120;
 export const SUPPORT_CREATOR_SENDER_DAILY = 8;
 /** Announcements of mail not written to a store read at Resend in a UTC day, held or sent on. */
 export const SUPPORT_ANNOUNCED_DAILY = 1_000;
+/**
+ * Of those, the reserve for announcements whose From has a store under it (one EXISTS, before the read). The rest
+ * (SUPPORT_ANNOUNCED_DAILY - this) is the public share, with every announcement that shows no From. Resend's
+ * email.received event is read for `data.from`; no dated Resend source could be read when this was written
+ * (resend.com was out of the session's network), so an announcement without a From string is counted as public.
+ * From is not authenticated: a forged From of any store owner, a free store included, spends the reserve.
+ */
+export const SUPPORT_ANNOUNCED_CREATOR_DAILY = 200;
 /** Bytes of files sent on with them in a UTC day, together, before base64. */
 export const SUPPORT_FILE_BYTES_DAILY = 300_000_000;
 /** Notices a UTC day telling the support inbox that messages are held. */
@@ -356,7 +365,7 @@ async function paysForAPlan(email: string): Promise<boolean | null> {
  * the day is out, a later announcement on this instance costs no counter and no notice mark: the day's count only
  * grows, so the answer cannot change before the day ends. Per instance, so another one counts once itself.
  */
-let announcedOut: { day: string; told: boolean } | null = null;
+let announcedOut: { day: string; public: boolean; creator: boolean; told: boolean } | null = null;
 /** For tests: forgets what this instance knows of the day. */
 export function forgetSupportDayState(): void {
   announcedOut = null;
@@ -446,7 +455,7 @@ async function tellHeld(target: string, now: number, address: string): Promise<b
     subject: "Some support email was not sent on today",
     text: [
       `Some email written to ${address} today was not sent on to this inbox.`,
-      `This happens when one sender writes more than ${SUPPORT_SENDER_HOURLY} times in an hour or ${SUPPORT_SENDER_DAILY} times in a day, or in one day (UTC) when more than ${SUPPORT_PUBLIC_DAILY} messages come from addresses with no store here, more than ${SUPPORT_DAILY} are sent on in all, or more than ${SUPPORT_ANNOUNCED_DAILY} arrive.`,
+      `This happens when one sender writes more than ${SUPPORT_SENDER_HOURLY} times in an hour or ${SUPPORT_SENDER_DAILY} times in a day, or in one day (UTC) when more than ${SUPPORT_PUBLIC_DAILY} messages come from addresses with no paid plan here, more than ${SUPPORT_DAILY} are sent on in all, one paying creator's address writes more than ${SUPPORT_CREATOR_SENDER_DAILY} times in a day, or more than ${SUPPORT_ANNOUNCED_DAILY} arrive (${SUPPORT_ANNOUNCED_DAILY - SUPPORT_ANNOUNCED_CREATOR_DAILY} from senders with no store, ${SUPPORT_ANNOUNCED_CREATOR_DAILY} from senders with one).`,
       "These messages were not sent on and will not be sent later. Read them in Resend (Emails, Receiving); this site keeps no copy. New messages are sent on again as usual.",
       "You get this note at most once a day.",
     ].join("\n\n"),
@@ -468,28 +477,45 @@ async function tellHeld(target: string, now: number, address: string): Promise<b
  *   "held"     to our own support, past a ceiling: kept in Resend, not tried
  *              again, and the inbox told once a day
  */
-export async function forwardInbound(id: string, now = Date.now(), announcedTo?: unknown): Promise<"sent" | "skipped" | "retry" | "held"> {
+export async function forwardInbound(id: string, now = Date.now(), announcedTo?: unknown, announcedFrom?: unknown): Promise<"sent" | "skipped" | "retry" | "held"> {
   const target = forwardTarget();
   if (!target || !ID.test(id)) return "skipped";
 
   // Mail the announcement does not show written to a store is our own support's: its announcements are
-  // counted before the message is read at Resend, so held ones cannot cost a read each without end.
+  // counted before the message is read at Resend, so held ones cannot cost a read each without end. An announcement
+  // whose From has a store (one EXISTS) takes the creators' reserve of the day's announcements; every other, and every
+  // one with no From, the public share, so made-up senders cannot hold a creator's mail unread.
   const creatorsDomain = creatorDomain(NIMBUS_FROM);
   const announced = typeof announcedTo === "string" ? [announcedTo] : list(announcedTo);
   if (!creatorsDomain || !announced.some((one) => (parseSender(one).address ?? "").toLowerCase().endsWith(`@${creatorsDomain}`))) {
     const today = new Date(now).toISOString().slice(0, 10);
     const first = announced.map((one) => parseSender(one).address).find((a) => a && a.toLowerCase().endsWith(`@${platformDomain()}`));
     const named = first ?? `support@${platformDomain()}`;
-    if (announcedOut?.day === today) {
-      // Out for the day on this instance: no counter, no mark; the notice only until it is told.
-      if (!announcedOut.told) announcedOut.told = await tellHeld(target, now, named);
+    const out = announcedOut?.day === today ? announcedOut : null;
+    const announcedFromAddress = typeof announcedFrom === "string" ? parseSender(announcedFrom).address : null;
+    // Out for the day on this instance in both pools: no EXISTS, no counter, no mark; the notice only until it is told.
+    let pool: "public" | "creator" = "public"; // the reserve out: a store owner too uses the public share, with no EXISTS
+    if (!(out?.public && out.creator)) {
+      if (announcedFromAddress && !out?.creator) {
+        const owns = await ownsAStore(announcedFromAddress);
+        if (owns === null) return "retry";
+        if (owns) pool = "creator";
+      }
+    }
+    if (out?.[pool]) {
+      if (!out.told) out.told = await tellHeld(target, now, named);
       return "held";
     }
-    const heard = await essentialLimitState("support-announced", today, SUPPORT_ANNOUNCED_DAILY, 2 * 86_400);
+    const heard = pool === "creator"
+      ? await essentialLimitState("support-announced-creator", today, SUPPORT_ANNOUNCED_CREATOR_DAILY, 2 * 86_400)
+      : await essentialLimitState("support-announced", today, SUPPORT_ANNOUNCED_DAILY - SUPPORT_ANNOUNCED_CREATOR_DAILY, 2 * 86_400);
     if (heard === "unknown") return "retry";
     if (heard === "exceeded") {
-      console.warn("a support message was held in Resend unread: past the day's announcements");
-      announcedOut = { day: today, told: await tellHeld(target, now, named) };
+      console.warn(`a support message was held in Resend unread: past the day's ${pool} announcements`);
+      const now_out = out ?? { day: today, public: false, creator: false, told: false };
+      now_out[pool] = true;
+      announcedOut = now_out;
+      if (!now_out.told) now_out.told = await tellHeld(target, now, named);
       return "held";
     }
   }

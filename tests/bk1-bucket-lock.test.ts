@@ -38,7 +38,8 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const SET_BOUND = 1_131_232;
 const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxStoredBytes: 36_199_424, reviewedAt: "2026-10-31", source: "synthetic test review, not a real one" };
-const short: BackupCostReview = { ...review, retentionDays: 3 };
+// The shortest retention admitted: the lock's 7 days and two (review of 9 November 2026).
+const short: BackupCostReview = { ...review, retentionDays: 9 };
 const key = Buffer.alloc(32, 7);
 
 let bucketClock = T0;
@@ -152,9 +153,10 @@ async function main(): Promise<void> {
     wipe();
     seed(5);
     at(T0 + 100 * DAY);
-    // Copies 4 to 6 days old: past a 3-day retention but inside the 7-day lock.
+    // Copies 4 to 6 days old: inside the 7-day lock. Since 9 November 2026 no admitted retention is shorter than the
+    // lock and two days, so they are inside the retention too; the prune's own lock check stays as a second guard.
     const inside = [filler(1, clock - 4 * DAY), filler(2, clock - 5 * DAY), filler(3, clock - 6 * DAY, 2_000)];
-    const outside = filler(4, clock - 9 * DAY, 2_000);
+    const outside = filler(4, clock - 10 * DAY, 2_000);
     redis.run(["SET", "nl:backup:last-ok", JSON.stringify({ at: clock - DAY, set: "bbbbbbbb-bbbb-4bbb-8bbb-000000000000", base: { keys: 5, bytes: 1 } })]);
     asked.length = 0;
     const result = await runBackup({ now: clock, review: short, store, key });
@@ -310,14 +312,20 @@ async function main(): Promise<void> {
       for (let i = 0; i < 30; i += 1) redis.run(["DEL", `nl:store:s${i}`]);
     }, 30);
     is("twelve good days leave a full retention of good sets", good.length >= 20, true);
-    is("thirty shrunk days: every run keeps its copy and holds the prune", [states.length, states.every((s) => s === "prune_shrunk")], [30, true]);
+    // The bucket is at its ceiling with the good sets, so a held copy can make room for the next only once the lock lets
+    // it go: the days between write nothing (room_shrunk), and the alarm fails every day.
+    is("thirty shrunk days: each a held copy or no room without a good set, never anything else", [states.length, states.every((s) => s === "prune_shrunk" || s === "room_shrunk")], [30, true]);
+    is("held copies keep being made once the lock lets the older ones go", states.filter((s) => s === "prune_shrunk").length >= 4, true);
     is("no good pre-shrink object was even asked to go", good.filter((id) => asked.includes(id)), []);
     is("every good pre-shrink object is still in the bucket", good.filter((id) => !objects.has(id)), []);
     is("the bucket stays inside its ceiling while it holds them", [...objects.values()].reduce((n, o) => n + o.byteLength, 0) <= nine.maxStoredBytes, true);
     for (let i = 0; i < 30; i += 1) redis.run(["SET", `nl:store:s${i}`, randomBytes(40).toString("hex")]);
-    at(start + 42 * DAY);
-    const back = await runBackup({ now: clock, review: nine, store, key });
-    is("the database back to its size: the next run prunes again", ran(back), "done");
+    const back: string[] = [];
+    for (let d = 42; d < 52; d += 1) {
+      at(start + d * DAY);
+      back.push(ran(await runBackup({ now: clock, review: nine, store, key })));
+    }
+    is("the database back to its size: within the lock's days a copy is made, and it prunes again", [back.includes("done"), back.at(-1)], [true, "done"]);
   }
 
   part("A wiped database (its marks gone): step 1 never deletes a good set while the prune is held (Claude 6 MEDIUM 1)");
@@ -326,7 +334,7 @@ async function main(): Promise<void> {
       wipe();
       seed(1);
     }, 20);
-    is("every blind run keeps its copy and holds the prune", states.every((s) => s === "prune_unverified"), true);
+    is("every blind run holds the prune, or writes nothing when only good sets could make room", [states[0], states.every((s) => s === "prune_unverified" || s === "room_shrunk")], ["prune_unverified", true]);
     is("every good pre-wipe object is still in the bucket, none asked for", [good.filter((id) => !objects.has(id)), good.filter((id) => asked.includes(id))], [[], []]);
   }
 

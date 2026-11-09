@@ -635,6 +635,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:imports:rows:@lib/imports.ts": short("Rows counted in the window", "day", 62, 128),
   "nl:inbox:@lib/inbox.ts": { what: "The inbox: conversations and their messages", room: ["lib/inbox.ts"] },
   "nl:inbox:tok:@lib/inbox.ts": { what: "What a visitor's chat opens", room: ["lib/inbox.ts"] },
+  // Owner's decision 15 (9 November 2026): numbers only, by store and month (three fields), and a mark a checkout.
+  "nl:intro:rep:@lib/intro-repeat.ts": short("Introductory prices paid again, counted a month", "day", 62, 128),
+  "nl:intro:rep:paid:@lib/intro-repeat.ts": short("A checkout looked at for an introductory price paid again", "order", 2, MARK),
   "nl:intro:c:@lib/intro-coupon.ts": { what: "An introductory price's coupon: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:course:@lib/learn.ts": { what: "A course's students, what they marked done, who is blocked, the drip emails sent", room: ["lib/learn.ts"], parts: [per("store", 400, MARK, "A drip email's mark.", MAIL("drip"))] },
   "nl:courses:drip@lib/learn.ts": company("Courses with drip emails", "One set for every store."),

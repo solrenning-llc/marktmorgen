@@ -41,6 +41,7 @@
  */
 import { noteFirstSale } from "@/lib/yearly-offer";
 import { noteTestSales } from "@/lib/headline-test";
+import { noteIntroRepeats } from "@/lib/intro-repeat";
 import { revokeRefundedGifts } from "@/lib/gifts";
 import { revokeRefundedPreorders } from "@/lib/preorders";
 import { revokeRefundedGroups } from "@/lib/group-buy";
@@ -493,6 +494,11 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     // A sale paid from a page running a test counts for the version its buyer was shown, once (lib/headline-test.ts).
     if (paid.some((row) => row.metadata?.ab)) {
       await noteTestSales(store.statsId, store.currency, paid).catch((error) => console.error("counting a tested page's sales failed", store.handle, error));
+    }
+    // A membership paid at its introductory price by an address that had it before is accepted and counted, by store
+    // and month, once a checkout (owner's decision 15, lib/intro-repeat.ts); it never throws.
+    if (paid.some((row) => row.mode === "subscription" && row.metadata?.intro)) {
+      await noteIntroRepeats(store, paid, deadline);
     }
     // The creator's ad platforms, sent each sale whose buyer allowed ad
     // measurement, whether or not the buyer came back from Stripe (lib/ad-events.ts).

@@ -13,6 +13,7 @@ import { readListings } from "@/lib/catalog";
 import { formatMoney } from "@/lib/money";
 import { recoveryReport } from "@/lib/payment-recovery-report";
 import { leaveMonth } from "@/lib/leave-flow";
+import { introRepeatMonth, introRepeatWords } from "@/lib/intro-repeat";
 import { memberHealth } from "@/lib/member-health";
 import { AWAY_POINTS, BAND_NAMES, HEALTH_WORDS } from "@/lib/member-health-rules";
 import { can } from "@/lib/team-roles";
@@ -67,6 +68,8 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
   const seesBuyers = can(access.role, "orders");
   // This month on the store's own cancel page (lib/leave-flow.ts), when it asks.
   const asked = numbers && store.leaving.on ? await leaveMonth(store.statsId).catch(() => null) : null;
+  // This month's introductory prices paid again by people who had the same membership before (lib/intro-repeat.ts).
+  const introAgain = numbers ? await introRepeatMonth(store.statsId).catch(() => null) : null;
   // One of the reasons the store's own page offers, or one the creator wrote (lib/leave-rules.ts).
   const reasonName = (reason: string) =>
     isLeaveReason(reason) ? LEAVE_NAMES[reason] : numbers?.leaving?.own[reason] ? `“${numbers.leaving.own[reason]}”` : "A reason you have since removed";
@@ -520,6 +523,11 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                         membership; a code from a link and your store sale on those begun from October 12, 2026. A code typed into Stripe&apos;s own box
                         is not written on the membership, so it is counted at full price here.
                       </p>
+                      {introAgain && introRepeatWords(introAgain) ? (
+                        <p className="mt-3 max-w-2xl text-sm text-ink" data-intro-repeat>
+                          {introRepeatWords(introAgain)}
+                        </p>
+                      ) : null}
                     </>
                   ) : null}
                 </section>

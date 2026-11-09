@@ -747,6 +747,13 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[4]);
           return 1;
         }
+        // lib/review-proof.ts REVIEW_LINK_IF_NOTED: a review link written only while its erasure note is still there.
+        if (key.startsWith("-- marktmorgen:review-link-if-noted:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, notes, link, member, value, seconds] = args;
+          if (this.run(["ZSCORE", notes, member]) === null) return 0;
+          this.run(["SET", link, value, "EX", seconds]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lease, queue, member, score, next] = args;
           if (this.run(["ZSCORE", lease, member]) === null) return 0;

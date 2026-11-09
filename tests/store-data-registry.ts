@@ -272,7 +272,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:aff:link:@lib/affiliates.ts": short("An emailed link to apply or sign in, a day", "store", 1, LINK_BYTES, MAIL("affiliate")),
   // A paid order whose affiliate link could not be read at checkout (owner's decision 6, 9 November 2026): one mark an
   // order once its link is decided ("credited", "none" or "told"), two days, past the sweep's day of reading it.
-  "nl:aff:pend:@lib/affiliates.ts": short("A pending affiliate link decided, once an order, two days", "order", 2, KEY),
+  "nl:aff:pend:@lib/affiliates.ts": short("A pending affiliate link's mark, once an order, two days", "order", 2, KEY),
+  // The PayPal orders among them still due a read or a notice: one member an order, the list kept two days from its last write.
+  "nl:aff:pend:pp:@lib/affiliates.ts": short("A PayPal order whose affiliate link is still pending, two days", "order", 2, KEY),
   "nl:aff:seen:@lib/affiliates.ts": short("A click counted once per visitor a day", "request", 2, KEY, REQ("affiliate")),
   "nl:aff:session:@lib/affiliates.ts": short("An affiliate signed in on one browser, thirty days, from an emailed link", "store", 30, KEY, MAIL("affiliate")),
   "nl:rl:aff:addr:@lib/affiliates.ts": short("Applications per address, an hour", "request", 1, KEY, REQ("affiliate")),

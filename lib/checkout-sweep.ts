@@ -56,7 +56,7 @@ import { enroll, readFlows } from "@/lib/flows";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
-import { AFFILIATE_ID_PATTERN, VIA_PENDING_META, affiliatesOn, listPartners, notePendingLinks, noteSession } from "@/lib/affiliates";
+import { AFFILIATE_ID_PATTERN, VIA_PENDING_META, affiliatesOn, listPartners, notePayPalPendings, notePendingLinks, noteSession } from "@/lib/affiliates";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
@@ -391,6 +391,14 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     } catch (error) {
       console.error("asking PayPal about a store's orders failed", store.handle, error);
     }
+    // A PayPal order whose affiliate link could not be read at checkout, decided or told about as a Stripe one is
+    // (owner's decision 6, lib/affiliates.ts): its own list, read only by a store with a program.
+    try {
+      const failed = await notePayPalPendings(store);
+      if (failed) counts.failed += failed;
+    } catch (error) {
+      console.error("reading a store's pending PayPal affiliate links failed", store.handle, error);
+    }
   }
   if (reviewed) {
     try {
@@ -493,6 +501,8 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         });
         if (pending === null) for (const row of sold) if (typeof row.metadata?.[VIA_PENDING_META] === "string") failOrder(row.id as string);
         for (const id of pending?.failed ?? []) failOrder(id);
+        // A creator who could not be told (refused REFUSED_TRIES times) is said in the run's log, by order count only.
+        if (pending?.untold) console.error("creators not told about unconfirmed affiliate links", store.handle, pending.untold);
       }
     }
     // The store's first sale ever, noted once, with the yearly plan offered

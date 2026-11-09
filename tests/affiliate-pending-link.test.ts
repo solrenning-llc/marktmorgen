@@ -269,15 +269,17 @@ async function main(): Promise<void> {
   is("a pending PayPal order whose read answers is credited to the affiliate", [pp?.aff, pp?.rate], [ANA, 30]);
   // Regra 23: was "told at its hand-over"; an unknown read at the hand-over now waits for the sweep, as a Stripe
   // order does, and the creator is told past PENDING_LINK_SECONDS, with the same retries.
+  // A store selling through PayPal: only such a store reads its list of pending PayPal orders (fixture, not a check).
+  const sellsPayPal = () => ({ ...store, paypalSeller: { merchant: "SYNTHETICMERCH1", at: NOW } }) as typeof store;
   const p2 = paid("PPORDER0000002", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-` });
   await real([["SET", `nl:ppsell:paid:${p2.order}`, JSON.stringify(p2)]]);
   odd = weirdCodes;
   await creditPayPalSale(store, p2, "Sourdough course", send);
   is("one still unknown at its hand-over is not credited, and waits", [(await sales()).has("paypal:PPORDER0000002"), await mark("paypal:PPORDER0000002")], [false, null]);
-  await notePayPalPendings(store, NOW + 300, send);
+  await notePayPalPendings(sellsPayPal(), NOW + 300, send);
   is("the sweep reads it again: still unknown, still waiting", [(await sales()).has("paypal:PPORDER0000002"), await mark("paypal:PPORDER0000002")], [false, null]);
   odd = null;
-  await notePayPalPendings(store, NOW + 600, send);
+  await notePayPalPendings(sellsPayPal(), NOW + 600, send);
   is("answered at a later pass: credited once", (await sales()).get("paypal:PPORDER0000002")?.aff, ANA);
   const p3 = paid("PPORDER0000003", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-` });
   await real([["SET", `nl:ppsell:paid:${p3.order}`, JSON.stringify(p3)]]);
@@ -285,13 +287,13 @@ async function main(): Promise<void> {
   await creditPayPalSale(store, p3, "Sourdough course", send);
   answer = "refused";
   sends = 0;
-  await notePayPalPendings(store, NOW + PENDING_LINK_SECONDS, send);
+  await notePayPalPendings(sellsPayPal(), NOW + PENDING_LINK_SECONDS, send);
   is("past the deadline, refused: due again", [sends, await mark("paypal:PPORDER0000003")], [1, "tell:unread"]);
   answer = "sent";
   odd = null;
-  await notePayPalPendings(store, NOW + PENDING_LINK_SECONDS + 300, send);
+  await notePayPalPendings(sellsPayPal(), NOW + PENDING_LINK_SECONDS + 300, send);
   is("sent at the next pass: told, and never credited", [sends, await mark("paypal:PPORDER0000003"), (await sales()).has("paypal:PPORDER0000003")], [2, "told", false]);
-  await notePayPalPendings(store, NOW + PENDING_LINK_SECONDS + 600, send);
+  await notePayPalPendings(sellsPayPal(), NOW + PENDING_LINK_SECONDS + 600, send);
   is("and not tried again", sends, 2);
 
   part("Every checkout route keeps the sale and the pending click");

@@ -16,7 +16,7 @@
  *   - a copy of its own older than the retention left after a run whose
  *     deletion finished; a failed deletion under the ceiling that costs the
  *     day's copy; a write that could take the bucket past the review's ceiling
- *     (retention + 2 sets), or one after a deletion at the ceiling that failed;
+ *     (retention + 2 + 3 sets), or one after a deletion at the ceiling that failed;
  *     the last verified copy deleted to make room; two runs at once;
  *   - a copy that does not read back the same counted as done;
  *   - a good copy's time lost to a later failure, a failure's reason not kept
@@ -172,7 +172,8 @@ async function main(): Promise<void> {
     // The bucket lock outlives it: the prune could not keep it (Claude 2's MEDIUM, Claude 6's LOW 1, 9 November 2026).
     ["a retention of 8 days", { ...review, retentionDays: 8 }],
     ["a storage ceiling the kept copies could pass", { ...review, maxStoredBytes: 30 * 1_000_000 }],
-    // One byte short of retention + 2 sets (inbox C4-53): no room for the day's set over a full retention and a day.
+    // One byte short of retention + 2 + 3 sets (inbox C4-53, C4-37): no room for the day's set over a full retention, a
+    // day and the 3 months' copies.
     ["a storage ceiling one byte short of retention + 2 + 3 sets", { ...review, maxStoredBytes: 35 * SET_BOUND - 1 }],
     ["no room for the run's own commands", { ...review, maxCommands: 3 }],
     ["a cap that is not a count", { ...review, maxRows: 1.5 }],

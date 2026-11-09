@@ -119,6 +119,8 @@ is("the backup is one of the LLC's fixed costs (FX275: 100% Marktmorgen)", (LLC_
 const current = CURRENT_LLC_FIXED_COST_CEILINGS.find((l) => l.id === "backup");
 is("its reviewed ceiling is unknown while anything it depends on is", [current?.fullMonthlyUsdCents, current?.fullAnnualUsdCents, current?.reserveReviewed, BACKUP_COST_UNKNOWNS.length > 0], [null, null, false, true]);
 is("its observation names the model and is not an approved ceiling", [FIXED_COST_SOURCE_OBSERVATIONS.backup.model, FIXED_COST_SOURCE_OBSERVATIONS.backup.approvedCeiling], ["lib/backup-cost.ts", false]);
+// Claude 6's NIT on #3293 (6728760434): the line prices the database copy only, and says so.
+is("its observation says it covers the database copy only", /database copy only/.test(String((FIXED_COST_SOURCE_OBSERVATIONS.backup as Record<string, unknown>).covers ?? "")), true);
 is("the LLC total stays unknown without it", allocateEntireLlcFixedCosts(CURRENT_LLC_FIXED_COST_CEILINGS), null);
 
 done();

@@ -237,6 +237,146 @@ async function main(): Promise<void> {
         { id: "2027-03-31", start: "2027-03-31T09:00:00.000Z", end: "2027-04-30T09:00:00.000Z" }]);
     is("a renewal of the same subscription writes no other anchor", anchorAfter(cut, { ...cut, period: { start: monthly.period.end, end: addMonthsMs(monthly.period.end * 1000, 1) / 1000, renews: true } }, monthly.period.end * 1000 + 60_000), cut.allowanceAnchor);
     is("past a period that does not renew, its anchor opens nothing", allowanceWindow({ ...cut, period: { ...monthly.period, renews: false } }, monthly.period.end * 1000 + 60_000), null);
+
+    // Periods as Stripe sends them, and a plan written as the daily job writes it.
+    const per = (startMs: number, months: number, renews = true) => ({ start: startMs / 1000, end: addMonthsMs(startMs, months) / 1000, renews });
+    const plan = (cycle: Cycle, period: ReturnType<typeof per>) => ({ active: true, tier: "scale" as const, cycle, trialEnds: 0, shared: false, period });
+    const read = async () => (await storeForEmail(owner))!;
+    // A yearly plan begun 1 December, switched to monthly on 10 December (anchor: December's yearly month, from the 1st),
+    // renewed and paid on 10 January.
+    const switchedOn10December = async () => {
+      redis.clear();
+      clock = START;
+      owner = await newStore("scale", "year");
+      clock = Date.UTC(2026, 11, 10, 12);
+      await setSubscription(owner, plan("month", per(clock, 1)));
+      clock = Date.UTC(2027, 0, 10, 12);
+      await setSubscription(owner, plan("month", per(clock, 1)));
+    };
+
+    part("7. A plan stopped and paid again on the same subscription: one payment, one window, and nothing used opens again");
+    await switchedOn10December();
+    is("7a: the switch kept December's yearly month", (await read()).allowanceAnchor, { subscriptionId: SUB, start: START, end: Date.UTC(2027, 0, 1, 12) });
+    // The 10 February renewal is not paid: Stripe says unpaid, the plan stops. On 20 March the creator pays only the
+    // latest invoice (10 March to 10 April); February's stays open. Same subscription.
+    clock = Date.UTC(2027, 1, 12, 12);
+    await setSubscription(owner, { active: false });
+    clock = Date.UTC(2027, 2, 20, 12);
+    await setSubscription(owner, plan("month", per(Date.UTC(2027, 2, 10, 12), 1, false)));
+    const idsA = new Set<string>();
+    let wholeA = 0;
+    for (const at of [Date.UTC(2027, 2, 20, 12), Date.UTC(2027, 3, 5, 12)]) { // both inside the one period paid
+      clock = at;
+      store = await read();
+      idsA.add(String(windowId(store, clock)));
+      wholeA += await drain(store);
+    }
+    is("7a: a payment after a skipped period (10 March to 10 April) opens one window, its own", [...idsA], ["2027-03-10"]);
+    is("7a: and gives each allowance kind whole once", wholeA, 8);
+    is("7a: the anchor is left behind", store.allowanceAnchor ?? null, null);
+
+    // The overdue invoice itself is paid (10 February to 10 March): no period skipped, the window used before the stop goes on.
+    await switchedOn10December();
+    clock = Date.UTC(2027, 1, 5, 12);
+    store = await read();
+    is("7b: early February counts in the anchor's month", [windowId(store, clock), await drain(store)], ["2027-02-01", 8]);
+    clock = Date.UTC(2027, 1, 12, 12);
+    await setSubscription(owner, { active: false });
+    clock = Date.UTC(2027, 1, 20, 12);
+    await setSubscription(owner, plan("month", per(Date.UTC(2027, 1, 10, 12), 1)));
+    store = await read();
+    is("7b: paying the overdue period keeps the window used before the stop, and what was used stays used", [windowId(store, clock), await drain(store)], ["2027-02-01", 0]);
+    clock = Date.UTC(2027, 2, 5, 12);
+    store = await read();
+    is("7b: the next window is the anchor's next month, whole", [windowId(store, clock), await drain(store)], ["2027-03-01", 8]);
+
+    // The plan is seen stopped only on 5 March, after March's window of the anchor was counted in; then a later period
+    // is paid. The window that holds its first day was used before the stop: it goes on, never opened again.
+    await switchedOn10December();
+    clock = Date.UTC(2027, 1, 10, 13);
+    await setSubscription(owner, plan("month", per(Date.UTC(2027, 1, 10, 12), 1)));
+    clock = Date.UTC(2027, 2, 1, 13);
+    store = await read();
+    is("7c: March's window of the anchor is used", [windowId(store, clock), await drain(store)], ["2027-03-01", 8]);
+    clock = Date.UTC(2027, 2, 5, 12);
+    await setSubscription(owner, { active: false });
+    clock = Date.UTC(2027, 2, 20, 12);
+    await setSubscription(owner, plan("month", per(Date.UTC(2027, 2, 10, 12), 1)));
+    store = await read();
+    is("7c: a period that begins inside a window used before the stop goes on in it, nothing whole again", [windowId(store, clock), await drain(store)], ["2027-03-01", 0]);
+    clock = Date.UTC(2027, 3, 5, 12);
+    store = await read();
+    is("7c: and the anchor's next month is whole", [windowId(store, clock), await drain(store)], ["2027-04-01", 8]);
+
+    part("8. A switch written late, after the window turned (a 3DS confirmation, the next day's job, a write that failed)");
+    // A yearly plan begun 1 December; on 31 January at 20:00 it is switched to monthly and paid on the invoice's page:
+    // the route answers "confirm" and writes nothing, so the record stays yearly.
+    const lateSwitch = Date.UTC(2027, 0, 31, 20);
+    redis.clear();
+    clock = START;
+    owner = await newStore("scale", "year");
+    clock = Date.UTC(2027, 1, 1, 13);
+    store = await read();
+    const idsB = new Set<string>([String(windowId(store, clock))]);
+    let wholeB = await drain(store);
+    // 2 February, 09:00: the daily job writes the monthly period Stripe began on 31 January at 20:00.
+    clock = Date.UTC(2027, 1, 2, 9);
+    await setSubscription(owner, plan("month", per(lateSwitch, 1)));
+    store = await read();
+    idsB.add(String(windowId(store, clock)));
+    wholeB += await drain(store);
+    is("8a: the late write opens no second window in the month", [...idsB], ["2027-02-01"]);
+    is("8a: the anchor is the old record's window that holds the new period's first day", store.allowanceAnchor ?? null, { subscriptionId: SUB, start: Date.UTC(2027, 0, 1, 12), end: Date.UTC(2027, 1, 1, 12) });
+    is("8a: each allowance kind whole once", wholeB, 8);
+    is("8a: an hour after the switch still reads January's month, and March's follows February's on the anchor's day",
+      [windowId(store, lateSwitch + 3_600_000), shape(allowanceWindow(store, Date.UTC(2027, 2, 1, 13)))],
+      ["2027-01-01", { id: "2027-03-01", start: "2027-03-01T12:00:00.000Z", end: "2027-04-01T12:00:00.000Z" }]);
+
+    // The route's write fails (the store write throws) and is made again by the next day's job, after the turn; then again.
+    redis.clear();
+    clock = START;
+    owner = await newStore("scale", "year");
+    clock = lateSwitch;
+    const realPipeline = redis.pipeline.bind(redis);
+    let failed = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (/cycle\\*":\\*"month/.test(JSON.stringify(commands))) { failed += 1; throw new Error("synthetic write failure"); }
+      return realPipeline(commands);
+    }) as typeof redis.pipeline;
+    let thrown = false;
+    try { await setSubscription(owner, plan("month", per(lateSwitch, 1))); } catch { thrown = true; } finally { redis.pipeline = realPipeline; }
+    store = await read();
+    is("8b: the failed write left the yearly record as it was", [thrown, failed > 0, store.cycle, store.allowanceAnchor ?? null], [true, true, "year", null]);
+    clock = Date.UTC(2027, 1, 1, 13);
+    store = await read();
+    is("8b: February's window is used on the yearly record", [windowId(store, clock), await drain(store)], ["2027-02-01", 8]);
+    clock = Date.UTC(2027, 1, 2, 9);
+    await setSubscription(owner, plan("month", per(lateSwitch, 1)));
+    store = await read();
+    is("8b: made again after the turn: the same window, nothing whole again", [windowId(store, clock), await drain(store)], ["2027-02-01", 0]);
+    clock = Date.UTC(2027, 1, 3, 9);
+    await setSubscription(owner, plan("month", per(lateSwitch, 1)));
+    store = await read();
+    is("8b: written once more the next day: the anchor and the window stay", [store.allowanceAnchor ?? null, windowId(store, clock)],
+      [{ subscriptionId: SUB, start: Date.UTC(2027, 0, 1, 12), end: Date.UTC(2027, 1, 1, 12) }, "2027-02-01"]);
+
+    // The other way, over a stale snapshot: monthly from 10 January, switched to yearly on 9 February, written on 13
+    // February, after the renewal's grace; the window counted in that grace keeps its name.
+    redis.clear();
+    clock = Date.UTC(2027, 0, 10, 12);
+    owner = await newStore("scale", "month");
+    clock = Date.UTC(2027, 1, 10, 13);
+    store = await read();
+    is("8c: the renewal's window is used in its grace", [windowId(store, clock), await drain(store)], ["2027-02-10", 8]);
+    clock = Date.UTC(2027, 1, 13, 9);
+    await setSubscription(owner, plan("year", per(Date.UTC(2027, 1, 9, 12), 12)));
+    store = await read();
+    is("8c: the yearly period written late keeps the window used, nothing whole again", [windowId(store, clock), await drain(store)], ["2027-02-10", 0]);
+    is("8c: anchored on the old record's month that holds the switch", store.allowanceAnchor ?? null, { subscriptionId: SUB, start: Date.UTC(2027, 0, 10, 12), end: Date.UTC(2027, 1, 10, 12) });
+
+    // Never from an older snapshot written late: a period that begins before the record's own is no switch.
+    const record = { subscriptionActive: true, subscriptionId: SUB, trialEnds: 0, planEndedAt: "", cycle: "month" as const, period: per(Date.UTC(2027, 1, 10, 12), 1) };
+    is("8d: an older period written over a newer one writes no anchor", anchorAfter(record, { ...record, period: per(Date.UTC(2027, 0, 10, 12), 1) }, Date.UTC(2027, 1, 11, 12)), null);
   } finally {
     Date.now = realNow;
   }
